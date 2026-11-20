@@ -2923,6 +2923,17 @@
         "tests/integration/test_pack_credential_files_lifecycle.py::test_pack_refuses_credential_files_naming_each_path",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files"
       ]
+    },
+    {
+      "issue": 4451,
+      "fixed_in": "Unreleased",
+      "summary": "apm uninstall removed the package's apm_modules copy and then exited 1 when a deployed skill member had been replaced by a symlink, because cleanup keeps such a directory; the evidence preflight now refuses before any change.",
+      "failure_modes": ["transaction", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/lifecycle/security/test_integrity.py::test_integrity_row",
+        "tests/unit/integration/test_cleanup_helper.py::test_refusals_name_a_symlinked_member_of_a_claimed_directory"
+      ]
     }
   ],
   "lifecycle_contracts": [

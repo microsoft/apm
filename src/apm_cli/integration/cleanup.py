@@ -57,6 +57,8 @@ AUTHORIZED = "authorized"
 EDITED = "edited"
 UNPROVEN = "unproven"
 UNREADABLE = "unreadable"
+# A member of a claimed directory replaced by a symlink: cleanup keeps the directory (#4451).
+SYMLINKED = "symlinked"
 
 
 class DeploymentEvidence:
@@ -169,10 +171,26 @@ class DeploymentEvidence:
         delete has no deployment evidence (#3701). Missing files, directories
         and final symlinks are skipped; their own rules apply.
         """
+        claims = list(dict.fromkeys(claims))
+        directories = [
+            claim.rstrip("/")
+            for claim in claims
+            if (physical := self._physical(claim)) is not None
+            and not physical.is_symlink()
+            and physical.is_dir()
+        ]
         refused: list[tuple[str, str]] = []
-        for claim in dict.fromkeys(claims):
+        for claim in claims:
             physical = self._physical(claim)
-            if physical is None or physical.is_symlink() or not physical.is_file():
+            if physical is None:
+                continue
+            if physical.is_symlink():
+                # Only a member of a claimed directory: managed final symlinks
+                # elsewhere keep their own unlink rule (#4451).
+                if any(claim.startswith(f"{directory}/") for directory in directories):
+                    refused.append((claim, SYMLINKED))
+                continue
+            if not physical.is_file():
                 continue
             verdict = self.verdict(claim, physical)
             if verdict != AUTHORIZED:
@@ -607,6 +625,7 @@ _REFUSAL_REASONS = {
     UNPROVEN: "no local deployment receipt or render of the locked package version",
     EDITED: "edited since APM deployed it",
     UNREADABLE: "its content could not be read to verify it",
+    SYMLINKED: "replaced by a symbolic link, so its directory cannot be removed",
 }
 
 

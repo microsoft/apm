@@ -380,6 +380,7 @@ _FROZEN_HASHES = r"--frozen: deployed files do not match the hashes recorded in 
 _RETAINED = r"Uninstall could not remove tracked target files"
 # Uninstall refuses before any change when a file lacks deletion evidence (#3701).
 _REFUSED = r"Uninstall refused: deleting these tracked files needs deployment evidence"
+_REFUSAL_NEXT_STEP = r"move each listed file aside or delete it, then rerun 'apm uninstall'"
 _FAILED_CLOSED_LEAVES_BYTES = (
     "#4353 install leaves fetched bytes in apm_modules when it fails closed"
 )
@@ -437,8 +438,8 @@ DEPLOYED_FILE_HASHES = ArtifactSlice(
         # evidence, so cleanup proceeds.
         ("uninstall-prune", "disk-or-cache"): Expect(
             1,
-            (_REFUSED, r"Nothing was removed"),
-            unchanged=_SKILL_STATE,
+            (_REFUSED, r"Nothing was removed", _REFUSAL_NEXT_STEP),
+            unchanged=(*_SKILL_STATE, "apm_modules"),
         ),
         ("uninstall-prune", "lock-edited"): Expect(0, absent=(SKILL, LOCK), forbids=(_RETAINED,)),
         ("uninstall-prune", "missing-hash"): Expect(0, absent=(SKILL, LOCK), forbids=(_RETAINED,)),
@@ -702,12 +703,13 @@ PATH_CONTAINMENT = ArtifactSlice(
             1, (r"outside the project tree",), unchanged=(LOCK, MANIFEST), check=_outside_intact
         ),
         ("update", "disk-or-cache"): Expect(0, unchanged=(LOCK, MANIFEST), check=_outside_intact),
+        # A deployed skill member replaced by a symlink: uninstall refuses
+        # before any change, so apm_modules stays byte-identical (#4451).
         ("uninstall-prune", "disk-or-cache"): Expect(
             1,
-            (_RETAINED,),
-            unchanged=(LOCK, MANIFEST),
+            (_REFUSED, r"replaced by a symbolic link", _REFUSAL_NEXT_STEP),
+            unchanged=(LOCK, MANIFEST, "apm_modules", ".agents/skills/p-skill"),
             check=_outside_intact,
-            xfail=_FAILED_CLOSED_LEAVES_BYTES,
         ),
         # The commit pin holds: the moved tag is not fetched.
         ("install", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE, check=_outside_intact),
