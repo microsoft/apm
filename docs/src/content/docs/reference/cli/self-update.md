@@ -140,7 +140,7 @@ APM checks for new releases at most once per day during normal command execution
 
 ```
 A new version of APM is available: 0.7.0 (current: 0.6.3)
-Run apm self-update to upgrade
+Run 'apm self-update' to update the APM CLI binary.
 ```
 
 The check is cached and non-blocking. Lookup, network, and metadata failures stay quiet. It is suppressed in distributions that disable self-update.

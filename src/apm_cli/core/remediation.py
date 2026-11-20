@@ -646,6 +646,107 @@ LLM_TLS_BOOTSTRAP_MISSING = _entry(
 )
 # -- end W3 plugins-runtime --
 # -- W3 core-models --
+# Advice printed by core/, models/, security/, utils/, output/,
+# update_policy.py and drift.py.
+
+GITHUB_AUTH_FIRST_ENABLED = _entry(
+    "github-auth-first-enabled",
+    "apm config unset github-auth-first",
+    "restore anonymous-first auth for github.com",
+)
+CLAUDE_PLUGIN_LAYOUT = _entry(
+    "claude-plugin-layout",
+    "apm pack --claude-plugin",
+    "produce the historical Claude plugin layout",
+)
+LOCKED_REFS_SATISFIED = _entry("locked-refs-satisfied", "apm update", "resolve the latest refs")
+DRY_RUN_INCOMPLETE = _entry("dry-run-incomplete", "apm install", "resolve the full dependency plan")
+DEPLOYMENT_OWNERS_INVALID = _entry(
+    "deployment-owners-invalid",
+    "apm prune",
+    "repair the invalid deployment ownership records",
+    then="rerun 'apm audit'",
+)
+PLUGIN_MCP_OWNERSHIP_UNKNOWN = _entry(
+    "plugin-mcp-ownership-unknown",
+    "apm install",
+    "regenerate apm.lock.yaml",
+    before="fix or delete the unreadable apm.lock.yaml",
+    then="run 'apm pack' again",
+)
+FROZEN_MARKETPLACE_UNLOCKED = _entry(
+    "frozen-marketplace-unlocked",
+    "apm install",
+    "lock the marketplace dependency",
+    then="commit apm.lock.yaml",
+)
+MARKETPLACE_CATALOG_REPINNED = _entry(
+    "marketplace-catalog-repinned",
+    "apm update {package}",
+    "move to the catalog's selection",
+)
+REGISTRY_TOKEN_IN_MANIFEST = _entry(
+    "registry-token-in-manifest",
+    "apm config set registry.{name}.token <value>",
+    "store the token outside apm.yml",
+)
+DEPENDENCY_ALIAS_INVALID = _entry(
+    "dependency-alias-invalid",
+    "apm install",
+    "install the dependency under the corrected alias",
+    before="{fix}",
+)
+PACKAGE_DIRECTORY_COLLISION = _entry(
+    "package-directory-collision",
+    "apm install",
+    "re-materialize the intended package",
+    before="{fix}",
+)
+ADO_COORDINATES_MISMATCHED = _entry(
+    "ado-coordinates-mismatched",
+    "apm install <original-ado-url>",
+    "regenerate its state from the original Azure DevOps URL",
+)
+SUBSET_PAIRINGS_INCONSISTENT = _entry(
+    "subset-pairings-inconsistent",
+    "apm install",
+    "regenerate the skill and target subset records in apm.lock.yaml",
+)
+COMPILE_DRY_RUN = _entry("compile-dry-run", "apm compile", "write the compiled files")
+HIDDEN_CHARACTERS_FLAGGED = _entry(
+    "hidden-characters-flagged", "apm audit --strip", "remove the flagged hidden characters"
+)
+HIDDEN_CHARACTERS_STRUCTURED = _entry(
+    "hidden-characters-structured",
+    "apm audit --strip",
+    "remove flagged characters from eligible regular documents",
+    before="review structured prompt fields manually",
+)
+MCP_EXECUTABLES_UNTRUSTED = _entry(
+    "mcp-executables-untrusted",
+    "apm approve {package}",
+    "trust its server executables",
+    before="run 'apm policy explain {package}' and confirm policy permits it",
+)
+EXECUTABLES_IDENTITY_UNLOCKED = _entry(
+    "executables-identity-unlocked",
+    "apm install",
+    "regenerate apm.lock.yaml",
+    then="approve {subject}",
+)
+EXECUTABLES_PIN_MALFORMED = _entry(
+    "executables-pin-malformed", "apm approve {package}", "record a valid sha256 pin"
+)
+LOCAL_FILES_COLLIDE = _entry(
+    "local-files-collide", "apm install --force", "overwrite the unmanaged local files"
+)
+GITHUB_GITLAB_HOST_CONFLICT = _entry(
+    "github-gitlab-host-conflict",
+    "apm install <package>",
+    "resolve the shorthand against GitLab",
+    before="unset GITHUB_HOST and set GITLAB_HOST={host} for this command only",
+)
+
 # -- end W3 core-models --
 # -- end W3 -------------------------------------------------------------------
 

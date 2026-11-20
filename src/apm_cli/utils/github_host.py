@@ -7,6 +7,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
+from apm_cli.core.remediation import GITHUB_GITLAB_HOST_CONFLICT
+
 _ADO_SERVER_BASE_PATH_ERROR = (
     "Azure DevOps Server URLs mounted below '/tfs/' are not currently "
     "supported. Use a root-hosted collection URL such as "
@@ -285,7 +287,7 @@ def format_github_gitlab_host_conflict_error(hostname: str) -> str:
         "Use object form in apm.yml:\n"
         f"  - git: https://{hostname}/owner/repo\n"
         "    path: path/inside/repo\n\n"
-        "Or run APM with GITHUB_HOST unset for this command only:\n"
+        f"Or {GITHUB_GITLAB_HOST_CONFLICT.bind(host=hostname).clause()}:\n"
         f"  env -u GITHUB_HOST GITLAB_HOST={hostname} apm install <package>"
     )
 

@@ -10,6 +10,7 @@ from apm_cli.core.command_logger import (
     InstallLogger,
     _ValidationOutcome,
 )
+from apm_cli.core.remediation import DRY_RUN_INCOMPLETE
 
 
 class TestValidationOutcome:
@@ -390,8 +391,7 @@ class TestInstallLogger:
         logger.install_summary(apm_count=count, mcp_count=0, disposition=InstallDisposition.DRY_RUN)
         mock_warning.assert_called_once()
         assert mock_warning.call_args.args[0] == (
-            f"Dry run incomplete: {count} locally known APM {noun}. "
-            "Run 'apm install' without --dry-run to resolve the full plan."
+            f"Dry run incomplete: {count} locally known APM {noun}. {DRY_RUN_INCOMPLETE.sentence()}"
         )
 
     @patch("apm_cli.core.command_logger._rich_warning")
