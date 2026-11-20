@@ -137,7 +137,8 @@ apm install -g microsoft/apm-sample-package#v1.0.0 --target copilot,claude
 
 APM keeps the user manifest and lockfile in `~/.apm/` (or `$APM_HOME`) and
 writes files where each harness reads user settings: `~/.copilot/`,
-`~/.claude/`, `~/.cursor/`, `~/.codex/`, with skills in `~/.agents/skills/`.
+`~/.claude/`, `~/.cursor/`, `~/.codex/`. Skills go to `~/.claude/skills/` for Claude Code
+and to `~/.agents/skills/` for GitHub Copilot, Codex and Cursor.
 Point a harness at another profile with `COPILOT_HOME`, `CLAUDE_CONFIG_DIR` or
 `CODEX_HOME`; the value must be an absolute path. A selection with no
 harness that supports user scope exits 2 before changing anything. Details:

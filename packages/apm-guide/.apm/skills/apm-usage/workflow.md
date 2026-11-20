@@ -21,7 +21,7 @@ apm install microsoft/apm-sample-package#v1.0.0
 apm compile
 
 # 5. Commit and share
-git add apm.yml apm.lock.yaml .apm/ .github/ .claude/ .cursor/ .grok/ .mcp.json AGENTS.md
+git add apm.yml apm.lock.yaml .gitignore     # add .apm/ if you author primitives
 git commit -m "Add APM dependencies"
 ```
 
@@ -98,9 +98,9 @@ aliases; experimental targets such as `grok-cloud` cannot be stored in
 |------|---------|-----|
 | `apm.yml` | Yes | Manifest -- declares dependencies |
 | `apm.lock.yaml` | Yes | Lockfile -- pins exact commits for reproducibility |
-| `.apm/` | Yes | Local primitives (instructions, agents, etc.) |
-| Target-owned directories such as `.github/`, `.claude/`, `.grok/`, and `.agents/`, plus root `.mcp.json` | Yes | Deployed agent files and project MCP config |
-| `AGENTS.md` | Yes | Compiled root context for agents-family targets |
+| `.gitignore` | Yes | `apm install` adds `apm_modules/` to it |
+| `.apm/` | Yes, if present | Local primitives you author (instructions, agents, etc.) |
+| Deployed files: `.github/`, `.claude/`, `.agents/`, `.grok/`, root `.mcp.json`, `AGENTS.md` | Optional | Any clone rebuilds them from the lockfile (`apm install --frozen`). Commit them when something reads the repo without running APM, such as a cloud coding agent |
 | `apm_modules/` | **No** | Installed dependencies -- gitignored automatically; restored by `apm install` |
 
 ## Team member setup
