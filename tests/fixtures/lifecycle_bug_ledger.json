@@ -3030,6 +3030,20 @@
         "tests/integration/test_pack_credential_files_lifecycle.py::test_pack_refuses_credential_files_naming_each_path",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files"
       ]
+    },
+    {
+      "issue": 4436,
+      "fixed_in": "Unreleased",
+      "summary": "The approval next step printed for parked local-bundle executables comes from the remediation catalog (local-bundle-executables-unapproved): add the printed key under executables.allow, then run apm install <bundle-path>.",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_remediation_advice_lifecycle.py::test_local_bundle_approval_hint_is_the_catalog_remedy_and_runs"
+      ]
     }
   ],
   "lifecycle_contracts": [
