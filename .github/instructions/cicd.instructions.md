@@ -15,9 +15,15 @@ integration suite runs only at merge time via GitHub Merge Queue
    - Uploads Linux x86_64 binary artifact for downstream integration testing.
    - Runs in both PR context (fast feedback for contributors) and merge_group
      context (against the tentative merge commit before queue auto-merges).
-2. **`ci-integration.yml`** - Tier 2, `merge_group` trigger only
+2. **`ci-integration.yml`** - Tier 2, `merge_group` (plus write-access `workflow_dispatch` to rehearse on a branch)
    - **Linux-only**. Builds binary inline, then runs smoke + integration +
-     release-validation against the tentative merge commit.
+     release-validation against the tentative merge commit. Hermetic
+     integration is sharded by the build-release planner
+     (`scripts/ci_sharding.py`, at most 8 shards); network tests run in a
+     retrying lane. `tests/quality/test_ci_topology.py` requires every
+     merge_group `EXPECTED_CHECKS` name in `merge-gate.yml` to come from a
+     merge_group job, and `merge-queue-freshness.yml` fails daily when
+     `main` moved but no merge_group run completed in 3 days.
    - Trust boundary is the write-access grant (only users with write can
      enqueue a PR). No environment approval gate.
    - Inlines the binary build instead of fetching from `ci.yml` to avoid
@@ -79,7 +85,7 @@ integration suite runs only at merge time via GitHub Merge Queue
 
 ## Release Flow Dependencies
 - **PR workflow**: Tier 1 only - ci.yml (build-and-test, Linux-only) provides fast feedback. Tier 2 does not run until enqueued.
-- **Merge queue workflow**: ci.yml (Tier 1 against tentative merge ref) + ci-integration.yml (Tier 2: build -> smoke-test -> integration-tests -> release-validation). Queue auto-merges on success; ejects on failure.
+- **Merge queue workflow**: ci.yml (Tier 1 against tentative merge ref, including `Coverage Combine (Linux)`, the global 80% floor) + ci-integration.yml (Tier 2: build + shard plan -> smoke-test -> planned integration shards + network lane -> integration-tests; release-validation in parallel). Queue auto-merges on success; ejects on failure.
 - **Push/Release workflow (Linux + Windows)**: release-plan -> build-linux-x86/build-linux-arm/build-windows -> sharded integration lanes + release-validation -> create-release (pushed tag only) -> publish-pypi (gh-aw-compat runs in parallel, informational)
 - **Homebrew distribution**: `microsoft/homebrew-apm` polls the latest public APM release and updates its formula with its own `GITHUB_TOKEN`; this workflow must not send a cross-repository dispatch or hold a tap credential.
 - **Push/Release workflow (macOS)**: build-and-validate-macos-intel and build-and-validate-macos-arm (full and promoted runs only; marker subsets on full runs) -> create-release

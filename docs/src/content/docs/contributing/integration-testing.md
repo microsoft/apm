@@ -42,7 +42,7 @@ APM uses a tiered approach to integration testing:
 - **Trigger**: every pull request and merge queue run. The required `Lifecycle Smoke (Linux)` aggregate checks every shard result independently and fails if any is missing, skipped, cancelled, or failed.
 - **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. No central count or membership list is maintained.
 - **Sharding**: `scripts.ci_sharding` balances the shards by the measured durations in `.github/ci-durations/linux-x86_64.json` while keeping each module and composite `xdist_group` intact. The shards are disjoint and their union is the unchanged required selection.
-- **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs unfiltered `pytest tests/integration/`, so the complete lifecycle family remains exercised.
+- **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh` over `tests/integration/`. The hermetic shards and the network lane together run every non-`live` test, so the complete lifecycle family remains exercised.
 - **Drift guard**: `tests/quality/test_ci_topology.py` independently collects the full, merge-group-only, required, and every sharded selection. It verifies their set relationships, each shard's timeout and worker bounds, the aggregate's failure behavior, the full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
 - **Fixture controls**: lifecycle helpers set `APM_TEST_LOOPBACK_PORTS` for a port-scoped local registry and `APM_TEST_FAIL_LOCK_REPLACE=1` for atomic-write fault injection. These are internal test controls, not user-facing APM settings.
 - **Source and ownership fixtures**: downloader stubs must return real `PackageInfo` and `ResolvedReference` values and materialize each package at the requested path, including staging directories. Native MCP cleanup tests must generate managed baselines through the real writer, then prove both authorized removal and unchanged bytes on unverifiable or foreign entries. Keep successful transitive-service, frozen replay, and exact-byte assertions; a mock-error exit is not success.
@@ -445,7 +445,7 @@ environment end-to-end; for local iteration prefer the direct
 ### GitHub Actions Workflow
 
 **On PR and merge queue:**
-1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds Linux smoke, integration, and release-validation gates.
+1. PR-time unit checks and the hermetic Lifecycle Smoke gate run first; merge queue adds the global coverage floor (`Coverage Combine (Linux)`) and Linux smoke, integration, and release-validation gates. Integration runs in up to 8 shards planned like the release pipeline's, in about 12-16 minutes.
 
 Architecture ratchet contracts and the real architecture-scaling test run in
 separate Linux jobs, each with the same five-minute setup-to-cleanup limit.
