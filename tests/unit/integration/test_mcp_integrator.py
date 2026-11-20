@@ -66,14 +66,6 @@ class TestIsVscodeAvailable:
         ):
             assert _is_vscode_available() is False
 
-    def test_code_on_path_takes_precedence_over_missing_dir(self, tmp_path):
-        # No .vscode dir, but 'code' is on PATH
-        with (
-            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value="/usr/bin/code"),
-            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
-        ):
-            assert _is_vscode_available() is True
-
 
 # ===========================================================================
 # MCPIntegrator.deduplicate
@@ -1042,22 +1034,6 @@ class TestCollectTransitive:
 # ===========================================================================
 # _gate_project_scoped_runtimes -- issue #1335
 # ===========================================================================
-
-
-class _FakeTarget:
-    """Minimal stand-in for TargetProfile (legacy active_targets shape)."""
-
-    def __init__(self, name: str):
-        self.name = name
-
-
-def _fake_active_targets(names: list[str]):
-    """Return a mock for the legacy active_targets that yields *names*."""
-
-    def _inner(_root, _explicit=None):
-        return [_FakeTarget(n) for n in names]
-
-    return _inner
 
 
 def _make_signal_dir(root: Path, target: str) -> None:

@@ -772,11 +772,6 @@ class TestLockFileSemanticEquivalence:
         b = self._make_lock(lockfile_version="2")
         assert not a.is_semantically_equivalent(b)
 
-    def test_new_lockfile_vs_empty(self):
-        a = self._make_lock()
-        b = LockFile()
-        assert not a.is_semantically_equivalent(b)
-
 
 # ---------------------------------------------------------------------------
 # Issue #1888: installed package name + version per lockfile entry

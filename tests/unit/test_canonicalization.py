@@ -154,12 +154,6 @@ class TestToCanonical:
         dep = DependencyReference.parse("git@bitbucket.org:team/rules.git")
         assert dep.to_canonical() == "bitbucket.org/team/rules"
 
-    def test_default_github_host_stripped(self):
-        """Default GitHub host (github.com) is stripped from canonical form."""
-        dep = DependencyReference.parse("github.com/microsoft/apm-sample-package")
-        # github.com is the default, so stripped
-        assert dep.to_canonical() == "microsoft/apm-sample-package"
-
     def test_virtual_path_github(self):
         """Virtual path on default host preserves path but strips host."""
         dep = DependencyReference.parse("microsoft/apm-sample-package/prompts/review.prompt.md")

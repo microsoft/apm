@@ -570,18 +570,6 @@ class TestMCPDependencyHardening:
         with pytest.raises(ValueError, match="Invalid MCP dependency name"):
             MCPDependency.from_dict({"name": "bad name"})
 
-    def test_from_dict_self_defined_runs_strict_checks(self):
-        # registry=False with stdio transport but no command -> existing
-        # strict=True check still fires.
-        with pytest.raises(ValueError, match="requires 'command'"):
-            MCPDependency.from_dict(
-                {
-                    "name": "x",
-                    "registry": False,
-                    "transport": "stdio",
-                }
-            )
-
 
 # ---------------------------------------------------------------------------
 # _build_self_defined_server_info

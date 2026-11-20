@@ -312,6 +312,127 @@ class TestRunInstallPipelinePlanCallback:
 
         plan_callback.assert_called_once()
 
+    def test_plan_callback_false_passes_complete_dep_keys_to_update_plan(self, tmp_path):
+        from apm_cli.install.pipeline import run_install_pipeline
+        from apm_cli.models.results import InstallResult
+
+        pkg = self._make_apm_package()
+
+        mock_ctx = MagicMock()
+        dep = MagicMock()
+        dep.replacement = None
+        mock_ctx.deps_to_install = [dep]
+        mock_ctx.root_has_local_primitives = False
+        mock_ctx.tui = MagicMock()
+        mock_ctx.only_packages = ["selected"]
+        mock_ctx.update_plan_complete_dep_keys = {"selected", "unselected"}
+        mock_ctx.package_hashes = {}
+
+        plan_callback = MagicMock(return_value=False)  # user says "no"
+
+        mock_resolve = MagicMock()
+        # Resolve phase must NOT clear deps_to_install so plan gate is reached
+        mock_resolve.run = MagicMock()
+
+        with (
+            patch("apm_cli.core.scope.get_deploy_root", return_value=tmp_path),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=tmp_path),
+            patch(
+                "apm_cli.install.phases.local_content._project_has_root_primitives",
+                return_value=False,
+            ),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
+            patch("apm_cli.install.context.InstallContext", return_value=mock_ctx),
+            patch("apm_cli.utils.install_tui.InstallTui", return_value=MagicMock()),
+            patch("apm_cli.install.plan.build_update_plan", return_value=MagicMock()) as build_plan,
+            patch("apm_cli.install.phases.resolve", mock_resolve),
+        ):
+            mock_ctx.tui.__enter__ = MagicMock(return_value=mock_ctx.tui)
+            mock_ctx.tui.__exit__ = MagicMock(return_value=False)
+            mock_ctx.tui.start_phase = MagicMock()
+
+            result = run_install_pipeline(pkg, plan_callback=plan_callback, target="claude")
+
+        assert isinstance(result, InstallResult)
+        plan_callback.assert_called_once()
+        build_plan.assert_called_once_with(
+            None,
+            [dep],
+            complete_resolved_dep_keys={"selected", "unselected"},
+            resolved_content_hashes={},
+        )
+
+    def test_plan_callback_true_continues_without_only_packages(self, tmp_path):
+        import contextlib
+
+        from apm_cli.install.pipeline import run_install_pipeline
+
+        pkg = self._make_apm_package()
+        mock_ctx = MagicMock()
+        dep = MagicMock()
+        mock_ctx.deps_to_install = [dep]
+        mock_ctx.root_has_local_primitives = False
+        mock_ctx.tui = MagicMock()
+        mock_ctx.only_packages = None
+        mock_ctx.transitive_failures = []
+        mock_ctx.existing_lockfile = None
+        mock_ctx.verbose = False
+        mock_ctx.dry_run = False
+        mock_ctx.legacy_skill_paths = True
+        mock_ctx.diagnostics = MagicMock()
+        mock_ctx.auth_resolver = MagicMock()
+        mock_ctx.update_refs = False
+        mock_ctx.logger = MagicMock()
+
+        plan_callback = MagicMock(return_value=True)
+
+        mock_resolve = MagicMock()
+        mock_resolve.run = MagicMock()
+        mock_finalize_result = MagicMock()
+
+        patches = [
+            patch("apm_cli.core.scope.get_deploy_root", return_value=tmp_path),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=tmp_path),
+            patch(
+                "apm_cli.install.phases.local_content._project_has_root_primitives",
+                return_value=False,
+            ),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
+            patch("apm_cli.install.context.InstallContext", return_value=mock_ctx),
+            patch("apm_cli.utils.install_tui.InstallTui", return_value=MagicMock()),
+            patch("apm_cli.install.plan.build_update_plan", return_value=MagicMock()),
+            patch("apm_cli.install.phases.resolve", mock_resolve),
+            patch("apm_cli.install.phases.policy_gate.run"),
+            patch("apm_cli.install.phases.targets.run"),
+            patch("apm_cli.install.phases.policy_target_check.run"),
+            patch("apm_cli.install.phases.download.run"),
+            patch("apm_cli.install.phases.integrate.run"),
+            patch("apm_cli.install.phases.cleanup.run"),
+            patch("apm_cli.install.phases.post_deps_local.run"),
+            patch("apm_cli.install.phases.finalize.run", return_value=mock_finalize_result),
+            patch("apm_cli.install.phases.lockfile.LockfileBuilder"),
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
+            patch(
+                "apm_cli.deps.lockfile.get_lockfile_path", return_value=tmp_path / "apm.lock.yaml"
+            ),
+            patch("apm_cli.utils.diagnostics.DiagnosticCollector"),
+        ]
+
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+
+            mock_ctx.tui.__enter__ = MagicMock(return_value=mock_ctx.tui)
+            mock_ctx.tui.__exit__ = MagicMock(return_value=False)
+            mock_ctx.tui.start_phase = MagicMock()
+
+            import contextlib as _cl
+
+            with _cl.suppress(Exception):  # sub-phases may raise; callback should still fire
+                run_install_pipeline(pkg, plan_callback=plan_callback, target="claude")
+
+        plan_callback.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # run_install_pipeline -- exception wrapping

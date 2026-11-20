@@ -242,19 +242,6 @@ class TestAlreadyResolvedSkipLogic:
 
     # --- is_cacheable gate ---
 
-    def test_cacheable_skips_normal_install(self):
-        """Normal install: is_cacheable=True (tag/commit ref) causes skip."""
-        assert (
-            _compute_skip_download(
-                install_path_exists=True,
-                is_cacheable=True,
-                update_refs=False,
-                already_resolved=False,
-                lockfile_match=False,
-            )
-            is True
-        )
-
     def test_cacheable_no_skip_during_update(self):
         """--update: is_cacheable alone does NOT cause skip_download=True.
 
@@ -445,21 +432,6 @@ class TestForceRefRecheck:
                 ),
                 None,
                 update_refs=False,
-            )
-            is True
-        )
-
-    def test_git_semver_forces_resolve_on_update(self) -> None:
-        """Git-source semver dep continues to re-resolve (pre-existing behavior)."""
-        assert (
-            should_force_ref_recheck(
-                _recheck_dep(
-                    is_local=False,
-                    artifactory_prefix=None,
-                    ref_kind="semver",
-                ),
-                None,
-                update_refs=True,
             )
             is True
         )

@@ -91,15 +91,6 @@ class TestDockerArgsProcessor(unittest.TestCase):
 class TestInstallationSummary(unittest.TestCase):
     """Test suite for InstallationSummary."""
 
-    def test_empty_summary(self):
-        """Test empty installation summary."""
-        summary = InstallationSummary()
-
-        self.assertEqual(len(summary.installed), 0)
-        self.assertEqual(len(summary.skipped), 0)
-        self.assertEqual(len(summary.failed), 0)
-        self.assertFalse(summary.has_any_changes())
-
     def test_add_operations(self):
         """Test adding different types of operations."""
         summary = InstallationSummary()

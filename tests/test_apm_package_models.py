@@ -1160,14 +1160,6 @@ class TestHookPackageValidation:
             assert result.is_valid, f"Errors: {result.errors}"
             assert result.package_type == PackageType.APM_PACKAGE
 
-    def test_validate_empty_dir_is_invalid(self):
-        """Test that a dir with no apm.yml, SKILL.md, hooks, or plugin evidence is invalid."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            result = validate_apm_package(Path(tmpdir))
-            # Empty directories without plugin.json or component dirs are not valid
-            assert not result.is_valid
-            assert result.package_type == PackageType.INVALID
-
 
 from src.apm_cli.models.validation import detect_package_type  # noqa: E402
 

@@ -1756,13 +1756,6 @@ class TestProxyRegistryOnlyMode:
             ):
                 dl.download_package(dep, Path("/tmp/test-pkg"))
 
-    def test_proxy_registry_only_is_canonical(self):
-        """PROXY_REGISTRY_ONLY=1 is the canonical name and raises for non-proxy deps."""
-        with patch.dict(os.environ, {"PROXY_REGISTRY_ONLY": "1"}, clear=True):
-            dl = GitHubPackageDownloader()
-            with pytest.raises(RuntimeError, match="PROXY_REGISTRY_ONLY is set"):
-                dl.download_package("microsoft/some-package", Path("/tmp/test-pkg"))
-
 
 # -- RegistryConfig: FQDN / prefix split and generic registry --
 

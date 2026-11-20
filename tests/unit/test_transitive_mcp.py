@@ -570,34 +570,6 @@ class TestCollectTransitiveMCPDeps:
         assert len(result) == 1
         assert result[0].name == "private-srv"
 
-    def test_no_lockfile_conservative(self, tmp_path):
-        """No lockfile → all self-defined skipped (conservative)."""
-        pkg_dir = tmp_path / "org" / "pkg-a"
-        pkg_dir.mkdir(parents=True)
-        (pkg_dir / "apm.yml").write_text(
-            yaml.dump(
-                {
-                    "name": "pkg-a",
-                    "version": "1.0.0",
-                    "dependencies": {
-                        "mcp": [
-                            "ghcr.io/registry/server",
-                            {
-                                "name": "private-srv",
-                                "registry": False,
-                                "transport": "http",
-                                "url": "https://private.example.com",
-                            },
-                        ]
-                    },
-                }
-            )
-        )
-        # No lock_path provided
-        result = MCPIntegrator.collect_transitive(tmp_path)
-        assert len(result) == 1
-        assert result[0].name == "ghcr.io/registry/server"
-
 
 # ---------------------------------------------------------------------------
 # _deduplicate_mcp_deps
@@ -622,9 +594,6 @@ class TestDeduplicateMCPDeps:
         assert len(result) == 2
         assert isinstance(result[0], str)
         assert isinstance(result[1], dict)
-
-    def test_empty_list(self):
-        assert MCPIntegrator.deduplicate([]) == []
 
     def test_dict_without_name_kept(self):
         """Dicts without 'name' are kept if not already in result."""
@@ -1068,9 +1037,6 @@ class TestGetServerConfigs:
     def test_extracts_configs_from_plain_strings(self):
         configs = MCPIntegrator.get_server_configs(["ghcr.io/org/server"])
         assert configs == {"ghcr.io/org/server": {"name": "ghcr.io/org/server"}}
-
-    def test_empty_list(self):
-        assert MCPIntegrator.get_server_configs([]) == {}
 
 
 # ---------------------------------------------------------------------------

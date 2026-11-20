@@ -367,12 +367,6 @@ class TestGitHubPackageDownloaderIntegration:
         # This test would require a real repository - skip in CI
         pytest.skip("Integration test requiring network access")
 
-    @pytest.mark.integration
-    def test_download_real_package(self):
-        """Test downloading a real APM package (requires network)."""
-        # This test would require a real APM package repository - skip in CI
-        pytest.skip("Integration test requiring network access")
-
 
 class TestEnterpriseHostHandling:
     """Test enterprise GitHub host handling (PR #33 bug fixes)."""
@@ -466,11 +460,6 @@ class TestErrorHandling:
     def test_network_timeout_handling(self):
         """Test handling of network timeouts."""
         # Would require mocking network timeouts
-        pass
-
-    def test_authentication_failure_handling(self):
-        """Test handling of authentication failures."""
-        # Would require mocking authentication failures
         pass
 
     def test_download_raw_file_retries_anonymous_failure_with_token(self):
@@ -592,11 +581,6 @@ class TestErrorHandling:
                     for call in mock_get.call_args_list[:3]
                 )
                 assert "Authorization" in mock_get.call_args_list[3].kwargs["headers"]
-
-    def test_repository_not_found_handling(self):
-        """Test handling of repository not found errors."""
-        # Would require mocking 404 errors
-        pass
 
     def test_download_github_file_403_rate_limit_no_token(self):
         """Test that 403 with X-RateLimit-Remaining: 0 and no token gives a rate-limit error."""
@@ -2406,24 +2390,6 @@ def _gitea_json_envelope(file_bytes: bytes) -> bytes:
             "content": _b64.b64encode(file_bytes).decode("ascii"),
         }
     ).encode("utf-8")
-
-
-def _error_url_components(text: str) -> list[tuple[str, str, str]]:
-    """Extract (scheme, hostname, path) tuples for any URLs embedded in *text*.
-
-    Download-error messages embed the failed endpoint as a URL. Asserting on
-    parsed components (per tests.instructions.md: never substring-match URLs)
-    rather than scraping with ``startswith``/``rstrip`` keeps the assertion
-    robust to wording or punctuation tweaks in the error string.
-    """
-    out: list[tuple[str, str, str]] = []
-    for token in text.split():
-        cleaned = token.strip("(),.;'\"")
-        if "://" not in cleaned:
-            continue
-        parsed = urlparse(cleaned)
-        out.append((parsed.scheme, parsed.hostname or "", parsed.path))
-    return out
 
 
 class TestGiteaRawUrlDownload:

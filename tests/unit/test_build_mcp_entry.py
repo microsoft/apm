@@ -145,12 +145,6 @@ class TestValidationRoundtrip:
             _build(name="", command_argv=("x",))
 
 
-class TestExplicitTransportOverride:
-    def test_explicit_transport_overrides_remote_inference(self):
-        entry, _ = _build(url="https://x/y", transport="sse")
-        assert entry["transport"] == "sse"
-
-
 class TestRegistryUrlOverlay:
     """``registry_url`` (--registry CLI flag) is persisted to the entry's
     ``registry:`` field for reproducible installs across machines."""

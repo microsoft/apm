@@ -21,6 +21,8 @@ import filecmp
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
@@ -439,6 +441,41 @@ class TestPromoteSubSkillsManagedFiles:
         logger.warning.assert_called()
         assert n >= 0
 
+    @pytest.mark.parametrize("previous_owner", ["other-pkg", None])
+    def test_overwrite_warning_names_previous_owner(
+        self, tmp_path: Path, previous_owner: str | None
+    ) -> None:
+        """Replacement names known owners and tells users how to avoid the overlap."""
+        skills_dir = tmp_path / ".apm" / "skills"
+        sub = skills_dir / "my-skill"
+        sub.mkdir(parents=True)
+        (sub / "SKILL.md").write_text("# skill", encoding="utf-8")
+
+        target_root = tmp_path / ".github" / "skills"
+        existing = target_root / "my-skill"
+        existing.mkdir(parents=True)
+        (existing / "SKILL.md").write_text("# different", encoding="utf-8")
+
+        logger = MagicMock()
+
+        # owned_by says a *different* package owns this skill
+        n, _deployed = SkillIntegrator._promote_sub_skills(
+            skills_dir,
+            target_root,
+            "parent-pkg",
+            warn=True,
+            owned_by={"my-skill": previous_owner},
+            logger=logger,
+        )
+        previous = "'other-pkg'" if previous_owner else "another package"
+        logger.warning.assert_called_once_with(
+            "Skill 'my-skill' from 'parent-pkg' replaced overlapping files "
+            f"from {previous}; separately owned assets were preserved "
+            "-- remove one package to avoid this"
+        )
+        assert n == 1
+        assert (existing / "SKILL.md").read_text(encoding="utf-8") == "# skill"
+
 
 # ---------------------------------------------------------------------------
 # _promote_sub_skills_standalone -- dedup via seen_skill_dirs (lines 761-762)
@@ -479,6 +516,46 @@ class TestPromoteSubSkillsStandaloneDedup:
             )
         # Logger.progress called for dedup skip on second target
         logger.progress.assert_called()
+
+    def test_plugin_manifest_subset_promotes_only_selected_nested_skill(
+        self, tmp_path: Path
+    ) -> None:
+        """--skill path filters plugin-manifest sub-skills during promotion."""
+        from apm_cli.deps.plugin_parser import _map_plugin_artifacts
+        from apm_cli.models.apm_package import PackageType
+
+        plugin_root = tmp_path / "skills-repo"
+        selected_skill = plugin_root / "skills" / "productivity" / "grill-me"
+        other_skill = plugin_root / "skills" / "writing" / "summarize-me"
+        selected_skill.mkdir(parents=True)
+        other_skill.mkdir(parents=True)
+        (selected_skill / "SKILL.md").write_text("# Grill Me", encoding="utf-8")
+        (other_skill / "SKILL.md").write_text("# Summarize Me", encoding="utf-8")
+
+        manifest = {
+            "name": "skills-repo",
+            "skills": [
+                "skills/productivity/grill-me",
+                "skills/writing/summarize-me",
+            ],
+        }
+        _map_plugin_artifacts(plugin_root, plugin_root / ".apm", manifest)
+
+        pkg_info = _make_package_info(plugin_root, package_type=PackageType.MARKETPLACE_PLUGIN)
+        target = _make_target(name="claude", root_dir=".claude", auto_create=True)
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        result = SkillIntegrator().integrate_package_skill(
+            pkg_info,
+            project_root,
+            targets=[target],
+            skill_subset=("skills/productivity/grill-me",),
+        )
+
+        assert result.sub_skills_promoted == 1
+        assert (project_root / ".claude" / "skills" / "grill-me" / "SKILL.md").exists()
+        assert not (project_root / ".claude" / "skills" / "summarize-me" / "SKILL.md").exists()
 
 
 # ---------------------------------------------------------------------------
