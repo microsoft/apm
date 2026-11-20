@@ -20,6 +20,10 @@ still apply. APM finds org policy from the project's git remote, and `apm instal
 `update -g` and `uninstall -g` do not use it, even when you run them from inside a governed
 project. [#3703](https://github.com/microsoft/apm/issues/3703) tracks user-scope org policy
 for 0.38.
+
+When the executables gate is on at user scope, it still parks hooks, MCP servers, LSP servers
+and `bin/` from dependencies, and `apm approve --user` and `apm deny --user` (including
+revoking an approval) control what deploys. See [Control executables](../control-executables/).
 :::
 
 ## Write and roll out the policy
