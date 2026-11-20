@@ -132,3 +132,78 @@ def check_agent_render_then_adopt(provider: FactsProvider) -> tuple[Violation, .
     if not owner_calls:
         findings.append(_summary(rule, _CONSUMER, f"agent deployment must call {_OWNER_METHOD}"))
     return tuple(findings)
+
+
+GUARD_COMMAND_RENDER_ADOPT = "install-deployment-command-render-then-adopt"
+_COMMAND_CONSUMER = "src/apm_cli/integration/command_integrator.py"
+_COMMAND_RENDER = "CommandIntegrator._rendered_command"
+_COMMAND_RENDER_STEPS = frozenset(
+    {"_transform_prompt_to_command", "resolve_links", "_gemini_command_text"}
+)
+
+
+def check_command_render_then_adopt(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Command adoption compares the rendered command, never the raw prompt.
+
+    Commands are format-transformed, so every ``_check_adopt_or_skip`` call in
+    ``command_integrator.py`` passes ``expected_content`` rendered by
+    ``CommandIntegrator._rendered_command``, and no raw comparison runs there.
+    An install then adopts command files an earlier run deployed but did not
+    record.
+    """
+    rule = GUARD_COMMAND_RENDER_ADOPT
+    _facts, failures = _facts_for(provider, _COMMAND_CONSUMER, rule)
+    if failures:
+        return tuple(failures)
+    index = provider.tree_index(_COMMAND_CONSUMER)
+    render = index.function(_COMMAND_RENDER) if index is not None else None
+    if index is None or render is None:
+        return (_summary(rule, _COMMAND_CONSUMER, f"{_COMMAND_RENDER} must render commands"),)
+
+    findings: list[Violation] = []
+    owner_calls = 0
+    for node in index.nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        name = _call_name(node)
+        if name in _BYPASS_CALLS - {"read_bytes"}:
+            findings.append(
+                violation(
+                    rule,
+                    _COMMAND_CONSUMER,
+                    f"command adoption must route through {_OWNER_METHOD}; "
+                    f"direct {name}() compares the wrong bytes",
+                    line=node.lineno,
+                    column=node.col_offset + 1,
+                )
+            )
+        elif name == _OWNER_METHOD:
+            owner_calls += 1
+            expected = next(
+                (kw.value for kw in node.keywords if kw.arg == "expected_content"), None
+            )
+            if not (isinstance(expected, ast.Call) and _call_name(expected) == "_rendered_command"):
+                findings.append(
+                    violation(
+                        rule,
+                        _COMMAND_CONSUMER,
+                        f"{_OWNER_METHOD} for commands must pass "
+                        "expected_content=self._rendered_command(...)",
+                        line=node.lineno,
+                        column=node.col_offset + 1,
+                    )
+                )
+    steps = {_call_name(node) for node in index.walk(render) if isinstance(node, ast.Call)}
+    if not steps >= _COMMAND_RENDER_STEPS:
+        findings.append(
+            _summary(
+                rule,
+                _COMMAND_CONSUMER,
+                f"{_COMMAND_RENDER} must render through {', '.join(sorted(_COMMAND_RENDER_STEPS))}",
+            )
+        )
+    if not owner_calls:
+        findings.append(
+            _summary(rule, _COMMAND_CONSUMER, f"command deployment must call {_OWNER_METHOD}")
+        )
+    return tuple(findings)
