@@ -55,9 +55,9 @@ class _SwapWorld:
         self.env = self._repositories.url_rewrite_subprocess_env(self._repository, _REMOTE)
         self.apm_home = isolated.config_root
         self.pins = isolated.config_root / "cache" / "marketplace" / "version-pins.json"
-        self.project = (
-            LocalPackageFactory(isolated.work_root).create("consumer", targets=("codex",)).root
-        )
+        self._consumers = LocalPackageFactory(isolated.work_root)
+        self._consumer = self._consumers.create("consumer", targets=("codex",))
+        self.project = self._consumer.root
         self._runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=300)
         self.apm("marketplace", "add", _REMOTE, "--name", _ALIAS, "--ref", "main")
 
@@ -82,10 +82,20 @@ class _SwapWorld:
         self.apm("marketplace", "update", _ALIAS)
         return head
 
+    def declare_marketplace_dependency(self) -> None:
+        self._consumers.replace_apm_dependencies(
+            self._consumer, ({"name": _PLUGIN, "marketplace": _ALIAS},)
+        )
+
     def apm(self, *args: str, expected: int = 0) -> CommandResult:
         result = self._runner.run(args, cwd=self.project, env=self.env)
         _assert_output_oracles(result)
         assert result.returncode == expected, _evidence(result)
+        return result
+
+    def runner_result(self, *args: str) -> CommandResult:
+        result = self._runner.run(args, cwd=self.project, env=self.env)
+        _assert_output_oracles(result)
         return result
 
     def snapshot(self) -> tuple[dict[str, bytes], dict[str, bytes]]:
@@ -110,3 +120,28 @@ def test_swapped_marketplace_ref_is_refused_every_time(
         assert "run 'apm update' to accept the new ref" in output, _evidence(refused)
         assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: "main"}
         assert world.snapshot() == before, "I7: a refused install changed durable state"
+
+
+@pytest.mark.parametrize("selection", [(), (f"{_PLUGIN}@{_ALIAS}",)], ids=["all", "selected"])
+def test_update_accepts_a_swapped_ref_visibly_and_frozen_audit_agree(
+    tmp_path: Path, apm_binary_path: Path, selection: tuple[str, ...]
+) -> None:
+    world = _SwapWorld(tmp_path, apm_binary_path)
+    world.declare_marketplace_dependency()
+    world.apm("install", *_FLAGS)
+    assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: "main"}
+
+    swapped = world.swap_ref()
+    before = world.snapshot()
+    frozen = world.runner_result("install", "--frozen", *_FLAGS)
+    audit = world.runner_result("audit", "--ci", "--no-policy")
+    assert (frozen.returncode, audit.returncode) == (0, 0), _evidence(frozen) + _evidence(audit)
+    assert world.snapshot() == before, "the locked replay moved state on a re-pinned catalog"
+
+    updated = world.apm("update", *selection, "--yes", *_FLAGS)
+    output = " ".join((updated.stdout + updated.stderr).split())
+    assert (
+        f"Plugin {_PLUGIN}@{_ALIAS} ref changed: was 'main', now '{swapped}'. "
+        "Accepted by this update." in output
+    ), _evidence(updated)
+    assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: swapped}

@@ -293,18 +293,22 @@ def enforce_ref_pin(
     pins_dir: str | None = None,
     *,
     accept_change: bool = False,
-) -> None:
+) -> str | None:
     """Refuse a ref that contradicts the recorded pin; otherwise stage it.
 
     A contradicting ref raises :class:`RefPinMismatchError` unless
     *accept_change* is set, which only an explicit ``apm update`` of that
     plugin does. A staged ref is written only when the install commits (#4400).
+
+    Returns:
+        The previously pinned ref when an accepted change replaces it, else ``None``.
     """
     previous_ref = check_ref_pin(marketplace_name, plugin_name, ref, version, pins_dir)
     if previous_ref is not None and not accept_change:
         key = _pin_key(marketplace_name, plugin_name, version)
         raise RefPinMismatchError(plugin_name, marketplace_name, previous_ref, ref, key)
     stage_ref_pin(marketplace_name, plugin_name, ref, version)
+    return previous_ref
 
 
 def staged_ref_pin_keys() -> frozenset[tuple[str, str, str]]:

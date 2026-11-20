@@ -685,7 +685,9 @@ class FreshDependencySource(DependencySource):
                 ref_changed=ref_changed,
             )
 
-            stage_existing_copy(ctx, install_path, skip=dep_key in ctx.pre_download_results)
+            stage_existing_copy(
+                ctx, install_path, dep_locked_chk, skip=dep_key in ctx.pre_download_results
+            )
             if dep_key in ctx.pre_download_results:
                 package_info = ctx.pre_download_results[dep_key]
             elif dep_ref.source == "registry":

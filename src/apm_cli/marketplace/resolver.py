@@ -1310,13 +1310,18 @@ def resolve_marketplace_plugin(
     if current_ref and enforce_ref_pins and not raw_ref_override:
         from .version_pins import enforce_ref_pin
 
-        enforce_ref_pin(
+        replaced_ref = enforce_ref_pin(
             marketplace_name,
             plugin_name,
             current_ref,
             version=resolved_version or plugin.version or "",
             accept_change=accept_ref_change,
         )
+        if replaced_ref is not None:
+            _emit_warning(
+                f"Plugin {plugin_name}@{marketplace_name} ref changed: was "
+                f"'{replaced_ref}', now '{current_ref}'. Accepted by this update."
+            )
 
     logger.debug(
         "Resolved %s@%s -> %s",
