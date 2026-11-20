@@ -110,7 +110,7 @@ apm runtime remove gemini -y
 | Runtime | Description | Default config |
 |---|---|---|
 | `copilot` | GitHub Copilot CLI. | GitHub Models (free). |
-| `codex` | OpenAI Codex CLI. | GitHub Models via global `~/.codex/config.toml`. |
+| `codex` | OpenAI Codex CLI. | GitHub Models via global `~/.codex/config.toml`, with `wire_api = "chat"` for Codex v0.116 and later and `"responses"` only for v0.115 or older. |
 | `llm` | Simon Willison's `llm` CLI with multiple providers. | GitHub Models. |
 | `gemini` | Google Gemini CLI. | Native defaults. |
 

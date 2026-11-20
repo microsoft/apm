@@ -11,11 +11,15 @@ does not import the commands layer (#3879).
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.utils.console import _rich_success
 
 if TYPE_CHECKING:
+    from apm_cli.core.command_logger import CommandLogger
     from apm_cli.install.context import InstallContext
     from apm_cli.models.results import InstallResult
 
@@ -30,13 +34,13 @@ _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS = frozenset(
 
 
 def _compile_hint_targets(
-    ctx: InstallContext, *, user_scope: bool, scoped_instructions_only: bool = False
+    targets: Iterable[object], *, user_scope: bool, scoped_instructions_only: bool = False
 ) -> tuple[list[str], frozenset[str]]:
     """Return display names and compiler families that need root-context hints."""
     target_names: list[str] = []
     families: set[str] = set()
     seen: set[str] = set()
-    for target in ctx.targets:
+    for target in targets:
         scoped = target.for_scope(user_scope=user_scope)
         if scoped is None:
             continue
@@ -73,46 +77,62 @@ def _root_context_outputs(families: frozenset[str]) -> list[str]:
     return outputs
 
 
-def _has_dep_instruction_files(ctx: InstallContext) -> bool:
-    """Return True if any installed dep directory contains ``.instructions.md`` files.
+def _iter_dep_instruction_files(apm_modules: Path, diagnostics=None) -> Iterator[str]:
+    """Yield ``apm_modules``-relative compile-input instruction files.
 
     Scans ``apm_modules/`` for ``*.instructions.md`` files under any
-    ``.apm/instructions/`` subdirectory, including dependencies installed by
-    earlier runs.  The all-modules scan is intentionally conservative: after
-    any successful install, every dependency instruction must be represented
-    in the next compile.  Imports stay lazy to keep the common no-hint path
-    lightweight.
+    ``.apm/instructions/`` subdirectory, which is where ``_copy_local_package``
+    and the bundle staging logic place compile-only instruction files.  Links
+    that resolve outside ``apm_modules`` are skipped (and reported when
+    *diagnostics* is given).  Imports stay lazy to keep the common no-hint
+    path lightweight.
     """
     from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
-    apm_modules = (ctx.apm_modules_dir or (ctx.project_root / "apm_modules")).resolve()
+    apm_modules = apm_modules.resolve()
     if not apm_modules.is_dir():
-        return False
+        return
 
-    for candidate in apm_modules.rglob("*.instructions.md"):
+    for found in apm_modules.rglob("*.instructions.md"):
+        relative_found = found.relative_to(apm_modules).as_posix()
         try:
-            candidate = ensure_path_within(candidate, apm_modules)
+            candidate = ensure_path_within(found, apm_modules)
         except PathTraversalError:
-            relative_candidate = candidate.relative_to(apm_modules).as_posix()
-            ctx.diagnostics.warn(
-                "Ignored unsafe instruction link that resolves outside "
-                f"apm_modules: {relative_candidate}"
-            )
+            if diagnostics is not None:
+                diagnostics.warn(
+                    "Ignored unsafe instruction link that resolves outside "
+                    f"apm_modules: {relative_found}"
+                )
             continue
         if not candidate.is_file():
             continue
-        # Only count files that live inside a ``.apm/instructions/`` subtree,
-        # which is where ``_copy_local_package`` and the bundle staging logic
-        # place compile-only instruction files.
         parts = candidate.parts
         try:
             idx = parts.index(".apm")
         except ValueError:
             continue
         if idx + 1 < len(parts) and parts[idx + 1] == "instructions":
-            return True
+            yield relative_found
 
-    return False
+
+def _has_dep_instruction_files(ctx: InstallContext) -> bool:
+    """Return True if any installed dep directory contains ``.instructions.md`` files.
+
+    The all-modules scan is intentionally conservative: after any successful
+    install, every dependency instruction must be represented in the next
+    compile.  Diagnostics are optional at this boundary: the hint must work
+    for a context that carries none (unsafe links are then skipped silently).
+    """
+    apm_modules = ctx.apm_modules_dir or (ctx.project_root / "apm_modules")
+    diagnostics = getattr(ctx, "diagnostics", None)
+    return any(True for _ in _iter_dep_instruction_files(apm_modules, diagnostics))
+
+
+def _project_compile_hint(target_names: list[str], families: frozenset[str], verb: str) -> str:
+    """Render the single project-scope ``apm compile`` hint line."""
+    targets = ", ".join(target_names)
+    outputs = " / ".join(_root_context_outputs(families))
+    return f"Instructions {verb} for {targets}. Run 'apm compile' to update {outputs}."
 
 
 def _hint_project_compile_needed(ctx: InstallContext) -> None:
@@ -135,7 +155,7 @@ def _hint_project_compile_needed(ctx: InstallContext) -> None:
     if ctx.installed_count == 0:
         return
 
-    target_names, families = _compile_hint_targets(ctx, user_scope=False)
+    target_names, families = _compile_hint_targets(ctx.targets, user_scope=False)
     if not target_names:
         return
 
@@ -143,10 +163,59 @@ def _hint_project_compile_needed(ctx: InstallContext) -> None:
         return
 
     if ctx.logger:
-        targets = ", ".join(target_names)
-        outputs = " / ".join(_root_context_outputs(families))
-        message = f"Instructions installed for {targets}. Run 'apm compile' to update {outputs}."
-        ctx.logger.info(message, symbol="info")
+        ctx.logger.info(_project_compile_hint(target_names, families, "installed"), symbol="info")
+
+
+@dataclass(frozen=True)
+class CompileInputSnapshot:
+    """Compile-input instructions present before a project-scope removal."""
+
+    target_names: tuple[str, ...] = ()
+    families: frozenset[str] = frozenset()
+    instruction_files: frozenset[str] = frozenset()
+
+
+def snapshot_compile_inputs(
+    project_root: Path, explicit_target: str | list[str] | None, apm_modules: Path
+) -> CompileInputSnapshot:
+    """Record compile-input instructions before ``apm uninstall`` / ``apm prune``.
+
+    Targets come from the same declaration ``apm install`` resolves.  The scan
+    is skipped when no active target compiles root context files, so the
+    common native-rules path stays cheap.  Never raises: a hint must not break
+    the removal it follows.
+    """
+    from apm_cli.integration.targets import resolve_targets
+
+    try:
+        targets = resolve_targets(
+            project_root, explicit_target=explicit_target, create_config=False
+        )
+    except Exception:
+        return CompileInputSnapshot()
+    target_names, families = _compile_hint_targets(targets, user_scope=False)
+    if not target_names:
+        return CompileInputSnapshot()
+    return CompileInputSnapshot(
+        tuple(target_names), families, frozenset(_iter_dep_instruction_files(apm_modules))
+    )
+
+
+def hint_compile_after_removal(
+    snapshot: CompileInputSnapshot, apm_modules: Path, logger: CommandLogger
+) -> None:
+    """Hint to run ``apm compile`` when a removal dropped compile-input instructions.
+
+    The compiled root context files (AGENTS.md / GEMINI.md) still carry the
+    removed instructions until the next compile.  Compilation stays explicit:
+    no file is written or recompiled here.
+    """
+    if not snapshot.instruction_files:
+        return
+    if snapshot.instruction_files <= frozenset(_iter_dep_instruction_files(apm_modules)):
+        return
+    message = _project_compile_hint(list(snapshot.target_names), snapshot.families, "removed")
+    logger.info(message, symbol="info")
 
 
 def _hint_global_root_context(ctx: InstallContext) -> None:
@@ -181,7 +250,7 @@ def _hint_global_root_context(ctx: InstallContext) -> None:
         return
 
     target_names, _ = _compile_hint_targets(
-        ctx,
+        ctx.targets,
         user_scope=True,
         scoped_instructions_only=not any(not instruction.apply_to for instruction in instructions),
     )

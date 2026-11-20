@@ -430,8 +430,9 @@ per server, never overwrite user-authored servers, and each record ownership in
 `apm.lock.yaml`. The first install of a project locked by APM 0.36 or earlier
 (also `--frozen`) moves the entries APM wrote to `.github/mcp.json` or
 `.vscode/mcp.json` into `.mcp.json`; user-authored or edited entries stay and
-APM warns (`Kept MCP server '<name>' ...`). A file is deleted only if APM created it
-and nothing but empty scaffolding remains.
+APM warns (`Kept MCP server '<name>' ...`). `.vscode/mcp.json` is deleted only if APM
+created it and nothing but empty scaffolding remains; `.github/mcp.json` is only emptied,
+never deleted (Copilot CLI reads it, and it is a `copilot` detection signal).
 
 `apm compile` continues to use legacy auto-detection with a `vscode`/`minimal` fallback for unsignalled projects -- bringing it onto the strict resolution chain is tracked as a follow-up.
 

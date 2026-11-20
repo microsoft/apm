@@ -104,7 +104,8 @@ def _warn_deprecated_manifest_keys(data: Mapping[str, Any], manifest_path: Path)
     from ..utils.console import _rich_warning
 
     user_scope = scope is InstallScope.USER
-    label = ascii(manifest_path.as_posix())[1:-1] if user_scope else "apm.yml"
+    # Resolve: `apm update -g` reads the user manifest by a relative path (C5b).
+    label = ascii(Path(manifest_path).resolve().as_posix())[1:-1] if user_scope else "apm.yml"
     for key in pending:
         _deprecated_manifest_keys_warned.add((scope.value, key))
         if key == "target":

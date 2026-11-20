@@ -54,6 +54,9 @@ _MCP_INSTALL = "src/apm_cli/integration/mcp_integrator_install.py"
 _MCP_INTEGRATION = "src/apm_cli/install/mcp/integration.py"
 
 
+_LSP_INTEGRATOR = "src/apm_cli/integration/lsp_integrator.py"
+
+
 _APM_PACKAGE = "src/apm_cli/models/apm_package.py"
 
 
@@ -150,7 +153,7 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
     """
     rule_id = "mutation_writes.mcp_target_selection"
     facts_by_path, failures = _read_required(
-        provider, rule_id, (_MCP_INSTALL, _MCP_INTEGRATION, _APM_PACKAGE)
+        provider, rule_id, (_MCP_INSTALL, _MCP_INTEGRATION, _APM_PACKAGE, _LSP_INTEGRATOR)
     )
     if failures:
         return failures
@@ -231,6 +234,34 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
         findings.append(
             violation(rule_id, _MCP_INSTALL, "resolver must not parse manifest targets itself")
         )
+    # C4 (#3967): MCP and LSP, project and user scope, read --exclude through one owner.
+    lsp_facts = facts_by_path[_LSP_INTEGRATOR]
+    for facts, span, path, call in (
+        (
+            install_facts,
+            resolver_span,
+            _MCP_INSTALL,
+            "filter_excluded_mcp_runtimes(target_runtimes, exclude)",
+        ),
+        (
+            lsp_facts,
+            _function_span(lsp_facts, "resolve_target_runtimes", top_level=False),
+            _LSP_INTEGRATOR,
+            "filter_excluded_mcp_runtimes(candidates, exclude)",
+        ),
+    ):
+        if (
+            span is None
+            or not _span_has_fixed(facts, span, call)
+            or _span_has_regex(facts, span, r"= \{exclude\b|\(exclude, \"--exclude\"\)")
+        ):
+            findings.append(
+                violation(
+                    rule_id,
+                    path,
+                    "resolver must apply --exclude through filter_excluded_mcp_runtimes",
+                )
+            )
     validation_line = _first_span_line(
         integration_facts,
         integration_span,

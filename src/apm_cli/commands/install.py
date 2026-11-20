@@ -22,7 +22,11 @@ from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
 # working without modification.
 from apm_cli.core.scope import InstallScope as _InstallScope
 from apm_cli.core.scope import get_apm_dir as _get_apm_dir
-from apm_cli.deps.lockfile_generator import check_current_cli
+from apm_cli.deps.lockfile_generator import (
+    LockfileGeneratorError,
+    check_current_cli,
+    refusal_exit,
+)
 from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
 from apm_cli.install.argv import (
     _get_invocation_argv,
@@ -729,7 +733,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     )
     if is_user_scope(scope):
         from ..core.target_detection import EffectiveTargetDecision
-        from ..integration.mcp_integrator_install import (
+        from ..integration.mcp_user_scope_runtimes import (
             discover_user_scope_mcp_runtimes,
             filter_excluded_mcp_runtimes,
             partition_user_scope_runtimes,
@@ -915,7 +919,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     "global_",
     is_flag=True,
     default=False,
-    help="Install to the APM user home ($APM_HOME, default ~/.apm) instead of the current project. Direct MCP installs create or update the user manifest. APM_HOME controls metadata but not target deployment. Mixed selections warn and skip workspace-only runtimes; selections with no global-capable runtime exit 2 before changing the user manifest, lockfile, or runtime configuration. Supported runtimes include Copilot CLI, Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, Kiro, Windsurf, and JetBrains Copilot.",
+    help="Install to the APM user home ($APM_HOME, default ~/.apm) instead of the current project. Direct MCP installs create or update the user manifest. APM_HOME controls metadata but not target deployment. Mixed selections warn and skip workspace-only runtimes; selections with no global-capable runtime exit 2 before changing the user manifest, lockfile, or runtime configuration. Runtimes without user-scope support are skipped with a warning that lists the supported ones.",
 )
 @click.option(
     "--ssh",
@@ -1606,13 +1610,14 @@ def install(  # noqa: PLR0913
             if transaction is not None
             else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
         )
-    except InsecureDependencyPolicyError as e:
-        command_result = (
-            transaction.fail(e)
-            if transaction is not None
-            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
-        )
-    except InstallFailureAlreadyRendered as e:
+    except (
+        InsecureDependencyPolicyError,
+        InstallFailureAlreadyRendered,
+        LockfileGeneratorError,
+    ) as e:
+        if isinstance(e, LockfileGeneratorError):
+            # The shared refusal renderer: [x] on stderr, like every other command.
+            refusal_exit(e).show()
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1806,6 +1811,7 @@ def _install_apm_packages(ctx, outcome):
             update=ctx.update,
             apm_dir=ctx.apm_dir,
             local_cleanup_pending=_local_cleanup_pending,
+            project_root=None if ctx.scope is _InstallScope.USER else ctx.project_root,
         )
         return (*prospective_plan.dependency_counts, None)
 
@@ -1945,7 +1951,10 @@ def _install_apm_packages(ctx, outcome):
                 if isinstance(e, PolicyViolationError)
                 else f"Failed to install APM dependencies: {e}"
             )
-            logger.error(msg)
+            if isinstance(e, PolicyViolationError):
+                logger.refusal(msg)
+            else:
+                logger.error(msg)
             if not ctx.verbose:
                 logger.progress("Run with --verbose for detailed diagnostics")
             raise InstallFailureAlreadyRendered(msg) from e
@@ -1980,7 +1989,7 @@ def _install_apm_packages(ctx, outcome):
             ),
         )
     except PolicyBlockError:
-        logger.error(
+        logger.refusal(
             "MCP server(s) blocked by org policy. "
             "APM packages remain installed; MCP configs were NOT written."
         )

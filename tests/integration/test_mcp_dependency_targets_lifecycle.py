@@ -167,6 +167,41 @@ def test_project_retained_claims_survive_exclude_retarget_and_pending_updates(
     assert chain.lock()["mcp_target_servers"]["copilot"] == ["srv-shared"]
 
 
+@pytest.mark.parametrize(
+    ("spelling", "alias"),
+    (("copilot", False), ("Copilot", False), ("vscode", True), ("VSCode", True)),
+)
+def test_project_exclude_reads_like_target(
+    tmp_path: Path, apm_binary_path: Path, spelling: str, alias: bool
+) -> None:
+    """Project ``--exclude`` folds case and honours aliases like ``--target`` (C4, #3967)."""
+    chain = Chain(tmp_path / "exclude", apm_binary_path, dirs=(".cursor",))
+    chain.write_manifest([stdio_server("srv", "srv")], targets=["copilot", "cursor"])
+    result = chain.ok("install", "--no-policy", "--exclude", spelling)
+    output = " ".join((result.stdout + result.stderr).split())
+    assert output.count("is deprecated and will") == (1 if alias else 0)
+    assert chain.servers("copilot") == {}
+    assert set(chain.servers("cursor")) == {"srv"}
+    assert set(chain.lock()["mcp_target_servers"]) == {"cursor"}
+
+
+def test_project_exclude_unknown_value_warns_and_alias_keeps_exit_code(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An unknown ``--exclude`` warns; alias case spellings share one exit code (C4)."""
+    chain = Chain(tmp_path / "unknown", apm_binary_path)
+    chain.write_manifest([stdio_server("srv", "srv")], targets=["copilot"])
+    result = chain.ok("install", "--no-policy", "--exclude", "bogus")
+    output = " ".join((result.stdout + result.stderr).split())
+    assert output.count("names no target or MCP runtime") == 1
+    assert set(chain.servers("copilot")) == {"srv"}
+
+    codes = {
+        chain.run("install", "--no-policy", "--exclude", v).returncode for v in ("vscode", "VSCode")
+    }
+    assert len(codes) == 1, codes
+
+
 def test_removing_the_last_mcp_server_is_reported_as_a_change(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

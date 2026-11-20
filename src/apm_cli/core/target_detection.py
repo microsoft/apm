@@ -632,7 +632,9 @@ def parse_target_field(
             )
 
     # ---- deprecation warning for legacy "agents" alias (once per call) ----
-    if "agents" in raw_parts:
+    # Only a CLI token is a flag; a manifest value (``source_path`` set) is
+    # warned once by the manifest owner with manifest wording (C5a, #3967).
+    if "agents" in raw_parts and source_path is None:
         _agents_alias_detected = True
         warnings.warn(
             "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "

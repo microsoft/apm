@@ -193,9 +193,9 @@ def _rich_success(message: str, symbol: str = None):  # noqa: RUF013
     _rich_echo(message, color="green", symbol=symbol, bold=True)
 
 
-def _rich_error(message: str, symbol: str = None):  # noqa: RUF013
-    """Display error message with red color."""
-    _rich_echo(message, color="red", symbol=symbol)
+def _rich_error(message: str, symbol: str = None, *, err: bool = False):  # noqa: RUF013
+    """Display error message with red color (``err=True`` writes to stderr)."""
+    _rich_echo(message, color="red", symbol=symbol, err=err)
 
 
 def _rich_warning(message: str, symbol: str = None, *, err: bool = False):  # noqa: RUF013

@@ -3238,8 +3238,9 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
         ),
         (
             "src/apm_cli/commands/uninstall/engine.py",
+            "                fail_on_write_error=True,\n"
             "                stored_configs=lockfile.mcp_configs,\n",
-            "",
+            "                fail_on_write_error=True,\n",
         ),
         (
             "src/apm_cli/core/conflict_detector.py",
@@ -4501,6 +4502,111 @@ def test_mcp_dependency_target_selection_guard_rejects_mutations(
 def test_exec_decision_guard_rejects_second_readers(path: str, old: str, new: str) -> None:
     """#3990/#3991: one owner decides exec status and allowed types; one compares them."""
     rule_id = "install-deployment-executable-trust-context"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/lock.py",
+            'require_current_cli(project_root, command="apm lock")',
+            'check_current_cli(project_root, command="apm lock")',
+            id="command-renders-its-own-refusal",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile_generator.py",
+            "        raise refusal_exit(exc) from exc",
+            "        raise RuntimeError(str(exc)) from exc",
+            id="gate-skips-the-shared-renderer",
+        ),
+    ],
+)
+def test_lockfile_refusal_guard_keeps_one_renderer(path: str, old: str, new: str) -> None:
+    """#3967: every command renders the newer-lockfile refusal through one owner."""
+    rule_id = "contracts-tooling-lockfile-generator-gate"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "        target_runtimes = filter_excluded_mcp_runtimes(target_runtimes, exclude)\n",
+            "        target_runtimes = [rt for rt in target_runtimes if rt != exclude]\n",
+            id="project-exclusion-filters-the-raw-spelling",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/mcp_integrator_install.py",
+            "        target_runtimes = filter_excluded_mcp_runtimes(target_runtimes, exclude)\n",
+            "        exclusions = {exclude}\n"
+            "        target_runtimes = filter_excluded_mcp_runtimes(target_runtimes, exclude)\n",
+            id="project-exclusion-keeps-a-second-set",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/lsp_integrator.py",
+            "            candidates = filter_excluded_mcp_runtimes(candidates, exclude)\n",
+            "            candidates = [target for target in candidates if target != exclude]\n",
+            id="lsp-exclusion-filters-the-raw-spelling",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/lsp_integrator.py",
+            "            candidates = filter_excluded_mcp_runtimes(candidates, exclude)\n",
+            "            exclusions = {exclude}\n"
+            "            candidates = filter_excluded_mcp_runtimes(candidates, exclude)\n",
+            id="lsp-exclusion-keeps-a-second-set",
+        ),
+    ],
+)
+def test_exclusion_guard_routes_mcp_and_lsp_through_the_normalizer(
+    path: str, old: str, new: str
+) -> None:
+    """C4 (#3967): MCP and LSP ``--exclude`` read through the one runtime normalizer."""
+    rule_id = "mutation_writes.mcp_target_selection"
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/commands/install.py",
+            "            refusal_exit(e).show()\n",
+            "            InstallLogger(verbose=verbose, dry_run=dry_run).error(str(e))\n",
+            id="install-renders-the-refusal-on-stdout",
+        ),
+    ],
+)
+def test_lockfile_refusal_guard_routes_install_through_the_renderer(
+    path: str, old: str, new: str
+) -> None:
+    """#3967: ``apm install`` renders its newer-lockfile refusal through the shared owner."""
+    rule_id = "contracts-tooling-lockfile-generator-gate"
     source = _source(path)
     assert source.count(old) == 1
     mutated = source.replace(old, new, 1)

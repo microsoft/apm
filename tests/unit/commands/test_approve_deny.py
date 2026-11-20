@@ -281,6 +281,21 @@ class TestFindMatchingKey:
         assert _find_matching_key({}, "anything") is None
 
 
+def test_port_less_name_points_at_the_ported_package() -> None:
+    """A port-less name never grants a ported package but names its key (#3967)."""
+    from apm_cli.commands.approve import _not_found_message
+    from apm_cli.security.executables import ExecutableDeclaration
+
+    ported = ExecutableDeclaration(package_key="github.com:8443/acme/hooky", package_name="hooky")
+    other = ExecutableDeclaration(package_key="acme/other", package_name="other")
+    message = _not_found_message([ported, other], "acme/hooky")
+    assert "not found in installed packages" in message
+    assert "'apm approve github.com:8443/acme/hooky'" in message
+    assert _not_found_message([other], "acme/hooky") == (
+        "acme/hooky: not found in installed packages"
+    )
+
+
 # ---------------------------------------------------------------------------
 # approve_cmd
 # ---------------------------------------------------------------------------
