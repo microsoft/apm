@@ -168,7 +168,8 @@ def test_user_scope_command_is_not_governed_by_home_remote_policy(
     HOME is a checkout whose remote names an org whose policy denies the
     package. The user-scope command succeeds, sends no policy request, writes
     no policy cache, leaves HOME's checkout untouched and prints nothing
-    about policy.
+    about policy. Control: a project-scope install of the same package from
+    that checkout is blocked by the policy.
     """
     world, pkg, home, apm_home, runner = _user_world(tmp_path, apm_binary_path)
     world.publish_policy(_DENY_PKG)
@@ -206,6 +207,14 @@ def test_user_scope_command_is_not_governed_by_home_remote_policy(
         assert not policy_cache.exists(), sorted(policy_cache.rglob("*"))
         assert tree_snapshot(home / ".git", exclude=()) == git_before
 
+        # Positive control: at project scope the same HOME checkout is governed,
+        # and the published policy blocks the same package.
+        _manifest(home, dependencies={"apm": [f"{pkg.slug}#v1.0.0"]})
+        blocked = _step(runner, ("install",), cwd=home, env=env, step="project-control", expected=1)
+        assert "Install blocked by org policy" in output(blocked), output(blocked)
+        assert f"github.com/{pkg.slug}" in output(blocked), output(blocked)
+        assert _policy_requests(fx), "the project-scope control made no policy request"
+
 
 def test_user_scope_policy_status_reports_no_source(tmp_path: Path, apm_binary_path: Path) -> None:
     """`apm policy status -g` states the user-scope source as "none".
@@ -237,3 +246,32 @@ def test_user_scope_policy_status_reports_no_source(tmp_path: Path, apm_binary_p
         )
         assert json.loads(result.stdout)["outcome"] == "found", result.stdout
         assert _policy_requests(fx), "the fixture never served the org policy"
+
+
+def test_user_scope_lifecycle_scripts_run_once(tmp_path: Path, apm_binary_path: Path) -> None:
+    """The user manifest's lifecycle scripts load once, as the user tier (#4365).
+
+    At user scope ``$APM_HOME/apm.yml`` is both the command manifest and the
+    user tier; it is not also a project tier, so its ``pre-install`` script
+    runs once and no project script is reported as skipped.
+    """
+    world, _pkg, _home, apm_home, runner = _user_world(tmp_path, apm_binary_path)
+    marker = tmp_path / "pre-install.log"
+    hook = {"type": "command", "bash": f"echo ran >> '{marker.as_posix()}'"}
+    _manifest(apm_home, lifecycle={"pre-install": [hook]})
+    local = tmp_path / "local-pkg"
+    skill_package_tree(local, "local-pkg")
+    # A wide terminal keeps long temp paths on one line for the I9 oracle.
+    env = {**world.isolated.subprocess_env(), "APM_HOME": str(apm_home), "COLUMNS": "400"}
+    env.pop("CLAUDE_CONFIG_DIR", None)
+
+    result = _step(
+        runner,
+        ("install", "-g", str(local)),
+        cwd=world.isolated.work_root,
+        env=env,
+        step="user-lifecycle-once",
+    )
+
+    assert marker.read_text(encoding="utf-8") == "ran\n", output(result)
+    assert "untrusted project script" not in output(result), output(result)
