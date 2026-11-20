@@ -33,8 +33,9 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse, urlsplit, urlunsplit
+from urllib.parse import urlparse
 
+from ..utils.credential_rendering import mask_known_values, redact_url_userinfo
 from ..utils.net import parse_host_address
 
 try:
@@ -331,44 +332,19 @@ def _redact_secrets(text: str) -> str:
         # CRLF and lone CR to LF in captured stdout/stderr. A credential whose
         # value carries a carriage return (a CRLF-sourced .env var, a Windows
         # PEM/base64 blob) therefore diverges from this raw os.environ needle,
-        # so the exact str.replace below would miss and leak the cleartext to
+        # so the exact match in mask_known_values would miss and leak it to
         # scripts.log. Mask the newline-normalized form too (same transform the
         # subprocess applies); keep the raw form so the command/target string,
         # which is never newline-translated, still matches.
         normalized = value.replace("\r\n", "\n").replace("\r", "\n")
         if normalized != value and len(normalized) >= _MIN_REDACT_LEN:
             secrets.append(normalized)
-    redacted = text
-    for value in sorted(set(secrets), key=len, reverse=True):
-        redacted = redacted.replace(value, "[REDACTED]")
-    return redacted
+    return mask_known_values(text, secrets)
 
 
-def _redact_url_credentials(url: str) -> str:
-    """Strip ``user:password@`` userinfo from a URL before it is logged.
-
-    Deterministic log hygiene for a field APM itself writes to
-    ``scripts.log`` (the http event target): the URL is parsed with
-    ``urllib`` and the authority rebuilt from host (+ port) only. This is
-    NOT a shape-scan of script output -- it sanitizes one APM-owned value.
-    The credential-bearing URL is still used for the actual dispatch; only
-    the LOGGED form is sanitized.
-    """
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return url
-    if "@" not in (parts.netloc or ""):
-        return url
-    try:
-        host = parts.hostname or ""
-        port = parts.port
-    except ValueError:
-        return url
-    if host and ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    netloc = f"{host}:{port}" if port is not None else host
-    return urlunsplit(parts._replace(netloc=netloc))
+# Logged http event targets drop ``user:password@`` userinfo through the
+# credential-value rendering owner; the dispatch still uses the full URL.
+_redact_url_credentials = redact_url_userinfo
 
 
 # -- Script output log -----------------------------------------------------
