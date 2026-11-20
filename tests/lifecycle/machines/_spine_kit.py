@@ -830,7 +830,12 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         assert_snapshot_set_unchanged(before, self._capture())
 
     @rule()
-    @precondition(lambda self: self.fixture.global_scope and self.materialized and self.clean)
+    @precondition(
+        # deps update resolves the declared set.
+        lambda self: (
+            self.fixture.global_scope and self.declared and self.materialized and self.clean
+        )
+    )
     def legacy_update(self) -> None:
         before = self._capture()
         self._run(("deps", "update", "--global", "--parallel-downloads", "0"), "legacy-update")
@@ -966,7 +971,12 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
         )
 
     @rule()
-    @precondition(lambda self: self.fixture.global_scope and self.materialized and self.clean)
+    @precondition(
+        # apm uninstall selects the package by its manifest entry.
+        lambda self: (
+            self.fixture.global_scope and self.declared and self.materialized and self.clean
+        )
+    )
     def uninstall(self) -> None:
         before = self._capture()
         self._run(("uninstall", "--global", self.fixture.source.remote_url), "uninstall")

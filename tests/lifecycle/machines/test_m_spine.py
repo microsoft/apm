@@ -33,7 +33,29 @@ from tests.lifecycle.machines._spine_kit import (
 )
 from tests.utils.artifact_snapshot import assert_snapshot_changes_within
 
-pytestmark = [pytest.mark.integration, pytest.mark.lifecycle_smoke]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.integration,
+    pytest.mark.lifecycle_smoke,
+    pytest.mark.promise(
+        "P-INV-I1",
+        "P-INV-I2",
+        "P-INV-I4",
+        "P-INV-I5",
+        "P-INV-I6",
+        "P-INV-I7",
+        "P-INV-I8",
+        "P-INV-I9",
+        "P-LAW-filesystem.open_world_observation",
+        "P-LAW-idempotency.byte_stable",
+        "P-LAW-lockfile.frozen_preserves_bytes",
+        "P-LAW-outcome.status_matches_state",
+        "P-LAW-ownership.preserve_unowned",
+        "P-LAW-routing.authorized_targets_only",
+        "P-LAW-source.ref_cache_coherent",
+        "P-LAW-transaction.failed_command_preserves_state",
+    ),
+]
 
 
 @pytest.mark.parametrize("variant", _VARIANTS)
