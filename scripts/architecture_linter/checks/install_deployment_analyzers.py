@@ -76,6 +76,12 @@ from scripts.architecture_linter.checks.install_lock_parent_placement import (
     GUARD_LOCK_PARENT_PLACEMENT,
     check_lock_parent_placement,
 )
+from scripts.architecture_linter.checks.install_locked_content_verdict import (
+    GUARD as _GUARD_LOCKED_CONTENT_VERDICT,
+)
+from scripts.architecture_linter.checks.install_locked_content_verdict import (
+    check_locked_content_verdict,
+)
 from scripts.architecture_linter.checks.install_locked_copy_validity import (
     GUARD as _GUARD_LOCKED_COPY_VALIDITY,
 )
@@ -234,6 +240,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_BUNDLE_STAGING,
         "Local bundle compile staging is lockfile-proven input, never a deployment claim.",
         check_bundle_compile_staging,
+    ),
+    _rule(
+        _GUARD_LOCKED_CONTENT_VERDICT,
+        "Install and audit --ci replay share one locked content-hash verdict.",
+        check_locked_content_verdict,
     ),
     _rule(
         _GUARD_LOCKED_COPY_VALIDITY,

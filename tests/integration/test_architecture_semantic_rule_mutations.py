@@ -290,10 +290,10 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old=(
             "    enforce_agent_plugin_deployment_boundary(package_info)\n"
             "\n"
-            "    from apm_cli.integration.dispatch import get_dispatch_table\n"
+            "    from apm_cli.core.deployment_ledger import recorded_writes\n"
         ),
         new=(
-            "    from apm_cli.integration.dispatch import get_dispatch_table\n"
+            "    from apm_cli.core.deployment_ledger import recorded_writes\n"
             "\n"
             "    enforce_agent_plugin_deployment_boundary(package_info)\n"
         ),
