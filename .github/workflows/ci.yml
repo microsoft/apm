@@ -958,6 +958,38 @@ jobs:
         APM_LIFECYCLE_RECEIPTS_REQUIRED: "1"
       run: uv run --extra dev python -m pytest -p no:cacheprovider -q tests/quality/test_promise_obligations.py
 
+    # The residual (not yet receipted) rows in promise_obligations.json may
+    # only shrink against the base branch.
+    - name: Ratchet promise-obligation baseline
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      run: |
+        git fetch --no-tags --depth=1 origin "$BASE_SHA"
+        uv run --extra dev python -m scripts.check_promise_receipts --base-ref "$BASE_SHA"
+
+    # Negative control: the same gate, run on the merged receipts minus the one
+    # receipt that alone covers a required row, must fail and name that row.
+    - name: Negative control - gate fails without one receipt
+      run: |
+        cp -R build/lifecycle-receipts build/lifecycle-receipts-control
+        uv run --extra dev python -m scripts.check_promise_receipts --drop-receipt \
+          --receipts-dir build/lifecycle-receipts-control | tee build/negative-control.txt
+        row=$(sed -n 's/^\[\*\] dropped .* covering //p' build/negative-control.txt)
+        status=0
+        APM_LIFECYCLE_RECEIPTS_DIR=build/lifecycle-receipts-control APM_LIFECYCLE_RECEIPTS_REQUIRED=1 \
+          uv run --extra dev python -m pytest -p no:cacheprovider -q -k test_merged_receipts_hold_the_ratchet \
+          tests/quality/test_promise_obligations.py > build/negative-control.log 2>&1 || status=$?
+        cat build/negative-control.log
+        if [ "$status" -eq 0 ]; then
+          echo "::error::The receipts gate passed without the receipt for $row."
+          exit 1
+        fi
+        if [ -z "$row" ] || ! grep -qF -- "$row" build/negative-control.log; then
+          echo "::error::The receipts gate failed, but not for the dropped row '$row'."
+          exit 1
+        fi
+        echo "[+] negative control: the gate failed (exit $status) and named $row"
+
   lifecycle-smoke:
     name: Lifecycle Smoke (Linux)
     needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3, lifecycle-smoke-shard-4, gate-cell-coverage]
