@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import is_user_scope
-from apm_cli.install.package_resolution import effective_dependency_selection
+from apm_cli.install.package_resolution import effective_dependency_selection, is_implicit_local
 from apm_cli.install.phases.lockfile_cache_pins import (
     sync_cache_pin_markers,
     sync_cache_pin_markers_from_disk,
@@ -446,15 +446,25 @@ class LockfileBuilder:
         each dependency that declared executables. Packages with no executables
         are absent from the map and keep ``exec_status=None`` (the audit treats
         them as trusted).
+
+        ``apm lock`` deploys nothing, so the gate never runs; each row keeps
+        the trust state recorded for its deployed files, as those files are
+        carried forward too (#4213).
         """
-        statuses = getattr(self.ctx, "package_exec_status", None)
-        if not statuses:
-            return
+        statuses = getattr(self.ctx, "package_exec_status", None) or {}
         allowed = getattr(self.ctx, "package_exec_allowed_types", None) or {}
         for dep_key, status in statuses.items():
             if dep_key in lockfile.dependencies and status:
                 lockfile.dependencies[dep_key].exec_status = status
                 lockfile.dependencies[dep_key].exec_allowed_types = allowed.get(dep_key, ())
+        existing = getattr(self.ctx, "existing_lockfile", None)
+        if not getattr(self.ctx, "lockfile_only", False) or existing is None:
+            return
+        for dep_key, dep in lockfile.dependencies.items():
+            prior = existing.get_dependency(dep_key)
+            if dep_key not in statuses and prior is not None and prior.exec_status:
+                dep.exec_status = prior.exec_status
+                dep.exec_allowed_types = prior.exec_allowed_types
 
     def _attach_native_plugins(self, lockfile: LockFile) -> None:
         """Record each admitted native Claude plugin as its dependency's ownership.
@@ -503,7 +513,9 @@ class LockfileBuilder:
         if not self.ctx.skill_subset:
             return  # bare install or --skill '*'; manifest value already flows through
         for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
-            if locked_dep.package_type == "skill_bundle":
+            if locked_dep.package_type == "skill_bundle" and not is_implicit_local(
+                locked_dep, self.ctx
+            ):
                 # Record what was deployed: the same owner the deploy used (#3760).
                 merged = effective_dependency_selection(locked_dep, self.ctx).skill_subset
                 try:

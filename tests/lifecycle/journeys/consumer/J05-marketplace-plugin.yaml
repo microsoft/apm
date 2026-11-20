@@ -73,13 +73,3 @@ steps:
       - "[i] Deployed files verified against apm.lock.yaml."
     forbidden_lines: ["#main #<SHA40>"]
 known_cells:
-  - id: frozen-header-repeats-ref
-    law: FORBID
-    tracking: "#4195"
-    step: 6
-    match: "#main #<SHA40>"
-  - id: failed-install-records-marketplace-pin
-    law: I5
-    tracking: "#4194"
-    step: 5
-    match: "install wrote home:.*\\.apm/cache/marketplace/version-pins\\.json"

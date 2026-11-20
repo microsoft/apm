@@ -36,7 +36,7 @@ steps:
     files: [apm.lock.yaml, .claude/rules/live.md, .claude/skills/live/SKILL.md]
     key_lines:
       - "[i] Targets: copilot, cursor  (source: apm.yml)"
-      - "[i] Cleaned 3 stale deployed files for acme/live-kit"
+      - "[i] Cleaned 2 stale deployed paths for acme/live-kit:"
   - n: 4
     run: [apm compile --target copilot]
     exit: 0
@@ -53,23 +53,3 @@ steps:
     files: []
     key_lines: ["[i] Deployed files verified against apm.lock.yaml."]
 known_cells:
-  - id: targets-source-ignores-manifest
-    law: KEY
-    tracking: "#4210"
-    step: 1
-    match: "key line not printed: 'apm.yml'"
-  - id: compile-zero-output-warning-after-dedup
-    law: FORBID
-    tracking: "#4209"
-    step: 4
-    match: "produced no output files"
-  - id: integration-line-hides-destinations
-    law: O6
-    tracking: "#4211"
-    step: 2
-    match: "\\.cursor/rules/live\\.mdc changed but no output line announces it"
-  - id: install-stale-cleanup-unannounced
-    law: O6
-    tracking: "#4193"
-    step: 3
-    match: "\\.claude/.*live.* changed but no output line announces it"
