@@ -2506,11 +2506,12 @@
     {
       "issue": 4179,
       "fixed_in": "0.37.0",
-      "summary": "apm install --mcp under policy.fetch_failure_default: block exits 1 with the policy refusal reason, and the --no-policy retry it names works.",
+      "summary": "A policy-blocked apm install --mcp (denied server, or policy.fetch_failure_default: block with no reachable policy) exits 1 with the refusal reason on stderr, never a bare Error installing dependencies: 1.",
       "failure_modes": ["outcome", "observation"],
       "properties": ["outcome.status_matches_state"],
       "regression_tests": [
-        "tests/integration/test_mcp_policy_block_reason_lifecycle.py::test_blocked_mcp_install_prints_the_reason"
+        "tests/integration/test_mcp_policy_block_reason_lifecycle.py::test_blocked_mcp_install_prints_the_reason",
+        "tests/integration/test_mcp_policy_block_reason_lifecycle.py::test_unfetchable_policy_block_prints_the_reason"
       ]
     },
     {
