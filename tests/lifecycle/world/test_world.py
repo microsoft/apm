@@ -573,6 +573,37 @@ def test_ghe_cloud_policy_is_read_through_api_v3(lifecycle_world: World) -> None
     assert 200 in statuses, world.services.egress_log()
 
 
+# -- unserve / restore ---------------------------------------------------------
+
+
+def test_unserved_repository_is_gone_until_restored(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    slug = f"{ORG}/p-skill"
+    spec = world.packages["p-skill:git"].spec
+    world.services.unserve(slug)
+    result = driver.run(world, ["install", spec])
+    assert result.returncode != 0, result.stdout
+    assert not (world.project / ".agents/skills/p-skill").exists()
+    refused = {e["status"] for e in world.services.egress_log() if "p-skill" in e["path"]}
+    assert refused == {404}, world.services.egress_log()
+    world.services.restore(slug)
+    _ok(world, ["install", spec])
+    _assert_surfaces(world, "p-skill", "project")
+
+
+def test_reset_restores_every_unserved_repository(
+    lifecycle_template: World, tmp_path: Path
+) -> None:
+    lifecycle_template.services.unserve(f"{ORG}/p-exec")
+    world = clone(lifecycle_template, tmp_path / "next")
+    world.services.reset()
+    _ok(world, ["install", world.packages["p-exec:git"].spec])
+    with pytest.raises(KeyError):
+        world.services.restore(f"{ORG}/p-exec")
+    with pytest.raises(KeyError):
+        world.services.unserve(f"{ORG}/never-served")
+
+
 _POLICY_EXIT = {
     "allow": 0,
     "deny-pkg": 1,
