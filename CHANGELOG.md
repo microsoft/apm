@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** Copilot project MCP servers move to a root `.mcp.json` shared with Claude Code. (#3875)
 - `apm approve` pins each package's hooks, MCP servers and native plugins to their content. (#3918)
 - Marketplace installs replay from the lockfile and fail closed on rebound aliases and cross-repo `*.ghe.com` sources. (#3915, #3917, #3923)
-- `apm install -g --target claude` installs Claude plugins natively, with MCP, LSP and `bin/` under one approval. (#3290)
+- `apm install -g --target claude` installs Claude plugins natively, with MCP, LSP and `bin/` under one approval; non-interactive runs also need `--trust-bin` for `bin/`. (#3290)
 
 ### Breaking changes and upgrade notes
 
@@ -35,7 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --frozen` now fails before deploying on any edited deployed file, of every primitive type; delete the files, rerun `apm install`, and commit. (closes #3994, #4004)
 - `PROXY_REGISTRY_ONLY=1` also refuses unsanctioned MCP registries and marketplace catalogs the proxy cannot serve; set `MCP_REGISTRY_URL` to a proxied registry. (closes #3994, #4004)
 - Hash framing hardening: `apm install` moves `apm.lock.yaml` to `lockfile_version: "4"`, which older APM refuses; update CI to APM 0.37 before committing it. (closes #4000, #4026)
-- Scripts that call `apm init --plugin` or `apm init --marketplace` now exit 2; switch to `apm plugin init` or `apm marketplace init` (see Removed). (#4074)
 - **Coming in 0.38:** CLI contract changes to exit codes, to which output goes to stderr, and to how an install handles a locally-authored file at a dependency's path. Details and any transition window will be in the 0.38 notes. (#3983)
 
 ### Added
@@ -139,13 +138,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install`, `apm update` and `apm audit --ci` retire or report hooks once `apm deny` or a removed approval gates them. (closes #3958, #3944, #3988)
 - `*.ghe.com` marketplaces refuse bare cross-repo sources of every type on every install path, and admit in-marketplace locators and `GITHUB_HOST`-matched entries. (closes #3913, #3923, #3937, #3942, #3945, #3952)
 - A rebound marketplace alias no longer switches catalogs: `apm.lock.yaml` records catalog origins, and `apm update`, `apm install x@alias` and `apm outdated` fail closed. (closes #3912, #3917, #3959, #3961, #3988)
-- `apm pack` builds plugin MCP servers from `apm.yml` and authored `.mcp.json`, never install-rendered copies, so packs carry no credentials. (closes #3966, #3988)
+- `apm pack` builds plugin MCP servers from `apm.yml` and authored `.mcp.json`, never install-rendered copies, so packs carry no install-resolved credentials; check authored files for literal secrets before publishing. (closes #3966, #3988)
 - `apm approve` and `apm deny` match package names exactly and refuse ambiguous names; a partial name could approve another package's executables. (#3988)
 - Reinstalling a local bundle whose MCP server was revoked, denied or repacked away now removes that server. (closes #3956, #3988)
 - `apm update` re-gates executables recorded while the gate was off, and retires executable types whose approval was removed. (closes #3990, #3991, #3989)
 - `apm audit --ci` applies org MCP policy to every server the lock keeps, including transitive and local-bundle servers. (#3989)
 - `apm install -g <bundle>` reads executables approvals only from `~/.apm/apm.yml`, never the current directory's `apm.yml`. (#3989)
-- A cold `apm install` of a locked marketplace package keeps the locked commit, failing with an `apm update` hint if the catalog moved. (#3989)
+- A cold `apm install` of a locked marketplace package keeps the locked commit; one that needs catalog-defined MCP or LSP servers fails with an `apm update` hint if the catalog moved. (#3989)
 - Trust and integrity consistency hardening. (#4051)
 - Trust and integrity consistency hardening, part 2. (#4061)
 
