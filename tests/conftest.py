@@ -298,13 +298,26 @@ def _hermetic_mcp_transport_lookup():
         mcp_transport_resolution.clear_registry_info_memo()
 
 
+_LIFECYCLE_MERGE_GROUP_MARKER = "lifecycle_merge_group"
+_LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Bind OpenAPM req markers anywhere under tests/ to the conformance map.
+    """Imply ``lifecycle_smoke`` and bind OpenAPM req markers to the conformance map.
 
-    Runs first, so environment-dependent skip markers that other conftests add
-    at collection time never change a requirement's recorded status.
+    A ``lifecycle_merge_group`` node is also ``lifecycle_smoke``, so the
+    merge-group selection is a subset of the full lifecycle smoke selection by
+    construction; ``tryfirst`` runs this before ``-m`` deselection. Running
+    first also means environment-dependent skip markers that other conftests
+    add at collection time never change a requirement's recorded status.
     """
+    for item in items:
+        if item.get_closest_marker(_LIFECYCLE_MERGE_GROUP_MARKER) and not item.get_closest_marker(
+            _LIFECYCLE_SMOKE_MARKER
+        ):
+            item.add_marker(_LIFECYCLE_SMOKE_MARKER)
+
     from tests.spec_conformance.coverage_map import record
 
     record(config, items)
