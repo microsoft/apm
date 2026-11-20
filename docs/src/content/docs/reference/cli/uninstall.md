@@ -112,7 +112,10 @@ What gets removed, in order:
    lockfiles, MCP cleanup touches only the runtimes recorded as owners in
    `mcp_target_servers`. An explicitly empty ownership map is a no-op. Older
    lockfiles adopt only self-defined entries that exactly match their stored
-   configuration baseline. When another surviving package declares the same LSP
+   configuration baseline. LSP cleanup works within the targets
+   `lsp_target_servers` records, or the `targets:` in `apm.yml` when declared;
+   a saved `apm config target` or harness detection applies only when the
+   lockfile records none. When another surviving package declares the same LSP
    server name, ownership transfers to that package instead of deleting the
    shared entry. Cleanup attempts every owning runtime before exiting nonzero on
    failure. Fix the reported configs, then run `apm install` to reconcile stale
