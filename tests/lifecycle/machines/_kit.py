@@ -17,7 +17,6 @@ import re
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import hypothesis
 import yaml
@@ -45,9 +44,6 @@ from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
 SCOPES = ("project", "user")
 LOCKFILE = "apm.lock.yaml"
-# Commands the driver has no user-scope flag for (driver._USER_SCOPE_FLAGS): they
-# take -g and run from the user cwd through a project-scope driver call.
-_GLOBAL_ONLY = frozenset({"lock", "compile", "outdated"})
 _EMPTY = b""
 
 
@@ -133,9 +129,6 @@ class Bench:
         args = tuple(args)
         if self.scope == "project":
             return driver.run(self.world, args)
-        if args[0] in _GLOBAL_ONLY:
-            shim = SimpleNamespace(project=self.world.user_cwd, env=self.world.env)
-            return driver.run(shim, (*args, "-g"))
         if args[0] == "deps":
             # ``deps`` takes the flag on the subcommand, after the subcommand name.
             return driver.run(self.world, (*args[:2], "-g", *args[2:]), scope="user")

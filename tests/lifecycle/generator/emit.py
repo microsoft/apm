@@ -31,6 +31,7 @@ from tests.lifecycle.generator.factors import (
 )
 from tests.lifecycle.generator.rules import RULES
 from tests.lifecycle.generator.space import Entry, Space, build_space
+from tests.lifecycle.generator.witnesses import machine_witnesses
 
 ROOT = Path(__file__).resolve().parents[3]
 OBLIGATIONS_PATH = ROOT / "tests" / "quality" / "lifecycle_obligations.json"
@@ -160,13 +161,24 @@ def generate() -> tuple[str, dict[str, str]]:
     witness = {
         cell: WITNESS.format(row.id) for row in rows for step in row.steps for cell in step.cells
     }
+    machines = machine_witnesses(space.obligations)
     statuses, lanes, obligations = {}, {}, {}
     for key in sorted(space.obligations):
         entry = space.obligations[key]
         record: dict[str, object] = {"family": entry.family, "strength": entry.strength}
+        machine = machines.get(key)
         if key in witness:
             statuses[key], lanes[key] = "required", OWN_LANE
             record["witness"] = witness[key]
+        elif machine is not None:
+            lanes[key] = machine.lane
+            record["witness"] = machine.node
+            record["credited_by"] = list(machine.credited_by)
+            if machine.tracking:
+                statuses[key] = "known-failing"
+                record["tracking"] = machine.tracking
+            else:
+                statuses[key] = "required"
         else:
             statuses[key], lanes[key] = "baseline", lane_for(entry)
         record.update(status=statuses[key], lane=lanes[key], issue=LANES[lanes[key]])
@@ -186,7 +198,9 @@ def generate() -> tuple[str, dict[str, str]]:
             "DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the "
             "factors they refine, and the named triples T1-T5, after the refusal, definition and "
             "partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are "
-            "credited by oracles.check_obligation in their witness covering row; baseline ids "
+            "credited by oracles.check_obligation in their witness (a covering row, or a machine "
+            "spine whose credited_by ids imply the cell); known-failing ids name the strict known "
+            "cell's tracking issue; baseline ids "
             "name the lane and issue that must discharge them. Regenerate with "
             "`python -m tests.lifecycle.generator`; `--check` fails on drift."
         ),

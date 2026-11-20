@@ -116,6 +116,9 @@ _CATALOG_CACHE = (
     f"{_MARKET_CACHE}/{MARKETPLACE_NAME}.json",
     f"{_MARKET_CACHE}/{MARKETPLACE_NAME}.meta.json",
 )
+# What a package change is: its resolved content and deployment, not graph
+# bookkeeping such as ``resolved_by`` (a diamond child re-parented on uninstall).
+_ROW_CONTENT = ("resolved_commit", "version", "content_hash", "deployed_file_hashes")
 _INCOMPLETE = re.compile(r"Orphan removals are not previewed|Dry run incomplete")
 _PREVIEW_LINE = re.compile(r"^\s*\[[i!+\-~]\]\s+(?:-\s+)?(\S+)")
 
@@ -228,7 +231,7 @@ def _rows(observation: Observation) -> dict[str, dict]:
     if lock is None:
         return {}
     return {
-        name: dependency.to_dict()
+        name: {key: dependency.to_dict().get(key) for key in _ROW_CONTENT}
         for dependency in lock.get_package_dependencies()
         if (name := package_name(dependency.repo_url or dependency.name or ""))
     }
