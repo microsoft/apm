@@ -2115,6 +2115,9 @@ def _read_cache(
     )
 
 
+_CACHE_PAIR_LOCK = threading.Lock()
+
+
 def _write_cache(
     repo_ref: str,
     policy: ApmPolicy,
@@ -2145,39 +2148,43 @@ def _write_cache(
     serialized = _serialize_policy(policy)
     fingerprint = _policy_fingerprint(serialized)
 
-    # Unique tmp suffix to avoid collisions from parallel writers
-    uid = f"{os.getpid()}.{threading.get_ident()}"
+    # The document and its metadata are one pair: a reader rejects a document
+    # whose recorded fingerprint differs (#4218), so writers in this process
+    # replace the pair together.
+    with _CACHE_PAIR_LOCK:
+        # Unique tmp suffix to avoid collisions from parallel writers
+        uid = f"{os.getpid()}.{threading.get_ident()}"
 
-    # Atomic write: policy file
-    tmp_policy = cache_dir / f"{key}.{uid}.yml.tmp"
-    try:
-        tmp_policy.write_text(serialized, encoding="utf-8")
-        os.replace(str(tmp_policy), str(policy_file))
-    except OSError:
-        # Best-effort cleanup
-        try:  # noqa: SIM105
-            tmp_policy.unlink(missing_ok=True)
+        # Atomic write: policy file
+        tmp_policy = cache_dir / f"{key}.{uid}.yml.tmp"
+        try:
+            tmp_policy.write_text(serialized, encoding="utf-8")
+            os.replace(str(tmp_policy), str(policy_file))
         except OSError:
-            pass
-        return
+            # Best-effort cleanup
+            try:  # noqa: SIM105
+                tmp_policy.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return
 
-    # Atomic write: metadata sidecar
-    persisted_chain_refs = chain_refs if chain_refs is not None else [repo_ref]
-    meta = {
-        "repo_ref": _redact_policy_ref(repo_ref),
-        "cached_at": time.time(),
-        "chain_refs": [_redact_policy_ref(ref) for ref in persisted_chain_refs],
-        "warnings": warnings or [],
-        "schema_version": CACHE_SCHEMA_VERSION,
-        "fingerprint": fingerprint,
-        "raw_bytes_hash": raw_bytes_hash or "",
-    }
-    tmp_meta = cache_dir / f"{key}.{uid}.meta.json.tmp"
-    try:
-        tmp_meta.write_text(json.dumps(meta), encoding="utf-8")
-        os.replace(str(tmp_meta), str(meta_file))
-    except OSError:
-        try:  # noqa: SIM105
-            tmp_meta.unlink(missing_ok=True)
+        # Atomic write: metadata sidecar
+        persisted_chain_refs = chain_refs if chain_refs is not None else [repo_ref]
+        meta = {
+            "repo_ref": _redact_policy_ref(repo_ref),
+            "cached_at": time.time(),
+            "chain_refs": [_redact_policy_ref(ref) for ref in persisted_chain_refs],
+            "warnings": warnings or [],
+            "schema_version": CACHE_SCHEMA_VERSION,
+            "fingerprint": fingerprint,
+            "raw_bytes_hash": raw_bytes_hash or "",
+        }
+        tmp_meta = cache_dir / f"{key}.{uid}.meta.json.tmp"
+        try:
+            tmp_meta.write_text(json.dumps(meta), encoding="utf-8")
+            os.replace(str(tmp_meta), str(meta_file))
         except OSError:
-            pass
+            try:  # noqa: SIM105
+                tmp_meta.unlink(missing_ok=True)
+            except OSError:
+                pass
