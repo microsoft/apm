@@ -54,19 +54,21 @@ def supply_chain_mismatch_hint(ctx: Any, dep_key: str) -> str:
 
 
 def content_hash_mismatch_hint(ctx: Any, dep_key: str) -> str:
-    """Explain a same-commit content mismatch and how to re-pin deliberately.
+    """Explain how to recover from a same-commit content mismatch.
 
     Only a moved commit may change content, so ``apm update`` cannot accept
-    new bytes for the locked commit (#4027).
+    new bytes for the locked commit; re-pinning is deliberate (#4027).
     """
     from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.lockfile import get_lockfile_path
 
     install = "apm install -g" if ctx.scope is InstallScope.USER else "apm install"
+    apm_dir = getattr(ctx, "apm_dir", None)
+    lockfile = get_lockfile_path(apm_dir) if apm_dir is not None else "apm.lock.yaml"
     return (
-        "This may indicate a supply-chain attack: the locked commit now yields "
-        "different content. Run 'apm cache clean' and retry. If you trust the new "
-        f"content, remove the '{dep_key}' entry from apm.lock.yaml and run "
-        f"'{install}' to re-pin it."
+        "This may indicate a supply-chain attack. Run 'apm cache clean' and retry. "
+        f"To accept the new content, remove the '{dep_key}' entry from "
+        f"{lockfile} and run '{install}'."
     )
 
 
@@ -225,30 +227,41 @@ def record_carried_package_hash(
     return excluded
 
 
+def locked_commit_unchanged(locked_dep: Any, commit: str | None) -> bool:
+    """Return whether *commit* is the commit *locked_dep* records.
+
+    A row without a commit on either side (registry or other commit-less
+    rows) has no commit identity, so it never counts as unchanged (#4027).
+    """
+    locked_commit = getattr(locked_dep, "resolved_commit", None)
+    return bool(commit not in (None, "", "cached") and commit == locked_commit)
+
+
 def update_accepts_new_content(ctx: Any, locked_dep: Any, resolved_commit: str | None) -> bool:
     """Return whether this run may lock new content without the hash check.
 
     Only ``apm update`` may, and only for a commit that moved: an unchanged
     commit must still hold its locked content (#4027).
     """
-    locked_commit = getattr(locked_dep, "resolved_commit", None)
-    return bool(
-        ctx.update_refs
-        and not (resolved_commit and locked_commit and resolved_commit == locked_commit)
-    )
+    return bool(ctx.update_refs and not locked_commit_unchanged(locked_dep, resolved_commit))
 
 
 def ensure_carried_licenses_match(
-    ctx: Any, dep_key: str, install_path: Path, locked_dep: Any
+    ctx: Any,
+    dep_key: str,
+    install_path: Path,
+    locked_dep: Any,
+    resolved_commit: str | None = None,
 ) -> None:
     """Fail closed when fresh carried licences differ from the lock record (#3556).
 
     The copies are excluded from content_hash, so the lock's carried records
-    are their integrity baseline, as content_hash is for the package.
+    are their integrity baseline, as content_hash is for the package; ``apm
+    update`` may change them only for a moved commit (#4027).
     """
     locked = getattr(locked_dep, "carried_licenses", ()) if locked_dep else ()
     if (
-        ctx.update_refs
+        update_accepts_new_content(ctx, locked_dep, resolved_commit)
         or dep_key in ctx.expected_hash_change_deps
         or not locked
         or frozenset(locked) == frozenset(ctx.package_carried_licenses.get(dep_key, ()))
@@ -261,7 +274,7 @@ def ensure_carried_licenses_match(
     raise DirectDependencyError(
         f"Licence file mismatch for {dep_key}: the licence files carried "
         "from the repository differ from the lockfile record. "
-        + supply_chain_mismatch_hint(ctx, dep_key)
+        + content_hash_mismatch_hint(ctx, dep_key)
     )
 
 

@@ -164,6 +164,18 @@ def test_local_bundle_fails_closed_when_policy_is_unavailable_under_block(
         _allow(project, _bundle_key(bundle))
         before = sorted(p.relative_to(project).as_posix() for p in project.rglob("*"))
 
+        # A dry-run previews without failing and writes nothing.
+        preview = run_step(
+            runner,
+            ("install", str(bundle), "--dry-run"),
+            cwd=project,
+            env=env,
+            step="bundle-unavailable-block-dry-run",
+        )
+        assert "[dry-run]" in output(preview), output(preview)
+        assert not _hooks_deployed(project)
+        assert sorted(p.relative_to(project).as_posix() for p in project.rglob("*")) == before
+
         result = run_step(
             runner,
             ("install", str(bundle)),
@@ -277,12 +289,20 @@ def test_update_accepts_new_content_for_a_moved_commit(
         skill.write_text(skill.read_text(encoding="utf-8") + "v2\n", encoding="utf-8")
         world.repositories.commit(pkg.repository, message="pkg-a v2")
 
-        result = run_step(runner, ("update", "--yes"), cwd=project, env=env, step="update-moved")
+        result = run_step(
+            runner, ("update", "--yes", "--verbose"), cwd=project, env=env, step="update-moved"
+        )
 
         after = load_yaml(project / "apm.lock.yaml")["dependencies"][0]
         assert after["resolved_commit"] != before["resolved_commit"]
         assert after["content_hash"] != before["content_hash"]
-        assert after["content_hash"] in " ".join(output(result).split()), output(result)
+        text = "".join(output(result).split())
+        assert "Newlockedcontentfor1dependency" in text, output(result)
+        assert after["content_hash"] in text, output(result)
+
+        # Nothing moved, so nothing is reported.
+        again = run_step(runner, ("update", "--yes"), cwd=project, env=env, step="update-again")
+        assert "New locked content" not in output(again), output(again)
 
 
 def test_unpack_refuses_executable_content(tmp_path: Path, apm_binary_path: Path) -> None:
@@ -320,9 +340,8 @@ def test_unpack_refuses_executable_content(tmp_path: Path, apm_binary_path: Path
 
     text = output(result)
     assert "Refusing to unpack" in text, text
-    assert f"apm install {bundle}" in " ".join(text.split()).replace(" ", "") or (
-        "apm install" in text
-    ), text
+    # Rich may wrap the long path, so compare with all whitespace removed.
+    assert "".join(f"apm install {bundle}".split()) in "".join(text.split()), text
     assert not any((target / ".claude").iterdir())
     assert [p.name for p in target.iterdir()] == [".claude"]
 

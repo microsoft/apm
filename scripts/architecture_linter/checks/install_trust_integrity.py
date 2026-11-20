@@ -47,7 +47,7 @@ _DISCOVERY = "discover_policy_with_chain"
 # here; they ask resolve_trust_policy.
 _DISCOVERY_CALLERS = frozenset(
     {
-        (_OWNER, "resolve_trust_policy"),
+        (_OWNER, "discover_trust_policy"),
         ("src/apm_cli/policy/install_preflight.py", "run_policy_preflight"),
         ("src/apm_cli/install/phases/policy_gate.py", "_discover_with_chain"),
         ("src/apm_cli/commands/approve.py", "_load_org_policy"),
@@ -56,6 +56,8 @@ _DISCOVERY_CALLERS = frozenset(
         ("src/apm_cli/commands/audit.py", "_resolve_fail_on_drift"),
         ("src/apm_cli/commands/update.py", "_policy"),
         ("src/apm_cli/core/lifecycle_scripts.py", "build_runner_from_context"),
+        # MCP admission records an unusable policy as ``policy_unavailable``,
+        # which audit reports; install paths then pass the routed policy gate.
         ("src/apm_cli/security/trust.py", "resolve"),
     }
 )
@@ -123,6 +125,24 @@ def check_trust_policy_outcome(provider: FactsProvider) -> tuple[Violation, ...]
     return tuple(findings)
 
 
+# One predicate decides whether the locked commit moved; every integrity
+# check that ``apm update`` relaxes asks it.
+_HELPER_NEEDLES = (
+    (
+        'return bool(commit not in (None, "", "cached") and commit == locked_commit)',
+        "locked_commit_unchanged must compare real commits only",
+    ),
+    (
+        "return bool(ctx.update_refs and not locked_commit_unchanged(locked_dep, resolved_commit))",
+        "apm update may skip the content-hash check only for a moved commit",
+    ),
+    (
+        "        update_accepts_new_content(ctx, locked_dep, resolved_commit)",
+        "apm update may skip the carried-licence check only for a moved commit",
+    ),
+)
+
+
 def check_update_content_integrity(provider: FactsProvider) -> tuple[Violation, ...]:
     """``apm update`` skips the content-hash check only for a moved commit."""
     facts, failures = _facts_for(provider, _SOURCES, GUARD_UPDATE_CONTENT_INTEGRITY)
@@ -139,19 +159,16 @@ def check_update_content_integrity(provider: FactsProvider) -> tuple[Violation, 
         )
     helpers, helper_failures = _facts_for(provider, _HELPERS, GUARD_UPDATE_CONTENT_INTEGRITY)
     findings.extend(helper_failures)
-    if not helper_failures and not _present(
-        helpers, "and not (resolved_commit and locked_commit and resolved_commit == locked_commit)"
-    ):
-        findings.append(
-            _summary(
-                GUARD_UPDATE_CONTENT_INTEGRITY,
-                _HELPERS,
-                "apm update may skip the content-hash check only for a moved commit",
-            )
-        )
+    if not helper_failures:
+        for needle, message in _HELPER_NEEDLES:
+            if not _present(helpers, needle):
+                findings.append(_summary(GUARD_UPDATE_CONTENT_INTEGRITY, _HELPERS, message))
     integrate, integrate_failures = _facts_for(provider, _INTEGRATE, GUARD_UPDATE_CONTENT_INTEGRITY)
     findings.extend(integrate_failures)
-    if not integrate_failures and not _present(integrate, "and not _locked_commit_unchanged"):
+    if not integrate_failures and not (
+        _present(integrate, "and not _locked_commit_unchanged")
+        and _present(integrate, "and locked_commit_unchanged(_dep_locked_chk, _callback_sha)")
+    ):
         findings.append(
             _summary(
                 GUARD_UPDATE_CONTENT_INTEGRITY,

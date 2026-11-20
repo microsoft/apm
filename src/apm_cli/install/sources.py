@@ -865,12 +865,10 @@ class FreshDependencySource(DependencySource):
             _carried_paths = record_carried_package_hash(ctx, dep_key, install_path, package_info)
 
             # Supply-chain protection: verify content hash on fresh downloads
-            # when the lockfile records one, unless an update moved the commit.
-            # Skip when ``ctx.expected_hash_change_deps`` marks this dep
-            # (set by resolve.py's BFS callback and _resolve_download_strategy
-            # when branch-ref drift or the v<=0.12.2 self-heal forces a
-            # re-download whose hash is legitimately expected to differ from
-            # the lockfile record).
+            # when the lockfile records one, unless an update moved the commit
+            # or ``ctx.expected_hash_change_deps`` marks this dep (resolve.py's
+            # BFS callback and _resolve_download_strategy set it when branch-ref
+            # drift or the v<=0.12.2 self-heal makes a hash change expected).
             # Thread-safety: the set is stable once resolve completes, and
             # integrate.py's own .add() is idempotent and single-threaded.
             _expected_hash_deps = ctx.expected_hash_change_deps
@@ -901,7 +899,9 @@ class FreshDependencySource(DependencySource):
                             "The downloaded content differs from the lockfile record. "
                             + content_hash_mismatch_hint(ctx, dep_key)
                         )
-            ensure_carried_licenses_match(ctx, dep_key, install_path, dep_locked_chk)
+            ensure_carried_licenses_match(
+                ctx, dep_key, install_path, dep_locked_chk, resolved_commit
+            )
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value

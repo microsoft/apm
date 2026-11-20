@@ -910,6 +910,31 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
             "        and not _locked_commit_unchanged\n",
             "",
         ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/phases/integrate.py",
+            "        and locked_commit_unchanged(_dep_locked_chk, _callback_sha)\n",
+            "        and _dep_locked_chk.resolved_commit == _callback_sha\n",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/source_helpers.py",
+            "    return bool(ctx.update_refs and not locked_commit_unchanged(locked_dep, "
+            "resolved_commit))\n",
+            "    return bool(ctx.update_refs)\n",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/source_helpers.py",
+            "        update_accepts_new_content(ctx, locked_dep, resolved_commit)\n        or dep_key",
+            "        ctx.update_refs\n        or dep_key",
+        ),
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/policy/outcome_routing.py",
+            "        fetch_result = discover_trust_policy(root)\n",
+            "        fetch_result = discover_policy_with_chain(root)\n",
+        ),
     ],
 )
 def test_trust_and_integrity_owners_reject_bypasses(

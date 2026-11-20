@@ -241,12 +241,13 @@ def _resolve_download_strategy(
     # A same-SHA callback receipt binds validated bytes to their published path.
     # Recheck those bytes rather than comparing them with the previous revision.
     # A commit that did not move keeps its locked content hash as the baseline.
+    from apm_cli.install.source_helpers import locked_commit_unchanged
+
     receipt = ctx.callback_content_hashes.get(dep_key)
     _locked_commit_unchanged = bool(
         _dep_locked_chk
         and _dep_locked_chk.content_hash
-        and _callback_sha
-        and _dep_locked_chk.resolved_commit == _callback_sha
+        and locked_commit_unchanged(_dep_locked_chk, _callback_sha)
     )
     if (
         _already_resolved_sha_match

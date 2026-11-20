@@ -94,34 +94,41 @@ def test_carried_mismatch_with_lock_fails_closed(tmp_path: Path) -> None:
 
     with pytest.raises(DirectDependencyError, match="Licence file mismatch") as exc_info:
         ensure_carried_licenses_match(ctx, "k", package, SimpleNamespace(carried_licenses=forged))
-    assert "Use 'apm update' to accept new content" in str(exc_info.value)
+    assert "remove the 'k' entry from" in str(exc_info.value)
     assert not package.exists()
 
 
 @pytest.mark.parametrize(
     ("scope", "command"),
-    [(InstallScope.PROJECT, "apm update"), (InstallScope.USER, "apm update -g")],
+    [(InstallScope.PROJECT, "apm install"), (InstallScope.USER, "apm install -g")],
 )
-def test_carried_mismatch_hint_names_targeted_update_for_direct_dep(
-    tmp_path: Path, scope, command
-) -> None:
+def test_carried_mismatch_hint_names_the_deliberate_re_pin(tmp_path: Path, scope, command) -> None:
     package, _legacy_hash, records = _package(tmp_path)
     forged = (CarriedLicense("LICENSE", "LICENSE", "sha256:" + "0" * 64),)
     ctx = _ctx(
         tmp_path,
         package_carried_licenses={"owner/repo/sub": records},
-        declared_direct_refs={"owner/repo/sub": ()},
         scope=scope,
+        apm_dir=tmp_path / "apm-root",
     )
 
     with pytest.raises(DirectDependencyError) as exc_info:
         ensure_carried_licenses_match(
             ctx, "owner/repo/sub", package, SimpleNamespace(carried_licenses=forged)
         )
-    assert (
-        f"Use '{command} owner/repo/sub' to accept new content for this package "
-        "and re-pin it in the lockfile."
-    ) in str(exc_info.value)
+    message = " ".join(str(exc_info.value).split())
+    lockfile = tmp_path / "apm-root" / "apm.lock.yaml"
+    assert f"remove the 'owner/repo/sub' entry from {lockfile} and run '{command}'" in message
+
+
+def test_update_keeps_the_carried_check_for_an_unchanged_commit(tmp_path: Path) -> None:
+    package, _legacy_hash, records = _package(tmp_path)
+    forged = (CarriedLicense("LICENSE", "LICENSE", "sha256:" + "0" * 64),)
+    ctx = _ctx(tmp_path, package_carried_licenses={"k": records}, update_refs=True)
+    locked = SimpleNamespace(carried_licenses=forged, resolved_commit="a" * 40)
+
+    with pytest.raises(DirectDependencyError, match="Licence file mismatch"):
+        ensure_carried_licenses_match(ctx, "k", package, locked, "a" * 40)
 
 
 @pytest.mark.parametrize(

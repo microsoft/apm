@@ -194,6 +194,7 @@ class LockfileBuilder:
             # Only write when the semantic content has actually changed
             # (avoids generated_at churn in version control).
             self._write_if_changed(lockfile, lockfile_path, _LF)
+            self._report_new_content(lockfile)
             # Target-scoped deployed-file contraction physically deletes the
             # dropped target's instruction files (via the cleanup chokepoint).
             # Guard it by `lockfile_only` for the same reason the merge-hook
@@ -460,26 +461,40 @@ class LockfileBuilder:
                     locked_dep.subset_pairings = None  # the widened flat product is exact
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
+        for dep_key, locked_dep in lockfile.dependencies.items():
+            if dep_key in self.ctx.package_hashes:
+                locked_dep.content_hash = self.ctx.package_hashes[dep_key]
+
+    def _report_new_content(self, lockfile: LockFile) -> None:
+        """Name the dependencies whose locked content changed this run.
+
+        Only a moved commit (or a row without one) may change content (#4027).
+        Runs after promotion and the write, so it reports the stored hashes.
+        """
+        from apm_cli.install.source_helpers import locked_commit_unchanged
+
         previous = getattr(self.ctx, "existing_lockfile", None)
         logger = getattr(self.ctx, "logger", None)
+        if previous is None or logger is None:
+            return
+        changed = []
         for dep_key, locked_dep in lockfile.dependencies.items():
-            if dep_key not in self.ctx.package_hashes:
-                continue
-            new_hash = self.ctx.package_hashes[dep_key]
-            old = previous.get_dependency(dep_key) if previous is not None else None
-            # Only a moved commit may change content (#4027); name each one.
+            old = previous.dependencies.get(dep_key)
             if (
-                logger
-                and old is not None
+                old is not None
                 and old.content_hash
-                and old.content_hash != new_hash
-                and old.resolved_commit != locked_dep.resolved_commit
+                and locked_dep.content_hash
+                and old.content_hash != locked_dep.content_hash
+                and not locked_commit_unchanged(old, locked_dep.resolved_commit)
             ):
-                logger.info(
-                    f"{dep_key}: new content hash {new_hash} for commit "
-                    f"{(locked_dep.resolved_commit or 'unknown')[:12]}"
-                )
-            locked_dep.content_hash = new_hash
+                changed.append((dep_key, locked_dep))
+        if not changed:
+            return
+        noun = "dependency" if len(changed) == 1 else "dependencies"
+        logger.info(f"New locked content for {len(changed)} {noun} (see apm.lock.yaml)")
+        for dep_key, locked_dep in changed:
+            commit = (locked_dep.resolved_commit or "no commit")[:12]
+            logger.verbose_detail(f"  {dep_key}: {locked_dep.content_hash} ({commit})")
 
     def _attach_declared_licenses(self, lockfile: LockFile) -> None:
         """Attach DECLARED-license provenance captured at acquire time (U6).
