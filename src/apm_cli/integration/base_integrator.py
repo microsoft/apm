@@ -12,6 +12,7 @@ from typing import Any
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.core.deployment_state import MaterializationResult
+from apm_cli.core.remediation import COWORK_SKILLS_DIR_UNDETECTED, LOCAL_FILE_UNMANAGED
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import (
@@ -281,7 +282,7 @@ class BaseIntegrator:
         else:
             _rich_warning(
                 f"Skipping {rel_path} -- local file exists (not managed by APM). "
-                f"Use 'apm install --force' to overwrite."
+                f"{LOCAL_FILE_UNMANAGED.sentence()}"
             )
         return True
 
@@ -1199,10 +1200,8 @@ class BaseIntegrator:
                 _orphan_msg = (
                     f"Cowork: skipping {_cowork_orphans_skipped} orphaned lockfile "
                     f"{'entry' if _cowork_orphans_skipped == 1 else 'entries'}"
-                    " -- OneDrive path not detected.\n"
-                    "Run: apm config set copilot-cowork-skills-dir <path>  "
-                    "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
-                    "to clean up these entries on the next install/uninstall."
+                    f" -- OneDrive path not detected.\n{COWORK_SKILLS_DIR_UNDETECTED.sentence()} "
+                    "Alternatively, set APM_COPILOT_COWORK_SKILLS_DIR."
                 )
                 if logger:
                     logger.warning(_orphan_msg, symbol="warning")

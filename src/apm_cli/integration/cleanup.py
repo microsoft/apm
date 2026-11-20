@@ -40,6 +40,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from apm_cli.core.remediation import COWORK_SKILLS_DIR_UNDETECTED
 from apm_cli.security.gate import is_python_bytecode_cache_path
 from apm_cli.utils.paths import SpellingAliasIndex
 
@@ -609,10 +610,8 @@ def remove_stale_deployed_files(
             (
                 f"Cowork: skipping {_cowork_orphans_skipped} stale lockfile "
                 f"{'entry' if _cowork_orphans_skipped == 1 else 'entries'}"
-                " -- OneDrive path not detected.\n"
-                "Run: apm config set copilot-cowork-skills-dir <path>  "
-                "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
-                "to clean up these entries on the next install/uninstall."
+                f" -- OneDrive path not detected.\n{COWORK_SKILLS_DIR_UNDETECTED.sentence()} "
+                "Alternatively, set APM_COPILOT_COWORK_SKILLS_DIR."
             ),
             package=dep_key,
         )

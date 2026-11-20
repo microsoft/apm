@@ -13,6 +13,12 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from apm_cli.core.remediation import (
+    CODEX_AGENT_CLAUDE_MODEL,
+    CODEX_AGENT_FIELD_NOT_STRING,
+    CODEX_AGENT_FRONTMATTER_INVALID,
+    CODEX_AGENT_FRONTMATTER_NOT_MAPPING,
+)
 from apm_cli.install.primitive_classification import (
     AgentSourceClassification,
     PrimitiveKind,
@@ -656,10 +662,7 @@ class AgentIntegrator(BaseIntegrator):
                 "not recognize Claude models."
             ),
             package=printable_ascii_text(package_name),
-            detail=(
-                "Fix: use a Codex model in a Codex-specific agent source, or remove 'model' "
-                "so Codex uses its default; then rerun 'apm install'."
-            ),
+            detail=f"Fix: {CODEX_AGENT_CLAUDE_MODEL.clause()}.",
         )
 
     @staticmethod
@@ -721,8 +724,8 @@ class AgentIntegrator(BaseIntegrator):
                                 ),
                                 package=printable_ascii_text(package_name),
                                 detail=(
-                                    f"Fix: set '{field}' to a string in the source agent, "
-                                    "then rerun 'apm install'."
+                                    "Fix: "
+                                    f"{CODEX_AGENT_FIELD_NOT_STRING.bind(field=field).clause()}."
                                 ),
                             )
                     # Collect only the raw dropped keys here (no formatting)
@@ -766,8 +769,7 @@ class AgentIntegrator(BaseIntegrator):
                         source,
                         package_name,
                         "YAML frontmatter must be a mapping and was ignored",
-                        "fix the source agent frontmatter to a YAML mapping, "
-                        "then rerun 'apm install'",
+                        CODEX_AGENT_FRONTMATTER_NOT_MAPPING.clause(),
                     )
                 if isinstance(fm, dict) and "tools" in fm:
                     AgentIntegrator._warn_codex_tools_dropped(
@@ -784,7 +786,7 @@ class AgentIntegrator(BaseIntegrator):
                     source,
                     package_name,
                     "invalid YAML frontmatter was ignored",
-                    "repair the frontmatter, then rerun 'apm install'",
+                    CODEX_AGENT_FRONTMATTER_INVALID.clause(),
                 )
 
         links_resolved = 0

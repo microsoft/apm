@@ -13,6 +13,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from apm_cli.core import remediation as _remediation
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.install.services import enforce_agent_plugin_deployment_boundary
 from apm_cli.integration.base_integrator import BaseIntegrator
@@ -827,15 +828,15 @@ class SkillIntegrator(BaseIntegrator):
             details = (
                 f"Skill selection declared by '{declared_by}' matched no available skills. "
                 f"Requested: {requested_display}. Available: {available_display}. "
-                f"Update '{declared_by.split(' > ')[-1]}' to a version whose 'skills:' "
-                "names available skills, then run 'apm install'."
+                + _remediation.SKILL_SELECTION_DECLARED_UNMATCHED.bind(
+                    package=declared_by.split(" > ")[-1]
+                ).sentence()
             )
         else:
             details = (
                 "Skill selection matched no available skills. "
                 f"Requested: {requested_display}. Available: {available_display}. "
-                "Edit 'skills:' in apm.yml to use an available name or remove the filter, "
-                "then run 'apm install'."
+                + _remediation.SKILL_SELECTION_UNMATCHED.sentence()
             )
         if diagnostics is not None:
             diagnostics.error(details, package=parent_name)
@@ -978,7 +979,7 @@ class SkillIntegrator(BaseIntegrator):
                         elif logger:
                             logger.warning(
                                 f"Skipping skill '{sub_name}' -- local skill exists (not managed by APM). "
-                                f"Use 'apm install --force' to overwrite."
+                                f"{_remediation.LOCAL_FILE_UNMANAGED.sentence()}"
                             )
                         else:
                             try:
@@ -986,7 +987,7 @@ class SkillIntegrator(BaseIntegrator):
 
                                 _rich_warning(
                                     f"Skipping skill '{sub_name}' -- local skill exists (not managed by APM). "
-                                    f"Use 'apm install --force' to overwrite."
+                                    f"{_remediation.LOCAL_FILE_UNMANAGED.sentence()}"
                                 )
                             except ImportError:
                                 pass
@@ -2080,9 +2081,8 @@ class SkillIntegrator(BaseIntegrator):
                     f"Cowork: skipping {_cowork_skipped} skill "
                     f"{'entry' if _cowork_skipped == 1 else 'entries'}"
                     " -- OneDrive path not detected.\n"
-                    "Run: apm config set copilot-cowork-skills-dir <path>  "
-                    "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
-                    "to clean up these entries on the next install/uninstall.",
+                    f"{_remediation.COWORK_SKILLS_DIR_UNDETECTED.sentence()} "
+                    "Alternatively, set APM_COPILOT_COWORK_SKILLS_DIR.",
                     symbol="warning",
                 )
 

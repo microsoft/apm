@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 from click import ClickException
 
+from apm_cli.core.remediation import AUDIT_TARGET_FLAG_DISABLED
 from apm_cli.core.target_catalog import (
     TARGET_CAPABILITIES,
     TargetCapability,
@@ -1862,8 +1863,8 @@ def resolve_audit_targets(
             flag = profile.requires_flag.replace("_", "-")
             raise AuditTargetDisabledError(
                 f"Cannot audit target '{name}': experimental feature "
-                f"'{flag}' is disabled. Run "
-                f"'apm experimental enable {flag}' to audit this installation."
+                f"'{flag}' is disabled. "
+                f"{AUDIT_TARGET_FLAG_DISABLED.bind(flag=flag).sentence()}"
             )
     from apm_cli.integration.skill_layout import (
         recorded_deployed_paths,

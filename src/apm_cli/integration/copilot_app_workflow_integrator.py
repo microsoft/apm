@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import COPILOT_APP_WORKFLOW_UNBOUND
 from apm_cli.integration import copilot_app_db as _db_mod
 from apm_cli.integration import copilot_app_ws as _ws_mod
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
@@ -375,8 +376,8 @@ class CopilotAppWorkflowIntegrator(BaseIntegrator):
                 message=(
                     "Copilot App workflows installed with --global run with CWD=~/.copilot, "
                     "not a project. Attach the workflow to a project from the App's Workflows "
-                    "tab to fix this, or re-run `apm install` from a repo without --global. "
-                    "See https://aka.ms/apm/copilot-app-global for details."
+                    f"tab to fix this, or {COPILOT_APP_WORKFLOW_UNBOUND.clause()} (without "
+                    "--global). See https://aka.ms/apm/copilot-app-global for details."
                 ),
                 package=pkg_name,
             )
@@ -400,8 +401,8 @@ class CopilotAppWorkflowIntegrator(BaseIntegrator):
                     "Copilot App workflows installed without a project binding: "
                     "could not detect a git repository for this install. "
                     "Workflows will run with CWD=~/.copilot, not a project. "
-                    "Re-run `apm install` from inside a git repo, or attach the "
-                    "workflow to a project from the App's Workflows tab."
+                    "Attach the workflow to a project from the App's Workflows tab, or "
+                    f"{COPILOT_APP_WORKFLOW_UNBOUND.clause()}."
                 ),
                 package=pkg_name,
             )

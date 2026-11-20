@@ -400,6 +400,125 @@ def test_command_remediation_clears_the_reported_state(
 
 # -- W2 executed proofs (integration/, marketplace/, bundle/) -----------------
 # -- W2 integration proofs --
+#
+# Advice printed by src/apm_cli/integration. The printed command may carry a
+# bound value (a flag name), so each proof binds the catalog entry, finds its
+# rendered "'command' to promise" in what the installed CLI printed, takes the
+# manual step the advice names, runs that command, and re-runs the reporting
+# command to observe the advice is gone.
+
+
+@dataclass(frozen=True)
+class _BoundProof:
+    remediation_id: str
+    world: Callable[[Path, Path], _World]
+    induce: Callable[[_World], None]
+    probe: tuple[str, ...]
+    reported_exit: int
+    before: Callable[[_World], None] = lambda _world: None
+    values: tuple[tuple[str, str], ...] = ()
+
+
+def _grok_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = _publish(scenario, "grok-kit", skill="alpha")
+    consumer = scenario.consumers.create("grok-consumer", dependencies=(source.dependency,))
+    for step, args in enumerate(
+        (
+            ("experimental", "enable", "grok-cloud"),
+            (*_INSTALL_ARGS, "--target", "grok-cloud"),
+            ("experimental", "disable", "grok-cloud"),
+        )
+    ):
+        _run_success(
+            scenario,
+            consumer,
+            args,
+            environment=source.environment,
+            scenario_id=f"remediation-grok-{step}",
+        )
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+_HOOK_SIDECAR = ".claude/apm-hooks.json"
+
+
+def _malformed_hook_sidecar(world: _World) -> None:
+    sidecar = world.consumer.root / _HOOK_SIDECAR
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text("{", encoding="ascii")
+
+
+def _skill_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = _publish(scenario, "skill-kit", skill="alpha")
+    consumer = scenario.consumers.create(
+        "skill-consumer",
+        dependencies=({**source.dependency, "skills": ["missing"]},),
+        targets=("copilot",),
+    )
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+def _select_skill(world: _World) -> None:
+    manifest = load_yaml(world.consumer.manifest_path)
+    manifest["dependencies"]["apm"][0]["skills"] = ["alpha"]
+    dump_yaml(manifest, world.consumer.manifest_path)
+
+
+W2_INTEGRATION_PROOFS: tuple[_BoundProof, ...] = (
+    _BoundProof(
+        "audit-target-flag-disabled",
+        _grok_world,
+        lambda _world: None,
+        ("audit", "--ci", "--no-policy"),
+        3,
+        values=(("flag", "grok-cloud"),),
+    ),
+    _BoundProof(
+        "hook-sidecar-unreadable",
+        _installed_world,
+        _malformed_hook_sidecar,
+        _INSTALL_ARGS,
+        0,
+        before=_unlink(_HOOK_SIDECAR),
+    ),
+    _BoundProof(
+        "skill-selection-unmatched",
+        _skill_world,
+        lambda _world: None,
+        _INSTALL_ARGS,
+        1,
+        before=_select_skill,
+    ),
+)
+
+
+@pytest.mark.parametrize("proof", W2_INTEGRATION_PROOFS, ids=lambda proof: proof.remediation_id)
+def test_w2_integration_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _BoundProof
+) -> None:
+    from apm_cli.core.remediation import catalog
+
+    world = proof.world(tmp_path, apm_binary_path)
+    proof.induce(world)
+    entry = catalog()[proof.remediation_id].bind(**dict(proof.values))
+
+    reported = _run(world, proof.probe, "remediation-reported")
+    assert reported.returncode == proof.reported_exit, _result_evidence(reported)
+    assert entry.option() in _normalized(reported), _result_evidence(reported)
+    argv = entry.argv()
+    assert argv[0] == "apm" and not any(token.startswith("<") for token in argv), argv
+
+    proof.before(world)
+    advised = _run(world, argv[1:], f"remediation-run-{proof.remediation_id}")
+    assert advised.returncode == 0, _result_evidence(advised)
+
+    again = _run(world, proof.probe, "remediation-cleared")
+    assert again.returncode == 0, _result_evidence(again)
+    assert entry.option() not in _normalized(again), _result_evidence(again)
+
+
 # -- end W2 integration proofs --
 # -- W2 marketplace proofs --
 # -- end W2 marketplace proofs --

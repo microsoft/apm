@@ -191,6 +191,138 @@ RESYNC_AFTER_UNMANAGED_CONFLICT = _entry(
 
 # -- W2 (integration/, marketplace/, bundle/) --------------------------------
 # -- W2 integration --
+# Advice printed by src/apm_cli/integration. Keep W2 integration additions here.
+HOOK_CONFIG_UNREADABLE = _entry(
+    "hook-config-unreadable",
+    "apm install",
+    "remove APM hook entries left for dropped targets",
+    before="delete or fix the file manually",
+)
+HOOK_SIDECAR_UNREADABLE = _entry(
+    "hook-sidecar-unreadable",
+    "apm install",
+    "finish the dropped-target hook cleanup",
+    before="delete or fix the file manually",
+)
+HOOK_PLUGIN_ROOT_UNRESOLVED = _entry(
+    "hook-plugin-root-unresolved",
+    "apm install",
+    "redeploy the hook with the resolved path",
+    before="ensure the quote marks match and wrap the complete reference and path in "
+    "balanced double quotes",
+)
+HOOK_PATH_ESCAPES_PACKAGE = _entry(
+    "hook-path-escapes-package",
+    "apm install",
+    "redeploy the hook",
+    before="keep the path inside the package",
+)
+CODEX_AGENT_CLAUDE_MODEL = _entry(
+    "codex-agent-claude-model",
+    "apm install",
+    "redeploy the Codex agent",
+    before="use a Codex model in a Codex-specific agent source, or remove 'model' so "
+    "Codex uses its default",
+)
+CODEX_AGENT_FIELD_NOT_STRING = _entry(
+    "codex-agent-field-not-string",
+    "apm install",
+    "redeploy the Codex agent with that setting",
+    before="set '{field}' to a string in the source agent",
+)
+CODEX_AGENT_FRONTMATTER_NOT_MAPPING = _entry(
+    "codex-agent-frontmatter-not-mapping",
+    "apm install",
+    "redeploy the Codex agent with verified tool restrictions",
+    before="fix the source agent frontmatter to a YAML mapping",
+)
+CODEX_AGENT_FRONTMATTER_INVALID = _entry(
+    "codex-agent-frontmatter-invalid",
+    "apm install",
+    "redeploy the Codex agent with verified tool restrictions",
+    before="repair the frontmatter",
+)
+INSTRUCTION_FRONTMATTER_REJECTED = _entry(
+    "instruction-frontmatter-rejected",
+    "apm install",
+    "deploy the instruction",
+    before="fix or remove the invalid frontmatter",
+)
+LOCAL_FILE_UNMANAGED = _entry(
+    "local-file-unmanaged",
+    "apm install --force",
+    "overwrite it with the package version",
+)
+COWORK_SKILLS_DIR_UNDETECTED = _entry(
+    "cowork-skills-dir-undetected",
+    "apm config set copilot-cowork-skills-dir <path>",
+    "clean up these entries on the next install or uninstall",
+)
+CANVAS_EXTENSIONS_BLOCKED = _entry(
+    "canvas-extensions-blocked",
+    "apm approve {package}",
+    "trust '{package}'",
+    then="run 'apm install' to deploy them to {deploy_dir}",
+)
+COPILOT_APP_WORKFLOW_UNBOUND = _entry(
+    "copilot-app-workflow-unbound",
+    "apm install",
+    "bind the workflows to that project",
+    before="change into the project's git repository",
+)
+MCP_ADMITTED_DENIED = _entry(
+    "mcp-admitted-denied",
+    "apm install",
+    "reconcile the MCP server",
+    before="lift the deny that 'apm policy explain {target}' names",
+)
+MCP_ADMITTED_UNAPPROVED = _entry(
+    "mcp-admitted-unapproved",
+    "apm approve {target}",
+    "approve its MCP servers",
+    then="run 'apm install'",
+)
+MCP_LOCAL_PACKAGE_UNRESOLVED = _entry(
+    "mcp-local-package-unresolved", "apm install", "rebuild the lockfile"
+)
+MCP_PACKAGE_MANIFEST_MISSING = _entry(
+    "mcp-package-manifest-missing", "apm install", "restore the package manifest"
+)
+MCP_LOCKFILE_UNWRITABLE = _entry(
+    "mcp-lockfile-unwritable",
+    "apm install",
+    "create {lockfile}",
+    before="make the directory writable",
+)
+MCP_REGISTRY_ALTERNATIVE = _entry(
+    "mcp-registry-alternative",
+    'apm install --mcp "{server}" --registry <URL>{retry}',
+    "look the server up in another registry (replace <URL>)",
+)
+SKILL_SELECTION_DECLARED_UNMATCHED = _entry(
+    "skill-selection-declared-unmatched",
+    "apm install",
+    "apply the updated skill selection",
+    before="update '{package}' to a version whose 'skills:' names available skills",
+)
+SKILL_SELECTION_UNMATCHED = _entry(
+    "skill-selection-unmatched",
+    "apm install",
+    "apply the updated skill selection",
+    before="edit 'skills:' in apm.yml to use an available name or remove the filter",
+)
+SKILL_CONFLICT_UNMANAGED = _entry(
+    "skill-conflict-unmanaged",
+    "apm install",
+    "deploy the skills without the conflicts",
+    before="rename the local skill or use a valid existing skills: or targets: selection "
+    "in apm.yml that excludes these conflicts",
+)
+AUDIT_TARGET_FLAG_DISABLED = _entry(
+    "audit-target-flag-disabled",
+    "apm experimental enable {flag}",
+    "audit this installation",
+)
 # -- end W2 integration --
 # -- W2 marketplace --
 # -- end W2 marketplace --
