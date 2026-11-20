@@ -340,3 +340,24 @@ class UndeclaredMarketplaceError(MarketplaceError):
             f"Add it to apm.yml:\n  marketplaces:\n    - name: {name}\n"
             "      source: <catalog repository URL>"
         )
+
+
+class ProjectMarketplaceOriginConflictError(MarketplaceOriginConflictError):
+    """``--frozen`` met a lock row from an origin the root ``apm.yml`` no longer declares.
+
+    The file wins (#2903 D3), so a plain install re-resolves through the map;
+    ``--frozen`` only replays the lock and refuses instead.
+    """
+
+    def __init__(self, marketplace_name: str, plugin_name: str, locked: str, current: str):
+        self.marketplace_name = marketplace_name
+        self.plugin_name = plugin_name
+        self.locked_origin = locked
+        self.current_origin = current
+        MarketplaceError.__init__(
+            self,
+            f"marketplace {marketplace_name!r} in apm.yml now points at {current}, but "
+            f"apm.lock.yaml recorded {plugin_name!r} from {locked}. Nothing was changed. "
+            "Run 'apm install' without --frozen to re-resolve through apm.yml, then "
+            "commit apm.lock.yaml.",
+        )

@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING
 
 from .errors import MarketplaceError, MarketplaceFetchError, UndeclaredMarketplaceError
 from .models import ORIGIN_PROJECT, MarketplaceSource
-from .source_identity import marketplace_origin
+from .source_identity import marketplace_origin, same_marketplace_origin
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -54,6 +54,7 @@ class _ProjectMarketplaces:
     declared: dict[str, DeclaredMarketplace]
     notice: Callable[[str], None] | None
     resolved: dict[str, MarketplaceSource] = field(default_factory=dict)
+    origin_changes_noted: set[str] = field(default_factory=set)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -214,6 +215,57 @@ def project_marketplace(name: str) -> MarketplaceSource | None:
             scope.resolved[lower] = source
             _notice_shadowed_registration(scope, source)
     return source
+
+
+def declared_origin_conflict(name: str, locked_origin: str | None) -> str | None:
+    """Return the origin apm.yml now declares for *name* when the lock recorded another.
+
+    Compares the bound map's entry with a lock row's ``source_url`` without
+    network access. ``None`` when no map is bound, the map does not declare
+    *name*, the row records no origin (written before origins were recorded)
+    or both name the same catalog origin. A local catalog entry has no
+    origin, so it conflicts with any recorded one and is returned as its
+    ``source``.
+    """
+    scope = _active
+    if scope is None or not locked_origin:
+        return None
+    entry = scope.declared.get(name.lower())
+    if entry is None:
+        return None
+    try:
+        declared = declared_marketplace_origin(entry)
+    except ValueError:
+        declared = ""
+    if declared and same_marketplace_origin(locked_origin, declared):
+        return None
+    return declared or entry.source
+
+
+def project_wins_locked_origin(name: str, locked_origin: str | None) -> bool:
+    """Return True when the bound map, not a registration, owns *name*'s origin.
+
+    The committed file wins (#2903 D3): a lock row recorded from another
+    origin re-resolves through the map instead of raising the alias
+    conflict a registration gets. The first such row per name prints one
+    ``[i]`` line.
+    """
+    scope = _active
+    if scope is None or name.lower() not in scope.declared:
+        return False
+    declared = declared_origin_conflict(name, locked_origin)
+    if declared is None:
+        return True
+    with scope.lock:
+        if name.lower() in scope.origin_changes_noted:
+            return True
+        scope.origin_changes_noted.add(name.lower())
+    if scope.notice is not None:
+        scope.notice(
+            f"Marketplace '{name}' in apm.yml now names {declared}; apm.lock.yaml "
+            f"recorded {locked_origin}. Re-resolving through apm.yml."
+        )
+    return True
 
 
 def require_root_declared_marketplace(name: str, plugin_name: str, *, required_by: str) -> None:

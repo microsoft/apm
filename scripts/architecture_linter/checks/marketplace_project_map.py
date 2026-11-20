@@ -2,8 +2,10 @@
 
 ``marketplace/project_marketplaces.py`` owns the root project's map: it alone
 binds the map for a command, resolves a declared name ahead of the registry
-(through ``registry.get_marketplace_by_name``) and refuses a transitive name
-the root does not declare. The resolver refuses a dependency's map with the
+(through ``registry.get_marketplace_by_name``), refuses a transitive name the
+root does not declare, and decides when a lock row recorded from another
+origin re-resolves through the map. ``marketplace.allow`` judges locked and
+freshly resolved catalog origins, so a lock cannot bypass it. The resolver refuses a dependency's map with the
 declaration owner's message. Project-origin sources never leave memory, so
 ``ORIGIN_PROJECT`` is read only where it is defined, cache-keyed and created.
 """
@@ -23,6 +25,8 @@ _OWNER_FUNCTIONS = (
     "bind_project_marketplaces",
     "project_marketplace",
     "require_root_declared_marketplace",
+    "declared_origin_conflict",
+    "project_wins_locked_origin",
 )
 _ORIGIN_READERS = frozenset(
     {
@@ -52,6 +56,16 @@ _REQUIRED_CALLS = (
         "_activate_validated_package",
         "dependency_marketplaces_error",
     ),
+    # The file wins over a lock row from another origin; --frozen refuses it.
+    ("src/apm_cli/drift.py", "_declared_origin_conflict", "declared_origin_conflict"),
+    (
+        "src/apm_cli/marketplace/catalog_origin.py",
+        "require_locked_catalog_origin",
+        "project_wins_locked_origin",
+    ),
+    # marketplace.allow judges locked and fresh catalog origins, not only apm.yml.
+    ("src/apm_cli/install/phases/policy_gate.py", "run", "marketplace_resolution_origins"),
+    ("src/apm_cli/policy/policy_checks.py", "run_policy_checks", "marketplace_resolution_origins"),
 )
 
 

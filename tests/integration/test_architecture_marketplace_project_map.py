@@ -39,6 +39,21 @@ def test_project_map_routes_through_owner() -> None:
             "        marketplace_scope = nullcontext(\n",
         ),
         (
+            "drift.py",
+            "    return declared_origin_conflict(dep_ref.marketplace_name, locked_dep.source_url)\n",
+            "    return None\n",
+        ),
+        (
+            "marketplace/catalog_origin.py",
+            "        if not project_wins_locked_origin(marketplace_name, dep.source_url):\n",
+            "        if True:\n",
+        ),
+        (
+            "install/phases/policy_gate.py",
+            "            marketplace_resolution_origins(\n",
+            "            tuple(\n",
+        ),
+        (
             "commands/view.py",
             "def _display_marketplace_plugin(",
             "ORIGIN_PROJECT = 'project'\n\n\ndef _display_marketplace_plugin(",

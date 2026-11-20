@@ -6,9 +6,22 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.drift import (
+    MARKETPLACE_ORIGIN_CHANGED,
+    MARKETPLACE_REPLAYED,
+    frozen_marketplace_refusal,
+    locked_marketplace_replay,
+    locked_marketplace_row,
+)
 from apm_cli.marketplace import registry as registry_mod
+from apm_cli.marketplace.catalog_origin import require_locked_catalog_origin
 from apm_cli.marketplace.client import _cache_key
-from apm_cli.marketplace.errors import MarketplaceFetchError, UndeclaredMarketplaceError
+from apm_cli.marketplace.errors import (
+    MarketplaceFetchError,
+    MarketplaceOriginConflictError,
+    UndeclaredMarketplaceError,
+)
 from apm_cli.marketplace.models import ORIGIN_PROJECT, MarketplaceSource
 from apm_cli.marketplace.project_marketplaces import (
     bind_project_marketplaces,
@@ -18,8 +31,13 @@ from apm_cli.marketplace.project_marketplaces import (
 )
 from apm_cli.marketplace.registry import get_marketplace_by_name
 from apm_cli.marketplace.user_manifest import DeclaredMarketplace
+from apm_cli.models.dependency import DependencyReference
 from apm_cli.policy.parser import PolicyValidationError, load_policy
-from apm_cli.policy.policy_checks import run_dependency_policy_checks
+from apm_cli.policy.policy_checks import (
+    MarketplaceOrigins,
+    marketplace_resolution_origins,
+    run_dependency_policy_checks,
+)
 from apm_cli.policy.schema import ApmPolicy, MarketplacePolicy
 
 
@@ -127,14 +145,97 @@ class TestTransitiveRule:
         assert "- name: tools" in message
 
 
+def _marketplace_row(plugin: str, source_url: str | None = None) -> LockedDependency:
+    return LockedDependency(
+        repo_url=f"owner/{plugin}",
+        discovered_via="acme",
+        marketplace_plugin_name=plugin,
+        resolved_commit="a" * 40,
+        resolved_ref="main",
+        source_url=source_url,
+    )
+
+
+def _lock(*rows: LockedDependency) -> LockFile:
+    return LockFile(dependencies={row.get_unique_key(): row for row in rows})
+
+
+class TestLockedOrigin:
+    """The file wins over a lock row recorded from another catalog origin."""
+
+    _DEP = DependencyReference.parse_from_dict({"name": "p", "marketplace": "acme"})
+
+    def test_changed_origin_re_resolves_with_one_notice_and_frozen_refuses(self):
+        lock = _lock(_marketplace_row("p", "https://github.com/old/catalog"))
+        notices: list[str] = []
+        with project_marketplace_scope(
+            [DeclaredMarketplace("acme", "https://github.com/contoso/catalog")],
+            notice=notices.append,
+        ):
+            decision = locked_marketplace_replay(self._DEP, lock)
+            assert decision.reason == MARKETPLACE_ORIGIN_CHANGED
+            assert decision.reference is None
+            assert locked_marketplace_row(self._DEP, lock) is None
+            refusal = frozen_marketplace_refusal(decision)
+            # Re-resolution accepts the changed origin instead of the alias conflict.
+            require_locked_catalog_origin("acme", "p", lock)
+            require_locked_catalog_origin("ACME", "p", lock)
+        assert isinstance(refusal, MarketplaceOriginConflictError)
+        assert "without --frozen" in str(refusal)
+        assert "github.com/old/catalog" in str(refusal)
+        assert len(notices) == 1
+        assert "Re-resolving through apm.yml" in notices[0]
+
+    def test_same_origin_replays_without_notice(self):
+        lock = _lock(_marketplace_row("p", "git@github.com:contoso/catalog.git"))
+        notices: list[str] = []
+        with project_marketplace_scope(
+            [DeclaredMarketplace("acme", "contoso/catalog")], notice=notices.append
+        ):
+            decision = locked_marketplace_replay(self._DEP, lock)
+            require_locked_catalog_origin("acme", "p", lock)
+        assert decision.reason == MARKETPLACE_REPLAYED
+        assert notices == []
+
+
 class TestMarketplaceAllowPolicy:
     @staticmethod
-    def _check(allow, declared):
+    def _check(allow, declared, resolved=()):
         policy = ApmPolicy(marketplace=MarketplacePolicy(allow=allow))
+        origins = (
+            None if declared is None and not resolved else MarketplaceOrigins(declared, resolved)
+        )
         result = run_dependency_policy_checks(
-            [], policy=policy, fail_fast=False, declared_marketplaces=declared
+            [], policy=policy, fail_fast=False, marketplace_origins=origins
         )
         return next((c for c in result.checks if c.name == "marketplace-allow"), None)
+
+    def test_locked_origins_cannot_bypass_the_allow_list(self):
+        allowed = _marketplace_row("a", "https://github.com/contoso/catalog")
+        evil = _marketplace_row("b", "https://github.com/evil/catalog")
+        unrecorded = _marketplace_row("c")
+        lock = _lock(allowed, evil, unrecorded, LockedDependency(repo_url="owner/plain"))
+        declared = (DeclaredMarketplace("acme", "https://github.com/contoso/catalog"),)
+        allow = ("github.com/contoso/*",)
+
+        check = self._check(allow, declared, marketplace_resolution_origins(lock))
+
+        assert [s.ref for s in check.subjects] == ["b@acme", "c@acme"]
+        assert "github.com/evil/catalog" in check.subjects[0].reason
+        assert "no recorded catalog origin" in check.subjects[1].reason
+        # Install: only deps being installed count, and a fresh resolution
+        # through an allowed catalog replaces its lock row.
+        fresh = {
+            evil.get_unique_key(): {
+                "discovered_via": "acme",
+                "marketplace_plugin_name": "b",
+                "source_url": "https://github.com/contoso/catalog",
+            }
+        }
+        installing = marketplace_resolution_origins(
+            lock, keys=[allowed.get_unique_key(), evil.get_unique_key()], provenance=fresh
+        )
+        assert self._check(allow, None, installing).passed
 
     def test_origins_match_host_path_globs(self):
         declared = (

@@ -65,7 +65,9 @@ def require_locked_catalog_origin(
     accepted, so older lockfiles keep working and gain the origin on their
     next lock write. Only the origin is compared: the lock does not record
     the catalog path, so a move to another path in the same repository is
-    not detected (see :func:`same_marketplace_catalog`).
+    not detected (see :func:`same_marketplace_catalog`). A name the root
+    ``marketplaces:`` map declares is owned by the file, not an alias: its
+    rows re-resolve through the map (#2903).
 
     *user_scope* selects the scope the refusal's remedy names; ``None``
     reads it from the invocation (:func:`invocation_user_scope`).
@@ -77,8 +79,11 @@ def require_locked_catalog_origin(
     """
     if lockfile is None:
         return
+    from .project_marketplaces import project_wins_locked_origin
+
     for dep in lockfile.marketplace_rows(marketplace_name, plugin_name):
-        require_locked_row_origin(dep, marketplace_name=marketplace_name, user_scope=user_scope)
+        if not project_wins_locked_origin(marketplace_name, dep.source_url):
+            require_locked_row_origin(dep, marketplace_name=marketplace_name, user_scope=user_scope)
 
 
 def require_locked_row_origin(
