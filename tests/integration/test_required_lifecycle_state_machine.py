@@ -2196,14 +2196,27 @@ def test_required_partial_install_promotes_carried_rows_only_from_verified_bytes
 ) -> None:
     """Hash framing hardening: a partial install re-hashes untouched rows from verified bytes."""
     scenario = _new_scenario(tmp_path / f"partial-promotion-{carried_cache}", apm_binary_path)
-    first = _publish(scenario, "framing-first", skill="framing-first")
-    second = _publish(scenario, "framing-second", skill="framing-second")
+    # A package named on the command line is validated before install. On
+    # github.com that is a REST probe, which never sees the fixture's Git URL
+    # rewrite; a generic Git host is probed with git ls-remote, which does.
+    published = {}
+    for name in ("framing-first", "framing-second"):
+        package = scenario.sources.create(name)
+        scenario.sources.add_skill(package, name, _skill(name))
+        repository = scenario.repositories.create(name, source_tree=package.root)
+        commit = scenario.repositories.commit(repository, message=f"seed {name}")
+        remote_url = f"https://git.fixture.invalid/{_OWNER}/{name}"
+        published[name] = (
+            repository,
+            remote_url,
+            {"git": remote_url, "ref": commit.sha, "alias": name},
+        )
     environment = scenario.repositories.url_rewrite_subprocess_env_many(
-        ((first.repository, first.remote_url), (second.repository, second.remote_url))
+        tuple((repository, url) for repository, url, _ in published.values())
     )
     consumer = scenario.consumers.create(
         "partial-promotion-consumer",
-        dependencies=(first.dependency, second.dependency),
+        dependencies=tuple(dependency for _, _, dependency in published.values()),
         targets=("claude",),
     )
     _run_success(
@@ -2227,7 +2240,7 @@ def test_required_partial_install_promotes_carried_rows_only_from_verified_bytes
     _run_success(
         scenario,
         consumer,
-        (*_INSTALL_ARGS, first.remote_url),
+        (*_INSTALL_ARGS, published["framing-first"][1]),
         environment=environment,
         scenario_id=f"partial-install-{carried_cache}",
     )
