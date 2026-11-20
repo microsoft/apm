@@ -218,6 +218,18 @@
         "transport-platform-credential-origin-scope",
         "transport-platform-origin-bounded-redirect"
       ]
+    },
+    {
+      "id": "archive-extraction-limits",
+      "decision": "Which limits every archive extraction applies, for every accepted format (tar.gz and zip): entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries (#4235)",
+      "owner": "utils/archive.py (safe_extract_tar, safe_extract_zip, read_zip_member; shared _archive_member_target, _claim_member and _stream_member); consumers: deps/registry/extractor.py, bundle/unpacker.py, bundle/local_bundle.py, deps/download_strategies.py",
+      "selectors": [
+        "src/apm_cli/utils/archive.py",
+        "src/apm_cli/deps/registry/extractor.py"
+      ],
+      "guards": [
+        "transport-platform-archive-extraction-limits"
+      ]
     }
   ]
 }

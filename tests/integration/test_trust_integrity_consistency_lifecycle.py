@@ -12,7 +12,9 @@ Hermetic chains against the installed CLI:
   lock untouched, while a moved commit is accepted;
 * ``apm update`` verifies an unchanged registry version against its locked
   hash, while a new registry version re-locks (#4125);
-* ``apm unpack`` never deploys executable content.
+* ``apm unpack`` never deploys executable content;
+* the ``apm audit --ci`` drift replay and the lifecycle script gate route the
+  org policy outcome as install does (#4079).
 """
 
 from __future__ import annotations
@@ -1240,6 +1242,122 @@ def test_unpack_waits_for_the_lifecycle_lock(tmp_path: Path, apm_binary_path: Pa
     assert proc.returncode == 0, text
     assert "Another APM operation is running" in text, text
     assert (target / _SKILL).is_file(), text
+
+
+def _age_policy_cache(world: PolicyScopeWorld, seconds: int) -> None:
+    metas = list((world.isolated.cache_root / "policy_v1").rglob("*.meta.json"))
+    assert metas, "expected a populated policy cache"
+    for meta_path in metas:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["cached_at"] = meta["cached_at"] - seconds
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+
+def _serve_unparseable_policy(world: PolicyScopeWorld) -> None:
+    assert world.policy_repository is not None
+    write(world.policy_repository.worktree / "apm-policy.yml", "- not-a-mapping\n")
+    world.repositories.commit(world.policy_repository, message="policy")
+
+
+def _pin_mismatched_policy_hash(project: Path) -> None:
+    manifest = load_yaml(project / "apm.yml")
+    manifest["policy"] = {"hash": f"sha256:{'0' * 64}"}
+    dump_yaml(manifest, project / "apm.yml")
+
+
+def _stale_policy_with_fetch_failure_block(world: PolicyScopeWorld, project: Path) -> None:
+    _age_policy_cache(world, 2 * 3600)
+    _serve_unparseable_policy(world)
+
+
+@pytest.mark.parametrize(
+    ("policy", "make_blocking", "expected"),
+    [
+        (_POLICY, lambda _world, project: _pin_mismatched_policy_hash(project), "hash mismatch"),
+        (
+            {**_POLICY, "fetch_failure": "block"},
+            _stale_policy_with_fetch_failure_block,
+            "fetch_failure=block",
+        ),
+    ],
+    ids=["hash-mismatch", "cached-stale-fetch-failure-block"],
+)
+def test_audit_ci_replay_routes_policy_outcome_like_install(
+    tmp_path: Path, apm_binary_path: Path, policy: dict, make_blocking, expected: str
+) -> None:
+    """The ``audit --ci`` drift replay reads org policy through outcome routing."""
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    hooked = _publish_hooked(world, "pkg-hooked")
+    world.publish_policy(policy)
+    runner = _runner(apm_binary_path)
+    project = world.consumer(
+        dependencies=[f"{hooked.slug}#v1.0.0"],
+        targets=("claude",),
+        extra={"executables": {"allow": {f"{ORG}/pkg-hooked": {"hooks": True}}}},
+    )
+    (project / ".claude").mkdir()
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        run_step(runner, ("install",), cwd=project, env=env, step="install")
+        assert _hooks_deployed(project)
+        run_step(runner, ("audit", "--ci"), cwd=project, env=env, step="audit-control")
+
+        make_blocking(world, project)
+        shutil.rmtree(project / "apm_modules")
+
+        result = run_step(
+            runner, ("audit", "--ci"), cwd=project, env=env, step="audit-replay", expected=1
+        )
+        text = output(result)
+        assert "[x]" in text, text
+        assert "Blocked by org policy" in " ".join(text.split()), text
+        assert expected in " ".join(text.split()), text
+
+        # Parity: install refuses the same policy outcome.
+        install = run_step(
+            runner, ("install",), cwd=project, env=env, step="install-parity", expected=1
+        )
+        assert expected in " ".join(output(install).split()), output(install)
+
+
+def test_lifecycle_scripts_are_suppressed_when_org_policy_cannot_be_resolved(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A policy discovery error suppresses lifecycle scripts with a warning."""
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_policy(
+        {**_POLICY, "extends": f"{ORG}/.github", "executables": {"deny_all": True}}
+    )
+    marker = world.isolated.root / "fired.log"
+    project = world.consumer(
+        extra={
+            "lifecycle": {
+                "pre-compile": [{"type": "command", "bash": f"echo pre-compile >> '{marker}'"}]
+            }
+        }
+    )
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        run_step(runner, ("lifecycle", "trust"), cwd=project, env=env, step="trust")
+        world.clear_policy_cache()
+
+        result = run_step(
+            runner, ("compile",), cwd=project, env=env, step="compile-cycle", expected=(0, 1)
+        )
+
+        assert not marker.exists(), output(result)
+        assert "org policy could not be enforced" in output(result), output(result)
+
+        # Control: a resolvable policy without the ceiling lets the script fire.
+        world.publish_policy(_POLICY)
+        world.clear_policy_cache()
+        result = run_step(
+            runner, ("compile",), cwd=project, env=env, step="compile-control", expected=(0, 1)
+        )
+        assert marker.exists(), output(result)
 
 
 def test_one_prune_retires_revoked_bundle_hooks_and_removes_an_orphan(

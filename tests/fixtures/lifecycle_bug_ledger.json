@@ -561,7 +561,7 @@
     {
       "issue": 4080,
       "fixed_in": "Unreleased",
-      "summary": "apm unpack deployed bundle files without the shared install owners that apm install <bundle> uses: org policy, integrity under require_hashes, the lifecycle lock and the lockfile record.",
+      "summary": "apm unpack deploys through the shared bundle-admission owner that apm install <bundle> uses: org policy, integrity under require_hashes, the lifecycle lock and the lockfile record.",
       "failure_modes": ["transaction", "ownership", "outcome"],
       "properties": ["transaction.failed_command_preserves_state", "ownership.preserve_unowned", "outcome.status_matches_state"],
       "regression_tests": [
@@ -582,7 +582,7 @@
     {
       "issue": 4125,
       "fixed_in": "Unreleased",
-      "summary": "apm update re-locked a registry dependency whose version did not move without verifying its locked hash, unlike a git dependency whose commit did not move.",
+      "summary": "apm update verifies a registry dependency whose version did not move against its locked hash, as it does for a git dependency whose commit did not move.",
       "failure_modes": [
         "transaction",
         "reference",
@@ -596,6 +596,56 @@
       "regression_tests": [
         "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_refuses_altered_bytes_for_an_unchanged_registry_version",
         "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_accepts_a_new_registry_version"
+      ]
+    },
+    {
+      "issue": 4079,
+      "fixed_in": "0.37.0",
+      "summary": "Policy outcome routing consistency: the apm audit --ci drift replay and the lifecycle script policy gate now route every org policy discovery outcome as install does, so an outcome that stops install also stops the audit replay and lifecycle scripts.",
+      "failure_modes": ["outcome", "routing"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_audit_ci_replay_routes_policy_outcome_like_install",
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_lifecycle_scripts_are_suppressed_when_org_policy_cannot_be_resolved"
+      ]
+    },
+    {
+      "issue": 4084,
+      "fixed_in": "0.37.0",
+      "summary": "Policy outcome routing consistency: apm audit --ci and apm approve handled some org policy discovery outcomes differently from apm install; every policy reader now takes one routed decision per outcome from a closed outcome set.",
+      "failure_modes": ["outcome", "routing"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_policy_outcome_routing_lifecycle.py::test_every_policy_reader_routes_the_outcome_like_install",
+        "tests/integration/test_policy_outcome_routing_lifecycle.py::test_approve_under_unreachable_policy_follows_fetch_failure_default"
+      ]
+    },
+    {
+      "issue": 4140,
+      "fixed_in": "0.37.0",
+      "summary": "An org policy with a wrongly typed field (for example enforcement given as a list) stopped install with an internal error; it is now a malformed policy, reported and routed by policy.fetch_failure_default.",
+      "failure_modes": ["outcome", "routing"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_policy_outcome_routing_lifecycle.py::test_wrongly_typed_policy_field_routes_as_malformed"
+      ]
+    },
+    {
+      "issue": 4235,
+      "fixed_in": "Unreleased",
+      "summary": "Registry archive extraction applies one set of archive limits to every accepted format: entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries, with every entry validated before the first write.",
+      "failure_modes": ["transaction", "observation"],
+      "properties": ["transaction.failed_command_preserves_state", "filesystem.open_world_observation"],
+      "regression_tests": [
+        "tests/unit/registry/test_extractor.py::TestArchiveLimitsApplyToEveryFormat::test_entry_count_cap",
+        "tests/unit/registry/test_extractor.py::TestArchiveLimitsApplyToEveryFormat::test_uncompressed_size_cap_counts_streamed_bytes",
+        "tests/unit/registry/test_extractor.py::TestArchiveLimitsApplyToEveryFormat::test_duplicate_entry_is_refused",
+        "tests/unit/registry/test_extractor.py::test_tar_special_file_is_refused",
+        "tests/unit/registry/test_extractor.py::test_tar_size_cap_applies_before_reading_past_an_oversized_member",
+        "tests/unit/registry/test_extractor.py::test_conflicting_entries_are_refused_before_any_write",
+        "tests/unit/registry/test_extractor.py::test_zip_special_file_modes_are_refused",
+        "tests/unit/registry/test_extractor.py::test_unsafe_entry_after_valid_ones_leaves_nothing_written",
+        "tests/integration/test_registry_archive_limits_lifecycle.py::test_registry_archive_over_the_limits_is_refused_without_writing"
       ]
     }
   ],

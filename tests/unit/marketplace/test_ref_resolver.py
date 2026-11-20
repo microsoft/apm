@@ -246,7 +246,7 @@ def _make_completed(stdout: str = "", stderr: str = "", returncode: int = 0):
 class TestRefResolver:
     """Tests for RefResolver with mocked subprocess."""
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_ado_remote_url_uses_canonical_dependency_url(
         self,
         mock_run: MagicMock,
@@ -268,7 +268,7 @@ class TestRefResolver:
         assert parsed.path == "/apm-org/apm-project/_git/consume-contract"
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_visualstudio_remote_uses_legacy_two_segment_path(
         self,
         mock_run: MagicMock,
@@ -288,7 +288,7 @@ class TestRefResolver:
         assert parsed.path == "/Platform/_git/standards"
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_ado_server_remote_preserves_explicit_port(
         self,
         mock_run: MagicMock,
@@ -328,7 +328,7 @@ class TestRefResolver:
             "https://dev.azure.com/apm-org/other-project/_git/consume-contract",
         ),
     )
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_ado_remote_url_rejects_unsafe_variants(
         self,
         mock_run: MagicMock,
@@ -347,7 +347,7 @@ class TestRefResolver:
         mock_run.assert_not_called()
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_ado_remote_url_is_part_of_cache_identity(
         self,
         mock_run: MagicMock,
@@ -374,7 +374,7 @@ class TestRefResolver:
         assert mock_run.call_count == 2
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_list_remote_refs_success(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
         resolver = RefResolver(timeout_seconds=5.0)
@@ -384,7 +384,7 @@ class TestRefResolver:
         assert refs[0].sha == _SHA_A
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_anonymous_first_retries_with_resolved_auth(self, mock_run: MagicMock) -> None:
         mock_run.side_effect = (
             _make_completed(returncode=128, stderr="authentication required"),
@@ -415,7 +415,7 @@ class TestRefResolver:
         assert mock_run.call_args_list[1].kwargs["env"]["ATTEMPT"] == "authenticated"
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_cache_hit(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
         resolver = RefResolver(timeout_seconds=5.0)
@@ -425,7 +425,7 @@ class TestRefResolver:
         assert mock_run.call_count == 1
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_different_remotes_separate_calls(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
         resolver = RefResolver(timeout_seconds=5.0)
@@ -434,7 +434,7 @@ class TestRefResolver:
         assert mock_run.call_count == 2
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_git_failure_raises(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(
             returncode=128,
@@ -445,7 +445,7 @@ class TestRefResolver:
             resolver.list_remote_refs("acme/gone")
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_timeout_raises(self, mock_run: MagicMock) -> None:
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=5.0)
         resolver = RefResolver(timeout_seconds=5.0)
@@ -453,7 +453,7 @@ class TestRefResolver:
             resolver.list_remote_refs("acme/slow")
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_os_error_raises(self, mock_run: MagicMock) -> None:
         mock_run.side_effect = OSError("git not found")
         resolver = RefResolver(timeout_seconds=5.0)
@@ -467,7 +467,7 @@ class TestRefResolver:
             resolver.list_remote_refs("acme/tools")
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_offline_mode_cache_hit(self, mock_run: MagicMock) -> None:
         """Pre-populate cache, then switch to offline."""
         mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
@@ -480,7 +480,7 @@ class TestRefResolver:
         assert len(refs) == 3
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_token_redacted_in_error(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(
             returncode=128,
@@ -492,7 +492,7 @@ class TestRefResolver:
         assert "ghp_secret" not in str(exc_info.value)
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_stderr_translator_disabled(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(
             returncode=128,
@@ -506,7 +506,7 @@ class TestRefResolver:
             resolver.list_remote_refs("acme/tools")
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_empty_repo(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout="")
         resolver = RefResolver(timeout_seconds=5.0)
@@ -515,7 +515,7 @@ class TestRefResolver:
         resolver.close()
 
     @pytest.mark.windows_compat
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_correct_command_args(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout="")
         resolver = RefResolver(timeout_seconds=7.5, host="github.com")
@@ -532,7 +532,7 @@ class TestRefResolver:
         assert kwargs["text"] is True
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_ssh_transport_uses_ssh_url_without_http_auth(
         self,
         mock_run: MagicMock,
@@ -561,7 +561,7 @@ class TestRefResolver:
         assert all("extraheader" not in key for key in keys)
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_ssh_transport_with_custom_port_uses_explicit_url(
         self,
         mock_run: MagicMock,
@@ -580,7 +580,7 @@ class TestRefResolver:
         assert args[0][4] == "ssh://git@github.com:2222/acme/tools.git"
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_ssh_transport_preserves_exact_unsuffixed_rewrite_request(
         self,
         mock_run: MagicMock,
@@ -600,7 +600,7 @@ class TestRefResolver:
         assert args[0][4] == requested_url
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_ssh_transport_rejects_requested_url_for_different_remote(
         self,
         mock_run: MagicMock,
@@ -621,7 +621,7 @@ class TestRefResolver:
         mock_run.assert_not_called()
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_ado_ssh_transport_uses_azure_devops_remote_shape(
         self,
         mock_run: MagicMock,
@@ -639,7 +639,7 @@ class TestRefResolver:
         assert args[0][4] == "git@ssh.dev.azure.com:v3/contoso/platform/tools"
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_ado_ssh_transport_accepts_git_path_from_canonical_owner(
         self,
         mock_run: MagicMock,
@@ -674,7 +674,7 @@ class TestRefResolver:
 class TestResolveRefSha:
     """Tests for single-ref resolution via resolve_ref_sha."""
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_happy_path_returns_sha(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(
             stdout=f"{_SHA_A}\tHEAD\n",
@@ -685,7 +685,7 @@ class TestResolveRefSha:
         resolver.close()
 
     @pytest.mark.windows_compat
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_resolves_specific_ref(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(
             stdout=f"{_SHA_B}\trefs/heads/main\n",
@@ -704,7 +704,7 @@ class TestResolveRefSha:
         assert parsed.path.rstrip("/") == "/acme/tools.git"
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_ref_not_found_raises(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout="")
         resolver = RefResolver(timeout_seconds=5.0)
@@ -712,7 +712,7 @@ class TestResolveRefSha:
             resolver.resolve_ref_sha("acme/tools", ref="nonexistent")
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_network_failure_raises(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(
             returncode=128,
@@ -723,7 +723,7 @@ class TestResolveRefSha:
             resolver.resolve_ref_sha("acme/tools")
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_timeout_raises(self, mock_run: MagicMock) -> None:
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=5.0)
         resolver = RefResolver(timeout_seconds=5.0)
@@ -731,7 +731,7 @@ class TestResolveRefSha:
             resolver.resolve_ref_sha("acme/tools")
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_os_error_raises(self, mock_run: MagicMock) -> None:
         mock_run.side_effect = OSError("git not found")
         resolver = RefResolver(timeout_seconds=5.0)
@@ -739,7 +739,7 @@ class TestResolveRefSha:
             resolver.resolve_ref_sha("acme/tools")
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_does_not_use_cache(self, mock_run: MagicMock) -> None:
         """resolve_ref_sha never reads from or writes to the cache."""
         mock_run.return_value = _make_completed(
@@ -752,7 +752,7 @@ class TestResolveRefSha:
         assert mock_run.call_count == 2  # Called twice (no cache hit).
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_security_env_vars(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(
             stdout=f"{_SHA_A}\tHEAD\n",
@@ -765,7 +765,7 @@ class TestResolveRefSha:
         assert env.get("GIT_ASKPASS") == "echo"
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_token_redacted_in_error(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(
             returncode=128,
@@ -810,7 +810,7 @@ class TestRemoteRef:
 class TestGitTerminalPromptSuppression:
     """Subprocess calls must include GIT_TERMINAL_PROMPT=0 to prevent hangs."""
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_env_includes_git_terminal_prompt(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
         resolver = RefResolver(timeout_seconds=5.0)
@@ -823,7 +823,7 @@ class TestGitTerminalPromptSuppression:
         )
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_env_includes_git_askpass(self, mock_run: MagicMock) -> None:
         mock_run.return_value = _make_completed(stdout=_MOCK_LS_REMOTE_OUTPUT)
         resolver = RefResolver(timeout_seconds=5.0)
@@ -843,7 +843,7 @@ class TestGitTerminalPromptSuppression:
 class TestRefResolverGHEHost:
     """Tests for RefResolver with custom or environment-driven host."""
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_custom_host_in_url(self, mock_run: MagicMock) -> None:
         """RefResolver with explicit host uses that host in ls-remote URL."""
         resolver = RefResolver(host="corp.ghe.com")
@@ -856,7 +856,7 @@ class TestRefResolverGHEHost:
         assert parsed.path.rstrip("/") == "/acme/tools.git"
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_default_host_env_var(
         self, mock_run: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -871,7 +871,7 @@ class TestRefResolverGHEHost:
         assert parsed.hostname == "ghe.example.com"
         resolver.close()
 
-    @patch("apm_cli.marketplace.ref_resolver.subprocess.run")
+    @patch("subprocess.run")
     def test_resolve_ref_sha_custom_host(self, mock_run: MagicMock) -> None:
         """resolve_ref_sha with custom host uses that host in URL."""
         resolver = RefResolver(host="corp.ghe.com")
@@ -904,7 +904,7 @@ class TestRefResolverTokenInjection:
     def test_token_uses_header_and_url_has_no_userinfo(self) -> None:
         """When token is provided, the URL remains credential-free."""
         resolver = RefResolver(host="github.com", token="ghp_testtoken123")
-        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = _make_completed("aaaa" * 10 + "\trefs/tags/v1.0.0\n")
             resolver.list_remote_refs("owner/repo")
             cmd_args = mock_run.call_args[0][0]
@@ -926,7 +926,7 @@ class TestRefResolverTokenInjection:
     def test_no_token_url_has_git_suffix(self) -> None:
         """Without token, URL still ends with .git and has no userinfo."""
         resolver = RefResolver(host="github.com")
-        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = _make_completed("aaaa" * 10 + "\trefs/tags/v1.0.0\n")
             resolver.list_remote_refs("owner/repo")
             cmd_args = mock_run.call_args[0][0]
@@ -938,7 +938,7 @@ class TestRefResolverTokenInjection:
     def test_resolve_ref_sha_with_token_uses_header(self) -> None:
         """Single-ref resolution also keeps the token out of its URL."""
         resolver = RefResolver(host="corp.ghe.com", token="ghp_xxx")
-        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = _make_completed("bbbb" * 10 + "\trefs/heads/main\n")
             resolver.resolve_ref_sha("org/repo", "main")
             cmd_args = mock_run.call_args[0][0]
@@ -967,7 +967,7 @@ class TestRefResolverTokenInjection:
     def test_ado_pat_uses_basic_header_without_url_credentials(self) -> None:
         """ADO PATs stay out of the process-visible remote URL."""
         resolver = RefResolver(host="dev.azure.com", token="ado_pat")
-        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = _make_completed("aaaa" * 10 + "\trefs/heads/main\n")
 
             resolver.list_remote_refs("contoso/platform/_git/repo")
@@ -1004,7 +1004,7 @@ class TestRefResolverTokenInjection:
             transport_scheme="ssh",
         )
 
-        with patch("apm_cli.marketplace.ref_resolver.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = _make_completed(
                 stderr="TF401019: The Git repository does not exist or you do not have permissions.",
                 returncode=128,

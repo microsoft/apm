@@ -274,10 +274,10 @@ def _assert_policy_ttl_refreshes(data: dict[str, Any]) -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         project_root = Path(temp_dir)
         with patch("apm_cli.policy.discovery.policy_get", return_value=response) as request:
-            with patch("apm_cli.policy.discovery.time.time", return_value=cached_at):
+            with patch("time.time", return_value=cached_at):
                 cold = discovery._fetch_from_url(POLICY_URL, project_root)
             with patch(
-                "apm_cli.policy.discovery.time.time",
+                "time.time",
                 return_value=cached_at + ttl + 1,
             ):
                 refreshed = discovery._fetch_from_url(POLICY_URL, project_root)

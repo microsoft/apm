@@ -55,7 +55,7 @@ class TestDownloadSubdirectoryPermissionError:
         raises *side_effect*, returning whatever exception propagates."""
         with (
             patch(
-                "apm_cli.deps.github_downloader.tempfile.mkdtemp",
+                "tempfile.mkdtemp",
                 side_effect=side_effect,
             ),
             patch("apm_cli.deps.github_downloader._rmtree"),
@@ -149,7 +149,7 @@ class TestDownloadSubdirectoryPermissionError:
 
         with (
             patch(
-                "apm_cli.deps.github_downloader.tempfile.mkdtemp",
+                "tempfile.mkdtemp",
                 return_value=fake_temp,
             ),
             patch.object(

@@ -258,7 +258,7 @@ def test_metrics_json_counts_reflect_a_read_once_parse_once_clean_run(
     real_inventory = build_inventory(ROOT)
 
     assert metrics["inventory_file_count"] == len(real_inventory.files)
-    assert metrics["excluded_root_count"] == len(EXCLUDED_ROOTS) == 17
+    assert metrics["excluded_root_count"] == len(EXCLUDED_ROOTS) == 18
     assert metrics["read_errors"] == 0
     assert metrics["parse_errors"] == 0
     assert metrics["max_reads_per_file"] <= 1

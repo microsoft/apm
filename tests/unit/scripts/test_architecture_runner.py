@@ -609,6 +609,7 @@ contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
 contracts-tooling-governance-evidence
 contracts-tooling-lifecycle-script-gate
+contracts-tooling-lifecycle-policy-errors
 contracts-tooling-lockfile-generator-gate
 contracts-tooling-lockfile-generator-stamp
 contracts-tooling-lockfile-read
@@ -675,7 +676,9 @@ install-deployment-outcome
 install-deployment-package-target-authorization
 install-deployment-plugin-bin-eligibility
 install-deployment-policy-disable-switch-owner
+install-deployment-policy-field-types
 install-deployment-policy-mcp-transport-projection
+install-deployment-policy-outcome-routing
 install-deployment-policy-remote-origin-owner
 install-deployment-policy-violation-subjects
 install-deployment-primitive-classification
@@ -783,6 +786,7 @@ registry_delegation.runtime_descriptors
 registry_delegation.target_vocabulary
 registry_delegation.user_invocable_resolution
 registry_delegation.version_rendering
+transport-platform-archive-extraction-limits
 transport-platform-artifactory-full-commit-sha
 transport-platform-artifactory-netrc-isolation
 transport-platform-auth-outcome-owner
