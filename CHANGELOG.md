@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rewriting a lockfile at `lockfile_version` 2 or later never writes version 1, after registry or git-semver dependencies are removed. (#4372)
 - User-lockfile deployment rows record `scope: user`, and paths under a target root outside HOME are target-relative. (#4375)
 - `apm install` refuses a marketplace plugin version whose ref changed since it was installed, naming both refs, instead of re-trusting it after one warning. (closes #4400, #4416)
+- `apm init --apply` and `apm discover --apply` without `--yes` never prompt when `APM_NON_INTERACTIVE` or `CI` is set, including on a Windows console; they print the consent error. (#4413)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - Registry transport errors render operating-system error text in printable ASCII, so a TLS failure on macOS no longer prints curly quotes. (#4369)
