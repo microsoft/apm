@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
 
 ## [0.37.0] - 2026-11-20
