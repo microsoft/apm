@@ -66,7 +66,8 @@ pytestmark = [
 
 ENFORCEMENTS = ("off", "warn", "block")
 SOURCE = "org:lifecycle-org/.github"
-MISS, RESOLVED = "miss", "resolved"
+MISS, RESOLVED, PREVIEW = "miss", "resolved", "preview"
+_PREVIEW_LINE = "Would be blocked by policy"
 
 
 @dataclass(frozen=True)
@@ -124,7 +125,7 @@ OWNER_ROWS: Mapping[str, OwnerRow] = {
 
 
 class RecordingLogger:
-    """Records the two announcement calls the owner makes."""
+    """Records the announcement calls the owner makes, and a dry run's preview."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
@@ -134,6 +135,10 @@ class RecordingLogger:
 
     def policy_discovery_miss(self, **kwargs) -> None:
         self.calls.append((MISS, kwargs))
+
+    def warning(self, message: str, **_kwargs) -> None:
+        # A dry run previews the block the real command applies (#4455).
+        self.calls.append((PREVIEW, {"message": message}))
 
 
 def _fetch_result(row: OwnerRow, enforcement: str) -> PolicyFetchResult:
@@ -162,11 +167,16 @@ def _route(result: PolicyFetchResult, row: OwnerRow, *, preview: bool) -> tuple:
         )
     except PolicyViolationError as exc:
         decision = "blocked:" + str(exc).split(":", 1)[0]
-    announced = tuple(
-        (kind, kwargs.get("outcome") if kind == MISS else kwargs.get("enforcement"))
-        for kind, kwargs in log.calls
-    )
+    announced = tuple((kind, _announced_value(kind, kwargs)) for kind, kwargs in log.calls)
     return decision, announced
+
+
+def _announced_value(kind: str, kwargs: dict) -> str | None:
+    if kind == MISS:
+        return kwargs.get("outcome")
+    if kind == PREVIEW:
+        return kwargs["message"].split(":", 1)[0]
+    return kwargs.get("enforcement")
 
 
 def _trust(result: PolicyFetchResult, row: OwnerRow, project: Path) -> tuple:
@@ -192,9 +202,13 @@ def _expected_owner(row: OwnerRow, enforcement: str) -> dict:
         (kind, row.outcome if kind == MISS else enforcement) for kind in row.announces
     )
     misses = tuple(kind for kind in row.announces if kind == MISS)
+    # A fetch_failure_default block raises; the exception is its only report,
+    # so the route announces no miss that would claim it proceeds (#4180).
+    route_announced = () if row.blocks and row.knob == "block" else announced
     return {
-        "route": ("blocked:Install blocked" if row.blocks else kept, announced),
-        "preview": (kept, announced),
+        "route": ("blocked:Install blocked" if row.blocks else kept, route_announced),
+        # A dry run never fails closed; it previews the block instead (#4455).
+        "preview": (kept, announced + (((PREVIEW, _PREVIEW_LINE),) if row.blocks else ())),
         # A trust reader never re-announces a resolved policy; a block is reported
         # only by its exception.
         "trust": ("blocked:Blocked by org policy", ()) if row.blocks else (kept, misses),
