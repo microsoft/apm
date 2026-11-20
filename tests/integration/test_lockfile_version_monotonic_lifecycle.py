@@ -53,10 +53,6 @@ def _apm(binary: Path, project: Path, env: dict[str, str], *args: str) -> str:
     return output
 
 
-def _lock_version(project: Path) -> str:
-    return str(load_yaml(project / "apm.lock.yaml")["lockfile_version"])
-
-
 @pytest.mark.req("req-lk-002")
 def test_lockfile_version_is_kept_after_the_v2_dependency_is_removed(
     apm_binary_path: Path, tmp_path: Path
@@ -92,7 +88,9 @@ def test_lockfile_version_is_kept_after_the_v2_dependency_is_removed(
 
     _apm(apm_binary_path, project, env, "uninstall", "apm-fixture-org/semver-tools")
     assert load_yaml(project / "apm.yml")["dependencies"]["apm"] == ["./pkg"]
-    assert _lock_version(project) == "2"
+    assert "lockfile_version: '2'" in (project / "apm.lock.yaml").read_text(encoding="utf-8")
 
     _apm(apm_binary_path, project, env, "install")
-    assert _lock_version(project) in {"2", "4"}
+    lock_text = (project / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert "lockfile_version: '1'" not in lock_text
+    assert "lockfile_version: '2'" in lock_text or "lockfile_version: '4'" in lock_text

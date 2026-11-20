@@ -61,13 +61,13 @@ def test_v4_marker_follows_framed_content_hashes_not_the_floor(tmp_path: Path):
     first = LockFile()
     first.add_dependency(_git_dep(content_hash="sha256:" + "b" * 64))
     first.write(path)
-    assert LockFile.read(path).lockfile_version == "4"
+    assert "lockfile_version: '4'" in path.read_text(encoding="utf-8")
 
     rewrite = LockFile()
     rewrite.add_dependency(_git_dep())
     rewrite.write(path)
 
-    assert LockFile.read(path).lockfile_version == "2"
+    assert "lockfile_version: '2'" in path.read_text(encoding="utf-8")
 
 
 def test_new_lockfile_without_v2_entries_is_v1(tmp_path: Path):
