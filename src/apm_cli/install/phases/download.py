@@ -172,3 +172,7 @@ def _report_cache_mismatch(ctx: InstallContext, dep_key: str, locked_dep, path) 
     logger = getattr(ctx, "logger", None)
     if logger is not None:
         logger.progress(message)
+    from apm_cli.install import prior_copy
+
+    # The re-download must not cost the copy if the lock refuses it (#4353).
+    prior_copy.set_aside(ctx, dep_key, path)

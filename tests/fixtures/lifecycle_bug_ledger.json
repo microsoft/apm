@@ -2428,6 +2428,17 @@
         "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
         "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
       ]
+    },
+    {
+      "issue": 4353,
+      "fixed_in": "Unreleased",
+      "summary": "A content-hash refusal removed or replaced the package copy already in apm_modules, so a failed install changed durable project state.",
+      "failure_modes": ["transaction", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_content_hash_refusal_keeps_modules_lifecycle.py::test_content_hash_refusal_leaves_apm_modules_unchanged",
+        "tests/lifecycle/security/test_integrity.py::test_integrity_row"
+      ]
     }
   ],
   "lifecycle_contracts": [

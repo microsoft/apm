@@ -663,6 +663,7 @@ class FreshDependencySource(DependencySource):
             extensions_from_resolved_package,
         )
         from apm_cli.drift import build_download_ref
+        from apm_cli.install import prior_copy
         from apm_cli.utils.path_security import safe_rmtree
 
         ctx = self.ctx
@@ -901,6 +902,7 @@ class FreshDependencySource(DependencySource):
             ensure_carried_licenses_match(
                 ctx, dep_key, install_path, dep_locked_chk, resolved_commit
             )
+            prior_copy.discard(ctx, dep_key)
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
@@ -936,8 +938,11 @@ class FreshDependencySource(DependencySource):
             )
 
         except DirectDependencyError:
+            # A refused fetch leaves apm_modules as it was (#4353).
+            prior_copy.restore(ctx, dep_key, install_path)
             raise
         except Exception as e:
+            prior_copy.restore(ctx, dep_key, install_path)
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             # task_id may not exist if progress.add_task failed; guard it.
             try:  # noqa: SIM105

@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` that refuses a content-hash mismatch leaves `apm_modules` as it was. (closes #4353)
 - With `PROXY_REGISTRY_ONLY=1`, `apm update` probes no source host, the automatic update check is skipped, and the direct org policy fetch is announced. (closes #4088, #4158)
 - MCP registry requests send only the credentials APM is configured with, through credential-scoped HTTP sessions. (#4158)
 - `apm update` verifies unchanged registry versions against their locked hash and fails closed on a mismatch. (closes #4125, #4157)

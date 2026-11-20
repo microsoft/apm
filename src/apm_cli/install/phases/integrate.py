@@ -70,7 +70,6 @@ def _resolve_download_strategy(
         locked_copy_proof,
     )
     from apm_cli.models.apm_package import GitReferenceType
-    from apm_cli.utils.path_security import safe_rmtree
 
     existing_lockfile = ctx.existing_lockfile
     update_refs = ctx.update_refs
@@ -296,7 +295,9 @@ def _resolve_download_strategy(
             diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
             if logger:
                 logger.progress(_hash_msg)
-            safe_rmtree(install_path, ctx.apm_modules_dir)
+            from apm_cli.install import prior_copy
+
+            prior_copy.set_aside(ctx, dep_ref.get_unique_key(), install_path)
             skip_download = False
 
     # When registry-only mode is active, bypass cache if the
