@@ -3728,8 +3728,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-marketplace-catalog-credentials",
         rule_id="transport-platform-marketplace-catalog-credentials",
         path="src/apm_cli/marketplace/client.py",
-        old="            ambient_credentials=False,\n",
-        new="            ambient_credentials=True,\n",
+        old="            bind_query=credential.presented,\n            ambient_credentials=False,\n",
+        new="            bind_query=credential.presented,\n            ambient_credentials=True,\n",
         intent="Hosted catalog requests regain ambient .netrc credentials.",
     ),
     MutationCase(
