@@ -348,9 +348,16 @@ def _deployed(world: _World) -> dict[str, bytes]:
 def test_branch_switch_then_source_edit_never_deletes_skill_members(
     tmp_path: Path, apm_binary_path: Path, variant: str
 ) -> None:
-    """Install keeps every member and lock entry; an unprovable edit refuses with a recovery."""
+    """Install keeps every member and lock entry; an unprovable edit refuses with a recovery.
+
+    The printed recovery is scoped to the refused skill: running it never
+    overwrites a genuine user edit in another deployed skill.
+    """
     world = _new_world(tmp_path, apm_binary_path)
     _committed_local_project(world)
+    _write(world.project / ".apm/skills/y/SKILL.md", _LOCAL_SKILL.replace("x", "y"))
+    assert world.apm("install").returncode == 0
+    _commit_all(world, "A: deploy skill y")
     members = set(_deployed(world))
     assert members == {f"{_X}/SKILL.md", f"{_X}/references/a.md"}
 
@@ -380,6 +387,9 @@ def test_branch_switch_then_source_edit_never_deletes_skill_members(
         world.git("stash", "drop", "-q")
     edited = _LOCAL_SKILL + "Read a (A2).\n"
     _write(world.project / ".apm/skills/x/SKILL.md", edited)
+    other = world.project / ".agents/skills/y/SKILL.md"
+    other.write_text(other.read_text(encoding="ascii") + _USER_EDIT, encoding="ascii")
+    other_bytes = other.read_bytes()
     before = _deployed(world)
     lock_before = (world.project / "apm.lock.yaml").read_bytes()
 
@@ -390,6 +400,7 @@ def test_branch_switch_then_source_edit_never_deletes_skill_members(
     assert _REFUSAL in output, output
     assert f"move {_X}/ aside" in output, output
     assert "then run 'apm install'" in output, output
+    assert "--force" not in output, output
     assert "Cleaned" not in output, output
     assert _deployed(world) == before
     assert (world.project / "apm.lock.yaml").read_bytes() == lock_before
@@ -399,7 +410,11 @@ def test_branch_switch_then_source_edit_never_deletes_skill_members(
     aside = world.isolated.root / "x-aside"
     shutil.move(str(world.project / _X), aside)
     recovered = world.apm("install")
-    _assert_converged(world, recovered, world.project)
+    output = _output(recovered)
+    assert recovered.returncode == 0, output
+    assert _REFUSAL not in output and "Cleaned" not in output, output
+    # The genuine edit in another skill survives the advised recovery.
+    assert other.read_bytes() == other_bytes
     assert (world.project / _X / "SKILL.md").read_text(encoding="ascii") == edited
     assert (world.project / _X / "references/a.md").read_text(encoding="ascii") == (
         "reference a, version A\n"
@@ -643,3 +658,36 @@ def test_user_scope_discarded_deploy_then_source_edit_installs(
     )
     missing = sorted(p for p in _locked_files_at(lock) if not (home / p).exists())
     assert not missing, missing
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="#4230 residual: multi-hash receipt history, 0.38 (step 5 fails closed today)",
+)
+def test_source_edit_after_branch_round_trip_installs_without_recovery(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """STRICT KNOWN CELL: step 5 of the #4230 repro should install the edit directly.
+
+    The deployed bytes match a render APM wrote earlier in this installation,
+    but receipts keep only the latest hash, so install refuses (exit 1). A
+    multi-hash receipt history would prove them and let this pass.
+    """
+    world = _new_world(tmp_path, apm_binary_path)
+    _committed_local_project(world)
+    world.git("checkout", "-q", "-b", "B")
+    _write(world.project / ".apm/skills/x/SKILL.md", _LOCAL_SKILL + "Read a (B).\n")
+    _write(world.project / ".apm/skills/x/references/a.md", "reference a, version B\n")
+    assert world.apm("install").returncode == 0
+    _commit_all(world, "B: edit and redeploy")
+    for branch in ("main", "B"):
+        world.git("checkout", "-q", branch)
+        assert world.apm("install").returncode == 0
+    # Back on main without an install: the receipts still hold branch B's bytes.
+    world.git("checkout", "-q", "main")
+    edited = _LOCAL_SKILL + "Read a (A2).\n"
+    _write(world.project / ".apm/skills/x/SKILL.md", edited)
+
+    result = world.apm("install")
+    assert result.returncode == 0, _output(result)
+    assert (world.project / _X / "SKILL.md").read_text(encoding="ascii") == edited

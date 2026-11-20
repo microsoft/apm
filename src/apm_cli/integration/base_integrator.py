@@ -173,16 +173,19 @@ def untrusted_baseline_message(
     *directory* names the deployed skill directory whose removal lets the next
     install, in the same scope, redeploy it from source.
     """
-    message = (
-        f"Skipped {entry}: no trustworthy local deployment baseline. Move the conflicting "
-        "file aside and retry; use --force only to intentionally overwrite it."
-    )
+    head = f"Skipped {entry}: no trustworthy local deployment baseline. "
     if directory is None:
-        return message
+        return (
+            f"{head}Move the conflicting file aside and retry; "
+            "use --force only to intentionally overwrite it."
+        )
+    # Scoped recovery: never a global --force that could overwrite edits elsewhere.
+    skill = f"{directory.rstrip('/')}/"
     return (
-        f"{message} To redeploy the skill, move {directory.rstrip('/')}/ aside "
-        f"(or delete it if it holds no edits), then run "
-        f"'{'apm install -g' if user_scope else 'apm install'}'."
+        f"{head}Move the conflicting file aside and retry. To redeploy only this skill, "
+        f"move {skill} aside (or delete it if it holds no edits), then run "
+        f"'{'apm install -g' if user_scope else 'apm install'}'; that rewrites {skill} "
+        "alone and keeps edited files elsewhere."
     )
 
 
