@@ -580,6 +580,53 @@ def test_frozen_consumer_accepts_equivalent_local_content_hash_encodings(
         assert rewritten["dependencies"][0]["content_hash"] == framed
 
 
+@pytest.mark.req("req-lk-016")
+@pytest.mark.parametrize(("version", "framed"), [("4", True), ("1", False)])
+def test_audit_ci_verifies_locked_content_hash_like_install(
+    tmp_path: Path, version: str, framed: bool
+) -> None:
+    """``apm audit --ci`` checks a warm copy with install's content verdict (#4187).
+
+    The copy holds the locked commit's ``.apm-pin`` marker, so only the
+    content hash, verified in the stream the lockfile version names, can
+    decide whether audit may read it.
+    """
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.audit_replay import _live_copies_stale
+    from apm_cli.install.cache_pin import write_marker
+    from apm_cli.install.source_helpers import locked_content_mismatch
+    from apm_cli.utils.content_hash import compute_package_hash
+
+    commit = "1" * 40
+    copy = tmp_path / "apm_modules" / "owner" / "pkg"
+    copy.mkdir(parents=True)
+    (copy / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n", encoding="utf-8")
+    write_marker(copy, commit)
+    recorded = compute_package_hash(copy, framed=framed)
+    lock_path = tmp_path / "apm.lock.yaml"
+
+    def lock_with(content_hash: str) -> LockFile:
+        lock_path.write_text(
+            f"lockfile_version: '{version}'\ndependencies:\n- repo_url: owner/pkg\n"
+            f"  host: github.com\n  resolved_commit: '{commit}'\n"
+            f"  content_hash: '{content_hash}'\n",
+            encoding="utf-8",
+        )
+        return LockFile.read(lock_path)
+
+    lock = lock_with(recorded)
+    dep = lock.get_dependency("owner/pkg")
+    assert not locked_content_mismatch("owner/pkg", dep, copy, lockfile=lock)
+    assert not _live_copies_stale(tmp_path / "apm_modules", lock_path)
+
+    other = compute_package_hash(copy, framed=not framed)
+    for content_hash in (other, "sha256:" + "0" * 64):
+        lock = lock_with(content_hash)
+        dep = lock.get_dependency("owner/pkg")
+        assert locked_content_mismatch("owner/pkg", dep, copy, lockfile=lock)
+        assert _live_copies_stale(tmp_path / "apm_modules", lock_path)
+
+
 @pytest.mark.req("req-lk-017")
 def test_lockfile_deployed_file_hash_mismatch_fails_closed():
     """Deployed-file re-verification oracle.
