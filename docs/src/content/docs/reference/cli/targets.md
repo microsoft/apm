@@ -130,4 +130,4 @@ Notes:
 - [`apm install`](../install/) -- uses the same target resolution to decide which harness configs to wire.
 - [`apm compile`](../compile/) -- compiles primitives for the targets shown here.
 - [Targets matrix](../../targets-matrix/) -- per-target output layout and feature support.
-- [Concepts: primitives and targets](../../../concepts/primitives-and-targets/)
+- [Concepts: primitives and targets](../../targets-matrix/)

@@ -93,4 +93,4 @@ apm unpack bundle.zip --force
 - [`apm pack`](../pack/) -- produce the bundles that `apm unpack` extracts.
 - [`apm install`](../install/) -- the preferred deploy path for plugin-format bundles.
 - [`apm audit`](../audit/) -- inspect hidden-character findings flagged during extraction.
-- [Pack a bundle](../../../producer/pack-a-bundle/) -- producer guide covering bundle formats and distribution.
+- [Pack a bundle](../../../producer/build-a-plugin/) -- producer guide covering bundle formats and distribution.

@@ -38,7 +38,7 @@ chatmode to prepend via `--chatmode`). Other primitive types --
 prompts, skills, agents, hooks, commands, MCP -- are deployed by
 `apm install` directly into the harness directories that consume them
 and are not touched by `apm compile`'s own deployment step. See
-[Primitives and targets](../../../concepts/primitives-and-targets/)
+[Primitives and targets](../../targets-matrix/)
 for the full reach map.
 
 After a successful non-dry-run compile, APM also reconciles deployed-file
@@ -46,7 +46,7 @@ ownership with the current `targets:` declaration. If the declared target set
 contracts, artifacts and lockfile entries owned by the removed target are
 cleaned up with the same hash and user-edit safeguards as `apm install` --
 this also includes merge-hook config/sidecar entries (see
-[Hooks and commands](../../../producer/author-primitives/hooks-and-commands/#hooks)
+[Hooks and commands](../../../producer/write-primitives/#hooks-and-commands)
 for what those files are) even though compile does not itself *deploy* hooks.
 
 **When you actually need it:** compile is **optional for the
@@ -69,14 +69,14 @@ Use [`apm targets`](../targets/) to preview what auto-detection
 resolves to before compiling.
 
 Before it reads sources, `apm compile` fires the `pre-compile`
-[lifecycle event](../../../enterprise/lifecycle-scripts/#generating-sources-before-compile),
+[lifecycle event](../../../enterprise/control-executables/#lifecycle-scripts),
 so a trusted project script can generate instructions under `.apm/` first.
 It does not fire with `--dry-run`, `--validate`, `--watch`, `--root`, or
 `--global`.
 
 The compiled output is scanned for hidden Unicode before any file is
 written. Critical findings cause the command to exit non-zero. See
-[Drift and secure by default](../../../consumer/drift-and-secure-by-default/).
+[Drift and secure by default](../../../enterprise/drift-detection/).
 
 ## Options
 
@@ -427,7 +427,7 @@ tests/AGENTS.md      # instructions scoped to tests/**
 Each agent harness then loads only the file nearest the code it is
 working in. If you did not expect new `AGENTS.md` / `CLAUDE.md` files
 in subdirectories, this is the distributed default in effect; see
-[Where compiled context files land](../../../concepts/primitives-and-targets/#where-compiled-context-files-land)
+[Where compiled context files land](../../../consumer/choose-harnesses/#compiled-outputs)
 for the rationale, or pass `--single-agents` for a single-file
 output.
 
@@ -449,6 +449,6 @@ Hand-authored context files without the marker still count.
 
 - [`apm install`](../install/) -- fetches dependencies into `apm_modules/` so `compile` can read them.
 - [`apm targets`](../targets/) -- shows what targets resolve to in the current project.
-- [Concepts: primitives and targets](../../../concepts/primitives-and-targets/)
-- [Concepts: lifecycle](../../../concepts/lifecycle/)
-- [Producer: compile](../../../producer/compile/) -- author workflow that calls `compile` with packaging-specific defaults.
+- [Concepts: primitives and targets](../../targets-matrix/)
+- [Concepts: lifecycle](../../../concepts/how-apm-works/)
+- [Producer: compile](../../../consumer/choose-harnesses/#compiled-outputs) -- author workflow that calls `compile` with packaging-specific defaults.

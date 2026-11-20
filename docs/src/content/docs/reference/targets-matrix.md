@@ -10,7 +10,7 @@ harness. Use this page to choose a target, debug an unexpected deploy
 location, or confirm whether a primitive is supported on a given tool.
 
 For background on the target model, see
-[Primitives and targets](../../concepts/primitives-and-targets/). For
+[How APM works](../../concepts/how-apm-works/#5-harness-and-target). For
 the runtime CLI surface, see [`apm targets`](../cli/targets/) and
 [`apm compile`](../cli/compile/). For the primitive types themselves,
 see [Primitive types](../primitive-types/).
@@ -139,7 +139,7 @@ mode no longer gets MCP servers; use the Copilot harness.
   the project-scope layout. User-scope deploys land under `~/.copilot/`, not
   `~/.github/`; hook script commands (`~/.copilot/hooks/`) resolve from any
   working directory (see the per-harness `$HOME` rule in
-  [Hooks and commands](../../producer/author-primitives/hooks-and-commands/#pitfalls)).
+  [Hooks and commands](../../producer/write-primitives/#hooks-and-commands)).
 - **Global compile.** `apm compile -g` can also render global instructions to
   `~/.copilot/AGENTS.md` for root-context readers that honor `AGENTS.md`.
 - **Prompt harness limitation.** In VS Code, only Local harness sessions load
@@ -147,7 +147,7 @@ mode no longer gets MCP servers; use the Copilot harness.
   [VS Code prompt files](https://code.visualstudio.com/docs/agent-customization/prompt-files).
   For those harnesses, ship the workflow as a skill, with
   `disable-model-invocation: true` where the host supports it. See
-  [Author a prompt](../../producer/author-primitives/prompts/#copilot-harness-limitation).
+  [Author a prompt](../../producer/write-primitives/#prompts).
 
 ## claude
 
@@ -323,7 +323,7 @@ GitHub Copilot for JetBrains IDEs.
   `github-copilot/intellij/` config directory. It does not auto-select a
   file-primitive target.
 - **Deploy directory.** User-scope `mcp.json`; see the
-  [JetBrains integration guide](../../integrations/ide-tool-integration/#jetbrains-intellij-idea-pycharm-goland-and-others)
+  [JetBrains integration guide](../../consumer/choose-harnesses/)
   for OS-specific paths. macOS and Linux use `$XDG_CONFIG_HOME` (default
   `~/.config`), while Windows uses `%LOCALAPPDATA%`.
 - **Supported primitives.** The IntelliJ-specific adapter supports MCP.
@@ -460,11 +460,11 @@ gate behavior and [`apm mcp`](../cli/mcp/) for the runtime surface.
 
 LSP servers follow the same active-target gate but are written only for
 `claude`, `copilot` and `opencode`; see
-[Install LSP servers](../../consumer/install-lsp-servers/).
+[Install LSP servers](../../consumer/install-mcp-servers/#lsp-servers).
 
 ## See also
 
 - [`apm targets`](../cli/targets/) - inspect resolved targets at runtime.
 - [`apm compile`](../cli/compile/) - target selection and compile flags.
 - [Primitive types](../primitive-types/) - what each primitive is.
-- [Primitives and targets](../../concepts/primitives-and-targets/) - conceptual model.
+- [How APM works](../../concepts/how-apm-works/#5-harness-and-target) - conceptual model.

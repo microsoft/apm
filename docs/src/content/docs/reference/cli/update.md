@@ -122,7 +122,7 @@ apm update
 - **Consent gate.** The prompt defaults to **No**. Without `--yes`, declining (or running in a non-interactive context) aborts with a clean exit; the manifest, lockfile, and workspace are untouched.
 - **No partial consent.** A single prompt covers both revision-pin manifest rewrites and the normal update plan; declining leaves everything unchanged.
 - **`--dry-run` skips the prompt.** It computes and prints the plan, including revision-pin SHA/tag rewrites, but never writes and never asks.
-- **Target contraction is reconciled.** A successful update removes unchanged dependencies' deployed files, lockfile ownership, and merge-hook config/sidecar entries for targets no longer declared in `apm.yml`, even when no dependency ref changes -- same contract as [`apm install`'s target-contraction note](../install/#notes); see [Hooks and commands](../../../producer/author-primitives/hooks-and-commands/#hooks) for what the merge-hook config/sidecar files are.
+- **Target contraction is reconciled.** A successful update removes unchanged dependencies' deployed files, lockfile ownership, and merge-hook config/sidecar entries for targets no longer declared in `apm.yml`, even when no dependency ref changes -- same contract as [`apm install`'s target-contraction note](../install/#notes); see [Hooks and commands](../../../producer/write-primitives/#hooks-and-commands) for what the merge-hook config/sidecar files are.
 - **One target decision covers services.** The effective target used for package deployment is reused for MCP and LSP reconciliation. Saved config targets are not re-detected or dropped after package updates. Required native config failures exit non-zero.
 - **No-op and service-only repair.** An accepted update with no dependency ref changes still reconciles missing MCP/LSP config. A manifest with only MCP/LSP dependencies also uses `apm update` as a configuration repair pass; `--dry-run` previews this without writing.
 - **Empty caches are restored.** If the lockfile expects dependencies but `apm_modules/` has no materialized packages, an otherwise unchanged update restores the cache from the same refs and reports `Restored dependency cache without changing refs.` No confirmation is required because dependency refs do not move.
@@ -145,5 +145,5 @@ For one release after the rename, running `apm update` from a directory **withou
 - [`apm install --frozen`](../install/) -- read-only install pinned to `apm.lock.yaml`; fails on drift. Use this in CI.
 - [CLI upgrades](../../../consumer/update-and-refresh/#update-the-apm-cli-binary) -- package-manager and standalone update paths.
 - [`apm outdated`](../outdated/) -- report dependencies with newer refs available, without changing anything.
-- [Manage dependencies (consumer guide)](../../../consumer/manage-dependencies/) -- task-oriented walkthrough.
+- [Manage dependencies (consumer guide)](../../../consumer/install-packages/) -- task-oriented walkthrough.
 - [Update and refresh](../../../consumer/update-and-refresh/) -- when to use `update`, `install --frozen`, and `self-update`.
