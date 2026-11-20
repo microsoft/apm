@@ -20,7 +20,11 @@ from tests.utils.hermetic_packaged_sample import (
     create_hermetic_packaged_sample,
 )
 
-pytestmark = [pytest.mark.e2e, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.promise("req-lk-015", "req-lk-017", "req-lk-018"),
+]
 
 _AGENT = Path(".apm") / "agents" / "fixture-agent.agent.md"
 _DEPLOYED_AGENT = ".github/agents/fixture-agent.agent.md"
