@@ -766,6 +766,7 @@ def test_manifestless_skill_bundle_subset_lifecycle(
     _assert_clean_audit(project)
 
 
+@pytest.mark.lifecycle_smoke
 @pytest.mark.parametrize("manifest", [".claude-plugin/plugin.json", "plugin.json"])
 def test_plugin_with_root_skills_subset_lifecycle(
     tmp_path: Path,
@@ -821,6 +822,7 @@ def test_plugin_with_root_skills_subset_lifecycle(
     assert_selection(("find-skills",))
     _assert_clean_audit(project)
     converged = _snapshot(project)
+    lock_bytes = (project / "apm.lock.yaml").read_bytes()
 
     shutil.rmtree(project / "apm_modules")
     shutil.rmtree(fixture.isolated.cache_root)
@@ -833,6 +835,7 @@ def test_plugin_with_root_skills_subset_lifecycle(
     )
     assert_selection(("find-skills",))
     assert _snapshot(project).semantic_bytes == converged.semantic_bytes
+    assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
     assert consumer.manifest_path.read_bytes() == manifest_bytes
     _assert_clean_audit(project)
 
