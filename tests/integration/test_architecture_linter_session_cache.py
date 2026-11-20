@@ -71,15 +71,15 @@ def _assert_cache_transparent(cases: Sequence[MutationCase]) -> str:
     """
     mismatches: list[str] = []
     digest = hashlib.sha256()
-    cold_reports: dict[str, bytes] = {}
-    for case in cases:
-        overrides = {case.path: _mutate(case)}
-        cold_reports[case.guard_id] = _findings_bytes(
-            run_selected_rules(ROOT, (case.rule_id,), source_overrides=overrides)
+    cold_reports = [
+        _findings_bytes(
+            run_selected_rules(ROOT, (case.rule_id,), source_overrides={case.path: _mutate(case)})
         )
+        for case in cases
+    ]
     with linter_session():
         warmed: set[str] = set()
-        for case in cases:
+        for index, case in enumerate(cases):
             if case.rule_id not in warmed:
                 run_selected_rules(ROOT, (case.rule_id,))
                 warmed.add(case.rule_id)
@@ -89,8 +89,8 @@ def _assert_cache_transparent(cases: Sequence[MutationCase]) -> str:
                 )
             )
             digest.update(cached)
-            if cached != cold_reports[case.guard_id]:
-                mismatches.append(case.guard_id)
+            if cached != cold_reports[index]:
+                mismatches.append(f"{case.guard_id}: {case.intent}")
     assert not mismatches, f"session cache changed findings for: {mismatches}"
     return digest.hexdigest()
 
