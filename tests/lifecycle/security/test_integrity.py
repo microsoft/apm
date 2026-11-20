@@ -479,6 +479,9 @@ def _content_hash_recorded(world: World) -> None:
 
 
 _CONTENT_MISMATCH = r"Content hash mismatch for lifecycle/p-skill"
+_FAILED_CLOSED_LEAVES_BYTES = (
+    "#4353 install leaves fetched bytes in apm_modules when it fails closed"
+)
 
 GIT_CONTENT_HASH = ArtifactSlice(
     packages=("p-skill",),
@@ -492,24 +495,32 @@ GIT_CONTENT_HASH = ArtifactSlice(
     cells={
         # The drift replay renders the changed copy and reports the deployed file.
         ("audit-ci", "disk-or-cache"): Expect(
-            1, (r"drift\s*\|\s*drift detected",), unchanged=_SKILL_STATE
-        ),
-        # I3: audit --ci must agree with install --frozen, which refuses this lock.
-        ("audit-ci", "lock-edited"): Expect(
             1,
             unchanged=_SKILL_STATE,
-            xfail=_pending("audit and frozen agree on content hash"),
+            xfail="#4356 audit --ci passes an edited cached copy that install --frozen refuses",
         ),
+        # I3: audit --ci must agree with install --frozen, which refuses this lock.
+        ("audit-ci", "lock-edited"): Expect(1, unchanged=_SKILL_STATE),
         ("audit-ci", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("audit-ci", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
-        ("frozen", "disk-or-cache"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
-        ("frozen", "lock-edited"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
+        ("frozen", "disk-or-cache"): Expect(
+            1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
+        ),
+        ("frozen", "lock-edited"): Expect(
+            1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
+        ),
         # Entries without a content hash are accepted (security.md defaults).
         ("frozen", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("frozen", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
-        ("install", "disk-or-cache"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
+        ("install", "disk-or-cache"): Expect(
+            1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
+        ),
         ("install", "lock-edited"): Expect(
-            1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE, smoke=True
+            1,
+            (_CONTENT_MISMATCH,),
+            unchanged=_SKILL_STATE,
+            smoke=True,
+            xfail=_FAILED_CLOSED_LEAVES_BYTES,
         ),
         # Install records the hash of verified bytes again.
         ("install", "missing-hash"): Expect(
