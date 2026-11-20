@@ -1,0 +1,10 @@
+{
+  "partition": "train2 residual dedupe and placement",
+  "steps_done": [1],
+  "folds": {},
+  "decisions": [
+    "step 1: --report-equal-copies lists 166 deletable copies, none in a file inside this scope (all in open-PR or protected files); nothing to delete",
+    "token_manager: 4 copies in tests/test_token_manager.py deleted; identical twins kept in forbidden tests/unit/core/test_token_manager_lifecycle.py (pure static checks, no class context)"
+  ],
+  "counts_left": {"same_body_groups": 4, "unclassified_modules": 0, "placement_offenders": 7, "weak_tests": 0}
+}

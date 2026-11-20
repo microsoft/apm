@@ -178,11 +178,6 @@ class TestResolveCredentialFromGit:
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="git", timeout=5)):
             assert GitHubTokenManager.resolve_credential_from_git("github.com") is None
 
-    def test_file_not_found_returns_none(self):
-        """Returns None when git is not installed."""
-        with patch("subprocess.run", side_effect=FileNotFoundError):
-            assert GitHubTokenManager.resolve_credential_from_git("github.com") is None
-
     def test_os_error_returns_none(self):
         """Returns None on generic OSError."""
         with patch("subprocess.run", side_effect=OSError("unexpected")):
@@ -463,9 +458,6 @@ class TestCredentialTimeout:
 class TestIsValidCredentialToken:
     """Test _is_valid_credential_token validation."""
 
-    def test_empty_string_invalid(self):
-        assert not GitHubTokenManager._is_valid_credential_token("")
-
     def test_none_coerced_invalid(self):
         """None fails the truthiness check and is reported invalid instead of raising."""
         assert GitHubTokenManager._is_valid_credential_token(None) is False
@@ -475,12 +467,6 @@ class TestIsValidCredentialToken:
 
     def test_normal_pat_valid(self):
         assert GitHubTokenManager._is_valid_credential_token("ghp_abc123")
-
-    def test_over_1024_chars_invalid(self):
-        assert not GitHubTokenManager._is_valid_credential_token("a" * 1025)
-
-    def test_exactly_1024_chars_valid(self):
-        assert GitHubTokenManager._is_valid_credential_token("a" * 1024)
 
     def test_password_for_prompt_invalid(self):
         assert not GitHubTokenManager._is_valid_credential_token(
