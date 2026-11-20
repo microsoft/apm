@@ -1,14 +1,26 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 import tomllib
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
+from tests.quality.taxonomy_ratchets import (
+    CATALOG,
+    UPDATE_COMMAND,
+    RatchetBaseline,
+    TaxonomyInventory,
+    catalog_problems,
+    catalog_source_ids,
+    collect_inventory,
+    load_catalog_ids,
+    load_ratchet_baseline,
+    placement_violations,
+    promise_violations,
+    stale_entries,
+    unclassified_growth,
+)
 
 RATCHET_TEST_SCOPE = "repository"
 
@@ -23,16 +35,7 @@ EXPECTED_MARKERS = {
     "e2e": "a real installed CLI crossing at least one command boundary",
 }
 BEHAVIORAL_MARKERS = frozenset(EXPECTED_MARKERS)
-INVENTORY_PLUGIN = "tests.quality.taxonomy_inventory_plugin"
 AUTHORITY_PROSE = "Module-level `pytestmark` is the sole behavioral classification authority."
-
-
-@dataclass(frozen=True)
-class TaxonomyInventory:
-    """Collected module declarations and effective node marker sets."""
-
-    modules: dict[str, tuple[str, ...]]
-    nodes: dict[str, tuple[str, ...]]
 
 
 def _declared_markers() -> dict[str, str]:
@@ -60,55 +63,6 @@ def _documented_marker_definitions(path: Path) -> dict[str, str]:
             definition = cells[2].rstrip(".")
             definitions[marker] = definition[:1].lower() + definition[1:]
     return definitions
-
-
-def _string_tuple_map(value: object, field: str) -> dict[str, tuple[str, ...]]:
-    """Validate one JSON mapping of strings to string arrays."""
-    assert isinstance(value, dict), f"taxonomy inventory {field} must be an object"
-    normalized: dict[str, tuple[str, ...]] = {}
-    for key, entries in value.items():
-        assert isinstance(key, str), f"taxonomy inventory {field} keys must be strings"
-        assert isinstance(entries, list), f"taxonomy inventory {field}[{key!r}] must be an array"
-        assert all(isinstance(entry, str) for entry in entries)
-        normalized[key] = tuple(entries)
-    return normalized
-
-
-def _collect_inventory(root: Path, output: Path) -> TaxonomyInventory:
-    """Collect the repository through the dedicated pytest inventory plugin."""
-    env = os.environ.copy()
-    env["APM_TAXONOMY_INVENTORY"] = str(output)
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-p",
-            "no:cacheprovider",
-            "-p",
-            INVENTORY_PLUGIN,
-            "-o",
-            "addopts=",
-            "--strict-markers",
-            "--collect-only",
-            "-q",
-            "tests",
-        ],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=300,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    data = json.loads(output.read_text(encoding="utf-8"))
-    assert isinstance(data, dict)
-    assert set(data) == {"modules", "nodes"}
-    return TaxonomyInventory(
-        modules=_string_tuple_map(data["modules"], "modules"),
-        nodes=_string_tuple_map(data["nodes"], "nodes"),
-    )
 
 
 def _behavioral(markers: tuple[str, ...]) -> tuple[str, ...]:
@@ -168,7 +122,7 @@ def marker_inventory(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> TaxonomyInventory:
     output = tmp_path_factory.mktemp("taxonomy") / "inventory.json"
-    return _collect_inventory(REPO_ROOT, output)
+    return collect_inventory(REPO_ROOT, output)
 
 
 def _classified_module_with_nodes(
@@ -279,3 +233,228 @@ def test_tm005_behavioral_marker_prose_mirrors_canonical_definitions() -> None:
         assert "uv run --frozen python scripts/check_test_assertions.py" in text
         assert "uv run --frozen python scripts/check_exact_test_duplicates.py" in text
         assert "--allow-provisional" not in text
+
+
+NEW_MODULE = "tests/unit/test_brand_new_contract.py"
+NEW_INTEGRATION_MODULE = "tests/integration/test_brand_new_contract.py"
+KNOWN_PROMISE = "req-mf-001"
+EMPTY_BASELINE = RatchetBaseline(legacy_modules=frozenset(), unclassified_modules=frozenset())
+
+
+@pytest.fixture(scope="module")
+def ratchet_baseline() -> RatchetBaseline:
+    return load_ratchet_baseline(REPO_ROOT)
+
+
+@pytest.fixture(scope="module")
+def catalog_ids() -> frozenset[str]:
+    return load_catalog_ids(REPO_ROOT)
+
+
+def _single_module(
+    module: str, markers: tuple[str, ...], promises: tuple[str, ...] = ()
+) -> TaxonomyInventory:
+    return TaxonomyInventory(
+        modules={module: markers},
+        nodes={f"{module}::test_value": markers},
+        promises={module: promises} if promises else {},
+    )
+
+
+def _write_module(root: Path, module: str, source: str) -> None:
+    path = root / module
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+
+
+def test_tm006_unclassified_modules_do_not_grow(
+    marker_inventory: TaxonomyInventory,
+    ratchet_baseline: RatchetBaseline,
+) -> None:
+    assert unclassified_growth(marker_inventory, ratchet_baseline) == []
+
+
+def test_tm006_new_unclassified_module_fails() -> None:
+    problems = unclassified_growth(_single_module(NEW_MODULE, ()), EMPTY_BASELINE)
+
+    assert len(problems) == 1
+    assert problems[0].startswith(f"{NEW_MODULE}: unclassified test module")
+    assert "add exactly one module-level behavioral marker" in problems[0]
+
+
+def test_tm006_baselined_unclassified_module_passes() -> None:
+    baseline = RatchetBaseline(
+        legacy_modules=frozenset({NEW_MODULE}),
+        unclassified_modules=frozenset({NEW_MODULE}),
+    )
+
+    assert unclassified_growth(_single_module(NEW_MODULE, ()), baseline) == []
+
+
+def test_tm007_new_modules_are_placed_by_behavior(
+    marker_inventory: TaxonomyInventory,
+    ratchet_baseline: RatchetBaseline,
+) -> None:
+    assert placement_violations(marker_inventory, ratchet_baseline, REPO_ROOT) == []
+
+
+def test_tm007_new_unit_module_under_integration_fails(tmp_path: Path) -> None:
+    _write_module(tmp_path, NEW_INTEGRATION_MODULE, "def test_value():\n    pass\n")
+
+    problems = placement_violations(
+        _single_module(NEW_INTEGRATION_MODULE, ("unit",)), EMPTY_BASELINE, tmp_path
+    )
+
+    assert len(problems) == 1
+    assert problems[0].startswith(f"{NEW_INTEGRATION_MODULE}: new module under tests/integration")
+    assert "move it to tests/unit" in problems[0]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import subprocess\n\ndef test_value():\n    subprocess.run(['git'])\n",
+        "from subprocess import check_output as co\n\ndef test_value():\n    co(['git'])\n",
+        "import os\n\ndef test_value():\n    os.execv('/bin/true', [])\n",
+    ],
+)
+def test_tm007_new_unit_module_spawning_a_process_fails(tmp_path: Path, source: str) -> None:
+    _write_module(tmp_path, NEW_MODULE, source)
+
+    problems = placement_violations(_single_module(NEW_MODULE, ("unit",)), EMPTY_BASELINE, tmp_path)
+
+    assert len(problems) == 1
+    assert problems[0].startswith(f"{NEW_MODULE}: new module under tests/unit spawns a process")
+    assert "line 4:" in problems[0]
+    assert "move the module to tests/integration" in problems[0]
+
+
+def test_tm007_mocked_process_and_legacy_modules_pass(tmp_path: Path) -> None:
+    _write_module(
+        tmp_path,
+        NEW_MODULE,
+        "import subprocess\n\n"
+        "def test_value(monkeypatch):\n"
+        "    monkeypatch.setattr(subprocess, 'run', lambda *a, **k: None)\n",
+    )
+    _write_module(tmp_path, NEW_INTEGRATION_MODULE, "import subprocess\nsubprocess.run(['git'])\n")
+    inventory = TaxonomyInventory(
+        modules={NEW_MODULE: ("unit",), NEW_INTEGRATION_MODULE: ("unit",)},
+        nodes={},
+    )
+    baseline = RatchetBaseline(
+        legacy_modules=frozenset({NEW_INTEGRATION_MODULE}), unclassified_modules=frozenset()
+    )
+
+    assert placement_violations(inventory, baseline, tmp_path) == []
+
+
+def test_tm008_new_modules_link_known_promises(
+    marker_inventory: TaxonomyInventory,
+    ratchet_baseline: RatchetBaseline,
+    catalog_ids: frozenset[str],
+) -> None:
+    assert promise_violations(marker_inventory, ratchet_baseline, catalog_ids) == []
+
+
+def test_tm008_new_module_without_promise_fails(catalog_ids: frozenset[str]) -> None:
+    problems = promise_violations(
+        _single_module(NEW_MODULE, ("unit",)), EMPTY_BASELINE, catalog_ids
+    )
+
+    assert len(problems) == 1
+    assert problems[0].startswith(f"{NEW_MODULE}: new test module declares no promise")
+    assert f"naming ids from {CATALOG.as_posix()}" in problems[0]
+
+
+def test_tm008_unknown_promise_id_fails(catalog_ids: frozenset[str]) -> None:
+    inventory = _single_module(NEW_MODULE, ("unit",), (KNOWN_PROMISE, "req-zz-999"))
+
+    problems = promise_violations(inventory, EMPTY_BASELINE, catalog_ids)
+
+    assert len(problems) == 1
+    assert problems[0].startswith(f"{NEW_MODULE}: pytest.mark.promise names unknown id(s)")
+    assert "'req-zz-999'" in problems[0]
+
+
+def test_tm008_new_module_with_known_promise_passes(catalog_ids: frozenset[str]) -> None:
+    inventory = _single_module(NEW_MODULE, ("unit",), (KNOWN_PROMISE,))
+
+    assert promise_violations(inventory, EMPTY_BASELINE, catalog_ids) == []
+
+
+def test_tm008_inventory_records_module_promises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    catalog_ids: frozenset[str],
+) -> None:
+    (tmp_path / "pytest.ini").write_text(
+        "[pytest]\nmarkers =\n    unit: unit\n    promise: promise\n",
+        encoding="utf-8",
+    )
+    _write_module(
+        tmp_path,
+        "tests/test_linked.py",
+        "import pytest\n\n"
+        f"pytestmark = [pytest.mark.unit, pytest.mark.promise({KNOWN_PROMISE!r})]\n\n"
+        "def test_value():\n    pass\n",
+    )
+    _write_module(
+        tmp_path,
+        "tests/test_unlinked.py",
+        "import pytest\n\npytestmark = pytest.mark.unit\n\ndef test_value():\n    pass\n",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(REPO_ROOT))
+
+    inventory = collect_inventory(tmp_path, tmp_path / "inventory.json")
+    problems = promise_violations(inventory, EMPTY_BASELINE, catalog_ids)
+
+    assert inventory.promises == {"tests/test_linked.py": (KNOWN_PROMISE,)}
+    assert [problem.split(":", 1)[0] for problem in problems] == ["tests/test_unlinked.py"]
+
+
+def test_tm009_taxonomy_baseline_has_no_stale_entries(
+    marker_inventory: TaxonomyInventory,
+    ratchet_baseline: RatchetBaseline,
+) -> None:
+    stale_legacy, stale_unclassified = stale_entries(marker_inventory, ratchet_baseline, REPO_ROOT)
+
+    assert (stale_legacy, stale_unclassified) == (set(), set()), (
+        f"taxonomy ratchet baseline is stale; run '{UPDATE_COMMAND}'"
+    )
+
+
+def test_tm009_stale_entries_are_detected(tmp_path: Path) -> None:
+    classified = "tests/unit/test_classified.py"
+    _write_module(tmp_path, classified, "def test_value():\n    pass\n")
+    baseline = RatchetBaseline(
+        legacy_modules=frozenset({classified, NEW_MODULE}),
+        unclassified_modules=frozenset({classified, NEW_MODULE}),
+    )
+
+    stale = stale_entries(_single_module(classified, ("unit",)), baseline, tmp_path)
+
+    assert stale == ({NEW_MODULE}, {classified, NEW_MODULE})
+
+
+def test_tm010_promise_catalog_resolves_to_sources() -> None:
+    payload = json.loads((REPO_ROOT / CATALOG).read_text(encoding="utf-8"))
+
+    assert catalog_problems(payload, catalog_source_ids(REPO_ROOT)) == []
+
+
+def test_tm010_dangling_catalog_id_fails() -> None:
+    payload = {
+        "description": "fixture",
+        "promises": [{"id": "req-zz-999", "source": "spec"}],
+        "schema_version": 1,
+    }
+
+    problems = catalog_problems(payload, {"architecture-owner": frozenset(), "spec": frozenset()})
+
+    assert len(problems) == 1
+    assert "'req-zz-999' no longer exists in its spec source" in problems[0]
+
+
+def test_tm010_promise_marker_is_registered() -> None:
+    assert "promise" in _declared_markers()

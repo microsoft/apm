@@ -27,11 +27,16 @@ CHECKERS = (
         QUALITY_DIR / "exact_test_duplicates.json",
         (
             "[+] exact test duplicate ratchet clean: "
-            "{module_count} files, 0 allowed duplicate group(s)\n"
+            "{module_count} files, {test_count} tests, "
+            "{body_groups} allowed body duplicate group(s), "
+            "{name_groups} allowed name collision group(s)\n"
         ),
     ),
 )
 ALLOW_PROVISIONAL_ENV = "APM_ALLOW_PROVISIONAL_BASELINES"
+ALGORITHM_DESCRIPTION = json.loads(
+    (QUALITY_DIR / "exact_test_duplicates.json").read_text(encoding="utf-8")
+)["algorithm_description"]
 
 
 def _assert_provisional_mode(
@@ -81,7 +86,16 @@ def test_repository_quality_baselines_are_scanned_once(
         )
 
         assert result.returncode == 0, result.stdout + result.stderr
-        assert result.stdout == expected.format(module_count=module_count)
+        counts = {
+            "module_count": module_count,
+            "body_groups": len(payload.get("body_duplicate_groups", ())),
+            "name_groups": len(payload.get("name_collision_groups", ())),
+        }
+        if "{test_count}" in expected:
+            prefix = expected.split("{test_count}", 1)[0].format(**counts)
+            assert result.stdout.startswith(prefix), result.stdout
+            counts["test_count"] = int(result.stdout[len(prefix) :].split(" ", 1)[0])
+        assert result.stdout == expected.format(**counts)
         assert result.stderr == ""
         assert baseline.is_file()
 
@@ -113,9 +127,11 @@ def test_duplicate_checker_reports_new_tracked_module_count(
     baseline.write_text(
         json.dumps(
             {
-                "algorithm": "sha256-bytes-v1",
-                "duplicate_groups": [],
-                "schema_version": 1,
+                "algorithm": "ast-body-v1",
+                "algorithm_description": ALGORITHM_DESCRIPTION,
+                "body_duplicate_groups": [],
+                "name_collision_groups": [],
+                "schema_version": 2,
                 "scope": [
                     "tests/**/test_*.py",
                     "tests/**/*_test.py",
@@ -163,9 +179,9 @@ def test_duplicate_checker_reports_new_tracked_module_count(
     )
 
     assert first_result.returncode == 0
-    assert "1 files, 0 allowed duplicate group(s)" in first_result.stdout
+    assert "1 files, 1 tests, 0 allowed body duplicate group(s)" in first_result.stdout
     assert second_result.returncode == 0
-    assert "2 files, 0 allowed duplicate group(s)" in second_result.stdout
+    assert "2 files, 2 tests, 0 allowed body duplicate group(s)" in second_result.stdout
 
 
 @pytest.mark.parametrize(
