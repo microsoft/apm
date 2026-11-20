@@ -23720,7 +23720,7 @@
     "src/apm_cli/commands/uninstall/engine.py:713",
     "src/apm_cli/commands/uninstall/engine.py:877",
     "src/apm_cli/commands/uninstall/engine.py:705",
-    "src/apm_cli/commands/update.py:467",
+    "src/apm_cli/commands/update.py:486",
     "src/apm_cli/commands/prune.py:210",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
@@ -23735,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "614517f9c410d33e32e418887835fcb0d39c216ed905f0908bfc39e43e189b53"
+ "sha256": "f842138693a73ebca63bdeb52a197b0183807dd27e891aebbccd28aeae9b2f26"
 }

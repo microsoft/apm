@@ -77,10 +77,10 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 1002, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 506, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 516, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 537, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 564, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 525, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 535, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 556, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 583, '"--target"'),
     ),
     "uninstall": (
         Ev("src/apm_cli/commands/uninstall/cli.py", 726, 'argument("packages"'),
@@ -146,7 +146,7 @@ USER_SCOPE_OPS = frozenset(
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 902, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 529, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 548, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 734, '"--global"'),
     "compile": Ev(_COMPILE, 1391, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 102, '"--global"'),
@@ -213,7 +213,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/commands/uninstall/engine.py", 713, "is an MCP server, not a package"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 877, "was not found in apm.yml"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 705, "cannot remove local-bundle"),
-            Ev("src/apm_cli/commands/update.py", 467, "No APM dependencies to update"),
+            Ev("src/apm_cli/commands/update.py", 486, "No APM dependencies to update"),
             Ev("src/apm_cli/commands/prune.py", 210, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
