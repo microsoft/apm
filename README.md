@@ -83,7 +83,7 @@ One `apm.yml` declares every primitive your agents need -- instructions, skills,
 - **[MCP servers](https://microsoft.github.io/apm/consumer/install-mcp-servers/)** -- from the GitHub MCP Registry, your own registry, a local command or a remote URL
 - **[Transitive dependencies](https://microsoft.github.io/apm/consumer/install-packages/#transitive-dependencies-and-the-lockfile)** -- packages can depend on packages; APM resolves the full tree
 - **[Publish packages](https://microsoft.github.io/apm/producer/)** -- tag a release and consumers pin `your-org/your-package#v1.2.0`; fixes reach them as Dependabot or Renovate pull requests
-- **[Build plugins](https://microsoft.github.io/apm/producer/build-a-plugin/)** -- keep your plugin's own dependencies declared and locked; `apm pack` writes the `plugin.json` each tool expects
+- **[Build plugins](https://microsoft.github.io/apm/producer/build-a-plugin/)** -- keep your plugin's own dependencies declared and locked; `apm pack` writes the `plugin.json` each tool expects, including Codex's `.codex-plugin/plugin.json`
 - **[CI/CD ready](https://microsoft.github.io/apm/consumer/run-in-ci/)** -- the [GitHub Action](https://github.com/microsoft/apm-action) installs from the lockfile on every run
 
 ### 2. Verified by lockfile
@@ -170,7 +170,7 @@ Then follow the **[Quickstart](https://microsoft.github.io/apm/quickstart/)**: a
 Teach your coding agent to use APM with the [official guide](https://github.com/microsoft/apm/tree/main/packages/apm-guide) (an expert agent plus the `apm-usage` skill):
 
 ```bash
-apm install microsoft/apm/packages/apm-guide#v0.36.1
+apm install microsoft/apm/packages/apm-guide#v0.37.0
 ```
 
 ## Community

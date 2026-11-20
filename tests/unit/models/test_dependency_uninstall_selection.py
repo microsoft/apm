@@ -264,7 +264,7 @@ def test_object_form_removal_seeds_the_orphan_scan_from_the_locked_plugin() -> N
     """The plugin's own dependencies become orphan candidates when it is removed."""
     from apm_cli.commands.uninstall.engine import _removal_targets
     from apm_cli.deps.lockfile import lockfile_parent_identity
-    from apm_cli.install.orphans import collect_orphan_candidates
+    from apm_cli.install.orphans import _collect_orphan_candidates as collect_orphan_candidates
 
     lockfile, locked = _object_form_lock()
     child = LockedDependency(

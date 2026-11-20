@@ -1020,10 +1020,10 @@ class TestInitAgentrcSuggestion:
             assert agentrc_pos > install_pos
 
     def test_agentrc_suppressed_in_plugin_mode(self):
-        """When invoked via 'apm init --plugin', no agentrc mention."""
+        """When invoked via 'apm plugin init', no agentrc mention."""
         with self.runner.isolated_filesystem():
             with patch("apm_cli.commands.init.shutil.which", return_value="/usr/bin/agentrc"):
-                result = self.runner.invoke(cli, ["init", "--plugin", "--yes", "my-plugin"])
+                result = self.runner.invoke(cli, ["plugin", "init", "--yes", "my-plugin"])
             assert result.exit_code == 0
             assert "agentrc" not in result.output
 
@@ -1228,7 +1228,7 @@ class TestInitMetadataFlags:
             os.chdir(tmp_dir)
             try:
                 result = self.runner.invoke(
-                    cli, ["init", "my-plugin", "--plugin", "--yes", "--version", "2.0.0"]
+                    cli, ["plugin", "init", "my-plugin", "--yes", "--version", "2.0.0"]
                 )
 
                 assert result.exit_code == 0
