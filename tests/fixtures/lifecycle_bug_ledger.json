@@ -529,6 +529,17 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
         "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
+    },
+    {
+      "issue": 4050,
+      "fixed_in": "0.37.0",
+      "summary": "With nothing declared, apm install wrote no lockfile, so apm install --frozen failed on the converged state while apm audit --ci passed.",
+      "failure_modes": ["idempotency", "outcome"],
+      "properties": ["idempotency.byte_stable", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_frozen_empty_manifest_lifecycle.py::test_empty_manifest_frozen_install_agrees_with_audit",
+        "tests/integration/test_generated_gate_state_machine.py::test_gate_mandatory_spine_covers_obligations"
+      ]
     }
   ],
   "lifecycle_contracts": [

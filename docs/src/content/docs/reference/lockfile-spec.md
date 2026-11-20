@@ -463,7 +463,7 @@ shipped.
 | Command | Reads | Writes |
 |---|---|---|
 | `apm install` | existing lockfile (for `--frozen` and incremental reuse) | full rewrite on resolution change |
-| `apm install --frozen` | required | rejects missing pins, incompatible immutable requirements, or MCP config/server-name drift |
+| `apm install --frozen` | required, unless `apm.yml` declares no APM, MCP or LSP dependency | rejects missing pins, incompatible immutable requirements, or MCP config/server-name drift |
 | `apm compile` | yes (resolution + integrity) | no |
 | `apm audit` | yes | no |
 | `apm prune` | yes (orphans and `deployments` ownership, even with nothing else to prune) | yes (after removing orphans and reconciling `deployments`) |

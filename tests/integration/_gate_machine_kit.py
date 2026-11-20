@@ -169,24 +169,6 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         match=r"^a denied hook is reported as merely unapproved$",
     ),
     KnownCell(
-        "gate-cell-g",
-        "I3",
-        "#4050",
-        lambda machine, op, before, after, result: (
-            op.name == "install-frozen" and op.paired.get("audit") == 0 and before.lock is None
-        ),
-        match=r"^audit --ci exited 0 but install --frozen exited 1$",
-    ),
-    KnownCell(
-        "gate-cell-g",
-        "I2",
-        "#4050",
-        lambda machine, op, before, after, result: (
-            op.name == "install-frozen" and machine.converged and before.lock is None
-        ),
-        match=r"^converged install-frozen exited 1$",
-    ),
-    KnownCell(
         "gate-cell-e",
         "I7",
         "#4045",

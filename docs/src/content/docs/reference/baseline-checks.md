@@ -67,7 +67,7 @@ the [policy schema](../policy-schema/).
 
 ### `lockfile-exists`
 
-- **What it verifies.** That `apm.lock.yaml` is present whenever the project has APM or MCP dependencies (including `devDependencies`), or whenever an existing lockfile records local content under the synthesized self-entry.
+- **What it verifies.** That `apm.lock.yaml` is present whenever the project has APM, MCP or LSP dependencies (including `devDependencies`), or whenever an existing lockfile records local content under the synthesized self-entry. With none declared, `apm install` writes no lockfile, and both this check and `apm install --frozen` accept its absence.
 - **Fails when.** `apm.yml` declares dependencies (production or dev) but no lockfile is on disk.
 - **Effect.** Subsequent checks are skipped (the lockfile is required input).
 - **Remediation.** Run `apm install` to generate `apm.lock.yaml` and commit it.

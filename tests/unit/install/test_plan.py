@@ -977,3 +977,27 @@ class TestLockfileSatisfiesManifest:
 
         assert ok is True
         assert reasons == []
+
+
+@pytest.mark.parametrize(
+    ("dependencies", "required"),
+    [
+        ({}, False),
+        ({"apm": []}, False),
+        ({"apm": ["owner/repo"]}, True),
+        ({"mcp": [{"name": "srv", "registry": False, "transport": "stdio", "command": "x"}]}, True),
+        ({"lsp": [{"name": "lsp", "command": "x", "extensionToLanguage": {".f": "f"}}]}, True),
+    ],
+)
+def test_manifest_requires_lockfile_only_when_something_is_declared(
+    tmp_path, dependencies: dict, required: bool
+) -> None:
+    """One owner answers whether a missing lockfile is converged (#4050)."""
+    from apm_cli.install.plan import manifest_requires_lockfile
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.utils.yaml_io import dump_yaml
+
+    manifest = tmp_path / "apm.yml"
+    dump_yaml({"name": "p", "version": "1.0.0", "dependencies": dependencies}, manifest)
+
+    assert manifest_requires_lockfile(APMPackage.from_apm_yml(manifest)) is required

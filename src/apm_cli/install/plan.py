@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency.reference import DependencyReference
     from apm_cli.models.dependency.replacement import ReplacementRule
 
@@ -496,6 +497,21 @@ _ACTION_SYMBOLS = {
     _ACTION_REMOVE: STATUS_SYMBOLS["remove"],
     _ACTION_UNCHANGED: STATUS_SYMBOLS["equal"],
 }
+
+
+def manifest_requires_lockfile(manifest: APMPackage) -> bool:
+    """Whether *manifest* declares state that only a lockfile can pin (#4050).
+
+    The one answer to "is a missing lockfile converged?": ``apm install``
+    writes no lockfile when the manifest declares no APM, MCP or LSP
+    dependency, so ``apm install --frozen`` replays that state as a no-op and
+    ``apm audit --ci`` accepts it; any declaration requires the lockfile.
+    """
+    return bool(
+        manifest.has_any_apm_dependencies()
+        or manifest.get_all_mcp_dependencies()
+        or manifest.get_lsp_dependencies()
+    )
 
 
 def lockfile_satisfies_manifest(
