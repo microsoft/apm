@@ -40,6 +40,9 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.component
+
+
 _CRED_FILL_PATCH = patch(
     "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
     return_value=None,

@@ -25,7 +25,7 @@ from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 
 @pytest.fixture(autouse=True)

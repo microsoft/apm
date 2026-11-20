@@ -17,6 +17,9 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
+
 _ENV = {"APM_E2E_TESTS": "1"}
 _SKILL = "grok-skill"
 

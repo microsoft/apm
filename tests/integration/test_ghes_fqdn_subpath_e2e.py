@@ -26,6 +26,8 @@ import yaml
 
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _clear_cache():

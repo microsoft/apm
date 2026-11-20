@@ -33,7 +33,7 @@ from apm_cli.install import validation
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.git_env import git_network_env
 
-pytestmark = [pytest.mark.integration]
+pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 # ── Shared constants ──────────────────────────────────────────────────
 

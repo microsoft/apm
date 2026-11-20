@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockFile
+
+pytestmark = pytest.mark.component
+
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "find"
 

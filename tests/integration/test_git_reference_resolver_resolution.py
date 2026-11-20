@@ -17,6 +17,8 @@ from git.exc import GitCommandError
 from apm_cli.deps.git_reference_resolver import GitReferenceResolver
 from apm_cli.models.apm_package import DependencyReference, GitReferenceType
 
+pytestmark = pytest.mark.component
+
 
 def _make_host() -> MagicMock:
     host = MagicMock()

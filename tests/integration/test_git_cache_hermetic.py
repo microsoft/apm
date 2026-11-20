@@ -25,6 +25,8 @@ from apm_cli.cache.git_cache import (
 from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.utils.git_env import _GitConfigSnapshot
 
+pytestmark = pytest.mark.component
+
 
 def _proc(*, returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
     result = MagicMock()

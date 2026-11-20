@@ -19,6 +19,8 @@ import yaml
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import APMPackage, DependencyReference  # noqa: F401
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.integration
 class TestGenericGitUrlInstallation:

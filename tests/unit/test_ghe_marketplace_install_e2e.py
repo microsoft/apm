@@ -36,6 +36,9 @@ from apm_cli.marketplace.resolver import resolve_marketplace_plugin
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.github_host import default_host
 
+pytestmark = pytest.mark.unit
+
+
 _GHE_HOST = "corp.ghe.com"
 _OWNER = "myorg"
 _REPO = "my-marketplace"

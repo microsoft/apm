@@ -30,7 +30,7 @@ from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType, cle
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_e2e_mode]
+pytestmark = [pytest.mark.component, pytest.mark.integration, pytest.mark.requires_e2e_mode]
 
 _COMMIT = "b" * 40
 _TOKEN_VARS = ("GITHUB_APM_PAT", "GITHUB_TOKEN", "GH_TOKEN", "ADO_APM_PAT")

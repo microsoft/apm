@@ -17,6 +17,9 @@ from git import Actor, Repo
 from apm_cli.core.auth import AuthResolver
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers to build a minimal downloader without full __init__ setup
 # ---------------------------------------------------------------------------

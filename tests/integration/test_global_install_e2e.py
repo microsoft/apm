@@ -23,6 +23,7 @@ from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.hermetic_packaged_sample import DEPENDENCY, HermeticPackagedSample
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
 ]
 

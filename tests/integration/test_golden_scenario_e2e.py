@@ -47,6 +47,7 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 PRIMARY_TOKEN = GITHUB_APM_PAT or GITHUB_TOKEN
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.requires_e2e_mode,
     # Mutates os.environ["HOME"]; must be serialized on a single xdist worker.
     # Requires --dist loadgroup in the xdist invocation (the only
