@@ -1388,6 +1388,20 @@ def test_output_oracle_reports_one_violation_per_duplicated_cause() -> None:
         check_cli_output(("install",), _cli(("install",), stdout), known_cells=(policy_cell,))
 
 
+def test_output_oracle_joins_a_plain_line_wrapped_at_a_space() -> None:
+    # Rich breaks the plain #4334 restriction line at a space; the repeat must stay visible.
+    row = "Package target restriction: [copilot, cursor]; effective targets: [copilot, "
+    stdout = f"{row}\ncursor]\n{row}\ncursor]\n"
+    with pytest.raises(
+        OutputOracleError, match=re.escape(f"stdout repeats a line: '{row}cursor]'")
+    ):
+        check_cli_output(("install",), _cli(("install",), stdout))
+    # A long unwrapped log line ends in no space, so its repeat is never joined away.
+    log = "WARNING apm_cli.adapters.client.codex Could not read " + "x" * 40
+    with pytest.raises(OutputOracleError, match=re.escape(f"stderr repeats a line: '{log}'")):
+        check_cli_output(("install",), _cli(("install",), "", f"{log}\n{log}\n"))
+
+
 def test_known_output_cell_output_shape_narrows_where_it_is_strict() -> None:
     cell = KnownOutputCell(
         "twice-with-mcp",
@@ -1424,6 +1438,17 @@ def test_output_oracle_does_not_join_a_plain_line_after_a_short_status_line() ->
     stdout = "[!] Policy off.\nPhase: gate\n[i] a\n[!] Policy off.\nPhase: mcp\n"
     found = [v.message for v in output_violations(("install",), _cli(("install",), stdout))]
     assert found == ["stdout repeats a diagnostic: '[!] Policy off.'"]
+
+
+def test_output_oracle_joins_the_space_led_tail_of_a_path_folded_at_full_width() -> None:
+    # A 160-character path folds into two full-width rows; the word after it
+    # wraps with the space it broke at (macOS tmp paths, #4113).
+    head, tail = "/" + "p" * 79, "/" + "q" * 79
+    stdout = (
+        f"[*] Validating 1 package...\n[+] \n{head}\n{tail}\n"
+        f"[>] Installing 1 new package...\n  [+] \n{head}\n{tail}\n (local)\n"
+    )
+    check_cli_output(("install",), _cli(("install",), stdout))
 
 
 def test_output_oracle_allows_non_ascii_characters_of_the_test_own_path() -> None:
