@@ -1,11 +1,11 @@
-"""Installed-CLI contract: denied bin/ and canvas name the deny, not apm approve (#4052).
+"""Installed-CLI contract: a denied canvas names the deny, not apm approve (#4052).
 
-A dependency whose bin/ or canvas extension is hard-denied (org policy or
-``apm deny``) must get a skip line that points to ``apm policy explain``:
-approving cannot lift a deny. Controls: an unapproved, undenied bin/ or canvas
-keeps the approvable "not approved / apm approve" line, and an approved bin/
-without ``--trust-bin`` in a non-interactive run keeps the "not trusted" line.
-Deployed files and the lockfile ``exec_status`` follow the gate as before.
+A dependency whose canvas extension is hard-denied (``apm deny``) must get a
+skip line that points to ``apm policy explain``: approving cannot lift a deny.
+Control: an unapproved, undenied canvas keeps the approvable "not approved /
+apm approve" line. Since #3290 a Claude plugin with bin/ at user scope loads
+natively, so its deny is reported by the native-plugin owner; that path is a
+control here. Deployed files and the lockfile ``exec_status`` follow the gate.
 """
 
 from __future__ import annotations
@@ -77,22 +77,27 @@ def _bin_plugin(root: Path) -> None:
 
 
 @pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI not available")
-@pytest.mark.parametrize("case", ["org-deny", "unapproved", "not-trusted"])
-def test_bin_skip_line_names_the_deny(tmp_path: Path, apm_binary_path: Path, case: str) -> None:
+def test_native_bin_plugin_denied_by_org_policy_names_the_deny(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Control: a Claude plugin with bin/ at -g is loaded natively (#3290).
+
+    Its deny is reported by the native-plugin owner, which already points to
+    ``apm policy explain``; this passes before and after #4052.
+    """
     world = PolicyScopeWorld(tmp_path, dict(os.environ))
     world.publish_policy(_BASE_POLICY)
     isolated = world.isolated
     plugin = isolated.work_root / "tool"
     _bin_plugin(plugin)
     package = str(plugin)
-    grant = {} if case == "unapproved" else {package: {"bin": True}}
     dump_yaml(
         {
             "name": "user",
             "version": "1.0.0",
             "targets": ["claude"],
             "dependencies": {"apm": [package]},
-            "executables": {"allow": grant},
+            "executables": {"allow": {package: {"bin": True}}},
         },
         isolated.config_root / "apm.yml",
     )
@@ -104,7 +109,6 @@ def test_bin_skip_line_names_the_deny(tmp_path: Path, apm_binary_path: Path, cas
         ["git", "remote", "add", "origin", f"https://github.com/{ORG}/home.git"],
     ):
         subprocess.run(args, cwd=isolated.home, env=git_env, check=True)
-    deployed = isolated.home / ".claude" / "skills" / "tool" / "bin" / "tool"
     runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=900)
 
     with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
@@ -115,27 +119,14 @@ def test_bin_skip_line_names_the_deny(tmp_path: Path, apm_binary_path: Path, cas
             result = run_step(runner, args, cwd=isolated.work_root, env=env, step=step)
             return _flat(output(result))
 
-        trust = () if case == "not-trusted" else ("--trust-bin",)
-        first = apm("install", "-g", *trust, step="1-install")
-        if case == "unapproved":
-            assert "bin/ executables skipped (not approved" in first, first
-            assert _approve_hint(package) in first, first
-            assert not deployed.exists()
-            return
-        if case == "not-trusted":
-            assert "bin/ executables skipped (not trusted)" in first, first
-            assert f"apm install --trust-bin {package}" in first, first
-            assert not deployed.exists()
-            return
-        assert deployed.is_file(), first
+        first = apm("install", "-g", "--trust-bin", step="1-install")
+        assert "native Claude plugin(s) declared and enabled" in first, first
 
         world.publish_policy(_DENY_ALL)
         world.clear_policy_cache()
         denied = apm("install", "-g", "--trust-bin", step="2-install-denied")
-        assert _denied_line("bin/ executables", package) in denied, denied
-        assert _approve_hint(package) not in denied, denied
-        assert not deployed.exists()
-        assert _exec_status(isolated.config_root / "apm.lock.yaml") == "denied"
+        assert f"Parked native plugin {package}: denied" in denied, denied
+        assert f"apm policy explain {package}" in denied, denied
 
 
 # -- canvas (project scope, apm deny) -----------------------------------------
