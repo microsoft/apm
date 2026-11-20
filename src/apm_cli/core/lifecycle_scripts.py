@@ -31,6 +31,7 @@ timeout.  Use APM_NO_SCRIPTS=1 to disable all scripts for one run.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -559,6 +560,10 @@ class LifecycleScriptRunner:
         matching = [s for s in self._scripts if s.event == event_name]
         if not matching:
             return []
+        # Scripts run outside APM, so they must observe the committed lockfile.
+        from apm_cli.deps.lockfile_write_authority import flush_lockfile_writes
+
+        flush_lockfile_writes()
 
         # command scripts run synchronously (in declared order); http
         # scripts dispatch through a bounded worker pool so a file with
@@ -601,6 +606,10 @@ class LifecycleScriptRunner:
 
 
 # -- Convenience: build runner from file-based discovery -------------------
+
+
+# Attribute a command logger carries once it printed the suppression notice.
+_SUPPRESSION_NOTED = "_apm_lifecycle_suppression_noted"
 
 
 def build_runner_from_context(
@@ -703,10 +712,14 @@ def build_runner_from_context(
         suppressed_reason = "org policy could not be enforced"
 
     if suppressed_reason is not None:
-        if logger is not None:
+        # One command may build several runners (update, then its install
+        # pipeline); the notice is printed once per command logger (#4333).
+        if logger is not None and getattr(logger, _SUPPRESSION_NOTED, None) != suppressed_reason:
             emit = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
             if emit is not None:
                 emit(f"Lifecycle scripts suppressed by {suppressed_reason}.")
+            with contextlib.suppress(AttributeError):
+                setattr(logger, _SUPPRESSION_NOTED, suppressed_reason)
         return LifecycleScriptRunner(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )

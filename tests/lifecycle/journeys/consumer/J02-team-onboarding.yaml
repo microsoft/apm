@@ -48,13 +48,13 @@ steps:
     exit: 0
     converged: true
     files: []
-    forbidden_lines: [integrated]
+    forbidden_lines: [integrated, adopted]
 known_cells:
-  - id: j02-frozen-sample-claude-command-mode-key
+  - id: j02-frozen-transitive-unpinned-notice
     law: FORBID
-    tracking: "#4182"
+    tracking: "#4183"
     step: 2
-    match: "forbidden '\\[!\\]' printed: .*frontmatter keys not supported for claude commands"
+    match: "forbidden '\\[!\\]' printed: .*dependency unpinned"
   - id: j02-frozen-warnings-beyond-the-docs-block
     law: O2
     tracking: "#4182"
@@ -65,3 +65,8 @@ known_cells:
     tracking: "#4184"
     step: 5
     match: "forbidden 'integrated' printed"
+  - id: j02-converged-install-reports-adopted
+    law: FORBID
+    tracking: "#4184"
+    step: 5
+    match: "forbidden 'adopted' printed"

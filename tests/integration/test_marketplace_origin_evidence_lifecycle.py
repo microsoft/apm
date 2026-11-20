@@ -238,10 +238,15 @@ def test_pre_037_lock_without_origin_evidence_still_updates(
         cwd=consumer.root,
         env=environment,
     )
+    # A lock as APM 0.36 wrote it: an older generator stamp, a pre-0.37 lockfile
+    # version, unframed hashes, and no origin evidence (#4228).
     lock = load_yaml(lock_path)
+    lock["apm_version"] = "0.36.0"
+    lock["lockfile_version"] = "1"
     for row in lock["dependencies"]:
         row.pop("source_url", None)
         row.pop("source_digest", None)
+        row.pop("content_hash", None)
     dump_yaml(lock, lock_path)
     legacy_lock = lock_path.read_bytes()
 
@@ -268,3 +273,61 @@ def test_pre_037_lock_without_origin_evidence_still_updates(
     locked = _locked_row(lock_path)
     assert locked["source_url"] == _REMOTE_A
     assert str(locked["source_digest"]).startswith("sha256:")
+    # One-way: the rewritten lock carries the current generator stamp.
+    assert not str(load_yaml(lock_path)["apm_version"]).startswith("0.36"), load_yaml(lock_path)
+
+
+def test_failed_update_keeps_the_lock_after_reverifying_provenance(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Restored catalog provenance reaches apm.lock.yaml only with a completed update."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path.resolve() / "isolated", base_env=dict(os.environ)
+    )
+    repositories = LocalGitRepositoryFactory(
+        isolated.repository_root, env=isolated.subprocess_env()
+    )
+    catalog_a, skill_source = _publish_catalog(
+        repositories, "catalog-a", _REMOTE_A, "from catalog A"
+    )
+    environment = repositories.url_rewrite_subprocess_env(catalog_a, _REMOTE_A)
+    consumer = LocalPackageFactory(isolated.work_root).create(
+        "consumer",
+        targets=("codex",),
+        dependencies=({"name": _PLUGIN, "marketplace": _ALIAS},),
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+    lock_path = consumer.root / "apm.lock.yaml"
+    runner.run_sequence(
+        (
+            ("marketplace", "add", _REMOTE_A, "--name", _ALIAS, "--ref", "main"),
+            ("install", *_INSTALL_FLAGS),
+        ),
+        expected_returncodes=(0, 0),
+        scenario_id="reverify-then-fail-install",
+        cwd=consumer.root,
+        env=environment,
+    )
+    locked_bytes = lock_path.read_bytes()
+
+    # The catalog changes (so update restores its digest) and the plugin's
+    # source goes away (so the update fails after that re-verification).
+    catalog_path = catalog_a.worktree / ".claude-plugin" / "marketplace.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    catalog["metadata"] = {"description": "republished"}
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    skill_source.unlink()
+    for path in sorted((catalog_a.worktree / _SUBDIR).rglob("*"), reverse=True):
+        path.unlink() if path.is_file() else path.rmdir()
+    (catalog_a.worktree / _SUBDIR).rmdir()
+    repositories.commit(catalog_a, message="republish catalog without the plugin")
+
+    (failed,) = runner.run_sequence(
+        (("update", "--yes", *_UPDATE_FLAGS),),
+        expected_returncodes=(1,),
+        scenario_id="reverify-then-fail-update",
+        cwd=consumer.root,
+        env=environment,
+    )
+    assert lock_path.read_bytes() == locked_bytes, _output(failed)

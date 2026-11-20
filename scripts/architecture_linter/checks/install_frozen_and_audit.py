@@ -490,7 +490,7 @@ _MCP_OWNERSHIP_OWNER = "src/apm_cli/install/mcp/ownership.py"
 _MCP_INTEGRATOR = "src/apm_cli/integration/mcp_integrator_install.py"
 _MCP_OWNERSHIP_CONSUMERS = (
     "src/apm_cli/install/mcp/integration.py",
-    "src/apm_cli/install/mcp/command.py",
+    "src/apm_cli/install/mcp/entry_integration.py",
     "src/apm_cli/commands/uninstall/engine.py",
 )
 
@@ -1101,7 +1101,7 @@ def check_lifecycle_serialization(provider: FactsProvider) -> tuple[Violation, .
             "reset_flags": "serialized_lifecycle",
         },
         "src/apm_cli/commands/init.py": {"init": "serialized_lifecycle_unless"},
-        "src/apm_cli/commands/install.py": {"install": "serialized_lifecycle_unless"},
+        "src/apm_cli/commands/install.py": {"install": "serialized_lifecycle_unless_fresh_preview"},
         "src/apm_cli/commands/lifecycle.py": {
             "lifecycle_init": "serialized_lifecycle",
         },

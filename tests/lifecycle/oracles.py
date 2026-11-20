@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Protocol
 
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.utils.content_hash import compute_file_hash
 from tests.lifecycle import receipts
 from tests.lifecycle.model.expected import exit_contract
 from tests.utils.apm_lifecycle_runner import CommandResult
@@ -116,6 +117,8 @@ class Observation:
     # Surface -> the artifact paths ("<root id>:<path>") it deploys, so I7-X1
     # can tell a retired executable's files from any other write.
     surface_paths: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # True when deploy_root is the user deploy root, where native plugin roots live.
+    user_scope: bool = False
 
 
 @dataclass(frozen=True)
@@ -389,13 +392,52 @@ def _i1_lock_deployed(
         # A record without a hash may be a directory (a deployed skill); it must exist.
         if not (path.is_file() if digest else path.exists()):
             found.append(Violation("I1", f"recorded file is missing: {relative}"))
-        elif digest and digest != "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest():
+        # The lock records line-ending-normalized hashes (apm#1952), so CRLF on Windows matches.
+        elif digest and digest != compute_file_hash(path):
             found.append(Violation("I1", f"recorded hash does not match disk: {relative}"))
-    for relative in sorted(after.managed_paths - set(recorded)):
+    native, native_found = _native_plugin_recorded(after)
+    found.extend(native_found)
+    for relative in sorted(after.managed_paths - set(recorded) - native):
         if (after.deploy_root / relative).exists():
             found.append(Violation("I1", f"deployed file is not in the lock: {relative}"))
     found.extend(_service_claim_violations(after))
     return found
+
+
+def _native_plugin_recorded(after: Observation) -> tuple[set[str], list[Violation]]:
+    """Managed paths a native_plugin record of the same lock owns, plus root mismatches.
+
+    A record owns the paths under its root only at user scope (where the root
+    lives) and only while the root's tree carries the record's fingerprint.
+    """
+    if after.lock is None or not after.user_scope:
+        return set(), []
+    from apm_cli.utils.content_hash import compute_native_plugin_hash
+
+    owned: set[str] = set()
+    found = []
+    for dependency in after.lock.dependencies.values():
+        record = dependency.native_plugin
+        if record is None:
+            continue
+        # Both sides are POSIX deploy-root-relative strings; a record root is never empty.
+        prefix = record.root.strip("/") + "/"
+        if prefix == "/":
+            continue
+        under = {path for path in after.managed_paths if path.startswith(prefix)}
+        if not under:
+            continue
+        try:
+            observed = compute_native_plugin_hash(after.deploy_root / record.root)
+        except (OSError, ValueError):
+            observed = "unreadable"
+        if observed == record.fingerprint:
+            owned |= under
+        else:
+            found.append(
+                Violation("I1", f"native plugin root does not match the lock: {record.root}")
+            )
+    return owned, found
 
 
 def _service_claim_violations(after: Observation) -> list[Violation]:

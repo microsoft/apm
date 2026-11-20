@@ -22,6 +22,7 @@ from apm_cli.utils.path_security import (
 from apm_cli.utils.paths import stored_alias
 
 if TYPE_CHECKING:
+    from apm_cli.core.deployment_ledger import OverwriteGate
     from apm_cli.integration.cleanup import DeploymentEvidence
 
 
@@ -29,6 +30,20 @@ def discover_primitives(*args: Any, **kwargs: Any) -> Any:
     from apm_cli.primitives.discovery import discover_primitives as _discover_primitives
 
     return _discover_primitives(*args, **kwargs)
+
+
+def _target_root_dirs(base: Path) -> frozenset[Path]:
+    """Every project-layout target root directory under *base*.
+
+    A project's target roots signal which harnesses it uses (opt-in targets
+    deploy only where their root exists), so project cleanup never removes
+    them. Cleanup bounded by the home directory is user scope, where roots
+    APM created itself (such as ``~/.claude``) go when their last file is
+    retired.
+    """
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    return frozenset((base / profile.root_dir).resolve() for profile in KNOWN_TARGETS.values())
 
 
 def _managed_absolute_target_root(
@@ -158,11 +173,45 @@ def _read_bytes_no_follow(path: Path) -> bytes:
         os.close(fd)
 
 
-def untrusted_baseline_message(entry: str) -> str:
-    """Refuse to replace an existing file that has no trustworthy deployment baseline."""
+def recovery_directory(entry: str, destination: Path, *, user_scope: bool) -> str:
+    """Name a deployed skill directory so a user can move it: project-relative or absolute."""
+    if user_scope or "://" in entry or Path(entry).is_absolute():
+        return destination.resolve().as_posix()
+    return entry
+
+
+def untrusted_baseline_message(
+    entry: str, directory: str | None = None, *, user_scope: bool = False
+) -> str:
+    """Refuse to replace an existing file that has no trustworthy deployment baseline.
+
+    *directory* names the deployed skill directory whose removal lets the next
+    install, in the same scope, redeploy it from source.
+    """
+    head = f"Skipped {entry}: no trustworthy local deployment baseline. "
+    if directory is None:
+        return (
+            f"{head}Move the conflicting file aside and retry; "
+            "use --force only to intentionally overwrite it."
+        )
+    # Scoped recovery: never a global --force that could overwrite edits elsewhere.
+    skill = f"{directory.rstrip('/')}/"
     return (
-        f"Skipped {entry}: no trustworthy local deployment baseline. Move the conflicting "
-        "file aside and retry; use --force only to intentionally overwrite it."
+        f"{head}Move the conflicting file aside and retry. To redeploy only this skill, "
+        f"move {skill} aside (or delete it if it holds no edits), then run "
+        f"'{'apm install -g' if user_scope else 'apm install'}'; that rewrites {skill} "
+        "alone and keeps edited files elsewhere."
+    )
+
+
+def unproven_overwrite_message(entry: str, *, user_scope: bool) -> str:
+    """Refuse to replace a managed file that APM cannot prove it deployed (#4360)."""
+    install = "apm install -g" if user_scope else "apm install"
+    return (
+        f"Kept {entry}: it differs from what APM renders and there is no local "
+        "deployment receipt or locked render proving APM wrote it, so it may hold "
+        f"local edits. Move it aside, then run '{install}' to restore it; or run "
+        f"'{install} --force' to overwrite it."
     )
 
 
@@ -173,6 +222,9 @@ class BaseIntegrator:
     detection, sync removal, and link resolution logic is
     handled here.
     """
+
+    # Overwrite evidence for one install call, bound by ``recorded_writes`` (#4360).
+    _overwrite_gate: "OverwriteGate | None" = None
 
     # Deploy-mode for the shared adopt predicate (:meth:`_check_adopt_or_skip`).
     # ``False`` = byte-preserving identity (the safe default any future
@@ -312,6 +364,19 @@ class BaseIntegrator:
             fail(error)
         yield from os.walk(source, followlinks=False, onerror=fail)
 
+    def install_user_scope(self) -> bool:
+        """Return whether this integrator deploys at user scope; recovery advice uses -g."""
+        return False
+
+    def untrusted_member_message(self, entry: str, directory: str, destination: Path) -> str:
+        """Refuse an unprovable member and name the skill directory and scoped retry."""
+        user_scope = self.install_user_scope()
+        return untrusted_baseline_message(
+            entry,
+            recovery_directory(directory, destination, user_scope=user_scope),
+            user_scope=user_scope,
+        )
+
     def copy_directory_files(
         self,
         source: Path,
@@ -394,7 +459,9 @@ class BaseIntegrator:
                     )
                 ):
                     if expected is None:
-                        message = untrusted_baseline_message(entry)
+                        message = self.untrusted_member_message(
+                            entry, path_entry(destination), destination
+                        )
                     else:
                         message = (
                             f"Skipped {entry}: modified since deployment. "
@@ -667,7 +734,21 @@ class BaseIntegrator:
             target_path, rel_path, managed_files, force, diagnostics=diagnostics
         ):
             return True, False
-        return False, False
+        # A managed file that differs from the render is replaced only with
+        # deployment evidence; the lockfile hash alone never authorizes it (#4360).
+        gate = self._overwrite_gate
+        if force or not target_path.is_file() or (gate and gate.authorizes(target_path, rel_path)):
+            return False, False
+        if gate is not None and gate.keep(target_path):
+            # The claim stays with its prior lock entry; finalize names the file.
+            target_paths.append(target_path)
+            return True, False
+        message = unproven_overwrite_message(rel_path, user_scope=bool(gate and gate.user_scope))
+        if diagnostics is not None:
+            diagnostics.error(message, package=gate.owner if gate else "")
+        else:
+            _rich_warning(message)
+        return True, False
 
     # Known integration prefixes that APM is allowed to deploy/remove under.
     # Derived from ``targets.KNOWN_TARGETS`` so adding a target auto-propagates.
@@ -961,6 +1042,13 @@ class BaseIntegrator:
         if not deleted_paths:
             return
         stop_resolved = stop_at.resolve()
+        # A project's target roots stay (#4132); at user scope the same names
+        # are roots APM created, which go with their last file.
+        target_roots = (
+            frozenset()
+            if stop_resolved == Path.home().resolve()
+            else _target_root_dirs(stop_resolved)
+        )
         # Collect unique parents (skip stop_at itself)
         candidates: set = set()
         for p in deleted_paths:
@@ -973,7 +1061,11 @@ class BaseIntegrator:
             except (ValueError, OSError):
                 cleanup_boundary = p.parent.resolve()
             parent = p.parent
-            while parent not in (parent.parent, stop_at) and parent.resolve() != cleanup_boundary:
+            while (
+                parent not in (parent.parent, stop_at)
+                and parent.resolve() != cleanup_boundary
+                and parent.resolve() not in target_roots
+            ):
                 candidates.add(parent)
                 parent = parent.parent
         # Sort deepest-first for safe bottom-up removal

@@ -19,7 +19,9 @@ from ..core.build_orchestrator import (
     OutputKind,
 )
 from ..core.command_logger import CommandLogger
+from ..core.plugin_manifest import plugin_manifest_notes_once
 from ..core.target_detection import TargetParamType
+from ..deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from ..install.locking import serialized_lifecycle_unless
 
 MARKETPLACE_DOCS_URL = (
@@ -433,7 +435,8 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
     )
 
     try:
-        result = BuildOrchestrator().run(options, logger=logger)
+        with plugin_manifest_notes_once():
+            result = BuildOrchestrator().run(options, logger=logger)
     except MetadataEnrichmentError as exc:
         if json_output:
             from ..marketplace.builder import BuildReport
@@ -961,6 +964,7 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed unpacking information")
 @click.pass_context
 @serialized_lifecycle_unless("dry_run")
+@lockfile_writer(LockfileWriter.UNPACK)
 def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     """Extract an APM bundle into the project."""
     from ..core.command_logger import InstallLogger

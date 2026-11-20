@@ -192,6 +192,7 @@ def result_from_install_context(ctx: InstallContext) -> InstallResult:
                 frozenset(complete_dep_keys) if complete_dep_keys is not None else None
             ),
             claude_native_keys=frozenset(getattr(ctx, "claude_native_keys", ())),
+            mcp_policy_enforced=bool(getattr(ctx, "mcp_policy_enforced", False)),
         ),
         force=bool(getattr(ctx, "force", False)),
     )
@@ -253,4 +254,20 @@ def raise_direct_dependency_failure(ctx: InstallContext) -> NoReturn:
         ctx.diagnostics.render_summary()
     raise DirectDependencyError(
         "One or more direct dependencies failed validation. Run with --verbose for details."
+    )
+
+
+def local_bundle_update_next_step(names, file_count: int, scope) -> str:
+    """Explain why 'apm update' leaves local bundles untouched and how to update one (#4318)."""
+    from apm_cli.core.scope import is_user_scope
+
+    if names:
+        noun = "Local bundle" if len(names) == 1 else "Local bundles"
+        subject = f"{noun} {', '.join(names)}"
+    else:
+        subject = f"Local bundle content ({file_count} file(s))"
+    flag = "-g " if is_user_scope(scope) else ""
+    return (
+        f"{subject} not updated: 'apm update' refreshes apm.yml dependencies only. "
+        f"To update a bundle, run 'apm install {flag}<newer-bundle-file>'."
     )

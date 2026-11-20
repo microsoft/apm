@@ -23,7 +23,9 @@ and never block resolution.
 Resolution only *stages* a pin (:func:`stage_ref_pin`).  The install
 transaction owns one :class:`RefPinStage` per attempt and writes the
 staged pins when the attempt commits; a dry run, a failed install or a
-read-only command (``apm view``) writes nothing (#4212, #4194).
+read-only command (``apm view``) writes nothing (#4212, #4194). A requested
+package that validation rejects withdraws its pins, so a partly successful
+install records only the packages it installs (#4322).
 """
 
 import json
@@ -31,9 +33,25 @@ import logging
 import os
 import threading
 
+from .errors import MarketplaceError
+
 logger = logging.getLogger(__name__)
 
 _PINS_FILENAME = "version-pins.json"
+
+
+class RefPinMismatchError(MarketplaceError):
+    """A marketplace plugin version resolved to a ref other than its recorded pin."""
+
+    def __init__(
+        self, plugin: str, marketplace: str, previous_ref: str, current_ref: str, key: str
+    ):
+        super().__init__(
+            f"Plugin {plugin}@{marketplace} ref changed: was '{previous_ref}', now "
+            f"'{current_ref}'. This may indicate a ref swap attack; refusing to install. "
+            "If the publisher moved this version on purpose, run 'apm update' to accept "
+            f"the new ref (pin '{key}')."
+        )
 
 
 # ------------------------------------------------------------------
@@ -51,9 +69,9 @@ def _pins_path(pins_dir: str | None = None) -> str:
     if pins_dir is not None:
         return os.path.join(pins_dir, _PINS_FILENAME)
 
-    from ..config import CONFIG_DIR
+    from ..core.scope import get_apm_home
 
-    return os.path.join(CONFIG_DIR, "cache", "marketplace", _PINS_FILENAME)
+    return os.path.join(os.fspath(get_apm_home()), "cache", "marketplace", _PINS_FILENAME)
 
 
 def _pin_key(marketplace_name: str, plugin_name: str, version: str = "") -> str:
@@ -117,8 +135,12 @@ def save_ref_pins(pins: dict, pins_dir: str | None = None) -> None:
 
     Writes to a temporary file first, then uses ``os.replace`` to move
     it into place so readers never see a partial write.  Errors are
-    logged and swallowed (advisory system).
+    logged and swallowed (advisory system). A preview writes nothing.
     """
+    from apm_cli.config import user_state_writes_suppressed
+
+    if user_state_writes_suppressed():
+        return
     path = _pins_path(pins_dir)
     tmp_path = path + ".tmp"
     try:
@@ -201,6 +223,17 @@ class RefPinStage:
         with self._lock:
             self._pins[(marketplace_name, plugin_name, version)] = ref
 
+    def keys(self) -> frozenset[tuple[str, str, str]]:
+        """Return the ``(marketplace, plugin, version)`` keys staged so far."""
+        with self._lock:
+            return frozenset(self._pins)
+
+    def drop(self, keys: frozenset[tuple[str, str, str]]) -> None:
+        """Withdraw staged pins of a package that will not install (#4322)."""
+        with self._lock:
+            for key in keys:
+                self._pins.pop(key, None)
+
     def commit(self, pins_dir: str | None = None) -> None:
         """Write every staged pin in one save and close this stage."""
         with self._lock:
@@ -250,3 +283,42 @@ def stage_ref_pin(
         stage = _active_stage
     if stage is not None:
         stage.add(marketplace_name, plugin_name, ref, version)
+
+
+def enforce_ref_pin(
+    marketplace_name: str,
+    plugin_name: str,
+    ref: str,
+    version: str = "",
+    pins_dir: str | None = None,
+    *,
+    accept_change: bool = False,
+) -> None:
+    """Refuse a ref that contradicts the recorded pin; otherwise stage it.
+
+    A contradicting ref raises :class:`RefPinMismatchError` unless
+    *accept_change* is set, which only an explicit ``apm update`` of that
+    plugin does. A staged ref is written only when the install commits (#4400).
+    """
+    previous_ref = check_ref_pin(marketplace_name, plugin_name, ref, version, pins_dir)
+    if previous_ref is not None and not accept_change:
+        key = _pin_key(marketplace_name, plugin_name, version)
+        raise RefPinMismatchError(plugin_name, marketplace_name, previous_ref, ref, key)
+    stage_ref_pin(marketplace_name, plugin_name, ref, version)
+
+
+def staged_ref_pin_keys() -> frozenset[tuple[str, str, str]]:
+    """Return the pin keys staged by the open install attempt (empty without one)."""
+    with _stage_lock:
+        stage = _active_stage
+    return stage.keys() if stage is not None else frozenset()
+
+
+def withdraw_ref_pins(keys: frozenset[tuple[str, str, str]]) -> None:
+    """Withdraw staged pins of a requested package that validation rejected."""
+    if not keys:
+        return
+    with _stage_lock:
+        stage = _active_stage
+    if stage is not None:
+        stage.drop(keys)

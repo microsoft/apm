@@ -205,24 +205,6 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         _frozen_after_tightening,
         match=r"^recorded file is missing: .*hook-kit-session\.json$",
     ),
-    KnownCell(
-        "gate-cell-g",
-        "I3",
-        "#4050",
-        lambda machine, op, before, after, result: (
-            op.name == "install-frozen" and op.paired.get("audit") == 0 and before.lock is None
-        ),
-        match=r"^audit --ci exited 0 but install --frozen exited 1$",
-    ),
-    KnownCell(
-        "gate-cell-g",
-        "I2",
-        "#4050",
-        lambda machine, op, before, after, result: (
-            op.name == "install-frozen" and machine.converged and before.lock is None
-        ),
-        match=r"^converged install-frozen exited 1$",
-    ),
 )
 
 
@@ -581,10 +563,13 @@ class GateMachine(RuleBasedStateMachine):
             if result is None:
                 return []
             # The outcome comes first: a plain install or update on local
-            # packages succeeds; --frozen refuses without a lockfile (#4133) and
-            # when it retired a hook the lock still records (I7-X1, #4043).
+            # packages succeeds; --frozen refuses without a lockfile (#4133) unless
+            # nothing is declared (a converged no-op, #4050), and when it retired a
+            # hook the lock still records (I7-X1, #4043) or the lock records a
+            # stale executables decision (#4053).
             retired = _frozen_after_tightening(self, Operation(name), before, after, result)
-            refused = before.lock is None or retired or _stale_decision(self, before)
+            missing_lock = before.lock is None and bool(self.declared)
+            refused = missing_lock or retired or _stale_decision(self, before)
             expected = 1 if mode == "frozen" and refused else 0
             if result.returncode != expected:
                 return [f"{name} exited {result.returncode}, expected {expected}"]

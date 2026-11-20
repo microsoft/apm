@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import yaml
 
 from apm_cli.core.scope import is_user_scope_root, manifest_file
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.deps.path_anchoring import (
     LocalResolutionError,
     build_local_parent_index,
@@ -474,6 +475,18 @@ class McpConfigDiff:
     def is_empty(self) -> bool:
         """Return whether current and stored configurations are identical."""
         return not (self.changed or self.source_only or self.lock_only)
+
+
+# Trust notices already shown in this process (#4256): one install collects
+# the locked MCP view in several passes, but the user needs one notice per server.
+_TRUST_NOTICES_SHOWN: set[str] = set()
+
+
+def _progress_trust_once(logger: Any, message: str) -> None:
+    if message in _TRUST_NOTICES_SHOWN:
+        return
+    _TRUST_NOTICES_SHOWN.add(message)
+    logger.progress(message)
 
 
 def _deduplicate(dependencies: list[Any] | tuple[Any, ...]) -> list[Any]:
@@ -990,11 +1003,13 @@ def _collect_locked_dependencies(
             manifest = load_yaml(manifest_path)
             if not isinstance(manifest, dict):
                 raise ValueError("package manifest must be a mapping")
+            # Collecting declarations only reads: never create user config.
             package = APMPackage.from_mapping(
                 manifest,
                 package_path=manifest_path.parent,
                 source_path=manifest_path.parent,
                 manifest_path=manifest_path,
+                create_config=False,
             )
             authored_declarations = _authored_mcp_declarations(manifest)
         except (OSError, ValueError, UnicodeError, yaml.YAMLError) as exc:
@@ -1069,8 +1084,9 @@ def _collect_locked_dependencies(
                 and dependency.depth == 1
                 and verdict.layer not in ("project-allow", "user-allow")
             ):
-                logger.progress(
-                    f"Trusting direct dependency MCP '{mcp_dependency.name}' from '{declarer}'"
+                _progress_trust_once(
+                    logger,
+                    f"Trusting direct dependency MCP '{mcp_dependency.name}' from '{declarer}'",
                 )
             collected.append(
                 replace(
@@ -1182,7 +1198,9 @@ def _collect_transitive_compat(
 
     if not modules_root.exists():
         return []
-    lockfile = LockFile.read(lock_path) if lock_path is not None and lock_path.exists() else None
+    lockfile = (
+        LockFile.read(lock_path) if lock_path is not None and lockfile_exists(lock_path) else None
+    )
     if lockfile is None:
         return _collect_unlocked_compat(
             modules_root,

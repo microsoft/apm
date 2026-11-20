@@ -21,9 +21,13 @@ from apm_cli.install.helpers.ref_reuse import (
     requires_remote_ref_resolution as _requires_remote_ref_resolution,
 )
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
+from apm_cli.install.pipeline_entry import record_preview_resolution
 from apm_cli.install.presentation.resolution import report_resolved_dependencies
 from apm_cli.install.repository_access import not_found_next_step
-from apm_cli.install.source_helpers import download_registry_package
+from apm_cli.install.source_helpers import (
+    download_registry_package,
+    with_preserved_install_hint,
+)
 from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.models.dependency import materialization as _materialization
@@ -113,15 +117,6 @@ def _materialization_migration_logger(
         )
 
     return report
-
-
-def _with_preserved_install_hint(message: str, install_path: Path | None) -> str:
-    """Explain that a failed replacement left the current install active."""
-    if install_path is None or not install_path.exists():
-        return message
-    return (
-        f"{message}. The existing installation remains active; fix the cause and retry the install."
-    )
 
 
 def _prepare_callback_materialization_path(
@@ -242,7 +237,6 @@ def _setup_downloader(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # 3. Auth resolver + downloader
     # ------------------------------------------------------------------
-    import os as _os
 
     from apm_cli.core.auth import AuthResolver
     from apm_cli.deps import github_downloader as _ghd_mod
@@ -266,20 +260,11 @@ def _setup_downloader(ctx: InstallContext) -> None:
     downloader.shared_clone_cache = shared_cache
 
     # WS3 (#1116): attach persistent cross-run git cache unless disabled
-    # via APM_NO_CACHE environment variable.
-    if not _os.environ.get("APM_NO_CACHE"):
-        from apm_cli.cache.paths import get_cache_root
+    # via APM_NO_CACHE; a --dry-run preview never writes the cache.
+    from apm_cli.cache.git_cache import attach_persistent_git_cache
 
-        try:
-            from apm_cli.cache.git_cache import GitCache
-
-            _cache_root = get_cache_root()
-            downloader.persistent_git_cache = GitCache(
-                _cache_root,
-                refresh=ctx.refresh,
-            )
-        except (OSError, ValueError):
-            pass  # Cache unavailable (permissions, missing dir) -- degrade gracefully
+    if not ctx.dry_run:
+        attach_persistent_git_cache(downloader, refresh=ctx.refresh)
 
     # Perf #1433: attach the InstallLogger so the subdir download path
     # can emit verbose-only [perf] lines (subdir cache state, bare
@@ -335,6 +320,8 @@ def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
 
 def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph, failures=()) -> None:
     """Raise on fatal resolution errors; show the download *failures* behind them once."""
+    if ctx.dry_run:
+        return record_preview_resolution(ctx, dependency_graph)
     if not dependency_graph.resolution_errors:
         return
     for _display, failure in failures if ctx.logger else ():
@@ -389,7 +376,7 @@ def _resolve_dependencies(
         _warn_insecure_dependencies,
     )
     from apm_cli.install.package_selection import selected_dependency_keys
-    from apm_cli.install.phases.local_content import _copy_local_package
+    from apm_cli.install.phases.local_content import copy_local_dependency
 
     # 3b. Dedicated registry resolver (design §3.1, §8)
     # Built when:
@@ -431,7 +418,6 @@ def _resolve_dependencies(
 
     # 5. Download callback for transitive resolution
     scope = ctx.scope
-    project_root = ctx.project_root
     # Local-path package references in apm.yml are relative to the
     # manifest's location (source_root), not the deploy override.
     # source_root is required on InstallContext; equals project_root
@@ -575,54 +561,38 @@ def _resolve_dependencies(
 
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
-                if (
-                    scope is InstallScope.USER
-                    and not Path(dep_ref.local_path).expanduser().is_absolute()
-                ):
-                    # At user scope, relative local paths have no meaningful
-                    # root (cwd is arbitrary, $HOME is not a project).  Only
-                    # absolute paths are unambiguous; reject relative refs.
-                    with callback_lock:
-                        callback_failures.add(dep_ref.get_unique_key())
-                    _tui = getattr(ctx, "tui", None)
-                    if _tui is not None:
-                        _tui.task_failed(dep_ref.get_unique_key())
-                    return None
-                # Anchor relative paths on the *declaring* package's source
-                # directory when available (#857). Falls back to project_root
-                # for direct deps and for parents that predate source_path.
-                # Direct deps from the root project anchor at ``source_root``
-                # (which equals ``project_root`` unless ``apm install --root``
-                # redirects writes -- then it stays at $PWD).  Transitive
-                # deps from a parent local package anchor at that package's
-                # source_path, which is already an absolute path and not
-                # affected by ``--root``.
-                base_dir = (
-                    parent_pkg.source_path
-                    if dep_ref.replacement is None
-                    and parent_pkg is not None
-                    and parent_pkg.source_path is not None
-                    else source_root
-                )
-                result_path = _copy_local_package(
+                # The declaring package anchors relative paths (#857, #4153).
+                failure = copy_local_dependency(
                     dep_ref,
                     replacement_path,
-                    base_dir,
-                    project_root=project_root,
-                    logger=logger,
+                    declaring_dir=(
+                        parent_pkg.source_path
+                        if dep_ref.replacement is None and parent_pkg is not None
+                        else None
+                    ),
+                    source_root=source_root,
+                    user_scope=scope is InstallScope.USER,
                 )
-                if result_path:
-                    with callback_lock:
-                        pending_callback_downloads[replacement_path] = (
-                            dep_ref.get_unique_key(),
-                            None,
+                dep_key = dep_ref.get_unique_key()
+                with callback_lock:
+                    if failure is None:
+                        pending_callback_downloads[replacement_path] = (dep_key, None)
+                        return replacement_path
+                    callback_failures.add(dep_key)  # the barrier stops (#3874)
+                    if dep_key in direct_dep_keys and logger:
+                        logger.error(failure)
+                    elif dep_key not in direct_dep_keys:
+                        via = f" (via {parent_chain})" if parent_chain else ""
+                        transitive_failures.append(
+                            (
+                                dep_ref.local_path,
+                                f"Failed to resolve transitive dep {dep_ref.local_path}{via}: "
+                                f"{failure}",
+                            )
                         )
-                    return replacement_path
-                with callback_lock:  # not a package: the barrier stops (#3874)
-                    callback_failures.add(dep_ref.get_unique_key())
                 _tui = getattr(ctx, "tui", None)
                 if _tui is not None:
-                    _tui.task_failed(dep_ref.get_unique_key())
+                    _tui.task_failed(dep_key)
                 return None
 
             # --- Git-source semver range resolution (issue #1488) ---
@@ -744,7 +714,7 @@ def _resolve_dependencies(
             else:
                 chain_hint = f" (via {parent_chain})" if parent_chain else ""
                 fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
-            fail_msg = _with_preserved_install_hint(fail_msg, install_path)
+            fail_msg = with_preserved_install_hint(fail_msg, install_path)
             fail_msg += not_found_next_step(e, dep_ref, is_direct=is_direct)
 
             with callback_lock:
@@ -779,6 +749,7 @@ def _resolve_dependencies(
         existing_lockfile=existing_lockfile,
         reference_resolver=downloader,
         frozen=InstallService.frozen_disposition(ctx).replay,
+        preview=ctx.dry_run,
         cache_validation_callback=partial(
             validate_cached_legacy_plugin,
             lockfile=existing_lockfile,
@@ -865,17 +836,13 @@ def _resolve_dependencies(
     try:
         tree = dependency_graph.dependency_tree
         for node in tree.nodes.values():
-            if node.dependency_ref.replacement is not None:
-                dep_base_dirs[node.dependency_ref.get_unique_key()] = source_root
-                continue
+            # Only declaring-package dirs; path_anchoring decides the rest.
             parent_node = node.parent
-            if parent_node is None or parent_node.package is None:
+            if node.dependency_ref.replacement is not None or parent_node is None:
                 continue
-            anchor = (
-                parent_node.package.source_path
-                if parent_node.package.source_path is not None
-                else project_root
-            )
+            anchor = getattr(parent_node.package, "source_path", None)
+            if anchor is None:
+                continue
             key = node.dependency_ref.get_unique_key()
             existing = dep_base_dirs.get(key)
             if existing is not None and existing != anchor:
@@ -895,7 +862,7 @@ def _resolve_dependencies(
             dep_base_dirs[key] = anchor
     except (AttributeError, KeyError):
         # Tree shape may differ across releases; fall back to empty map
-        # (callers default to project_root anchoring, matching legacy).
+        # (callers fall back to the root anchor in path_anchoring).
         # Narrow set: real bugs (TypeError/NameError) should surface, not
         # silently degrade to legacy anchoring.
         dep_base_dirs = {}

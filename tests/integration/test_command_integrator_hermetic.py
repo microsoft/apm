@@ -724,6 +724,7 @@ class TestIntegrateCommandsForTarget:
             force: bool,
             diagnostics: MagicMock,
             target_paths: list[Path],
+            **_kwargs: object,
         ) -> tuple[bool, bool]:
             target_paths.append(target_path)
             return (True, True)

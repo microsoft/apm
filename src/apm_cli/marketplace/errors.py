@@ -113,6 +113,10 @@ class MarketplaceOriginConflictError(MarketplaceError):
         )
 
 
+class MarketplaceProvenanceError(MarketplaceError):
+    """Raised when a locked marketplace row cannot be re-verified against its catalog (#4228)."""
+
+
 class MarketplaceYmlError(MarketplaceError):
     """Raised when marketplace.yml validation or parsing fails."""
 

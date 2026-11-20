@@ -50,7 +50,7 @@ export PROXY_REGISTRY_ONLY=1
 | `PROXY_REGISTRY_URL` | Base URL of the proxy. APM downloads package archives from it. |
 | `PROXY_REGISTRY_TOKEN` | Bearer token, never sent to hosts other than the proxy. |
 | `PROXY_REGISTRY_ONLY` | `1` refuses any direct download from the upstream host, including on lockfile replay, and skips source-host probes such as the `apm update` auth check. |
-| `PROXY_REGISTRY_ALLOW_HTTP` | `1` silences the warning for a plaintext `http://` proxy. Use it on internal networks. |
+| `PROXY_REGISTRY_ALLOW_HTTP` | `1` authorizes sending `PROXY_REGISTRY_TOKEN` over `http://` to a host that is not loopback or a private network address (10/8, 172.16/12, 192.168/16). Without it, the token is not sent there and a `[!]` line says why. |
 
 The lockfile records which entries came through the proxy. With `PROXY_REGISTRY_ONLY=1`,
 a lockfile written without the proxy is refused before anything downloads:

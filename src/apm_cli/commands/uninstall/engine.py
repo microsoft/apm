@@ -628,7 +628,10 @@ def _resolve_marketplace_packages(
                     ):
                         require_locked_row_origin(locked, marketplace_name=marketplace_name)
                     resolution = resolve_marketplace_plugin(
-                        plugin_name, marketplace_name, auth_resolver=auth_resolver
+                        plugin_name,
+                        marketplace_name,
+                        auth_resolver=auth_resolver,
+                        enforce_ref_pins=False,
                     )
                     canonical = resolution.canonical
                     # Supply-chain guard: refuse registry canonicals not present in lockfile
@@ -1346,6 +1349,7 @@ def _sync_integrations_after_uninstall(
     excluded_survivor_keys: frozenset[str] = frozenset(),
     *,
     evidence: "DeploymentEvidence | None",
+    executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
 ) -> "IntegrationCleanupOutcome":
     """Remove deployed files and re-integrate from remaining packages.
 
@@ -1447,9 +1451,14 @@ def _sync_integrations_after_uninstall(
     from ...security.executables import closed_exec_map, resolve_project_exec_allow_map
 
     # Trust is resolved only when survivors are rebuilt; nothing else consumes it.
+    # The command resolved survivor trust before its first write (#4185).
     _allow_executables = (
         resolve_project_exec_allow_map(
-            project_root, apm_package, user_scope=user_scope, logger=logger
+            project_root,
+            apm_package,
+            user_scope=user_scope,
+            executable_context=executable_context,
+            logger=logger,
         )
         if target_survivor_plan
         else closed_exec_map(None)

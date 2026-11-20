@@ -69,6 +69,7 @@ from ..core.command_logger import InstallLogger
 from ..core.target_catalog import target_help_fragment
 from ..core.target_detection import TargetParamType
 from ..deps.github_downloader import GitHubPackageDownloader
+from ..deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from ..deps.revision_pins import (
     RemoteRefDownloader,
     RevisionPinResolutionError,
@@ -364,10 +365,7 @@ def _run_mcp_lsp_integration(
             pre_install_lock=existing_lock,
         )
     except PolicyBlockError:
-        logger.refusal(
-            "MCP server(s) blocked by org policy. "
-            "APM packages remain installed; MCP configs were NOT written."
-        )
+        logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
         logger.render_summary()
         sys.exit(1)
 
@@ -420,6 +418,7 @@ def _handle_service_only_update(
     )
     if not has_services:
         logger.info("No APM dependencies declared in apm.yml -- nothing to update.")
+        _explain_local_bundles(scope, apm_package, logger)
         return True
     if dry_run:
         logger.dry_run_notice("would reconcile MCP/LSP configuration; no files written")
@@ -450,7 +449,38 @@ def _handle_service_only_update(
         logger.render_summary()
         sys.exit(1)
     logger.success("MCP/LSP configuration reconciled. No APM dependencies to update.")
+    _explain_local_bundles(scope, apm_package, logger)
     return True
+
+
+def _explain_local_bundles(scope: Any, apm_package: Any, logger: InstallLogger) -> None:
+    """Name the installed local bundles 'apm update' leaves untouched (#4318)."""
+    from apm_cli.install.local_bundle_hook_trust import installed_local_bundles
+    from apm_cli.install.outcome import local_bundle_update_next_step
+
+    names, file_count = installed_local_bundles(scope, apm_package)
+    if names or file_count:
+        logger.info(local_bundle_update_next_step(names, file_count, scope))
+
+
+def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
+    """Re-verify locked marketplace provenance before planning; fail closed (#4228)."""
+    from apm_cli.marketplace.catalog_origin import reverify_locked_provenance
+    from apm_cli.marketplace.errors import MarketplaceError
+
+    try:
+        restored = reverify_locked_provenance(lockfile, manifest_file(lock_path.parent))
+    except MarketplaceError as exc:
+        _rich_error(str(exc), symbol="error")
+        sys.exit(1)
+    for row in restored:
+        logger.info(f"Restored marketplace provenance for {row} from its catalog.")
+    if restored and not dry_run:
+        from apm_cli.deps.lockfile_write_authority import provisional_lockfile_writes
+
+        with provisional_lockfile_writes():
+            lockfile.write(lock_path)
+    return lockfile
 
 
 @click.command(
@@ -647,6 +677,7 @@ def update(
     )
 
 
+@lockfile_writer(LockfileWriter.UPDATE)
 def _run_dep_update(
     *,
     assume_yes: bool,
@@ -900,7 +931,7 @@ def _run_dep_update_locked(
     _modules_dir = get_modules_dir(scope)
     _mcp_lsp_project_root = get_deploy_root(scope)
     _lock_path = get_lockfile_path(_apm_dir)
-    _existing_lock = LockFile.read(_lock_path)
+    _existing_lock = _reverified_lock(LockFile.read(_lock_path), _lock_path, logger, dry_run)
     _cache_rehydration_required = _module_cache_needs_rehydration(
         _existing_lock,
         _modules_dir,
@@ -932,6 +963,7 @@ def _run_dep_update_locked(
             target=target,
             legacy_skill_paths=legacy_skill_paths,
             lsp_preflight=LspPreflight(),
+            trust_transitive_mcp=trust_transitive_mcp,
         )
     except FrozenInstallError as e:
         _rich_error(str(e))
@@ -948,8 +980,11 @@ def _run_dep_update_locked(
             _rich_echo(e.diagnostic_context)
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
-    except (DirectDependencyError, PolicyViolationError, RequiredIntegrationError) as e:
-        _rich_error(str(e), err=isinstance(e, PolicyViolationError))
+    except PolicyViolationError as e:
+        _rich_error(str(e), err=True)
+        sys.exit(1)
+    except (DirectDependencyError, RequiredIntegrationError) as e:
+        logger.error(str(e))
         sys.exit(1)
     except click.UsageError:
         raise

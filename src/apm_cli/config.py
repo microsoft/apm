@@ -45,6 +45,30 @@ def ensure_config_exists():
             os.chmod(CONFIG_FILE, 0o600)
 
 
+_CONFIG_CREATION_SUPPRESSED = False
+
+
+@contextlib.contextmanager
+def config_creation_suppressed():
+    """Never create ``config.json`` or other user state in this block (``install --dry-run``).
+
+    Process-wide rather than per-thread: dependency resolution reads manifests
+    on worker threads.
+    """
+    global _CONFIG_CREATION_SUPPRESSED
+    previous = _CONFIG_CREATION_SUPPRESSED
+    _CONFIG_CREATION_SUPPRESSED = True
+    try:
+        yield
+    finally:
+        _CONFIG_CREATION_SUPPRESSED = previous
+
+
+def user_state_writes_suppressed() -> bool:
+    """Return True inside :func:`config_creation_suppressed` (a preview)."""
+    return _CONFIG_CREATION_SUPPRESSED
+
+
 def get_config(*, create: bool = True):
     """Get the current configuration.
 
@@ -60,7 +84,7 @@ def get_config(*, create: bool = True):
     global _config_cache
     if _config_cache is not None:
         return _config_cache
-    if create:
+    if create and not _CONFIG_CREATION_SUPPRESSED:
         ensure_config_exists()
     elif not os.path.exists(CONFIG_FILE):
         return {}
@@ -649,9 +673,18 @@ def list_registry_configs() -> dict[str, dict]:
 
 
 def set_registry_url(name: str, url: str) -> None:
-    """Write registry.<name>.url to config.json."""
+    """Write registry.<name>.url to config.json.
+
+    Raises:
+        ValueError: If the registry URL scheme owner does not accept *url*.
+    """
+    from apm_cli.deps.registry.url_scheme import registry_url_error
+
     regs = dict(_get_registries_section())
     entry = dict(regs.get(name) or {})
+    error = registry_url_error(name, url, insecure=entry.get("insecure"))
+    if error is not None:
+        raise ValueError(error)
     entry["url"] = url
     regs[name] = entry
     update_config({"registries": regs})
