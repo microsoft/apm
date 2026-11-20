@@ -101,6 +101,33 @@ def test_tampered_package_content_fails_closed_naming_the_entry(
     assert DEPENDENCY in output and "content_hash" in output
 
 
+@pytest.mark.req("req-lk-015")
+@pytest.mark.parametrize("command", sorted(_VERIFY))
+def test_locked_content_hash_is_recomputed_and_names_both_envelopes(
+    tmp_path: Path, apm_binary_path: Path, command: str
+) -> None:
+    """Both verifiers recompute the tree at the locked commit and name the entry and both envelopes."""
+    sample = _installed(tmp_path, apm_binary_path)
+    project = sample.project.root
+    lock_path = project / "apm.lock.yaml"
+    lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    entry = next(row for row in lock["dependencies"] if DEPENDENCY in row["repo_url"])
+    observed = entry["content_hash"]
+    expected = "sha256:" + "0" * 64
+    entry["content_hash"] = expected
+    lock_path.write_text(yaml.safe_dump(lock, sort_keys=False), encoding="utf-8")
+    lock_before = lock_path.read_bytes()
+
+    result = sample.run(_VERIFY[command], scenario_id=f"lk-015-lock-{command}")
+
+    output = _text(result)
+    assert result.returncode == 1, output
+    assert (
+        f"Content hash mismatch for {DEPENDENCY}: expected {expected}, got {observed}." in output
+    ), output
+    assert lock_path.read_bytes() == lock_before
+
+
 # --- req-lk-018: frozen by default under CI ------------------------------------
 
 
