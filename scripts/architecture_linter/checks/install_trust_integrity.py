@@ -355,7 +355,7 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
     ),
     _BUNDLE_HOOK_TRUST: (
         "parse_local_bundle_hook_source(",
-        "is_package_approved(allow_map, key, EXEC_TYPE_HOOKS)",
+        "package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS)",
         "if None in keys:",
         "HookIntegrator().retire_local_bundle_hooks(item.slug, project_root, hook_targets)",
         "_retire_per_file(project_root, targets, item)",
