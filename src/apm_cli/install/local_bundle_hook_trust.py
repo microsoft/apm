@@ -160,22 +160,27 @@ def deployed_bundle_hook_keys(
 def unadmitted_bundle_hooks(
     project_root: Path,
     targets: Any,
-    allow_executables: Callable[[], dict[str, dict[str, bool]] | None],
+    allow_executables: Callable[[], dict[str, dict[str, bool]]],
     bundle_paths: Collection[str] | Callable[[], Collection[str]] = (),
 ) -> list[UnadmittedBundleHooks]:
     """Return deployed local-bundle hooks the current trust does not admit.
 
     *allow_executables* returns the effective deny-wins map, and is asked
-    only when a local bundle has deployed hooks; ``None`` means the
-    executables gate is off, which admits every hook as installs do.
+    only when a local bundle has deployed hooks. A gate-off map from the trust
+    owner admits every hook, as installs do; a missing map admits none.
     """
     deployed = deployed_bundle_hook_keys(project_root, targets, bundle_paths)
     if not deployed:
         return []
     allow_map = allow_executables()
-    if allow_map is None:
+    from apm_cli.security.executables import (
+        EXEC_TYPE_HOOKS,
+        exec_map_authorizes_all,
+        package_type_approved,
+    )
+
+    if exec_map_authorizes_all(allow_map):
         return []
-    from apm_cli.security.executables import EXEC_TYPE_HOOKS, is_package_approved
 
     result: list[UnadmittedBundleHooks] = []
     for slug, state in sorted(deployed.items()):
@@ -183,7 +188,7 @@ def unadmitted_bundle_hooks(
         files = tuple(sorted(state.hook_files))
         if None in keys:
             result.append(UnadmittedBundleHooks(slug, REASON_UNRECORDED, files))
-        elif not all(is_package_approved(allow_map, key, EXEC_TYPE_HOOKS) for key in keys):
+        elif not all(package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS) for key in keys):
             result.append(UnadmittedBundleHooks(slug, REASON_NOT_GRANTED, files))
     return result
 
@@ -224,7 +229,7 @@ def _drop_lock_rows(lock_dir: Path, paths: Collection[str]) -> None:
 def retire_unadmitted_bundle_hooks(
     project_root: Path,
     targets: Any,
-    allow_executables: Callable[[], dict[str, dict[str, bool]] | None],
+    allow_executables: Callable[[], dict[str, dict[str, bool]]],
     *,
     lock_dir: Path | None = None,
     logger: Any = None,
@@ -280,7 +285,7 @@ def scope_bundle_hook_inputs(scope: Any, apm_package: Any, *, no_policy: bool, l
     explicit = list(getattr(apm_package, "canonical_targets", None) or ()) or None
     targets = resolve_targets(root, user_scope=user_scope, explicit_target=explicit)
 
-    def allow_provider() -> dict[str, dict[str, bool]] | None:
+    def allow_provider() -> dict[str, dict[str, bool]]:
         return resolve_project_exec_allow_map(
             root, apm_package, user_scope=user_scope, no_policy=no_policy, logger=logger
         )
