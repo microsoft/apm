@@ -18,6 +18,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.install.phases.lockfile import compute_deployed_hashes
 from apm_cli.integration.hook_file_routing import (
@@ -70,7 +72,10 @@ def _make_package_info(
 
 
 class TestIsVscodeAvailable:
-    def test_vscode_dir_makes_it_available(self, tmp_path):
+    def test_vscode_dir_makes_it_available(self, tmp_path, monkeypatch):
+        import shutil
+
+        monkeypatch.setattr(shutil, "which", lambda _: None)
         (tmp_path / ".vscode").mkdir()
         assert _is_vscode_available(tmp_path) is True
 
@@ -90,15 +95,12 @@ class TestIsVscodeAvailable:
 
 
 class TestMCPIntegratorCollectTransitive:
-    def test_returns_empty_when_no_apm_modules_dir(self, tmp_path):
-        result = MCPIntegrator.collect_transitive(tmp_path / "apm_modules")
-        assert result == []
-
-    def test_returns_empty_when_apm_modules_empty(self, tmp_path):
+    @pytest.mark.parametrize("create_dir", [False, True], ids=["absent", "empty"])
+    def test_returns_empty_without_packages(self, tmp_path, create_dir):
         apm_modules = tmp_path / "apm_modules"
-        apm_modules.mkdir()
-        result = MCPIntegrator.collect_transitive(apm_modules)
-        assert result == []
+        if create_dir:
+            apm_modules.mkdir()
+        assert MCPIntegrator.collect_transitive(apm_modules) == []
 
     def test_skips_invalid_apm_yml(self, tmp_path):
         apm_modules = tmp_path / "apm_modules"
@@ -211,6 +213,8 @@ class TestMCPIntegratorBuildSelfDefinedInfo:
             }
         )
         info = MCPIntegrator._build_self_defined_info(dep)
+        assert info["name"] == "tool-server"
+        assert info["_raw_stdio"]["command"] == "python"
         assert info["_apm_tools_override"] == ["search", "read"]
 
     def test_stdio_with_dict_args(self):
@@ -360,9 +364,11 @@ class TestMCPIntegratorDriftDetection:
     def test_ignores_new_deps_not_in_stored(self):
         from apm_cli.models.dependency.mcp import MCPDependency
 
-        dep = MCPDependency.from_string("brand-new")
-        drifted = MCPIntegrator._detect_mcp_config_drift([dep], {})
-        assert len(drifted) == 0
+        new_dep = MCPDependency.from_string("brand-new")
+        changed = MCPDependency.from_dict({"name": "srv", "env": {"A": "new"}})
+        stored = {"srv": {"name": "srv", "env": {"A": "old"}}}
+        drifted = MCPIntegrator._detect_mcp_config_drift([new_dep, changed], stored)
+        assert drifted == {"srv"}
 
 
 class TestMCPIntegratorAppendDrifted:
@@ -385,10 +391,6 @@ class TestMCPIntegratorRemoveStale:
         assert "old-server" not in config["servers"]
         assert "keep-me" in config["servers"]
 
-    def test_skips_vscode_when_file_absent(self, tmp_path):
-        # Should not raise
-        MCPIntegrator.remove_stale({"nonexistent"}, runtime="vscode", project_root=tmp_path)
-
     def test_removes_from_cursor_mcp_json(self, tmp_path):
         cursor = tmp_path / ".cursor"
         cursor.mkdir()
@@ -401,26 +403,21 @@ class TestMCPIntegratorRemoveStale:
         assert "stale" not in config["mcpServers"]
         assert "keep" in config["mcpServers"]
 
-    def test_removes_from_opencode_json(self, tmp_path):
-        opencode_dir = tmp_path / ".opencode"
-        opencode_dir.mkdir()
-        opencode_json = tmp_path / "opencode.json"
-        opencode_json.write_text(
-            json.dumps({"mcp": {"stale-oc": {"cmd": "x"}, "keep": {"cmd": "y"}}})
-        )
-        MCPIntegrator.remove_stale({"stale-oc"}, runtime="opencode", project_root=tmp_path)
-        config = json.loads(opencode_json.read_text())
-        assert "stale-oc" not in config["mcp"]
-        assert "keep" in config["mcp"]
-
-    def test_removes_from_gemini_settings(self, tmp_path):
-        gemini_dir = tmp_path / ".gemini"
-        gemini_dir.mkdir()
-        settings = gemini_dir / "settings.json"
-        settings.write_text(json.dumps({"mcpServers": {"stale-gem": {}, "keep": {}}}))
-        MCPIntegrator.remove_stale({"stale-gem"}, runtime="gemini", project_root=tmp_path)
-        config = json.loads(settings.read_text())
-        assert "stale-gem" not in config["mcpServers"]
+    @pytest.mark.parametrize(
+        ("runtime", "marker_dir", "config_rel", "key"),
+        [
+            ("opencode", ".opencode", "opencode.json", "mcp"),
+            ("gemini", ".gemini", ".gemini/settings.json", "mcpServers"),
+        ],
+    )
+    def test_removes_from_runtime_config(self, tmp_path, runtime, marker_dir, config_rel, key):
+        (tmp_path / marker_dir).mkdir()
+        config_path = tmp_path / config_rel
+        config_path.write_text(json.dumps({key: {"stale": {"cmd": "x"}, "keep": {"cmd": "y"}}}))
+        MCPIntegrator.remove_stale({"stale"}, runtime=runtime, project_root=tmp_path)
+        config = json.loads(config_path.read_text())
+        assert "stale" not in config[key]
+        assert "keep" in config[key]
 
     def test_removes_from_claude_project_mcp_json(self, tmp_path):
         from tests.utils.managed_mcp import install_managed_mcp
@@ -440,27 +437,38 @@ class TestMCPIntegratorRemoveStale:
         config = json.loads(mcp_json.read_text())
         assert config["mcpServers"] == {"keep-cl": {}}
 
-    def test_empty_stale_names_is_noop(self, tmp_path):
-        # Should not touch anything
-        MCPIntegrator.remove_stale(set(), project_root=tmp_path)
+    @pytest.mark.parametrize(
+        ("stale", "runtime"),
+        [(set(), None), ({"nonexistent"}, "vscode")],
+        ids=["empty_stale_names", "vscode_file_absent"],
+    )
+    def test_noop_leaves_project_untouched(self, tmp_path, stale, runtime):
+        MCPIntegrator.remove_stale(stale, runtime=runtime, project_root=tmp_path)
+        assert list(tmp_path.iterdir()) == []
 
     def test_exclude_removes_runtime_from_set(self, tmp_path):
         vscode = tmp_path / ".vscode"
         vscode.mkdir()
         mcp_json = vscode / "mcp.json"
         mcp_json.write_text(json.dumps({"servers": {"srv": {}}}))
-        # Exclude vscode -- file should NOT be touched
         MCPIntegrator.remove_stale(
             {"srv"}, runtime="vscode", exclude="vscode", project_root=tmp_path
         )
-        config = json.loads(mcp_json.read_text())
-        assert "srv" in config["servers"]  # unchanged
+        assert json.loads(mcp_json.read_text()) == {"servers": {"srv": {}}}
 
 
 class TestMCPIntegratorUpdateLockfile:
     def test_noop_when_lockfile_absent(self, tmp_path):
-        # Should not raise even when lock path does not exist
-        MCPIntegrator.update_lockfile({"s1", "s2"}, lock_path=tmp_path / "missing.lock.yaml")
+        lock_path = tmp_path / "missing.lock.yaml"
+        MCPIntegrator.update_lockfile(set(), lock_path=lock_path)
+        assert not lock_path.exists()
+
+    def test_creates_absent_lockfile_for_servers(self, tmp_path):
+        from apm_cli.deps.lockfile import LockFile
+
+        lock_path = tmp_path / "missing.lock.yaml"
+        MCPIntegrator.update_lockfile({"s2", "s1"}, lock_path=lock_path)
+        assert LockFile.read(lock_path).mcp_servers == ["s1", "s2"]
 
     def test_updates_mcp_servers_in_lockfile(self, tmp_path):
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
@@ -1145,23 +1153,20 @@ class TestToHyphenCase:
 
 
 class TestValidateSkillName:
-    def test_valid_name(self):
-        ok, _ = validate_skill_name("my-skill")
+    @pytest.mark.parametrize("name", ["my-skill", "a", "42"])
+    def test_valid_name(self, name):
+        ok, _ = validate_skill_name(name)
         assert ok is True
 
-    def test_empty_name(self):
-        ok, msg = validate_skill_name("")
+    @pytest.mark.parametrize(("name", "fragment"), [("", "empty"), ("MySkill", "lowercase")])
+    def test_invalid_name_message(self, name, fragment):
+        ok, msg = validate_skill_name(name)
         assert ok is False
-        assert "empty" in msg.lower()
+        assert fragment in msg.lower()
 
     def test_too_long(self):
         ok, _msg = validate_skill_name("a" * 65)
         assert ok is False
-
-    def test_uppercase(self):
-        ok, msg = validate_skill_name("MySkill")
-        assert ok is False
-        assert "lowercase" in msg.lower()
 
     def test_underscore(self):
         ok, _msg = validate_skill_name("my_skill")
@@ -1182,14 +1187,6 @@ class TestValidateSkillName:
     def test_trailing_hyphen(self):
         ok, _msg = validate_skill_name("my-skill-")
         assert ok is False
-
-    def test_single_char(self):
-        ok, _ = validate_skill_name("a")
-        assert ok is True
-
-    def test_numeric_name(self):
-        ok, _ = validate_skill_name("42")
-        assert ok is True
 
 
 class TestNormalizeSkillName:

@@ -14,6 +14,8 @@ import json
 import warnings
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 
 # ---------------------------------------------------------------------------
@@ -83,12 +85,13 @@ class TestGetServerNames:
         names = MCPIntegrator.get_server_names([dep_a, dep_b])
         assert names == {"server-a", "server-b"}
 
-    def test_extracts_from_strings(self):
-        names = MCPIntegrator.get_server_names(["srv1", "srv2"])
-        assert names == {"srv1", "srv2"}
-
-    def test_empty_list(self):
-        assert MCPIntegrator.get_server_names([]) == set()
+    @pytest.mark.parametrize(
+        ("deps", "expected"),
+        [(["srv1", "srv2"], {"srv1", "srv2"}), ([], set())],
+        ids=["strings", "empty"],
+    )
+    def test_extracts_from_strings(self, deps, expected):
+        assert MCPIntegrator.get_server_names(deps) == expected
 
 
 # ---------------------------------------------------------------------------

@@ -365,11 +365,6 @@ class TestReflink:
         result = reflink_supported()
         assert isinstance(result, bool)
 
-    def test_reflink_supported_respects_env_var(self):
-        """reflink_supported() respects APM_NO_REFLINK."""
-        with patch.dict(os.environ, {"APM_NO_REFLINK": "1"}):
-            assert reflink_supported() is False
-
     def test_reflink_supported_clear_env(self):
         """reflink_supported() works with clear env."""
         with patch.dict(os.environ, {"APM_NO_REFLINK": ""}, clear=False):
@@ -386,14 +381,14 @@ class TestReflink:
         assert isinstance(result, bool)
 
     def test_clone_file_respects_no_reflink(self, tmp_path: Path):
-        """clone_file() respects APM_NO_REFLINK."""
+        """APM_NO_REFLINK disables reflink support and clone_file()."""
         src = tmp_path / "source.txt"
         src.write_text("test")
         dst = tmp_path / "dest.txt"
 
         with patch.dict(os.environ, {"APM_NO_REFLINK": "1"}):
-            result = clone_file(src, dst)
-            assert result is False
+            assert reflink_supported() is False
+            assert clone_file(src, dst) is False
 
     def test_clone_file_pathlib_objects(self, tmp_path: Path):
         """clone_file() accepts Path objects."""
@@ -492,37 +487,25 @@ class TestHelpers:
 class TestInstallTui:
     """Test install TUI animation control."""
 
-    def test_should_animate_never_mode(self):
-        """should_animate() returns False for APM_PROGRESS=never."""
-        with patch.dict(os.environ, {"APM_PROGRESS": "never"}):
-            assert should_animate() is False
-
-    def test_should_animate_quiet_mode(self):
-        """should_animate() returns False for APM_PROGRESS=quiet."""
-        with patch.dict(os.environ, {"APM_PROGRESS": "quiet"}):
-            assert should_animate() is False
-
-    def test_should_animate_off_mode(self):
-        """should_animate() returns False for APM_PROGRESS=off."""
-        with patch.dict(os.environ, {"APM_PROGRESS": "off"}):
-            assert should_animate() is False
-
-    def test_should_animate_false_values(self):
-        """should_animate() returns False for 0/false/no."""
-        for val in ["0", "false", "no"]:
-            with patch.dict(os.environ, {"APM_PROGRESS": val}):
-                assert should_animate() is False
-
-    def test_should_animate_always_mode(self):
-        """should_animate() returns True for APM_PROGRESS=always."""
-        with patch.dict(os.environ, {"APM_PROGRESS": "always"}):
-            assert should_animate() is True
-
-    def test_should_animate_true_values(self):
-        """should_animate() returns True for 1/true/yes."""
-        for val in ["1", "true", "yes"]:
-            with patch.dict(os.environ, {"APM_PROGRESS": val}):
-                assert should_animate() is True
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("never", False),
+            ("quiet", False),
+            ("off", False),
+            ("0", False),
+            ("false", False),
+            ("no", False),
+            ("always", True),
+            ("1", True),
+            ("true", True),
+            ("yes", True),
+        ],
+    )
+    def test_should_animate_progress_override(self, value, expected):
+        """APM_PROGRESS explicitly forces animation on or off."""
+        with patch.dict(os.environ, {"APM_PROGRESS": value}):
+            assert should_animate() is expected
 
     def test_should_animate_ci_environment(self):
         """should_animate() returns False in CI environment."""

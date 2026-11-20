@@ -86,7 +86,7 @@ class TestLocalPathNoMarkersHint:
         empty_dir.mkdir()
         logger = MagicMock()
         _local_path_no_markers_hint(empty_dir, logger=logger)
-        logger.progress.assert_not_called()
+        assert logger.method_calls == []
 
     def test_sub_package_with_logger_uses_logger(self, tmp_path: Path) -> None:
         from apm_cli.install.validation import _local_path_no_markers_hint
