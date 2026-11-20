@@ -92,6 +92,7 @@ COMPONENT_ONLY: dict[str, str] = {
     "target-not-deployed": _OUTSIDE,
     "user-instructions-missing": _OUTSIDE,
     "user-manifest-invalid": _OUTSIDE,
+    "user-packages-missing": _OUTSIDE,
     "lifecycle-scripts-untrusted": _OUTSIDE,
 }
 
