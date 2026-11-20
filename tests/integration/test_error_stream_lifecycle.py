@@ -22,6 +22,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-OWN-user-facing-output-diagnostics"),
 ]
 
 _LONG_NAME = "a-deliberately-long-local-package-directory-name-that-exceeds-eighty-columns"

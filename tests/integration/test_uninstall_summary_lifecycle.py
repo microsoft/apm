@@ -15,6 +15,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-OWN-user-facing-output-diagnostics"),
 ]
 
 _COUNT_LINE = re.compile(r"\b\d+ packages?\b|package\(s\)")

@@ -8,7 +8,10 @@ import pytest
 
 from scripts.architecture_linter.runner import run_selected_rules
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-user-facing-output-diagnostics"),
+]
 
 _ROOT = Path(__file__).resolve().parents[2]
 

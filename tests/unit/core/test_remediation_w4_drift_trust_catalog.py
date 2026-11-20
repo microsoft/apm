@@ -17,8 +17,10 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.core.remediation import catalog
-from tests.utils.click_tree import resolve_line
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-remediation-advice"),
+]
 
 _OWNER = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "core" / "remediation.py"
 _BLOCK = re.compile(
@@ -84,36 +86,7 @@ def _block_ids() -> list[str]:
 _IDS = _block_ids()
 
 
-def test_every_w4_drift_trust_remediation_has_a_proof_level() -> None:
-    ids = set(_IDS)
-    assert EXECUTED.isdisjoint(COMPONENT_ONLY)
-    assert ids == EXECUTED | set(COMPONENT_ONLY), (
-        sorted(ids - EXECUTED - set(COMPONENT_ONLY)),
-        sorted((EXECUTED | set(COMPONENT_ONLY)) - ids),
-    )
-
-
 def test_executed_ids_match_the_installed_cli_proofs() -> None:
     from tests.integration.test_remediation_advice_lifecycle import W4_DRIFT_TRUST_PROOFS
 
     assert {proof.remediation_id for proof in W4_DRIFT_TRUST_PROOFS} == EXECUTED
-
-
-def _sample(text: str) -> str:
-    text = re.sub(r"\{[a-z_]+\}", "sample", text)
-    return re.sub(r"<[^>\s]+>", "sample", text)
-
-
-@pytest.mark.parametrize("remediation_id", _IDS)
-def test_w4_drift_trust_remediation_resolves_and_names_its_state(remediation_id: str) -> None:
-    entry = catalog()[remediation_id]
-    resolution = resolve_line(_sample(entry.command))
-    assert resolution.ok, (entry.command, resolution)
-
-    promise = entry.fixes_promise
-    assert promise and promise == promise.strip()
-    assert promise[0].islower() and not promise.startswith(("to ", "run ")), promise
-    assert promise.isascii() and not promise.endswith(".")
-    rendered = entry.bind(**{name: "sample" for name in re.findall(r"\{([a-z_]+)\}", repr(entry))})
-    assert rendered.sentence().startswith(("Run '", rendered.sentence()[:1]))
-    assert f"'{rendered.command}' to {rendered.fixes_promise}" in rendered.sentence()

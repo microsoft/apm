@@ -15,6 +15,11 @@ from tests.spec_conformance._test_kind import (
     classify_definition,
 )
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-behavioral-test-taxonomy-classification"),
+]
+
 
 def _classify(tmp_path: Path, source: str) -> str:
     path = tmp_path / "test_case_reqs.py"

@@ -25,7 +25,10 @@ import pytest
 
 from tests.utils.click_tree import iter_commands, resolve
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-DOC-cli-surface"),
+]
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "apm_cli"
 _QUOTED = re.compile(r"(?:(?<=['\"])|(?<=`))apm ([^'\"`\n]+?)(?=['\"`])")

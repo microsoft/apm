@@ -14,6 +14,11 @@ import pytest
 from apm_cli.core.remediation import catalog
 from tests.utils.click_tree import resolve_line
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-remediation-advice"),
+]
+
 _ENTRIES = tuple(sorted(catalog().values(), key=lambda entry: entry.id))
 
 

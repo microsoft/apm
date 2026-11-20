@@ -10,6 +10,11 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-user-facing-output-diagnostics"),
+]
+
 
 def _uninstall(project: Path, deps: list[str], *args: str) -> str:
     (project / "apm.yml").write_text(

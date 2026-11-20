@@ -631,13 +631,6 @@ W2_MARKETPLACE_PROOFS: tuple[_TextProof, ...] = (
 )
 
 
-@pytest.mark.parametrize("proof", W2_MARKETPLACE_PROOFS, ids=lambda proof: proof.remediation_id)
-def test_w2_marketplace_remediation_clears_the_reported_state(
-    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
-) -> None:
-    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
-
-
 # -- end W2 marketplace proofs --
 # -- W2 bundle proofs --
 # 'apm pack' refuses an installed project whose lockfile or attested files are
@@ -686,13 +679,6 @@ W2_BUNDLE_PROOFS: tuple[_TextProof, ...] = (
         before=_unlink(_INSTRUCTION),
     ),
 )
-
-
-@pytest.mark.parametrize("proof", W2_BUNDLE_PROOFS, ids=lambda proof: proof.remediation_id)
-def test_w2_bundle_remediation_clears_the_reported_state(
-    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
-) -> None:
-    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
 
 
 # -- end W2 bundle proofs --
@@ -760,15 +746,6 @@ W3_DEPS_COMPILATION_PROOFS: tuple[_TextProof, ...] = (
         _orphan_removed,
     ),
 )
-
-
-@pytest.mark.parametrize(
-    "proof", W3_DEPS_COMPILATION_PROOFS, ids=lambda proof: proof.remediation_id
-)
-def test_w3_deps_compilation_remediation_clears_the_reported_state(
-    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
-) -> None:
-    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
 
 
 # -- end W3 deps-compilation proofs --
@@ -889,13 +866,6 @@ W3_PLUGINS_RUNTIME_PROOFS: tuple[_TextProof, ...] = (
 )
 
 
-@pytest.mark.parametrize("proof", W3_PLUGINS_RUNTIME_PROOFS, ids=lambda proof: proof.remediation_id)
-def test_w3_plugins_runtime_remediation_clears_the_reported_state(
-    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
-) -> None:
-    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
-
-
 # -- end W3 plugins-runtime proofs --
 # -- W3 core-models proofs --
 
@@ -966,13 +936,6 @@ W3_CORE_MODELS_PROOFS: tuple[_TextProof, ...] = (
         _expect_ok,
     ),
 )
-
-
-@pytest.mark.parametrize("proof", W3_CORE_MODELS_PROOFS, ids=lambda proof: proof.remediation_id)
-def test_w3_core_models_remediation_clears_the_reported_state(
-    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
-) -> None:
-    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
 
 
 # -- end W3 core-models proofs --
@@ -1395,3 +1358,20 @@ def test_w4_phases_targets_remediation_clears_the_reported_state(
 
 # -- end W4 phases-targets proofs --
 # -- end W4 executed proofs ---------------------------------------------------
+
+
+# One loop runs every area's text proofs (W2 marketplace and bundle, W3).
+_AREA_TEXT_PROOFS = (
+    *W2_MARKETPLACE_PROOFS,
+    *W2_BUNDLE_PROOFS,
+    *W3_DEPS_COMPILATION_PROOFS,
+    *W3_PLUGINS_RUNTIME_PROOFS,
+    *W3_CORE_MODELS_PROOFS,
+)
+
+
+@pytest.mark.parametrize("proof", _AREA_TEXT_PROOFS, ids=lambda proof: proof.remediation_id)
+def test_area_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
+) -> None:
+    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)

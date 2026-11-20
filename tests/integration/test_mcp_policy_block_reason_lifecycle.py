@@ -21,6 +21,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-OWN-policy-outcome-routing"),
 ]
 
 _MCP = ("install", "--mcp", "fetch", "--", "npx", "-y", "@modelcontextprotocol/server-fetch")
