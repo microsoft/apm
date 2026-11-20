@@ -67,6 +67,7 @@ def run_policy_preflight(
     registries: dict[str, str] | None = None,
     effective_target: tuple[str, ...] | None = None,
     effective_target_source: str = "effective target",
+    fetch_result: PolicyFetchResult | None = None,
 ) -> tuple[PolicyFetchResult | None, bool]:
     """Discover + enforce policy for a non-pipeline command site.
 
@@ -88,6 +89,8 @@ def run_policy_preflight(
         selection, for compilation-target policy.
     effective_target_source:
         Where that selection came from, named in violation details.
+    fetch_result:
+        A discovery the caller already holds, so one install discovers once.
     no_policy:
         CLI ``--no-policy`` flag value.
     logger:
@@ -125,7 +128,8 @@ def run_policy_preflight(
         return None, False
 
     # -- Discovery (chain-aware: resolves extends: + merges) -----------
-    fetch_result = discover_policy_with_chain(project_root)
+    if fetch_result is None:
+        fetch_result = discover_policy_with_chain(project_root)
 
     # -- Route the outcome through the shared 9-outcome table ---------
     # Logging + fail-closed gating live in ``policy/outcome_routing.py``

@@ -721,6 +721,7 @@ class TestInstallLocalBundleDryRun:
             logger: object,
             migrate_user_legacy: bool = True,
             dry_run: bool = False,
+            policy_fetch_result: object = None,
         ) -> dict | None:
             captured["project_root"] = project_root
             captured["user_scope"] = user_scope
@@ -1627,9 +1628,15 @@ class TestInstallLocalBundleLsp:
                 return PolicyFetchResult(policy=policy, source="test", outcome="found")
             return PolicyFetchResult(policy=None, source="", outcome="absent")
 
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-            side_effect=discover_policy,
+        with (
+            patch(
+                "apm_cli.policy.discovery.discover_policy_with_chain",
+                side_effect=discover_policy,
+            ),
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                side_effect=discover_policy,
+            ),
         ):
             result = _invoke_install(
                 project,
@@ -1723,6 +1730,32 @@ class TestInstallLocalBundleLsp:
         assert not (
             project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
         ).exists()
+
+    def test_bundle_install_discovers_org_policy_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.policy.discovery import PolicyFetchResult
+
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        absent = PolicyFetchResult(policy=None, source="", outcome="absent")
+
+        with (
+            patch(
+                "apm_cli.policy.discovery.discover_policy_with_chain", return_value=absent
+            ) as trust_reads,
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=absent,
+            ) as preflight_reads,
+        ):
+            result = _invoke_install(
+                project, str(bundle), "--target", "claude", monkeypatch=monkeypatch
+            )
+
+        assert result.exit_code == 0, result.output
+        # The trust map and the policy preflight share one discovery.
+        assert trust_reads.call_count + preflight_reads.call_count == 1
 
     def test_copilot_aliases_are_normalized_for_bundle_lsp(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

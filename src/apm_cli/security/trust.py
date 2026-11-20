@@ -286,7 +286,6 @@ class McpAdmission:
         one_off: bool = False,
         no_policy: bool = False,
         include_user: bool = True,
-        cache_only_policy: bool = False,
         logger: Any = None,
         trust_context: ExecTrustContext | None = None,
     ) -> McpAdmission:
@@ -313,9 +312,8 @@ class McpAdmission:
                 from apm_cli.policy.discovery import discover_policy_with_chain
                 from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
 
-                kwargs = {"cache_only": True} if cache_only_policy else {}
                 try:
-                    result = discover_policy_with_chain(project_root, **kwargs)
+                    result = discover_policy_with_chain(project_root)
                 except (OSError, ValueError, RuntimeError) as exc:
                     admission.policy_unavailable = type(exc).__name__
                 else:

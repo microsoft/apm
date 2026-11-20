@@ -49,6 +49,7 @@ def install_local_bundle(
     rejected_flags: dict[str, object],
     allow_executables: dict | None = None,
     create_config: bool = True,
+    policy_fetch_result=None,
 ) -> None:
     """Deploy a local bundle into project / user scope.
 
@@ -217,6 +218,7 @@ def install_local_bundle(
             dry_run=dry_run,
             effective_target=deployment_decision.canonical_targets,
             effective_target_source=deployment_decision.source,
+            fetch_result=policy_fetch_result,
         )
         policy = policy_fetch.policy if policy_fetch is not None else None
         from .integrity import require_hashes_enabled
@@ -524,12 +526,14 @@ def effective_bundle_allow_map(
     logger: Any,
     migrate_user_legacy: bool = True,
     dry_run: bool = False,
+    policy_fetch_result=None,
 ) -> dict[str, dict[str, bool]] | None:
     """Resolve local-bundle trust through the canonical trust owner.
 
     Org policy resolves from *project_root* as for a package install; the
     bundle policy preflight reports its outcome, so this read does not repeat
-    it. The grants are read from the scope's manifest (``$APM_HOME/apm.yml``
+    it. *policy_fetch_result* is the install's one policy discovery, which the
+    preflight reuses. The grants are read from the scope's manifest (``$APM_HOME/apm.yml``
     under ``-g``), never from the working directory's ``apm.yml`` at user
     scope.
     """
@@ -546,6 +550,7 @@ def effective_bundle_allow_map(
         no_policy=no_policy,
         announce=False,
         raise_blocking_errors=not dry_run,
+        fetch_result=policy_fetch_result,
     )
     grants_manifest = project_manifest_path(manifest_root(project_root, user_scope=user_scope))
     return materialize_exec_map(
