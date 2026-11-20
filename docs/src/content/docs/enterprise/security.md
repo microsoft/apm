@@ -87,6 +87,7 @@ risk that remains.
 | Skip the policy on a laptop | `--no-policy` and `APM_POLICY_DISABLE=1` are local; the required CI check runs anyway | You: branch protection makes the check required |
 | Weaken or spoof the org policy | Inheritance never loosens; cross-host `extends:` rejected; an incomplete chain fails closed; `policy.hash` pin | Owners of the policy repository |
 | Edit deployed agent files outside APM | Drift replay and `content-integrity` in `apm audit --ci`; `--frozen` | You, for files APM did not deploy (see `unmanaged_files` in the [policy schema](../../reference/policy-schema/#unmanaged_files)) |
+| Forge a lockfile row so cleanup deletes a file APM never wrote | A lockfile hash alone never deletes: cleanup needs a local deployment receipt or byte equality with the locked render, and keeps and names any other file | You: delete kept files by hand once reviewed |
 
 :::caution[What APM does not do]
 - **No signatures.** APM verifies no package, commit or release signatures.
