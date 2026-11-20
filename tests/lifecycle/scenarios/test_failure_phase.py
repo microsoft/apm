@@ -61,10 +61,14 @@ _DEPLOYED_BEFORE_FAILURE = "#4164"
 _UNTRACKED_SKILL = Known(
     _DEPLOYED_BEFORE_FAILURE, r"deployed file is not in the lock: .agents/skills/p-child/SKILL.md"
 )
-_DEPLOY_CHANGED = Known(_DEPLOYED_BEFORE_FAILURE, r"failed install changed deployed surfaces")
+_DEPLOY_CHANGED = Known(
+    _DEPLOYED_BEFORE_FAILURE,
+    r"failed install changed deployed surfaces|failed install changed durable files",
+)
 _LOCK_CHANGED = Known(
     _DEPLOYED_BEFORE_FAILURE,
-    r"failed install changed the lockfile|failed install changed deployed surfaces",
+    r"failed install changed the lockfile|failed install changed deployed surfaces"
+    r"|failed install changed durable files",
 )
 
 

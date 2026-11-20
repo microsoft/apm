@@ -56,7 +56,9 @@ pytestmark = [
 USER_MCP = "user-mcp"
 NOTE_BLOCKS_UNINSTALL = {
     "R": Known("#4162", r"exited 1, expected \[0\]"),
-    "I7": Known("#4162", r"failed uninstall changed (the lockfile|deployed surfaces)"),
+    "I7": Known(
+        "#4162", r"failed uninstall changed (the lockfile|deployed surfaces|durable files)"
+    ),
 }
 _USER_SKILL = "---\nname: user-own\ndescription: The user's own skill.\n---\n\nMine.\n"
 

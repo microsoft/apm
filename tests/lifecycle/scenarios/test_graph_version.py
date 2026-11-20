@@ -168,7 +168,13 @@ def test_constraint_compatibility(lifecycle_world, root_ref, parent_ref, exit_co
     kinds = {"p-skill": ("skill",), "g-pin": ("skill",)}
     scenario = _scenario(lifecycle_world, specs, kinds=kinds, requires=requires)
 
-    step = scenario.run(f"install {' '.join(specs)}", exit=exit_code)
+    # The failed install still creates an empty .github directory.
+    empty_github = Known("#4159", r"failed install changed durable files: \['project:\.github'\]")
+    step = scenario.run(
+        f"install {' '.join(specs)}",
+        exit=exit_code,
+        known={"I7": empty_github} if exit_code else None,
+    )
     if exit_code:
         # The failed install still creates an empty .github directory.
         with known_defect("#4159", r"unexpected: \['project:\.github'\]"):

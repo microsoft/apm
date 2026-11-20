@@ -123,7 +123,7 @@ KNOWN_CELLS = (
         "symlink-add-deploys",
         "I7",
         "#4168",
-        r"^failed install changed deployed surfaces$",
+        r"^failed install changed (deployed surfaces|durable files: .*p-child.*)$",
         _adds_through_symlink,
     ),
 )

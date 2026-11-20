@@ -301,14 +301,15 @@ KNOWN_CELLS = (
         "uninstall-unattributed-rebuild",
         "I9",
         "#4219",
-        r"^duplicate 'integrated' line$",
+        r"^duplicate 'integrated' line(: .*)?$",
         _unattributed_rebuild,
     ),
     KnownCell(
         "uninstall-lsp-survivor",
         "I7",
         "#4214",
-        r"^failed uninstall changed (the manifest|the lockfile|deployed surfaces)$",
+        r"^failed uninstall (changed (the manifest|the lockfile|deployed surfaces|durable files: .*)"
+        r"|exited 1 without announcing why)$",
         _lsp_survivor,
     ),
     KnownCell(

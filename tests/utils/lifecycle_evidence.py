@@ -395,6 +395,14 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^  \[\+\] .*^  \[x\] \d+ dependenc\w* blocked by org policy",
     ),
     KnownOutputCell(
+        "install-empty-org-policy-banner-per-phase",
+        "I9",
+        "#4241",
+        _runs("install"),
+        r"Org policy at org:\S+ is present but empty",
+        output=r"^\[!\] Org policy at \S+ is present but empty.*^  \[\+\] .*^\+- MCP Servers",
+    ),
+    KnownOutputCell(
         "install-frozen-mcp-targeting-twice",
         "I9",
         "#4196",
@@ -410,6 +418,31 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         r"\(files unchanged\)",
         # Two or more survivor tree lines with no package line naming them.
         output=r"\A(?!.*^  \[\+\] )(?=(?:.*^  \|-- ){2})",
+    ),
+    KnownOutputCell(
+        "uninstall-unattributed-skill-lines",
+        "I9",
+        "#4219",
+        _runs("uninstall"),
+        r"\|-- (Skill integrated|\d+ skill\(s\) integrated)",
+        # Two survivor skill lines with no package line naming them.
+        output=r"\A(?!.*^  \[\+\] )(?=(?:.*^  \|-- Skill integrated){2})",
+    ),
+    KnownOutputCell(
+        "pack-dry-run-plugin-notes-twice",
+        "I9",
+        "#4291",
+        _runs("pack", "--dry-run"),
+        r"Left out of the plugin|Would write plugin manifest",
+        output=r"^\[!\] Left out of the plugin: ",
+    ),
+    KnownOutputCell(
+        "install-frozen-parked-mcp-notice-per-phase",
+        "I9",
+        "#4299",
+        _runs("install", "--frozen"),
+        r"Parked MCP server .*: denied",
+        output=r"^\[!\] Parked MCP server .*: denied.*^\+- MCP Servers",
     ),
     KnownOutputCell(
         "install-hook-line-per-target",

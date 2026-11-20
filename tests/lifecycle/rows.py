@@ -73,6 +73,8 @@ _PROJECT_HOME_ALLOWED = (
     ".apm-local",
     ".local/state/gh",
     ".cache/apm",
+    # The world's hermetic az stub logs each call here (tests/lifecycle/world/shims.py).
+    ".azure/lifecycle-az-calls.log",
 )
 _RECONCILING = frozenset({"install", "update"})
 
