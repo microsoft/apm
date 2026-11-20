@@ -276,11 +276,6 @@ def _edit_files(name: str, edit: Callable[[str], str]) -> Callable[[Path], None]
     return change
 
 
-def _pending(phrase: str) -> str:
-    """Reason of a strict expected failure whose tracking issue is maintainer-routed."""
-    return f"S-pending (neutral issue to follow): {phrase}"
-
-
 @dataclass(frozen=True)
 class Tamper:
     """One out-of-band change; ``apply`` may register cleanups on the stack."""
@@ -306,7 +301,7 @@ class Expect:
     policy_fetch: bool | None = None
     # True: the op read the marketplace catalog over the network; False: it did not.
     catalog_fetch: bool | None = None
-    xfail: str | None = None  # _pending(<phrase>) -> strict expected failure
+    xfail: str | None = None  # "#<open issue> <phrase>" -> strict expected failure
     smoke: bool = False
 
 
@@ -378,8 +373,8 @@ _SKILL_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill")
 _DRIFT = r"content-integrity\s*\|\s*1 file\(s\) with hash drift"
 _FROZEN_HASHES = r"--frozen: deployed files do not match the hashes recorded in apm.lock.yaml"
 _RETAINED = r"Uninstall could not remove tracked target files"
-_UNINSTALL_RETAINS_MODULES = _pending(
-    "uninstall keeps apm_modules when it retains an edited target file"
+_UNINSTALL_RETAINS_MODULES = (
+    "#4467 uninstall keeps apm_modules when it retains an edited target file"
 )
 
 DEPLOYED_FILE_HASHES = ArtifactSlice(
@@ -1007,7 +1002,7 @@ def _change_upstream_policy(world: World, stack: contextlib.ExitStack) -> None:
     _expire_policy_cache(world)
 
 
-_PIN_CACHE = _pending("policy cache content verified against the pin before use")
+_PIN_CACHE = "#4218 policy cache content verified against the pin before use"
 _PIN_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill", ".github")
 
 POLICY_HASH_PIN = ArtifactSlice(
