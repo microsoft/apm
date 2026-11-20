@@ -133,7 +133,8 @@ class TestMaterialization:
             install_path=Path("/some/path"),
             dep_key="owner/repo",
         )
-        assert m.deltas == {"installed": 1}
+        # A local copy is not a fetch; integration decides installed (#4184).
+        assert m.deltas == {"installed": 0}
 
     def test_custom_deltas(self) -> None:
         from apm_cli.install.sources import Materialization

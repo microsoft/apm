@@ -686,13 +686,12 @@ def integrate_package_primitives(  # noqa: PLR0913
             ),
         )
 
-    # A3: warm-cache visibility. If nothing was integrated for any kind AND
-    # no skill was created, emit one annotation so the user knows the dep
-    # was evaluated (the [+] header above already carries the SHA).
+    # A3: warm-cache visibility. If nothing changed (adopted files never count),
+    # say so once; the [+] header above already carries the SHA.
     _total_integrated = sum(_info["files"] for _info in _per_kind.values())
-    _total_integrated += int(skill_result.skill_created)
-    _total_integrated += int(skill_result.sub_skills_promoted)
+    _total_integrated += _skill_count
     _total_integrated += int(skill_result.bin_deployed)
+    result["files_changed"] = _total_integrated
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 

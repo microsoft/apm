@@ -80,7 +80,7 @@ class Materialization:
     package_info: PackageInfo | None
     install_path: Path
     dep_key: str
-    deltas: dict[str, int] = field(default_factory=lambda: {"installed": 1})
+    deltas: dict[str, int] = field(default_factory=lambda: {"installed": 0})
 
 
 class DependencySource(ABC):

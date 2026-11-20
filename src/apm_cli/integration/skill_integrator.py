@@ -37,7 +37,7 @@ from apm_cli.integration.skill_preflight import find_unmanaged_conflicts, select
 from apm_cli.integration.skill_preflight import preflight_skill_selection as _preflight_selection
 from apm_cli.integration.skill_support import (
     SkillIntegrationResult,
-    build_copy_ignore,
+    _build_deployable_copy_ignore,
     build_skill_ownership_maps,
     skill_dir_has_content,
 )
@@ -80,38 +80,6 @@ def should_compile_instructions(package_info) -> bool:
         package_info,
         resolve_effective_type=get_effective_type,
     )
-
-
-def _build_deployable_copy_ignore(
-    *,
-    skip_bin: bool = False,
-    source_plan: "DeployableSourcePlan | None" = None,
-    exclude_apm: bool = False,
-    exclude_apm_yml: bool = False,
-) -> Callable[[str, list[str]], list[str]]:
-    """Build a copy filter constrained to the authorized source plan."""
-    base_ignore = build_copy_ignore(skip_bin=skip_bin)
-    internal_names = (
-        *((".apm",) if exclude_apm else ()),
-        *(("apm.yml",) if exclude_apm_yml else ()),
-    )
-    internal_filter = shutil.ignore_patterns(*internal_names) if internal_names else None
-
-    def _combined(directory: str, contents: list[str]) -> list[str]:
-        ignored = set(base_ignore(directory, contents))
-        if internal_filter is not None:
-            ignored.update(internal_filter(directory, contents))
-        if source_plan is not None:
-            ignored.update(source_plan.copy_ignore(directory, contents))
-        return list(ignored)
-
-    _combined.rebased = lambda plan: _build_deployable_copy_ignore(  # type: ignore[attr-defined]
-        skip_bin=skip_bin,
-        source_plan=plan,
-        exclude_apm=exclude_apm,
-        exclude_apm_yml=exclude_apm_yml,
-    )
-    return _combined
 
 
 def to_hyphen_case(name: str) -> str:
@@ -394,6 +362,7 @@ class SkillIntegrator(BaseIntegrator):
             dict[Path, tuple[Mapping[str, str], Mapping[str, str]]] | None
         ) = None
         self._skill_files: list[Path] = []
+        self._skill_changed_dirs: set[Path] = set()  # destinations whose bytes changed
         self._skill_recorded_hashes: dict[str, str] = {}
         self._skill_session_hashes: dict[str, str] = {}
         self._hash_snapshots: dict[Path, dict[str, str]] | None = None
@@ -483,6 +452,7 @@ class SkillIntegrator(BaseIntegrator):
         """Record copied source members, never surviving siblings; adopt identical trees (#3391)."""
         from collections import ChainMap
 
+        from apm_cli.integration.skill_support import tree_file_hashes
         from apm_cli.utils.content_hash import compute_file_hash
 
         def entry(path: Path) -> str:
@@ -515,6 +485,7 @@ class SkillIntegrator(BaseIntegrator):
             self, source, destination, ignore=ignore, owned=lambda p: claimed(entry(p)), force=force
         )
         unchanged = unchanged and not adopted
+        before = tree_file_hashes(destination, entry)
         copied = self.copy_directory_files(
             source,
             destination,
@@ -547,6 +518,8 @@ class SkillIntegrator(BaseIntegrator):
                 self._skill_can_complete = False
             self._resolve_markdown_links_in_skill_bundle(source, destination, copied)
         written_hashes = {entry(path): compute_file_hash(path) for path in copied}
+        if any(before.get(key) != digest for key, digest in written_hashes.items()):
+            self._skill_changed_dirs.add(destination)
         if session is not None and written:
             if self.link_resolver is None:
                 raise RuntimeError("Cannot record skill writes without final link rendering.")
@@ -1008,7 +981,7 @@ class SkillIntegrator(BaseIntegrator):
             if not copied:
                 continue
             rewriter._native_skill_session_owners[target.resolve()] = parent_name
-            promoted += 1
+            promoted += target in rewriter._skill_changed_dirs
             if target / "SKILL.md" in copied:
                 deployed.append(target)
                 if warn and target_existed and not is_self_overwrite and not unchanged:
@@ -1406,10 +1379,11 @@ class SkillIntegrator(BaseIntegrator):
             )
             all_target_paths.extend(sub_deployed)
 
-        # Count unique sub-skills from primary target only
+        # Count changed unique sub-skills from primary target only
         primary_root = project_root / ".github" / "skills"
         sub_skills_count = sum(
-            1 for p in all_target_paths if p.parent == primary_root and p.name != skill_name
+            p.parent == primary_root and p.name != skill_name and p in self._skill_changed_dirs
+            for p in all_target_paths
         )
 
         return SkillIntegrationResult(
@@ -1420,6 +1394,10 @@ class SkillIntegrator(BaseIntegrator):
             references_copied=files_copied,
             links_resolved=0,
             sub_skills_promoted=sub_skills_count,
+            skills_changed=sub_skills_count
+            + (
+                primary_skill_md is not None and primary_skill_md.parent in self._skill_changed_dirs
+            ),
             target_paths=all_target_paths,
             deployed_files=tuple(self._skill_files),
             complete=self._skill_materialization_complete(project_root),
@@ -1545,6 +1523,7 @@ class SkillIntegrator(BaseIntegrator):
             references_copied=0,
             links_resolved=0,
             sub_skills_promoted=total_promoted,
+            skills_changed=total_promoted,
             target_paths=all_deployed,
             deployed_files=tuple(self._skill_files),
             complete=self._skill_materialization_complete(project_root),
@@ -1588,7 +1567,7 @@ class SkillIntegrator(BaseIntegrator):
         )
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
-        self._skill_files = []
+        self._skill_files, self._skill_changed_dirs = [], set()
         self._skill_targets = targets
         self._skill_source_plan = source_plan
         self._skill_can_complete = True
@@ -1634,6 +1613,7 @@ class SkillIntegrator(BaseIntegrator):
                 references_copied=0,
                 links_resolved=0,
                 sub_skills_promoted=sub_skills_count,
+                skills_changed=sub_skills_count,
                 target_paths=sub_deployed,
                 deployed_files=tuple(self._skill_files),
                 complete=self._skill_materialization_complete(project_root),

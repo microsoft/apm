@@ -592,6 +592,17 @@
         "tests/integration/test_lifecycle_trust_serialization_lifecycle.py::test_concurrent_lifecycle_trust_keeps_every_trust_record",
         "tests/integration/test_lifecycle_trust_serialization_lifecycle.py::test_concurrent_lifecycle_untrust_keeps_the_revocation"
       ]
+    },
+    {
+      "issue": 4184,
+      "fixed_in": "0.37.0",
+      "summary": "A converged apm install reported unchanged commands, skills and hooks as integrated and claimed to install dependencies, local packages and the project root's own .apm content always counted as installed dependencies, and uninstall counted one package once per store with internal names and an absolute manifest path.",
+      "failure_modes": ["idempotency", "observation", "outcome"],
+      "properties": ["idempotency.byte_stable", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_converged_install_lifecycle.py::test_converged_install_reports_no_change",
+        "tests/integration/test_uninstall_summary_lifecycle.py::test_local_uninstall_summary_counts_once_with_manifest_spelling"
+      ]
     }
   ],
   "lifecycle_contracts": [

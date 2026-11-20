@@ -31,6 +31,46 @@ _SUCCESS_SUMMARY_DISPOSITIONS = frozenset(
 )
 
 
+_CHANGED_COUNTER_KEYS = (
+    "prompts",
+    "agents",
+    "skills",
+    "sub_skills",
+    "instructions",
+    "commands",
+    "hooks",
+    "canvases",
+)
+
+
+def integration_changed_files(result: dict) -> int:
+    """Return how many deployed files one package's integration changed (#4184).
+
+    ``integrate_package_primitives`` is the single owner of this count: it
+    records ``files_changed`` once every primitive kind ran. Early-exit results
+    (no targets, refused packages) fall back to the per-kind counters, which
+    count only fresh writes, never adopted or unchanged files.
+    """
+    changed = result.get("files_changed")
+    if isinstance(changed, int):
+        return changed
+    return sum(int(result.get(key, 0) or 0) for key in _CHANGED_COUNTER_KEYS)
+
+
+def package_install_count(result: dict | None, *, fetched: bool) -> int:
+    """Return 1 when one package counts as installed this run, else 0 (#4184).
+
+    A package counts when its bytes were freshly fetched, when integration
+    changed any deployed file, or when it was natively registered (an Agent
+    Plugin deploys no primitives by design). A converged package counts zero.
+    """
+    if fetched:
+        return 1
+    if not result:
+        return 0
+    return int(integration_changed_files(result) > 0 or bool(result.get("native_plugin")))
+
+
 def diagnostic_error_count(diagnostics: object | None) -> int:
     """Return a defensive integer error count."""
     if diagnostics is None:

@@ -1160,6 +1160,36 @@ def test_failed_direct_dependency_stops_before_integration() -> None:
     ("path", "old", "new"),
     [
         (
+            "src/apm_cli/install/phases/integrate.py",
+            '            "prompts": _root_result["prompts"],',
+            '            "installed": int(_local_changed > 0),\n'
+            '            "prompts": _root_result["prompts"],',
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            "            deltas[k] = int_result[k]\n",
+            '            deltas[k] = int_result[k]\n        deltas["installed"] = 1\n',
+        ),
+    ],
+)
+def test_install_count_routes_through_outcome_owner(path: str, old: str, new: str) -> None:
+    """Root content or a converged package never counts as installed on its own (#4184)."""
+    rule_id = "install-deployment-outcome"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
             "src/apm_cli/security/trust_fingerprint.py",
             "return compute_native_plugin_pin(plugin_root)",
             "return compute_native_plugin_hash(plugin_root)",

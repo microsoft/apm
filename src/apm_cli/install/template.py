@@ -22,6 +22,7 @@ from apm_cli.agent_plugins.errors import (
     AgentPluginDeploymentBoundaryError,
     AgentPluginTargetExcludedError,
 )
+from apm_cli.install.outcome import package_install_count
 from apm_cli.install.package_resolution import effective_dependency_selection
 from apm_cli.install.services import (
     IntegratorBundle,
@@ -565,13 +566,11 @@ def _integrate_materialization(
         )
         for k in (*mutation_keys, "links_resolved"):
             deltas[k] = int_result[k]
-        # Source-level install deltas are promoted only when primitives changed.
-        if any(int_result[k] > 0 for k in mutation_keys):
-            deltas["installed"] = 1
-        # A natively registered Agent Plugin deploys no primitives by design --
-        # Copilot loads the whole unit live -- but it is still an install.
-        if int_result.get("native_plugin"):
-            deltas["installed"] = 1
+        # Fetched bytes or changed deployed files make an install (#4184); a
+        # natively registered Agent Plugin deploys no primitives by design.
+        deltas["installed"] = package_install_count(
+            int_result, fetched=bool(deltas.get("installed"))
+        )
         ctx.package_deployed_files[dep_key] = int_result["deployed_files"]
         from apm_cli.core.deployment_state import CompletedReintegration
 

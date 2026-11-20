@@ -564,5 +564,6 @@ class TestRunIntegrationLoop:
         ):
             run(ctx)
 
-        assert ctx.installed_count == 1
+        # Project-root content is never an installed APM dependency (#4184).
+        assert ctx.installed_count == 0
         assert ctx.total_prompts_integrated == 2

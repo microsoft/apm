@@ -12,7 +12,7 @@ from typing import Any
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.core.deployment_state import MaterializationResult
-from apm_cli.utils.atomic_io import normalize_crlf_to_lf
+from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -597,6 +597,25 @@ class BaseIntegrator:
             return target_bytes == expected
         except OSError:
             return False
+
+    @classmethod
+    def write_text_if_changed(
+        cls,
+        path: Path,
+        text: str,
+        writer: Callable[[Path, str], None] = write_text_lf,
+    ) -> bool:
+        """Write rendered *text* unless *path* already holds its LF bytes (#4184).
+
+        Returns whether a write happened, so integrators count byte-identical
+        renders as unchanged instead of freshly integrated. *writer* must
+        LF-normalize (``write_text_lf`` / ``atomic_write_text``).
+        """
+        if cls.is_content_identical_to_text(path, text, lf_normalized_deploy=True):
+            return False
+        path.parent.mkdir(parents=True, exist_ok=True)
+        writer(path, text)
+        return True
 
     def _check_adopt_or_skip(
         self,

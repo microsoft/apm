@@ -59,12 +59,19 @@ def _flat(handler: dict, event: str = "preToolUse") -> dict:
     return {"version": 1, "hooks": {event: [{"type": "command", **handler}]}}
 
 
-def _install(target_name: str, package: PackageInfo, home: Path, profile=None) -> None:
+def _install(
+    target_name: str, package: PackageInfo, home: Path, profile=None, *, converged=False
+) -> None:
     profile = profile or KNOWN_TARGETS[target_name].for_scope(user_scope=True)
     root = home / profile.root_dir
     root.mkdir(parents=True, exist_ok=True)
     result = HookIntegrator().integrate_hooks_for_target(profile, package, home, user_scope=True)
-    assert result.hooks_integrated >= 1
+    if converged:
+        # Byte-identical hook config is unchanged, never re-integrated (#4184).
+        assert result.hooks_integrated == 0
+        assert result.files_adopted >= 1
+    else:
+        assert result.hooks_integrated >= 1
 
 
 def _commands(home: Path, target_name: str) -> list[str]:
@@ -265,7 +272,7 @@ class TestUserScopeInstall:
         shutil.copytree(home, home_b)
         _use_home(monkeypatch, home_b)
 
-        _install("claude", package, home_b)
+        _install("claude", package, home_b, converged=True)
 
         for name in ("settings.json", "apm-hooks.json"):
             assert (home_b / ".claude" / name).read_bytes() == (

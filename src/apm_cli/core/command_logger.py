@@ -306,6 +306,8 @@ class InstallLogger(CommandLogger):
         self._lockfile_written = False
         # MCP servers this run removed from native config; a change on their own.
         self._mcp_removed: set[str] = set()
+        # The project's own .apm/ content changed on disk; never an APM dependency.
+        self._local_content_updated = False
         self._failed_install_residue_note = ""
 
     def failed_install_residue(self, residue: FailedInstallResidue) -> None:
@@ -461,6 +463,10 @@ class InstallLogger(CommandLogger):
     def record_lockfile_write(self) -> None:
         """Keep metadata-only persistence out of the unchanged summary."""
         self._lockfile_written = True
+
+    def record_local_content_updated(self) -> None:
+        """Record that the project's own .apm/ content changed deployed files (#4184)."""
+        self._local_content_updated = True
 
     def record_mcp_removed(self, names) -> None:
         """Record MCP servers this install removed, so the summary counts them."""
@@ -1164,6 +1170,8 @@ class InstallLogger(CommandLogger):
             )
         elif parts:
             summary = " and ".join(parts)
+            if self._local_content_updated:
+                summary = f"{summary} and updated local content"
             if errors > 0:
                 _rich_warning(
                     f"Installed {summary}{cleanup_suffix}{timing_suffix} with {errors} error(s).",
@@ -1184,6 +1192,11 @@ class InstallLogger(CommandLogger):
             _rich_error(
                 f"Installation failed with {errors} error(s){timing_suffix}.",
                 symbol="error",
+            )
+        elif self._local_content_updated:
+            _rich_success(
+                f"Updated local content{cleanup_suffix}{timing_suffix}.",
+                symbol="sparkles",
             )
         elif stale_cleaned > 0:
             file_noun = "file" if stale_cleaned == 1 else "files"
