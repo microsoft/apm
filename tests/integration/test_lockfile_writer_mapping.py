@@ -20,10 +20,14 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.deps import lockfile_write_authority as authority
 from apm_cli.deps.lockfile_write_authority import LockfileWriter
-from apm_cli.utils import atomic_io
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
+from tests.utils.lockfile_write_counter import (
+    INOTIFY_AVAILABLE,
+    LockfileWriteCounter,
+    count_lockfile_writes,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.component, pytest.mark.promise("P-INV-I1")]
 
@@ -49,21 +53,23 @@ _NO_POLICY = ("--no-policy", "--trust-transitive-mcp")
 class _Recorder:
     declared: list[LockfileWriter] = field(default_factory=list)
     opened: list[LockfileWriter] = field(default_factory=list)
-    persisted: int = 0
 
     def clear(self) -> None:
         self.declared.clear()
         self.opened.clear()
-        self.persisted = 0
 
 
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    """Record declared writers, opened write scopes and lockfile persists."""
+    """Record declared writers and opened write scopes (call-through spies).
+
+    Recorded AQ004 debt, shrink-only (#4255): call-through spies prove the
+    declared writer (single-writer contract); no public observation seam yet
+    (#4473). Persisted writes are observed on disk by ``_lock_writes``.
+    """
     record = _Recorder()
     original_scope = authority.lockfile_write_scope
     original_class = authority._WriteScope
-    original_write = atomic_io.atomic_write_text
 
     @contextmanager
     def declaring(writer: LockfileWriter) -> Iterator[None]:
@@ -77,15 +83,27 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
             super().__init__(writer)
             record.opened.append(writer)
 
-    def persisting(path: Path, *args: object, **kwargs: object) -> None:
-        if Path(path).name == _LOCKFILE:
-            record.persisted += 1
-        original_write(path, *args, **kwargs)
-
     monkeypatch.setattr(authority, "lockfile_write_scope", declaring)
     monkeypatch.setattr(authority, "_WriteScope", _Opening)
-    monkeypatch.setattr(atomic_io, "atomic_write_text", persisting)
     return record
+
+
+@contextmanager
+def _lock_writes(root: Path) -> Iterator[LockfileWriteCounter | None]:
+    """Count persisted lockfile writes under *root* where inotify can (Linux)."""
+    if not INOTIFY_AVAILABLE:
+        yield None
+        return
+    with count_lockfile_writes(root) as counter:
+        yield counter
+
+
+def _persisted(writes: LockfileWriteCounter | None) -> int | None:
+    """Atomic lockfile publications seen; an in-place write fails outright."""
+    if writes is None:
+        return None
+    assert writes.in_place_writes == 0, writes.events
+    return writes.writes
 
 
 @dataclass(frozen=True)
@@ -174,10 +192,11 @@ def test_each_lock_writing_command_maps_to_its_registered_writer(
 
     for args, cwd, writer in steps:
         recorder.clear()
-        _ok(cwd, world.environment, *args)
+        with _lock_writes(cwd) as writes:
+            _ok(cwd, world.environment, *args)
         assert (cwd / _LOCKFILE).is_file(), args
         assert recorder.declared == [writer], (args, recorder.declared)
-        assert recorder.persisted <= 1, (args, recorder.persisted)
+        assert _persisted(writes) in (None, 0, 1), (args, writes)
 
     assert set(LockfileWriter) == {writer for _args, _cwd, writer in steps}
 
@@ -188,12 +207,13 @@ def test_install_with_mcp_and_lsp_persists_the_lockfile_once(
     world = _world(tmp_path / "services")
     root = world.project.root
 
-    _ok(root, world.environment, "install", *_NO_POLICY)
+    with _lock_writes(root) as writes:
+        _ok(root, world.environment, "install", *_NO_POLICY)
 
     lock = yaml.safe_load((root / _LOCKFILE).read_text(encoding="utf-8"))
     assert lock.get("mcp_servers") and lock.get("lsp_servers"), lock
     assert recorder.opened == [LockfileWriter.INSTALL]
-    assert recorder.persisted == 1
+    assert _persisted(writes) in (None, 1), writes
 
 
 def test_newer_generator_lockfile_is_refused_before_any_writer_scope_opens(
@@ -214,10 +234,11 @@ def test_newer_generator_lockfile_is_refused_before_any_writer_scope_opens(
         before = _tree(cwd)
         lock_before = (cwd / _LOCKFILE).read_bytes()
         recorder.clear()
-        assert _invoke(cwd, world.environment, *args) != 0, args
+        with _lock_writes(cwd) as writes:
+            assert _invoke(cwd, world.environment, *args) != 0, args
         assert (cwd / _LOCKFILE).read_bytes() == lock_before, writer
         assert recorder.opened == [], (writer, recorder.opened)
-        assert recorder.persisted == 0, writer
+        assert _persisted(writes) in (None, 0), (writer, writes)
         assert _tree(cwd) == before, writer
 
 
