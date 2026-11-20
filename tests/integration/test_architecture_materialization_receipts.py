@@ -79,6 +79,21 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
             "False",
         ),
         (
+            "integration/instruction_integrator.py",
+            "self.note_rendered_write(target_path)",
+            "pass",
+        ),
+        (
+            "install/services.py",
+            "integrators.skill, _integrator, targets=[_target], package_info=package_info",
+            "None, _integrator, targets=[_target], package_info=package_info",
+        ),
+        (
+            "core/deployment_ledger.py",
+            'take = getattr(integrator, "take_rendered_writes", None)',
+            "take = None",
+        ),
+        (
             "core/deployment_ledger.py",
             "value = deployed_path_entry(path, self.root, targets)",
             "value = DeploymentLedgerCodec.legacy_value(locator)",
