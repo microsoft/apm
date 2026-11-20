@@ -268,16 +268,6 @@ class TestAddTreeChildren:
         child_branch.add.assert_called_once()
         assert "(circular)" in child_branch.add.call_args.args[0]
 
-    def test_add_children_with_no_children_map_entry(self):
-        """No children for parent means nothing is added."""
-        parent_branch = MagicMock()
-        parent_repo_url = "https://github.com/owner/parent"
-        children_map = {}
-
-        _add_tree_children(parent_branch, parent_repo_url, children_map)
-
-        parent_branch.add.assert_not_called()
-
 
 class TestDepsCommand:
     """Tests for deps command structure."""

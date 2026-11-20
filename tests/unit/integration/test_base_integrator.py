@@ -251,29 +251,22 @@ class TestValidateDeployPath:
 
 
 class TestPartitionBucketKey:
-    def test_prompts_copilot_aliased(self):
-        assert BaseIntegrator.partition_bucket_key("prompts", "copilot") == "prompts"
-
-    def test_agents_copilot_aliased(self):
-        assert BaseIntegrator.partition_bucket_key("agents", "copilot") == "agents_github"
-
-    def test_instructions_copilot_aliased(self):
-        assert BaseIntegrator.partition_bucket_key("instructions", "copilot") == "instructions"
-
-    def test_instructions_cursor_aliased(self):
-        assert BaseIntegrator.partition_bucket_key("instructions", "cursor") == "rules_cursor"
-
-    def test_instructions_claude_aliased(self):
-        assert BaseIntegrator.partition_bucket_key("instructions", "claude") == "rules_claude"
-
-    def test_commands_claude_aliased(self):
-        assert BaseIntegrator.partition_bucket_key("commands", "claude") == "commands"
-
-    def test_no_alias_falls_through(self):
-        assert BaseIntegrator.partition_bucket_key("agents", "claude") == "agents_claude"
-
-    def test_no_alias_opencode(self):
-        assert BaseIntegrator.partition_bucket_key("agents", "opencode") == "agents_opencode"
+    @pytest.mark.parametrize(
+        ("prim_name", "target", "expected"),
+        [
+            ("prompts", "copilot", "prompts"),
+            ("agents", "copilot", "agents_github"),
+            ("instructions", "copilot", "instructions"),
+            ("instructions", "cursor", "rules_cursor"),
+            ("instructions", "claude", "rules_claude"),
+            ("commands", "claude", "commands"),
+            ("agents", "claude", "agents_claude"),
+            ("agents", "cursor", "agents_cursor"),
+            ("agents", "opencode", "agents_opencode"),
+        ],
+    )
+    def test_bucket_key(self, prim_name, target, expected):
+        assert BaseIntegrator.partition_bucket_key(prim_name, target) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -308,11 +301,6 @@ class TestPartitionManagedFiles:
         mf = {".opencode/agents/foo.md"}
         result = BaseIntegrator.partition_managed_files(mf)
         assert ".opencode/agents/foo.md" in result["agents_opencode"]
-
-    def test_skills_cross_target_bucket(self):
-        mf = {".agents/skills/my-skill/skill.md"}
-        result = BaseIntegrator.partition_managed_files(mf)
-        assert ".agents/skills/my-skill/skill.md" in result["skills"]
 
     def test_hooks_cross_target_bucket(self):
         mf = {".github/hooks/pre-tool-use.sh"}

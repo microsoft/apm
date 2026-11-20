@@ -86,6 +86,9 @@ class TestLegacySkillPattern:
             ".github/instructions/foo.md",  # not skills
             ".cursor/agents/something.md",  # not skills
             "skills/my-skill/SKILL.md",  # no dot-prefix
+            ".github/skills.bak/foo/SKILL.md",
+            "./.github/skills/foo/SKILL.md",
+            ".github/skills/foo/",
         ],
     )
     def test_rejects_non_legacy(self, path: str) -> None:
@@ -507,18 +510,6 @@ class TestPathTraversalRejection:
         assert outer.exists(), "File outside project_root must NOT be deleted"
         assert result.deleted == []
         assert result.failed == ["../outer/victim.txt"]
-
-    @pytest.mark.parametrize(
-        "path",
-        [
-            ".github/skills.bak/foo/SKILL.md",
-            "./.github/skills/foo/SKILL.md",
-            ".github/skills/foo/",
-        ],
-    )
-    def test_regex_near_miss_rejects(self, path: str) -> None:
-        """Paths that look similar but shouldn't match the legacy pattern."""
-        assert not _LEGACY_SKILL_PATTERN.match(path)
 
 
 # ===================================================================

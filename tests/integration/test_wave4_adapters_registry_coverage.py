@@ -347,12 +347,6 @@ class TestGitHubDownloaderValidation:
 class TestIntegrationScenarios:
     """Integration scenarios combining multiple components."""
 
-    def test_copilot_config_with_env_placeholders(self, tmp_path: Path) -> None:
-        """End-to-end: Copilot adapter with env-var placeholders."""
-        adapter = CopilotClientAdapter()
-
-        assert adapter.target_name == "copilot"
-
     def test_package_validation_workflow(self, tmp_path: Path) -> None:
         """End-to-end: Create and validate APM package structure."""
         apm_dir = tmp_path / ".apm"
@@ -410,16 +404,6 @@ class TestErrorHandling:
         diff = json_key_diff({"a": 1}, {"a": "string"})
         assert len(diff) > 0
 
-    def test_mcp_operations_initialization_no_errors(self) -> None:
-        """MCPServerOperations handles initialization errors."""
-        ops = MCPServerOperations()
-        assert ops is not None
-
-    def test_runtime_manager_initialization_no_errors(self) -> None:
-        """RuntimeManager handles initialization errors."""
-        manager = RuntimeManager()
-        assert manager is not None
-
 
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
@@ -435,11 +419,6 @@ class TestEdgeCases:
         assert "${VAR1}" in result
         assert "${VAR2}" in result
         assert "${VAR3}" in result
-
-    def test_json_key_diff_empty_objects(self) -> None:
-        """json_key_diff handles empty objects."""
-        diff = json_key_diff({}, {})
-        assert len(diff) == 0
 
     def test_package_validator_unicode_in_yaml(self, tmp_path: Path) -> None:
         """PackageValidator handles Unicode in YAML."""

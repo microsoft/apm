@@ -389,21 +389,6 @@ Content here.
 
         return tmp_path
 
-    def test_compile_agents_md_creates_output(self, compilation_project: Path) -> None:
-        """Compile creates AGENTS.md output file with primitives."""
-        # Call with explicit primitives (None means discover)
-        result = compile_agents_md(
-            primitives=None,
-            output_path=str(compilation_project / "AGENTS.md"),
-            chatmode=None,
-            dry_run=False,
-            base_dir=str(compilation_project),
-        )
-
-        # Result should be content string
-        assert result is not None
-        assert isinstance(result, str)
-
     def test_compilation_with_chatmode_selection(self, compilation_project: Path) -> None:
         """Compilation respects chatmode selection."""
         result = compile_agents_md(

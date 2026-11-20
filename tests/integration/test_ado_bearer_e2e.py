@@ -251,12 +251,6 @@ class TestStalePatFallback:
 # PR test report under session-state/files/.
 
 
-@pytest.mark.skip(reason="Requires manual tenant switch; reproduced manually in PR report")
-class TestWrongTenant:
-    def test_wrong_tenant_renders_case_2_error(self, tmp_path):
-        pass
-
-
 # ---------------------------------------------------------------------------
 # T3K: PAT regression (PAT path must be unchanged)
 # ---------------------------------------------------------------------------

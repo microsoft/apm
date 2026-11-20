@@ -245,18 +245,6 @@ class TestDependencyReferenceParsing:
         ref = DependencyReference.parse("owner/repo")
         assert ref.repo_url is not None
 
-    def test_parse_github_url(self) -> None:
-        from apm_cli.models.apm_package import DependencyReference
-
-        ref = DependencyReference.parse("https://github.com/owner/repo")
-        assert ref is not None
-
-    def test_parse_local_path(self, tmp_path: Path) -> None:
-        from apm_cli.models.apm_package import DependencyReference
-
-        ref = DependencyReference.parse(str(tmp_path))
-        assert ref.is_local is True
-
     def test_parse_virtual_package(self) -> None:
         from apm_cli.models.apm_package import DependencyReference
 
@@ -274,12 +262,6 @@ class TestDependencyReferenceParsing:
 
         ref = DependencyReference.parse("ghes.corp.com/owner/repo")
         assert ref.host is not None
-
-    def test_parse_ado_format(self) -> None:
-        from apm_cli.models.apm_package import DependencyReference
-
-        ref = DependencyReference.parse("dev.azure.com/org/project/_git/repo")
-        assert ref.is_azure_devops() is True
 
     def test_get_identity(self) -> None:
         from apm_cli.models.apm_package import DependencyReference

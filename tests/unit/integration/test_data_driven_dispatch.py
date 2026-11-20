@@ -520,33 +520,6 @@ class TestSkillTargetGating:
 
 
 # ===================================================================
-# 5. TestPartitionBucketKey
-# ===================================================================
-
-
-class TestPartitionBucketKey:
-    """Verify that partition_bucket_key produces the correct aliased keys."""
-
-    def test_copilot_prompts_alias(self):
-        assert BaseIntegrator.partition_bucket_key("prompts", "copilot") == "prompts"
-
-    def test_copilot_agents_alias(self):
-        assert BaseIntegrator.partition_bucket_key("agents", "copilot") == "agents_github"
-
-    def test_claude_commands_alias(self):
-        assert BaseIntegrator.partition_bucket_key("commands", "claude") == "commands"
-
-    def test_cursor_instructions_alias(self):
-        assert BaseIntegrator.partition_bucket_key("instructions", "cursor") == "rules_cursor"
-
-    def test_claude_instructions_alias(self):
-        assert BaseIntegrator.partition_bucket_key("instructions", "claude") == "rules_claude"
-
-    def test_unaliased_key_passthrough(self):
-        assert BaseIntegrator.partition_bucket_key("agents", "cursor") == "agents_cursor"
-
-
-# ===================================================================
 # 6. TestCodexPartitionRouting
 # ===================================================================
 

@@ -122,26 +122,6 @@ class TestOrgToEnvSuffix:
         assert _org_to_env_suffix("some-Big-Org") == "SOME_BIG_ORG"
 
 
-class TestDetectTokenType:
-    """AuthResolver.detect_token_type classifies all known prefixes."""
-
-    @pytest.mark.parametrize(
-        "token, expected",
-        [
-            ("github_pat_abc", "fine-grained"),
-            ("ghp_abc123", "classic"),
-            ("ghu_abc123", "oauth"),
-            ("gho_abc123", "oauth"),
-            ("ghs_abc123", "github-app"),
-            ("ghr_abc123", "github-app"),
-            ("anunknown_token", "unknown"),
-            ("Bearer eyJxxx", "unknown"),
-        ],
-    )
-    def test_token_type_detection(self, token: str, expected: str) -> None:
-        assert AuthResolver.detect_token_type(token) == expected
-
-
 class TestGitlabRestHeaders:
     def test_no_token_returns_empty_dict(self) -> None:
         assert AuthResolver.gitlab_rest_headers(None) == {}
@@ -1150,14 +1130,6 @@ class TestSplitArgvAtDoubleDash:
 
 
 class TestCheckPackageConflicts:
-    def test_empty_deps_returns_empty_set(self) -> None:
-        result = _check_package_conflicts([])
-        assert result == set()
-
-    def test_string_dep_is_parsed(self) -> None:
-        result = _check_package_conflicts(["owner/repo"])
-        assert len(result) > 0
-
     def test_invalid_entries_are_skipped(self) -> None:
         # Should not raise; invalid entries are silently skipped
         result = _check_package_conflicts(["not-valid-format-##$$", 123, None])

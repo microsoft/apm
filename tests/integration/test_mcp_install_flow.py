@@ -932,17 +932,12 @@ def test_legacy_lockfile_adopts_exact_mcp_baseline_before_target_contraction(
 
 
 class TestRunMcpInstallEarlyReturns:
-    def test_empty_deps_returns_zero(self, tmp_path, monkeypatch):
-        """Line 70: no MCP deps -> early return 0."""
-        monkeypatch.chdir(tmp_path)
-        result = run_mcp_install([], logger=NullCommandLogger())
-        assert result == 0
-
-    def test_none_deps_treated_as_empty(self, tmp_path, monkeypatch):
-        """Empty list -> returns 0 immediately."""
+    @pytest.mark.parametrize("deps", [[], None], ids=["empty", "none"])
+    def test_no_deps_returns_zero(self, tmp_path, monkeypatch, deps):
+        """No MCP deps -> early return 0."""
         monkeypatch.chdir(tmp_path)
         with patch("apm_cli.integration.mcp_integrator._get_console", return_value=None):
-            result = run_mcp_install([], logger=NullCommandLogger())
+            result = run_mcp_install(deps, logger=NullCommandLogger())
         assert result == 0
 
 
