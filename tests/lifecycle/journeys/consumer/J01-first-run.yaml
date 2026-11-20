@@ -1,0 +1,114 @@
+# J01 First run (quickstart), golden, PR tier (#4110). Schema: test_journeys.py.
+schema: 1
+id: J01
+persona: consumer
+title: First run (quickstart)
+docs: [quickstart.mdx, getting-started/installation.md]
+world:
+  project: empty
+  git: init
+steps:
+  - n: 1
+    run: [apm --version]
+    exit: 0
+    docs:
+      page: getting-started/installation.md
+      commands: [apm --version]
+    key_lines: [CLI version <VER>]
+    forbidden_lines: [Traceback, A new version of APM is available]
+  - n: 2
+    run: [apm --help]
+    exit: 0
+    key_lines: ["Common workflows:"]
+    forbidden_lines: [apm run <script>]
+  - n: 3
+    run: ["apm init -y --target copilot,claude"]
+    exit: 0
+    docs:
+      page: quickstart.mdx
+      commands: ["apm init -y --target copilot,claude"]
+    files: [apm.yml]
+    key_lines: ["[*] APM project initialized successfully!", apm install <owner>/<repo>]
+    forbidden_lines: ["Run a script:", agentrc]
+  - n: 4
+    run: [apm install microsoft/apm-sample-package#v1.0.0]
+    exit: 0
+    docs:
+      page: consumer/install-packages.md
+      commands: [apm install microsoft/apm-sample-package#v1.0.0]
+    files:
+      - apm.yml
+      - apm.lock.yaml
+      - .gitignore
+      - apm_modules/
+      - .agents/skills/*
+      - .github/prompts/*
+      - .github/agents/*
+      - .github/instructions/*
+      - .claude/*
+    key_lines:
+      - "[+] microsoft/apm-sample-package #v1.0.0 @<SHA8>"
+      - "|-- 2 prompts integrated -> .github/prompts/"
+      - "|-- 1 skill(s) integrated -> .agents/skills/"
+      - "[*] Installed 2 APM dependencies in <DUR>."
+    forbidden_lines:
+      - "[!]"
+      - Skipped inactive experimental resolver
+      - dependency unpinned
+      - Traceback
+  - n: 5
+    run:
+      - git add apm.yml apm.lock.yaml .gitignore
+      - git commit -q -m "Add agent dependencies"
+      - git add .github .claude .agents
+      - git commit -q -m "Commit the deployed files"
+      - git status --porcelain
+    exit: 0
+    note: the quickstart commits apm.yml and the lock; committing the deployed files is its optional next step
+    docs:
+      page: quickstart.mdx
+      commands: [git add apm.yml apm.lock.yaml .gitignore]
+    git_clean: true
+    forbidden_lines: ["?? .apm-local/", "?? apm_modules/"]
+  - n: 6
+    run: [apm install]
+    exit: 0
+    converged: true
+    files: []
+    key_lines: ["[*]"]
+    forbidden_lines: [integrated, "[!]"]
+  - n: 7
+    run: ["apm install microsoft/apm/packages/apm-guide#{release}"]
+    exit: 0
+    docs:
+      page: /README.md
+      commands: ["apm install microsoft/apm/packages/apm-guide#{release}"]
+      pins: true
+    key_lines: ["[*] Installed"]
+    forbidden_lines: ["[!]"]
+known_cells:
+  - id: j01-init-third-party-tip
+    law: FORBID
+    tracking: "#4181"
+    step: 3
+    match: "forbidden 'agentrc' printed"
+  - id: j01-sample-claude-command-mode-key
+    law: FORBID
+    tracking: "#4182"
+    step: 4
+    match: "forbidden '\\[!\\]' printed: .*frontmatter keys not supported for claude commands"
+  - id: j01-transitive-unpinned-notice
+    law: FORBID
+    tracking: "#4183"
+    step: 4
+    match: "forbidden 'dependency unpinned' printed"
+  - id: j01-converged-install-reports-integrated
+    law: FORBID
+    tracking: "#4184"
+    step: 6
+    match: "forbidden 'integrated' printed"
+  - id: j01-converged-install-repeats-warnings
+    law: FORBID
+    tracking: "#4184"
+    step: 6
+    match: "forbidden '\\[!\\]' printed"

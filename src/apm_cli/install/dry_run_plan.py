@@ -240,18 +240,15 @@ class ProspectiveInstallPlan:
         """
         if not self.should_install_mcp:
             return self
-        from apm_cli.core.scope import is_user_scope, manifest_root
+        from apm_cli.core.scope import is_user_scope, scope_manifest_path
         from apm_cli.security.executables import (
             exec_trust_context_for_project,
             materialize_exec_map,
-            project_manifest_path,
         )
 
         allow_map = materialize_exec_map(
             exec_trust_context_for_project(
-                project_manifest_path(
-                    manifest_root(ctx.project_root, user_scope=is_user_scope(ctx.scope))
-                ),
+                scope_manifest_path(ctx.project_root, user_scope=is_user_scope(ctx.scope)),
                 policy=None,
                 fallback_allow_executables=getattr(apm_package, "allow_executables", None),
                 migrate_user_legacy=False,

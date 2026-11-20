@@ -142,6 +142,7 @@ def test_policy_signin_redirect_without_helper_is_reported_as_auth_required(
     assert scenario.helper is not None and scenario.helper.gets(), "helper was not consulted"
 
 
+@pytest.mark.req("req-pl-010")
 def test_audit_ci_and_install_fail_closed_when_ado_policy_unreachable_under_block(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

@@ -1,0 +1,64 @@
+# J11 Deploy a bundle: install a packed plugin bundle into a project, a bundle
+# without its lockfile, a dry run, the CI gate, and the deprecated unpack path
+# for a legacy --format apm bundle (#4110). Schema: test_journeys.py.
+# Setup packs the producer my-pkg 1.0.0 (one local skill plus the world's
+# p-skill dependency) in the project, then resets it to a fresh consumer.
+schema: 1
+id: J11
+persona: consumer
+title: Deploy a bundle
+docs: [consumer/install-packages.md, reference/cli/unpack.md]
+world:
+  setup:
+    - "python -c \"from pathlib import Path as P; P('apm.yml').write_text('name: my-pkg\\nversion: 1.0.0\\ndescription: My package.\\nlicense: MIT\\ntargets: [copilot]\\ndependencies:\\n  apm:\\n    - lifecycle/p-skill#v1.0.0\\n'); d = P('.apm/skills/review'); d.mkdir(parents=True); (d / 'SKILL.md').write_text('---\\nname: review\\ndescription: Review code.\\n---\\n\\nReview the change.\\n')\""
+    - apm install
+    - apm pack --archive -o dist
+    - apm pack --format apm --archive
+    - python -m zipfile -e dist/my-pkg-1.0.0.zip nolock
+    - rm nolock/my-pkg-1.0.0/apm.lock.yaml
+    - python -m zipfile -c bundle-without-lock.zip nolock/my-pkg-1.0.0
+    - rm -rf .apm .agents .github apm_modules apm.lock.yaml .gitignore nolock apm.yml
+    - "python -c \"from pathlib import Path as P; P('apm.yml').write_text('name: consumer\\nversion: 1.0.0\\ntargets: [copilot]\\ndependencies:\\n  apm: []\\n')\""
+steps:
+  - n: 1
+    run: [apm install ./dist/my-pkg-1.0.0.zip --target copilot]
+    exit: 0
+    files: [apm.lock.yaml, .agents/skills/review/SKILL.md, .agents/skills/p-skill/SKILL.md]
+    key_lines:
+      - "[>] Installing local bundle from ./dist/my-pkg-1.0.0.zip"
+      - "[*] Installed 2 file(s) from local bundle"
+    forbidden_lines: [file exists with different content, "[!]", "[x]"]
+  - n: 2
+    run: [apm install ./bundle-without-lock.zip]
+    exit: 0
+    key_lines:
+      - "[!] Bundle has no apm.lock.yaml -- skipping integrity check."
+  - n: 3
+    run: [apm install --dry-run ./dist/my-pkg-1.0.0.zip]
+    exit: 0
+    files: []
+    key_lines: ["[i] [dry-run] Would deploy 2 file(s) from local bundle"]
+  - n: 4
+    run: [apm audit --ci, apm install --frozen]
+    exit: 0
+    key_lines: ["[*] All 11 check(s) passed", "[+] No drift detected", "[i] No changes -- install state already up to date"]
+  - n: 5
+    run: [apm unpack ./build/my-pkg-1.0.0.zip]
+    exit: 0
+    docs:
+      page: reference/cli/unpack.md
+      commands: [apm unpack ./build/my-pkg-1.0.0.zip]
+    key_lines:
+      - "[!] 'apm unpack' is deprecated and will be removed in a future release. Repack with the default plugin format and use 'apm install <bundle-path>'."
+    forbidden_lines: ["[!] No files were unpacked"]
+known_cells:
+  - id: J11-bundle-install-does-not-name-destinations
+    law: O6
+    tracking: "#4192"
+    step: 1
+    match: "changed but no output line announces it"
+  - id: J11-legacy-pack-drops-agents-skills
+    law: FORBID
+    tracking: "#4202"
+    step: 5
+    match: "No files were unpacked"

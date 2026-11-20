@@ -1,0 +1,67 @@
+# J02 Team onboarding from a committed lock, golden, PR tier (#4110). Schema: test_journeys.py.
+schema: 1
+id: J02
+persona: consumer
+title: Team onboarding from a committed lock
+docs: [quickstart.mdx, consumer/install-packages.md]
+world:
+  from: J01
+steps:
+  - n: 1
+    run: [git clone . ../teammate]
+    exit: 0
+    chdir: ../teammate
+    cold_cache: true
+    note: the teammate clones the committed J01 state on a machine with an empty package cache
+    docs:
+      page: quickstart.mdx
+      commands: [git clone . ../teammate && cd ../teammate]
+  - n: 2
+    run: [apm install --frozen]
+    exit: 0
+    docs:
+      page: quickstart.mdx
+      commands: [apm install --frozen]
+      output: ["[i] Deployed files verified against apm.lock.yaml."]
+    files: [apm_modules/]
+    key_lines: ["[*] Installed 2 APM dependencies", "[i] Deployed files verified against apm.lock.yaml."]
+    forbidden_lines: ["[!]", Skipped inactive experimental resolver]
+  - n: 3
+    run: [apm audit]
+    exit: 0
+    docs:
+      page: quickstart.mdx
+      commands: [apm audit]
+      output: ["[+] Replayed 2 package(s)", "[+] No drift detected", "[*] 8 file(s) scanned -- no issues found"]
+    key_lines: ["[+] No drift detected", "file(s) scanned -- no issues found"]
+    forbidden_lines: ["[!]"]
+  - n: 4
+    run: [apm find --source .claude/skills/style-checker/SKILL.md]
+    exit: 0
+    docs:
+      page: enterprise/drift-detection.md
+      commands: [apm find --source .claude/skills/style-checker/SKILL.md]
+      output: [microsoft/apm-sample-package  microsoft/apm-sample-package@v1.0.0]
+    key_lines: [microsoft/apm-sample-package@v1.0.0]
+  - n: 5
+    run: [apm install]
+    exit: 0
+    converged: true
+    files: []
+    forbidden_lines: [integrated]
+known_cells:
+  - id: j02-frozen-sample-claude-command-mode-key
+    law: FORBID
+    tracking: "#4182"
+    step: 2
+    match: "forbidden '\\[!\\]' printed: .*frontmatter keys not supported for claude commands"
+  - id: j02-frozen-warnings-beyond-the-docs-block
+    law: O2
+    tracking: "#4182"
+    step: 2
+    match: "extra diagnostic not in the docs block: '\\[!\\] "
+  - id: j02-converged-install-reports-integrated
+    law: FORBID
+    tracking: "#4184"
+    step: 5
+    match: "forbidden 'integrated' printed"
