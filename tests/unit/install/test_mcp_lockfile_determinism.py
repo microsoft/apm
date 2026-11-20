@@ -227,6 +227,7 @@ def _run_lockfile_phase_and_local_persist(project_root: Path, instant: datetime)
         post_deps_local.run(ctx)
 
 
+@pytest.mark.req("req-lk-005")
 def test_unchanged_local_instructions_do_not_rewrite_lockfile(tmp_path: Path) -> None:
     """The lockfile stays byte-stable when local instruction hashes are unchanged."""
     first_instant = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)

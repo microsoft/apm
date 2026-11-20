@@ -13,6 +13,7 @@ import pytest
 from apm_cli.models.dependency.reference import DependencyReference
 
 
+@pytest.mark.req("req-rs-003", "req-rs-008")
 class TestStringShorthandRouting:
     """Routing from the ``owner/repo#<ref>`` shorthand."""
 

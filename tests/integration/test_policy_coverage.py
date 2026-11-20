@@ -164,6 +164,7 @@ class TestPolicyParsingIntegration:
         assert policy.name == "minimal"
         assert policy.enforcement == "warn"  # Default
 
+    @pytest.mark.req("req-pl-009")
     def test_parse_policy_with_unknown_keys(self, tmp_path: Path) -> None:
         """Parser warns about unknown keys but continues."""
         policy_file = tmp_path / "unknown-keys-policy.yml"

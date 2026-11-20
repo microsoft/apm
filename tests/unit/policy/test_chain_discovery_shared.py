@@ -411,6 +411,7 @@ class TestMultiLevelExtendsChain:
         assert "org-mid/.github" in chain_refs[1]
         assert "contoso/.github" in chain_refs[2]
 
+    @pytest.mark.req("req-pl-003")
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
     def test_cycle_in_chain_raises(self, mock_discover, mock_write_cache):
@@ -430,6 +431,7 @@ class TestMultiLevelExtendsChain:
         with pytest.raises(PolicyInheritanceError, match="Cycle"):
             discover_policy_with_chain(Path("/fake"))
 
+    @pytest.mark.req("req-pl-003")
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
     def test_depth_limit_raises(self, mock_discover, mock_write_cache):

@@ -98,18 +98,21 @@ class TestExtractTarball:
 
     # ─── Path traversal & unsafe entries ────────────────────────────────
 
+    @pytest.mark.req("req-sc-002")
     def test_rejects_absolute_path(self, tmp_path):
         data = _build_tar([("/etc/passwd", b"x")])
         digest = hashlib.sha256(data).hexdigest()
         with pytest.raises(UnsafeTarballError):
             extract_tarball(data, digest, tmp_path)
 
+    @pytest.mark.req("req-sc-002")
     def test_rejects_path_traversal(self, tmp_path):
         data = _build_tar([("../escape.txt", b"x")])
         digest = hashlib.sha256(data).hexdigest()
         with pytest.raises(UnsafeTarballError):
             extract_tarball(data, digest, tmp_path)
 
+    @pytest.mark.req("req-sc-002")
     def test_rejects_symlink(self, tmp_path):
         def add_symlink(tar):
             ti = tarfile.TarInfo(name="link")
@@ -122,6 +125,7 @@ class TestExtractTarball:
         with pytest.raises(UnsafeTarballError):
             extract_tarball(data, digest, tmp_path)
 
+    @pytest.mark.req("req-sc-002")
     def test_rejects_hard_link(self, tmp_path):
         def add_hardlink(tar):
             ti = tarfile.TarInfo(name="link")
@@ -234,6 +238,7 @@ class TestExtractArchiveDispatcher:
         with pytest.raises(UnknownArchiveFormatError):
             extract_archive(data, digest, tmp_path)
 
+    @pytest.mark.req("req-lk-013")
     def test_hash_mismatch_fails_before_extraction_for_both(self, tmp_path):
         for data in (
             _build_tar([("apm.yml", b"x")]),

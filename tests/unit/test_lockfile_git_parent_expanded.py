@@ -5,6 +5,8 @@ explicit virtual git dependency. The lockfile must persist those expanded fields
 and never use ``parent`` as durable ``repo_url`` / ``source`` identity.
 """
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import DependencyReference
 
@@ -52,6 +54,7 @@ class TestLockfileExpandedGitParent:
         assert locked.resolved_by == "org/monorepo/agents/pkg-a"
         assert locked.source is None
 
+    @pytest.mark.req("req-mf-010")
     def test_to_dict_has_no_parent_sentinel(self):
         locked = LockedDependency.from_dependency_ref(
             dep_ref=_expanded_parent_equivalent_ref(),

@@ -355,6 +355,7 @@ def test_root_repository_range_still_passes(scenario, apm_binary_path):
     assert _pinned_verdict(runner, project, env, "root-range")["passed"] is True
 
 
+@pytest.mark.req("req-pl-007")
 @pytest.mark.parametrize(
     ("name", "reference", "hint"),
     [

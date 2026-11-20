@@ -242,6 +242,7 @@ class TestLockFile:
         dep = DependencyReference.parse("github.com/team/skills")
         assert dep.get_unique_key() == "team/skills"
 
+    @pytest.mark.req("req-lk-001")
     def test_to_yaml(self):
         lock = LockFile(apm_version="1.0.0")
         lock.add_dependency(LockedDependency(repo_url="owner/repo"))
@@ -686,11 +687,13 @@ class TestLockFileSemanticEquivalence:
         b = self._make_lock()
         assert a.is_semantically_equivalent(b)
 
+    @pytest.mark.req("req-lk-005")
     def test_different_generated_at_still_equivalent(self):
         a = self._make_lock(generated_at="2025-01-01T00:00:00+00:00")
         b = self._make_lock(generated_at="2025-06-15T12:00:00+00:00")
         assert a.is_semantically_equivalent(b)
 
+    @pytest.mark.req("req-lk-005")
     def test_different_apm_version_still_equivalent(self):
         a = self._make_lock(apm_version="0.8.5")
         b = self._make_lock(apm_version="0.9.0")

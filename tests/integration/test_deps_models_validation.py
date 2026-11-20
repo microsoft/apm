@@ -307,10 +307,12 @@ class TestParseAdoUrls:
 class TestToCanonical:
     """to_canonical() returns the correct scheme-free identity string."""
 
+    @pytest.mark.req("req-mf-009")
     def test_default_host_stripped(self) -> None:
         ref = _make_dep_ref(host="github.com", repo_url="owner/repo")
         assert ref.to_canonical() == "owner/repo"
 
+    @pytest.mark.req("req-mf-009")
     def test_non_default_host_preserved(self) -> None:
         ref = _make_dep_ref(host="gitlab.com", repo_url="owner/repo")
         assert ref.to_canonical() == "gitlab.com/owner/repo"
