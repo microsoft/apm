@@ -128,9 +128,9 @@ executables:
   Run `apm approve <package>` to pin them.
 
 Hook pins are keyed on the publisher's file, such as a plugin's `hooks/hooks.json`,
-so approving a Claude Code plugin's hooks takes effect on the next install. A Claude
-Code plugin installed whole at user scope gets one `plugin:` pin in `~/.apm/apm.yml`;
-run `apm approve` from `~/.apm` ([details](../install-plugins/#claude-code-plugins-at-user-scope)).
+so approving a Claude Code plugin's hooks takes effect on the next install. A plugin
+APM installs whole gets one `plugin:` pin in `apm.yml` (`~/.apm/apm.yml` with `-g`;
+run `apm approve` from `~/.apm` then) ([details](../install-plugins/#native-plugins)).
 
 A pin covers the files APM copies. Code a hook downloads when it runs
 (`npx`, `curl`) is not covered.

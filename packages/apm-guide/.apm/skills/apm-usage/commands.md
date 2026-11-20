@@ -129,43 +129,62 @@ workspace-only runtimes. If no selected target supports user scope, the command
 exits `2` before creating or changing the user manifest, lockfile, or runtime
 configuration.
 
-`apm install -g --target claude` installs Claude plugins intact: it copies the
-approved plugin root to `~/.agents/plugins/<plugin>/`, generates
-`~/.agents/plugins/.claude-plugin/marketplace.json`, and writes only
-`extraKnownMarketplaces` and `enabledPlugins` into Claude's `settings.json`. No
-`claude` CLI is needed. A plugin APM cannot install intact (unapproved
-executables, declared plugin `dependencies`, a skill subset, symlinks,
-`monitors/` or `workflows/`) is parked: not deployed or declared, a warning
-names the package and the next step, and the install continues (exit 0). To
-approve a parked plugin, run `cd ~/.apm && apm approve <package>` (or
-`--pending`). `bin/` deploys inside the plugin root under the same approval
-and org `bin_deploy` policy, and needs `--trust-bin` when not interactive. MCP and LSP servers the
-plugin ships are loaded by Claude from the plugin, not written by APM; the
-whole-plugin approval covers them, and a server org MCP policy blocks, or an
-MCP entry APM cannot read (`.mcpb`/`.dxt`, URL, unreadable file), parks the
-plugin (`enforcement: block`). A transitive plugin with MCP servers needs a pin
-or `--trust-transitive-mcp`, even with no `executables` block. An explicit `false` in
-`enabledPlugins` is kept. `apm.lock.yaml` records each as `native_plugin`. See
-[admission limits](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
+`apm install` installs native plugins intact: Claude plugins
+(`.claude-plugin/plugin.json`) targeting `claude` (or `copilot` at project
+scope), and Agent Plugins targeting `copilot`. It copies the approved plugin
+root from `apm_modules` to `.agents/plugins/<plugin>/`, generates
+`.agents/plugins/.claude-plugin/marketplace.json`, and writes only
+`extraKnownMarketplaces.apm-p-<hash>` (path `./.agents/plugins`) and
+`enabledPlugins["<plugin>@apm-p-<hash>"]` into `.claude/settings.json` (targets
+`claude`) and `.github/copilot/settings.json` (targets `copilot`). Commit
+`.agents/plugins/`, both settings files and `apm.lock.yaml`: a fresh clone
+loads the plugins without APM after folder trust. With `-g`, APM uses `~/.agents/plugins/`, an absolute path, `apm-u-<hash>`,
+`~/.claude/settings.json` (`CLAUDE_CONFIG_DIR`) for Claude plugins and
+`~/.copilot/settings.json` (`COPILOT_HOME`) for Agent Plugins. No `claude` or
+`copilot` CLI is needed. Copilot also reads `.claude/settings.json` (lower
+priority), so for a plugin targeting `claude` but not `copilot` APM writes its
+own `false` into `.github/copilot/settings.json`; APM owns that Copilot key for
+every plugin it declares to Claude, follows `targets:`, and warns when it
+overrides a value it did not write. A `--target` run that excludes a native
+plugin keeps its previous lock entry and deployed root, with a note.
 
-`apm audit --ci` checks both the source and the deployed copy against that
-fingerprint (each publisher file's path, bytes and executable bit, excluding
-APM's root `apm.yml` and `.apm/`). Same-revision content
-changes are refused, not adopted. Run audit from the user manifest directory with
-Claude included in that manifest's targets; see the [user-plugin audit recipe](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
+A plugin with only a root `plugin.json` (an `apm pack` bundle) deploys loose
+at project scope; with `--global` it is parked. A plugin APM cannot install
+intact (unapproved executables, declared plugin `dependencies`, a skill subset,
+symlinks, `monitors/` or `workflows/`) is parked: not deployed or declared, a
+warning names the package and the next step, and the install continues (exit
+0). To approve a parked plugin, run `apm approve <package>` (from `~/.apm` for
+`-g`; or `--pending`). `bin/` deploys inside the plugin root under the same approval
+and org `bin_deploy` policy, and needs `--trust-bin` when not interactive. MCP
+and LSP servers the plugin ships are loaded by the harness from the plugin, not
+written by APM for Claude or Copilot; the whole-plugin approval covers them,
+and a server org MCP policy blocks, or an MCP entry APM cannot read
+(`.mcpb`/`.dxt`, URL, unreadable file), parks the plugin
+(`enforcement: block`). A transitive plugin with MCP servers needs a pin or
+`--trust-transitive-mcp`, even with no `executables` block. Two plugins whose
+names match ignoring case fail the install, naming both dependencies.
+`apm.lock.yaml` records each as `native_plugin`, the only ownership record: APM removes only entries the
+previous lock produced, keeps user entries and never changes an explicit
+`false`. Invalid settings JSON fails the install with nothing written. See
+[native plugins](https://microsoft.github.io/apm/consumer/install-plugins/#native-plugins).
 
-An existing package-owned loose Claude hook blocks native transition without
-changing hook settings or ownership. Explicitly uninstall the package with
-`apm uninstall --global <package>`, then reinstall with the original targets;
-repair unreadable settings or ownership records first. APM never automatically
-deletes retained-target hooks to migrate them.
+`apm audit --ci` checks both the `apm_modules` source and the deployed copy
+against that fingerprint (each publisher file's path and bytes at project
+scope, plus executable bits at user scope, excluding APM's root `apm.yml` and
+`.apm/`). Same-revision content changes are refused, not adopted. For user
+scope, run audit from the user manifest directory with Claude in its targets;
+see the [user-plugin audit recipe](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
-Global uninstall removes the plugin roots and Claude settings keys the previous
+A plugin whose hooks were installed loose is refused with `Cannot switch <pkg>
+to a native plugin. Hook settings were preserved. Run: apm uninstall <pkg> &&
+apm install <pkg>` (with `--global` at user scope). A plugin without loose
+hooks switches automatically and its stale loose files are removed.
+
+Uninstall and prune remove the plugin roots and settings keys the previous
 lockfile recorded; your explicit `false`, your own entries and roots you edited
-stay. If updating Claude settings fails, settings are left unchanged and the
-previous lockfile is restored; fix the reported cause and rerun the same
-command.
-Global uninstall removes the plugin roots and `enabledPlugins` keys the previous
+stay. If updating settings fails, settings are left unchanged and the previous
+lockfile is restored; fix the reported cause and rerun the same command.
+Uninstall (either scope) removes the plugin roots and settings keys the previous
 lock recorded, plus APM's `extraKnownMarketplaces` entry once none remain. An
 edited root, an explicit `false` and your own entries are kept; APM never takes
 over foreign marketplace/plugin ownership. APM's package-replacement rollback
@@ -174,6 +193,10 @@ repair, reconcile remaining declarations with
 `apm install --global --target claude` for Claude-only installs; for mixed
 targets, retain the full original `--target` list. Do not re-add removed
 package arguments.
+The first `apm install` that targets `copilot` and declares every plugin the
+earlier `apm` marketplace (pointing at `apm_modules`) enabled retires it and its
+ledger in one rollback unit; other commands keep it and warn to run `apm install`. `apm deps list` reports
+`N native plugin(s) activated from .agents/plugins`.
 
 Cursor and OpenCode user configs are `~/.cursor/mcp.json` and
 `~/.config/opencode/opencode.json`. Global MCP cleanup removes only names
@@ -675,7 +698,7 @@ rewriting files. Explicit `--file` remains user-directed.
 
 `apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` cache-only into a temporary scratch tree and diffs the result against your working tree. It catches four failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed, and (4) `unrecorded` files that install deploys but no lockfile entry claims. The scan is read-only -- never writes to your project, lockfile, or live `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives.
 
-Native Copilot Agent Plugins replay through the canonical package loader, with or without a plugin `apm.yml`. A clean install or reinstall can audit successfully. Set the consumer's `targets: [copilot]` in `apm.yml`; audit has no `--target` flag. Invalid native manifests fail replay instead of entering legacy conversion. Admitted local native cache units are compared with a scratch copy of their original source using install's validated copying; modified or missing cached skills fail audit. Remote native units use the recorded package content hash, including in cold-cache CI. Run `apm install` to restore drift or establish a missing remote hash. Cache files remain outside deployed-file tracking, and native registration files are not covered by this content comparison.
+Native Copilot Agent Plugins replay through the canonical package loader, with or without a plugin `apm.yml`. A clean install or reinstall can audit successfully. Set the consumer's `targets: [copilot]` in `apm.yml`; audit has no `--target` flag. Invalid native manifests fail replay instead of entering legacy conversion. Admitted local native cache units are compared with a scratch copy of their original source using install's validated copying; modified or missing cached skills fail audit. Remote native units use the recorded package content hash, including in cold-cache CI. Run `apm install` to restore drift or establish a missing remote hash. The deployed copy under `.agents/plugins/` is checked against the lock's `native_plugin` fingerprint; settings files are not covered by this content comparison.
 
 Bare `apm audit` uses the warmed local cache and skips drift with an informational message when the cache is absent; run `apm install` before relying on non-CI drift. `apm audit --ci` is stricter: in a project with `apm.yml` and `apm.lock.yaml` but no `apm_modules/`, it prepares a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without touching the checkout. No checkout install is required first, but local dependency sources must be available at their declared paths. Windows long and native 8.3 spellings of the same project retain project scope; they do not require a global install. Auditing the actual user metadata workspace (`~/.apm`) still refuses missing modules when its lockfile records packages or local bundle staging and requires `apm install --global`; a user lockfile with only MCP/LSP servers or `~/.apm` content needs no `apm_modules/`. Missing gitignored deployed outputs do not fail `deployed-files-present`, so repos that gitignore them can use audit-only CI too. Without committed deployed bytes, that pattern lacks deployed-byte integrity and drift coverage; use full-install CI when outputs need to be materialized.
 

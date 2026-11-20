@@ -11,8 +11,8 @@ how to install it:
 | `SKILL.md` (alone, or with apm.yml = HYBRID) | One skill bundle | Copy whole tree to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` | Many skills in one repo | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` or `.apm/hooks/*.json` only | Harness hook package | Add hook commands to each target's configuration and copy referenced files |
-| `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
-| `plugin.json` with the recognized Agent Plugins `$schema` | Portable Agent Plugin | Acquired and locked as one opaque unit; registered when effective targets include Copilot and admission gates pass. Excluded targets create no native registration or loose primitive projection. APM does not require the runtime during lifecycle operations; loading requires supported Copilot CLI 1.0.81 or newer |
+| `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Targets `claude` (or `copilot` at project scope): deploy intact to `.agents/plugins/<plugin>/` and declare in harness settings (needs `.claude-plugin/plugin.json`; without it, dissected at project scope and parked with `--global`); other targets: dissect via plugin artifact mapping |
+| `plugin.json` with the recognized Agent Plugins `$schema` | Portable Agent Plugin | Acquired and locked as one opaque unit; deployed to `.agents/plugins/<plugin>/` and declared in Copilot settings when effective targets include Copilot and admission gates pass. Excluded targets create no native declaration or loose primitive projection. APM does not require the runtime during lifecycle operations; loading requires supported Copilot CLI 1.0.81 or newer |
 | `.codex-plugin/plugin.json` without higher-precedence package intent | Codex compatibility bundle | Complete native bundle through Codex CLI 0.163.0 or later, user scope only; initially disabled, no loose projection or other-target translation |
 
 When plugin signals coexist with an eligible `apm.yml`, the APM layout wins.
@@ -24,8 +24,10 @@ Claude plugin MCP files (`.mcp.json`, `mcp.json`, `.github/.mcp.json`, or JSON
 files named by `plugin.json` `mcpServers`) may use `{"mcpServers": {...}}` or a
 flat top-level server map whose values are all server objects. A file with no
 usable server is skipped with a warning naming the file and plugin.
-`${CLAUDE_PLUGIN_ROOT}` in MCP and LSP servers is locked unexpanded and
-written per target: `${CLAUDE_PROJECT_DIR:-.}/apm_modules/<pkg>/...` in
+A plugin deployed intact to `.agents/plugins/` keeps its servers; Claude Code
+and Copilot load them from the plugin, and APM writes them only for other
+targets. Otherwise `${CLAUDE_PLUGIN_ROOT}` in MCP and LSP servers is locked
+unexpanded and written per target: `${CLAUDE_PROJECT_DIR:-.}/apm_modules/<pkg>/...` in
 `.mcp.json` (Claude, Copilot), `${workspaceFolder}/...` for Cursor,
 `${CLAUDE_PROJECT_DIR}/...` in the Claude LSP plugin, otherwise (and with
 `--global`) the absolute path. A lockfile from an older release holding the
@@ -41,9 +43,8 @@ subsets are refused. Publisher files/version and dependency pins are preserved;
 repair generations belong only to APM transport metadata. `apm pack` output
 is unchanged. Native content discovery does not certify execution or auth.
 
-For Agent Plugins with the same declared name, a direct dependency wins over a
-transitive dependency. APM refuses same-precedence collisions and does not
-silently repoint a ledger-recorded owner to a transitive claimant.
+Two native plugins whose names match, ignoring case, fail the install naming
+both dependencies. Ownership lives only in `apm.lock.yaml` (`native_plugin`).
 
 The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
 also uses APM dependency resolution. APM installs it as a skill -- it
@@ -832,19 +833,17 @@ Agent Plugins schema selects the portable Agent Plugin route.
 #### Shipping `bin/` executables (Claude Code only)
 
 A marketplace plugin may ship a root `bin/` directory of executable
-scripts. On `apm install`, APM deploys them under the Claude Code skills
-directory as a skills-directory plugin (a folder containing
-`.claude-plugin/plugin.json`), which puts `bin/` on Claude Code's Bash
-tool PATH so the agent can invoke them as bare commands.
+scripts. On `apm install` with the `claude` target, `bin/` stays inside the
+plugin deployed intact to `.agents/plugins/<plugin>/` (`~/.agents/plugins/`
+with `-g`), which puts it on Claude Code's Bash tool PATH so the agent can
+invoke the scripts as bare commands.
 
 This is a **Claude-Code-specific** contract -- no other harness has an
-equivalent, so `bin/` deploys only when an active Claude Code skills
-target is present. Authoring rules:
+equivalent. Authoring rules:
 
-- Place executables in a top-level `bin/` directory; APM marks them
-  `0o755` on POSIX.
-- Deploy is **user-scope only**. A project-scope install (`apm install`
-  without `-g`) skips `bin/` and prints a hint to re-run with `-g`.
+- Place executables in a top-level `bin/` directory with `.claude-plugin/plugin.json`.
+- The whole-plugin approval covers `bin/`; it also needs `--trust-bin` (or an
+  interactive install). Otherwise the plugin is parked.
 - Deployed executables land on Claude Code's PATH and are invoked
   **without per-call confirmation** -- treat them as trusted code and
   keep them minimal.

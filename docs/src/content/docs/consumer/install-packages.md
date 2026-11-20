@@ -149,6 +149,9 @@ Commit `apm.yml` and `apm.lock.yaml`. APM adds its download folder,
 `apm_modules/`, to `.gitignore`. Committing the deployed harness files is
 optional, since any clone rebuilds them from the lockfile
 ([should I commit them?](../../concepts/how-apm-works/#common-questions)).
+Native plugins are the exception: commit `.agents/plugins/`,
+`.claude/settings.json` and `.github/copilot/settings.json` so a fresh clone
+loads them without APM ([Native plugins](../install-plugins/#commit-native-plugins)).
 
 ## Remove a package
 
