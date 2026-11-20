@@ -2950,7 +2950,7 @@
     {
       "issue": 4446,
       "fixed_in": "Unreleased",
-      "summary": "apm uninstall of another package re-evaluates the remaining gated MCP servers and hooks through the gate retirement owner and removes any the current gates no longer allow (deny, revoke, org deny, org gate on, changed definition, policy dependency deny), instead of admitting every recorded server and keeping every deployed hook.",
+      "summary": "apm uninstall of another package re-evaluates the remaining gated MCP servers and hooks through the gate retirement owner and removes any the current gates no longer allow (deny, revoke, org deny, org gate on, changed definition, policy dependency deny), instead of admitting every recorded server and keeping every deployed hook; a direct local survivor whose source changed since the lock is re-copied first, as install does.",
       "failure_modes": ["cleanup", "routing"],
       "properties": ["routing.authorized_targets_only"],
       "regression_tests": [

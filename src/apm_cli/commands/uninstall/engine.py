@@ -1702,6 +1702,56 @@ def _sync_integrations_after_uninstall(
     )
 
 
+def _restage_changed_local_survivors(
+    lockfile: LockFile,
+    modules_dir: Path,
+    source_root: Path,
+    skip_keys: set[str],
+    logger: CommandLogger,
+) -> set[str]:
+    """Re-copy each direct local survivor whose source changed since the lock (#4446).
+
+    Install re-copies local packages on every run; without this, uninstall
+    judges and rebuilds a survivor from its stale ``apm_modules`` copy, so a
+    hook whose local definition changed since approval is never re-judged.
+    Returns the restaged lock keys; their lock rows record the new content hash.
+    """
+    from ...install.phases.local_content import _copy_local_package, compute_local_package_hash
+
+    restaged: set[str] = set()
+    for key, dep in sorted(lockfile.dependencies.items()):
+        if key == "." or key in skip_keys or dep.source != "local" or dep.depth != 1:
+            continue
+        try:
+            dep_ref = dep.to_dependency_ref()
+            source = (source_root / dep_ref.local_path).resolve()
+            install_path = dep_ref.get_install_path(modules_dir)
+            current = compute_local_package_hash(source, framed=dep.content_hash_framed)
+        except (OSError, ValueError, TypeError, PathTraversalError):
+            continue
+        if not install_path.is_dir() or current == dep.content_hash:
+            continue
+        staged_path = modules_dir / "_local" / f".apm-uninstall-refresh-{uuid4().hex}"
+        refresh_logger = _LocalRefreshLogger(logger, _dependency_public_label(dep_ref))
+        staged = _copy_local_package(
+            dep_ref, staged_path, source_root, project_root=source_root, logger=refresh_logger
+        )
+        if staged is None:
+            if staged_path.exists():
+                safe_rmtree(staged_path, modules_dir)
+            continue
+        _activate_staged_local_refresh(
+            LocalSlotRefresh(
+                install_path=install_path, staged_path=staged_path, survivor_keys=(key,)
+            ),
+            modules_dir,
+        )
+        dep.content_hash = current
+        restaged.add(key)
+        logger.progress(f"Refreshed {_dependency_public_label(dep_ref)} from its local source")
+    return restaged
+
+
 def gate_retired_hook_survivors(
     lockfile: "LockFile | None",
     modules_dir: Path,
@@ -1727,6 +1777,9 @@ def gate_retired_hook_survivors(
 
     if lockfile is None:
         return refreshed, set()
+    refreshed = refreshed | _restage_changed_local_survivors(
+        lockfile, modules_dir, manifest_path.parent, removed_keys, logger
+    )
     try:
         apm_package = APMPackage.from_apm_yml(manifest_path)
         retirements = gate_retirements(

@@ -16,12 +16,8 @@ _ALL = (
 )
 _LOCAL = ("definition-changed", "local-deny", "revoke-approval")
 _BUNDLE = tuple(change for change in _ALL if change != "policy-dep-deny")
-# Uninstall rebuilds a local survivor from its apm_modules copy and does not
-# re-read the changed source, so the redefined hook is not judged (#4446).
-_UNINSTALL_REDEFINED = "#4446 uninstall rebuild does not re-read a changed local package definition"
 _DRY_RUN = "S-pending (neutral issue to follow): dry-run preview of gate removal"
 _XFAIL = {
-    "G|uninstall-prune-rebuild|definition-changed|hook": _UNINSTALL_REDEFINED,
     **{f"G|dry-run|{change}|hook": _DRY_RUN for change in ("local-deny", "org-deny")},
     "G|dry-run|revoke-approval|hook": _DRY_RUN,
 }
