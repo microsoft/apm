@@ -21,6 +21,9 @@ from click.testing import CliRunner
 from apm_cli.commands.pack import pack_cmd
 from apm_cli.utils.console import _reset_console
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

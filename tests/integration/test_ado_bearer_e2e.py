@@ -62,7 +62,7 @@ if _AZ_AVAILABLE and os.getenv("APM_TEST_ADO_BEARER") == "1":
     except Exception:
         _BEARER_REACHABLE = False
 
-pytestmark = pytest.mark.requires_ado_bearer
+pytestmark = [pytest.mark.e2e, pytest.mark.requires_ado_bearer]
 
 
 def run_apm(

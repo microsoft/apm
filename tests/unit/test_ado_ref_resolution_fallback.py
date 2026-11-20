@@ -3,9 +3,13 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.core.auth import AuthResolver
 from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 def test_ado_semver_ref_resolution_retries_stale_pat_with_cli_bearer(

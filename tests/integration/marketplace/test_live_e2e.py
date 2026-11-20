@@ -25,6 +25,9 @@ import pytest
 
 from .conftest import run_cli
 
+pytestmark = pytest.mark.e2e
+
+
 # ---------------------------------------------------------------------------
 # Shared live YAML template
 # ---------------------------------------------------------------------------

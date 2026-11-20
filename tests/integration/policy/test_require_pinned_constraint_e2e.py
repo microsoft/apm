@@ -40,6 +40,9 @@ from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
+pytestmark = pytest.mark.component
+
+
 FIXTURES_DIR = Path(__file__).parent.parent.parent / "fixtures" / "policy" / "require_pinned"
 
 _PATCH_DISCOVER_GATE = "apm_cli.policy.discovery.discover_policy_with_chain"

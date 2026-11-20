@@ -29,12 +29,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
+import pytest
 import yaml
 
 from apm_cli.core.auth import AuthResolver
 from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder
 from apm_cli.marketplace.migration import load_marketplace_config
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.component
+
 
 # A 40-char hex SHA so ref resolution never touches the network.
 _SHA = "a" * 40

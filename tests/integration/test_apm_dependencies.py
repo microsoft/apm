@@ -31,7 +31,7 @@ from apm_cli.deps.apm_resolver import APMDependencyResolver  # noqa: F401
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import APMPackage, DependencyReference
 
-pytestmark = pytest.mark.requires_github_token
+pytestmark = [pytest.mark.component, pytest.mark.requires_github_token]
 
 
 class TestAPMDependenciesIntegration:

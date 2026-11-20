@@ -33,6 +33,8 @@ from apm_cli.install.package_resolution import (
 )
 from apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 
 def _scripted_head(boundary_owner: str, boundary_repo: str):
     """Build a fake ``requests.head`` that returns 200 only for one boundary.

@@ -43,6 +43,9 @@ from apm_cli.deps.registry_proxy import RegistryConfig
 from apm_cli.models.apm_package import DependencyReference, PackageInfo, PackageType
 from apm_cli.utils.archive import ArchiveError, safe_extract_zip
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers: build a minimal APM ZIP
 # ---------------------------------------------------------------------------

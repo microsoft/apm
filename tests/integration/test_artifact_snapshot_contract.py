@@ -20,6 +20,8 @@ from tests.utils.artifact_snapshot import (
     assert_unchanged,
 )
 
+pytestmark = pytest.mark.component
+
 
 def test_capture_is_read_only_and_portable(
     tmp_path: Path,

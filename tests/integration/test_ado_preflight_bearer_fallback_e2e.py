@@ -29,10 +29,13 @@ from apm_cli.install.context import InstallContext
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.git_env import reset_git_cache
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="POSIX-only fake-binary E2E; Windows variant lives in test-integration.ps1",
-)
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="POSIX-only fake-binary E2E; Windows variant lives in test-integration.ps1",
+    ),
+]
 
 
 @pytest.fixture(autouse=True)

@@ -12,12 +12,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest  # noqa: F401
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import init
 from apm_cli.marketplace.init_template import render_marketplace_block
 from apm_cli.marketplace.yml_schema import load_marketplace_from_apm_yml
+
+pytestmark = pytest.mark.component
+
 
 # ---------------------------------------------------------------------------
 # Helpers

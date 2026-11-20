@@ -20,10 +20,13 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.doctor import doctor
+
+pytestmark = pytest.mark.component
+
 
 # ---------------------------------------------------------------------------
 # Helpers

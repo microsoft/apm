@@ -8,5 +8,8 @@
   "e2e = module runs the installed CLI (ApmLifecycleRunner, apm_binary_path, apm_engine_command, packaged_sample, run_cli); component = tmp_path, CliRunner, real files, repo file reads, git, http; unit = pure logic with mocks only.",
   "Modules mixing CliRunner and real-binary tests are classified e2e (module must be uniform)."
  ],
- "counts_left": {}
+ "counts_left": {
+  "unclassified_modules": 239,
+  "placement_offenders": 8
+ }
 }

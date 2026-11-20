@@ -19,9 +19,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from apm_cli.marketplace.builder import MarketplaceBuilder
 
 from .conftest import run_cli  # noqa: F401
+
+pytestmark = pytest.mark.e2e
+
 
 # A marketplace name that GitHub accepts as a repo/manifest identifier but the
 # Copilot App rejects: contains an uppercase letter, a dot, and an underscore.

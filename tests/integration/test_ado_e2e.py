@@ -17,6 +17,7 @@ import pytest
 import yaml
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.live,
     pytest.mark.requires_ado_pat,
 ]

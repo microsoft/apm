@@ -19,6 +19,7 @@ from apm_cli.models.apm_package import (
 from tests.utils.git_link_fixture import git
 
 pytestmark = [
+    pytest.mark.component,
     pytest.mark.integration,
     pytest.mark.requires_e2e_mode,
 ]

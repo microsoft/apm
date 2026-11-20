@@ -17,6 +17,8 @@ from apm_cli.commands.audit import (
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.security.content_scanner import ScanFinding
 
+pytestmark = pytest.mark.component
+
 
 class TestAuditConfig:
     """Tests for _AuditConfig dataclass."""
