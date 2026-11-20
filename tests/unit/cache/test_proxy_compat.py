@@ -93,3 +93,4 @@ class TestInsteadOfRewrite:
 
         # No clone, no fetch, no rev-parse -- pure file-system hit
         assert mock_run.call_args_list == []
+        assert (git_dir / "HEAD").read_text(encoding="utf-8") == f"{sha}\n"
