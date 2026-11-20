@@ -344,11 +344,11 @@
       "guards": ["install-deployment-package-content-hash"]
     },
     {
-      "id": "trust-policy-outcome",
-      "decision": "Which org policy an executables-trust reader applies when discovery does not return a usable policy (#4027)",
-      "owner": "policy/outcome_routing.py (resolve_trust_policy routes every discovery outcome through route_discovery_outcome with policy.fetch_failure_default); consumers: security/executables.py resolve_project_exec_allow_map, install/exec_gate.py ReplayExecAllowMap, install/local_bundle_handler.py effective_bundle_allow_map",
+      "id": "policy-outcome-routing",
+      "decision": "How every policy-discovery outcome is handled (enforce, report and skip, or block) for every command that reads org policy, over a closed outcome set where an unknown outcome blocks; including which org policy an executables-trust reader applies when discovery does not return a usable policy (#4027, #4084)",
+      "owner": "policy/outcome_routing.py (POLICY_DISCOVERY_OUTCOMES and _OUTCOME_ROUTES; classify_discovery_outcome decides, route_discovery_outcome logs and raises, classify_project_policy and resolve_trust_policy serve readers with policy.fetch_failure_default); consumers: install/phases/policy_gate.py, policy/install_preflight.py, commands/audit.py _audit_ci_gate, commands/approve.py _load_org_policy, commands/update.py _executables_need_reconcile, security/trust.py McpAdmission.for_project, security/executables.py resolve_project_exec_allow_map, install/exec_gate.py ReplayExecAllowMap, install/local_bundle_handler.py effective_bundle_allow_map",
       "selectors": ["src/apm_cli/policy/outcome_routing.py"],
-      "guards": ["install-deployment-trust-policy-outcome"]
+      "guards": ["install-deployment-policy-outcome-routing", "install-deployment-trust-policy-outcome"]
     },
     {
       "id": "unpack-executable-refusal",

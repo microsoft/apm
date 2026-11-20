@@ -1870,6 +1870,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Policy check 9 reads the raw declared transport instead of the effective one.",
     ),
     MutationCase(
+        guard_id="install-deployment-policy-outcome-routing",
+        rule_id="install-deployment-policy-outcome-routing",
+        path="src/apm_cli/commands/audit.py",
+        old="        elif route.blocks:\n",
+        new='        elif route.blocks or fetch_result.outcome in ("malformed", "empty"):\n',
+        intent="audit --ci classifies policy outcomes with its own list beside the routing owner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-policy-remote-origin-owner",
         rule_id="install-deployment-policy-remote-origin-owner",
         path="src/apm_cli/policy/_remote.py",

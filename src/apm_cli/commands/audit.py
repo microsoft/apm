@@ -718,56 +718,42 @@ def _audit_ci_gate(
             sys.exit(1)
 
     if fetch_result is not None:
-        # Honour project-side fetch_failure_default for outcomes that
-        # mean "no enforcement applied".  Pre-#1159, auto-discovery
-        # silently swallowed `absent` / `no_git_remote` / `empty` /
-        # `disabled` -- a fail-open governance bypass.  Now those
-        # outcomes are surfaced explicitly:
-        #
-        #   * malformed / cache_miss_fetch_fail / garbage_response
-        #     -> existing fetch-failure handling (warn unless block);
-        #     applies to auto-discovery and `--policy org`. Any other
-        #     explicit --policy already failed closed above (#3195).
-        #   * absent / no_git_remote / empty   (auto-discovery only)
-        #     -> were silently dropped pre-#1159; now surfaced as
-        #        explicit warnings, and honour `block` for parity with
-        #        install.  `--policy org` keeps the legacy fall-through.
-        #   * disabled   (auto-discovery only)
-        #     -> emit a forensic `[i]` breadcrumb in --ci mode so
-        #        audit logs explain WHY no policy ran.
-        fetch_failure_outcomes = (
-            "malformed",
-            "cache_miss_fetch_fail",
-            "garbage_response",
-            "incomplete_chain",
-        )
-        no_policy_outcomes = ("absent", "no_git_remote", "empty")
+        # The routing owner decides every outcome exactly as install does
+        # (#1159, #4084); audit only renders the decision:
+        #   * block -> `[x]` and exit 1
+        #   * no usable policy -> `[!]` and skip enforcement (absent /
+        #     no_git_remote / empty only under auto-discovery; `--policy org`
+        #     reports fetch failures)
+        #   * disabled (auto-discovery) -> forensic `[i]` breadcrumb
+        from ..policy.outcome_routing import classify_discovery_outcome
 
-        if auto_discovered and fetch_result.outcome == "disabled":
-            click.echo(
-                "[i] Org-policy auto-discovery disabled by project apm.yml "
-                "(policy.discovery_enabled=false); no enforcement applied",
-                err=True,
-            )
-            fetch_result = None
-        elif (
-            fetch_result.outcome in fetch_failure_outcomes
-            or fetch_result.error
-            or (auto_discovered and fetch_result.outcome in no_policy_outcomes)
-        ):
-            project_default = read_project_fetch_failure_default(cfg.project_root)
-            source = fetch_result.source
-            err_text = fetch_result.error or fetch_result.fetch_error or fetch_result.outcome
-            cause = _audit_outcome_cause(fetch_result.outcome, source, err_text)
-            if fetch_result.outcome == "incomplete_chain" or project_default == "block":
+        route = classify_discovery_outcome(
+            fetch_result,
+            fetch_failure_default=read_project_fetch_failure_default(cfg.project_root),
+        )
+        source = fetch_result.source
+        err_text = fetch_result.error or fetch_result.fetch_error or fetch_result.outcome
+        cause = _audit_outcome_cause(fetch_result.outcome, source, err_text)
+
+        if route.disabled:
+            if auto_discovered:
                 click.echo(
-                    f"[x] {cause} (policy.fetch_failure_default=block)",
+                    "[i] Org-policy auto-discovery disabled by project apm.yml "
+                    "(policy.discovery_enabled=false); no enforcement applied",
                     err=True,
                 )
-                if fetch_result.discovery_hint:
-                    click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
-                sys.exit(1)
+            fetch_result = None
+        elif route.blocks:
+            if route.from_fetch_failure_default:
+                click.echo(f"[x] {cause} (policy.fetch_failure_default=block)", err=True)
             else:
+                click.echo(f"[x] {cause}", err=True)
+                click.echo(f"    Blocked by org policy: {route.block_reason}", err=True)
+            if fetch_result.discovery_hint:
+                click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
+            sys.exit(1)
+        elif route.policy is None:
+            if auto_discovered or route.unresolved:
                 click.echo(
                     f"[!] {cause}; enforcement skipped "
                     "(set policy.fetch_failure_default=block in apm.yml to fail closed)",
@@ -775,7 +761,7 @@ def _audit_ci_gate(
                 )
                 if cfg.verbose and fetch_result.discovery_hint:
                     click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
-                fetch_result = None
+            fetch_result = None
 
     if fetch_result is not None and fetch_result.found:
         policy_obj = fetch_result.policy
