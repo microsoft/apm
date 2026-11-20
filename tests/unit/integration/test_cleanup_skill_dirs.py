@@ -452,3 +452,27 @@ class TestDepartingOwnerReleasesUserContentDirectory:
 
         assert result.released == []
         assert ".agents/skills/my-skill" in result.retained
+
+
+@pytest.mark.parametrize(
+    ("rel_path", "expected"),
+    [
+        ("agent-data/workflows/flow", True),
+        ("agent-data\\workflows\\flow", True),
+        ("agent-data/workflows/flow/extra", False),
+        (".claude/skills/", False),
+        ("agent-data/workflows/", False),
+    ],
+)
+def test_skill_directory_entry_uses_the_last_separator(rel_path: str, expected: bool) -> None:
+    assert _is_skill_directory_entry(rel_path) is expected
+
+
+@pytest.mark.parametrize(
+    ("digest", "expected"),
+    [("sha256:abc", "abc"), ("abc", "abc"), ("SHA256:abc", "SHA256:abc"), ("sha256:", "")],
+)
+def test_strip_sha256_prefix(digest: str, expected: str) -> None:
+    from apm_cli.integration.cleanup import _strip_sha256_prefix
+
+    assert _strip_sha256_prefix(digest) == expected
