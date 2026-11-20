@@ -4411,7 +4411,9 @@ def test_required_deleting_all_local_content_cleans_its_deployments(
         scenario_id="tree-deleted-install",
     )
 
-    assert "Cleaned 4 stale files" in result.stdout
+    # Each removed skill directory is named once; its SKILL.md is folded in (#4193).
+    assert "  - .agents/skills/only/\n  - .claude/skills/only/\n" in result.stdout
+    assert "Cleaned 2 stale files" in result.stdout
     assert _local_skill_rows(root, "only") == {}
     assert not _skill_on_disk(root, ".agents", "only")
     assert not _skill_on_disk(root, ".claude", "only")

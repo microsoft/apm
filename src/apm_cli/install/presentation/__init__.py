@@ -18,10 +18,10 @@ def surface_target_cleanup(
     the user's tracked workspace, so -- like every other caller of the
     cleanup chokepoint (see ``install/phases/cleanup.py``) -- it must be
     visible without ``--verbose``. Surfaces each user-edit skip as a yellow
-    inline and the deletion count as an info line.
+    inline and names each deleted path.
     """
     if logger is None:
         return
     for skipped in cleanup.skipped_user_edit:
         logger.cleanup_skipped_user_edit(skipped, dep_key)
-    logger.stale_cleanup(dep_key, len(cleanup.deleted))
+    logger.stale_cleanup(dep_key, cleanup)

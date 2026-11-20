@@ -30,8 +30,8 @@ class _RecordingLogger:
         self.stale_cleanup_calls: list[tuple[str, int]] = []
         self.user_edit_calls: list[tuple[str, str]] = []
 
-    def stale_cleanup(self, dep_key: str, count: int) -> None:
-        self.stale_cleanup_calls.append((dep_key, count))
+    def stale_cleanup(self, dep_key: str, cleanup) -> None:
+        self.stale_cleanup_calls.append((dep_key, len(cleanup.announced_paths)))
 
     def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str) -> None:
         self.user_edit_calls.append((rel_path, dep_key))

@@ -40,10 +40,10 @@ still update it.
 Explicit HTTPS upgrades and Git-qualified marketplace requests are not no-ops
 when they change the stored transport or default-registry routing.
 
-During install or uninstall, `Cleaned N stale deployed files for DEPENDENCY`
-names the affected dependency, not a deletion location. A local source path in
-that message identifies the package; cleanup removes deployed files, not source
-files.
+During install, uninstall or prune, `Cleaned N stale deployed files for
+DEPENDENCY:` names the affected dependency and lists each removed path below it
+(a skill directory once, with a trailing `/`). A local source path in the
+header identifies the package; cleanup removes deployed files, not source files.
 
 `apm install` rejects incompatible immutable requirements for one package
 identity and reports both dependency paths and refs. Equivalent tag/SHA
