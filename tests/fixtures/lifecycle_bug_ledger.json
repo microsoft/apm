@@ -2475,6 +2475,22 @@
         "tests/integration/test_locked_source_cache_parity_lifecycle.py::test_update_refusal_names_the_mismatch_as_an_error",
         "tests/lifecycle/security/test_integrity.py::test_integrity_row"
       ]
+    },
+    {
+      "issue": 4389,
+      "fixed_in": "Unreleased",
+      "summary": "install --frozen judges lock sync from package copies that match the lock, so it agrees with audit --ci on an edited apm_modules copy whose locked source is intact.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "source.ref_cache_coherent"
+      ],
+      "regression_tests": [
+        "tests/integration/test_mcp_omission_lifecycle.py::test_skills_only_preserves_admitted_baseline_and_real_drift"
+      ]
     }
   ],
   "lifecycle_contracts": [

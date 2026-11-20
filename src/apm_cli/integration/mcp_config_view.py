@@ -828,6 +828,25 @@ class _CollectedDependencies:
     one_off: list[tuple[str, str]] = field(default_factory=list)
 
 
+def _copy_contradicts_lock(
+    package_key: str, dependency: LockedDependency, modules_root: Path, lockfile: LockFile
+) -> bool:
+    """Whether the apm_modules copy differs from its locked ``content_hash`` (#4389).
+
+    A frozen install then judges this package's declarations from the verified
+    copy it restores (the strict post-restoration check), never from these bytes.
+    """
+    from apm_cli.install.source_helpers import locked_content_mismatch
+
+    try:
+        package_root = dependency.to_dependency_ref().get_install_path(modules_root)
+    except (OSError, ValueError):
+        return False
+    return package_root.is_dir() and locked_content_mismatch(
+        package_key, dependency, package_root, lockfile=lockfile
+    )
+
+
 def _collect_locked_dependencies(
     lockfile: LockFile | None,
     modules_root: Path,
@@ -919,7 +938,14 @@ def _collect_locked_dependencies(
                 )
             continue
 
-        if allow_pending and not manifest_path.parent.exists() and dependency.source != "local":
+        if (
+            allow_pending
+            and dependency.source != "local"
+            and (
+                not manifest_path.parent.exists()
+                or _copy_contradicts_lock(package_key, dependency, modules_root, lockfile)
+            )
+        ):
             from apm_cli.drift import build_download_ref
 
             try:
