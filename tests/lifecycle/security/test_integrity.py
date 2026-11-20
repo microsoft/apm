@@ -1036,7 +1036,6 @@ def _change_upstream_policy(world: World, stack: contextlib.ExitStack) -> None:
     _expire_policy_cache(world)
 
 
-_PIN_CACHE = _pending("policy cache content verified against the pin before use")
 _PIN_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill", ".github")
 
 POLICY_HASH_PIN = ArtifactSlice(
@@ -1053,9 +1052,9 @@ POLICY_HASH_PIN = ArtifactSlice(
     cells={
         # The pin covers the bytes that are evaluated, so a changed cache entry
         # is not evaluated; the verified policy allows p-skill.
-        ("audit-ci", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE, xfail=_PIN_CACHE),
-        ("frozen", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE, xfail=_PIN_CACHE),
-        ("install", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE, xfail=_PIN_CACHE),
+        ("audit-ci", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE),
+        ("frozen", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE),
+        ("install", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE),
         # Not registered: ("bundle-install", "disk-or-cache"). The bundle preflight
         # reads the cache only, and no world bundle carries an approved item a
         # cached-policy edit could change, so the row would not observe the cell.
