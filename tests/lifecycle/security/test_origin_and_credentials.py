@@ -369,10 +369,6 @@ _ORIGIN_STATE = (_ORIGIN_LOCK, _ORIGIN_MANIFEST, ".agents/skills/p-skill")
 _ORIGIN_GIT = ("git", "-c", "user.name=lifecycle", "-c", "user.email=lifecycle@example.invalid")
 
 
-def _origin_pending(phrase: str) -> str:
-    return f"S-pending (neutral issue to follow): {phrase}"
-
-
 def _origin_plugin(name: str, repo: str) -> dict:
     return {
         "name": name,
@@ -588,11 +584,7 @@ ORIGIN_ROWS: dict[str, _OriginExpect] = {
         0, unchanged=_ORIGIN_STATE, keeps_origin=False
     ),
     "M|transitive marketplace dep|lock-row-edited": _OriginExpect(0, present=(_ORIGIN_SKILL,)),
-    "M|update|lock-row-edited": _OriginExpect(
-        0,
-        present=(_ORIGIN_SKILL,),
-        xfail=_origin_pending("update restores the recorded marketplace provenance"),
-    ),
+    "M|update|lock-row-edited": _OriginExpect(0, present=(_ORIGIN_SKILL,)),
 }
 
 

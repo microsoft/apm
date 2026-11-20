@@ -2896,7 +2896,9 @@
         "lockfile.frozen_preserves_bytes"
       ],
       "regression_tests": [
-        "tests/integration/test_marketplace_update_provenance_lifecycle.py::test_update_restores_or_refuses_altered_marketplace_provenance"
+        "tests/integration/test_marketplace_update_provenance_lifecycle.py::test_update_restores_or_refuses_altered_marketplace_provenance",
+        "tests/integration/test_marketplace_update_provenance_lifecycle.py::test_update_refuses_a_marketplace_declaration_whose_lock_row_lost_provenance",
+        "tests/lifecycle/security/test_origin_and_credentials.py::test_origin_row"
       ]
     },
     {
