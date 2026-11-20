@@ -217,7 +217,7 @@ are active for this `panel-mode` and surface. Do not spawn
 | `oss-growth-hacker` | Adoption Strategist | Surface-gated |
 | `auth-expert` | Auth / Token Reviewer | Surface-gated |
 | `doc-writer` | Documentation Reviewer | Surface-gated |
-| `test-coverage-expert` | Test-Presence Reviewer | Core unless docs-only (`src/` untouched) |
+| `test-coverage-expert` | Test-Presence Reviewer | Core when `src/` is touched or a test file is cut (deleted, moved, or renamed under `tests/`); skip otherwise |
 | `performance-expert` | Package-Manager Performance Reviewer | Surface-gated |
 | `apm-ceo` | Strategic Arbiter / Synthesizer | Always |
 
@@ -267,7 +267,7 @@ and surface.
 | Mode | Roster | Context | Comment |
 |------|--------|---------|---------|
 | full | Surface-gated specialists + CEO | Shared brief + owned files | yes |
-| lean | Highest-signal surface owner, test-coverage if `src/` touched, CEO. Architect optional on tiny diffs. | Shared brief only | yes |
+| lean | Highest-signal surface owner, test-coverage if `src/` touched or a test file is cut, CEO. Architect optional on tiny diffs. | Shared brief only | yes |
 | delta | CEO + previously-active personas whose owned files changed since last panel head; test-coverage only if tests or `src/` changed in range | Brief + last comment + diff | yes if head or watermark changed; else noop |
 
 Even `full` is surface-gated. Never spawn inactive stubs.
@@ -410,9 +410,13 @@ When active, the performance-expert reviews against BOTH:
 
 ### Test Coverage Expert
 
-**Active by default on every PR that touches `src/**/*.py`.** Skip
-(do not spawn) on a documentation-only PR -- the diff contains zero
-`src/**/*.py` files.
+**Active by default on every PR that touches `src/**/*.py`, and on
+every PR that cuts a test file** -- `git diff --name-status` shows a
+`D` (deleted) or `R` (moved or renamed) entry whose old path is under
+`tests/`. A merge of two tests deletes one of them, so it counts. The
+cut trigger runs the persona's cut/merge review on test-only clean-up
+PRs. Skip (do not spawn) when neither holds, e.g. a
+documentation-only PR.
 
 The test-coverage-expert is paired with the devx-ux-expert lens and
 defends the user-promise contracts the DevX persona enumerates (CLI

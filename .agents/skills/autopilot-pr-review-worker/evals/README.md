@@ -1,6 +1,6 @@
 # autopilot-pr-review-worker evals
 
-Two complementary evals live here.
+Three complementary evals live here.
 
 ## 1. `render_eval.py` (content / output-shape eval)
 
@@ -62,3 +62,21 @@ should-NOT-trigger.
 This is a manual eval against the dispatch description in
 `SKILL.md`'s frontmatter -- run by reading the description as if
 you were the harness's dispatcher LLM and classifying each query.
+
+## 3. `roster_eval.py` (test-coverage activation eval)
+
+Checks the test-coverage-expert activation rule (SKILL.md "Test
+Coverage Expert", `assets/panel-mode.md`) against the cases in
+`roster-cases.json` (kept outside `fixtures/`, which
+`render_eval.py` renders): `src/` changes and
+test-file cuts (deleted, merged, moved, or renamed under `tests/`)
+activate the panelist; docs-only and test-only edits without a cut do
+not.
+
+Run:
+
+```bash
+python3 roster_eval.py
+```
+
+Exit 0 when every case matches.

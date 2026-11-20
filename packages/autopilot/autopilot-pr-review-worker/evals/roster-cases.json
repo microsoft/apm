@@ -1,0 +1,14 @@
+{
+  "description": "test-coverage-expert activation cases. Each case is the PR's `git diff --name-status` output (tab-separated) and whether the panelist must spawn. Rule: active when a src/**/*.py path is touched, or a D / R entry has an old path under tests/.",
+  "cases": [
+    {"name": "src change with test edit", "name_status": ["M\tsrc/apm_cli/install/pipeline.py", "M\ttests/unit/install/test_pipeline.py"], "expect_active": true},
+    {"name": "src-only new module", "name_status": ["A\tsrc/apm_cli/install/new_phase.py"], "expect_active": true},
+    {"name": "test-only deletion", "name_status": ["D\ttests/unit/test_duplicate_case.py"], "expect_active": true},
+    {"name": "test-only merge (one file absorbs another)", "name_status": ["M\ttests/unit/test_lockfile_roundtrip.py", "D\ttests/unit/test_lockfile_roundtrip_extra.py"], "expect_active": true},
+    {"name": "test-only rename", "name_status": ["R100\ttests/unit/test_phase_three.py\ttests/unit/test_install_idempotent.py"], "expect_active": true},
+    {"name": "test moved out of tests/", "name_status": ["R087\ttests/integration/test_helper_probe.py\tscripts/helper_probe.py"], "expect_active": true},
+    {"name": "docs-only", "name_status": ["M\tdocs/src/content/docs/reference/cli-commands.md", "M\tCHANGELOG.md"], "expect_active": false},
+    {"name": "test-only edit and addition (no cut)", "name_status": ["M\ttests/unit/test_a.py", "A\ttests/unit/test_new_case.py"], "expect_active": false},
+    {"name": "file moved into tests/ (nothing cut)", "name_status": ["R100\tscripts/probe.py\ttests/unit/test_probe.py"], "expect_active": false}
+  ]
+}
