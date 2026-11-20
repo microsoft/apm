@@ -84,13 +84,9 @@ class DeploymentEvidence:
     ) -> None:
         self._deploy_root = deploy_root
         self.user_scope = user_scope
-        self._kept = frozenset(value.replace("\\", "/").rstrip("/") for value in kept)
-        # Every ancestor directory of a kept member, so each lookup stays O(1).
-        self._kept_parents = frozenset(
-            "/".join(parts[:index])
-            for parts in (value.split("/") for value in self._kept)
-            for index in range(1, len(parts))
-        )
+        self._kept: frozenset[str] = frozenset()
+        self._kept_parents: frozenset[str] = frozenset()
+        self.retain(kept)
         self._receipts = dict(receipts)
         self._render = render
         self._owners = dict(owners or {})
@@ -153,6 +149,19 @@ class DeploymentEvidence:
             owners={path: tuple(keys) for path, keys in owners.items()},
             user_scope=user_scope,
             kept=kept,
+        )
+
+    def retain(self, kept: Iterable[str]) -> None:
+        """Adopt this run's skip set; evidence built before integration learns it late."""
+        values = frozenset(value.replace("\\", "/").rstrip("/") for value in kept)
+        if values == self._kept:
+            return
+        self._kept = values
+        # Every ancestor directory of a kept member, so each lookup stays O(1).
+        self._kept_parents = frozenset(
+            "/".join(parts[:index])
+            for parts in (value.split("/") for value in values)
+            for index in range(1, len(parts))
         )
 
     def kept(self, value: str) -> bool:
