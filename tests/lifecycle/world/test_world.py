@@ -321,6 +321,9 @@ _POLICY_EXIT = {
     "unreachable": 0,
     "hash-mismatch": 1,
     "chain-cycle": 1,
+    "deny-lsp": 0,
+    "deny-native": 0,
+    "exec-gate-on": 0,
 }
 _POLICY_ANNOUNCE = {
     "deny-pkg": "denied by pattern",
@@ -346,6 +349,42 @@ def test_policy_variant_is_served_and_recorded(lifecycle_world: World, variant: 
         if entry["host"] == API_HOST and entry["path"].endswith("/contents/apm-policy.yml")
     }
     assert policy_org(variant) in fetched, world.services.egress_log()
+
+
+@pytest.mark.parametrize(
+    ("variant", "package"),
+    [
+        ("deny-pkg", "p-exec"),
+        ("deny-lsp", "p-lsp"),
+        ("deny-native", "p-native-claude"),
+        ("deny-native", "p-native-codex"),
+    ],
+)
+def test_dependency_deny_variant_blocks_its_package(
+    lifecycle_world: World, variant: str, package: str
+) -> None:
+    world = lifecycle_world
+    use_policy(world, variant)
+    before = (world.project / "apm.yml").read_bytes()
+    result = driver.run(world, ["install", world.packages[package].spec])
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, output
+    assert f"denied by pattern: **/{package}" in output, output
+    assert (world.project / "apm.yml").read_bytes() == before
+
+
+def test_exec_gate_on_variant_gates_a_project_without_an_executables_block(
+    lifecycle_world: World,
+) -> None:
+    world = lifecycle_world
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    del data["executables"]
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    use_policy(world, "exec-gate-on")
+    result = _ok(world, ["install", world.packages["p-exec"].spec])
+    assert "hooks skipped (not approved" in " ".join((result.stdout + result.stderr).split())
+    assert not (world.project / ".github" / "hooks" / "p-exec-session.json").exists()
 
 
 @pytest.mark.parametrize(

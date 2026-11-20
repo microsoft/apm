@@ -72,8 +72,15 @@ POLICY_VARIANTS = (
     "unreachable",
     "hash-mismatch",
     "chain-cycle",
+    "deny-lsp",
+    "deny-native",
+    "exec-gate-on",
 )
 DENIED_PACKAGE = "p-exec"
+# exec-gate-on: any org executables signal turns the gate on
+# (security/executables.py org_signal); recommending a package the world never
+# serves denies nothing.
+RECOMMENDED_ONLY = f"{ORG}/p-recommended"
 _CHAIN_PEER = "chain-cycle-peer"
 
 
@@ -97,6 +104,21 @@ def policy_documents() -> dict[str, dict[str, object]]:
         "mcp-deny": {"name": "mcp-deny", **base, "mcp": {"deny": ["*"]}},
         # The project pins a different hash (``use_policy``); the served bytes are benign.
         "hash-mismatch": {"name": "hash-mismatch", **base},
+        "deny-lsp": {
+            "name": "deny-lsp",
+            **base,
+            "dependencies": {"deny": ["**/p-lsp", f"{ORG}/p-lsp"]},
+        },
+        "deny-native": {
+            "name": "deny-native",
+            **base,
+            "dependencies": {"deny": ["**/p-native-claude", "**/p-native-codex"]},
+        },
+        "exec-gate-on": {
+            "name": "exec-gate-on",
+            **base,
+            "executables": {"recommend": [RECOMMENDED_ONLY]},
+        },
         "chain-cycle": {
             "name": "chain-cycle",
             **base,
