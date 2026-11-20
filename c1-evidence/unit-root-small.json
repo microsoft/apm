@@ -1,9 +1,72 @@
 {
  "partition": "unit root and small subpackages",
- "steps_done": [1],
- "folds": {},
- "decisions": [
-  "step1: --report-equal-copies lists 3 in-scope copies (test_base_integrator, test_hook_integrator, test_prune_command); all 3 files are owned by open PRs, left untouched"
+ "steps_done": [
+  1
  ],
- "counts_left": {"same_body_groups": 88, "unclassified_modules": null, "placement_offenders": null, "weak_tests": null}
+ "folds": {
+  "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCodexProcessArgumentsV01Variables::test_legacy_optional_hint_skipped": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_legacy_optional_hint_skipped[codex]",
+  "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCodexProcessArgumentsV01Variables::test_legacy_optional_hint_with_variables_skipped": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_legacy_optional_hint_with_variables_skipped[codex]",
+  "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCodexProcessArgumentsV01Variables::test_v01_full_docker_arg_set_preserved": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_v01_full_docker_arg_set_preserved[codex]",
+  "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCodexProcessArgumentsV01Variables::test_v01_plain_value_hint_args_extracted": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_v01_plain_value_hint_args_extracted[codex]",
+  "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCodexProcessArgumentsV01Variables::test_v01_variables_placeholder_resolved_from_runtime_vars": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_v01_variables_placeholder_resolved_from_runtime_vars[codex]",
+  "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCodexProcessArgumentsV01Variables::test_v01_variables_unknown_var_gets_placeholder": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_v01_variables_unknown_var_gets_placeholder[codex]",
+  "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCopilotProcessArgumentsV01Variables::test_legacy_optional_hint_skipped": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_legacy_optional_hint_skipped[copilot]",
+  "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCopilotProcessArgumentsV01Variables::test_legacy_optional_hint_with_variables_skipped": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_legacy_optional_hint_with_variables_skipped[copilot]",
+  "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCopilotProcessArgumentsV01Variables::test_v01_full_docker_arg_set_preserved": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_v01_full_docker_arg_set_preserved[copilot]",
+  "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCopilotProcessArgumentsV01Variables::test_v01_plain_value_hint_args_extracted": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_v01_plain_value_hint_args_extracted[copilot]",
+  "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCopilotProcessArgumentsV01Variables::test_v01_variables_placeholder_resolved_from_runtime_vars": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_v01_variables_placeholder_resolved_from_runtime_vars[copilot]",
+  "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCopilotProcessArgumentsV01Variables::test_v01_variables_unknown_var_gets_placeholder": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_v01_variables_unknown_var_gets_placeholder[copilot]",
+  "tests/unit/marketplace/test_parser.py::test_https_ado_url_rejects_unsafe_encoded_path": "tests/unit/marketplace/test_parser.py::test_invalid_or_unsafe_source_url_rejected",
+  "tests/unit/marketplace/test_parser.py::test_invalid_ssh_protocol_url_rejected": "tests/unit/marketplace/test_parser.py::test_invalid_or_unsafe_source_url_rejected",
+  "tests/unit/policy/test_pinned_constraint.py::test_classify_non_semver_literal_tag_returns_bare_branch": "tests/unit/policy/test_pinned_constraint.py::test_classify_non_release_tag_refs_return_bare_branch",
+  "tests/unit/policy/test_pinned_constraint.py::test_classify_pinned_specs_return_none": "tests/unit/policy/test_pinned_constraint.py::test_classify_pinned_refs_return_none",
+  "tests/unit/policy/test_pinned_constraint_declared.py::test_exact_package_release_tag_is_pinned": "tests/unit/policy/test_pinned_constraint.py::test_classify_pinned_refs_return_none",
+  "tests/unit/policy/test_pinned_constraint_declared.py::test_other_names_and_near_misses_stay_bare_branch": "tests/unit/policy/test_pinned_constraint.py::test_classify_non_release_tag_refs_return_bare_branch",
+  "tests/unit/policy/test_pinned_constraint_declared.py::test_package_qualified_literal_tag_for_own_name_is_pinned": "tests/unit/policy/test_pinned_constraint.py::test_classify_pinned_refs_return_none",
+  "tests/unit/test_artifactory_support.py::TestArtifactoryDownloader::test_parse_artifactory_base_url_not_set": "tests/unit/test_artifactory_support.py::TestParseArtifactoryBaseUrlCanonicalVar::test_neither_var_set",
+  "tests/unit/test_build_sha.py::TestGetBuildSha::test_returns_empty_on_timeout": "tests/unit/test_build_sha.py::TestGetBuildSha::test_returns_empty_when_git_unavailable_or_times_out",
+  "tests/unit/test_build_sha.py::TestGetBuildSha::test_returns_empty_when_git_unavailable": "tests/unit/test_build_sha.py::TestGetBuildSha::test_returns_empty_when_git_unavailable_or_times_out",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDefault::test_returns_non_empty_string": "tests/unit/test_output_formatters_rendering.py::test_format_default_returns_non_empty_string[plain]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDefaultColor::test_returns_non_empty_string": "tests/unit/test_output_formatters_rendering.py::test_format_default_returns_non_empty_string[color]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetrics::test_efficiency_excellent": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[plain-excellent]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetrics::test_efficiency_fair": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[plain-fair]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetrics::test_efficiency_good": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[plain-good]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetrics::test_efficiency_poor": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[plain-poor]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetrics::test_efficiency_very_poor": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[plain-very-poor]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetrics::test_header_present": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[plain-header]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetrics::test_returns_list": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[plain-header]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetricsColorBranches::test_excellent_efficiency_colored": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[color-excellent]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetricsColorBranches::test_fair_efficiency_colored": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[color-fair]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetricsColorBranches::test_good_efficiency_colored": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[color-good]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetricsColorBranches::test_header_colored": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[color-header]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetricsColorBranches::test_poor_efficiency_colored": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[color-poor]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetricsColorBranches::test_returns_list_colored": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[color-header]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatDetailedMetricsColorBranches::test_very_poor_efficiency_colored": "tests/unit/test_output_formatters_rendering.py::test_detailed_metrics_efficiency_text[color-very-poor]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatOptimizationProgress::test_empty_pattern_shows_global": "tests/unit/test_output_formatters_rendering.py::test_optimization_progress_text[plain-global-pattern]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatOptimizationProgress::test_header_present": "tests/unit/test_output_formatters_rendering.py::test_optimization_progress_text[plain-header]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatOptimizationProgress::test_returns_list": "tests/unit/test_output_formatters_rendering.py::test_optimization_progress_text[plain-header]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatOptimizationProgressColorBranches::test_empty_pattern_global_colored": "tests/unit/test_output_formatters_rendering.py::test_optimization_progress_text[color-global-pattern]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatOptimizationProgressColorBranches::test_header_present_colored": "tests/unit/test_output_formatters_rendering.py::test_optimization_progress_text[color-header]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatOptimizationProgressColorBranches::test_returns_list_colored": "tests/unit/test_output_formatters_rendering.py::test_optimization_progress_text[color-header]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatProjectDiscovery::test_basic_header_present": "tests/unit/test_output_formatters_rendering.py::test_project_discovery_text[plain-header]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatProjectDiscovery::test_no_constitution_line_when_absent": "tests/unit/test_output_formatters_rendering.py::test_project_discovery_text[plain-no-constitution]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatProjectDiscoveryColorBranches::test_header_present_colored": "tests/unit/test_output_formatters_rendering.py::test_project_discovery_text[color-header]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatProjectDiscoveryColorBranches::test_no_constitution_colored": "tests/unit/test_output_formatters_rendering.py::test_project_discovery_text[color-no-constitution]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatVerbose::test_includes_issues_when_present": "tests/unit/test_output_formatters_rendering.py::test_format_verbose_includes_issues[plain]",
+  "tests/unit/test_output_formatters_rendering.py::TestFormatVerboseColor::test_includes_issues": "tests/unit/test_output_formatters_rendering.py::test_format_verbose_includes_issues[color]",
+  "tests/unit/test_version_checker.py::TestAirGappedEnvVars::test_multiple_v_prefixes_are_rejected": "tests/unit/test_version_checker.py::TestAirGappedEnvVars::test_invalid_version_env_var_returns_none"
+ },
+ "decisions": [
+  "step1: --report-equal-copies lists 3 in-scope copies (test_base_integrator, test_hook_integrator, test_prune_command); all 3 files are owned by open PRs, left untouched",
+  "output_formatters_rendering: plain vs color same-body clones folded into module-level tests parametrized over an any_formatter fixture (plain|color)",
+  "adapters/test_v01_variables_process_arguments: copilot/codex class clones folded into module tests over an adapter fixture (copilot|codex); full-docker test now asserts the whole ordered list for both",
+  "policy/test_pinned_constraint(_declared): same-body classify tests with different _dep helpers merged into two ref-parametrized tests in test_pinned_constraint.py (plain specs expanded to acme/lib#<spec>, exactly what the old _dep built)",
+  "same-file clones differing only in decorator data (parser, build_sha, version_checker) merged into one parametrized or subTest-driven test; artifactory not_set clone removed in favour of TestParseArtifactoryBaseUrlCanonicalVar::test_neither_var_set (same setup, same body)"
+ ],
+ "counts_left": {
+  "same_body_groups": 88,
+  "unclassified_modules": null,
+  "placement_offenders": null,
+  "weak_tests": null
+ }
 }

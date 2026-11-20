@@ -38,69 +38,9 @@ def _dep(spec: str) -> DependencyReference:
 
 
 # ---------------------------------------------------------------------------
-# Package-qualified literal tags
+# Package-qualified literal tags and exact package release tags (name@X.Y.Z),
+# #3731. Plain ref classification lives in test_pinned_constraint.py.
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "spec",
-    [
-        "acme/mono/packages/pkg-a#pkg-a-v1.1.0",
-        "acme/mono/packages/pkg-a#pkg-a--v1.1.0",
-        "acme/mono/packages/pkg-a#pkg-a-v1.1.0-rc.1",
-        "acme/mono/packages/pkg-a#pkg-a-v1.1.0+build.5",
-        "acme/widget#widget-v1.2.0",
-        "acme/widget#widget--v1.2.0",
-        "https://github.com/acme/widget.git#widget-v1.2.0",
-    ],
-)
-def test_package_qualified_literal_tag_for_own_name_is_pinned(spec):
-    assert classify_unbounded_reason(_dep(spec)) is None
-
-
-@pytest.mark.parametrize(
-    "spec",
-    [
-        # another package's tag on a subdirectory dep
-        "acme/mono/packages/pkg-a#pkg-b-v1.1.0",
-        # the repository's tag layout on a subdirectory dep
-        "acme/mono/packages/pkg-a#mono-v1.1.0",
-        # a subdirectory package's tag on the repository dep
-        "acme/mono#pkg-a-v1.1.0",
-        # version-looking suffix that is not a full semver
-        "acme/mono/packages/pkg-a#pkg-a-v1.1",
-        "acme/mono/packages/pkg-a#pkg-a-v1",
-        # arbitrary prefix
-        "acme/mono/packages/pkg-a#release-pkg-a-v1.1.0",
-        # layouts the resolver does not select from
-        "acme/mono/packages/pkg-a#pkg-a_v1.1.0",
-    ],
-)
-def test_other_names_and_near_misses_stay_bare_branch(spec):
-    assert classify_unbounded_reason(_dep(spec)) is UnboundedReason.BARE_BRANCH
-
-
-# ---------------------------------------------------------------------------
-# Exact package release tags (name@X.Y.Z), #3731
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "spec",
-    [
-        # Ruling change (#3731): pkg-a@1.1.0 used to be a bare branch.
-        # An exact name@X.Y.Z tag declares one release, like v1.2.3, and
-        # the name is not bound to the dependency's own name.
-        "acme/mono/packages/pkg-a#pkg-a@1.1.0",
-        "acme/mono/packages/pkg-a#pkg-a@v1.1.0",
-        "shadcn/ui#shadcn@4.12.0",
-        "upstash/context7/skills/context7-mcp#@upstash/context7-mcp@4.4.4",
-        "acme/mono/packages/pkg-a#@scope/pkg-a@1.1.0-rc.1",
-        "acme/mono#pkg-a@1.1.0+build.5",
-    ],
-)
-def test_exact_package_release_tag_is_pinned(spec):
-    assert classify_unbounded_reason(_dep(spec)) is None
 
 
 def _object_dep(ref: str) -> DependencyReference:

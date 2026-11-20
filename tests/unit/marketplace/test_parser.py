@@ -168,9 +168,13 @@ def test_ssh_protocol_url_rejects_ambiguous_or_unsafe_components(raw: str) -> No
         "ssh://git@gitea.example.com/org/%2e%2e/repo.git",
         "ssh://git@gitea.example.com/org/%2e%2e%2frepo.git",
         "ssh://git@gitea.example.com/org/%252e%252e%252frepo.git",
+        "https://dev.azure.com/contoso/%/_git/repo",
+        "https://dev.azure.com/contoso/%FF/_git/repo",
+        "https://dev.azure.com/contoso/%2F/_git/repo",
+        "https://dev.azure.com/contoso/%252E%252E/_git/repo",
     ],
 )
-def test_invalid_ssh_protocol_url_rejected(raw: str) -> None:
+def test_invalid_or_unsafe_source_url_rejected(raw: str) -> None:
     with pytest.raises(ValueError):
         _parse_marketplace_source(raw, host_flag=None)
 
@@ -253,20 +257,6 @@ def test_https_ado_url_preserves_encoded_path_presentation() -> None:
     assert kind == "ado"
     assert host == "dev.azure.com"
     assert parsed.path == "/contoso/My%20Projects/_git/agent-forge"
-
-
-@pytest.mark.parametrize(
-    "raw",
-    [
-        "https://dev.azure.com/contoso/%/_git/repo",
-        "https://dev.azure.com/contoso/%FF/_git/repo",
-        "https://dev.azure.com/contoso/%2F/_git/repo",
-        "https://dev.azure.com/contoso/%252E%252E/_git/repo",
-    ],
-)
-def test_https_ado_url_rejects_unsafe_encoded_path(raw: str) -> None:
-    with pytest.raises(ValueError):
-        _parse_marketplace_source(raw, host_flag=None)
 
 
 @pytest.mark.parametrize(

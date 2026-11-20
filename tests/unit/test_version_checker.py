@@ -599,21 +599,12 @@ class TestAirGappedEnvVars(unittest.TestCase):
         self.assertEqual(result, "1.5.0")
 
     @patch("requests.get")
-    @patch.dict("os.environ", {"VERSION": "not-a-version"}, clear=False)
     def test_invalid_version_env_var_returns_none(self, mock_get):
-        """An invalid VERSION value returns None without calling the API."""
-        result = get_latest_version_from_github()
+        """Invalid VERSION values, including a doubled v prefix, return None without an API call."""
+        for value in ("not-a-version", "vv1.2.3"):
+            with self.subTest(version=value), patch.dict("os.environ", {"VERSION": value}):
+                self.assertIsNone(get_latest_version_from_github())
         mock_get.assert_not_called()
-        self.assertIsNone(result)
-
-    @patch("requests.get")
-    @patch.dict("os.environ", {"VERSION": "vv1.2.3"}, clear=False)
-    def test_multiple_v_prefixes_are_rejected(self, mock_get):
-        """VERSION normalization must add or remove exactly one v prefix."""
-        result = get_latest_version_from_github()
-
-        mock_get.assert_not_called()
-        self.assertIsNone(result)
 
     @patch("requests.get")
     @patch.dict("os.environ", {"APM_REPO": "corp/apm-fork"}, clear=False)

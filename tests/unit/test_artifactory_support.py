@@ -1002,12 +1002,6 @@ class TestArtifactoryDownloader:
             host, prefix, scheme = result  # noqa: RUF059
             assert prefix == "artifactory/github"
 
-    def test_parse_artifactory_base_url_not_set(self):
-        """Returns None when env var is not set."""
-        with patch.dict(os.environ, {}, clear=True):
-            result = self.downloader._parse_artifactory_base_url()
-            assert result is None
-
     def test_parse_artifactory_base_url_empty(self):
         """Returns None for empty string."""
         with patch.dict(os.environ, {"PROXY_REGISTRY_URL": ""}, clear=True):

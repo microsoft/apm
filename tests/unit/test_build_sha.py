@@ -45,23 +45,23 @@ class TestGetBuildSha(unittest.TestCase):
         ]
 
     @patch("apm_cli.version.__BUILD_SHA__", None)
-    @patch("subprocess.run", side_effect=FileNotFoundError("git not found"))
-    def test_returns_empty_when_git_unavailable(self, _mock_run):
-        """Returns empty string when git is not installed."""
-        with patch("sys.frozen", False, create=True):
-            assert get_build_sha() == ""
+    def test_returns_empty_when_git_unavailable_or_times_out(self):
+        """Returns empty string when git is not installed or times out."""
+        for error in (
+            FileNotFoundError("git not found"),
+            subprocess.TimeoutExpired(cmd="git", timeout=5),
+        ):
+            with (
+                self.subTest(error=type(error).__name__),
+                patch("subprocess.run", side_effect=error),
+                patch("sys.frozen", False, create=True),
+            ):
+                assert get_build_sha() == ""
 
     @patch("apm_cli.version.__BUILD_SHA__", None)
     @patch("subprocess.run")
     def test_returns_empty_when_git_fails(self, mock_run):
         """Returns empty string when git command fails (e.g., not a repo)."""
         mock_run.return_value = MagicMock(returncode=128, stdout="")
-        with patch("sys.frozen", False, create=True):
-            assert get_build_sha() == ""
-
-    @patch("apm_cli.version.__BUILD_SHA__", None)
-    @patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="git", timeout=5))
-    def test_returns_empty_on_timeout(self, _mock_run):
-        """Returns empty string when git times out."""
         with patch("sys.frozen", False, create=True):
             assert get_build_sha() == ""

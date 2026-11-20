@@ -10,6 +10,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Helpers to build model objects without touching external systems
 # ---------------------------------------------------------------------------
@@ -180,12 +182,6 @@ class TestFormatDefault(unittest.TestCase):
     def setUp(self) -> None:
         self.formatter = CompilationFormatter(use_color=False)
 
-    def test_returns_non_empty_string(self) -> None:
-        results = _make_results()
-        output = self.formatter.format_default(results)
-        self.assertIsInstance(output, str)
-        self.assertTrue(len(output) > 0)
-
     def test_contains_project_discovery_header(self) -> None:
         results = _make_results()
         output = self.formatter.format_default(results)
@@ -278,11 +274,6 @@ class TestFormatVerbose(unittest.TestCase):
         output = self.formatter.format_verbose(results)
         self.assertIn("Placement Distribution", output)
 
-    def test_includes_issues_when_present(self) -> None:
-        results = _make_results(errors=["oops"])
-        output = self.formatter.format_verbose(results)
-        self.assertIn("oops", output)
-
     def test_updates_target_name(self) -> None:
         results = _make_results(target_name="RULES.md")
         self.formatter.format_verbose(results)
@@ -337,12 +328,6 @@ class TestFormatProjectDiscovery(unittest.TestCase):
     def setUp(self) -> None:
         self.formatter = CompilationFormatter(use_color=False)
 
-    def test_basic_header_present(self) -> None:
-        analysis = _make_analysis()
-        lines = self.formatter._format_project_discovery(analysis)
-        text = "\n".join(lines)
-        self.assertIn("Analyzing project structure", text)
-
     def test_directory_count_present(self) -> None:
         analysis = _make_analysis(directories_scanned=7)
         lines = self.formatter._format_project_discovery(analysis)
@@ -358,12 +343,6 @@ class TestFormatProjectDiscovery(unittest.TestCase):
         text = "\n".join(lines)
         self.assertIn("Constitution detected", text)
         self.assertIn("CONSTITUTION.md", text)
-
-    def test_no_constitution_line_when_absent(self) -> None:
-        analysis = _make_analysis(constitution_detected=False)
-        lines = self.formatter._format_project_discovery(analysis)
-        text = "\n".join(lines)
-        self.assertNotIn("Constitution detected", text)
 
     def test_files_analyzed_count_present(self) -> None:
         analysis = _make_analysis(files_analyzed=42)
@@ -424,28 +403,11 @@ class TestFormatOptimizationProgress(unittest.TestCase):
     def setUp(self) -> None:
         self.formatter = CompilationFormatter(use_color=False)
 
-    def test_returns_list(self) -> None:
-        decisions = [_make_decision()]
-        result = self.formatter._format_optimization_progress(decisions)
-        self.assertIsInstance(result, list)
-
-    def test_header_present(self) -> None:
-        decisions = [_make_decision()]
-        lines = self.formatter._format_optimization_progress(decisions)
-        text = "\n".join(lines)
-        self.assertIn("Optimizing placements", text)
-
     def test_pattern_in_output(self) -> None:
         decisions = [_make_decision(pattern="**/*.ts")]
         lines = self.formatter._format_optimization_progress(decisions)
         text = "\n".join(lines)
         self.assertIn("**/*.ts", text)
-
-    def test_empty_pattern_shows_global(self) -> None:
-        decisions = [_make_decision(pattern="")]
-        lines = self.formatter._format_optimization_progress(decisions)
-        text = "\n".join(lines)
-        self.assertIn("(global)", text)
 
     def test_multiple_placements_shows_locations(self) -> None:
         dirs = [Path("/fake/project/a"), Path("/fake/project/b")]
@@ -796,30 +758,6 @@ class TestFormatDetailedMetrics(unittest.TestCase):
         stats = _make_stats(efficiency=efficiency, placement_accuracy=placement_accuracy)
         return "\n".join(self.formatter._format_detailed_metrics(stats))
 
-    def test_header_present(self) -> None:
-        text = self._run(0.70)
-        self.assertIn("Performance Metrics", text)
-
-    def test_efficiency_excellent(self) -> None:
-        text = self._run(0.90)
-        self.assertIn("Excellent", text)
-
-    def test_efficiency_good(self) -> None:
-        text = self._run(0.65)
-        self.assertIn("Good", text)
-
-    def test_efficiency_fair(self) -> None:
-        text = self._run(0.50)
-        self.assertIn("Fair", text)
-
-    def test_efficiency_poor(self) -> None:
-        text = self._run(0.30)
-        self.assertIn("Poor", text)
-
-    def test_efficiency_very_poor(self) -> None:
-        text = self._run(0.10)
-        self.assertIn("Very Poor", text)
-
     def test_pollution_excellent(self) -> None:
         # Pollution ≤ 10 → Excellent
         text = self._run(0.95)  # pollution = 5%
@@ -843,11 +781,6 @@ class TestFormatDetailedMetrics(unittest.TestCase):
     def test_guide_line_present(self) -> None:
         text = self._run(0.70)
         self.assertIn("Guide:", text)
-
-    def test_returns_list(self) -> None:
-        stats = _make_stats(efficiency=0.70)
-        result = self.formatter._format_detailed_metrics(stats)
-        self.assertIsInstance(result, list)
 
 
 # ===========================================================================
@@ -1402,12 +1335,6 @@ class TestFormatDefaultColor(unittest.TestCase):
         except unittest.SkipTest as exc:
             self.skipTest(str(exc))
 
-    def test_returns_non_empty_string(self) -> None:
-        results = _make_results()
-        output = self.formatter.format_default(results)
-        self.assertIsInstance(output, str)
-        self.assertTrue(len(output) > 0)
-
     def test_includes_project_discovery(self) -> None:
         results = _make_results()
         output = self.formatter.format_default(results)
@@ -1445,11 +1372,6 @@ class TestFormatVerboseColor(unittest.TestCase):
         self.assertIsInstance(output, str)
         self.assertTrue(len(output) > 0)
 
-    def test_includes_issues(self) -> None:
-        results = _make_results(errors=["oops"])
-        output = self.formatter.format_verbose(results)
-        self.assertIn("oops", output)
-
     def test_dry_run_verbose_colored(self) -> None:
         results = _make_results(is_dry_run=True)
         output = self.formatter.format_verbose(results)
@@ -1486,24 +1408,12 @@ class TestFormatProjectDiscoveryColorBranches(unittest.TestCase):
         except unittest.SkipTest as exc:
             self.skipTest(str(exc))
 
-    def test_header_present_colored(self) -> None:
-        analysis = _make_analysis()
-        lines = self.formatter._format_project_discovery(analysis)
-        text = "\n".join(lines)
-        self.assertIn("Analyzing project structure", text)
-
     def test_constitution_detected_colored(self) -> None:
         analysis = _make_analysis(constitution_detected=True, constitution_path="CONST.md")
         lines = self.formatter._format_project_discovery(analysis)
         text = "\n".join(lines)
         self.assertIn("Constitution detected", text)
         self.assertIn("CONST.md", text)
-
-    def test_no_constitution_colored(self) -> None:
-        analysis = _make_analysis(constitution_detected=False)
-        lines = self.formatter._format_project_discovery(analysis)
-        text = "\n".join(lines)
-        self.assertNotIn("Constitution detected", text)
 
 
 class TestFormatOptimizationProgressColorBranches(unittest.TestCase):
@@ -1514,17 +1424,6 @@ class TestFormatOptimizationProgressColorBranches(unittest.TestCase):
             self.formatter = _color_formatter()
         except unittest.SkipTest as exc:
             self.skipTest(str(exc))
-
-    def test_returns_list_colored(self) -> None:
-        decisions = [_make_decision()]
-        result = self.formatter._format_optimization_progress(decisions)
-        self.assertIsInstance(result, list)
-
-    def test_header_present_colored(self) -> None:
-        decisions = [_make_decision()]
-        lines = self.formatter._format_optimization_progress(decisions)
-        text = "\n".join(lines)
-        self.assertIn("Optimizing placements", text)
 
     def test_constitution_row_colored(self) -> None:
         analysis = _make_analysis(constitution_detected=True)
@@ -1540,12 +1439,6 @@ class TestFormatOptimizationProgressColorBranches(unittest.TestCase):
         lines = self.formatter._format_optimization_progress(decisions)
         text = "\n".join(lines)
         self.assertIn("2 locations", text)
-
-    def test_empty_pattern_global_colored(self) -> None:
-        decisions = [_make_decision(pattern="")]
-        lines = self.formatter._format_optimization_progress(decisions)
-        text = "\n".join(lines)
-        self.assertIn("(global)", text)
 
     def test_instruction_exception_colored(self) -> None:
         """Exception in file_path.name falls back to str(file_path)[-20:]."""
@@ -1725,30 +1618,6 @@ class TestFormatDetailedMetricsColorBranches(unittest.TestCase):
         stats = _make_stats(efficiency=efficiency, placement_accuracy=placement_accuracy)
         return "\n".join(self.formatter._format_detailed_metrics(stats))
 
-    def test_header_colored(self) -> None:
-        text = self._run(0.70)
-        self.assertIn("Performance Metrics", text)
-
-    def test_excellent_efficiency_colored(self) -> None:
-        text = self._run(0.90)
-        self.assertIn("Excellent", text)
-
-    def test_good_efficiency_colored(self) -> None:
-        text = self._run(0.65)
-        self.assertIn("Good", text)
-
-    def test_fair_efficiency_colored(self) -> None:
-        text = self._run(0.50)
-        self.assertIn("Fair", text)
-
-    def test_poor_efficiency_colored(self) -> None:
-        text = self._run(0.30)
-        self.assertIn("Poor", text)
-
-    def test_very_poor_efficiency_colored(self) -> None:
-        text = self._run(0.10)
-        self.assertIn("Very Poor", text)
-
     def test_placement_accuracy_excellent_colored(self) -> None:
         text = self._run(0.90, placement_accuracy=0.97)
         self.assertIn("97.0%", text)
@@ -1764,11 +1633,6 @@ class TestFormatDetailedMetricsColorBranches(unittest.TestCase):
     def test_placement_accuracy_poor_colored(self) -> None:
         text = self._run(0.90, placement_accuracy=0.60)
         self.assertIn("60.0%", text)
-
-    def test_returns_list_colored(self) -> None:
-        stats = _make_stats(efficiency=0.70)
-        result = self.formatter._format_detailed_metrics(stats)
-        self.assertIsInstance(result, list)
 
 
 class TestFormatIssuesColorBranches(unittest.TestCase):
@@ -2032,3 +1896,67 @@ class TestRichColorIntegrationRoundTrips(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.fixture(params=["plain", "color"])
+def any_formatter(request) -> CompilationFormatter:
+    if request.param == "color":
+        return _color_formatter()
+    return CompilationFormatter(use_color=False)
+
+
+def test_format_default_returns_non_empty_string(any_formatter) -> None:
+    output = any_formatter.format_default(_make_results())
+    assert isinstance(output, str)
+    assert len(output) > 0
+
+
+def test_format_verbose_includes_issues(any_formatter) -> None:
+    output = any_formatter.format_verbose(_make_results(errors=["oops"]))
+    assert "oops" in output
+
+
+@pytest.mark.parametrize(
+    ("analysis_kwargs", "present", "absent"),
+    [
+        ({}, "Analyzing project structure", None),
+        ({"constitution_detected": False}, None, "Constitution detected"),
+    ],
+    ids=["header", "no-constitution"],
+)
+def test_project_discovery_text(any_formatter, analysis_kwargs, present, absent) -> None:
+    lines = any_formatter._format_project_discovery(_make_analysis(**analysis_kwargs))
+    text = "\n".join(lines)
+    if present is not None:
+        assert present in text
+    if absent is not None:
+        assert absent not in text
+
+
+@pytest.mark.parametrize(
+    ("decision_kwargs", "expected"),
+    [({}, "Optimizing placements"), ({"pattern": ""}, "(global)")],
+    ids=["header", "global-pattern"],
+)
+def test_optimization_progress_text(any_formatter, decision_kwargs, expected) -> None:
+    lines = any_formatter._format_optimization_progress([_make_decision(**decision_kwargs)])
+    assert isinstance(lines, list)
+    assert expected in "\n".join(lines)
+
+
+@pytest.mark.parametrize(
+    ("efficiency", "expected"),
+    [
+        (0.70, "Performance Metrics"),
+        (0.90, "Excellent"),
+        (0.65, "Good"),
+        (0.50, "Fair"),
+        (0.30, "Poor"),
+        (0.10, "Very Poor"),
+    ],
+    ids=["header", "excellent", "good", "fair", "poor", "very-poor"],
+)
+def test_detailed_metrics_efficiency_text(any_formatter, efficiency, expected) -> None:
+    lines = any_formatter._format_detailed_metrics(_make_stats(efficiency=efficiency))
+    assert isinstance(lines, list)
+    assert expected in "\n".join(lines)
