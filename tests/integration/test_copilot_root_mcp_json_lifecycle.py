@@ -499,11 +499,12 @@ def test_legacy_copilot_claim_never_adopts_a_user_root_entry(
     assert project.read_json(".mcp.json")["mcpServers"] == {"echo": user_root}
     assert "echo" in project.read_json(".github/mcp.json")["mcpServers"]
 
-    # Dropping the dependency removes only APM's retired entry, never the user's.
+    # Dropping the dependency removes only APM's retired entry, never the user's;
+    # the emptied .github/mcp.json APM created is deleted (#4524).
     project.manifest(targets=["copilot"])
     project.install()
     assert project.read_json(".mcp.json")["mcpServers"] == {"echo": user_root}
-    assert project.read_json(".github/mcp.json")["mcpServers"] == {}
+    assert not (project.root / ".github/mcp.json").exists()
 
 
 def test_partial_install_keeps_unhealed_retired_claims_for_the_retry(
@@ -601,7 +602,9 @@ def test_a_lock_rewrite_before_the_mcp_phase_keeps_the_heal_pending(
     output = _flat(project.install())
 
     assert "Removed APM-managed MCP server 'echo' from .github/mcp.json" in output
-    assert project.read_json(".github/mcp.json") == {"mcpServers": {}}
+    # copilot is declared, so the emptied file APM created is deleted (#4524).
+    assert "Removed empty .github/mcp.json (APM created it and no longer writes it)" in output
+    assert not (project.root / ".github/mcp.json").exists()
     assert project.lock()["apm_version"] != "0.35.0"
 
 

@@ -4297,6 +4297,17 @@
       "regression_tests": [
         "tests/integration/test_native_mcp_collision_lifecycle.py::test_user_disabled_matching_codex_connection_installs_and_replays_frozen"
       ]
+    },
+    {
+      "issue": 4524,
+      "fixed_in": "Unreleased",
+      "summary": "The 0.36 to 0.37 Copilot MCP move deletes .github/mcp.json when APM created it and the move leaves it empty, and names it in the move summary, instead of leaving an empty mcpServers file; a file holding any other entry keeps it with only APM's entries removed.",
+      "failure_modes": ["cleanup", "ownership"],
+      "properties": ["ownership.preserve_unowned", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c6_036_copilot_kiro_mcp_project_converges_to_the_037_layout",
+        "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_a_lock_rewrite_before_the_mcp_phase_keeps_the_heal_pending"
+      ]
     }
   ],
   "lifecycle_contracts": [
