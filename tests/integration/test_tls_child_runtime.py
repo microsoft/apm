@@ -41,7 +41,7 @@ import pytest
 from apm_cli.core.tls_trust import _child_bootstrap_dir, _venv_site_packages
 from apm_cli.runtime.manager import RuntimeManager
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 _truststore_missing = importlib.util.find_spec("truststore") is None
 _requires_truststore = pytest.mark.skipif(

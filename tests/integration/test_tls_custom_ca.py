@@ -74,6 +74,7 @@ def _resolve_openssl() -> str | None:
 _OPENSSL_EXECUTABLE = _resolve_openssl()
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.skipif(_OPENSSL_EXECUTABLE is None, reason="openssl CLI not available"),
 ]

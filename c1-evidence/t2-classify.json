@@ -9,7 +9,7 @@
   "Modules mixing CliRunner and real-binary tests are classified e2e (module must be uniform)."
  ],
  "counts_left": {
-  "unclassified_modules": 90,
+  "unclassified_modules": 65,
   "placement_offenders": 8
  }
 }

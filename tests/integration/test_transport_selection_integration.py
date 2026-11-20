@@ -35,7 +35,7 @@ from apm_cli.deps.transport_selection import (
 )
 from apm_cli.models.apm_package import DependencyReference
 
-pytestmark = pytest.mark.requires_network_integration
+pytestmark = [pytest.mark.component, pytest.mark.requires_network_integration]
 
 
 _OWNER = "github"

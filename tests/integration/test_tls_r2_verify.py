@@ -52,7 +52,7 @@ from apm_cli.core.tls_trust import (
     ensure_child_tls_bootstrap,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 _SSL_CERT_FILE = "SSL_CERT_FILE"
 

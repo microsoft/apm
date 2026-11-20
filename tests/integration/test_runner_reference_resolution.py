@@ -22,6 +22,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helper: import DependencyReference through the public re-export so tests
 # follow the same import path as production code.

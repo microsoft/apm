@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.e2e, pytest.mark.integration]
 
 TIMEOUT = 180
 

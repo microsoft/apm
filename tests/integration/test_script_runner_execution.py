@@ -44,6 +44,9 @@ import pytest
 
 from apm_cli.core.script_runner import ScriptRunner
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

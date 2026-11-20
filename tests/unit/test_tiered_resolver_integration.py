@@ -11,6 +11,8 @@ import os
 import sys
 from unittest.mock import MagicMock
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 from apm_cli.deps.tiered_ref_resolver import (
@@ -21,6 +23,8 @@ from apm_cli.deps.tiered_ref_resolver import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+pytestmark = pytest.mark.unit
 
 SHA_FMT = "{:040x}"
 

@@ -29,6 +29,8 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
 import types
@@ -39,6 +41,8 @@ from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy, build_tiered_re
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+
+pytestmark = pytest.mark.unit
 
 REPO = "owner/repo"
 BRANCH = "main"

@@ -7,7 +7,7 @@ import requests
 
 from apm_cli.registry.client import SimpleRegistryClient
 
-pytestmark = pytest.mark.requires_network_integration
+pytestmark = [pytest.mark.component, pytest.mark.requires_network_integration]
 
 
 class TestRegistryClientIntegration(unittest.TestCase):

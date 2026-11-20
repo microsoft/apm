@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def preserve_cwd():

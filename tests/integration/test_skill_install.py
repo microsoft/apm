@@ -11,7 +11,7 @@ import subprocess
 import pytest
 
 # Skip all tests if GITHUB_APM_PAT is not set
-pytestmark = pytest.mark.requires_github_token
+pytestmark = [pytest.mark.e2e, pytest.mark.requires_github_token]
 
 
 @pytest.fixture

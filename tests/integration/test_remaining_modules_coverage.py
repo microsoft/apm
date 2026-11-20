@@ -24,6 +24,9 @@ from urllib.parse import urlparse
 
 import pytest
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Module 1: marketplace/yml_schema.py
 # ---------------------------------------------------------------------------

@@ -22,6 +22,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.e2e
+
+
 TIMEOUT = 180
 _SKILL_NAME = "scope"
 _CLAUDE_SKILL = Path(".claude/skills") / _SKILL_NAME / "SKILL.md"

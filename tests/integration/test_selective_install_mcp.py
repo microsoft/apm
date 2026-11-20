@@ -22,6 +22,9 @@ from click.testing import CliRunner
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from tests.utils.materialized_downloader import stub_materialized_downloader
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

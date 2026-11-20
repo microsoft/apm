@@ -15,6 +15,8 @@ from tests.integration.release_homebrew_update_harness import (
     _assert_release_workflow_has_no_package_manager_push,
 )
 
+pytestmark = pytest.mark.component
+
 
 def test_incoming_dispatch_conditions_do_not_imply_package_manager_push(
     tmp_path: Path,

@@ -13,6 +13,8 @@ from tests.utils.scenario_rows import (
     ScenarioRow,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _public_callable_names(value: object) -> set[str]:
     return {

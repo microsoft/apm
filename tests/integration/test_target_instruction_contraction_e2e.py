@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.e2e
+
+
 TIMEOUT = 180
 _RULE_NAME = "scope"
 _CLAUDE_RULE = Path(".claude/rules") / f"{_RULE_NAME}.md"

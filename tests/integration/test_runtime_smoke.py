@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 pytestmark = [
+    pytest.mark.component,
     pytest.mark.requires_e2e_mode,
     pytest.mark.requires_network_integration,
     # Mutates os.environ["HOME"]; must be serialized on a single xdist worker.

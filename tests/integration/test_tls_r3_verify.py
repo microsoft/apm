@@ -47,7 +47,7 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = [pytest.mark.integration]
+pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 
 # --------------------------------------------------------------------------- #

@@ -28,7 +28,7 @@ import pytest
 
 from apm_cli.core.tls_trust import configure_tls_trust
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 _TRUST_ENV_VARS = (
     "REQUESTS_CA_BUNDLE",
