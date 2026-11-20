@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import socket
 
+from ...utils.credential_rendering import redact_url_userinfo
 from ...utils.net import parse_host_address
 
 # F7: tokens that would be evaluated by a real shell but are NOT evaluated
@@ -35,26 +36,6 @@ _METADATA_HOSTS = {
     "100.100.100.200",  # Alibaba Cloud
     "fd00:ec2::254",  # AWS IPv6 IMDS
 }
-
-
-def _redact_url_userinfo(url: str) -> str:
-    """Return *url* without userinfo, or a safe placeholder if malformed."""
-    try:
-        from urllib.parse import urlparse, urlunparse
-
-        parsed = urlparse(url)
-        if parsed.username is None and parsed.password is None:
-            return url
-        host = parsed.hostname
-        if host is None:
-            return "<redacted-url>"
-        if ":" in host and not host.startswith("["):
-            host = f"[{host}]"
-        if parsed.port is not None:
-            host = f"{host}:{parsed.port}"
-        return urlunparse(parsed._replace(netloc=host))
-    except (ValueError, TypeError):
-        return "<redacted-url>"
 
 
 def _is_internal_or_metadata_host(host: str) -> bool:
@@ -96,7 +77,7 @@ def warn_ssrf_url(url: str | None, logger) -> None:
         return
     if _is_internal_or_metadata_host(host):
         logger.warning(
-            f"URL '{_redact_url_userinfo(url)}' points to an internal or metadata address; "
+            f"URL '{redact_url_userinfo(url)}' points to an internal or metadata address; "
             f"verify intent before installing."
         )
 
