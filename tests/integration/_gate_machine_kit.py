@@ -162,13 +162,6 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         scopes=("project",),
     ),
     KnownCell(
-        "gate-cell-d",
-        "R",
-        "#4044",
-        _hook_parked_with_wrong_reason,
-        match=r"^a denied hook is reported as merely unapproved$",
-    ),
-    KnownCell(
         "gate-cell-g",
         "I3",
         "#4050",
@@ -185,15 +178,6 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
             op.name == "install-frozen" and machine.converged and before.lock is None
         ),
         match=r"^converged install-frozen exited 1$",
-    ),
-    KnownCell(
-        "gate-cell-e",
-        "I7",
-        "#4045",
-        lambda machine, op, before, after, result: (
-            op.name == "uninstall" and op.cell_kinds == ("lsp",) and "lsp" in before.deployed
-        ),
-        match=r"^failed uninstall changed the (manifest|lockfile)$",
     ),
 )
 

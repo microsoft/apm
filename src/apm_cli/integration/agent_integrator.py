@@ -28,6 +28,7 @@ from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.yaml_io import load_yaml_str, yaml_to_str
 
 if TYPE_CHECKING:
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.skill_adoption import ResolveLinks
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -332,6 +333,7 @@ class AgentIntegrator(BaseIntegrator):
         apm_package,
         project_root: Path,
         managed_files: set = None,  # noqa: RUF013
+        evidence: DeploymentEvidence | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed agent files for a single *target*."""
         mapping = target.primitives.get("agents")
@@ -349,6 +351,7 @@ class AgentIntegrator(BaseIntegrator):
             legacy_glob_dir=legacy_dir,
             legacy_glob_pattern=legacy_pattern,
             targets=[target],
+            evidence=evidence,
         )
 
     # ------------------------------------------------------------------
