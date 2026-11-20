@@ -39,6 +39,7 @@ def _ctx(tmp_path: Path, **overrides) -> SimpleNamespace:
     values = {
         "package_carried_licenses": {},
         "package_hashes": {},
+        "package_framed_hashes": {},
         "update_refs": False,
         "expected_hash_change_deps": set(),
         "apm_modules_dir": tmp_path / "apm_modules",

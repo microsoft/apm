@@ -563,7 +563,9 @@ class InstallService:
                         parent_index=parent_index,
                     )
                     selected_source = source_base / Path(dependency.local_path).expanduser()
-                observed_hash = compute_local_package_hash(selected_source)
+                observed_hash = compute_local_package_hash(
+                    selected_source, framed=dependency.content_hash_framed
+                )
                 expected_hash = dependency.content_hash
                 # v0.1 readers also accept the identical SHA-256 digest without its envelope.
                 if (

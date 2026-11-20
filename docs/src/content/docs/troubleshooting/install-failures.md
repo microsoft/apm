@@ -216,6 +216,15 @@ restore it from version control.
 `apm install <bundle>` warns, but still installs, when the bundle's embedded
 `apm.lock.yaml` was written by a newer APM; the warning names both versions.
 
+APM 0.36 and earlier also refuse a lockfile that APM 0.37 promoted to
+`lockfile_version: "4"` (hash framing hardening):
+
+```text
+Unsupported lockfile version '4'; supported versions: ...
+```
+
+Upgrade APM to 0.37 or later everywhere that lockfile is installed, CI included.
+
 ### Drifted refs
 
 To force re-resolution to the latest version or Git ref allowed by `apm.yml`:

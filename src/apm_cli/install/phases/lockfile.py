@@ -132,10 +132,18 @@ class LockfileBuilder:
             return
         try:
             from apm_cli.deps.lockfile import LockFile as _LF
-            from apm_cli.deps.lockfile import get_lockfile_path
+            from apm_cli.deps.lockfile import get_lockfile_path, records_framed_content_hashes
+            from apm_cli.install.phases.content_hash_stream import (
+                PROMOTED_MESSAGE,
+                promote_content_hashes,
+            )
 
             lockfile = _LF.from_installed_packages(
                 self.ctx.installed_packages, self.ctx.dependency_graph
+            )
+            # Rows carry the stream this run records in until promotion settles it.
+            lockfile.set_content_hash_stream(
+                framed=records_framed_content_hashes(self.ctx.existing_lockfile)
             )
             # Attach deployed_files and package_type to each LockedDependency
             self._attach_deployed_files(lockfile)
@@ -179,6 +187,8 @@ class LockfileBuilder:
             self._preserve_existing_mcp_state(lockfile)
             self._preserve_existing_lsp_state(lockfile)
             self._preserve_existing_revision_pin_tags(lockfile)
+            # After every carry-forward step, so promotion sees each final row.
+            promoted = promote_content_hashes(self.ctx, lockfile)
             # The carry-forward steps above set fields such as resolved_tag
             # and replacements directly, so re-derive the schema version
             # before the semantic comparison (#3433).
@@ -187,6 +197,8 @@ class LockfileBuilder:
             # Only write when the semantic content has actually changed
             # (avoids generated_at churn in version control).
             self._write_if_changed(lockfile, lockfile_path, _LF)
+            if promoted and self.ctx.logger:
+                self.ctx.logger.info(PROMOTED_MESSAGE)
             # Target-scoped deployed-file contraction physically deletes the
             # dropped target's instruction files (via the cleanup chokepoint).
             # Guard it by `lockfile_only` for the same reason the merge-hook

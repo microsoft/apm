@@ -86,6 +86,12 @@ from scripts.architecture_linter.checks.install_manifest_snapshot import (
     GUARD_MANIFEST_SNAPSHOT,
     check_manifest_snapshot,
 )
+from scripts.architecture_linter.checks.install_package_content_hash import (
+    GUARD as _GUARD_PACKAGE_CONTENT_HASH,
+)
+from scripts.architecture_linter.checks.install_package_content_hash import (
+    check_package_content_hash,
+)
 from scripts.architecture_linter.checks.install_package_target_authorization import (
     _GUARD_PACKAGE_TARGET,
     check_package_target_authorization,
@@ -154,6 +160,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_LOCKED_COPY_VALIDITY,
         "apm_modules copy validity against the lock is owned by drift.locked_copy_proof.",
         check_locked_copy_validity,
+    ),
+    _rule(
+        _GUARD_PACKAGE_CONTENT_HASH,
+        "Package content hashing, its lockfile stream and promotion stay owned by utils/content_hash.py.",
+        check_package_content_hash,
     ),
     _rule(
         _GUARD_SINGLE_FILE,

@@ -2004,14 +2004,14 @@ class TestBundleMcpWiringE2E:
         bundle = _make_plugin_bundle(tmp_path / "src", pack_target="all")
         lock_path = bundle / "apm.lock.yaml"
         lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
-        lock["lockfile_version"] = "4"
+        lock["lockfile_version"] = "5"
         lock_path.write_text(yaml.safe_dump(lock), encoding="utf-8")
         project = _make_project(tmp_path / "dst")
 
         result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
 
         assert result.exit_code == 2
-        assert "Unsupported lockfile version '4'; supported versions: 1, 2, 3" in result.output
+        assert "Unsupported lockfile version '5'; supported versions: 1, 2, 3, 4" in result.output
         assert not (project / "apm.lock.yaml").exists()
 
 

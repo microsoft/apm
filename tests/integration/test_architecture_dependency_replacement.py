@@ -141,7 +141,7 @@ FROZEN_RULE = "install-deployment-frozen-mutation-eligibility"
         ),
         (
             "src/apm_cli/install/helpers/plan_inputs.py",
-            "from apm_cli.utils.content_hash import compute_package_hash",
+            "from apm_cli.install.source_helpers import package_digests, record_package_digests",
             "from apm_cli.utils.content_hash import compute_native_bundle_hash",
         ),
         (
