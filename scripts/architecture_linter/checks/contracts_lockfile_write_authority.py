@@ -79,6 +79,18 @@ _SCOPE_OPENERS = frozenset({"lockfile_writer", "lockfile_write_scope"})
 _WRITE_METHODS = frozenset({"write", "save"})
 _ENUM_MEMBER = re.compile(r"^    ([A-Z_]+) = \"[a-z-]+\"$", re.MULTILINE)
 _DECORATOR_REACH = 12
+# Explicit early commit points; every other writer (``install --mcp`` included)
+# commits once, when its writer scope ends.
+_FLUSH = "flush_lockfile_writes"
+FLUSH_SITES = frozenset(
+    {
+        ("src/apm_cli/commands/prune.py", "prune"),
+        ("src/apm_cli/commands/uninstall/cli.py", "_abort_if_retained_target_cleanup_paths"),
+        ("src/apm_cli/commands/uninstall/cli.py", "_persist_uninstall_lockfile"),
+        ("src/apm_cli/core/lifecycle_scripts.py", "fire"),
+        ("src/apm_cli/install/phases/claude_plugins.py", "run"),
+    }
+)
 # Deployment-receipt claims bind to the committed lockfile, never a staged one.
 _CLAIM_BINDING = "bind_committed_claims"
 _BINDING_REACH = 3
@@ -206,6 +218,18 @@ def _check_sources(provider: FactsProvider) -> list[Violation]:
                             line=call.line,
                         )
                     )
+                continue
+            if (method or call.qualname) == _FLUSH and (path, call.scope) not in FLUSH_SITES:
+                findings.append(
+                    violation(
+                        RULE_ID,
+                        path,
+                        f"{call.scope or '<module>'} commits the lockfile before its command "
+                        "ends; only the registered flush sites may call flush_lockfile_writes",
+                        line=call.line,
+                        column=call.column,
+                    )
+                )
                 continue
             if (method or call.qualname) == _CLAIM_BINDING and not _binds_after_commit(facts, call):
                 findings.append(

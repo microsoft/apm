@@ -10,6 +10,7 @@ fresh project and on a project that already holds an earlier install.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -305,6 +306,40 @@ def test_direct_mcp_entry_reaches_the_install_policy_verdict(
         direct_text,
         declared_text,
     )
+
+
+@pytest.mark.parametrize("user_scope", [False, True], ids=["project", "user"])
+def test_direct_mcp_entry_records_exactly_what_it_wrote(
+    tmp_path: Path, apm_binary_path: Path, user_scope: bool
+) -> None:
+    """``install --mcp`` commits one lockfile that records the server it wrote.
+
+    The lockfile names the server for exactly the target whose config holds
+    it, and repeating the entry changes no bytes, at project and user scope.
+    """
+    chain = Chain(tmp_path / "direct-mcp-lock", apm_binary_path, dirs=(".github",))
+    chain.write_manifest([])
+    scope = ("--global",) if user_scope else ()
+    root = chain.isolated.config_root if user_scope else chain.project
+    config = (
+        chain.isolated.home / ".copilot" / "mcp-config.json"
+        if user_scope
+        else chain.project / ".mcp.json"
+    )
+
+    first = chain.ok("install", "--mcp", "entry-srv", *scope, *_TARGET, "--", "npx", "entry")
+    lock = yaml.safe_load((root / "apm.lock.yaml").read_text(encoding="utf-8"))
+    written = json.loads(config.read_text(encoding="utf-8"))["mcpServers"]
+    text = first.stdout + first.stderr
+    assert lock["mcp_servers"] == ["entry-srv"], text
+    assert lock["mcp_target_servers"] == {"copilot": ["entry-srv"]}, text
+    assert set(written) == {"entry-srv"}, text
+    before = ((root / "apm.lock.yaml").read_bytes(), config.read_bytes())
+
+    chain.ok("install", "--mcp", "entry-srv", *scope, *_TARGET, "--", "npx", "entry")
+    assert ((root / "apm.lock.yaml").read_bytes(), config.read_bytes()) == before
+    if not user_scope:
+        chain.ok("audit", "--ci")
 
 
 def test_failed_install_removes_the_target_root_it_created(

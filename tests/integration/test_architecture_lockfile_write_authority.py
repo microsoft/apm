@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from scripts.architecture_linter.checks.contracts_lockfile_write_authority import COMMIT_SITES
+from scripts.architecture_linter.checks.contracts_lockfile_write_authority import (
+    COMMIT_SITES,
+    FLUSH_SITES,
+)
 from scripts.architecture_linter.runner import run_selected_rules
 
 pytestmark = pytest.mark.unit
@@ -87,11 +90,33 @@ _SUB_CHECK_MUTATIONS = (
         "                )\n",
         "binds deployment claims before the lockfile commits",
     ),
+    (
+        "7-closed-flush-sites",
+        "src/apm_cli/install/mcp/command.py",
+        "    migrate_lockfile_if_needed(command.project_root)\n",
+        "    migrate_lockfile_if_needed(command.project_root)\n    flush_lockfile_writes()\n",
+        "only the registered flush sites may call flush_lockfile_writes",
+    ),
 )
 
 
 def test_commit_sites_only_shrink() -> None:
     assert COMMIT_SITES <= _COMMIT_SITE_BASELINE
+
+
+_FLUSH_SITE_BASELINE = frozenset(
+    {
+        ("src/apm_cli/commands/prune.py", "prune"),
+        ("src/apm_cli/commands/uninstall/cli.py", "_abort_if_retained_target_cleanup_paths"),
+        ("src/apm_cli/commands/uninstall/cli.py", "_persist_uninstall_lockfile"),
+        ("src/apm_cli/core/lifecycle_scripts.py", "fire"),
+        ("src/apm_cli/install/phases/claude_plugins.py", "run"),
+    }
+)
+
+
+def test_flush_sites_only_shrink() -> None:
+    assert FLUSH_SITES <= _FLUSH_SITE_BASELINE
 
 
 def test_sub_check_mutations_are_sorted() -> None:
