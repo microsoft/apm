@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install` accepts unchanged skills after a branch or worktree switch, keeps skill files it does not rewrite, and names the recovery when it refuses. (#4258)
+- `apm update` names an installed local bundle it leaves untouched and says how to update it (`apm install <newer-bundle-file>`), instead of only reporting no APM dependencies. (#4338)
 - `apm update` re-verifies each marketplace dependency's recorded provenance against its registered catalog: it restores the catalog origin and digest, and refuses a lockfile whose provenance no longer matches. (#4338)
 - A top-level `workspaces:` key in `apm.yml` now gets a warning that names it as reserved for OpenAPM v0.2, and `dependencies.conflict_resolution: nest` refuses the install before anything is written. (#4283)
 - A lockfile whose `apm_version` is `unknown` now moves APM-written entries out of the retired `.github/mcp.json` and reports it, like a lockfile from an earlier known version. (#4283)
@@ -82,6 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm approve`, `--pending`, `--list` and `apm policy explain` now see an Agent Plugin whose only executable is its root `mcp.json`, so it can be approved. (closes #4042, #4058)
 - `apm install --frozen` and `apm audit --ci` now reach the same verdict on hook approval pins, and `apm install` retires hooks whose pin no longer matches. (closes #4188, #4272)
 - A package with `.claude-plugin/plugin.json` (or `plugin.json` without `$schema`) and a root `skills/` directory is detected as a Claude plugin collection (`marketplace_plugin`) on every install pass, as documented in Package types, so `apm install -g --trust-bin` deploys its `bin/` inside the plugin root; locks that recorded `skill_bundle` still replay. (closes #4270, #4276)
+- A failing `apm audit --ci -f sarif` or `-f json` names each failed check on stderr instead of only reporting where it wrote the file. (closes #4224, #4338)
+- `apm install` names an LSP server filtered from a denied package as denied, instead of 'not trusted yet' with an approve hint. (closes #4237, #4338)
 - Plain `apm audit` renders advisory drift as `[!] Drift detected` and prints `[x]` only when drift fails the run via `fail_on_drift` (#4217)
 - A failed `apm install plugin@marketplace` no longer leaves a marketplace version pin under APM_HOME (#4217)
 - `apm marketplace outdated` lists local-path entries such as `source: ./` as skipped instead of failing a git ls-remote (#4217)

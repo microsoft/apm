@@ -420,6 +420,7 @@ def _handle_service_only_update(
     )
     if not has_services:
         logger.info("No APM dependencies declared in apm.yml -- nothing to update.")
+        _explain_local_bundles(scope, apm_package, logger)
         return True
     if dry_run:
         logger.dry_run_notice("would reconcile MCP/LSP configuration; no files written")
@@ -450,7 +451,18 @@ def _handle_service_only_update(
         logger.render_summary()
         sys.exit(1)
     logger.success("MCP/LSP configuration reconciled. No APM dependencies to update.")
+    _explain_local_bundles(scope, apm_package, logger)
     return True
+
+
+def _explain_local_bundles(scope: Any, apm_package: Any, logger: InstallLogger) -> None:
+    """Name the installed local bundles 'apm update' leaves untouched (#4318)."""
+    from apm_cli.install.local_bundle_hook_trust import installed_local_bundles
+    from apm_cli.install.outcome import local_bundle_update_next_step
+
+    names, file_count = installed_local_bundles(scope, apm_package)
+    if names or file_count:
+        logger.info(local_bundle_update_next_step(names, file_count, scope))
 
 
 def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
@@ -459,7 +471,7 @@ def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
     from apm_cli.marketplace.errors import MarketplaceError
 
     try:
-        restored = reverify_locked_provenance(lockfile)
+        restored = reverify_locked_provenance(lockfile, manifest_file(lock_path.parent))
     except MarketplaceError as exc:
         _rich_error(str(exc), symbol="error")
         sys.exit(1)
