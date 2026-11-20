@@ -319,3 +319,34 @@ def test_receiptless_legacy_bundle_skill_migrates_only_when_render_equal(
         assert legacy_skill.read_bytes() == before
         assert _kept_line(".github/skills/test-skill/SKILL.md", user_scope=False) in output
         assert ".github/skills/test-skill/SKILL.md" in world.lock_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_receipted_file_edited_after_deployment_is_kept_on_upgrade(
+    tmp_path: Path, apm_binary_path: Path, scope: str
+) -> None:
+    """A receipt proves APM wrote its recorded bytes, not the edited ones (#4360).
+
+    The receipts stay intact; the user edits each kind and the package
+    changes upstream. Install refuses every edited file instead of
+    replacing it.
+    """
+    user_scope = scope == "user"
+    world = _world(tmp_path, apm_binary_path, user_scope=user_scope)
+    paths = world.kind_paths()
+    assert (world.home / ".apm" / "deployment-receipts").is_dir()
+    for path in paths.values():
+        path.write_text(path.read_text(encoding="utf-8") + _EDIT, encoding="utf-8")
+    edited = {path: path.read_bytes() for path in paths.values()}
+    package = world.home.parent / "packages" / "kit" / ".apm"
+    for source in package.rglob("*.md"):
+        source.write_text(source.read_text(encoding="utf-8") + "\nVersion 2.\n", encoding="utf-8")
+    install_args = (str(package.parent), "--target", "copilot,claude") if user_scope else ()
+
+    result = world.install(*install_args)
+
+    output = _output(result)
+    assert result.returncode == 1, output
+    for path in paths.values():
+        assert _kept_line(_entry(world, path), user_scope=user_scope) in output, output
+    assert {path: path.read_bytes() for path in paths.values()} == edited

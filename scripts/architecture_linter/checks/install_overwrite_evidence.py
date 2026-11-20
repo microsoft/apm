@@ -56,6 +56,10 @@ _LEAF_WRITERS = frozenset(
         "integrate_command",
     }
 )
+# The exact write condition: force, a missing file, or the bound evidence gate.
+_PERMITTED_WRITE = (
+    "force or not target_path.is_file() or (gate and gate.authorizes(target_path, rel_path))"
+)
 # Lockfile hash surfaces that must never authorize an overwrite.
 _LOCK_HASH_NAMES = frozenset({"deployed_file_hashes", "lockfile", "_claims", "content_hash"})
 
@@ -95,9 +99,7 @@ def _owner_findings(provider: FactsProvider, rule: str) -> list[Violation]:
         for node in permits
         if isinstance(parent := index.parent(node), ast.If)
         and node in parent.body
-        and "authorizes"
-        in {_call_name(c) for c in ast.walk(parent.test) if isinstance(c, ast.Call)}
-        and "force" in {n.id for n in ast.walk(parent.test) if isinstance(n, ast.Name)}
+        and ast.unparse(parent.test) == _PERMITTED_WRITE
     ]
     if len(permits) != 1 or guarded != permits:
         return [
@@ -131,12 +133,20 @@ def _ledger_findings(provider: FactsProvider, rule: str) -> list[Violation]:
         and _call_name(node) == "_trusted_hash"
         and any(ast.unparse(arg) == "self._write_locator" for arg in node.args)
     ]
-    if not trusted or "verdict" not in _calls(index, decide):
+    # A receipt authorizes only bytes it recorded; the render path reads no receipt.
+    bytes_checked = any(
+        isinstance(node, ast.If)
+        and ast.unparse(node.test) == "trusted is not None and compute_file_hash(path) == trusted"
+        for node in index.walk(decide)
+    )
+    calls = _calls(index, decide)
+    if not trusted or not bytes_checked or "render_verdict" not in calls or "verdict" in calls:
         findings.append(
             _summary(
                 rule,
                 _LEDGER,
-                f"{_AUTHORIZED} must decide from a trusted receipt or the locked render verdict",
+                f"{_AUTHORIZED} must decide from a trusted receipt still holding its "
+                "recorded bytes, or the receipt-free locked render verdict",
             )
         )
     for node in index.walk(decide):
