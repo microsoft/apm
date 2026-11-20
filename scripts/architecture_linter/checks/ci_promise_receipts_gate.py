@@ -2,7 +2,8 @@
 
 ``.github/workflows/ci.yml`` (job ``promise-obligation-receipts``) is the only
 place that merges every lifecycle shard's oracle receipts and runs
-``tests/quality/test_promise_obligations.py`` with every witness required.
+``tests/quality/test_promise_obligations.py`` with every witness required, a
+shrink-only baseline ratchet and a negative control that must see it fail.
 ``merge-gate.yml`` must list its check for both pull_request and merge_group,
 and ``tests/quality/test_ci_topology.py`` must keep the behavioral guard that
 pins the job's shape.
@@ -29,9 +30,13 @@ _CI_FRAGMENTS = (
     '        APM_LIFECYCLE_RECEIPTS_REQUIRED: "1"',
     "      run: uv run --extra dev python -m pytest -p no:cacheprovider -q "
     "tests/quality/test_promise_obligations.py",
+    '        uv run --extra dev python -m scripts.check_promise_receipts --base-ref "$BASE_SHA"',
+    "        uv run --extra dev python -m scripts.check_promise_receipts --drop-receipt",
+    '        if [ "$status" -eq 0 ]; then',
 )
 _TOPOLOGY_GUARDS = (
     "def _assert_promise_receipts_gate(",
+    "def _assert_negative_control_step(",
     "def test_promise_receipts_gate_is_required(",
     "def test_promise_receipts_gate_drift_fails(",
 )

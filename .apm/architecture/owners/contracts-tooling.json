@@ -158,7 +158,8 @@
         ".github/workflows/ci.yml",
         ".github/workflows/merge-gate.yml",
         "tests/quality/test_ci_topology.py",
-        "scripts/architecture_linter/checks/ci_promise_receipts_gate.py"
+        "scripts/architecture_linter/checks/ci_promise_receipts_gate.py",
+        "scripts/check_promise_receipts.py"
       ],
       "guards": ["ci-validation-topology-promise-receipts-gate"]
     }

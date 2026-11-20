@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -1577,6 +1578,24 @@ PROMISE_RECEIPTS_MODULE = "tests/quality/test_promise_obligations.py"
 PROMISE_RECEIPTS_UPLOAD_STEP = "Upload lifecycle receipts"
 PROMISE_RECEIPTS_DOWNLOAD_STEP = "Download lifecycle receipts"
 PROMISE_RECEIPTS_RUN_STEP = "Check promise-obligation receipts"
+PROMISE_RECEIPTS_RATCHET_STEP = "Ratchet promise-obligation baseline"
+PROMISE_RECEIPTS_CONTROL_STEP = "Negative control - gate fails without one receipt"
+PROMISE_RECEIPTS_RATCHET_COMMAND = [
+    "uv", "run", "--extra", "dev", "python", "-m", "scripts.check_promise_receipts",
+    "--base-ref", "$BASE_SHA",
+]  # fmt: skip
+BASE_SHA_EXPRESSION = (
+    "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"
+)
+# A stub `uv` stands in for the receipts script and the gate, so the control
+# step's own shell decides whether a passing or misdirected gate fails it.
+_CONTROL_UV_STUB = """#!/bin/bash
+case " $* " in
+  *" --drop-receipt "*) echo "[*] dropped 1 receipt(s) of w covering P-INV-I1|op:prune" ;;
+  *" pytest "*) echo "$GATE_OUTPUT"; exit "$GATE_STATUS" ;;
+  *) exit 97 ;;
+esac
+"""
 PROMISE_RECEIPTS_SOURCE = ".pytest_cache/d/lifecycle-receipts/"
 PROMISE_RECEIPTS_DIR = "build/lifecycle-receipts"
 PROMISE_RECEIPTS_ENV = {
@@ -1595,7 +1614,42 @@ def _expected_checks_by_event(merge_gate: WorkflowNode) -> dict[str, list[str]]:
     return {"merge_group": match[1].split(","), "pull_request": match[2].split(",")}
 
 
-def _assert_promise_receipts_gate(ci: WorkflowNode, merge_gate: WorkflowNode) -> None:
+def _assert_negative_control_step(step: WorkflowNode, workdir: Path) -> None:
+    """The control passes only when the gate fails and names the dropped row."""
+    stub = workdir / "bin" / "uv"
+    stub.parent.mkdir(parents=True, exist_ok=True)
+    stub.write_text(_CONTROL_UV_STUB, encoding="ascii")
+    stub.chmod(0o755)
+    named = "FAILED: no oracle receipt covered:\n  P-INV-I1|op:prune"
+    for status, output, accepted in (
+        ("1", named, True),
+        ("0", named, False),
+        ("1", "FAILED: some unrelated error", False),
+    ):
+        receipts_dir = workdir / PROMISE_RECEIPTS_DIR
+        shutil.rmtree(workdir / "build", ignore_errors=True)
+        receipts_dir.mkdir(parents=True)
+        result = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+            cwd=workdir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            env={
+                "PATH": f"{stub.parent}{os.pathsep}{os.environ['PATH']}",
+                "GATE_STATUS": status,
+                "GATE_OUTPUT": output,
+            },
+        )
+        assert (result.returncode == 0) == accepted, (
+            f"negative control accepted gate exit {status} with {output!r}: {result.stdout}"
+        )
+
+
+def _assert_promise_receipts_gate(
+    ci: WorkflowNode, merge_gate: WorkflowNode, workdir: Path
+) -> None:
     for shard_job in LIFECYCLE_SMOKE_SHARD_JOBS:
         upload = workflow_step(workflow_job(ci, shard_job), PROMISE_RECEIPTS_UPLOAD_STEP)
         assert "if" not in upload and "continue-on-error" not in upload
@@ -1630,7 +1684,17 @@ def _assert_promise_receipts_gate(ci: WorkflowNode, merge_gate: WorkflowNode) ->
         token.startswith(("-k", "-m", "--deselect", "--ignore", "--co", "--collect-only"))
         for token in tokens
     ), "the receipts gate must run the whole obligation module"
-    assert _pytest_targets(job) == (PROMISE_RECEIPTS_MODULE,)
+    assert set(_pytest_targets(job)) == {PROMISE_RECEIPTS_MODULE}
+
+    ratchet = workflow_step(job, PROMISE_RECEIPTS_RATCHET_STEP)
+    assert "if" not in ratchet and "continue-on-error" not in ratchet
+    assert ratchet["env"] == {"BASE_SHA": BASE_SHA_EXPRESSION}
+    assert PROMISE_RECEIPTS_RATCHET_COMMAND in shell_commands(ratchet), (
+        "the residual baseline must be shrink-only against the base branch"
+    )
+    control = workflow_step(job, PROMISE_RECEIPTS_CONTROL_STEP)
+    assert "if" not in control and "continue-on-error" not in control
+    _assert_negative_control_step(control, workdir)
 
     for event, checks in _expected_checks_by_event(merge_gate).items():
         assert checks.count(PROMISE_RECEIPTS_CHECK) == 1, (
@@ -1638,10 +1702,11 @@ def _assert_promise_receipts_gate(ci: WorkflowNode, merge_gate: WorkflowNode) ->
         )
 
 
-def test_promise_receipts_gate_is_required() -> None:
+def test_promise_receipts_gate_is_required(tmp_path: Path) -> None:
     _assert_promise_receipts_gate(
         load_workflow(REPO_ROOT / ".github/workflows/ci.yml"),
         load_workflow(REPO_ROOT / ".github/workflows/merge-gate.yml"),
+        tmp_path,
     )
 
 
@@ -1655,9 +1720,15 @@ def test_promise_receipts_gate_is_required() -> None:
         "skipped-on-shard-failure",
         "missing-shard-need",
         "hidden-receipts-dropped",
+        "baseline-may-grow",
+        "control-accepts-a-passing-gate",
+        "control-ignores-which-row",
+        "control-optional",
     ],
 )
-def test_promise_receipts_gate_drift_fails(provisional_ci: WorkflowNode, mutation: str) -> None:
+def test_promise_receipts_gate_drift_fails(
+    provisional_ci: WorkflowNode, mutation: str, tmp_path: Path
+) -> None:
     merge_gate = deepcopy(load_workflow(REPO_ROOT / ".github/workflows/merge-gate.yml"))
     wait_env = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")[
         "env"
@@ -1679,8 +1750,19 @@ def test_promise_receipts_gate_drift_fails(provisional_ci: WorkflowNode, mutatio
         del job["if"]
     elif mutation == "missing-shard-need":
         job["needs"].remove(LIFECYCLE_SMOKE_SHARD_JOBS[-1])
+    elif mutation == "baseline-may-grow":
+        ratchet = workflow_step(job, PROMISE_RECEIPTS_RATCHET_STEP)
+        ratchet["run"] = ratchet["run"].replace(' --base-ref "$BASE_SHA"', " --help")
+    elif mutation == "control-accepts-a-passing-gate":
+        control = workflow_step(job, PROMISE_RECEIPTS_CONTROL_STEP)
+        control["run"] = control["run"].replace('"$status" -eq 0', '"$status" -eq 99')
+    elif mutation == "control-ignores-which-row":
+        control = workflow_step(job, PROMISE_RECEIPTS_CONTROL_STEP)
+        control["run"] = control["run"].replace("! grep -qF", "grep -qvF")
+    elif mutation == "control-optional":
+        workflow_step(job, PROMISE_RECEIPTS_CONTROL_STEP)["continue-on-error"] = True
     else:
         upload_job = workflow_job(provisional_ci, LIFECYCLE_SMOKE_SHARD_JOBS[0])
         del workflow_step(upload_job, PROMISE_RECEIPTS_UPLOAD_STEP)["with"]["include-hidden-files"]
     with pytest.raises(AssertionError):
-        _assert_promise_receipts_gate(provisional_ci, merge_gate)
+        _assert_promise_receipts_gate(provisional_ci, merge_gate, tmp_path)
