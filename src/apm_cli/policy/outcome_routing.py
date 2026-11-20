@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import POLICY_FETCH_FAILURE_BLOCKED
 from apm_cli.install.errors import PolicyViolationError
 
 if TYPE_CHECKING:  # pragma: no cover - type-checking only
@@ -97,12 +98,6 @@ _OUTCOME_ROUTES: dict[str, str] = {
 
 if set(_OUTCOME_ROUTES) != POLICY_DISCOVERY_OUTCOMES:  # pragma: no cover - import-time guard
     raise RuntimeError("every policy-discovery outcome needs exactly one route")
-
-# The way out of an org-enforced fail-closed block; never advertise a bypass.
-_FETCH_FAILURE_BLOCK_REMEDY = (
-    "Check that the org policy source is reachable (apm policy status) "
-    "and retry, or ask your org admin."
-)
 
 
 @dataclass(frozen=True)
@@ -175,7 +170,9 @@ def classify_discovery_outcome(
             ]
             if hint:
                 sentences.append(hint.rstrip("."))
-            reason = ". ".join([*sentences, _FETCH_FAILURE_BLOCK_REMEDY])
+            named = f" ({source})" if source != "unknown" else ""
+            remedy = POLICY_FETCH_FAILURE_BLOCKED.bind(source=named).sentence()
+            reason = ". ".join([*sentences, remedy])
         return DiscoveryRoute(
             outcome,
             route,
