@@ -109,6 +109,9 @@ class Observation:
     deploy_root: Path
     lock: LockFile | None
     managed_paths: frozenset[str] = frozenset()
+    # Service -> server names configured in the managed adapter configs
+    # ({"lsp": {"kit-lsp"}}); I1 reconciles them with the lock's URI claims.
+    services: Mapping[str, frozenset[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -127,6 +130,8 @@ class Operation:
     allowed: Mapping[str, Collection[str]] = field(default_factory=dict)
     # Exit codes of the paired probe; {"audit": rc} pairs an install --frozen with audit --ci.
     paired: Mapping[str, int] = field(default_factory=dict)
+    # Output (stdout + stderr) of each paired probe; I3 asks a failing side for a remediation.
+    paired_output: Mapping[str, str] = field(default_factory=dict)
     # True when the step only edits inputs (manifest, stores, policy cache).
     edit_only: bool = False
     # CLI command for the exit contract (I8); defaults to the first word of ``name``.
@@ -364,7 +369,7 @@ def _i1_lock_deployed(
 ) -> list[Violation] | None:
     del before, result, model, op
     lock = after.lock
-    if lock is None and not after.managed_paths:
+    if lock is None and not after.managed_paths and not after.services:
         return None
     recorded: dict[str, str | None] = {}
     if lock is not None:
@@ -385,6 +390,28 @@ def _i1_lock_deployed(
     for relative in sorted(after.managed_paths - set(recorded)):
         if (after.deploy_root / relative).exists():
             found.append(Violation("I1", f"deployed file is not in the lock: {relative}"))
+    found.extend(_service_claim_violations(after))
+    return found
+
+
+def _service_claim_violations(after: Observation) -> list[Violation]:
+    """Each service claim of the lock names a configured server, and vice versa."""
+    records = after.lock.deployment_ledger.records.values() if after.lock is not None else ()
+    found = []
+    for service, configured in sorted(after.services.items()):
+        claimed = {
+            record.locator.value
+            for record in records
+            if record.locator.kind.value == "uri" and record.locator.target == service
+        }
+        found.extend(
+            Violation("I1", f"claimed {service} server is not configured: {server}")
+            for server in sorted(claimed - configured)
+        )
+        found.extend(
+            Violation("I1", f"configured {service} server is not claimed: {server}")
+            for server in sorted(configured - claimed)
+        )
     return found
 
 
@@ -411,9 +438,25 @@ def _i3_frozen_audit(
     if "audit" not in op.paired or result is None:
         return None
     audit, frozen = op.paired["audit"], result.returncode
+    found = []
     if (audit == 0) != (frozen == 0):
-        return [Violation("I3", f"audit --ci exited {audit} but install --frozen exited {frozen}")]
-    return []
+        found.append(
+            Violation("I3", f"audit --ci exited {audit} but install --frozen exited {frozen}")
+        )
+    # A failing side names the command that repairs the project.
+    sides = (
+        ("audit --ci", audit, op.paired_output.get("audit")),
+        ("install --frozen", frozen, result.stdout + result.stderr),
+    )
+    for label, code, text in sides:
+        if code != 0 and text is not None and not _REMEDIATION.search(" ".join(text.split())):
+            found.append(Violation("I3", f"{label} exited {code} without a remediation"))
+    return found
+
+
+# A remediation names an apm command line ("run 'apm install'", "apm approve <pkg>")
+# or tells the user what to rerun ("Rerun the same install command without --frozen").
+_REMEDIATION = re.compile(r"\bapm [a-z][a-z-]+|\bre-?run\b", re.I)
 
 
 def _i4_gate_monotonicity(
@@ -492,7 +535,34 @@ def _i7_failure_preserves_state(
         found.append(Violation("I7", f"failed {op.name} changed the lockfile"))
     if after.deployed != before.deployed:
         found.append(Violation("I7", f"failed {op.name} changed deployed surfaces"))
+    changed = [
+        path
+        for path in _changed_paths(before.artifacts, after.artifacts)
+        if path.split(":", 1)[1].rsplit("/", 1)[-1] not in {"apm.yml", "apm.lock.yaml"}
+        and not any(_within(path.split(":", 1)[1], prefix) for prefix in _FAILURE_BOOKKEEPING)
+    ]
+    if changed:
+        found.append(Violation("I7", f"failed {op.name} changed durable files: {changed}"))
+    if not _FAILURE_ANNOUNCEMENT.search(result.stdout + result.stderr):
+        found.append(
+            Violation("I7", f"failed {op.name} exited {result.returncode} without announcing why")
+        )
     return found
+
+
+# Bookkeeping a failed command may still write: receipts, logs, caches, CLI state.
+_FAILURE_BOOKKEEPING = (
+    ".apm/deployment-receipts",
+    ".apm/logs",
+    ".apm-local",
+    ".local/state/gh",
+    ".cache/apm",
+)
+# A failed command announces its failure: an [x] line or an error/failure word.
+_FAILURE_ANNOUNCEMENT = re.compile(
+    r"\[x\]|\berror\b|\bfail|\bdenied\b|\bnot found\b|\babort|\bcannot\b|\binvalid\b|\brefus",
+    re.I,
+)
 
 
 def _i8_exit_code(

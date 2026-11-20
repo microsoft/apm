@@ -29,6 +29,8 @@ from tests.workflow_contracts import (
     workflow_step,
 )
 
+pytest_plugins = ["pytester"]
+
 RATCHET_TEST_SCOPE = "repository"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -93,6 +95,7 @@ LIFECYCLE_SMOKE_MERGE_GROUP_MARKER = "lifecycle_merge_group"
 LIFECYCLE_SMOKE_REQUIRED_EXPRESSION = (
     f"{LIFECYCLE_SMOKE_FULL_EXPRESSION} and not {LIFECYCLE_SMOKE_MERGE_GROUP_MARKER}"
 )
+LIFECYCLE_MARKER_IMPLICATION_HOOK = "tests/conftest.py:pytest_collection_modifyitems"
 MERGE_GROUP_INTEGRATION_WORKFLOW = REPO_ROOT / ".github/workflows/ci-integration.yml"
 MERGE_GROUP_INTEGRATION_JOB = "integration-tests-shard"
 MERGE_GROUP_INTEGRATION_STEP = "Run integration tests (sharded + parallelized)"
@@ -901,7 +904,12 @@ def _assert_lifecycle_partition_sets(
     full = _validated_lifecycle_node_set(full_nodes, "full")
     merge_group = _validated_lifecycle_node_set(merge_group_nodes, "merge-group")
     required = _validated_lifecycle_node_set(required_nodes, "required")
-    assert merge_group < full, "merge-group lifecycle selection must be a strict subset of full"
+    assert merge_group < full, (
+        "merge-group lifecycle selection must be a strict subset of full; "
+        f"{sorted(merge_group - full)[:5]} carry {LIFECYCLE_SMOKE_MERGE_GROUP_MARKER} "
+        f"but are not collected by -m {LIFECYCLE_SMOKE_FULL_EXPRESSION}. Fix: the auto-add in "
+        f"{LIFECYCLE_MARKER_IMPLICATION_HOOK} was removed or bypassed; restore it."
+    )
     assert required.isdisjoint(merge_group), (
         "required lifecycle selection must be disjoint from merge-group"
     )
@@ -1662,10 +1670,13 @@ def _assert_license_review_retries_without_softening(workflow: WorkflowNode) -> 
     *retries, final = attempts
     assert all(step.get("continue-on-error") is True for step in retries)
     assert "continue-on-error" not in final, "the last attempt must be able to fail the job"
-    for previous, step in pairwise(attempts):
-        assert f"steps.{previous['id']}.outcome == 'failure'" in str(step["if"]), (
-            "a retry runs only after the previous attempt failed"
+    earlier_failed: list[str] = []
+    for step in attempts:
+        expected = " && ".join(["github.event_name == 'pull_request'", *earlier_failed])
+        assert str(step.get("if")) == expected, (
+            f"{step['id']}: runs on every pull request once every earlier attempt failed"
         )
+        earlier_failed.append(f"steps.{step['id']}.outcome == 'failure'")
 
 
 def test_license_review_retries_transient_failures_without_softening_policy() -> None:
@@ -1682,6 +1693,11 @@ def test_license_review_retries_transient_failures_without_softening_policy() ->
     _license_review_steps(weakened)[1]["with"]["fail-on-severity"] = "critical"
     with pytest.raises(AssertionError):
         _assert_license_review_retries_without_softening(weakened)
+
+    disabled = deepcopy(workflow)
+    _license_review_steps(disabled)[-1]["if"] += " && false"
+    with pytest.raises(AssertionError):
+        _assert_license_review_retries_without_softening(disabled)
 
 
 def _assert_pr_runs_cancel_superseded_pushes_only(workflow: WorkflowNode, name: str) -> None:
@@ -1715,3 +1731,32 @@ def test_heavy_pr_workflows_spare_the_shared_actions_api_quota() -> None:
         if "POLL_SEC" in step.get("env", {})
     ]
     assert poll and all(int(value) >= 30 for value in poll), poll
+
+
+def test_merge_group_only_node_is_collected_as_lifecycle_smoke(
+    pytester: pytest.Pytester,
+) -> None:
+    """A node marked only lifecycle_merge_group is selected by -m lifecycle_smoke."""
+    pytester.makeini(
+        "[pytest]\nmarkers =\n"
+        f"    {LIFECYCLE_SMOKE_MARKER}: smoke\n"
+        f"    {LIFECYCLE_SMOKE_MERGE_GROUP_MARKER}: merge group\n"
+    )
+    pytester.makeconftest("from tests.conftest import pytest_collection_modifyitems\n")
+    pytester.makepyfile(
+        f"""
+        import pytest
+
+        @pytest.mark.{LIFECYCLE_SMOKE_MERGE_GROUP_MARKER}
+        def test_merge_group_only():
+            pass
+
+        def test_unmarked():
+            pass
+        """
+    )
+    result = pytester.runpytest(
+        "--collect-only", "-q", "--strict-markers", "-m", LIFECYCLE_SMOKE_FULL_EXPRESSION
+    )
+    result.stdout.fnmatch_lines(["*::test_merge_group_only"])
+    result.stdout.no_fnmatch_line("*::test_unmarked")

@@ -110,7 +110,10 @@ Each item is then admitted in this order (first match wins):
 When an approved definition changes upstream, install parks the item and
 warns `Parked MCP server 'kit-docs' (acme/agent-kit): definition changed since
 approval` (or `Parked hook file '<path>' ...`), naming the review and
-re-approve commands.
+re-approve commands. A package none of whose hook files matches its pin
+retires the hooks it deployed earlier. `apm install --frozen` and
+`apm audit --ci` both fail while the lockfile still records such a hook as
+deployed.
 
 A type-level `hooks: true` or `mcp: true` grant still deploys any content, and
 every install warns once that it is `not pinned to content`. Run
@@ -123,6 +126,10 @@ holds on Windows; the installed copy is still integrity-checked including file
 modes. Any byte change parks the whole plugin: it is not registered, and
 install warns `Parked native plugin <pkg>: content changed since approval`
 with the re-approve command. Per-file hook pins never admit a native plugin.
+An Agent Plugin's root `mcp.json` counts: `mcp`, plus `bin` when a server
+runs a command. `apm approve --pending`, `--list` and `apm policy explain`
+list those types, and a type-level grant must cover both; one that misses a
+type parks the plugin with `not approved (missing grant: bin)`.
 A plugin that runs files under its root `.apm/` or `apm.yml` that are not
 copies of pinned files cannot be pinned: `apm approve` refuses it (exit 1)
 with `APM cannot pin files under .apm/ or apm.yml`, and install parks it.

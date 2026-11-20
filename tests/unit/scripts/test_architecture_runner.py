@@ -627,6 +627,7 @@ contracts-tooling-strip-charset
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
+install-deployment-bundle-admission-owner
 install-deployment-bundle-compile-staging
 install-deployment-bundle-user-scope-root
 install-deployment-bundle-native-layout
@@ -647,11 +648,13 @@ install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority
 install-deployment-gitlab-facade-orchestration
 install-deployment-gitlab-policy-adapter
+install-deployment-hook-pin-frozen-audit-parity
 install-deployment-incomplete-chain-routing
 install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
 install-deployment-lock-parent-placement
+install-deployment-locked-content-verdict
 install-deployment-locked-copy-validity
 install-deployment-package-content-hash
 install-deployment-skill-layout
@@ -702,6 +705,7 @@ install-deployment-uninstall-reachability
 install-deployment-uninstall-selection
 install-deployment-unpack-executable-refusal
 install-deployment-update-content-integrity
+install-deployment-update-registry-integrity
 install-deployment-update-plan-ref-annotation
 marketplace-integrations-agent-plugin-contract
 marketplace-integrations-authoring-source
@@ -793,6 +797,7 @@ transport-platform-cache-cleanup-outcome
 transport-platform-clone-connect-retry
 transport-platform-credential-origin-scope
 transport-platform-credential-report-owner
+transport-platform-credential-value-rendering
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight

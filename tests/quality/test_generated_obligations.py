@@ -32,9 +32,7 @@ from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 
 pytestmark = [
     pytest.mark.unit,
-    pytest.mark.promise(
-        "P-INV-I1", "P-INV-I4", "P-INV-I5", "P-INV-I7", "P-LAW-auth.credentials_isolated"
-    ),
+    pytest.mark.promise("P-OWN-executable-item-admission", "P-OWN-executable-trust-context"),
 ]
 
 

@@ -166,8 +166,11 @@ def _earn_install_receipts(tmp_path: Path) -> list[receipts.Receipt]:
     )
     start = len(receipts.earned())
     # A converged install repeated as a no-op, then a refused one.
-    for code, fields in ((0, {"paired": {"audit": 0}}), (2, {})):
-        result = CommandResult(("apm", "install"), code, "[+] done\n", "", tmp_path)
+    for code, fields, out in (
+        (0, {"paired": {"audit": 0}}, "[+] done\n"),
+        (2, {}, "[x] Usage error: no target\n"),
+    ):
+        result = CommandResult(("apm", "install"), code, out, "", tmp_path)
         op = oracles.operation_for(("install",), forbidden={"project": ("*",)}, **fields)
         oracles.check_cross_cutting(observation, observation, result, _Model(code == 0), op)
     return list(receipts.earned()[start:])
@@ -302,3 +305,13 @@ def test_i9_reports_one_violation_per_duplicated_cause(tmp_path: Path) -> None:
     result = CommandResult(("apm", "install"), 0, nonadjacent, "", tmp_path)
     found = [v.message for v in oracles._i9_no_noise(None, None, result, None, None)]
     assert found == ["duplicate 'integrated' line: '|-- 1 skill integrated'"]
+
+
+def test_i9_leaves_a_duplicate_owned_by_a_known_output_cell_to_the_global_hook(
+    tmp_path: Path,
+) -> None:
+    warning = "[!] Org policy not applied (outcome=empty, source=org:x/.github)"
+    stdout = f"[i] p declares:\n{warning}\n{warning}\n[i] a\n[i] a\n[+] Approved p\n"
+    result = CommandResult(("apm", "approve", "p"), 0, stdout, "", tmp_path)
+    found = [v.message for v in oracles._i9_no_noise(None, None, result, None, None)]
+    assert found == ["identical consecutive line: '[i] a'"]
