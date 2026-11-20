@@ -11,6 +11,8 @@ import pytest
 
 from apm_cli.utils.paths import portable_relpath
 
+pytestmark = pytest.mark.component
+
 
 class TestPortableRelpath:
     """Tests for portable_relpath()."""

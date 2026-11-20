@@ -18,6 +18,8 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "cli-consistency-checker.md"
 CLI_REFERENCE_DIR = "docs/src/content/docs/reference/cli/"

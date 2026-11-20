@@ -5,12 +5,16 @@ import sys
 import unittest
 from pathlib import Path
 
+import pytest
+
 from apm_cli.utils.helpers import (
     detect_platform,
     find_plugin_json,
     get_available_package_managers,
     is_tool_available,
 )
+
+pytestmark = pytest.mark.component
 
 
 class TestHelpers(unittest.TestCase):

@@ -36,6 +36,8 @@ from apm_cli.policy.schema import (
     RegistrySourcePolicy,
 )
 
+pytestmark = pytest.mark.component
+
 # -- Helpers --------------------------------------------------------
 
 

@@ -19,6 +19,8 @@ import pytest
 
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _enable_package_registry(monkeypatch):

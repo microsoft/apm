@@ -21,6 +21,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # _sanitize_bundle_name
 # ---------------------------------------------------------------------------

@@ -26,6 +26,8 @@ from apm_cli.deps.transport_selection import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.git_env import get_git_executable, git_network_env
 
+pytestmark = pytest.mark.component
+
 _GITHUB_TOKEN_ENV_NAMES = {
     "GH_TOKEN",
     "GITHUB_APM_PAT",

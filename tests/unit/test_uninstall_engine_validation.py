@@ -21,6 +21,8 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

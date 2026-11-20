@@ -20,6 +20,8 @@ from apm_cli.deps.lockfile import (
 from apm_cli.deps.registry.resolver import RegistryResolution
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize(
     ("fixture_name", "expected_size", "expected_sha256"),

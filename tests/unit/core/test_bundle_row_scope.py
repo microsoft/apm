@@ -8,6 +8,8 @@ from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
+pytestmark = pytest.mark.component
+
 _BUNDLED = ".claude/skills/bundled/SKILL.md"
 _HASH = "sha256:" + "b" * 64
 

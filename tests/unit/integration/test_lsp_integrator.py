@@ -17,6 +17,8 @@ import pytest
 from apm_cli.integration.lsp_integrator import LSPIntegrator
 from apm_cli.models.dependency.lsp import LSPDependency
 
+pytestmark = pytest.mark.component
+
 _CLAUDE_PROJECT_PLUGIN = Path(".claude") / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
 
 # ---------------------------------------------------------------------------

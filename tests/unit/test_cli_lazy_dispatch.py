@@ -10,6 +10,10 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 _FORBIDDEN_PREFIXES = (
     "apm_cli.commands.install",
     "apm_cli.commands.audit",

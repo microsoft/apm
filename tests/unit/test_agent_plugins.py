@@ -26,6 +26,8 @@ from apm_cli.agent_plugins import (
     validate_plugin_manifest_document,
 )
 
+pytestmark = pytest.mark.component
+
 _SCHEMA_DIR = Path(__file__).parent.parent / "fixtures" / "schemas"
 _PLUGIN_SCHEMA_PATH = _SCHEMA_DIR / "agent-plugins-v1.0.0-plugin.schema.json"
 _MCP_SCHEMA_PATH = _SCHEMA_DIR / "agent-plugins-v1.0.0-mcp.schema.json"

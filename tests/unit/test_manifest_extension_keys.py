@@ -24,6 +24,8 @@ from apm_cli.models.apm_package import (
     clear_apm_yml_cache,
 )
 
+pytestmark = pytest.mark.component
+
 _WARN_PATH = "apm_cli.utils.console._rich_warning"
 
 

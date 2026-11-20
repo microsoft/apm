@@ -8,6 +8,8 @@ from apm_cli.models.dependency import DependencyReference
 from apm_cli.models.dependency.object_fields import parse_alias_override
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
+pytestmark = pytest.mark.component
+
 
 class TestParseAliasOverrideTraversal:
     """Reject aliases that navigate outside apm_modules."""

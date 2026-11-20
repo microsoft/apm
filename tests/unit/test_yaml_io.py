@@ -18,6 +18,8 @@ from apm_cli.utils.yaml_io import (
     yaml_to_str,
 )
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 @pytest.mark.parametrize("body", ["\n  indented\n\n", "  indented\n", "", "\n\n"])

@@ -6,8 +6,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
 from apm_cli.factory import ClientFactory
+
+pytestmark = pytest.mark.component
 
 
 class TestOpenCodeClientFactory(unittest.TestCase):

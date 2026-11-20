@@ -57,6 +57,8 @@ from apm_cli.policy.schema import ApmPolicy
 from apm_cli.utils.git_env import get_git_executable
 from tests.utils.simulated_ado_chain import StaticPolicyResolver
 
+pytestmark = pytest.mark.component
+
 # Minimal valid YAML that produces a valid ApmPolicy
 VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"
 

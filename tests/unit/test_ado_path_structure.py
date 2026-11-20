@@ -18,6 +18,8 @@ from apm_cli.primitives.discovery import (
     get_dependency_declaration_order,
 )
 
+pytestmark = pytest.mark.component
+
 
 class TestADOPathStructure:
     """Test ADO vs GitHub path structure handling."""

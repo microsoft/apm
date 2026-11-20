@@ -17,6 +17,8 @@ from apm_cli.core.plugin_manifest import (
     write_plugin_manifest,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)

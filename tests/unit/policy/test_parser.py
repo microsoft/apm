@@ -5,6 +5,8 @@ import tempfile
 import textwrap
 import unittest
 
+import pytest
+
 from apm_cli.policy.parser import (
     PolicyValidationError,
     _build_policy,
@@ -12,6 +14,8 @@ from apm_cli.policy.parser import (
     validate_policy,
 )
 from apm_cli.policy.schema import ApmPolicy
+
+pytestmark = pytest.mark.component
 
 
 class TestValidatePolicy(unittest.TestCase):

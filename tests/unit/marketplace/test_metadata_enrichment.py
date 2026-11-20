@@ -35,6 +35,8 @@ from apm_cli.marketplace.drift_check import check_marketplace_drift
 from apm_cli.marketplace.migration import load_marketplace_config
 from tests.utils.metadata_transport import BUILDER_HTTP_SEAM, urlopen_adapter
 
+pytestmark = pytest.mark.component
+
 
 def _write_config(project_root: Path) -> None:
     """Create a marketplace with one pinned remote package."""

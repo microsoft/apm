@@ -27,6 +27,8 @@ from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
 from apm_cli.utils.git_env import get_git_executable
 
+pytestmark = pytest.mark.component
+
 
 def _local_source(name: str, path: Path, ref: str = "main") -> MarketplaceSource:
     return MarketplaceSource(name=name, url=f"file://{path}", ref=ref)

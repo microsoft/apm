@@ -17,6 +17,8 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
+pytestmark = pytest.mark.component
+
 
 def _make_package_info(pkg_dir: Path, *, name: str = "test-pkg") -> PackageInfo:
     package = APMPackage(name=name, version="1.0.0", package_path=pkg_dir)

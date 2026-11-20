@@ -21,6 +21,8 @@ from apm_cli.utils.git_env import (
     validate_resolved_git_url_rewrite,
 )
 
+pytestmark = pytest.mark.component
+
 _PLATFORM_TOKENS = {
     "ADO_APM_PAT": "ado-sentinel",
     "GH_TOKEN": "gh-sentinel",

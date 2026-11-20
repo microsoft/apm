@@ -18,6 +18,8 @@ from rich.theme import Theme
 from apm_cli.commands.mcp import mcp
 from apm_cli.registry.integration import RegistryIntegration
 
+pytestmark = pytest.mark.component
+
 _SEARCH = "apm_cli.registry.client.SimpleRegistryClient.search_servers"
 _FIND = "apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference"
 

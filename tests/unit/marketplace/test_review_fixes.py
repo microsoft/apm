@@ -22,6 +22,8 @@ from apm_cli.marketplace.migration import (
 )
 from apm_cli.marketplace.yml_editor import _is_apm_yml_with_marketplace
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # r3: malformed apm.yml surfaces a clear error
 # ---------------------------------------------------------------------------

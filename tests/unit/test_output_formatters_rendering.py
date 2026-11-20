@@ -25,6 +25,8 @@ from apm_cli.output.models import (
 )
 from apm_cli.primitives.models import Instruction
 
+pytestmark = pytest.mark.unit
+
 
 def _make_instruction(
     name: str = "test-instruction",

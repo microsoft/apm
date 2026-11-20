@@ -15,6 +15,8 @@ import pytest
 from apm_cli.integration.skill_transformer import SkillTransformer, to_hyphen_case
 from apm_cli.primitives.models import Skill
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize(
     ("raw", "expected"),

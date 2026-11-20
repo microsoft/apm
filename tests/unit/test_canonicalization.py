@@ -17,6 +17,8 @@ import pytest
 
 from apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.component
+
 # ── to_canonical() ──────────────────────────────────────────────────────────
 
 

@@ -29,7 +29,10 @@ from tests.utils.local_ado_org_fixture import (
     install_logging_credential_helper,
 )
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX helper launcher")
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.skipif(sys.platform == "win32", reason="POSIX helper launcher"),
+]
 
 HOST = "dev.azure.com"
 REPO_PATH = "contoso/platform/agent-skills"

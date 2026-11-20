@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
 from apm_cli.utils.exclude import (
     _match_double_star,  # noqa: F401
     _match_glob_recursive,
@@ -12,6 +14,8 @@ from apm_cli.utils.exclude import (
     should_exclude,
     validate_exclude_patterns,
 )
+
+pytestmark = pytest.mark.component
 
 
 class TestValidateExcludePatterns(unittest.TestCase):

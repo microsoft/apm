@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pytest
+
 from apm_cli.utils.version_checker import (
     _get_github_token,
     _reset_version_check_auth_resolver_for_tests,
@@ -16,6 +18,8 @@ from apm_cli.utils.version_checker import (
     save_version_check_timestamp,
     should_check_for_updates,
 )
+
+pytestmark = pytest.mark.component
 
 
 class TestVersionParser(unittest.TestCase):

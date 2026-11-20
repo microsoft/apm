@@ -15,6 +15,8 @@ from tests.integration import (
 )
 from tests.integration.marketplace import conftest as marketplace_conftest
 
+pytestmark = pytest.mark.component
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SILENT_ADOPT_FILENAME = "test_silent_adopt_existing_files_e2e.py"
 

@@ -6,10 +6,13 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import urlparse
 
+import pytest
 from click.testing import CliRunner
 
 import apm_cli.commands.self_update as update_module
 from apm_cli.cli import cli
+
+pytestmark = pytest.mark.component
 
 
 class TestUpdateCommand(unittest.TestCase):

@@ -16,6 +16,8 @@ from apm_cli.integration.hook_integrator import (
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
+pytestmark = pytest.mark.component
+
 
 def _entry(command: str) -> dict[str, Any]:
     return {"hooks": [{"type": "command", "command": command}]}

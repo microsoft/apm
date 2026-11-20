@@ -39,6 +39,8 @@ from apm_cli.core.errors import (
     render_unknown_target_error,
 )
 
+pytestmark = pytest.mark.component
+
 _THREE_CMD_RE = re.compile(r"^\s*apm\s+\S", re.MULTILINE)
 
 

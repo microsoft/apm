@@ -26,6 +26,8 @@ from apm_cli.commands._helpers import (
 )
 from apm_cli.install.orphans import _find_orphaned_packages
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # _atomic_write
 # ---------------------------------------------------------------------------

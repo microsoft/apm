@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from apm_cli.security.audit_report import (
     detect_format_from_extension,
     findings_to_json,
@@ -12,6 +14,8 @@ from apm_cli.security.audit_report import (
     write_report,
 )
 from apm_cli.security.content_scanner import ScanFinding
+
+pytestmark = pytest.mark.component
 
 
 def _make_finding(

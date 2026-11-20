@@ -3,6 +3,10 @@
 import ast
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 TARGET_CATALOG = Path("src/apm_cli/core/target_catalog.py")
 SOURCE_ROOT = Path("src/apm_cli")
 TARGET_NAMES = frozenset(

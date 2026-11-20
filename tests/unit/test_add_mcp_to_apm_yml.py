@@ -16,6 +16,8 @@ import yaml
 from apm_cli.commands.install import _add_mcp_to_apm_yml
 from apm_cli.install.mcp.writer import _diff_entry
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def tmp_apm_yml():

@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional  # noqa: F401, UP035
 from unittest.mock import MagicMock, call, patch  # noqa: F401
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.drift import (
     build_download_ref,
@@ -21,6 +23,8 @@ from apm_cli.drift import (
     revision_pin_mismatch,
 )
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.component
 
 
 def _orphan_preview(lockfile, intended, *, only_packages):
@@ -540,7 +544,6 @@ class TestBuildDownloadRef(unittest.TestCase):
 # locked_copy_proof / locked_copy_is_stale (#3884)
 # ---------------------------------------------------------------------------
 
-import pytest  # noqa: E402
 
 from apm_cli.drift import (  # noqa: E402
     LOCKED_COPY_CONTENT_HASH,

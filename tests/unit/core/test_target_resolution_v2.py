@@ -75,6 +75,8 @@ from apm_cli.core.target_detection import (
 )
 from apm_cli.models.manifest_targets import option_target_names
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

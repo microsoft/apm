@@ -8,11 +8,14 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.commands.deps.cli import _deps_list_source_label
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+pytestmark = pytest.mark.component
 
 
 def _force_rich_fallback():

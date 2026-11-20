@@ -14,6 +14,8 @@ import pytest
 
 from apm_cli.integration import copilot_app_db as cdb
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Schema fixture -- mirrors live Copilot App ``data.db`` (user_version=13).
 # ---------------------------------------------------------------------------

@@ -19,6 +19,8 @@ import pytest
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Shared v0.1 Docker fixture (same shape as real registry data)
 # ---------------------------------------------------------------------------

@@ -33,6 +33,8 @@ from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
 from apm_cli.utils.git_env import GitUrlRewriteError
 
+pytestmark = pytest.mark.component
+
 
 def _git_source(url: str, name: str = "acme", ref: str = "main") -> MarketplaceSource:
     return MarketplaceSource(name=name, url=url, ref=ref)

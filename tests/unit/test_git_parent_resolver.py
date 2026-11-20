@@ -6,6 +6,8 @@ import yaml
 from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.models.dependency import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def resolver(tmp_path):

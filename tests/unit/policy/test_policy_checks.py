@@ -48,6 +48,8 @@ from apm_cli.policy.schema import (
     UnmanagedFilesPolicy,
 )
 
+pytestmark = pytest.mark.component
+
 # -- Helpers --------------------------------------------------------
 
 

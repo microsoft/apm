@@ -62,6 +62,8 @@ from apm_cli.policy.schema import (
 )
 from tests.utils.simulated_ado_chain import StaticPolicyResolver
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

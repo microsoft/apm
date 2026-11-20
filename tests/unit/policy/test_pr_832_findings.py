@@ -39,6 +39,8 @@ from apm_cli.policy.models import CheckResult, CIAuditResult, PolicySubject
 from apm_cli.policy.outcome_routing import route_discovery_outcome
 from apm_cli.policy.schema import ApmPolicy
 
+pytestmark = pytest.mark.component
+
 # ──────────────────────────────────────────────────────────────────────
 # #2: PolicyBlockError is an alias of PolicyViolationError
 # ──────────────────────────────────────────────────────────────────────

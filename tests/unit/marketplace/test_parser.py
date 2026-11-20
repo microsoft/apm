@@ -18,6 +18,8 @@ import pytest
 from apm_cli.commands.marketplace import _parse_marketplace_source
 from apm_cli.marketplace.source_identity import parse_marketplace_source
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize(
     "raw",

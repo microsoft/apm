@@ -20,6 +20,8 @@ import pytest
 
 from apm_cli.core.auth import AuthContext, AuthResolver, HostInfo
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # uses_public_github_anonymous_first -- resolution order
 # ---------------------------------------------------------------------------

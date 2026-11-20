@@ -55,6 +55,8 @@ from apm_cli.policy.parser import load_policy
 from apm_cli.policy.project_config import ProjectPolicyConfigError
 from apm_cli.policy.schema import ApmPolicy
 
+pytestmark = pytest.mark.component
+
 VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"
 
 

@@ -12,6 +12,10 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _UNPUBLISHED_FEATURE_REF = re.compile(r"ghcr\.io/microsoft/apm/apm-cli")

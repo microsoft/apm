@@ -12,8 +12,12 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.marketplace import client as mp_client
 from apm_cli.marketplace.models import MarketplaceSource
+
+pytestmark = pytest.mark.component
 
 CATALOG = {"name": "catalog", "plugins": [{"name": "skill-creator", "source": "owner/repo"}]}
 

@@ -18,6 +18,8 @@ import pytest
 from apm_cli.marketplace import registry
 from apm_cli.marketplace.models import MarketplaceSource
 
+pytestmark = pytest.mark.component
+
 FIXTURE = Path(__file__).parent / "fixtures" / "legacy_marketplaces.json"
 
 

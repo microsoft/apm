@@ -5,10 +5,12 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest  # noqa: F401
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+
+pytestmark = pytest.mark.component
 
 
 class TestDepsCleanCommand:

@@ -19,7 +19,7 @@ from apm_cli.utils.git_env import get_git_executable, git_subprocess_env
 # script itself both resolve git via the canonical apm_cli.utils.git_env
 # owner. Selected by the PR-time Windows Compatibility Gate via
 # `pytest -m windows_compat`; also runs on every other OS.
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
 ROOT = Path(__file__).parents[2]
 GATE = ROOT / "packages/autopilot/autopilot-pr-merge-worker/scripts/owner_touch_gate.py"

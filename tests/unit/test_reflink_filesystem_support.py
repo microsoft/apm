@@ -21,6 +21,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Reset module-level cache state between tests
 # ---------------------------------------------------------------------------

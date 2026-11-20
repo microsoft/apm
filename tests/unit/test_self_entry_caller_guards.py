@@ -9,10 +9,14 @@ must skip it. These tests pin the contract for representative call sites.
 from pathlib import Path  # noqa: F401
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.deps.lockfile import _SELF_KEY, LockedDependency, LockFile
 from apm_cli.integration.skill_integrator import SkillIntegrator
+
+pytestmark = pytest.mark.component
 
 
 def _lockfile_with_self_and_remote() -> LockFile:

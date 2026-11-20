@@ -37,6 +37,8 @@ from apm_cli.models.validation import (
     validate_apm_package,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # PackageContentType.from_string()
 # ---------------------------------------------------------------------------

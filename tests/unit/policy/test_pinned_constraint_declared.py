@@ -28,6 +28,8 @@ from apm_cli.policy._constraint_pinning import (
 from apm_cli.policy.policy_checks import _check_pinned_constraints, run_policy_checks
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
+pytestmark = pytest.mark.component
+
 _REPLACE_SCHEMA = (
     "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
 )

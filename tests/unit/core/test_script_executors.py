@@ -27,6 +27,8 @@ from apm_cli.core.script_executors import (
     execute_script,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _make_event(event_name: str = "post-install") -> LifecycleEvent:
     return LifecycleEvent(

@@ -24,6 +24,8 @@ from apm_cli.integration import copilot_app_ws as ws
 websockets = pytest.importorskip("websockets")
 from websockets.sync.server import serve as _serve  # noqa: E402
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Server harness
 # ---------------------------------------------------------------------------

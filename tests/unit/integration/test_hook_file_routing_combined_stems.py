@@ -16,6 +16,8 @@ from apm_cli.integration.hook_file_routing import (
     raise_for_legacy_routing,
 )
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize(
     "stem, expected",

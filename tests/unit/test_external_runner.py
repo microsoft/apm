@@ -15,6 +15,8 @@ from apm_cli.security.content_scanner import ScanFinding
 from apm_cli.security.external.base import ExternalScanError
 from apm_cli.security.external.runner import merge_findings, run_external_scanners
 
+pytestmark = pytest.mark.unit
+
 
 def _finding(file="a.md"):
     return ScanFinding(

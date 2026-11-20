@@ -22,6 +22,8 @@ import requests
 
 from apm_cli.registry.operations import MCPServerOperations
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

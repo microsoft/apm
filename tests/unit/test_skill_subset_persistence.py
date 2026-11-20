@@ -17,6 +17,8 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 
+pytestmark = pytest.mark.component
+
 
 class TestSkillSubsetFilterTokens:
     """Canonical matching tokens for declared and flattened skill names."""

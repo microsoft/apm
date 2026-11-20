@@ -10,6 +10,8 @@ from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import APMPackage, DependencyReference
 
+pytestmark = pytest.mark.component
+
 # ===========================================================================
 # DependencyReference.is_local_path()
 # ===========================================================================

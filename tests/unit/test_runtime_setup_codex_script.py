@@ -20,7 +20,10 @@ from tests.utils.runtime_setup_codex import (
     write_release_metadata,
 )
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Bash scripts not available")
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.skipif(sys.platform == "win32", reason="Bash scripts not available"),
+]
 
 
 @pytest.fixture

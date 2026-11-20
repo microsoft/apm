@@ -17,6 +17,8 @@ from urllib.parse import urlparse
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 
 def _assert_extends_host_in_message(msg: str, expected_host: str) -> None:
     """Assert *expected_host* appears as the parsed ``extends host:`` token.

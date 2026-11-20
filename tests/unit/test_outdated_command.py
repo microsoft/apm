@@ -14,6 +14,8 @@ from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Patch targets -- imports are lazy (inside function body), so we patch
 # at the source module level.

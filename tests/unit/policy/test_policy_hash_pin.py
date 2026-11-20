@@ -38,6 +38,8 @@ from apm_cli.policy.project_config import (
 )
 from apm_cli.policy.schema import ApmPolicy
 
+pytestmark = pytest.mark.component
+
 _VALID_POLICY_YAML = "name: org-policy\nversion: '1.0'\nenforcement: warn\n"
 
 

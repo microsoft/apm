@@ -13,6 +13,8 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

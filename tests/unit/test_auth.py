@@ -15,6 +15,8 @@ from apm_cli.core.auth import AuthResolver, HostInfo
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _reset_bearer_singleton():

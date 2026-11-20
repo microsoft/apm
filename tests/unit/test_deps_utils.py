@@ -19,6 +19,8 @@ from apm_cli.commands.deps._utils import (
 )
 from apm_cli.constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 
+pytestmark = pytest.mark.component
+
 # ------------------------------------------------------------------
 # Helpers to build fixture package directories
 # ------------------------------------------------------------------

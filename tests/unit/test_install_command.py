@@ -16,6 +16,8 @@ from apm_cli.cli import cli
 from apm_cli.core.scope import InstallScope
 from apm_cli.models.results import InstallResult
 
+pytestmark = pytest.mark.component
+
 
 class TestInstallCommandAutoBootstrap:
     """Test cases for apm install command auto-bootstrap feature."""

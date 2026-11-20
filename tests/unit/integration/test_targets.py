@@ -16,6 +16,8 @@ from apm_cli.integration.targets import (
 )
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.component
+
 
 class TestPrimitiveMappingValidation:
     """output_compare must stay in lockstep with RULE_FORMATS (apm#1662)."""

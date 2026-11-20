@@ -16,6 +16,8 @@ from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS, UserHookHomeReference
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
+pytestmark = pytest.mark.component
+
 _VERIFIED = {
     "claude": ("command", "bash"),
     "copilot": ("bash",),

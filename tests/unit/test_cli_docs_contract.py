@@ -2,8 +2,12 @@
 
 from pathlib import Path
 
+import pytest
+
 from apm_cli.cli import cli
 from scripts.check_cli_docs import DEFAULT_DIST, recovery_guidance, registry_docs_mismatches
+
+pytestmark = pytest.mark.component
 
 REPO_ROOT = Path(__file__).parents[2]
 CLI_REFERENCE_DIR = REPO_ROOT / "docs" / "src" / "content" / "docs" / "reference" / "cli"

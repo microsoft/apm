@@ -31,6 +31,8 @@ from apm_cli.models.format_detection import (
 )
 from apm_cli.models.validation import PackageType
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # ApmYmlDetector
 # ---------------------------------------------------------------------------

@@ -8,7 +8,11 @@ suite (which CI does not collect), so this module pins their behaviour inside
 
 import os
 
+import pytest
+
 from apm_cli.core import script_executors as se
+
+pytestmark = pytest.mark.unit
 
 
 class TestMatchesCredential:

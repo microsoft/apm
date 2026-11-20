@@ -20,6 +20,8 @@ import pytest
 
 from apm_cli.models.apm_package import MCPDependency
 
+pytestmark = pytest.mark.component
+
 _WARN_PATH = "apm_cli.models.dependency.mcp._rich_warning"
 
 

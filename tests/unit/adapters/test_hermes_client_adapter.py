@@ -27,6 +27,8 @@ from apm_cli.adapters.client.hermes import HermesClientAdapter
 from apm_cli.factory import ClientFactory
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 
+pytestmark = pytest.mark.component
+
 
 class TestHermesClientFactory(unittest.TestCase):
     """Factory registration for the hermes runtime."""

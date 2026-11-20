@@ -6,6 +6,8 @@ import pytest
 
 from apm_cli.core.token_manager import GitHubTokenManager
 
+pytestmark = pytest.mark.unit
+
 
 class TestGetTokenEnvVarForPurpose:
     def test_returns_selected_variable_without_exposing_value(self) -> None:

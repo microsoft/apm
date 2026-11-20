@@ -17,6 +17,8 @@ from apm_cli.utils.diagnostics import (
 )
 from apm_cli.utils.yaml_io import yaml_to_str
 
+pytestmark = pytest.mark.component
+
 
 class TestAgentIntegrator:
     """Test agent integration logic."""

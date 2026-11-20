@@ -16,6 +16,8 @@ import yaml
 from apm_cli.integration.mcp_integrator import MCPIntegrator, _is_vscode_available
 from apm_cli.models.dependency.mcp import MCPDependency
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

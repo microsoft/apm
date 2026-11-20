@@ -23,6 +23,8 @@ from click.testing import CliRunner
 
 from apm_cli.deps.lockfile import LockedDependency
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

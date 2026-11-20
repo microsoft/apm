@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
-import pytest  # noqa: F401
+import pytest
 import yaml
 from click.testing import CliRunner
 
@@ -14,6 +14,8 @@ from apm_cli.deps.dependency_graph import DependencyNode
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import APMPackage, DependencyReference
 from apm_cli.models.results import InstallResult
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Part 3d: LockedDependency.is_dev field

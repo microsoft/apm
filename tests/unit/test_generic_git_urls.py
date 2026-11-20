@@ -18,6 +18,8 @@ from src.apm_cli.utils.github_host import (
     is_supported_git_host,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestGenericHostSupport:
     """Test that any valid FQDN is accepted as a git host."""

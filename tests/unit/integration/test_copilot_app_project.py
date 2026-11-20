@@ -21,6 +21,8 @@ import pytest
 from apm_cli.integration import copilot_app_db as cdb
 from apm_cli.integration import copilot_app_project as cap
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Schema fixture -- includes the workflows table (required by user_version
 # guard) plus the projects table (subject under test).

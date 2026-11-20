@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _suppress_console(monkeypatch):

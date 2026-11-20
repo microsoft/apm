@@ -22,6 +22,8 @@ from apm_cli.marketplace.yml_schema import (
     load_marketplace_from_apm_yml,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _write_apm_yml(tmp_path: Path, marketplace_block: dict[str, Any]) -> Path:
     """Write a minimal apm.yml with the given marketplace block."""

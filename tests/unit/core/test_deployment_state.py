@@ -23,6 +23,8 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
+pytestmark = pytest.mark.component
+
 VALID = NativePayloadValidation(valid=True, contract="file")
 
 

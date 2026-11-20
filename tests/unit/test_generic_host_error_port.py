@@ -26,6 +26,8 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.git_env import _GitConfigSnapshot
 
+pytestmark = pytest.mark.component
+
 
 def _make_downloader():
     """Build a GitHubPackageDownloader with a real AuthResolver.

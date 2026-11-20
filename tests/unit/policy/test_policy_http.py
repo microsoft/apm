@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.policy._policy_http import policy_get
 from apm_cli.policy.discovery import _fetch_ado_contents
+
+pytestmark = pytest.mark.component
 
 _SESSION_REQUEST = "apm_cli.utils.http_credentials.CredentialScopedSession.request"
 

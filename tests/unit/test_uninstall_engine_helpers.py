@@ -30,6 +30,8 @@ from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.path_security import PathTraversalError
 from apm_cli.utils.path_security import safe_rmtree as real_safe_rmtree
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

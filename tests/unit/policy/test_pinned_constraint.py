@@ -15,6 +15,8 @@ from apm_cli.policy._constraint_pinning import (
     is_pinned_constraint,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _dep(
     spec: str | None,

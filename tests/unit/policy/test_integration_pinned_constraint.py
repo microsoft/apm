@@ -24,6 +24,8 @@ from apm_cli.policy.policy_checks import (
 )
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
+pytestmark = pytest.mark.component
+
 CHECK_NAME = "dependency-pinned-constraint"
 
 

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-import pytest  # noqa: F401
+import pytest
 
 from src.apm_cli.models.apm_package import (
     APMPackage,  # noqa: F401
@@ -14,6 +14,8 @@ from src.apm_cli.models.validation import (
     detect_package_type,
     gather_detection_evidence,
 )
+
+pytestmark = pytest.mark.component
 
 # ============================================================================
 # Detection: covers all 8 shapes from the plan's test matrix

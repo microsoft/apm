@@ -17,6 +17,8 @@ from apm_cli.models.apm_package import APMPackage
 from apm_cli.utils.diagnostics import DiagnosticCollector
 from apm_cli.utils.yaml_io import dump_yaml
 
+pytestmark = pytest.mark.component
+
 
 def test_filter_targets_for_dependency_intersects_active_targets() -> None:
     """Filtering keeps only active targets named by the dependency subset."""

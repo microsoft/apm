@@ -32,6 +32,8 @@ from apm_cli.core.target_detection import (
 )
 from apm_cli.integration.targets import KNOWN_TARGETS, RUNTIME_TO_CANONICAL_TARGET
 
+pytestmark = pytest.mark.component
+
 COMMANDS = ("compile", "install", "update")
 
 

@@ -9,8 +9,12 @@ pre-rewrite paths would give false assurance.
 import json
 from pathlib import Path
 
+import pytest
+
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+
+pytestmark = pytest.mark.component
 
 
 def _make_package_info(install_path: Path, name: str = "hookify") -> PackageInfo:

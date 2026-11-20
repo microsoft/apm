@@ -25,6 +25,8 @@ from apm_cli.policy.policy_checks import (
 )
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
+pytestmark = pytest.mark.component
+
 ENTERPRISE_ALLOW = (
     "ghes.corp.example/**",
     "contoso.ghe.com/**",

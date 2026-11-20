@@ -3,13 +3,15 @@
 import sys  # noqa: F401
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.core.script_runner import ScriptRunner
 
 # Import modules at module level BEFORE any sys.platform patching,
 # to avoid triggering Windows-only import paths (msvcrt, CREATE_NO_WINDOW) on Unix.
 from apm_cli.runtime.manager import RuntimeManager
+
+pytestmark = pytest.mark.component
 
 
 def _make_manager(platform: str) -> RuntimeManager:

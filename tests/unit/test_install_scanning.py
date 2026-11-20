@@ -14,6 +14,8 @@ from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.security.content_scanner import ContentScanner
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def clean_files(tmp_path):

@@ -38,6 +38,8 @@ from apm_cli.utils.github_host import (
     parse_artifactory_path,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _mock_stream_response(
     status_code: int = 200,

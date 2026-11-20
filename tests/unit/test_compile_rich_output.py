@@ -4,7 +4,11 @@ import subprocess
 import sys
 from pathlib import Path  # noqa: F401
 
+import pytest
+
 from ..utils.constitution_fixtures import DEFAULT_CONSTITUTION, temp_project_with_constitution
+
+pytestmark = pytest.mark.component
 
 CLI = [sys.executable, "-m", "apm_cli.cli", "compile", "--single-agents"]
 

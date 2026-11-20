@@ -23,6 +23,8 @@ from apm_cli.marketplace.models import (
 from apm_cli.marketplace.resolver import resolve_marketplace_plugin
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 def _patch_marketplace(
     source: MarketplaceSource, plugins: list[MarketplacePlugin]

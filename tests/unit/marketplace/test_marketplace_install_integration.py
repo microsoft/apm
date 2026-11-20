@@ -13,6 +13,8 @@ from apm_cli.marketplace.resolver import (
     parse_marketplace_ref,
 )
 
+pytestmark = pytest.mark.component
+
 
 class TestInstallMarketplacePreParse:
     """The pre-parse intercept in _validate_and_add_packages_to_apm_yml."""

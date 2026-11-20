@@ -22,6 +22,8 @@ from apm_cli.utils.reflink import (
     reflink_supported,
 )
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _clean_capability_cache():

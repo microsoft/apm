@@ -21,6 +21,8 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # _parse_toggle_input
 # ---------------------------------------------------------------------------

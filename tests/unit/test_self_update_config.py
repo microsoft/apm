@@ -8,6 +8,8 @@ import pytest
 
 from apm_cli.commands import self_update
 
+pytestmark = pytest.mark.component
+
 
 def test_unix_self_update_passes_running_identity_not_new_destination(monkeypatch, tmp_path):
     """A frozen absolute invocation must remain identifiable outside PATH."""

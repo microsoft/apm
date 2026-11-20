@@ -21,6 +21,8 @@ from apm_cli.cli import cli
 from apm_cli.factory import ClientFactory
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.component
+
 
 class TestIntelliJClientFactory:
     """Verify IntelliJClientAdapter is registered in ClientFactory."""

@@ -11,6 +11,8 @@ from apm_cli.core.command_logger import (
     _ValidationOutcome,
 )
 
+pytestmark = pytest.mark.component
+
 
 class TestValidationOutcome:
     def test_all_failed(self):

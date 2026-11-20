@@ -26,6 +26,8 @@ from apm_cli.core.target_detection import (
     should_compile_gemini_md,
 )
 
+pytestmark = pytest.mark.component
+
 
 class TestDetectTarget:
     """Tests for detect_target function."""

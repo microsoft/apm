@@ -24,6 +24,8 @@ from apm_cli.policy.parser import PolicyValidationError, load_policy
 from apm_cli.policy.project_config import read_project_fetch_failure_default
 from apm_cli.policy.schema import ApmPolicy
 
+pytestmark = pytest.mark.component
+
 _PATCH_DISCOVER = "apm_cli.install.phases.policy_gate._discover_with_chain"
 
 

@@ -17,6 +17,8 @@ from apm_cli.integration.prompt_integrator import (
     _parse_workflow_frontmatter,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestParseWorkflowFrontmatter:
     def test_defaults_when_only_interval(self):

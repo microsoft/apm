@@ -21,6 +21,8 @@ from apm_cli.marketplace.errors import (
 )
 from apm_cli.marketplace.models import MarketplaceSource
 
+pytestmark = pytest.mark.component
+
 
 def _quoted_hosts(text: str) -> set[str]:
     """Extract host tokens from `Host '<host>'` patterns in error text.

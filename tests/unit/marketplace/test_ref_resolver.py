@@ -22,6 +22,8 @@ from apm_cli.marketplace.ref_resolver import (
 )
 from apm_cli.utils.git_env import get_git_executable
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # _parse_ls_remote_output
 # ---------------------------------------------------------------------------

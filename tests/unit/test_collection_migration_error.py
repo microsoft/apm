@@ -10,6 +10,8 @@ import pytest
 
 from src.apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 class TestCollectionMigrationError:
     """Parsing `.collection.yml` URLs raises a migration ValueError."""

@@ -12,7 +12,7 @@ import json
 import os
 from unittest.mock import patch
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.marketplace.version_pins import (
     _pin_key,
@@ -22,6 +22,8 @@ from apm_cli.marketplace.version_pins import (
     record_ref_pin,
     save_ref_pins,
 )
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Unit tests -- load / save

@@ -3,10 +3,13 @@
 from unittest.mock import patch
 
 import click
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.output.script_formatters import ScriptExecutionFormatter
+
+pytestmark = pytest.mark.component
 
 
 def _walk_commands(group: click.Group, prefix: tuple[str, ...] = ()):

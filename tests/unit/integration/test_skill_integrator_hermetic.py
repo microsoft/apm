@@ -32,6 +32,8 @@ from apm_cli.integration.skill_integrator import (
 )
 from apm_cli.integration.targets import TargetProfile
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -39,6 +39,8 @@ from apm_cli.core.token_manager import GitHelperCredential, GitHubTokenManager
 from apm_cli.models.dependency.host_virtual import UnsupportedHostQualifiedVirtualPackageError
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Autouse fixtures
 # ---------------------------------------------------------------------------

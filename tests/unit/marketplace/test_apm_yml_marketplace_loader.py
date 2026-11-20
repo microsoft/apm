@@ -16,6 +16,8 @@ from apm_cli.marketplace.errors import MarketplaceYmlError
 from apm_cli.marketplace.output_profiles import MARKETPLACE_OUTPUTS, known_output_names
 from apm_cli.marketplace.yml_schema import load_marketplace_from_apm_yml
 
+pytestmark = pytest.mark.component
+
 
 def _write(p: Path, content: str) -> None:
     p.write_text(textwrap.dedent(content).lstrip(), encoding="utf-8")

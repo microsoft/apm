@@ -8,6 +8,8 @@ import pytest
 
 from apm_cli.utils.console import _get_console, _reset_console
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Console singleton tests
 # ---------------------------------------------------------------------------

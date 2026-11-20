@@ -22,6 +22,8 @@ from apm_cli.utils.path_security import (
     validate_path_segments,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # ensure_path_within
 # ---------------------------------------------------------------------------

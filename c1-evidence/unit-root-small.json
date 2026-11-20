@@ -2,7 +2,8 @@
  "partition": "unit root and small subpackages",
  "steps_done": [
   1,
-  2
+  2,
+  3
  ],
  "folds": {
   "tests/unit/adapters/test_v01_variables_process_arguments.py::TestCodexProcessArgumentsV01Variables::test_legacy_optional_hint_skipped": "tests/unit/adapters/test_v01_variables_process_arguments.py::test_legacy_optional_hint_skipped[codex]",
@@ -181,11 +182,14 @@
   "root: portable_relpath, ls-remote empty parse, init toggle/read-targets cases folded into parametrized tests; unit copies no longer mirror tests/unit/utils, tests/benchmarks and tests/integration twins (outside this partition)",
   "test_reference_registry_shorthand identity test removed: identical xfail twin kept in tests/unit/registry/test_compat_matrix.py (P3 kept it on c1/unit-subpkgs)",
   "test_auth.py TestDetectTokenType one-liners folded as rows into core/test_auth_validation.py TestDetectTokenType::test_token_prefixes",
-  "kept same-body groups (14): 9 have every member in files owned by open PRs; 4 pair tests/unit/core/test_token_manager_lifecycle.py (lifecycle file, must not edit) with tests/test_token_manager.py; 1 pairs core/test_auth_validation TestDetectTokenType::test_token_prefixes with tests/integration/test_commands_auth_flow.py (same assert body, different rows; tests/integration has no owning partition, deleting either loses rows)"
+  "kept same-body groups (14): 9 have every member in files owned by open PRs; 4 pair tests/unit/core/test_token_manager_lifecycle.py (lifecycle file, must not edit) with tests/test_token_manager.py; 1 pairs core/test_auth_validation TestDetectTokenType::test_token_prefixes with tests/integration/test_commands_auth_flow.py (same assert body, different rows; tests/integration has no owning partition, deleting either loses rows)",
+  "step3: 372 in-scope modules got one module-level behavioral marker (276 component, 96 unit); component = tmp_path/tempfile/CliRunner/real file reads or writes/process spawn/PATH lookup, unit = everything else; existing pytestmark values were turned into lists keeping their marks; stale '# noqa: F401' on now-used pytest imports dropped",
+  "step3 left unclassified (41): 35 modules owned by open PRs and 6 *_lifecycle* modules (rule forbids editing them)",
+  "env: 5 tests (git transport matrix x2, anonymous-first scoped retry, auth credential report, drift git-head proof) fail identically with and without this branch in this sandbox (forced commit signing, GIT_SSH_COMMAND=/bin/false); not caused by these changes"
  ],
  "counts_left": {
   "same_body_groups": 14,
-  "unclassified_modules": null,
+  "unclassified_modules": 41,
   "placement_offenders": null,
   "weak_tests": null
  }

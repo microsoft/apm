@@ -19,6 +19,8 @@ from apm_cli.integration.copilot_cowork_paths import (
 )
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # TestResolveCoworkSkillsDir
 # ---------------------------------------------------------------------------

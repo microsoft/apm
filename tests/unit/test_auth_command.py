@@ -7,6 +7,7 @@ import textwrap
 from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.auth import (
@@ -17,6 +18,8 @@ from apm_cli.commands.auth import (
     token_page_url,
     token_scopes,
 )
+
+pytestmark = pytest.mark.component
 
 
 def _auth_ctx(token, source):

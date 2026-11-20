@@ -25,6 +25,8 @@ from apm_cli.integration.hook_integrator import (
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
+pytestmark = pytest.mark.component
+
 
 def _make_package_info(install_path: Path, name: str = "test-pkg") -> PackageInfo:
     package = APMPackage(name=name, version="1.0.0")

@@ -27,6 +27,8 @@ from apm_cli.deps.plugin_parser import (
 )
 from apm_cli.utils.helpers import find_plugin_json
 
+pytestmark = pytest.mark.component
+
 
 def test_union_dep_list_indexes_existing_entries_once() -> None:
     """Large dependency merges must not scan the growing result per append."""
