@@ -410,3 +410,29 @@ def reconcile_scope_bundle_hooks(
     return retire_unadmitted_bundle_hooks(
         root, targets, allow_provider, lock_dir=get_apm_dir(scope), logger=logger, dry_run=dry_run
     )
+
+
+def installed_local_bundles(scope: Any, apm_package: Any) -> tuple[list[str], int]:
+    """Return ``(names, file_count)`` of the local bundles a scope's lockfile records.
+
+    Names come from the hook ownership markers and compile staging slugs a
+    bundle leaves; *file_count* counts every bundle-owned path, so a bundle
+    without either is still reported (#4318).
+    """
+    from apm_cli.core.scope import get_apm_dir
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+    lock_dir = get_apm_dir(scope)
+    paths = _lock_bundle_paths(lock_dir)
+    lockfile = LockFile.read(get_lockfile_path(lock_dir))
+    staged = set(lockfile.local_staging_slugs()) if lockfile is not None else set()
+    if not paths and not staged:
+        return [], 0
+    try:
+        root, targets, _allow = scope_bundle_hook_inputs(
+            scope, apm_package, no_policy=True, logger=None
+        )
+        hooked = set(deployed_bundle_hook_keys(root, targets, paths))
+    except BundleHookTargetsUnresolved:
+        hooked = set()
+    return sorted(hooked | staged), len(paths)

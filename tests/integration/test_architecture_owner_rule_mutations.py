@@ -1443,8 +1443,8 @@ def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) 
     [
         pytest.param(
             "src/apm_cli/core/deployment_ledger.py",
-            "if self._trusted_hash(path, targets, self._write_locator) is not None:",
-            "if self.lockfile_hash_matches(path, self._claims):",
+            "trusted = self._trusted_hash(path, targets, self._write_locator)",
+            "trusted = self.lockfile_hash(path, self._claims)",
             id="lockfile-hash-authorizes",
         ),
         pytest.param(
@@ -1458,6 +1458,18 @@ def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) 
             "skip, adopted = self._check_adopt_or_skip(",
             "skip, adopted = self._adopt_without_evidence(",
             id="writer-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "(gate and gate.authorizes(target_path, rel_path)):",
+            "(gate and gate.authorizes(target_path, rel_path)) or True:",
+            id="unconditional-write",
+        ),
+        pytest.param(
+            "src/apm_cli/core/deployment_ledger.py",
+            "if trusted is not None and compute_file_hash(path) == trusted:",
+            "if trusted is not None:",
+            id="receipt-binding-without-bytes",
         ),
     ],
 )

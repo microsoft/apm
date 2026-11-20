@@ -111,6 +111,12 @@ _ORIGIN_ENTRY_POINTS = (
         "resolve_marketplace_plugin",
     ),
     (
+        "src/apm_cli/marketplace/catalog_origin.py",
+        "_declared_row_keeps_provenance",
+        "require_locked_catalog_origin",
+        "resolve_marketplace_plugin",
+    ),
+    (
         "src/apm_cli/deps/apm_resolver.py",
         "_resolve_marketplace_dep",
         "require_locked_catalog_origin",

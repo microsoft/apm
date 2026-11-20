@@ -51,8 +51,7 @@
   "rows": 17,
   "status": {
    "baseline": 1468,
-   "known-failing": 1,
-   "required": 1022
+   "required": 1023
   }
  },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
@@ -22384,9 +22383,8 @@
    "rules": [
     "U8"
    ],
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e-evidence",
-   "tracking": "#4318",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-17-local-bundle-refusals]"
   },
   "rule|U9|approve-list-read-only": {
@@ -23632,7 +23630,7 @@
   "generated_cover-14-refusals.yaml": "670950509c0f185887feb8e014bced0c85b8b3a9b89ba01d1521b7dcdd3bb763",
   "generated_cover-15-refusals.yaml": "6bfca20083437cf5708ee57a4467837d456a0526dac39ab373a40e0730d17c57",
   "generated_cover-16-source-refusals.yaml": "dabc3fdbb50c3b1dfcf110c5831e492e34dfce99da84fec4d815d9bb0e1bc473",
-  "generated_cover-17-local-bundle-refusals.yaml": "4298a661270a635e1ba043dafe52ba8405605815bbc9e84f055914c86ef58c4b"
+  "generated_cover-17-local-bundle-refusals.yaml": "fa2fb9ff70cb5b3b8caea7de2936bd3884dfcd447fa52b611b5d877b42773d96"
  },
  "rules": {
   "E1": {
@@ -23683,7 +23681,7 @@
   },
   "U3": {
    "evidence": [
-    "src/apm_cli/core/deployment_ledger.py:772"
+    "src/apm_cli/core/deployment_ledger.py:781"
    ],
    "text": "edited is defined relative to a receipt; present with unknown provenance has no lock"
   },
@@ -23722,7 +23720,7 @@
     "src/apm_cli/commands/uninstall/engine.py:701",
     "src/apm_cli/commands/uninstall/engine.py:855",
     "src/apm_cli/commands/uninstall/engine.py:693",
-    "src/apm_cli/commands/update.py:450",
+    "src/apm_cli/commands/update.py:451",
     "src/apm_cli/commands/prune.py:210",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
@@ -23737,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "03a0cffcd93800b64d10a624f3a78295c46af24feb2fb707029e502ab9d1ff08"
+ "sha256": "f7f4b4e1ba835f40cd04459dbc8b53a4b08b98166373a994253dcf4ca8a11c4a"
 }

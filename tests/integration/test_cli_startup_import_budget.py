@@ -67,7 +67,7 @@ def _tree(root: Path) -> dict[str, bytes]:
 _ENTRYPOINT = "import sys; from apm_cli.entrypoint import main; sys.argv[0] = 'apm'; main()"
 
 
-def _imported_modules(args: tuple[str, ...], env: dict) -> set[str]:
+def _assert_startup_imports(args: tuple[str, ...], env: dict) -> set[str]:
     result = subprocess.run(
         [sys.executable, "-X", "importtime", "-c", _ENTRYPOINT, *args],
         capture_output=True,
@@ -119,7 +119,7 @@ def startup_env(tmp_path: Path) -> dict[str, str]:
 def test_installed_cli_startup_stays_within_import_budget(
     startup_env: dict[str, str], args: tuple[str, ...]
 ) -> None:
-    modules = _imported_modules(args, startup_env)
+    modules = _assert_startup_imports(args, startup_env)
 
     assert _forbidden(modules) == [], f"apm {' '.join(args)} imported forbidden modules"
     assert len(modules) <= MODULE_BUDGET, (
@@ -170,8 +170,12 @@ def test_installed_cli_startup_ratio_is_recorded(
         samples = []
         for _ in range(5):
             start = time.perf_counter()
-            subprocess.run(command, capture_output=True, env=startup_env, timeout=120, check=False)
+            result = subprocess.run(
+                command, capture_output=True, env=startup_env, timeout=120, check=False
+            )
             samples.append(time.perf_counter() - start)
+            # A ratio over failing commands measures nothing.
+            assert result.returncode == 0, result.stderr[-2000:]
         return statistics.median(samples)
 
     baseline = median_seconds([python, "-c", "pass"])

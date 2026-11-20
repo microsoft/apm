@@ -105,6 +105,9 @@ _acquire = locking.acquire_lifecycle_lock
 
 
 def _parked_acquire(*args, **kwargs):
+    if os.path.exists({ready!r}):
+        # The holder is parked: this process is the contender reaching the lock.
+        open({started!r}, "w").close()
     handle = _acquire(*args, **kwargs)
     armed = {armed!r}
     try:
@@ -126,8 +129,9 @@ class _Park:
     """Park the holder inside the lifecycle lock until a release file appears.
 
     A one-shot hook parks the first lock holder: the lock acquire itself
-    (engine driver) or ``git remote get-url`` (binary driver). A ``git`` shim
-    marks the contender's start (GitPython's ``git version`` at import).
+    (engine driver) or ``git remote get-url`` (binary driver). The contender's
+    start is its own lock acquire (engine driver) or its first ``git`` call
+    once the holder is parked (binary driver); startup itself spawns no git.
     """
 
     def __init__(self, world) -> None:
@@ -142,8 +146,8 @@ class _Park:
         real = shutil.which("git", path=world.env["PATH"])
         script = (
             "#!/bin/sh\n"
-            # GitPython runs `git version` while apm imports, before the lock.
-            f'if [ "$1" = "version" ] && [ -e "{self.ready}" ]; then : > "{self.started}"; fi\n'
+            # The parked holder runs no git, so any git call now is the contender's.
+            f'if [ -e "{self.ready}" ]; then : > "{self.started}"; fi\n'
         )
         if park_in_git:
             script += (
@@ -167,6 +171,7 @@ class _Park:
                     armed=str(self.armed),
                     ready=str(self.ready),
                     release=str(self.release),
+                    started=str(self.started),
                     timeout=_PARK_TIMEOUT,
                 ),
                 encoding="ascii",
@@ -184,7 +189,7 @@ class _Park:
             time.sleep(0.02)
 
     def wait_contender(self, contender: _Run) -> None:
-        """Wait until the contender is past its imports, then let it reach the lock."""
+        """Wait until the contender reaches the lock, then give it time to finish."""
         deadline = time.monotonic() + _PARK_TIMEOUT
         while not self.started.exists():
             assert contender.thread.is_alive(), f"contender never started: {contender.output()}"

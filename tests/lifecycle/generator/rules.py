@@ -77,10 +77,10 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 1033, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 475, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 485, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 506, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 533, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 490, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 500, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 521, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 548, '"--target"'),
     ),
     "uninstall": (
         Ev("src/apm_cli/commands/uninstall/cli.py", 723, 'argument("packages"'),
@@ -108,9 +108,9 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_APPROVE, 296, 'argument("packages"'),
     ),
     "audit": (
-        Ev("src/apm_cli/commands/audit.py", 1374, 'argument("package"'),
-        Ev("src/apm_cli/commands/audit.py", 1393, '"--dry-run"'),
-        Ev("src/apm_cli/commands/audit.py", 1431, '"--no-policy"'),
+        Ev("src/apm_cli/commands/audit.py", 1398, 'argument("package"'),
+        Ev("src/apm_cli/commands/audit.py", 1417, '"--dry-run"'),
+        Ev("src/apm_cli/commands/audit.py", 1455, '"--no-policy"'),
     ),
     "marketplace": (
         Ev("src/apm_cli/commands/marketplace/__init__.py", 351, "def add(source, name"),
@@ -146,7 +146,7 @@ USER_SCOPE_OPS = frozenset(
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 933, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 498, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 513, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 731, '"--global"'),
     "compile": Ev(_COMPILE, 1391, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 102, '"--global"'),
@@ -154,7 +154,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 171, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 84, "def prune(ctx, dry_run)"),
-    "audit": Ev("src/apm_cli/commands/audit.py", 1495, "def audit("),
+    "audit": Ev("src/apm_cli/commands/audit.py", 1519, "def audit("),
     "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 351, "def add(source, name"),
 }
 
@@ -172,7 +172,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U3": (
         "edited is defined relative to a receipt; present with unknown provenance has no lock",
-        (Ev("src/apm_cli/core/deployment_ledger.py", 772, "class DeploymentLedgerCodec"),),
+        (Ev("src/apm_cli/core/deployment_ledger.py", 781, "class DeploymentLedgerCodec"),),
     ),
     "U4": (
         "a declared target change without a receipt is reachable; only receipt-backed "
@@ -213,7 +213,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/commands/uninstall/engine.py", 701, "is an MCP server, not a package"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 855, "was not found in apm.yml"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 693, "cannot remove local-bundle"),
-            Ev("src/apm_cli/commands/update.py", 450, "No APM dependencies to update"),
+            Ev("src/apm_cli/commands/update.py", 451, "No APM dependencies to update"),
             Ev("src/apm_cli/commands/prune.py", 210, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
@@ -314,15 +314,13 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     UNINSTALL_MCP_REFUSALS["mcp-registry"]: (1, r"was not found in apm\.yml"),
     UNINSTALL_MCP_REFUSALS["inline-mcp"]: (1, r"is an MCP server, not a package"),
     LOCAL_BUNDLE_REFUSALS["uninstall"]: (1, r"is a local bundle\. Bundles installed with"),
-    LOCAL_BUNDLE_REFUSALS["update"]: (0, r"No APM dependencies"),
+    # The update names the bundle it leaves untouched (#4318).
+    LOCAL_BUNDLE_REFUSALS["update"]: (0, r"Local bundle p-exec not updated"),
     LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"Nothing to prune"),
 }
 # Refusal rule cells whose current message is a defect: (tracking issue, a regex
 # the fixed output matches). The cell is known-failing until that output appears.
-RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {
-    # The message says there is nothing to update while a local bundle is installed.
-    LOCAL_BUNDLE_REFUSALS["update"]: ("#4318", r"p-exec"),
-}
+RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {}
 
 # Rule cells: must-cover singletons a rule names on its own.
 RULE_CELLS: Mapping[str, str] = {

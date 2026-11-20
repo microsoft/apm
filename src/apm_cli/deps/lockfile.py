@@ -193,11 +193,7 @@ def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> 
 
 
 def _same_document(current: str | None, serialized: str) -> bool:
-    """Whether the *current* lockfile text holds exactly the data *serialized* would write.
-
-    Only formatting may differ; a legacy layout the writer would migrate is a
-    different document and is rewritten.
-    """
+    """Whether *current* holds the data *serialized* would write; only formatting may differ."""
     from ..utils.yaml_io import load_yaml_str
 
     try:
@@ -1525,6 +1521,10 @@ class LockFile:
             return "3"
         return "2" if self._needs_v2() or self.version_floor != "1" else "1"
 
+    def is_origin_recording_format(self) -> bool:
+        """Whether this lock's version is one only APM 0.37+ writes (#4228)."""
+        return self.lockfile_version == FRAMED_CONTENT_HASH_VERSION
+
     def sync_lockfile_version(self) -> None:
         """Re-derive ``lockfile_version`` from current content.
 
@@ -1836,8 +1836,7 @@ class LockFile:
         from ..core.deployment_ledger import DeploymentLedgerCodec
         from .lockfile_write_authority import has_staged_lockfile, staged_lockfile_text
 
-        staged = has_staged_lockfile(path)
-        if staged is not None:  # a writer scope staged (or removed) this lockfile
+        if (staged := has_staged_lockfile(path)) is not None:  # staged (or removed) by a writer
             lock = cls.from_yaml(staged_lockfile_text(path)) if staged else None
             return DeploymentLedgerCodec.adopt_lockfile_rows(lock, path)
         if not path.exists() and not path.is_symlink():

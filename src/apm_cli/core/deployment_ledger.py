@@ -404,15 +404,24 @@ class DeploymentMaterializationSession:
     ) -> bool:
         """Whether replacing an existing managed file has deployment evidence (#4360).
 
-        This checkout's trusted receipt for the file, or its bytes equal to what
-        the locked versions render. A lockfile hash alone never authorizes it.
+        This checkout's trusted receipt whose bytes the file still holds, or its
+        bytes equal to what the locked versions render. A lockfile hash alone
+        never authorizes it; an unreadable file is never overwritten.
         """
         from apm_cli.integration.cleanup import AUTHORIZED
+        from apm_cli.utils.content_hash import compute_file_hash
 
-        if self._trusted_hash(path, targets, self._write_locator) is not None:
-            return True
+        trusted = self._trusted_hash(path, targets, self._write_locator)
+        try:
+            if trusted is not None and compute_file_hash(path) == trusted:
+                return True
+        except OSError:
+            return False
         evidence = self.render_evidence
-        return evidence is not None and evidence.verdict(claim, path) == AUTHORIZED
+        return (
+            evidence is not None
+            and evidence.render_verdict(claim, path, rendered_as=None) == AUTHORIZED
+        )
 
     def _trusted_hash(
         self,
