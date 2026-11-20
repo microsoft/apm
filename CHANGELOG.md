@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A refreshed org policy that fails validation no longer drops a valid cached policy: install and `apm audit --ci` keep applying the cached policy, as for an unreachable policy host. (#4476)
+- A refreshed org policy that fails validation no longer drops a valid cached policy: install and `apm audit --ci` keep applying the cached policy, as for an unreachable policy host. (#4476, #4481)
 - Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
 - `apm audit --ci` and `apm install --frozen` advice for edited files says what install does per file kind; `apm install` warns before overwriting edits. (closes #4090, #4143)
 - `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)
