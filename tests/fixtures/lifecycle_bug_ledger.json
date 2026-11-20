@@ -608,6 +608,16 @@
       ]
     },
     {
+      "issue": 4179,
+      "fixed_in": "0.37.0",
+      "summary": "apm install --mcp under policy.fetch_failure_default: block exited 1 with only 'Error installing dependencies: 1' because the policy refusal was dropped and its exit code re-framed as an error; it now prints the refusal reason, and the --no-policy way out it names works.",
+      "failure_modes": ["outcome", "observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_policy_block_reason_lifecycle.py::test_blocked_mcp_install_prints_the_reason"
+      ]
+    },
+    {
       "issue": 4182,
       "fixed_in": "0.37.0",
       "summary": "A command frontmatter key the target format cannot carry (for example mode: for Claude commands) printed a [!] warning on every install and install --frozen although nothing was wrong; it is now a verbose note.",

@@ -169,9 +169,12 @@ def run_mcp_policy_preflight(
                 effective_target=target_decision.canonical_targets,
                 effective_target_source=target_decision.source,
             )
-    except PolicyBlockError:
+    except PolicyBlockError as exc:
+        # The exception carries the reason (#4179); render it once, then exit
+        # without the outer handler re-framing the exit code as an error.
+        logger.refusal(str(exc))
         logger.render_summary()
-        raise click.exceptions.Exit(1) from None
+        raise InstallFailureAlreadyRendered(str(exc)) from None
 
 
 def run_mcp_install(  # noqa: PLR0913
