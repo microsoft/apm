@@ -20,7 +20,7 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.promise("P-OWN-credential-value-rendering"),
+    pytest.mark.promise("P-OWN-credential-value-rendering", "P-LAW-auth.credentials_isolated"),
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
 ]

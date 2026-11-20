@@ -33,7 +33,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
-    pytest.mark.promise("P-OWN-executable-trust-fingerprint"),
+    pytest.mark.promise("P-OWN-executable-trust-fingerprint", "P-INV-I3"),
 ]
 
 _PACKAGE = "../hooky"

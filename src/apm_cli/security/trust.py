@@ -460,13 +460,38 @@ def hook_file_filter(
     return HookFileAdmission(ctx, package_keys, package_path)
 
 
-def parked_hook_message(package: str, item: str, reason: str) -> str:
+def _shell_argument(argument: str) -> str:
+    """One shell word for a package identity; options such as ``--pending`` pass through."""
+    import shlex
+
+    return argument if argument.startswith("-") else shlex.quote(argument)
+
+
+def approve_command(argument: str, *, user_scope: bool = False, user_store: bool = False) -> str:
+    """Return the ``apm approve`` command that clears a parked executable.
+
+    Remediation catalog ids ``executables-unapproved`` (project) and
+    ``executables-unapproved-user-scope`` (``-g``): a package installed with
+    ``apm install -g`` is approved with ``apm approve -g`` (#4154). ``-g``
+    selects the installation; ``--user`` (*user_store*) only the store.
+    """
+    flags = ("-g " if user_scope else "") + ("--user " if user_store else "")
+    return f"apm approve {flags}{_shell_argument(argument)}"
+
+
+def explain_command(package: str, *, user_scope: bool = False) -> str:
+    """Return the ``apm policy explain`` command for a parked package's scope."""
+    flag = "-g " if user_scope else ""
+    return f"apm policy explain {flag}{_shell_argument(package)}"
+
+
+def parked_hook_message(package: str, item: str, reason: str, *, user_scope: bool = False) -> str:
     """Return the warning for one pinned hook file the trust owner parked."""
     if reason == REASON_DENIED:
         # apm approve cannot clear a deny; point at the deciding layer instead.
         return (
             f"Parked hook file '{item}' ({package}): denied\n"
-            f"    Explain: apm policy explain {package}"
+            f"    Explain: {explain_command(package, user_scope=user_scope)}"
         )
     why = (
         "definition changed since approval"
@@ -475,7 +500,8 @@ def parked_hook_message(package: str, item: str, reason: str) -> str:
     )
     return (
         f"Parked hook file '{item}' ({package}): {why}\n"
-        f"    Review: apm approve --pending  |  Re-approve: apm approve {package}"
+        f"    Review: {approve_command('--pending', user_scope=user_scope)}  |  "
+        f"Re-approve: {approve_command(package, user_scope=user_scope)}"
     )
 
 
@@ -763,17 +789,9 @@ def native_declaration(declaration: Any, plugin_root: Path) -> Any:
 
 
 def parked_plugin_message(
-    package: str, reason: str, detail: str | None = None, *, approve_cwd: Path | None = None
+    package: str, reason: str, detail: str | None = None, *, user_scope: bool = False
 ) -> str:
-    """Return the warning for a native plugin the trust owner parked.
-
-    *approve_cwd* is the directory whose ``apm.yml`` ``apm approve`` must
-    update (``APM_HOME`` for a user-scope plugin); the hint then works from
-    any working directory.
-    """
-    approve = "apm approve"
-    if approve_cwd is not None:
-        approve = f"cd {_display_dir(approve_cwd)} && apm approve"
+    """Return the warning for a native plugin the trust owner parked."""
     if reason == REASON_APM_REFERENCE:
         return (
             f"Parked native plugin {package}: {detail or 'an executable references .apm/'}; "
@@ -781,12 +799,16 @@ def parked_plugin_message(
             "    Ask the publisher to move them out of .apm/ and apm.yml"
         )
     if reason == REASON_DENIED:
-        return f"Parked native plugin {package}: denied\n    Explain: apm policy explain {package}"
+        return (
+            f"Parked native plugin {package}: denied\n"
+            f"    Explain: {explain_command(package, user_scope=user_scope)}"
+        )
     if reason == REASON_UNTRUSTED_TRANSITIVE:
         return (
             f"Parked native plugin {package}: a transitive plugin with MCP servers needs "
             "a pinned approval; 'mcp: true' is not enough\n"
-            f"    Pin: {approve} {package}  |  This run only: --trust-transitive-mcp"
+            f"    Pin: {approve_command(package, user_scope=user_scope)}  |  "
+            "This run only: --trust-transitive-mcp"
         )
     why = (
         "content changed since approval" if reason == REASON_DEFINITION_CHANGED else "not approved"
@@ -795,17 +817,9 @@ def parked_plugin_message(
         why = f"not approved (missing grant: {detail})"
     return (
         f"Parked native plugin {package}: {why}\n"
-        f"    Review: {approve} --pending  |  Re-approve: {approve} {package}"
+        f"    Review: {approve_command('--pending', user_scope=user_scope)}  |  "
+        f"Re-approve: {approve_command(package, user_scope=user_scope)}"
     )
-
-
-def _display_dir(path: Path) -> str:
-    """*path* with the home directory shown as ``~``."""
-    try:
-        relative = Path(path).relative_to(Path.home()).as_posix()
-    except ValueError:
-        return str(path)
-    return "~" if relative == "." else f"~/{relative}"
 
 
 def hooks_package_admissible(
@@ -1435,6 +1449,21 @@ def native_plugin_pin(plugin_root: Path) -> PinnedItem:
         )
     except (OSError, ValueError) as exc:
         return PinnedItem(PLUGIN_GRANT_KEY, PLUGIN_ITEM, None, summary, str(exc))
+
+
+def approval_scan_dir(source_dir: Path, installed_dir: Path) -> Path:
+    """Return the directory ``apm approve`` scans for a local dependency.
+
+    A local dependency is the consumer's own source, so approve reads it
+    there. A native plugin has no ``apm.yml`` at its source; install gates the
+    normalized copy whose synthesized manifest carries the plugin's MCP
+    servers, so approve reads that same copy (#4154).
+    """
+    from apm_cli.core.scope import manifest_file
+
+    if not manifest_file(source_dir).is_file() and manifest_file(installed_dir).is_file():
+        return installed_dir
+    return source_dir
 
 
 def installed_content_matches_lock(locked_dependency: Any, package_dir: Path) -> bool:

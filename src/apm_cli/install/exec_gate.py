@@ -626,14 +626,16 @@ def executable_skip_reason(
     a denied type points to ``apm policy explain`` because approving cannot
     lift a deny. Any other skip is approvable.
     """
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.security.trust import approve_command, explain_command
+
+    user_scope = is_user_scope(getattr(ctx, "scope", None))
     denied = getattr(ctx, "package_denied_exec_types", None) or {}
     if exec_type in denied.get(package_name, frozenset()):
-        return (
-            f"{kind} skipped (denied). Run 'apm policy explain {label}' to see which deny applies."
-        )
-    return (
-        f"{kind} skipped (not approved in executables.allow). Run 'apm approve {label}' to approve."
-    )
+        explain = explain_command(label, user_scope=user_scope)
+        return f"{kind} skipped (denied). Run '{explain}' to see which deny applies."
+    approve = approve_command(label, user_scope=user_scope)
+    return f"{kind} skipped (not approved in executables.allow). Run '{approve}' to approve."
 
 
 def log_bin_status(
