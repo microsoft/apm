@@ -12,7 +12,7 @@ world:
     - "apm init -y --target copilot,claude"
     - apm install acme/release-kit#v1.1.0
     - apm install acme/live-kit#main
-    - sed -i /acme.live-kit/d apm.yml
+    - "python -c \"from pathlib import Path as P; m = P('apm.yml'); m.write_text(''.join(l for l in m.read_text().splitlines(True) if 'acme/live-kit' not in l))\""
 steps:
   - n: 1
     run: [apm uninstall acme/release-kit]
