@@ -80,6 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP passthrough-key warnings print once per server per command instead of once per manifest parse. (closes #4242, #4405)
 - The MCP registry lookup progress line names the registry it queries. (closes #4244, #4405)
 - `apm install --frozen` prints the direct-dependency MCP trust notice once per server. (closes #4256, #4405)
+- Output escapes a non-ASCII package or project path to printable ASCII (`\xfc`) instead of echoing it raw, so cp1252 terminals never crash. (#4425)
+- `apm uninstall` of a package declared more than once prints each removal line once and no longer warns about the copy it just removed. (#4425)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - Registry transport errors render operating-system error text in printable ASCII, so a TLS failure on macOS no longer prints curly quotes. (#4369)

@@ -167,6 +167,18 @@ def _dependency_public_label(dep_entry: object) -> str:
     return dependency.get_identity()
 
 
+def _progress_once(logger, printed: set[str], message: str, **kwargs) -> None:
+    """Print a removal line once per run (#4331).
+
+    Two declarations of one package share a public label, so their removal
+    lines are identical; each distinct line prints once.
+    """
+    if message in printed:
+        return
+    printed.add(message)
+    logger.progress(message, **kwargs)
+
+
 def _is_private_local_identity(value: str) -> bool:
     """Return whether a diagnostic identity can expose a declared local path."""
     return value.startswith(("local:", "_local/")) or DependencyReference.is_local_path(value)
@@ -771,6 +783,7 @@ def _validate_uninstall_packages(
 
     packages_to_remove = []
     seen_entry_ids: set[int] = set()
+    printed: set[str] = set()
     packages_not_found = []
 
     for package in packages:
@@ -823,12 +836,16 @@ def _validate_uninstall_packages(
             if not log_matches:
                 continue
             if canonical_for_match != display_label:
-                logger.progress(
+                _progress_once(
+                    logger,
+                    printed,
                     f"{display_label} - found in apm.yml (as {canonical_for_match})",
                     symbol="check",
                 )
             else:
-                logger.progress(
+                _progress_once(
+                    logger,
+                    printed,
                     f"{_dependency_public_label(matched_dep)} - found in apm.yml",
                     symbol="check",
                 )
@@ -997,9 +1014,10 @@ def _dry_run_uninstall(
 
         lockfile = LockFile.read(get_lockfile_path(Path(".")))
     logger.progress(f"Dry run: Would remove {len(packages_to_remove)} package(s):")
+    printed: set[str] = set()
     for pkg in packages_to_remove:
         package_label = _dependency_public_label(pkg)
-        logger.progress(f"  - {package_label} from apm.yml")
+        _progress_once(logger, printed, f"  - {package_label} from apm.yml")
         try:
             dep_ref = _parse_dependency_entry(_removal_target(pkg, lockfile))
             package_path = dep_ref.get_install_path(apm_modules_dir)
@@ -1013,12 +1031,14 @@ def _dry_run_uninstall(
                 apm_modules_dir,
             )
             if shared_survivors:
-                logger.progress(
+                _progress_once(
+                    logger,
+                    printed,
                     f"  - refresh {package_label} in apm_modules/ for "
-                    f"{len(shared_survivors)} surviving declaration(s)"
+                    f"{len(shared_survivors)} surviving declaration(s)",
                 )
             else:
-                logger.progress(f"  - {package_label} from apm_modules/")
+                _progress_once(logger, printed, f"  - {package_label} from apm_modules/")
 
     if lockfile:
         # Resolved-by repairs are intentionally discarded: --dry-run's preview
@@ -1087,6 +1107,9 @@ def _remove_packages_from_disk(
                 )
                 continue
 
+            if package_path in deleted_pkg_paths:
+                # Another declaration of the same package already removed it (#4331).
+                continue
             if package_path.exists():
                 try:
                     safe_rmtree(package_path, apm_modules_dir)

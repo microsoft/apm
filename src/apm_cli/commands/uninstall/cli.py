@@ -37,6 +37,7 @@ from .engine import (
     _dependency_public_label,
     _dry_run_uninstall,
     _preflight_uninstall_survivors,
+    _progress_once,
     _project_transitive_orphans,
     _remove_packages_from_disk,
     _removed_lock_key,
@@ -1090,6 +1091,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):  # noqa: PLR0915
             return
 
         # Step 4: Remove from apm.yml
+        printed: builtins.set[str] = builtins.set()
         for section, declarations in (
             ("dependencies.apm", prod_deps),
             ("devDependencies.apm", dev_deps),
@@ -1097,7 +1099,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_):  # noqa: PLR0915
             for declaration in manifest_declarations_of(declarations, packages_to_remove):
                 declarations.remove(declaration)
                 package_label = _dependency_public_label(declaration)
-                logger.progress(f"Removed {package_label} from {section} in apm.yml")
+                _progress_once(
+                    logger, printed, f"Removed {package_label} from {section} in apm.yml"
+                )
         data["dependencies"]["apm"] = prod_deps
         data["devDependencies"]["apm"] = dev_deps
         # Drop empty devDependencies wrappers so the manifest stays clean

@@ -154,7 +154,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 171, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 84, "def prune(ctx, dry_run)"),
-    "audit": Ev("src/apm_cli/commands/audit.py", 1519, "def audit("),
+    "audit": Ev("src/apm_cli/commands/audit.py", 1525, "def audit("),
     "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 351, "def add(source, name"),
 }
 
@@ -210,9 +210,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev(_INSTALL, 987, '"--url"'),
             Ev("src/apm_cli/models/dependency/reference.py", 860, '"registry" in entry'),
             Ev("src/apm_cli/marketplace/registration.py", 45, "No marketplace.json found"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 701, "is an MCP server, not a package"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 855, "was not found in apm.yml"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 693, "cannot remove local-bundle"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 731, "is an MCP server, not a package"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 895, "was not found in apm.yml"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 723, "cannot remove local-bundle"),
             Ev("src/apm_cli/commands/update.py", 451, "No APM dependencies to update"),
             Ev("src/apm_cli/commands/prune.py", 210, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
@@ -227,8 +227,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 678, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 679, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 680, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 681, "InstallScope.USER"),
             Ev("src/apm_cli/install/exec_gate.py", 682, 'target.name == "claude"'),
         ),
     ),
