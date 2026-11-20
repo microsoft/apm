@@ -54,6 +54,10 @@ KNOWN_LARGE_MODULES = {
     # Root-only hook replay (#3600), native Claude cache verification (#3290)
     # and local bundle hash drift through the deployed-hash verifier (#3989).
     "drift.py": 1041,
+    # The resolver and the integration phase take their frozen answers from
+    # InstallService, the only frozen-flag reader (#4012).
+    "phases/resolve.py": 1001,
+    "pipeline.py": 1001,
 }
 
 

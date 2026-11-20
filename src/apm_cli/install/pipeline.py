@@ -139,9 +139,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
             contextlib.nullcontext()
             if ctx.lockfile_only
             else ctx.integrators["skill"].ownership_snapshot(
-                replay_lockfile=(
-                    ctx.existing_lockfile if InstallService.frozen_disposition(ctx).replay else None
-                ),
+                replay_lockfile=InstallService.frozen_replay_lockfile(ctx),
                 materialization_session=session,
             )
         ):

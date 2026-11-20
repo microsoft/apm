@@ -104,6 +104,12 @@ class InstallService:
         return FrozenDisposition(replay=source.frozen is True)
 
     @staticmethod
+    def frozen_replay_lockfile(source: Any) -> LockFile | None:
+        """The recorded lockfile a frozen replay deploys against; None otherwise."""
+        frozen = InstallService.frozen_disposition(source)
+        return source.existing_lockfile if frozen.replay else None
+
+    @staticmethod
     def frozen_writes(frozen: bool) -> AbstractContextManager[list[str] | None]:
         """Protect the complete caller lifetime with the canonical write chokepoint."""
         from apm_cli.deps.lockfile import suppress_lockfile_writes

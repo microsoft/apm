@@ -51,13 +51,10 @@ def run(ctx: InstallContext) -> None:
     """
     from apm_cli.install.service import InstallService
 
+    frozen_disposition = InstallService.frozen_disposition(ctx)
     receipt_retirements: list[Path] = []
     try:
-        _run_cleanup(
-            ctx,
-            receipt_retirements,
-            frozen_disposition=InstallService.frozen_disposition(ctx),
-        )
+        _run_cleanup(ctx, receipt_retirements, frozen_disposition=frozen_disposition)
     finally:
         DeploymentMaterializationSession.retire_removed(
             ctx.project_root,

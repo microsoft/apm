@@ -655,6 +655,7 @@ def test_skill_receipt_scope_does_not_restrict_install_target_contraction(
         DeploymentLedger({row.locator.key: row for row in (codex, historical)}), existing
     )
     ctx = SimpleNamespace(
+        frozen=False,
         existing_lockfile=existing,
         package_deployed_files={_OWNER: [claude_marker]},
         package_completed_reintegrations={
