@@ -123,6 +123,27 @@ def _validate_primitive_coverage():
 
 
 @pytest.fixture(autouse=True)
+def _restore_executable_caches():
+    """Restore the process-wide git/gh executable caches after each test.
+
+    A test that patches ``shutil.which`` while git resolves would otherwise
+    cache a wrong path for every later test on the same worker. Restoring
+    the pre-test value (rather than clearing it) undoes that leak without
+    changing what any test observes at its start.
+    """
+    from apm_cli.utils import git_env
+
+    if git_env._git_executable is None:
+        # Start every test from the real, resolved git, so a test that clears
+        # PATH sees the same warm cache whatever ran before it on the worker.
+        with contextlib.suppress(FileNotFoundError):
+            git_env.get_git_executable()
+    saved = (git_env._git_executable, git_env._gh_executable)
+    yield
+    git_env._git_executable, git_env._gh_executable = saved
+
+
+@pytest.fixture(autouse=True)
 def _isolate_discovery_state():
     """Clear process-scoped discovery cache + perf counters between tests.
 
