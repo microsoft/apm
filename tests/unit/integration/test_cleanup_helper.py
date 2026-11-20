@@ -333,11 +333,13 @@ def test_orphan_loop_uses_manifest_intent_not_integration_outcome():
 
     from apm_cli.install.phases import cleanup as cleanup_mod
 
-    # The orphan block asks the owner; the owner input it builds is the guard.
-    src = inspect.getsource(cleanup_mod._orphan_decision)
+    # The orphan block asks the owner with the intent _run_cleanup builds.
+    owner_call = inspect.getsource(cleanup_mod._orphan_decision)
+    assert "intended=desired_owners" in owner_call
+    src = inspect.getsource(cleanup_mod._run_cleanup)
     code_only = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
     # Must consult manifest intent.
-    assert "intended_dep_keys" in code_only, (
+    assert "frozenset(intended_dep_keys" in code_only, (
         "Orphan loop must use intended_dep_keys (manifest intent). "
         "Using package_deployed_files.keys() (integration outcome) re-introduces "
         "silent deletion of files for still-declared packages on transient errors."
