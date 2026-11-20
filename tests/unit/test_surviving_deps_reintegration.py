@@ -737,9 +737,9 @@ def test_uninstall_reports_survivor_hook_refusal_as_incomplete(tmp_path: Path) -
     assert error is refusal
     assert outcome.counts == {"hooks": 0}
     assert call(str(refusal)) in logger.warning.call_args_list
-    assert call("Migrate the package above, then run 'apm install' to resync.") in (
-        logger.warning.call_args_list
-    )
+    assert call(
+        "Migrate the package above, then run 'apm install' to resync the remaining integrations."
+    ) in (logger.warning.call_args_list)
 
 
 def test_uninstall_reports_org_policy_block_with_next_step(tmp_path: Path) -> None:
@@ -768,6 +768,6 @@ def test_uninstall_reports_org_policy_block_with_next_step(tmp_path: Path) -> No
 
     assert error is refusal
     assert call(str(refusal)) in logger.warning.call_args_list
-    assert call("Resolve the org policy issue above, then run 'apm install' to resync.") in (
-        logger.warning.call_args_list
-    )
+    assert call(
+        "Resolve the org policy issue above, then run 'apm install' to resync the remaining integrations."
+    ) in (logger.warning.call_args_list)

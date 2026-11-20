@@ -319,7 +319,7 @@ def test_mcp_cleanup_failure_preserves_lock_and_live_config(
     output = " ".join(result.output.split())
     assert "MCP cleanup failed" in result.output
     assert "apm install" in output
-    assert "lock ownership was retained" in output
+    assert "Lock ownership was retained" in output
     assert lock_path.read_bytes() == lock_before
     assert config_path.read_bytes() == config_before
 

@@ -18,6 +18,7 @@ from click.testing import CliRunner
 
 import apm_cli.commands.self_update as update_module
 from apm_cli.cli import cli
+from apm_cli.core.remediation import CLI_INSTALLER_UNREACHABLE
 
 
 class TestInstallerUrlAirGap:
@@ -326,7 +327,7 @@ class TestInstallerUrlAirGap:
             ):
                 command = update_module._get_manual_update_command()
 
-        assert command == "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
+        assert command == CLI_INSTALLER_UNREACHABLE.sentence()
         assert "APM_INSTALLER_BASE_URL/" not in command
 
     def test_manual_command_no_direct_fallback_unix_uses_env_reference(self) -> None:
@@ -340,7 +341,7 @@ class TestInstallerUrlAirGap:
             ):
                 command = update_module._get_manual_update_command()
 
-        assert command == "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
+        assert command == CLI_INSTALLER_UNREACHABLE.sentence()
 
     def test_manual_command_no_direct_fallback_windows_uses_env_reference(self) -> None:
         """Fail-closed manual Windows guidance should reference the mirror env var."""
@@ -353,7 +354,7 @@ class TestInstallerUrlAirGap:
             ):
                 command = update_module._get_manual_update_command()
 
-        assert command == "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
+        assert command == CLI_INSTALLER_UNREACHABLE.sentence()
 
     def test_manual_command_mirror_base_does_not_print_credentials(self) -> None:
         """Manual guidance should not echo credentials embedded in mirror URLs."""

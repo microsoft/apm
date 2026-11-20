@@ -140,7 +140,10 @@ def test_prune_resync_warning_hides_exception_class_name(
 
     warning = next(msg for method, msg, _kw in logger.calls if method == "warning")
     assert "CopilotSettingsCollisionError" not in warning
-    assert "Re-run 'apm install' to re-register once resolved." in warning
+    assert (
+        "Resolve the cause above, then run 'apm install' to re-register the GitHub Copilot plugins."
+        in warning
+    )
 
 
 def test_uninstall_resync_warning_hides_exception_class_name(
@@ -166,4 +169,7 @@ def test_uninstall_resync_warning_hides_exception_class_name(
 
     warning = next(msg for method, msg, _kw in logger.calls if method == "warning")
     assert "CopilotSettingsCollisionError" not in warning
-    assert "Re-run 'apm install' to re-register once resolved." in warning
+    assert (
+        "Resolve the cause above, then run 'apm install' to re-register the GitHub Copilot plugins."
+        in warning
+    )

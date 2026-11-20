@@ -1246,13 +1246,17 @@ def search(expression, limit, verbose):
         from ...marketplace.registry import get_marketplace_by_name
 
         if "@" not in expression:
-            logger.error(f"Invalid format: '{expression}'. {MARKETPLACE_SEARCH_FORMAT.sentence()}")
+            logger.error(
+                f"Invalid format: '{expression}'. {MARKETPLACE_SEARCH_FORMAT.sentence()} "
+                "For example: apm search security@skills"
+            )
             sys.exit(1)
 
         query, marketplace_name = expression.rsplit("@", 1)
         if not query or not marketplace_name:
             logger.error(
-                f"Both QUERY and MARKETPLACE are required. {MARKETPLACE_SEARCH_FORMAT.sentence()}"
+                f"Both QUERY and MARKETPLACE are required. {MARKETPLACE_SEARCH_FORMAT.sentence()} "
+                "For example: apm search security@skills"
             )
             sys.exit(1)
 
