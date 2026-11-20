@@ -26,6 +26,23 @@ def destination_tree_lines(phrase: str, paths: list[str], verbose: bool) -> list
     return [f"  |-- {phrase} -> {suffix}"]
 
 
+def destination_folders(records: list[str], targets: Any) -> list[str]:
+    """Return the primitive folders (``.github/agents/``) holding *records*, in order.
+
+    A record outside every target primitive folder is named by its parent.
+    """
+    roots = [
+        f"{mapping.deploy_root or target.root_dir}/{mapping.subdir}/".replace("//", "/")
+        for target in targets
+        for mapping in (target.primitives or {}).values()
+    ]
+    folders: list[str] = []
+    for record in records:
+        owner = max((root for root in roots if record.startswith(root)), key=len, default=None)
+        folders.append(owner or f"{record.rsplit('/', 1)[0]}/")
+    return list(dict.fromkeys(folders))
+
+
 def deployed_path_entry(
     target_path: Path,
     project_root: Path,
