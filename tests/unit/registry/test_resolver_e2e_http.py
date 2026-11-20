@@ -303,6 +303,7 @@ class TestE2EAuthHeader:
             resolver.download_package(_make_dep(), tmp_path / "x")
         assert "Authorization" not in seen_headers["versions"]
         assert "Authorization" not in seen_headers["download"]
+        assert (tmp_path / "x" / "apm.yml").is_file()
 
     def test_anonymous_when_no_env(self, tmp_path, monkeypatch):
         monkeypatch.delenv("APM_REGISTRY_TOKEN_CORP", raising=False)
@@ -330,3 +331,4 @@ class TestE2EAuthHeader:
             resolver = RegistryPackageResolver({"corp": base})
             resolver.download_package(_make_dep(), tmp_path / "x")
         assert "Authorization" not in seen_headers["versions"]
+        assert (tmp_path / "x" / "apm.yml").is_file()
