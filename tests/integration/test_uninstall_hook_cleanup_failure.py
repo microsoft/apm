@@ -9,7 +9,6 @@ from click.testing import CliRunner, Result
 from apm_cli.commands.uninstall.cli import uninstall
 from apm_cli.core.deployment_ledger import (
     DeploymentLedgerCodec,
-    DeploymentMaterializationSession,
 )
 from apm_cli.core.deployment_state import (
     DeploymentLedger,
@@ -17,11 +16,10 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
-from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml
+from tests.utils.deployment_evidence import seed_receipts
 
 pytestmark = pytest.mark.component
 
@@ -73,11 +71,7 @@ def _prepare_hook_install(
         deployment_ledger=DeploymentLedger(records={locator.key: record}),
         _deployments_present=True,
     ).write(tmp_path / "apm.lock.yaml")
-    session = DeploymentMaterializationSession(tmp_path, InstallScope.PROJECT, None)
-    session.record(
-        {hook_file: compute_file_hash(hook_file)}, [KNOWN_TARGETS["copilot"]], dependency_key
-    )
-    session.flush()
+    seed_receipts(tmp_path, [hook_file], target="copilot", owner=dependency_key)
     monkeypatch.setattr("apm_cli.integration.cleanup._render_locked", lambda *_a, **_k: None)
     return package, hook_file
 
