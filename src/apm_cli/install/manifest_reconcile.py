@@ -726,7 +726,15 @@ def dropped_target_files(
         *(path for dep in lockfile.dependencies.values() for path in dep.deployed_files),
         *lockfile.local_deployed_files,
     ]
-    return {path: name for path in recorded if (name := classify(path)) is not None}
+    dropped = {path: name for path in recorded if (name := classify(path)) is not None}
+    # A target apm.yml declared when the lock was written and no longer does is
+    # dropped; one only an explicit --target deployed is precedence (#4517).
+    # Without a recorded declaration (an older lock), every undeclared target counts.
+    if lockfile.manifest_targets:
+        dropped = {
+            path: name for path, name in dropped.items() if name in lockfile.manifest_targets
+        }
+    return dropped
 
 
 def reconcile_target_deployed_files(

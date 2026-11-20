@@ -87,4 +87,40 @@ def test_bundle_install_explicit_target_still_wins(tmp_path: Path, apm_binary_pa
     assert (project / ".github/agents/rev.agent.md").is_file()
     assert not (project / ".claude").exists()
     assert not (project / ".cursor").exists()
+    # An explicit --target over an unchanged apm.yml is precedence: audit and
+    # --frozen agree it is not a dropped target (#4517).
     world.audit_clean()
+    lock = lock_bytes(project)
+    tree = tree_digest(project)
+    world.apm("install", "--frozen", NO_POLICY)
+    assert lock_bytes(project) == lock
+    assert tree_digest(project) == tree
+
+
+def test_dropping_a_declared_target_after_an_explicit_target_install_is_refused(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Precedence never hides a real drop: apm.yml stops declaring a target it declared."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    artifact = _packed_bundle(world, tmp_path, archive=False)
+    project = world.project
+    write(project / "apm.yml", "name: proj\nversion: 1.0.0\ntargets: [claude, cursor]\n")
+    world.apm("install", str(artifact), NO_POLICY)
+    world.apm("install", str(artifact), "--target", "copilot", NO_POLICY)
+    assert (project / ".claude/rules/glob.md").is_file()
+    assert (project / ".github/agents/rev.agent.md").is_file()
+
+    write(project / "apm.yml", "name: proj\nversion: 1.0.0\ntargets: [cursor]\n")
+    lock = lock_bytes(project)
+    tree = tree_digest(project)
+
+    audit = world.apm("audit", "--ci", NO_POLICY, expect=1)
+    text = " ".join((audit.stdout + audit.stderr).split())
+    assert "lockfile-targets-current" in text and "claude" in text, text
+    frozen = world.apm("install", "--frozen", NO_POLICY, expect=1)
+    text = " ".join((frozen.stdout + frozen.stderr).split())
+    assert "apm.yml no longer declares target(s) claude" in text, text
+    assert "copilot" not in text.split("apm.yml no longer declares target(s)")[1][:40], text
+    # A refused frozen install writes nothing.
+    assert lock_bytes(project) == lock
+    assert tree_digest(project) == tree

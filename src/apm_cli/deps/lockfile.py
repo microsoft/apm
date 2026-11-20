@@ -159,6 +159,21 @@ def suppress_lockfile_writes() -> Iterator[list[str]]:
         _suppressed_writes.reset(token)
 
 
+def _declared_target_names(root: Path, *, user_scope: bool) -> list[str] | None:
+    """Targets the apm.yml beside a lockfile declares ([] for auto-detect).
+
+    ``None`` when no manifest sits beside it (a scratch snapshot).
+    """
+    from apm_cli.core.scope import manifest_file
+
+    if not manifest_file(root).is_file():
+        return None
+    from apm_cli.install.manifest_reconcile import declared_target_profiles
+
+    profiles = declared_target_profiles(root, user_scope=user_scope)
+    return sorted({profile.name for profile in profiles}) if profiles else []
+
+
 def installed_apm_version() -> str:
     """Return the running APM version stamped into lockfile metadata.
 
@@ -1151,6 +1166,10 @@ class LockFile:
     lockfile_version: str = "1"
     generated_at: str | None = None
     apm_version: str | None = None
+    # Targets apm.yml declared when this lock was written ([] = auto-detect;
+    # None = not recorded). An explicit --target is precedence, not a
+    # declaration, so only a change here is a dropped target (#4517).
+    manifest_targets: list[str] | None = None
     dependencies: dict[str, LockedDependency] = field(default_factory=dict)
     mcp_servers: list[str] = field(default_factory=list)
     mcp_configs: dict[str, dict] = field(default_factory=dict)
@@ -1489,6 +1508,8 @@ class LockFile:
                 data["generated_at"] = self.generated_at
             if self.apm_version:
                 data["apm_version"] = self.apm_version
+            if self.manifest_targets is not None:
+                data["manifest_targets"] = sorted(self.manifest_targets)
             data["dependencies"] = [dep.to_dict() for dep in self.get_all_dependencies()]
             data["deployments"] = DeploymentLedgerCodec.persisted_rows(self, user_scope=user_scope)
             if self.mcp_servers:
@@ -1604,6 +1625,10 @@ class LockFile:
             framed_content_hashes=data.get("lockfile_version") == FRAMED_CONTENT_HASH_VERSION,
         )
         lock._apm_version_null = "apm_version" in data and data["apm_version"] is None
+        recorded_targets = data.get("manifest_targets")
+        lock.manifest_targets = (
+            [str(name) for name in recorded_targets] if isinstance(recorded_targets, list) else None
+        )
         lock._extensions = vendor_extensions(data)
         for dep_data in data.get("dependencies", []):
             lock.add_dependency(LockedDependency.from_dict(dep_data))
@@ -1730,6 +1755,13 @@ class LockFile:
             self.sync_lockfile_version()
         user_scope = DeploymentLedgerCodec.prepare_lockfile_write(self, existing, path)
         unchanged = existing is not None and self.is_semantically_equivalent(existing)
+        # A no-op keeps the recorded declaration; any other write records the
+        # targets the sibling apm.yml declares now (#4517).
+        self.manifest_targets = (
+            existing.manifest_targets
+            if unchanged
+            else _declared_target_names(path.parent, user_scope=user_scope)
+        )
         if existing is not None and existing.generated_at is not None:
             if unchanged:
                 self.generated_at = existing.generated_at
