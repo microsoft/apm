@@ -745,11 +745,8 @@ def _resolve_dependencies(
                 chain_hint = f" (via {parent_chain})" if parent_chain else ""
                 fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
             fail_msg = _with_preserved_install_hint(fail_msg, install_path)
-            if is_direct:
-                fail_msg += not_found_next_step(e, dep_ref)
+            fail_msg += not_found_next_step(e, dep_ref, is_direct=is_direct)
 
-            # Printed once by the deferred summary (#4199); one critical
-            # section so concurrent failures don't interleave (F7, #1116).
             with callback_lock:
                 callback_failures.add(dep_key)
                 transitive_failures.append((dep_display, fail_msg))

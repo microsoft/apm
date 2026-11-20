@@ -36,8 +36,8 @@ def inaccessible_package_reason(dep_ref, package: str, auth_resolver, verbose: b
     return f"{reason}. Run 'apm install --verbose {package}' to see each probe and credential."
 
 
-def not_found_next_step(error: BaseException, dep_ref) -> str:
+def not_found_next_step(error: BaseException, dep_ref, *, is_direct: bool) -> str:
     """Return the next step for a direct dependency whose repository is missing."""
-    if not reports_repository_not_found(error):
+    if not is_direct or not reports_repository_not_found(error):
         return ""
     return f" Run 'apm uninstall {dep_ref.get_identity()}' to remove it from apm.yml."

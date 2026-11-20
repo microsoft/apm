@@ -4,15 +4,23 @@
     "issue": 4174,
     "fixed_in": "Unreleased",
     "summary": "An install of an inaccessible repository on a configured host did not name the credential source tried, and its advice ('run with --verbose') was not a runnable command and its verbose form named no source.",
-    "failure_modes": ["auth", "observation"],
-    "properties": ["outcome.status_matches_state", "auth.credentials_isolated", "transaction.failed_command_preserves_state"],
+    "failure_modes": [
+      "auth",
+      "observation"
+    ],
+    "properties": [
+      "outcome.status_matches_state",
+      "auth.credentials_isolated",
+      "transaction.failed_command_preserves_state"
+    ],
     "regression_tests": [
       "tests/integration/test_repository_not_found_lifecycle.py::test_inaccessible_repository_names_host_and_credential_source",
-      "tests/unit/core/test_auth_phase3.py::TestDescribeCredentialTried"
+      "tests/unit/core/test_auth_phase3.py::TestDescribeCredentialTried",
+      "tests/unit/test_install_command.py::TestValidationFailureReasonMessages::test_validation_failure_without_verbose_includes_verbose_hint"
     ]
   },
   "red": "APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_repository_not_found_lifecycle.py::test_inaccessible_repository_names_host_and_credential_source -n 0 -p no:cacheprovider -q -> FAILED: assert 'host: lifecycle.ghe.com' in \"... [x] lifecycle.ghe.com/lifecycle/p-missing -- not accessible or doesn't exist -- run with --verbose for auth details ...\"",
   "green": "same command -> 1 passed",
-  "owner": "src/apm_cli/core/auth.py (AuthResolver.describe_credential_tried); caller src/apm_cli/install/validation.py (inaccessible_package_reason, verbose 'Auth resolved' line in _validate_ado_git_package) used by src/apm_cli/commands/install.py",
-  "notes": "Security-flavoured: the test sets GITHUB_APM_PAT_LIFECYCLE to a sentinel and asserts it never appears in stdout/stderr of either run and that only lifecycle.ghe.com / api.lifecycle.ghe.com received it (proxy.hosts_receiving). Output names the env var name only. describe_credential_tried reads only contexts the resolver already resolved (no extra helper/gh subprocess for a diagnostic). Hint executed: 'apm install --verbose lifecycle.ghe.com/lifecycle/p-missing' exits 1, prints 'source=GITHUB_APM_PAT_LIFECYCLE', and prints no further Run advice; apm.yml unchanged. Key line from journey E04 step 4 ('[x] <pkg> -- not accessible or doesn't exist') is kept as a prefix. PR #4143 conflict risk: its remediation-advice rule would flag the 'Run 'apm install --verbose ...'' f-string in install/validation.py; convert to a catalog entry when #4143 lands. PR #4138 conflict risk: src/apm_cli/commands/install.py (3-line change at the reason site plus one import)."
+  "owner": "src/apm_cli/core/auth.py (AuthResolver.describe_credential_tried); caller src/apm_cli/install/validation.py (inaccessible_package_reason, verbose 'Auth resolved' line in _validate_ado_git_package) used by src/apm_cli/commands/install.py; src/apm_cli/install/repository_access.py",
+  "notes": "Security-flavoured: the test sets GITHUB_APM_PAT_LIFECYCLE to a sentinel and asserts it never appears in stdout/stderr of either run and that only lifecycle.ghe.com / api.lifecycle.ghe.com received it (proxy.hosts_receiving). Output names the env var name only. describe_credential_tried reads only contexts the resolver already resolved (no extra helper/gh subprocess for a diagnostic). Hint executed: 'apm install --verbose lifecycle.ghe.com/lifecycle/p-missing' exits 1, prints 'source=GITHUB_APM_PAT_LIFECYCLE', and prints no further Run advice; apm.yml unchanged. Key line from journey E04 step 4 ('[x] <pkg> -- not accessible or doesn't exist') is kept as a prefix. PR #4143 conflict risk: its remediation-advice rule would flag the 'Run 'apm install --verbose ...'' f-string in install/validation.py; convert to a catalog entry when #4143 lands. PR #4138 conflict risk: src/apm_cli/commands/install.py (3-line change at the reason site plus one import). CI follow-up: inaccessible_package_reason moved to src/apm_cli/install/repository_access.py (new module; LOC budget of install/validation.py, now 985). tests/unit/test_install_command.py::TestValidationFailureReasonMessages updated to assert the new exact line. If #4143's module-ownership registry lands, register src/apm_cli/install/repository_access.py."
 }
