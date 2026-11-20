@@ -29,6 +29,7 @@ longer occurs fails until its entry is removed.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import shlex
@@ -468,3 +469,25 @@ def test_page_without_command_is_reported(docs: Docs) -> None:
     pages = {**docs.pages, "probe": "# apm probe\n"}
     found = surface_mismatches(replace(docs, pages=pages))
     assert Mismatch("probe", "page-without-command", "reference/cli/probe.md") in found
+
+
+_RENAMED_FLAG_MUTANT = (
+    REPO_ROOT / "tests" / "fixtures" / "cli_surface_mutants" / "renamed_frozen_flag.py"
+)
+
+
+def test_ratchet_kills_the_recorded_renamed_flag_mutant(
+    docs: Docs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = importlib.util.spec_from_file_location("renamed_frozen_flag", _RENAMED_FLAG_MUTANT)
+    assert spec is not None and spec.loader is not None
+    mutant = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mutant)
+    assert not ratchet_failures(surface_mismatches(docs), load_expected())
+
+    install = _command("install")
+    monkeypatch.setattr(install, "params", mutant.mutant_params(install))
+    failures = ratchet_failures(surface_mismatches(docs), load_expected())
+
+    assert any("option-not-in-page: --locked" in f for f in failures), failures
+    assert any("unknown-table-flag: apm install :: --frozen" in f for f in failures), failures

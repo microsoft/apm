@@ -87,7 +87,8 @@ def _publish(shared: Path, env: dict[str, str], packages) -> dict[str, Path]:
     for variant, document in policy_documents().items():
         tree = trees / policy_org(variant)
         tree.mkdir(parents=True)
-        (tree / POLICY_FILE).write_text(yaml.safe_dump(document), encoding="utf-8")
+        text = document if isinstance(document, str) else yaml.safe_dump(document)
+        (tree / POLICY_FILE).write_text(text, encoding="utf-8")
         publish(policy_org(variant), POLICY_REPO, tree)
     catalog = trees / MARKETPLACE_REPO
     (catalog / ".claude-plugin").mkdir(parents=True)

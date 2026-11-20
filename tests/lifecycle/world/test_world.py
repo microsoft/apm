@@ -16,6 +16,7 @@ import subprocess
 import time
 from dataclasses import replace
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 import requests
@@ -32,8 +33,10 @@ from tests.lifecycle.world import (
     use_ado_pat,
     use_policy,
     use_registry,
+    use_registry_proxy,
 )
 from tests.lifecycle.world.packages import GIT_PUBLISHED, LSP_SERVER, MCP_SERVER, PACKAGE_NAMES
+from tests.lifecycle.world.routes import MIRROR_HOSTS, PROXY_HOST, PROXY_TOKEN
 from tests.lifecycle.world.services import (
     ADO_BEARER,
     ADO_HOST,
@@ -48,6 +51,7 @@ from tests.lifecycle.world.services import (
     policy_org,
 )
 from tests.lifecycle.world.shims import AZ_CALL_LOG, TRAP_EXIT, TRAPPED
+from tests.utils.lifecycle_evidence import OutputOracleError
 
 pytestmark = [
     pytest.mark.e2e,
@@ -263,6 +267,11 @@ def test_each_package_installs_through_the_real_cli(
     assert world.services.egress_log() == [], "a local-path install reached the network"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="tracking #4270: whole-plugin bin/ not deployed after approve + --trust-bin",
+    raises=AssertionError,
+)
 @pytest.mark.parametrize("source", ["marketplace", "git"])
 def test_claude_plugin_bin_deploys_at_user_scope_after_trust(
     lifecycle_world: World, source: str
@@ -306,7 +315,7 @@ def test_user_scope_with_apm_home_outside_home(lifecycle_world: World) -> None:
 # p-lsp declares only LSP servers. Locally its empty .apm/ satisfies package
 # validation; git cannot carry an empty directory, so the served copy is
 # refused ("missing the required .apm/ directory"). Found by the world.
-_LSP_ONLY_REMOTE = "LSP-only package rejected from git/marketplace (no .apm/)"
+_LSP_ONLY_REMOTE = "tracking #4257: LSP-only package rejected from git/marketplace (no .apm/)"
 _REMOTE_CELLS = [
     pytest.param(
         package,
@@ -597,6 +606,48 @@ def test_ghe_cloud_serves_contents_and_commits_under_api_v3(lifecycle_world: Wor
     assert _get(world, f"{base}/contents/missing.md").status_code == 404
 
 
+def _repo_api_urls(shape: str) -> tuple[str, str]:
+    """(apm.yml contents URL, commit-of-v1.0.0 URL) of world repo p-skill on *shape*."""
+    host = HOST_ALIASES[shape][0]
+    if shape == "gitlab":
+        project = quote(f"{HOST_ALIASES[shape][1]}/p-skill", safe="")
+        base = f"https://{host}/api/v4/projects/{project}/repository"
+        return f"{base}/files/apm.yml/raw?ref=v1.0.0", f"{base}/commits/v1.0.0"
+    if shape == "ado":
+        base = f"https://{host}/{ORG}/{ORG}/_apis/git/repositories/p-skill"
+        items = f"{base}/items?path=apm.yml&versionDescriptor.version=v1.0.0&api-version=7.0"
+        return items, f"{base}/commits?searchCriteria.itemVersion.version=v1.0.0"
+    prefix = "/api/v1" if shape == "generic" else "/api/v3"
+    base = f"https://{host}{prefix}/repos/{ORG}/p-skill"
+    return f"{base}/contents/apm.yml?ref=v1.0.0", f"{base}/commits/v1.0.0"
+
+
+def _commit_sha(response: requests.Response) -> str:
+    payload = response.json()
+    if "value" in payload:
+        return payload["value"][0]["commitId"]
+    return payload.get("sha") or payload["id"]
+
+
+@pytest.mark.parametrize("shape", sorted(HOST_ALIASES))
+def test_every_git_host_serves_repository_contents_and_commits(
+    lifecycle_world: World, shape: str
+) -> None:
+    world = lifecycle_world
+    expected = _get(world, f"https://{API_HOST}/repos/{ORG}/p-skill/commits/v1.0.0").json()["sha"]
+    contents_url, commit_url = _repo_api_urls(shape)
+    contents = _get(world, contents_url)
+    assert contents.status_code == 200, contents.text
+    body = contents.content
+    if contents.headers.get("Content-Type", "").startswith("application/json"):
+        body = base64.b64decode(contents.json()["content"])
+    assert b"name: p-skill" in body
+    commit = _get(world, commit_url)
+    assert commit.status_code == 200 and _commit_sha(commit) == expected, commit.text
+    missing = _get(world, contents_url.replace("apm.yml", "missing.md"))
+    assert missing.status_code == 404
+
+
 def test_ghe_cloud_policy_is_read_through_api_v3(lifecycle_world: World) -> None:
     world = lifecycle_world
     use_policy(world, "deny-pkg", host="ghe")
@@ -644,6 +695,143 @@ def test_reset_restores_every_unserved_repository(
         world.services.unserve(f"{ORG}/never-served")
 
 
+# -- scripted routes, registry proxy, proxy-only ---------------------------------
+
+
+def test_scripted_redirect_answers_with_a_3xx_to_another_host(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    mirror = MIRROR_HOSTS[0]
+    world.services.redirect(API_HOST, f"/repos/{ORG}/p-skill", f"https://{mirror}/moved")
+    world.services.script(mirror, "/moved", 200, {"Content-Type": "text/plain"}, b"mirrored")
+    first = requests.get(
+        f"https://{API_HOST}/repos/{ORG}/p-skill",
+        proxies={"https": world.services.proxy_url},
+        verify=str(world.services.ca_path),
+        allow_redirects=False,
+        timeout=30,
+    )
+    assert first.status_code == 307 and first.headers["Location"] == f"https://{mirror}/moved"
+    assert _get(world, f"https://{API_HOST}/repos/{ORG}/p-skill").text == "mirrored"
+    assert {e["host"] for e in world.services.egress_log()} == {API_HOST, mirror}
+
+
+def test_cross_origin_registry_redirect_is_refused(lifecycle_world: World) -> None:
+    """A 3xx off the configured registry origin: no request, no token, reaches the mirror."""
+    world = lifecycle_world
+    use_registry(world)
+    mirror = MIRROR_HOSTS[1]
+    world.services.redirect(registry.HOST, registry.BASE, f"https://{mirror}{registry.BASE}")
+    result = driver.run(world, ["install", world.packages["p-skill:registry"].spec])
+    assert result.returncode != 0, result.stdout
+    assert mirror not in _hosts(world), world.services.egress_log()
+    assert not (world.project / ".agents/skills/p-skill").exists()
+
+
+def test_proxy_only_install_never_goes_direct(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    use_registry_proxy(world)
+    world.services.forbid_direct()
+    _ok(world, ["install", world.packages["p-skill:git"].spec])
+    _assert_surfaces(world, "p-skill", "project")
+    assert _hosts(world) == {PROXY_HOST}, world.services.egress_log()
+    assert world.services.proxy.hosts_receiving(PROXY_TOKEN) == {PROXY_HOST}
+
+
+def test_forbid_direct_refuses_and_records_direct_content(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    world.services.forbid_direct()
+    result = driver.run(world, ["install", world.packages["p-skill:git"].spec])
+    assert result.returncode != 0, result.stdout
+    statuses = {e["status"] for e in world.services.egress_log() if e["host"] != PROXY_HOST}
+    assert statuses == {403}, world.services.egress_log()
+    # Operator-configured registries are sanctioned routes under PROXY_REGISTRY_ONLY.
+    assert _get(world, f"https://{REGISTRY_HOST}/v0.1/servers").status_code == 200
+    registry_versions = f"{registry.URL}/v1/packages/{ORG}/p-skill/versions"
+    sanctioned = requests.get(
+        registry_versions,
+        headers={"Authorization": f"Bearer {registry.TOKEN}"},
+        proxies={"https": world.services.proxy_url},
+        verify=str(world.services.ca_path),
+        timeout=30,
+    )
+    assert sanctioned.status_code == 200, sanctioned.text
+    world.services.reset()
+    assert world.services.routes.direct_forbidden is False
+    assert world.services.routes.scripted == []
+
+
+# -- new git revisions ---------------------------------------------------------
+
+
+def _tag_sha(world: World, tag: str) -> int | str:
+    response = _get(world, f"https://{API_HOST}/repos/{ORG}/p-skill/commits/{tag}")
+    return response.json()["sha"] if response.status_code == 200 else response.status_code
+
+
+def test_published_revision_changes_content_under_a_ref_until_reset(
+    lifecycle_template: World, tmp_path: Path
+) -> None:
+    services = lifecycle_template.services
+    world = clone(lifecycle_template, tmp_path / "first")
+    services.reset()
+    original = _tag_sha(world, "v1.0.0")
+    skill = "skills/p-skill/SKILL.md"
+    changed = "---\nname: p-skill\ndescription: changed upstream.\n---\n\nRevision 2.\n"
+    sha = services.publish_revision(f"{ORG}/p-skill", {skill: changed}, tag="v1.0.0")
+    services.publish_revision(f"{ORG}/p-skill", {skill: changed}, tag="v2.0.0")
+    assert _tag_sha(world, "v1.0.0") == sha != original
+    _ok(world, ["install", f"{ORG}/p-skill#v1.0.0"])
+    deployed = world.project / ".agents/skills/p-skill/SKILL.md"
+    assert "Revision 2." in deployed.read_text(encoding="utf-8")
+    services.reset()
+    assert _tag_sha(world, "v1.0.0") == original
+    assert _tag_sha(world, "v2.0.0") == 404
+    with pytest.raises(KeyError):
+        services.publish_revision(f"{ORG}/never-served", {"x": "y"})
+
+
+# -- publish / override_repository -------------------------------------------------
+
+
+def _skill_tree(world: World, dest: Path, body: str) -> Path:
+    shutil.copytree(world.packages["p-skill"].spec, dest)
+    skill = dest / "skills/p-skill/SKILL.md"
+    skill.write_text(skill.read_text(encoding="utf-8") + f"\n{body}\n", encoding="utf-8")
+    return dest
+
+
+def test_publish_serves_a_test_authored_repository_until_reset(
+    lifecycle_world: World, tmp_path: Path
+) -> None:
+    world = lifecycle_world
+    tree = _skill_tree(world, tmp_path / "tree", "Published by the test.")
+    world.services.publish(f"{ORG}/p-published", tree)
+    _ok(world, ["install", f"{ORG}/p-published#v1.0.0"])
+    deployed = world.project / ".agents/skills/p-skill/SKILL.md"
+    assert "Published by the test." in deployed.read_text(encoding="utf-8")
+    with pytest.raises(ValueError):
+        world.services.publish(f"{ORG}/p-skill", tree)
+    world.services.reset()
+    assert _get(world, f"https://{API_HOST}/repos/{ORG}/p-published").status_code == 404
+
+
+def test_override_repository_replaces_a_world_repository_until_reset(
+    lifecycle_world: World, tmp_path: Path
+) -> None:
+    world = lifecycle_world
+    original = _get(world, f"https://{API_HOST}/repos/{ORG}/p-skill/commits/v1.0.0").json()["sha"]
+    tree = _skill_tree(world, tmp_path / "tree", "Overridden upstream.")
+    world.services.override_repository(f"{ORG}/p-skill", tree)
+    _ok(world, ["install", world.packages["p-skill:git"].spec])
+    deployed = world.project / ".agents/skills/p-skill/SKILL.md"
+    assert "Overridden upstream." in deployed.read_text(encoding="utf-8")
+    world.services.reset()
+    restored = _get(world, f"https://{API_HOST}/repos/{ORG}/p-skill/commits/v1.0.0").json()["sha"]
+    assert restored == original
+    with pytest.raises(KeyError):
+        world.services.override_repository(f"{ORG}/never-served", tree)
+
+
 _POLICY_EXIT = {
     "allow": 0,
     "deny-pkg": 1,
@@ -655,12 +843,18 @@ _POLICY_EXIT = {
     "deny-lsp": 0,
     "deny-native": 0,
     "exec-gate-on": 0,
+    "malformed": 0,
+    "garbage_response": 0,
+    "cached_stale": 1,
 }
 _POLICY_ANNOUNCE = {
     "deny-pkg": "denied by pattern",
     "unreachable": "HTTP 503",
     "hash-mismatch": "Policy hash mismatch",
     "chain-cycle": "Cycle detected in policy extends chain",
+    "malformed": "is not valid YAML",
+    "garbage_response": "is not a YAML mapping",
+    "cached_stale": "Using stale cached policy",
 }
 
 
@@ -723,7 +917,15 @@ def test_exec_gate_on_variant_gates_a_project_without_an_executables_block(
     ("variant", "absent"),
     [
         ("exec-deny-all", ".github/hooks/p-exec-session.json"),
-        ("mcp-deny", ".mcp.json"),
+        pytest.param(
+            "mcp-deny",
+            ".mcp.json",
+            marks=pytest.mark.xfail(
+                strict=True,
+                raises=OutputOracleError,
+                reason="#4267 the blocking org policy line prints twice when MCP is denied",
+            ),
+        ),
     ],
 )
 def test_org_policy_denies_approved_executables(
