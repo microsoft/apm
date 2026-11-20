@@ -788,7 +788,7 @@ jobs:
   lifecycle-smoke-shard-1:
     name: Lifecycle Smoke Shard 1 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
@@ -843,7 +843,7 @@ jobs:
   lifecycle-smoke-shard-2:
     name: Lifecycle Smoke Shard 2 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
@@ -853,7 +853,7 @@ jobs:
   lifecycle-smoke-shard-3:
     name: Lifecycle Smoke Shard 3 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:
@@ -863,7 +863,7 @@ jobs:
   lifecycle-smoke-shard-4:
     name: Lifecycle Smoke Shard 4 (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     env:

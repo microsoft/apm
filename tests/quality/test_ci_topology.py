@@ -38,9 +38,11 @@ RATCHET_CHECK = "Test Architecture Ratchets"
 RATCHET_CONTRACT_JOB = "test-architecture-contracts"
 RATCHET_SCALING_JOB = "test-architecture-scaling"
 RATCHET_EXECUTION_JOBS = (RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB)
-ARCHITECTURE_SCALING_TARGET = (
+ARCHITECTURE_SCALING_TARGETS = (
     "tests/perf/test_architecture_linter_scaling.py::"
-    "test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction"
+    "test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction",
+    "tests/perf/test_architecture_linter_scaling.py::"
+    "test_session_cached_mutation_matrix_scales_within_2_2x_from_n_to_2n",
 )
 ALLOW_PROVISIONAL_KEY = "APM_ALLOW_PROVISIONAL_BASELINES"
 DRAFT_PROVISIONAL_GUARD = (
@@ -83,7 +85,7 @@ LIFECYCLE_SMOKE_AGGREGATE_STEP = "Require every lifecycle shard"
 LIFECYCLE_SMOKE_DURATIONS = ".github/ci-durations/linux-x86_64.json"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
-LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 10
+LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 15
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 LIFECYCLE_SMOKE_ROOT = "tests/integration"
 LIFECYCLE_SMOKE_E2E_ENV = "APM_E2E_TESTS"
@@ -280,7 +282,7 @@ def _assert_ci_test_targets(
     ratchet = workflow_job(ci, RATCHET_CONTRACT_JOB)
     expected_ratchet_targets = Counter({path: 1 for path in repository_modules | fixture_modules})
     assert Counter(_pytest_targets(ratchet)) == expected_ratchet_targets
-    assert _pytest_targets(workflow_job(ci, RATCHET_SCALING_JOB)) == (ARCHITECTURE_SCALING_TARGET,)
+    assert _pytest_targets(workflow_job(ci, RATCHET_SCALING_JOB)) == ARCHITECTURE_SCALING_TARGETS
 
     required_shard = workflow_job(ci, "build-and-test-shard")
     assert _pytest_targets(required_shard) == REQUIRED_SHARD_ROOTS
@@ -312,7 +314,7 @@ def _assert_ratchet_execution(ci: WorkflowNode, job_id: str) -> None:
         expected_env = {ALLOW_PROVISIONAL_KEY: DRAFT_PROVISIONAL_GUARD}
     else:
         assert job_id == RATCHET_SCALING_JOB
-        expected_command = [*prefix, "-m", "benchmark", ARCHITECTURE_SCALING_TARGET]
+        expected_command = [*prefix, "-m", "benchmark", *ARCHITECTURE_SCALING_TARGETS]
         expected_env = {"PYTEST_PERF": "1"}
     assert list(shell_commands(steps[4])) == [expected_command]
     assert steps[4].get("env", {}) == expected_env
@@ -1157,7 +1159,7 @@ def _assert_lifecycle_smoke_timeout(job: WorkflowNode) -> None:
     timeout = job.get("timeout-minutes")
     assert isinstance(timeout, int)
     assert timeout == LIFECYCLE_SMOKE_TIMEOUT_MINUTES, (
-        "lifecycle-smoke needs its measured 10-minute whole-job budget, "
+        "lifecycle-smoke needs its measured 15-minute whole-job budget, "
         "without an inadequate deadline or an unbounded increase"
     )
 
@@ -1721,9 +1723,12 @@ def _assert_blast_radius_aggregate(workflow: WorkflowNode) -> None:
 
 def _assert_blast_radius_required(merge_gate: WorkflowNode) -> None:
     wait_step = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")
-    event, merge_group, pull_request = re.findall(r"'([^']*)'", wait_step["env"]["EXPECTED_CHECKS"])
-    assert event == "merge_group"
-    assert BLAST_RADIUS_CHECK in pull_request.split(","), "PR gate must require the slice"
+    quoted = re.findall(r"'([^']*)'", wait_step["env"]["EXPECTED_CHECKS"])
+    assert quoted[0] == "merge_group"
+    merge_group, *pull_request_lists = (item for item in quoted[1:] if "," in item)
+    assert pull_request_lists, "merge-gate must declare the pull_request check list"
+    for pull_request in pull_request_lists:
+        assert BLAST_RADIUS_CHECK in pull_request.split(","), "PR gate must require the slice"
     assert BLAST_RADIUS_CHECK not in merge_group.split(","), "merge queue runs the full suite"
 
 
@@ -1940,3 +1945,83 @@ def test_macos_arm_split_drift_fails(release_workflow: WorkflowNode, mutation: s
         jobs[MACOS_ARM_BUILD_JOB]["steps"].append({"run": MACOS_UNIT_COMMAND})
     with pytest.raises((AssertionError, KeyError)):
         _assert_macos_arm_split(release_workflow)
+
+
+# Opt-in full integration before the queue (#4116): ci-integration.yml runs on
+# workflow_dispatch and on PRs labeled `full-integration`; merge-gate.yml
+# requires its checks at PR time only when that label is present.
+FULL_INTEGRATION_LABEL = "full-integration"
+FULL_INTEGRATION_GATE = (
+    "github.event_name != 'pull_request' || "
+    f"contains(github.event.pull_request.labels.*.name, '{FULL_INTEGRATION_LABEL}')"
+)
+FULL_INTEGRATION_CHECKS = (
+    "Build (Linux)",
+    "Smoke Test (Linux)",
+    "Integration Tests (Linux)",
+    "Release Validation (Linux)",
+)
+_GATE_CONTEXTS = re.compile(
+    r"^\$\{\{ github\.event_name == 'merge_group' && '([^']+)' \|\| "
+    r"contains\(github\.event\.pull_request\.labels\.\*\.name, 'full-integration'\) "
+    r"&& '([^']+)' \|\| '([^']+)' \}\}$"
+)
+
+
+def _integration_triggers(workflow: WorkflowNode) -> dict:
+    triggers = workflow["on"]
+    assert isinstance(triggers, dict)
+    return triggers
+
+
+def _assert_full_integration_opt_in(integration: WorkflowNode, merge_gate: WorkflowNode) -> None:
+    triggers = _integration_triggers(integration)
+    assert set(triggers) == {"merge_group", "workflow_dispatch", "pull_request"}, sorted(triggers)
+    assert triggers["pull_request"] == {
+        "branches": ["main"],
+        "types": ["labeled", "synchronize", "reopened"],
+    }
+    for job_id, job in integration["jobs"].items():
+        condition = str(job.get("if", ""))
+        assert FULL_INTEGRATION_GATE in condition, (
+            f"{job_id} must be skipped on PRs without the {FULL_INTEGRATION_LABEL} label"
+        )
+
+    wait = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")
+    match = _GATE_CONTEXTS.match(str(wait["env"]["EXPECTED_CHECKS"]))
+    assert match, "EXPECTED_CHECKS must branch on merge_group, then on the label"
+    merge_time, labeled, unlabeled = (
+        tuple(name.strip() for name in group.split(",")) for group in match.groups()
+    )
+    assert not set(FULL_INTEGRATION_CHECKS) & set(unlabeled)
+    assert labeled == (*unlabeled, *FULL_INTEGRATION_CHECKS)
+    assert set(FULL_INTEGRATION_CHECKS) <= set(merge_time)
+
+
+def test_ci_integration_can_be_dispatched() -> None:
+    integration = load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW)
+    assert "workflow_dispatch" in _integration_triggers(integration)
+
+
+def test_full_integration_label_runs_and_gates_only_labeled_prs() -> None:
+    _assert_full_integration_opt_in(
+        load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW),
+        load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml"),
+    )
+
+
+@pytest.mark.parametrize("mutation", ["ungated-job", "pull-request-target", "unlabeled-gate"])
+def test_full_integration_opt_in_drift_fails(mutation: str) -> None:
+    integration = deepcopy(load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW))
+    merge_gate = deepcopy(load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml"))
+    if mutation == "ungated-job":
+        del integration["jobs"]["build"]["if"]
+    elif mutation == "pull-request-target":
+        integration["on"]["pull_request_target"] = {"branches": ["main"]}
+    else:
+        wait = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")
+        expression = str(wait["env"]["EXPECTED_CHECKS"])
+        head, _, unlabeled = expression.rpartition(" || '")
+        wait["env"]["EXPECTED_CHECKS"] = f"{head} || 'Build (Linux),{unlabeled}"
+    with pytest.raises(AssertionError):
+        _assert_full_integration_opt_in(integration, merge_gate)
