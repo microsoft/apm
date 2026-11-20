@@ -110,12 +110,4 @@ steps:
       commands: [apm view you/my-skills versions]
     key_lines: ["| v1.0.0 | tag    |"]
     forbidden_lines: ["[x]"]
-known_cells:
-  # Runner gap, not a CLI defect: the index assigns O1 to this step of a
-  # non-golden journey, and regen_goldens.py refuses non-golden journeys, so no
-  # golden can exist. Remove once the runner skips O1 when golden is false.
-  - id: runner-o1-on-non-golden-journey
-    law: O1
-    tracking: "#0"
-    step: 2
-    match: "no golden tests/lifecycle/journeys/goldens/P01/02.txt"
+known_cells: []

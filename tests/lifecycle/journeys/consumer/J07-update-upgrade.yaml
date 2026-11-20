@@ -80,11 +80,6 @@ steps:
     files: []
     key_lines: ["[i] Current version:", "[+] You're already on the latest version:"]
 known_cells:
-  - id: runner-gap-o1-non-golden
-    law: O1
-    tracking: "#0"
-    step: 3
-    match: "no golden tests/lifecycle/journeys/goldens/J07/03.txt"
   - id: update-plan-lists-pinned-package-twice
     law: O4
     tracking: "#4208"
@@ -95,3 +90,10 @@ known_cells:
     tracking: "#4208"
     step: 3
     match: "repeats '\\[~\\] acme/release-kit'"
+  # No O1 golden until the defect is fixed: the pinned package line prints
+  # twice (O4), so regen_goldens refuses the transcript.
+  - id: update-plan-lists-pinned-package-twice-golden
+    law: O1
+    tracking: "#4208"
+    step: 3
+    match: "no golden tests/lifecycle/journeys/goldens/J07/03\\.txt"
