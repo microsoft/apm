@@ -91,6 +91,11 @@ def test_generic_host_response_classification(response, kwargs, expected) -> Non
             AuthOutcome(K.AUTH_REQUIRED, "Azure DevOps redirected to sign-in", 200),
         ),
         (
+            _resp(200, history=[_hop(SIGNIN)]),
+            True,
+            AuthOutcome(K.CREDENTIAL_REJECTED, "Azure DevOps redirected to sign-in", 200),
+        ),
+        (
             _resp(200, history=[_hop("https://dev.azure.com/x")]),
             False,
             AuthOutcome(K.OK, "", 200),
@@ -239,3 +244,12 @@ def test_public_github_anonymous_reaches_text_rules() -> None:
 )
 def test_is_ado_signin_location(location, expected) -> None:
     assert is_ado_signin_location(location) is expected
+
+
+def test_minimal_response_objects_are_read_defensively() -> None:
+    bare = SimpleNamespace(status_code=200)
+    hopless = SimpleNamespace(status_code=200, headers={}, url=None, history=[SimpleNamespace()])
+
+    assert classify_auth_outcome(response=bare) == AuthOutcome(K.OK, "", 200)
+    assert classify_auth_outcome(host_kind="ado", response=bare) == AuthOutcome(K.OK, "", 200)
+    assert classify_auth_outcome(host_kind="ado", response=hopless) == AuthOutcome(K.OK, "", 200)

@@ -3,7 +3,13 @@
   "owners": {
     "apm-home-resolution": {
       "architecture_owner": "apm-home-resolution",
-      "equivalents": [],
+      "equivalents": [
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.core.scope.get_manifest_path__mutmut_5",
+          "reason": "get_manifest_path reaches get_source_root only for non-USER scopes, and get_source_root treats every non-USER value (including None) identically: override, else Path.cwd()."
+        }
+      ],
       "floor": 0.96,
       "measured": {
         "equivalent": 0,
@@ -454,8 +460,33 @@
       "equivalents": [
         {
           "class": "semantic-equivalent",
+          "mutant": "apm_cli.core.auth_outcome._classify_response__mutmut_6",
+          "reason": "classify_auth_outcome only calls _classify_response after checking getattr(candidate, 'status_code', None) is not None, so the attribute always exists and dropping the default cannot raise."
+        },
+        {
+          "class": "semantic-equivalent",
           "mutant": "apm_cli.core.auth_outcome._transport_kind__mutmut_1",
           "reason": "For None or a str error, _cause_chain yields nothing (it only walks BaseException instances), so the loop returns None exactly like the early return."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.core.auth_outcome.classify_auth_outcome__mutmut_14",
+          "reason": "kind_name is only ever compared with 'ado' (is_ado = host_kind == 'ado'); None, 'XXgenericXX', 'GENERIC' and a non-string truthy kind all compare unequal exactly like 'generic'."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.core.auth_outcome.classify_auth_outcome__mutmut_17",
+          "reason": "kind_name is only ever compared with 'ado' (is_ado = host_kind == 'ado'); None, 'XXgenericXX', 'GENERIC' and a non-string truthy kind all compare unequal exactly like 'generic'."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.core.auth_outcome.classify_auth_outcome__mutmut_18",
+          "reason": "kind_name is only ever compared with 'ado' (is_ado = host_kind == 'ado'); None, 'XXgenericXX', 'GENERIC' and a non-string truthy kind all compare unequal exactly like 'generic'."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.core.auth_outcome.classify_auth_outcome__mutmut_19",
+          "reason": "kind_name is only ever compared with 'ado' (is_ado = host_kind == 'ado'); None, 'XXgenericXX', 'GENERIC' and a non-string truthy kind all compare unequal exactly like 'generic'."
         },
         {
           "class": "semantic-equivalent",
@@ -664,7 +695,18 @@
     },
     "trust-policy-outcome": {
       "architecture_owner": "trust-policy-outcome",
-      "equivalents": [],
+      "equivalents": [
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.policy.outcome_routing.route_discovery_outcome__mutmut_8",
+          "reason": "'disabled' appears in no later branch, so without the early return it reaches the final defensive 'return None' with no logger call and no raise, the same observable result."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.policy.outcome_routing.route_discovery_outcome__mutmut_9",
+          "reason": "'disabled' appears in no later branch, so without the early return it reaches the final defensive 'return None' with no logger call and no raise, the same observable result."
+        }
+      ],
       "floor": 0.98,
       "measured": {
         "equivalent": 0,
