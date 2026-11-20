@@ -980,6 +980,53 @@ def test_trust_and_integrity_owners_reject_bypasses(
     ("path", "old", "new"),
     [
         pytest.param(
+            "src/apm_cli/install/dry_run_plan.py",
+            "filter_lsp_by_allow_executables(list(self.lsp_dependencies), allow_map, ctx.logger)",
+            "filter_lsp_by_allow_executables(\n"
+            "                list(self.lsp_dependencies),\n"
+            '                getattr(apm_package, "allow_executables", None),\n'
+            "                ctx.logger,\n"
+            "            )",
+            id="manifest-grants-bypass-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/template.py",
+            "            allow_executables=authorized_exec_map(AUTHORIZED_FIRST_PARTY),\n",
+            "",
+            id="omitted-first-party-map",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "                            allow_executables=replay_allow,\n",
+            "                            allow_executables=None,\n",
+            id="literal-none-map",
+        ),
+        pytest.param(
+            "src/apm_cli/install/lsp/integration.py",
+            "    allow_map = closed_exec_map(None)\n",
+            "    allow_map = None\n",
+            id="none-placeholder-map",
+        ),
+    ],
+)
+def test_deploy_path_allow_map_comes_from_the_trust_owner(path: str, old: str, new: str) -> None:
+    """Closed-world provenance: every allow-map consumer gets an owner map (#4018)."""
+    rule_id = "install-deployment-executable-trust-context"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
             "src/apm_cli/install/deployment_plan.py",
             "def prepare_package_deployment(",
             "def _hooks_ok(allow_executables, key):\n"
