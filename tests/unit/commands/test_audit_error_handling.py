@@ -320,6 +320,7 @@ class TestApplyStrip:
             modified = _apply_strip(findings, tmp_path, logger)
 
         assert modified == 1
+        assert bad_file.read_text(encoding="utf-8") == "Helloworld"
 
     def test_skips_nonexistent_files(self, tmp_path: Path) -> None:
         logger = _make_logger()
@@ -327,6 +328,7 @@ class TestApplyStrip:
         findings = {missing: [_make_finding("critical")]}
         result = _apply_strip(findings, tmp_path, logger)
         assert result == 0
+        assert not (tmp_path / "nonexistent.md").exists()
 
     def test_skips_outside_project_root(self, tmp_path: Path) -> None:
         logger = _make_logger()
@@ -338,6 +340,7 @@ class TestApplyStrip:
         result = _apply_strip(findings, project_root, logger)
         assert result == 0
         logger.warning.assert_called()
+        assert not (tmp_path / "outside.md").exists()
 
     def test_handles_os_error_gracefully(self, tmp_path: Path) -> None:
         logger = _make_logger()
@@ -350,6 +353,7 @@ class TestApplyStrip:
 
         assert result == 0
         logger.warning.assert_called()
+        assert bad_file.read_text(encoding="utf-8") == "Hello\u202eworld"
 
     def test_no_change_means_no_write(self, tmp_path: Path) -> None:
         logger = _make_logger()
@@ -362,6 +366,7 @@ class TestApplyStrip:
             result = _apply_strip(findings, tmp_path, logger)
 
         assert result == 0
+        assert clean_file.read_text(encoding="utf-8") == "Hello world"
 
 
 # ---------------------------------------------------------------------------
