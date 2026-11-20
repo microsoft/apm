@@ -17,6 +17,8 @@ from apm_cli.marketplace.yml_schema import (
     PackageEntry,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

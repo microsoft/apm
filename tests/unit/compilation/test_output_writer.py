@@ -13,6 +13,8 @@ import pytest
 from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
 from apm_cli.compilation.output_writer import CompiledOutputWriter
 
+pytestmark = pytest.mark.component
+
 _HASH_LINE_RE = re.compile(r"<!-- Build ID: [a-f0-9]{12} -->")
 
 

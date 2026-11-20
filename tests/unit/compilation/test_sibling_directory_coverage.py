@@ -19,6 +19,8 @@ import pytest
 from apm_cli.compilation.context_optimizer import ContextOptimizer
 from apm_cli.primitives.models import Instruction
 
+pytestmark = pytest.mark.component
+
 
 class TestSiblingDirectoryCoverage:
     """Test coverage for files in sibling directories."""

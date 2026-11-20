@@ -26,6 +26,9 @@ from apm_cli.commands.deps.cli import (
     _show_scope_deps,
 )
 from apm_cli.constants import APM_MODULES_DIR, APM_YML_FILENAME
+from apm_cli.core.command_logger import CommandLogger
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -265,9 +268,11 @@ class TestResolveScopeDepsInsecure:
 
 
 class TestShowScopeDeps:
-    def test_orphaned_packages_warning_emitted(self, tmp_path: Path) -> None:
+    def test_orphaned_packages_warning_emitted(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         apm_dir = tmp_path
-        logger = _make_logger()
+        logger = CommandLogger("deps")
 
         installed = [_make_pkg_dict("owner/repo")]
         orphaned = ["owner/orphan"]
@@ -276,7 +281,9 @@ class TestShowScopeDeps:
             "apm_cli.commands.deps.cli._resolve_scope_deps", return_value=(installed, orphaned)
         ):
             _show_scope_deps("Project", apm_dir, logger, console=None, has_rich=False)
-        logger.warning.assert_called()
+        out = "".join(capsys.readouterr())
+        assert "[!] 1 orphaned package(s) found" in out
+        assert "[!]   - owner/orphan" in out
 
     def test_insecure_only_fallback_text(self, tmp_path: Path) -> None:
         """insecure_only=True with no rich renders fallback text."""
@@ -296,15 +303,16 @@ class TestShowScopeDeps:
             )
         # Should not crash; just need coverage of the branch
 
-    def test_none_installed_returns_early(self, tmp_path: Path) -> None:
+    def test_none_installed_returns_early(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """_resolve_scope_deps returns (None, None) -> early return."""
         apm_dir = tmp_path
-        logger = _make_logger()
+        logger = CommandLogger("deps")
 
         with patch("apm_cli.commands.deps.cli._resolve_scope_deps", return_value=(None, None)):
             _show_scope_deps("Project", apm_dir, logger, console=None, has_rich=False)
-        # No error calls
-        logger.error.assert_not_called()
+        assert "[x]" not in "".join(capsys.readouterr())
 
     def test_exception_propagates(self, tmp_path: Path) -> None:
         """Exception inside _show_scope_deps propagates to caller."""

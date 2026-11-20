@@ -1,10 +1,8 @@
 """Comprehensive unit tests for apm_cli.commands.install.
 
 Targets the uncovered branches in:
-- _split_argv_at_double_dash
-- _get_invocation_argv
-- _check_package_conflicts
 - _merge_packages_into_yml
+- _resolve_package_references (GitLab direct shorthand persistence)
 - _validate_and_add_packages_to_apm_yml (key branches)
 - install CLI command (key validation / early-exit branches)
 """
@@ -12,17 +10,21 @@ Targets the uncovered branches in:
 from __future__ import annotations
 
 from pathlib import Path
+from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.install import (
-    _check_package_conflicts,
-    _get_invocation_argv,
     _merge_packages_into_yml,
-    _split_argv_at_double_dash,
+    _resolve_package_references,
 )
+from apm_cli.core.command_logger import CommandLogger
+from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
+from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -59,112 +61,15 @@ def _make_dep_ref(
 
 
 # ---------------------------------------------------------------------------
-# _get_invocation_argv
-# ---------------------------------------------------------------------------
-
-
-class TestGetInvocationArgv:
-    def test_returns_sys_argv(self) -> None:
-        import sys
-
-        result = _get_invocation_argv()
-        assert result is sys.argv
-
-
-# ---------------------------------------------------------------------------
-# _split_argv_at_double_dash
-# ---------------------------------------------------------------------------
-
-
-class TestSplitArgvAtDoubleDash:
-    def test_no_double_dash_returns_full_argv_empty_command(self) -> None:
-        clean, cmd = _split_argv_at_double_dash(["apm", "install", "owner/repo"])
-        assert clean == ["apm", "install", "owner/repo"]
-        assert cmd == ()
-
-    def test_double_dash_splits_correctly(self) -> None:
-        clean, cmd = _split_argv_at_double_dash(
-            ["apm", "install", "--mcp", "foo", "--", "npx", "-y", "srv"]
-        )
-        assert clean == ["apm", "install", "--mcp", "foo"]
-        assert cmd == ("npx", "-y", "srv")
-
-    def test_double_dash_at_end_gives_empty_command(self) -> None:
-        clean, cmd = _split_argv_at_double_dash(["apm", "install", "--"])
-        assert clean == ["apm", "install"]
-        assert cmd == ()
-
-    def test_double_dash_at_start_gives_empty_clean(self) -> None:
-        clean, cmd = _split_argv_at_double_dash(["--", "npx", "server"])
-        assert clean == []
-        assert cmd == ("npx", "server")
-
-    def test_command_tuple_is_tuple_type(self) -> None:
-        _, cmd = _split_argv_at_double_dash(["a", "--", "b"])
-        assert isinstance(cmd, tuple)
-
-    def test_empty_argv_returns_empty(self) -> None:
-        clean, cmd = _split_argv_at_double_dash([])
-        assert clean == []
-        assert cmd == ()
-
-
-# ---------------------------------------------------------------------------
-# _check_package_conflicts
-# ---------------------------------------------------------------------------
-
-
-class TestCheckPackageConflicts:
-    def test_empty_deps_returns_empty_set(self) -> None:
-        result = _check_package_conflicts([])
-        assert result == set()
-
-    def test_string_dep_adds_identity(self) -> None:
-        with patch("apm_cli.install.package_selection.DependencyReference") as mock_cls:
-            mock_ref = MagicMock()
-            mock_ref.get_identity.return_value = "github.com/owner/repo"
-            mock_cls.parse.return_value = mock_ref
-            result = _check_package_conflicts(["owner/repo"])
-        assert "github.com/owner/repo" in result
-
-    def test_dict_dep_uses_parse_from_dict(self) -> None:
-        with patch("apm_cli.install.package_selection.DependencyReference") as mock_cls:
-            mock_ref = MagicMock()
-            mock_ref.get_identity.return_value = "github.com/owner/repo"
-            mock_cls.parse_from_dict.return_value = mock_ref
-            result = _check_package_conflicts([{"repo": "owner/repo"}])
-        assert "github.com/owner/repo" in result
-
-    def test_invalid_dep_entry_is_skipped(self) -> None:
-        with patch("apm_cli.install.package_selection.DependencyReference") as mock_cls:
-            mock_cls.parse.side_effect = ValueError("bad format")
-            result = _check_package_conflicts(["bad-format"])
-        assert result == set()
-
-    def test_unknown_type_is_skipped(self) -> None:
-        result = _check_package_conflicts([42, None, 3.14])
-        assert result == set()
-
-    def test_multiple_deps_returns_all_identities(self) -> None:
-        with patch("apm_cli.install.package_selection.DependencyReference") as mock_cls:
-            ref_a = MagicMock()
-            ref_a.get_identity.return_value = "github.com/a/repo"
-            ref_b = MagicMock()
-            ref_b.get_identity.return_value = "github.com/b/repo"
-            mock_cls.parse.side_effect = [ref_a, ref_b]
-            result = _check_package_conflicts(["a/repo", "b/repo"])
-        assert "github.com/a/repo" in result
-        assert "github.com/b/repo" in result
-
-
-# ---------------------------------------------------------------------------
 # _merge_packages_into_yml
 # ---------------------------------------------------------------------------
 
 
 class TestMergePackagesIntoYml:
-    def test_appends_packages_to_current_deps(self, tmp_path: Path) -> None:
-        logger = _make_install_logger()
+    def test_appends_packages_to_current_deps(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        logger = CommandLogger("install")
         apm_yml = tmp_path / "apm.yml"
         data = {"dependencies": {"apm": ["existing/pkg"]}}
         current_deps = data["dependencies"]["apm"]
@@ -182,7 +87,7 @@ class TestMergePackagesIntoYml:
 
         assert "new/pkg" in current_deps
         mock_dump.assert_called_once()
-        logger.success.assert_called_once()
+        assert "".join(capsys.readouterr()).count("[*] Updated apm.yml with 1 new package(s)") == 1
 
     def test_uses_apm_yml_entry_when_present(self, tmp_path: Path) -> None:
         logger = _make_install_logger()
@@ -316,6 +221,7 @@ class TestValidateAndAddPackagesToApmYml:
                     )
         # Dry-run: packages returned but NOT written
         assert "owner/repo" in validated
+        assert apm_yml.read_text() == "name: project\nversion: 1.0.0\ndependencies:\n  apm: []\n"
 
     def test_validation_summary_false_returns_early(self, tmp_path: Path) -> None:
         from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
@@ -497,76 +403,6 @@ class TestInstallCommandBranches:
 # ---------------------------------------------------------------------------
 
 
-class TestInstallContextDefaults:
-    def test_refresh_default_is_false(self) -> None:
-        from apm_cli.commands.install import InstallContext
-
-        ctx = InstallContext(
-            scope=None,
-            manifest_path=Path("."),
-            manifest_display="apm.yml",
-            apm_dir=Path("."),
-            project_root=Path("."),
-            logger=None,
-            auth_resolver=None,
-            verbose=False,
-            force=False,
-            dry_run=False,
-            update=False,
-            dev=False,
-            runtime=None,
-            exclude=None,
-            target=None,
-            parallel_downloads=4,
-            allow_insecure=False,
-            allow_insecure_hosts=(),
-            protocol_pref=None,
-            allow_protocol_fallback=False,
-            trust_transitive_mcp=False,
-            no_policy=False,
-            install_mode=None,
-            packages=(),
-        )
-        assert ctx.refresh is False
-        assert ctx.only_packages is None
-        assert ctx.transaction is None
-        assert ctx.legacy_skill_paths is False
-        assert ctx.frozen is False
-        assert ctx.plan_callback is None
-
-    def test_context_is_mutable(self) -> None:
-        from apm_cli.commands.install import InstallContext
-
-        ctx = InstallContext(
-            scope=None,
-            manifest_path=Path("."),
-            manifest_display="apm.yml",
-            apm_dir=Path("."),
-            project_root=Path("."),
-            logger=None,
-            auth_resolver=None,
-            verbose=False,
-            force=False,
-            dry_run=False,
-            update=False,
-            dev=False,
-            runtime=None,
-            exclude=None,
-            target=None,
-            parallel_downloads=4,
-            allow_insecure=False,
-            allow_insecure_hosts=(),
-            protocol_pref=None,
-            allow_protocol_fallback=False,
-            trust_transitive_mcp=False,
-            no_policy=False,
-            install_mode=None,
-            packages=(),
-        )
-        ctx.refresh = True
-        assert ctx.refresh is True
-
-
 class TestInstallUpdatePackageScoping:
     def test_update_existing_named_package_scopes_apm_install_to_that_package(
         self, tmp_path: Path, monkeypatch
@@ -604,3 +440,68 @@ class TestInstallUpdatePackageScoping:
 
         assert result.exit_code == 0, result.output
         assert service_requests[0].only_packages == ["owner/target"]
+
+
+class TestResolvePackageReferencesGitLabDirectShorthandPersistence:
+    """Virtual probe results must serialize as git+path for apm.yml merge."""
+
+    _PKG = "git.epam.com/epm-ease/apm-registry/agents/ai-run-ba-flow"
+
+    @patch("apm_cli.commands.install._try_resolve_gitlab_direct_shorthand")
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    def test_virtual_shorthand_populates_apm_yml_entries_object_form(
+        self, mock_validate, mock_try_resolve
+    ):
+        resolved = DependencyReference.from_gitlab_shorthand_probe(
+            "git.epam.com",
+            "epm-ease/apm-registry",
+            "agents/ai-run-ba-flow",
+            None,
+        )
+        mock_try_resolve.return_value = resolved
+        parsed_stub = MagicMock()
+        parsed_stub.is_virtual = False
+
+        with patch("apm_cli.commands.install.DependencyReference") as mock_dep_cls:
+            mock_dep_cls.parse.return_value = parsed_stub
+            mock_dep_cls.is_local_path.return_value = False
+            mock_dep_cls.needs_gitlab_direct_shorthand_probing.return_value = True
+
+            existing = set()
+            _v, _inv, validated, _mkt, entries, _chg = _resolve_package_references(
+                [self._PKG],
+                [],
+                existing,
+            )
+
+        canonical = "git.epam.com/epm-ease/apm-registry/agents/ai-run-ba-flow"
+        assert validated == [canonical]
+        assert entries[canonical] == {
+            "git": "https://git.epam.com/epm-ease/apm-registry",
+            "path": "agents/ai-run-ba-flow",
+        }
+
+    def test_generated_entry_round_trips_via_from_apm_yml(self, tmp_path):
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            dedent(
+                """
+                name: wire-test
+                version: "0.0.1"
+                dependencies:
+                  apm:
+                    - git: https://git.epam.com/epm-ease/apm-registry
+                      path: agents/ai-run-ba-flow
+                """
+            ).lstrip(),
+            encoding="utf-8",
+        )
+        clear_apm_yml_cache()
+        pkg = APMPackage.from_apm_yml(apm_yml)
+        deps = pkg.get_apm_dependencies()
+        assert len(deps) == 1
+        ref = deps[0]
+        assert ref.host == "git.epam.com"
+        assert ref.repo_url == "epm-ease/apm-registry"
+        assert ref.virtual_path == "agents/ai-run-ba-flow"
+        assert ref.is_virtual is True

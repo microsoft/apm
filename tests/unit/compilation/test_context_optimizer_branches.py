@@ -20,6 +20,8 @@ from apm_cli.compilation.context_optimizer import (
 )
 from apm_cli.primitives.models import Instruction
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
