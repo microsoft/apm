@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -513,6 +514,24 @@ def test_frozen_root_declaration_keeps_precedence(tmp_path: Path, apm_binary_pat
         _assert_mcp_matches_producer(scenario)
 
 
+def _audit_ci(scenario: _Scenario) -> None:
+    result = scenario.runner.run(
+        ("audit", "--ci", "--no-policy"),
+        scenario_id="cold-whole-plugin-audit",
+        cwd=scenario.consumer,
+        env=scenario.environment,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _tree_bytes(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
 def test_frozen_does_not_defer_a_missing_local_source(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -542,38 +561,54 @@ def test_frozen_does_not_defer_a_missing_local_source(
     assert not (scenario.consumer / ".agents/skills/frozen-skill").exists()
 
 
+def _drift_present_copy(present: Path, problem: str) -> None:
+    """Leave an invalid-shape or MCP-mismatched copy where the plugin is installed."""
+    if problem == "invalid-shape":
+        shutil.rmtree(present, ignore_errors=True)
+        present.mkdir(parents=True)
+        return
+    present.mkdir(parents=True, exist_ok=True)
+    dump_yaml(
+        {
+            "name": "frozen-plugin",
+            "version": "1.0.0",
+            "dependencies": {"mcp": [{**_ROOT_MCP, "name": "plugin-server", "command": "changed"}]},
+        },
+        present / "apm.yml",
+    )
+
+
+@pytest.mark.parametrize("start", ["cold", "warm"])
 @pytest.mark.parametrize("problem", ["invalid-shape", "present-mcp-mismatch"])
 def test_frozen_restores_and_verifies_a_drifted_present_source(
-    tmp_path: Path, apm_binary_path: Path, problem: str
+    tmp_path: Path, apm_binary_path: Path, problem: str, start: str
 ) -> None:
     """A present copy that drifted from the lock is restored from the pin and verified.
 
     The pinned source is reachable, so --frozen replaces the drifted copy with
     the verified locked bytes and succeeds (#4401): the lock and manifest stay
     byte-identical, the deployed skill and MCP servers match the producer, and
-    the user's own MCP entry stays. An unreachable or unverifiable source still
-    fails closed (test_frozen_refuses_unverifiable_source_evidence).
+    the user's own MCP entry stays. On a converged (warm) checkout,
+    ``apm audit --ci`` agrees before the replay; after every replay it verifies
+    the restored copy. An unreachable or unverifiable source still fails
+    closed (test_frozen_refuses_unverifiable_source_evidence).
     """
     scenario = _scenario(tmp_path, apm_binary_path)
     present = scenario.consumer / "apm_modules/frozen/plugin"
-    present.mkdir(parents=True)
-    if problem == "present-mcp-mismatch":
-        dump_yaml(
-            {
-                "name": "frozen-plugin",
-                "version": "1.0.0",
-                "dependencies": {
-                    "mcp": [{**_ROOT_MCP, "name": "plugin-server", "command": "changed"}]
-                },
-            },
-            present / "apm.yml",
-        )
     native = scenario.consumer / ".mcp.json"
     native.write_text('{"mcpServers":{"user-owned":{"command":"keep"}}}\n', encoding="utf-8")
     producer_servers = json.loads((scenario.producer / ".mcp.json").read_text(encoding="utf-8"))[
         "mcpServers"
     ]
 
+    if start == "warm":
+        scenario.freeze()
+    _drift_present_copy(present, problem)
+    if start == "warm":
+        # audit --ci agrees with --frozen on the drifted converged checkout (#4401).
+        _audit_ci(scenario)
+
+    copies = []
     for _ in range(2):
         scenario.freeze()
         assert (scenario.consumer / ".agents/skills/frozen-skill/SKILL.md").read_bytes() == _SKILL
@@ -585,6 +620,10 @@ def test_frozen_restores_and_verifies_a_drifted_present_source(
         servers = json.loads(native.read_text(encoding="utf-8"))["mcpServers"]
         assert servers.pop("user-owned") == {"command": "keep"}
         assert servers == producer_servers
+        # audit --ci verifies the restored copy against the locked content hash.
+        _audit_ci(scenario)
+        copies.append(_tree_bytes(present))
+    assert copies[0] == copies[1], "a repeat --frozen rewrote the restored copy"
 
 
 def test_frozen_services_only_cannot_defer_without_hydration(
