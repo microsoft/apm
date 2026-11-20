@@ -10,7 +10,7 @@ from __future__ import annotations
 import builtins
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -395,26 +395,44 @@ def policy_denied_locked_packages(lockfile: Any, policy: Any) -> dict[str, str]:
     return denied
 
 
+class GateRetirements(NamedTuple):
+    """What the current gates no longer allow, by surface (see gate_retirements)."""
+
+    denied_packages: dict[str, str]
+    parked_servers: dict[str, str]
+    hook_pins: dict[str, str]
+    # The org policy is unavailable and its fetch-failure posture is block:
+    # install's policy gate, not this view, decides (#4458).
+    policy_blocks: bool = False
+
+
 def gate_retirements(
     lockfile: Any, modules_dir: Path, apm_package: Any, project_root: Path, *, user_scope: bool
-) -> tuple[dict[str, str], dict[str, str]] | None:
+) -> GateRetirements | None:
     """What the current gates no longer allow on a path that skips install's gate.
 
-    Returns ``(denied packages, parked servers)``: locked dependencies the org
-    policy denies, and recorded MCP servers that install's own MCP admission
+    The one owner of gate monotonicity for ``apm update`` and ``apm uninstall``
+    (#4444, #4445, #4446): locked dependencies the org policy denies, recorded
+    MCP servers that install's own MCP admission
     (:class:`~apm_cli.security.trust.McpAdmission`) now parks -- a deny, a
-    revoked approval or a changed definition (#4444, #4445, #4446). ``None``
-    when the org policy is unresolved, so the caller defers to install.
+    revoked approval or a changed definition -- and recorded hook files whose
+    pinned approval no longer admits them (:func:`locked_hook_pin_mismatches`,
+    the ``--frozen`` and audit owner). When the org policy is unavailable,
+    ``policy_blocks`` tells a blocking posture (the caller runs install's
+    policy gate) and ``None`` a warning one (nothing to judge against).
     """
     from apm_cli.core.scope import manifest_root
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.policy.outcome_routing import classify_project_policy
+    from apm_cli.security.executables import resolve_project_exec_allow_map
     from apm_cli.security.trust import McpAdmission
 
     if lockfile is None:
-        return {}, {}
+        return GateRetirements({}, {}, {})
     route = classify_project_policy(manifest_root(project_root, user_scope=user_scope))
-    if route.blocks or route.unresolved:
+    if route.blocks:
+        return GateRetirements({}, {}, {}, policy_blocks=True)
+    if route.unresolved:
         return None
     denied = policy_denied_locked_packages(lockfile, route.policy)
     # The bare derivation: folding recorded omissions in first would put each
@@ -425,7 +443,16 @@ def gate_retirements(
         modules_dir,
         admission=McpAdmission.for_project(project_root, user_scope=user_scope),
     )
-    return denied, view.consent_problems(lockfile)
+
+    def _trust_ctx() -> Any:
+        allow = resolve_project_exec_allow_map(project_root, apm_package, user_scope=user_scope)
+        return getattr(allow, "trust_context", None)
+
+    hooks = {
+        f"{item.package}/{item.item}": item.describe()
+        for item in locked_hook_pin_mismatches(lockfile, modules_dir, _trust_ctx)
+    }
+    return GateRetirements(denied, view.consent_problems(lockfile), hooks)
 
 
 def lock_exec_decisions_stale(

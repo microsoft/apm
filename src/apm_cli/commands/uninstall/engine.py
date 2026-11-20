@@ -1790,7 +1790,7 @@ def _cleanup_stale_mcp(
     retirements = gate_retirements(
         lockfile, apm_modules_path, apm_package, deploy_root, user_scope=user_scope
     )
-    denied = retirements[0] if retirements is not None else {}
+    denied = retirements.denied_packages if retirements is not None else {}
     for key, why in sorted(denied.items()):
         if logger is not None:
             logger.warning(f"{key} is no longer allowed ({why}); removing its MCP servers")
