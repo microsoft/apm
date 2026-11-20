@@ -36,6 +36,11 @@ UNSET = (
     "GITHUB_API_TOKEN",
     "ADO_APM_PAT",
     "GITLAB_TOKEN",
+    "GITLAB_APM_PAT",
+    "ARTIFACTORY_APM_TOKEN",
+    "APM_COPILOT_COWORK_SKILLS_DIR",
+    "APM_CACHE_DIR",
+    "APM_TEMP_DIR",
     "APM_NON_INTERACTIVE",
     "GIT_ASKPASS",
     "SSH_ASKPASS",
@@ -49,7 +54,14 @@ UNSET = (
     "GIT_INDEX_FILE",
     "VIRTUAL_ENV",
 )
-UNSET_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_", "GIT_AUTHOR_", "GIT_COMMITTER_")
+UNSET_PREFIXES = (
+    "GIT_CONFIG_KEY_",
+    "GIT_CONFIG_VALUE_",
+    "GIT_AUTHOR_",
+    "GIT_COMMITTER_",
+    "GITHUB_APM_PAT_",
+    "APM_MARKETPLACE_",
+)
 
 
 def build_world(parent: Path, name: str, apm_bin: str | None, git_host: str) -> dict:
@@ -78,6 +90,12 @@ def build_world(parent: Path, name: str, apm_bin: str | None, git_host: str) -> 
         "HOME": str(home),
         "APM_HOME": str(home / ".apm"),
         "XDG_CONFIG_HOME": str(home / ".config"),
+        "XDG_DATA_HOME": str(home / ".local" / "share"),
+        "XDG_CACHE_HOME": str(home / ".cache"),
+        # Every harness user root the target resolver honors
+        # (apm_cli.integration.targets.USER_ROOT_VARIABLES) is pinned here.
+        "CLAUDE_CONFIG_DIR": str(home / ".claude"),
+        "HERMES_HOME": str(home / ".hermes"),
         "CODEX_HOME": str(home / ".codex"),
         "COPILOT_HOME": str(home / ".copilot"),
         "TMPDIR": str(root / "scratch"),

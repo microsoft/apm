@@ -2790,7 +2790,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:ee457ee33997e47a186dc20c1207774c1fcfb6ee7a3180d31b0e052b04a4b11f
+  content_hash: sha256:8a0579f4df6d30e48f59732695c3f260c388635164306c92e111817c6d05c3f9
 - kind: project-relative
   target: copilot
   value: .agents/skills/release-acceptance/assets/report-template.md
@@ -2889,7 +2889,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:fe2c64f27d7feaee8ddcf1c317229a0f28b31485dc6c0a8fd0aa98d17860b7c5
+  content_hash: sha256:2a1497f49639f27dd5a56c6ce3b46f65084bb9f50b6420a15d1731a0affcab19
 - kind: project-relative
   target: copilot
   value: .agents/skills/release-acceptance/scripts/findings.py
@@ -2898,7 +2898,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:8757dc10bf72341f466e280cee13c5d5dc94eb359999daa3080287c75fdcb50c
+  content_hash: sha256:5a73fd8d72577d370f3d346b2a883902c5a7569d68ac441afed0c76a1bae924a
 - kind: project-relative
   target: copilot
   value: .agents/skills/release-acceptance/scripts/journeys.py
@@ -2907,7 +2907,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:9b68ffbd02b6fde780ae84f6ccd76e380572211b5ce80be60e79f8cc17ef474e
+  content_hash: sha256:5c887eceb46ea3d9df3352acfaf61cb7ea52125b0a2bc2f59f9eac161e0b39ba
 - kind: project-relative
   target: copilot
   value: .agents/skills/release-acceptance/scripts/load_gate.py
@@ -2925,7 +2925,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:d1f265f0b8d22b6a9b22b08591c9aa4057e15516f9cbecfb39e64647d6106b5a
+  content_hash: sha256:584d84491833f843cd22e04ec3e8ae27a5948d67da398d7d3f9e1f7bba525e28
 - kind: project-relative
   target: copilot
   value: .agents/skills/supply-chain-security
@@ -3660,7 +3660,7 @@ local_deployed_file_hashes:
   .agents/skills/docs-sync/evals/trigger-evals.json: sha256:b0da21a8a6e588676247a9a15d792ef6596389f16ae100f83fa423ee47992501
   .agents/skills/oss-growth/SKILL.md: sha256:90b5d0369032de850f2255910f4cf5caafb7d60f07bda8a2146d394bfa459918
   .agents/skills/python-architecture/SKILL.md: sha256:f06e50b8c40d7e5a732a5405a603efd80da58de2b6f6b293f0f6b58f28eefe7b
-  .agents/skills/release-acceptance/SKILL.md: sha256:ee457ee33997e47a186dc20c1207774c1fcfb6ee7a3180d31b0e052b04a4b11f
+  .agents/skills/release-acceptance/SKILL.md: sha256:8a0579f4df6d30e48f59732695c3f260c388635164306c92e111817c6d05c3f9
   .agents/skills/release-acceptance/assets/report-template.md: sha256:8a512357cc6f59095b6f3cb7680ceba468bb20e703a868dc5584943f5f348535
   .agents/skills/release-acceptance/evals/README.md: sha256:1e09b02c12fd6d0a78aa425635344088a97d09d6efcbfe56678f42a760711bde
   .agents/skills/release-acceptance/evals/content-evals.json: sha256:4069b6f9b0e6f122ac68baa7e612dc2f026f1d6be090879766cff5d839c2502a
@@ -3671,11 +3671,11 @@ local_deployed_file_hashes:
   .agents/skills/release-acceptance/references/verifier-brief.md: sha256:d0d9a9d1bb1a2721f1130feba1ce583b1bb2c86509e37396e962ada9ceb2c004
   .agents/skills/release-acceptance/references/walker-brief.md: sha256:3e0190461cbcdef88f81b750ab2016a7f64465f25525c122b398335640c3c539
   .agents/skills/release-acceptance/scripts/brief_lint.py: sha256:faefe5c3c41d9e9f7b5b89ebecdf33c0036393c9df27d396c5af789b10c43869
-  .agents/skills/release-acceptance/scripts/capture.py: sha256:fe2c64f27d7feaee8ddcf1c317229a0f28b31485dc6c0a8fd0aa98d17860b7c5
-  .agents/skills/release-acceptance/scripts/findings.py: sha256:8757dc10bf72341f466e280cee13c5d5dc94eb359999daa3080287c75fdcb50c
-  .agents/skills/release-acceptance/scripts/journeys.py: sha256:9b68ffbd02b6fde780ae84f6ccd76e380572211b5ce80be60e79f8cc17ef474e
+  .agents/skills/release-acceptance/scripts/capture.py: sha256:2a1497f49639f27dd5a56c6ce3b46f65084bb9f50b6420a15d1731a0affcab19
+  .agents/skills/release-acceptance/scripts/findings.py: sha256:5a73fd8d72577d370f3d346b2a883902c5a7569d68ac441afed0c76a1bae924a
+  .agents/skills/release-acceptance/scripts/journeys.py: sha256:5c887eceb46ea3d9df3352acfaf61cb7ea52125b0a2bc2f59f9eac161e0b39ba
   .agents/skills/release-acceptance/scripts/load_gate.py: sha256:2a022da626bf51cc1e941ab6a920d94c1ee553daa43d0395087044834169059f
-  .agents/skills/release-acceptance/scripts/world.py: sha256:d1f265f0b8d22b6a9b22b08591c9aa4057e15516f9cbecfb39e64647d6106b5a
+  .agents/skills/release-acceptance/scripts/world.py: sha256:584d84491833f843cd22e04ec3e8ae27a5948d67da398d7d3f9e1f7bba525e28
   .agents/skills/supply-chain-security/SKILL.md: sha256:55ef10cd0f6b68e0db5a435a79851c055eab74d93fd552c6626df631deb51df4
   .github/agents/agentic-workflows.agent.md: sha256:087da35526e15dcec7ebbee6e9e0fbafeca846f520da450a9d364d028fc6737a
   .github/agents/algorithmic-patterns.agent.md: sha256:278321484288eb8965a42c20cfa65ff055d250579849b1c48cbd3f553883fe5d

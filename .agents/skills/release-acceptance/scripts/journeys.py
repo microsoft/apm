@@ -112,18 +112,23 @@ def load(repo_root: Path, catalog: str | None) -> dict:
                 "pass --catalog PATH to use another copy of the program catalogue"
             )
     journeys = normalize(_read(path), str(path))
-    counts: dict[str, int] = {}
-    for journey in journeys:
-        counts[journey["persona"]] = counts.get(journey["persona"], 0) + 1
     return {
         "source": str(path),
         "embedded": False,
         "journeys": journeys,
-        "counts": {
-            "journeys": len(journeys),
-            "steps": sum(len(j["steps"]) for j in journeys),
-            **counts,
-        },
+        "counts": count(journeys),
+    }
+
+
+def count(journeys: list[dict]) -> dict:
+    """Journey, step and per-persona totals for exactly these journeys."""
+    personas: dict[str, int] = {}
+    for journey in journeys:
+        personas[journey["persona"]] = personas.get(journey["persona"], 0) + 1
+    return {
+        "journeys": len(journeys),
+        "steps": sum(len(j["steps"]) for j in journeys),
+        **personas,
     }
 
 
@@ -145,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"journeys: unknown ids {missing}", file=sys.stderr)
             return 3
         result["journeys"] = [j for j in result["journeys"] if j["id"] in wanted]
+        result["counts"] = count(result["journeys"])
     print(json.dumps(result, indent=2))
     return 0
 

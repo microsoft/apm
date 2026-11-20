@@ -211,6 +211,33 @@ def docs_url_resolves(docs_root: Path, slug: str, anchor: str | None) -> bool:
     return False
 
 
+def _text(value: str | bytes | None) -> str:
+    """Partial output from TimeoutExpired may be bytes even with text=True."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value or ""
+
+
+def write_logs(logs: Path, step_id: str, out: str, err: str) -> tuple[Path, Path]:
+    """Save one invocation's streams under a fresh ``<step>.<n>`` name.
+
+    Repeated captures of the same step never overwrite earlier evidence.
+    """
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", step_id)
+    n = 1
+    while True:
+        stdout_log = logs / f"{safe}.{n}.stdout"
+        try:
+            with stdout_log.open("x", encoding="utf-8") as handle:
+                handle.write(out)
+        except FileExistsError:
+            n += 1
+            continue
+        stderr_log = logs / f"{safe}.{n}.stderr"
+        stderr_log.write_text(err, encoding="utf-8")
+        return stdout_log, stderr_log
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run one step and lint its output.")
     parser.add_argument("--world", required=True, help="world JSON written by world.py")
@@ -246,19 +273,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         rc, out, err = proc.returncode, proc.stdout, proc.stderr
     except subprocess.TimeoutExpired as exc:
-        rc, out, err = 124, exc.stdout or "", (exc.stderr or "") + "\n[capture] timeout"
-    logs = Path(world["logs"])
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", args.step_id)
-    (logs / f"{safe}.stdout").write_text(out, encoding="utf-8")
-    (logs / f"{safe}.stderr").write_text(err, encoding="utf-8")
+        rc, out, err = 124, _text(exc.stdout), _text(exc.stderr) + "\n[capture] timeout"
+    stdout_log, stderr_log = write_logs(Path(world["logs"]), args.step_id, out, err)
     docs_root = Path(args.docs_root) if args.docs_root else None
     record = {
         "step": args.step_id,
         "cmd": cmd,
         "cwd": cwd,
         "rc": rc,
-        "stdout_log": str(logs / f"{safe}.stdout"),
-        "stderr_log": str(logs / f"{safe}.stderr"),
+        "stdout_log": str(stdout_log),
+        "stderr_log": str(stderr_log),
         "lint": lint_lines(out, err, rc, help_output="--help" in cmd or "-h" in cmd),
         "hints": extract_hints(out + "\n" + err, docs_root),
     }

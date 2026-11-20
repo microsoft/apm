@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -202,6 +203,21 @@ class TestJourneyLoader:
         path.write_text(json.dumps(doc), encoding="utf-8")
         assert journeys.load(tmp_path, str(path))["journeys"][0]["steps"][0]["id"] == "E01.3"
 
+    def test_ids_filter_recomputes_counts(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        path = tmp_path / "catalogue.json"
+        doc = {
+            "journeys": [
+                {"id": "J01", "persona": "consumer", "steps": [{"cmd": "a"}, {"cmd": "b"}]},
+                {"id": "E01", "persona": "enterprise", "steps": [{"cmd": "c"}]},
+            ]
+        }
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        assert journeys.main(["--catalog", str(path), "--ids", "E01"]) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert result["counts"] == {"journeys": 1, "steps": 1, "enterprise": 1}
+
     @pytest.mark.parametrize(
         "doc, message",
         [
@@ -307,6 +323,94 @@ class TestLedger:
         with pytest.raises(findings.LedgerError, match="verdict"):
             findings.recheck(ledger, [{"id": "RA-001", "verdict": "MAYBE"}], "new")
 
+    def test_add_binds_an_unbound_ledger_to_the_findings_sha(self) -> None:
+        ledger = {"sha": None, "findings": []}
+        findings.add(ledger, [_finding(sha="abc1234")])
+        assert ledger["sha"] == "abc1234"
+
+    def test_gate_is_pending_when_the_ledger_is_bound_to_another_sha(self) -> None:
+        ledger = {"sha": None, "findings": []}
+        findings.add(ledger, [_finding(severity="blocker", status="false-positive")])
+        assert findings.gate_row(ledger, "abc1234")["verdict"] == "GO"
+        row = findings.gate_row(ledger, "def5678")
+        assert (row["verdict"], row["stale_sha"]) == (
+            "PENDING-VERIFICATION",
+            {"ledger": "abc1234", "requested": "def5678"},
+        )
+
+    def test_recheck_must_cover_every_unresolved_finding(self) -> None:
+        ledger = {"sha": None, "findings": []}
+        findings.add(
+            ledger,
+            [
+                _finding(severity="blocker", status="verified"),
+                _finding(step="J03.5", observed="other", status="changed"),
+                _finding(step="J03.6", observed="closed", status="false-positive"),
+            ],
+        )
+        with pytest.raises(findings.LedgerError, match=r"no verdict for \['RA-002'\]"):
+            findings.recheck(ledger, [{"id": "RA-001", "verdict": "VERIFIED-FIXED"}], "new")
+        assert ledger["sha"] == "abc1234"
+        assert [f["status"] for f in ledger["findings"]] == [
+            "verified",
+            "changed",
+            "false-positive",
+        ]
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["gate-row", "--sha", "abc1234"],
+            ["verify", "--verdicts", "v.jsonl"],
+            ["set", "--id", "RA-001", "route=new"],
+            ["recheck", "--verdicts", "v.jsonl", "--sha", "abc1234"],
+        ],
+    )
+    def test_cli_refuses_a_missing_ledger(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], args: list[str]
+    ) -> None:
+        (tmp_path / "v.jsonl").write_text("", encoding="utf-8")
+        missing = tmp_path / "typo.json"
+        argv = [args[0], "--ledger", str(missing)] + [
+            str(tmp_path / a) if a.endswith(".jsonl") else a for a in args[1:]
+        ]
+        assert findings.main(argv) == 2
+        assert f"findings: ledger not found: {missing}" in capsys.readouterr().err
+        assert not missing.exists()
+
+    def test_cli_add_creates_a_missing_ledger(self, tmp_path: Path) -> None:
+        new = tmp_path / "new.jsonl"
+        new.write_text(json.dumps(_finding()) + "\n", encoding="utf-8")
+        ledger = tmp_path / "findings.json"
+        assert findings.main(["add", "--ledger", str(ledger), "--findings", str(new)]) == 0
+        assert json.loads(ledger.read_text(encoding="utf-8"))["sha"] == "abc1234"
+
+    def test_verify_changed_persists_the_verifier_evidence(self) -> None:
+        ledger = {"sha": None, "findings": []}
+        findings.add(ledger, [_finding()])
+        findings.verify(
+            ledger,
+            [
+                {
+                    "id": "RA-001",
+                    "verdict": "CHANGED",
+                    "observed": "Error: No such option: --skip-policy",
+                    "repro": "repros/e01_7_verifier.sh",
+                }
+            ],
+        )
+        finding = ledger["findings"][0]
+        assert (finding["status"], finding["observed"], finding["repro"]) == (
+            "changed",
+            "Error: No such option: --skip-policy",
+            "repros/e01_7_verifier.sh",
+        )
+        entry = finding["history"][-1]
+        assert (entry["walker_observed"], entry["walker_repro"]) == (
+            "Error: No such option: --no-policy",
+            "repros/e01_7.sh",
+        )
+
     def test_coverage_counts_per_journey(self) -> None:
         rows = [
             {"step": "J01.1", "status": "pass"},
@@ -352,6 +456,39 @@ class TestWorld:
         assert "gpgsign = false" in gitconfig
         assert "insteadOf = https://git.example.invalid/" in gitconfig
 
+    def test_world_scrubs_supported_apm_credentials(self, tmp_path: Path) -> None:
+        built = world.build_world(tmp_path, "w", None, "git.example.invalid")
+        host = {
+            "GITHUB_APM_PAT": "x",
+            "GITHUB_APM_PAT_CONTOSO": "x",
+            "GITLAB_APM_PAT": "x",
+            "ARTIFACTORY_APM_TOKEN": "x",
+            "LANG": "C.UTF-8",
+        }
+        env = world.scrub_env(host, built)
+        assert not set(host) - {"LANG"} & set(env)
+
+    def test_world_pins_every_harness_user_root(self, tmp_path: Path) -> None:
+        from apm_cli.integration.targets import USER_ROOT_VARIABLES
+
+        built = world.build_world(tmp_path, "w", None, "git.example.invalid")
+        roots = {v.env_var for v in USER_ROOT_VARIABLES.values()} | {
+            "XDG_DATA_HOME",
+            "XDG_CACHE_HOME",
+        }
+        host = {name: f"/real/{name.lower()}" for name in roots}
+        host["APM_COPILOT_COWORK_SKILLS_DIR"] = "/real/cowork"
+        env = world.scrub_env(host, built)
+        home = Path(built["env"]["HOME"])
+        assert {name: Path(env[name]).is_relative_to(home) for name in roots} == dict.fromkeys(
+            roots, True
+        )
+        assert (env["CLAUDE_CONFIG_DIR"], env["HERMES_HOME"]) == (
+            str(home / ".claude"),
+            str(home / ".hermes"),
+        )
+        assert "APM_COPILOT_COWORK_SKILLS_DIR" not in env
+
     @pytest.mark.skipif(
         sys.platform == "win32", reason="symlink creation needs privileges on Windows"
     )
@@ -361,6 +498,47 @@ class TestWorld:
         built = world.build_world(tmp_path / "worlds", "w", str(binary), "git.example.invalid")
         assert (Path(built["bin"]) / "apm").resolve() == binary.resolve()
         assert built["env"]["PATH"].split(os.pathsep)[0] == built["bin"]
+
+
+class TestCapture:
+    @staticmethod
+    def _world_file(tmp_path: Path) -> Path:
+        built = world.build_world(tmp_path / "worlds", "w", None, "git.example.invalid")
+        path = tmp_path / "world.json"
+        path.write_text(json.dumps(built), encoding="utf-8")
+        return path
+
+    def test_repeated_captures_of_a_step_keep_every_output(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        path = self._world_file(tmp_path)
+        records = []
+        for text in ("first run", "second run"):
+            argv = ["--world", str(path), "--step-id", "J01.4", "--", sys.executable, "-c"]
+            assert capture.main([*argv, f"print({text!r})"]) == 0
+            records.append(json.loads(capsys.readouterr().out))
+        assert [r["step"] for r in records] == ["J01.4", "J01.4"]
+        assert [Path(r["stdout_log"]).read_text(encoding="utf-8") for r in records] == [
+            "first run\n",
+            "second run\n",
+        ]
+
+    def test_timeout_with_partial_bytes_output_is_decoded(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def fake_run(cmd: list[str], **_: object) -> None:
+            raise subprocess.TimeoutExpired(cmd, 1, output=b"partial \xff", stderr=b"slow")
+
+        monkeypatch.setattr(capture.subprocess, "run", fake_run)
+        argv = ["--world", str(self._world_file(tmp_path)), "--step-id", "J01.4", "--", "apm"]
+        assert capture.main(argv) == 0
+        record = json.loads(capsys.readouterr().out)
+        assert record["rc"] == 124
+        assert Path(record["stdout_log"]).read_text(encoding="utf-8") == "partial \ufffd"
+        assert Path(record["stderr_log"]).read_text(encoding="utf-8").startswith("slow")
 
 
 class TestBriefLint:
