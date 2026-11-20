@@ -191,6 +191,49 @@ def _expected_deployed_command_path(project: Path, target: TargetProfile) -> Pat
     return root / mapping.subdir / f"{stem}{extension}"
 
 
+_AGENT_FILES = {
+    "agents/rev.agent.md": "---\nname: rev\ndescription: Review agent\n---\nReview the diff.\n",
+    "agents/lint.md": "# Lint\n",
+}
+
+
+def _integrate_agents(
+    bundle: Path,
+    project: Path,
+    target: TargetProfile,
+    *,
+    lockfile: dict | None = None,
+    force: bool = False,
+    dry_run: bool = False,
+):
+    """Run the bundle deploy loop for one target with a fresh diagnostics collector."""
+    from apm_cli.bundle.local_bundle import LocalBundleInfo
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.services import integrate_local_bundle
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    if lockfile is None:
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+    diagnostics = DiagnosticCollector()
+    bundle_info = LocalBundleInfo(
+        source_dir=bundle,
+        plugin_json={"id": "test-plugin"},
+        package_id="test-plugin",
+        lockfile=lockfile,
+        pack_targets=["claude"],
+    )
+    result = integrate_local_bundle(
+        bundle_info,
+        project,
+        targets=(target,),
+        force=force,
+        dry_run=dry_run,
+        diagnostics=diagnostics,
+        scope=InstallScope.PROJECT,
+    )
+    return result, diagnostics
+
+
 def test_local_bundle_receives_enabled_empty_executable_gate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -746,45 +789,148 @@ class TestGrokBuildLocalBundleDeployment:
 class TestLocalBundlePathRouting:
     """Direct contracts for untrusted packed bundle paths."""
 
-    def test_packed_markdown_agents_are_skipped_for_codex_with_one_warning_each(
-        self, tmp_path: Path
-    ) -> None:
-        from apm_cli.bundle.local_bundle import LocalBundleInfo
-        from apm_cli.core.scope import InstallScope
-        from apm_cli.install.services import integrate_local_bundle
-        from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+    def test_packed_markdown_agents_render_to_codex_toml(self, tmp_path: Path) -> None:
+        """Codex agents are rendered to TOML and claimed by the rendered hash (#3714)."""
+        import tomllib
 
-        bundle = _make_bundle(
-            tmp_path / "src",
-            pack_target="claude",
-            files={"agents/rev.agent.md": "# Rev\n", "agents/lint.md": "# Lint\n"},
-        )
+        from apm_cli.utils.content_hash import compute_file_hash
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
         project = _make_project(tmp_path / "dst")
-        diagnostics = DiagnosticCollector()
-        bundle_info = LocalBundleInfo(
-            source_dir=bundle,
-            plugin_json={"id": "test-plugin"},
-            package_id="test-plugin",
-            lockfile=yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8")),
-            pack_targets=["claude"],
-        )
 
-        result = integrate_local_bundle(
-            bundle_info,
-            project,
-            targets=(KNOWN_TARGETS["codex"],),
-            diagnostics=diagnostics,
-            scope=InstallScope.PROJECT,
+        result, diagnostics = _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
+
+        assert result["skipped"] == 0
+        assert sorted(result["deployed_files"]) == [
+            ".codex/agents/lint.toml",
+            ".codex/agents/rev.toml",
+        ]
+        rev = tomllib.loads((project / ".codex/agents/rev.toml").read_text(encoding="utf-8"))
+        assert rev == {
+            "name": "rev",
+            "description": "Review agent",
+            "developer_instructions": "Review the diff.",
+        }
+        lint = tomllib.loads((project / ".codex/agents/lint.toml").read_text(encoding="utf-8"))
+        assert lint["developer_instructions"] == "# Lint"
+        for record, claim in result["deployed_file_hashes"].items():
+            assert claim == compute_file_hash(project / record)
+        assert CATEGORY_WARNING not in diagnostics.by_category()
+
+    def test_codex_bundle_agent_collision_dry_run_and_force(self, tmp_path: Path) -> None:
+        """Rendered agents adopt identical bytes, keep edits without --force (#3714)."""
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        project = _make_project(tmp_path / "dst")
+        codex = KNOWN_TARGETS["codex"]
+        rev = project / ".codex/agents/rev.toml"
+
+        preview, _diagnostics = _integrate_agents(bundle, project, codex, dry_run=True)
+        assert not (project / ".codex").exists()
+        installed, _diagnostics = _integrate_agents(bundle, project, codex)
+        assert preview["deployed_file_hashes"] == installed["deployed_file_hashes"]
+        rendered = rev.read_bytes()
+
+        again, diagnostics = _integrate_agents(bundle, project, codex)
+        assert again["deployed_file_hashes"] == installed["deployed_file_hashes"]
+        assert again["skipped"] == 0
+        assert not diagnostics.has_diagnostics
+
+        rev.write_bytes(rendered + b"# edited\n")
+        kept, diagnostics = _integrate_agents(bundle, project, codex)
+        assert rev.read_bytes() == rendered + b"# edited\n"
+        assert kept["skipped"] == 1
+        assert ".codex/agents/rev.toml" not in kept["deployed_file_hashes"]
+        assert [d.message for d in diagnostics.by_category()["collision"]] == [
+            ".codex/agents/rev.toml"
+        ]
+
+        forced, _diagnostics = _integrate_agents(bundle, project, codex, force=True)
+        assert rev.read_bytes() == rendered
+        assert forced["deployed_file_hashes"] == installed["deployed_file_hashes"]
+
+    @pytest.mark.parametrize(
+        ("rel", "content", "reason"),
+        [
+            ("agents/bad.md", b"---\nname: bad\n---\n\xff\xfe\n", "UnicodeDecodeError"),
+            ("agents/native.toml", b'name = "native"\n', "cannot convert"),
+        ],
+        ids=["render-failure", "non-markdown-source"],
+    )
+    def test_codex_bundle_agent_that_cannot_render_writes_nothing(
+        self, tmp_path: Path, rel: str, content: bytes, reason: str
+    ) -> None:
+        """A failed render skips the agent with a named warning and no claim (#3714)."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files={})
+        (bundle / rel).parent.mkdir(parents=True, exist_ok=True)
+        (bundle / rel).write_bytes(content)
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        lockfile["pack"]["bundle_files"] = {rel: hashlib.sha256(content).hexdigest()}
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(
+            bundle, project, KNOWN_TARGETS["codex"], lockfile=lockfile
         )
 
         assert result["deployed_files"] == []
-        assert result["skipped"] == 2
-        assert not (project / ".codex" / "agents").exists()
-        warnings = sorted(w.message for w in diagnostics.by_category()[CATEGORY_WARNING])
-        assert len(warnings) == 2
-        assert "'agents/lint.md' for target codex" in warnings[0]
-        assert "'agents/rev.agent.md' for target codex" in warnings[1]
-        assert all("codex_agent (.toml)" in message for message in warnings)
+        assert result["deployed_file_hashes"] == {}
+        assert result["skipped"] == 1
+        assert not (project / ".codex").exists()
+        [warning] = diagnostics.by_category()[CATEGORY_WARNING]
+        assert f"{rel!r}" in warning.message
+        assert "for target codex" in warning.message
+        assert reason in warning.message
+
+    def test_codex_bundle_agent_rejects_bytes_that_do_not_match_the_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        (bundle / "agents/rev.agent.md").write_bytes(b"---\nname: evil\n---\nInjected.\n")
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
+
+        assert result["deployed_files"] == [".codex/agents/lint.toml"]
+        assert not (project / ".codex/agents/rev.toml").exists()
+        [warning] = diagnostics.by_category()[CATEGORY_WARNING]
+        assert "'agents/rev.agent.md'" in warning.message
+        assert "pack.bundle_files" in warning.message
+
+    @pytest.mark.parametrize(
+        "target_name",
+        sorted(name for name, target in KNOWN_TARGETS.items() if "agents" in target.primitives),
+    )
+    def test_only_codex_agents_are_rendered_across_agent_targets(
+        self, tmp_path: Path, target_name: str
+    ) -> None:
+        """Non-Codex agent targets keep copying packed bytes unchanged (#3714)."""
+        import tomllib
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        project = _make_project(tmp_path / "dst")
+        target = KNOWN_TARGETS[target_name]
+        mapping = target.primitives["agents"]
+
+        result, diagnostics = _integrate_agents(bundle, project, target)
+
+        assert result["skipped"] == 0
+        assert not diagnostics.has_diagnostics
+        root = project / (mapping.deploy_root or target.root_dir) / mapping.subdir
+        expected = {
+            (root / f"{stem}{mapping.extension}").relative_to(project).as_posix(): packed
+            for stem, packed in (("rev", "agents/rev.agent.md"), ("lint", "agents/lint.md"))
+        }
+        assert sorted(result["deployed_files"]) == sorted(expected)
+        for record, packed in expected.items():
+            deployed = (project / record).read_bytes()
+            if mapping.format_id == "codex_agent":
+                assert tomllib.loads(deployed.decode("utf-8"))["developer_instructions"]
+            else:
+                assert deployed == (bundle / packed).read_bytes()
 
     @pytest.mark.parametrize(
         "target_name",
