@@ -106,11 +106,11 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-mf-027](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-027) | MUST | 4.5 | consumer | active | 2 | - |
 | [req-na-001](docs/src/content/docs/specs/openapm-v0.1.md#req-na-001) | MUST | 8.5.11 | consumer | skipped | 1 | - |
 | [req-na-002](docs/src/content/docs/specs/openapm-v0.1.md#req-na-002) | MUST | 8.5.11 | consumer | active | 2 | - |
-| [req-na-003](docs/src/content/docs/specs/openapm-v0.1.md#req-na-003) | MUST | 8.5.11 | consumer | active | 1 | - |
+| [req-na-003](docs/src/content/docs/specs/openapm-v0.1.md#req-na-003) | MUST | 8.5.11 | consumer | active | 2 | - |
 | [req-na-004](docs/src/content/docs/specs/openapm-v0.1.md#req-na-004) | MUST | 8.5.11 | consumer | active | 12 | tests/fixtures/spec-conformance/native-activation/req-na-004.json |
 | [req-na-005](docs/src/content/docs/specs/openapm-v0.1.md#req-na-005) | MUST | 8.5.11 | consumer | active | 2 | - |
 | [req-na-006](docs/src/content/docs/specs/openapm-v0.1.md#req-na-006) | MUST | 8.5.11 | consumer | skipped | 1 | - |
-| [req-na-007](docs/src/content/docs/specs/openapm-v0.1.md#req-na-007) | MUST | 8.5.11 | consumer | active | 1 | - |
+| [req-na-007](docs/src/content/docs/specs/openapm-v0.1.md#req-na-007) | MUST | 8.5.11 | consumer | active | 2 | - |
 | [req-pl-001](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-001) | MUST | 6.1 | governance | active | 1 | - |
 | [req-pl-002](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-002) | MUST | 6.2 | governance | active | 1 | - |
 | [req-pl-003](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-003) | MUST | 6.4 | governance | active | 1 | - |
@@ -191,7 +191,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-tg-010](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-010) | MUST | 8.5.4 | consumer | active | 1 | - |
 | [req-tg-011](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-011) | MUST | 8.5.5 | consumer | active | 4 | - |
 | [req-tg-012](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012) | MUST | 8.5.6 | consumer | active | 7 | - |
-| [req-tg-013](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-013) | MUST | 8.5.7 | consumer | active | 7 | - |
+| [req-tg-013](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-013) | MUST | 8.5.7 | consumer | active | 9 | - |
 | [req-tg-014](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-014) | MUST | 8.5.8 | consumer | active | 2 | - |
 | [req-tg-015](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-015) | MUST | 8.5.1 | consumer | active | 6 | - |
 | [req-tg-016](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-016) | MUST | 8.5.9 | consumer | active | 2 | - |
@@ -214,4 +214,8 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 
 ### req-na-006
 - The explicit split fallback for Codex, which fails A3, is implemented in #3920; schema-bearing Agent Plugins v1 dependencies stay opaque under req-tg-011.
+
+### req-tg-013
+- #3921 activates an Agent Plugin from an intact copy deployed to .agents/plugins/<name>, verified against the lock fingerprint, instead of referencing apm_modules in place; the spec clause awaits its amendment.
+- #3921 refuses every plugin-name collision instead of letting a direct dependency win over a transitive one, and records ownership per lock entry rather than in a ledger, so there is no owner to re-point; see test_same_plugin_name_claimants_are_refused. The precedence clauses await their spec amendment.
 

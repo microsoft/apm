@@ -30,7 +30,7 @@ from apm_cli.claude_plugins.registrar import (
     marketplace_binding,
     marketplace_name,
     native_ownership,
-    reconcile_claude_plugins,
+    reconcile_native_plugins,
     verify_claude_native_cache,
 )
 from apm_cli.core.scope import InstallScope
@@ -114,7 +114,7 @@ class _Home:
         return root
 
     def reconcile(self, previous) -> None:
-        reconcile_claude_plugins(
+        reconcile_native_plugins(
             modules_dir=self.modules,
             scope=InstallScope.USER,
             previous=previous,
@@ -216,7 +216,7 @@ def test_ownership_derives_from_previous_and_next_lockfile(case_id: str, tmp_pat
     moved_from = case.get("previous_marketplace")
     declaration = SettingsDeclaration(
         marketplace["name"],
-        Path(marketplace["path"]),
+        marketplace["path"],
         frozenset(case["next_lock_plugins"]),
         None if previous is None else frozenset(previous),
         (moved_from["name"], moved_from["path"]) if moved_from else None,
@@ -349,6 +349,46 @@ def test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding
     with pytest.raises(ClaudeNativePluginError, match="another source"):
         home.reconcile(None)
     assert json.loads(home.settings.read_text()) == foreign
+
+
+@pytest.mark.req("req-na-003")
+@pytest.mark.req("req-na-007")
+def test_project_scope_declares_a_relative_path_under_a_per_project_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#3921: committed project settings name the profile root relatively."""
+    from apm_cli.claude_plugins.registrar import scope_binding
+    from apm_cli.native_plugins import scopes
+
+    assert_spec_contains(
+        "At project scope the\ndeclaration MUST use a relative path",
+        "at project\nscope the name MUST NOT depend on the user, the host, or the absolute\ncheckout path",
+    )
+    monkeypatch.setattr(scopes, "project_identity", lambda root: "example.test/acme/app")
+    one = scope_binding(
+        user_scope=False,
+        modules_dir=tmp_path / "a/apm_modules",
+        deploy_root=tmp_path / "a",
+        previous=None,
+    )
+    two = scope_binding(
+        user_scope=False,
+        modules_dir=tmp_path / "elsewhere/b/apm_modules",
+        deploy_root=tmp_path / "elsewhere/b",
+        previous=None,
+    )
+    assert one == two == (one[0], "./.agents/plugins")
+    assert one[0] != marketplace_name(tmp_path / "a")
+    monkeypatch.setattr(scopes, "project_identity", lambda root: "example.test/acme/other")
+    assert (
+        scope_binding(
+            user_scope=False,
+            modules_dir=tmp_path / "a/apm_modules",
+            deploy_root=tmp_path / "a",
+            previous=None,
+        )[0]
+        != one[0]
+    )
 
 
 def _reconcile(case: dict[str, Any]) -> tuple[Any, list[str]]:

@@ -826,9 +826,10 @@
       "keyword": "MUST",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_writes_only_the_two_keys_and_runs_no_vendor_cli"
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_writes_only_the_two_keys_and_runs_no_vendor_cli",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_declares_a_relative_path_under_a_per_project_name"
       ]
     },
     {
@@ -886,9 +887,10 @@
       "keyword": "MUST",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding"
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_declares_a_relative_path_under_a_per_project_name"
       ]
     },
     {
@@ -2016,15 +2018,21 @@
       "keyword": "MUST",
       "section": "8.5.7",
       "status": "active",
-      "test_count": 7,
+      "test_count": 9,
       "tests": [
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_invalid_settings_fail_closed_without_overwrite",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_missing_ledger_re_adopts_only_the_exact_reserved_namespace",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_missing_previous_lock_never_adopts_or_retires_existing_entries",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_lifecycle_registration_clauses_persist_in_spec",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_in_place_and_consumer_owned",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_and_consumer_owned",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_references_the_materialized_package_in_place",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_non_copilot_target_creates_no_native_registration",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_plugin_name_precedence_and_owner_identity_are_deterministic",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused"
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_same_plugin_name_claimants_are_refused"
+      ],
+      "waivers": [
+        "#3921 activates an Agent Plugin from an intact copy deployed to .agents/plugins/<name>, verified against the lock fingerprint, instead of referencing apm_modules in place; the spec clause awaits its amendment.",
+        "#3921 refuses every plugin-name collision instead of letting a direct dependency win over a transitive one, and records ownership per lock entry rather than in a ledger, so there is no owner to re-point; see test_same_plugin_name_claimants_are_refused. The precedence clauses await their spec amendment."
       ]
     },
     {
