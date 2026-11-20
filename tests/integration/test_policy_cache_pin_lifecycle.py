@@ -53,7 +53,9 @@ def _edit_cached_policy(world: PolicyScopeWorld, package: str) -> None:
     assert documents, "no cached policy document"
     for path in documents:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        data.setdefault("dependencies", {}).setdefault("deny", []).append(package)
+        dependencies = data.get("dependencies") or {}
+        dependencies["deny"] = [*(dependencies.get("deny") or []), package]
+        data["dependencies"] = dependencies
         path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
 
