@@ -410,7 +410,11 @@ class TestEnterpriseHostHandling:
         target_path = tmp_path / "test-enterprise"
 
         with patch("pathlib.Path.exists", return_value=False):
-            downloader._clone_with_fallback("team/internal-repo", target_path)
+            downloader._clone_with_fallback(
+                "team/internal-repo",
+                target_path,
+                dep_ref=DependencyReference(repo_url="team/internal-repo"),
+            )
 
         # Verify Method 3 used enterprise host, NOT github.com
         calls = mock_repo_class.clone_from.call_args_list
@@ -430,9 +434,10 @@ class TestEnterpriseHostHandling:
         downloader = GitHubPackageDownloader()
         downloader.github_host = "custom.ghe.com"
 
-        # Build URLs for both SSH and HTTPS methods
-        url_ssh = downloader._build_repo_url("owner/repo", use_ssh=True)
-        url_https = downloader._build_repo_url("owner/repo", use_ssh=False)
+        # Build URLs for both SSH and HTTPS methods from a host-less dep_ref
+        dep_ref = DependencyReference(repo_url="owner/repo")
+        url_ssh = downloader._build_repo_url("owner/repo", use_ssh=True, dep_ref=dep_ref)
+        url_https = downloader._build_repo_url("owner/repo", use_ssh=False, dep_ref=dep_ref)
 
         assert "custom.ghe.com" in url_ssh
         assert "custom.ghe.com" in url_https
@@ -835,14 +840,10 @@ class TestAzureDevOpsSupport:
             build_ado_ssh_url,
         )
 
-        # HTTPS clone URL with token
-        url = build_ado_https_clone_url("myorg", "My Project", "myrepo", token="tok")
+        # HTTPS clone URL
+        url = build_ado_https_clone_url("myorg", "My Project", "myrepo")
         assert "My%20Project" in url
         assert "My Project" not in url
-        assert url == "https://tok@dev.azure.com/myorg/My%20Project/_git/myrepo"
-
-        # HTTPS clone URL without token
-        url = build_ado_https_clone_url("myorg", "My Project", "myrepo")
         assert url == "https://dev.azure.com/myorg/My%20Project/_git/myrepo"
 
         # SSH cloud URL
@@ -2310,8 +2311,8 @@ class TestGitLabInstallFileDownload:
             dep_ref = DependencyReference(repo_url="a/b", host="gitlab.com")
             assert downloader._resolve_dep_token(dep_ref) == "gitlab-pat"
 
-    def test_gitlab_pat_primary_https_uses_oauth2_not_x_access_token(self):
-        """GitLab-class remotes embed PAT via oauth2 basic form (not GitHub x-access-token)."""
+    def test_gitlab_pat_never_embedded_in_https_url(self):
+        """GitLab PATs travel via git env; the clone URL stays credential-free."""
         with (
             patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-resolved-value"}, clear=True),
             _CRED_FILL_PATCH,
@@ -2324,17 +2325,16 @@ class TestGitLabInstallFileDownload:
                 "group/nested/repo",
                 use_ssh=False,
                 dep_ref=gitlab_dep,
-                token=resolved,
             )
         assert "x-access-token" not in url.lower()
-        assert "oauth2" in url
-        assert "glpat-resolved-value" in url
+        assert "oauth2" not in url
+        assert "glpat-resolved-value" not in url
         from urllib.parse import urlsplit
 
         sp = urlsplit(url)
         assert sp.scheme == "https"
         assert sp.hostname == "gitlab.com"
-        assert sp.username == "oauth2"
+        assert sp.username is None
         assert sp.path == "/group/nested/repo.git"
 
     def test_gitlab_git_error_redacts_oauth2_url(self):

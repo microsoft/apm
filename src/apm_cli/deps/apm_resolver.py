@@ -13,6 +13,8 @@ from dataclasses import fields, is_dataclass, replace
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.local_bundle import route_agent_plugin_package
 from ..core.errors import TargetResolutionError
 from ..models.apm_package import APMPackage, DependencyReference
@@ -347,7 +349,7 @@ class APMDependencyResolver:
             self._apm_modules_dir = project_root / "apm_modules"
 
         # Load the root package
-        apm_yml_path = project_root / "apm.yml"
+        apm_yml_path = manifest_file(project_root)
         if not apm_yml_path.exists() and root_package is None:
             # Create empty dependency graph for projects without apm.yml
             empty_package = APMPackage(name="unknown", version="0.0.0", package_path=project_root)
@@ -1678,7 +1680,7 @@ class APMDependencyResolver:
             )
 
         # Look for apm.yml in the install path
-        apm_yml_path = install_path / "apm.yml"
+        apm_yml_path = manifest_file(install_path)
         if not apm_yml_path.exists():
             # Package exists but has no apm.yml (e.g., Claude Skill)
             # Check for SKILL.md and create minimal package

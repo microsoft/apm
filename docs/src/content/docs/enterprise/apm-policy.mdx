@@ -16,10 +16,10 @@ an agent does at runtime. Every field is in the [policy schema](../../reference/
 
 :::caution[Project installs only]
 Org policy does not govern user-scope (`-g`) installs in 0.37; local approvals and denies
-still apply. `apm install -g`, `update -g` and `uninstall -g` look for org policy from your
-home directory, not from the project you run them in, so a governed project's policy is not
-applied to them. Two paths check the current directory's policy instead: `apm install -g --mcp`
-and a user-scope install of a local bundle. Do not rely on either for governance.
+still apply. User scope has no git remote, so `apm install -g` (including `--mcp` and local
+bundles), `update -g` and `uninstall -g` discover no org policy, from your home directory or
+the project you run them in. `apm policy status -g` shows source `none`. Settings such as
+`policy.fetch_failure_default` come from the user manifest (`$APM_HOME/apm.yml`).
 [#3703](https://github.com/microsoft/apm/issues/3703) tracks user-scope org policy for 0.38.
 
 When the executables gate is on at user scope, it still parks hooks, MCP servers, LSP servers

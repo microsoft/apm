@@ -173,7 +173,7 @@ class TestCustomAdoServerHostClassification:
             )
             resolver = AuthResolver(allow_external_fallback=False)
             backend = backend_for(dep, resolver)
-            assert backend.build_clone_https_url(dep, token=None) == (
+            assert backend.build_clone_https_url(dep) == (
                 "https://ado.corp.example.com:8443/DefaultCollection/Platform/_git/standards"
             )
             assert resolver.classify_host(dep.host, port=dep.port).api_base == (

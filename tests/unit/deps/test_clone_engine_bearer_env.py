@@ -37,11 +37,7 @@ def _ado_host(git_env: dict) -> MagicMock:
     host.auth_resolver.try_with_fallback.side_effect = resolver_impl.try_with_fallback
     host.auth_resolver.git_env_for_context.side_effect = AuthResolver.git_env_for_context
     host.auth_resolver._build_git_env.side_effect = AuthResolver._build_git_env
-    host._build_repo_url = MagicMock(
-        side_effect=lambda *a, **kw: (
-            "https://bearer-url/o/r" if kw.get("auth_scheme") == "bearer" else "https://pat-url/o/r"
-        )
-    )
+    host._build_repo_url = MagicMock(return_value="https://pat-url/o/r")
     host._sanitize_git_error = MagicMock(side_effect=lambda s: s)
     return host
 
@@ -143,11 +139,7 @@ def test_github_token_uses_header_not_clone_url(tmp_path: Path) -> None:
     host.auth_resolver.git_env_for_remote.side_effect = lambda ctx, _url: (
         AuthResolver.git_env_for_context(ctx, base_env=host.git_env)
     )
-    host._build_repo_url.side_effect = lambda *_args, **kwargs: (
-        f"https://{kwargs['token']}@github.com/owner/repo"
-        if kwargs.get("token")
-        else "https://github.com/owner/repo"
-    )
+    host._build_repo_url.return_value = "https://github.com/owner/repo"
     seen: list[tuple[str, dict[str, str]]] = []
 
     CloneEngine(host).execute(

@@ -207,8 +207,8 @@
     },
     {
       "id": "credential-origin-scope",
-      "decision": "Credentials attach only to their configured origin: registry token per PROXY_REGISTRY_URL origin, credential headers dropped on cross-origin redirects, GitHub MCP tokens only for parser-agreed hosts, and the redirect follow decision (same scheme, host and effective port under the base path, at most 3 hops, credentials re-sent only on in-bound hops)",
-      "owner": "utils/http_credentials.py (CREDENTIAL_HEADER_NAMES, strip_cross_origin_credential_headers, CredentialScopedSession, origin_bounded_request, unfollowed_redirect_request); deps/registry_proxy.py (RegistryConfig.headers_for); deps/registry/auth.py (RegistryAuthContext.auth_header, RegistryAuthContext.headers); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, deps/registry/client.py, marketplace/client.py, marketplace/builder.py, policy/_policy_http.py, install/artifactory_resolver.py, install/validation.py, adapters/client/copilot.py",
+      "decision": "Credentials attach only to their configured origin: registry token per PROXY_REGISTRY_URL origin, credential headers dropped on cross-origin redirects, GitHub MCP tokens only for parser-agreed hosts, and the redirect follow decision (same scheme, host and effective port under the base path, at most 3 hops, credentials re-sent only on in-bound hops); HTTP sessions are CredentialScopedSession unless frozen-exempt, and no URL builder takes a credential",
+      "owner": "utils/http_credentials.py (CREDENTIAL_HEADER_NAMES, strip_cross_origin_credential_headers, CredentialScopedSession, origin_bounded_request, unfollowed_redirect_request); deps/registry_proxy.py (RegistryConfig.headers_for); deps/registry/auth.py (RegistryAuthContext.auth_header, RegistryAuthContext.headers); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, deps/registry/client.py, registry/client.py, marketplace/client.py, marketplace/builder.py, policy/_policy_http.py, install/artifactory_resolver.py, install/validation.py, adapters/client/copilot.py",
       "selectors": [
         "src/apm_cli/utils/http_credentials.py",
         "src/apm_cli/deps/registry_proxy.py"
@@ -216,8 +216,17 @@
       "guards": [
         "transport-platform-authenticated-egress-credential-headers",
         "transport-platform-credential-origin-scope",
-        "transport-platform-origin-bounded-redirect"
+        "transport-platform-http-session-construction",
+        "transport-platform-origin-bounded-redirect",
+        "transport-platform-url-builder-credential-free"
       ]
+    },
+    {
+      "id": "egress-route-policy",
+      "decision": "Route of every outbound request (direct, proxy-only or refused) and registry-only (PROXY_REGISTRY_ONLY) enforcement, with the org policy fetch kept direct as the documented governance-channel exception",
+      "owner": "deps/egress_route.py (EgressSurface, EgressRoute, route_for, is_refused, is_proxy_only); deps/registry_proxy.py parses the flag (is_enforce_only) for the owner only; consumers: install/pipeline.py, install/validation.py, install/phases/integrate.py, install/helpers/ref_reuse.py, deps/git_reference_resolver.py, deps/git_semver_resolver.py, deps/artifactory_orchestrator.py, models/dependency/reference.py, commands/view.py, commands/outdated.py, registry/client.py, marketplace/client.py, policy/_policy_http.py",
+      "selectors": ["src/apm_cli/deps/egress_route.py"],
+      "guards": ["transport-platform-egress-route-policy"]
     },
     {
       "id": "credential-value-rendering",
