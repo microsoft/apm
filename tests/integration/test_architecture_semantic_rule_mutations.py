@@ -160,9 +160,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         rule_id="install-deployment-local-bundle-policy-preflight",
         path="src/apm_cli/install/local_bundle_handler.py",
-        old="cache_only=True,",
-        new="cache_only=False,",
-        intent="Local bundle policy preflight stops running cache-only.",
+        old="effective_target_source=deployment_decision.source,\n        )",
+        new="effective_target_source=deployment_decision.source,\n            cache_only=True,\n        )",
+        intent="Local bundle policy preflight reads a cold policy cache as no policy.",
     ),
     MutationCase(
         rule_id="install-deployment-local-identity-anchor",

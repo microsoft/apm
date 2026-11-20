@@ -1006,6 +1006,7 @@ def _check_drift(
         diff_scratch_against_project,
         run_replay,
     )
+    from ..install.errors import PolicyViolationError
     from ..integration.targets import resolve_audit_targets
 
     logger = CheckLogger(verbose=verbose)
@@ -1024,6 +1025,17 @@ def _check_drift(
         try:
             scratch = run_replay(config, logger)
         except (AgentPluginDeploymentBoundaryError, CodexNativeError) as exc:
+            return (
+                CheckResult(
+                    name="drift",
+                    passed=False,
+                    message=f"drift replay blocked: {exc}",
+                    details=[str(exc)],
+                ),
+                [],
+            )
+        except PolicyViolationError as exc:
+            # Org policy asked to block when it cannot be resolved.
             return (
                 CheckResult(
                     name="drift",

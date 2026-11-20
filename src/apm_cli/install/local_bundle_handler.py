@@ -217,7 +217,6 @@ def install_local_bundle(
             dry_run=dry_run,
             effective_target=deployment_decision.canonical_targets,
             effective_target_source=deployment_decision.source,
-            cache_only=True,
         )
         policy = policy_fetch.policy if policy_fetch is not None else None
         from .integrity import require_hashes_enabled
@@ -524,29 +523,30 @@ def effective_bundle_allow_map(
     no_policy: bool,
     logger: Any,
     migrate_user_legacy: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, dict[str, bool]] | None:
     """Resolve local-bundle trust through the canonical trust owner.
 
-    Org policy is discovered from *project_root*; the grants are read from
-    the scope's manifest (``$APM_HOME/apm.yml`` under ``-g``), never from
-    the working directory's ``apm.yml`` at user scope.
+    Org policy resolves from *project_root* as for a package install; the
+    bundle policy preflight reports its outcome, so this read does not repeat
+    it. The grants are read from the scope's manifest (``$APM_HOME/apm.yml``
+    under ``-g``), never from the working directory's ``apm.yml`` at user
+    scope.
     """
     from ..core.scope import manifest_root
+    from ..policy.outcome_routing import resolve_trust_policy
     from ..security.executables import (
         exec_trust_context_for_project,
         materialize_exec_map,
         project_manifest_path,
     )
 
-    policy = None
-    if not no_policy:
-        from ..policy.discovery import discover_policy_with_chain
-
-        policy = getattr(
-            discover_policy_with_chain(project_root, cache_only=True),
-            "policy",
-            None,
-        )
+    policy = resolve_trust_policy(
+        project_root,
+        no_policy=no_policy,
+        announce=False,
+        raise_blocking_errors=not dry_run,
+    )
     grants_manifest = project_manifest_path(manifest_root(project_root, user_scope=user_scope))
     return materialize_exec_map(
         exec_trust_context_for_project(

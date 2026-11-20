@@ -1251,6 +1251,7 @@ def install(  # noqa: PLR0913
                     no_policy=no_policy,
                     logger=logger,
                     migrate_user_legacy=not dry_run,
+                    dry_run=dry_run,
                 )
                 _install_lb(
                     bundle_info=_bundle_info,

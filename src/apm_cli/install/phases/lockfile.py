@@ -460,9 +460,26 @@ class LockfileBuilder:
                     locked_dep.subset_pairings = None  # the widened flat product is exact
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
+        previous = getattr(self.ctx, "existing_lockfile", None)
+        logger = getattr(self.ctx, "logger", None)
         for dep_key, locked_dep in lockfile.dependencies.items():
-            if dep_key in self.ctx.package_hashes:
-                locked_dep.content_hash = self.ctx.package_hashes[dep_key]
+            if dep_key not in self.ctx.package_hashes:
+                continue
+            new_hash = self.ctx.package_hashes[dep_key]
+            old = previous.get_dependency(dep_key) if previous is not None else None
+            # Only a moved commit may change content (#4027); name each one.
+            if (
+                logger
+                and old is not None
+                and old.content_hash
+                and old.content_hash != new_hash
+                and old.resolved_commit != locked_dep.resolved_commit
+            ):
+                logger.info(
+                    f"{dep_key}: new content hash {new_hash} for commit "
+                    f"{(locked_dep.resolved_commit or 'unknown')[:12]}"
+                )
+            locked_dep.content_hash = new_hash
 
     def _attach_declared_licenses(self, lockfile: LockFile) -> None:
         """Attach DECLARED-license provenance captured at acquire time (U6).

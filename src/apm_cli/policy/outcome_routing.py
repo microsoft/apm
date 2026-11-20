@@ -24,6 +24,7 @@ and the exact gating semantics match the pre-extraction behaviour.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.install.errors import PolicyViolationError
@@ -229,3 +230,64 @@ def route_discovery_outcome(
 
     # Defensive: unrecognised outcome -- skip enforcement.
     return None
+
+
+class _TrustReaderLog:
+    """Logger adapter for trust readers.
+
+    A trust reader runs after (or instead of) the command's own policy
+    announcement, so a resolved policy is not announced again; a miss is
+    always reported, through the caller's logger when it can render one.
+    """
+
+    def __init__(self, logger) -> None:
+        self._logger = logger
+
+    def policy_resolved(self, **_kwargs) -> None:
+        return None
+
+    def policy_discovery_miss(self, **kwargs) -> None:
+        render = getattr(self._logger, "policy_discovery_miss", None)
+        if render is None:
+            from apm_cli.core.command_logger import InstallLogger
+
+            verbose = bool(getattr(self._logger, "verbose", False))
+            render = InstallLogger(verbose=verbose).policy_discovery_miss
+        render(**kwargs)
+
+
+def resolve_trust_policy(
+    project_root: Path,
+    *,
+    no_policy: bool = False,
+    logger=None,
+    announce: bool = True,
+    raise_blocking_errors: bool = True,
+) -> ApmPolicy | None:
+    """Return the org policy an executables-trust reader may apply.
+
+    The single policy-outcome owner for trust readers. The discovery outcome
+    routes through :func:`route_discovery_outcome` with the project's
+    ``policy.fetch_failure_default``, exactly as package installs do: an
+    unusable policy raises :class:`PolicyViolationError` when the project or
+    the cached policy asks to block, and is reported otherwise. A reader
+    never silently drops the org layer. ``announce=False`` suppresses the
+    miss report (for read-only replays whose command reports it);
+    ``raise_blocking_errors=False`` serves dry-run previews.
+    """
+    if no_policy:
+        return None
+    from .discovery import PolicyFetchResult, discover_policy_with_chain
+    from .project_config import read_project_fetch_failure_default
+
+    root = Path(project_root)
+    try:
+        fetch_result = discover_policy_with_chain(root)
+    except (OSError, ValueError, RuntimeError) as exc:
+        fetch_result = PolicyFetchResult(outcome="cache_miss_fetch_fail", fetch_error=str(exc))
+    return route_discovery_outcome(
+        fetch_result,
+        logger=_TrustReaderLog(logger) if announce else None,
+        fetch_failure_default=read_project_fetch_failure_default(root),
+        raise_blocking_errors=raise_blocking_errors,
+    )

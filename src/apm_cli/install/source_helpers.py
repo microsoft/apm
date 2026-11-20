@@ -40,7 +40,18 @@ def supply_chain_mismatch_hint(ctx: Any, dep_key: str) -> str:
     A direct dependency gets the targeted ``apm update <dep_key>``: its key is
     the ``replace:``-projected unique key ``apm update`` matches. A transitive
     one cannot be named on that command line, so it gets the full refresh.
+    During an update only an unchanged commit is checked, so the hint points
+    at the cache instead.
     """
+    if getattr(ctx, "update_refs", False):
+        # Only an unchanged commit is checked during an update, so updating
+        # again cannot accept the new bytes.
+        return (
+            "This may indicate a supply-chain attack: the locked commit did not "
+            "change, so its content must not change either. Run 'apm cache clean' "
+            "and retry; if the mismatch persists, the source is serving altered "
+            "content for this commit."
+        )
     command = lockfile_refresh_command(ctx.scope)
     if dep_key in (getattr(ctx, "declared_direct_refs", None) or {}):
         return (

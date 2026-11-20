@@ -550,9 +550,8 @@ class TestUnpackCanvasTrust:
     """Canvas extensions are executable code: unpack must enforce the feature gate.
 
     The ``canvas`` experimental flag controls feature availability.
-    When OFF, canvas paths are silently dropped.  When ON, canvas files
-    are allowed (``apm unpack`` is deprecated and has no project context
-    for allowExecutables enforcement).
+    When OFF, canvas paths are dropped.  When ON, unpack refuses them:
+    only ``apm install <bundle>`` applies the executables gate.
     """
 
     @pytest.fixture(autouse=True)
@@ -584,18 +583,17 @@ class TestUnpackCanvasTrust:
         assert not (output / ".github" / "extensions" / "widget").exists()
         assert (output / ".github" / "agents" / "a.md").exists()
 
-    def test_canvas_deployed_when_flag_on(self, tmp_path, enable_canvas):
-        """Canvas deploys when the experimental flag is on (apm unpack has no allowExecutables)."""
+    def test_canvas_refused_when_flag_on(self, tmp_path, enable_canvas):
+        """With the flag on, canvas is executable content that unpack refuses."""
         deployed = [".github/agents/a.md", ".github/extensions/widget/extension.mjs"]
         bundle = _build_bundle_dir(tmp_path, deployed)
         output = tmp_path / "target"
         output.mkdir()
 
-        result = unpack_bundle(bundle, output)
+        with pytest.raises(ValueError, match="apm install"):
+            unpack_bundle(bundle, output)
 
-        assert result.canvas_blocked == 0
-        assert ".github/extensions/widget/extension.mjs" in result.files
-        assert (output / ".github" / "extensions" / "widget" / "extension.mjs").exists()
+        assert list(output.iterdir()) == []
 
     def test_canvas_blocked_when_flag_off_no_trust(self, tmp_path):
         """When the experimental flag is off, canvas is always blocked regardless."""
@@ -621,6 +619,59 @@ class TestUnpackCanvasTrust:
         assert result.canvas_blocked == 1
         assert result.files == []
         assert not (output / ".github" / "extensions").exists()
+
+
+class TestUnpackRefusesExecutables:
+    """``apm unpack`` cannot apply the executables gate, so it deploys none (#4027)."""
+
+    @pytest.mark.parametrize(
+        "executable",
+        [
+            ".github/hooks/pkg-hooks.json",
+            ".github/hooks/scripts/pkg/run.sh",
+            ".claude/settings.json",
+            ".cursor/hooks.json",
+            ".vscode/mcp.json",
+            ".codex/config.toml",
+            ".github/skills/tool/bin/tool",
+        ],
+    )
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_executable_content_is_refused_before_any_write(self, tmp_path, executable, dry_run):
+        bundle = _build_bundle_dir(tmp_path, [".github/agents/a.md", executable])
+        output = tmp_path / "target"
+        output.mkdir()
+
+        with pytest.raises(ValueError, match=r"apm install .*test-pkg-1\.0\.0"):
+            unpack_bundle(bundle, output, dry_run=dry_run)
+
+        assert list(output.iterdir()) == []
+
+    def test_executable_inside_a_directory_entry_is_refused(self, tmp_path):
+        bundle = _build_bundle_dir(tmp_path, [".github/skills/tool/"])
+        (bundle / ".github/skills/tool/bin").mkdir()
+        (bundle / ".github/skills/tool/bin/run").write_text("x", encoding="utf-8")
+        output = tmp_path / "target"
+        output.mkdir()
+
+        with pytest.raises(ValueError, match="bin executable"):
+            unpack_bundle(bundle, output)
+
+    def test_non_executable_content_still_unpacks(self, tmp_path):
+        deployed = [
+            ".github/agents/a.md",
+            ".github/skills/tool/SKILL.md",
+            ".github/skills/tool/scripts/helper.py",
+            ".github/instructions/b.instructions.md",
+        ]
+        bundle = _build_bundle_dir(tmp_path, deployed)
+        output = tmp_path / "target"
+        output.mkdir()
+
+        result = unpack_bundle(bundle, output)
+
+        assert set(result.files) == set(deployed)
+        assert all((output / f).exists() for f in deployed)
 
 
 # ---------------------------------------------------------------------------

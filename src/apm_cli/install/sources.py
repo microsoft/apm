@@ -873,9 +873,16 @@ class FreshDependencySource(DependencySource):
             # Thread-safety: resolve phase completes before integrate runs,
             # so the set is stable here.  integrate.py's own .add() is
             # idempotent (set semantics) and runs single-threaded.
+            # ``apm update`` accepts new bytes only for a commit that moved;
+            # an unchanged commit must still hold its locked content.
             _expected_hash_deps = ctx.expected_hash_change_deps
+            _locked_commit = getattr(dep_locked_chk, "resolved_commit", None)
+            _commit_moved = bool(
+                ctx.update_refs
+                and not (resolved_commit and _locked_commit and resolved_commit == _locked_commit)
+            )
             if (
-                not ctx.update_refs
+                not _commit_moved
                 and dep_key not in _expected_hash_deps
                 and dep_locked_chk
                 and dep_locked_chk.content_hash

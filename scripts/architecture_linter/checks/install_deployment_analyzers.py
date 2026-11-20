@@ -148,6 +148,14 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
     check_resolution_replacement,
     check_uninstall_selection,
 )
+from scripts.architecture_linter.checks.install_trust_integrity import (
+    GUARD_TRUST_POLICY_OUTCOME,
+    GUARD_UNPACK_EXECUTABLES,
+    GUARD_UPDATE_CONTENT_INTEGRITY,
+    check_trust_policy_outcome,
+    check_unpack_executable_refusal,
+    check_update_content_integrity,
+)
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
@@ -165,6 +173,21 @@ RULES: tuple[Rule, ...] = (
         _GUARD_PACKAGE_CONTENT_HASH,
         "Package content hashing, its lockfile stream and promotion stay owned by utils/content_hash.py.",
         check_package_content_hash,
+    ),
+    _rule(
+        GUARD_TRUST_POLICY_OUTCOME,
+        "Executables-trust readers route policy outcomes through resolve_trust_policy.",
+        check_trust_policy_outcome,
+    ),
+    _rule(
+        GUARD_UPDATE_CONTENT_INTEGRITY,
+        "apm update keeps the content-hash check for an unchanged commit.",
+        check_update_content_integrity,
+    ),
+    _rule(
+        GUARD_UNPACK_EXECUTABLES,
+        "apm unpack refuses executable content before any write.",
+        check_unpack_executable_refusal,
     ),
     _rule(
         _GUARD_SINGLE_FILE,

@@ -869,6 +869,53 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
 
 
 @pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new"),
+    [
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/install/exec_gate.py",
+            "            policy = resolve_trust_policy(self._project_root, announce=False)\n",
+            "            policy = None\n",
+        ),
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/install/local_bundle_handler.py",
+            "        announce=False,\n        raise_blocking_errors=not dry_run,\n",
+            "        announce=False,\n        raise_blocking_errors=not dry_run,\n"
+            "        cache_only=True,\n",
+        ),
+        (
+            "install-deployment-trust-policy-outcome",
+            "src/apm_cli/commands/uninstall/engine.py",
+            "    preflight_survivor_hooks(target_survivor_plan, _allow_executables)\n",
+            "    from ...policy.discovery import discover_policy_with_chain\n\n"
+            "    discover_policy_with_chain(project_root)\n"
+            "    preflight_survivor_hooks(target_survivor_plan, _allow_executables)\n",
+        ),
+        (
+            "install-deployment-update-content-integrity",
+            "src/apm_cli/install/phases/integrate.py",
+            "        and not _locked_commit_unchanged\n",
+            "",
+        ),
+    ],
+)
+def test_trust_and_integrity_owners_reject_bypasses(
+    rule_id: str, path: str, old: str, new: str
+) -> None:
+    """Each trust and integrity consistency guard rejects its bypass (#4027)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert {violation.rule_id for violation in report.violations} == {rule_id}
+
+
+@pytest.mark.parametrize(
     ("path", "old", "new"),
     [
         (
@@ -1909,6 +1956,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The MCP view grows a second trust hasher beside the fingerprint owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-trust-policy-outcome",
+        rule_id="install-deployment-trust-policy-outcome",
+        path="src/apm_cli/security/executables.py",
+        old="    policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)\n",
+        new=(
+            "    from apm_cli.policy.discovery import discover_policy_with_chain\n\n"
+            '    policy = getattr(discover_policy_with_chain(project_root), "policy", None)\n'
+        ),
+        intent="A trust reader drops the policy discovery outcome and keeps only .policy.",
+    ),
+    MutationCase(
         guard_id="install-deployment-uninstall-reachability",
         rule_id="install-deployment-uninstall-reachability",
         path="src/apm_cli/commands/uninstall/engine.py",
@@ -1923,6 +1981,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def select_manifest_dependency(",
         new="def select_manifest_dependency_disabled(",
         intent="Dependency CLI selection loses the one manifest-selection function.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-unpack-executable-refusal",
+        rule_id="install-deployment-unpack-executable-refusal",
+        path="src/apm_cli/bundle/unpacker.py",
+        old="        _refuse_executable_content(unique_files, source_dir, bundle_path)\n",
+        new="",
+        intent="apm unpack copies executable bundle content without refusing it.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-update-content-integrity",
+        rule_id="install-deployment-update-content-integrity",
+        path="src/apm_cli/install/sources.py",
+        old="                not _commit_moved\n",
+        new="                not ctx.update_refs\n",
+        intent="apm update skips the content-hash check even for an unchanged commit.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-agent-plugin-contract",
