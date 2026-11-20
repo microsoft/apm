@@ -12,7 +12,7 @@ from apm_cli.marketplace.models import (
     MarketplaceSource,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers

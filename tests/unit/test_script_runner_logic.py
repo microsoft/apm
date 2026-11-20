@@ -1,11 +1,12 @@
 """Unit tests for script runner functionality (pure logic cases)."""
 
+import os
 import shutil  # noqa: F401
-from unittest.mock import mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
-from apm_cli.core.script_runner import PromptCompiler
+from apm_cli.core.script_runner import PromptCompiler, ScriptRunner
 
 pytestmark = pytest.mark.unit
 
@@ -110,3 +111,45 @@ Hello ${input:name}!"""
             match="Prompt file 'nonexistent.prompt.md' not found",  # noqa: RUF043
         ):
             self.compiler.compile("nonexistent.prompt.md", {})
+
+
+class TestExecuteRuntimeCommandResolution:
+    """Test that _execute_runtime_command resolves executables on all platforms."""
+
+    def setup_method(self):
+        self.runner = ScriptRunner()
+
+    @patch("apm_cli.core.script_runner.subprocess.run")
+    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=r"C:\npm\copilot.cmd")
+    def test_resolves_executable(self, mock_find_runtime, mock_run):
+        """The executable should be resolved via find_runtime_binary on all platforms."""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        self.runner._execute_runtime_command(
+            "copilot --log-level all", "prompt content", os.environ.copy()
+        )
+
+        mock_find_runtime.assert_called_once_with("copilot")
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0] == r"C:\npm\copilot.cmd"
+
+    @patch("apm_cli.core.script_runner.subprocess.run")
+    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
+    def test_keeps_original_when_find_returns_none(self, mock_find_runtime, mock_run):
+        """If find_runtime_binary can't find it, keep the original name."""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        self.runner._execute_runtime_command("copilot -p", "prompt content", os.environ.copy())
+
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0] == "copilot"
+
+    @patch("apm_cli.core.script_runner.subprocess.run")
+    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
+    def test_resolves_on_non_windows(self, mock_find_runtime, mock_run):
+        """find_runtime_binary should be called on all platforms, not just Windows."""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        self.runner._execute_runtime_command("copilot -p", "prompt content", os.environ.copy())
+
+        mock_find_runtime.assert_called_once_with("copilot")

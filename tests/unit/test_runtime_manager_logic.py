@@ -2,6 +2,7 @@
 
 import shutil  # noqa: F401
 import subprocess  # noqa: F401
+import sys
 from unittest.mock import ANY, MagicMock, Mock, call, patch  # noqa: F401
 
 import pytest
@@ -13,6 +14,26 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 # RuntimeManager unit tests
 # ---------------------------------------------------------------------------
+
+
+class TestFrozenLoaderEnvIsolation:
+    """A frozen binary must not leak its bundled loader paths to setup children."""
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="Bash setup scripts only")
+    def test_setup_script_restores_original_loader_paths(self, monkeypatch):
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/bundle/_internal")
+        monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/local/lib")
+        monkeypatch.setenv("DYLD_LIBRARY_PATH", "/bundle/_internal")
+        monkeypatch.delenv("DYLD_LIBRARY_PATH_ORIG", raising=False)
+        manager = RuntimeManager()
+        with patch("apm_cli.runtime.manager.subprocess.run") as mock_run:
+            mock_run.return_value = Mock(returncode=0)
+            assert manager.run_embedded_script("echo setup", "", [])
+        env = mock_run.call_args.kwargs["env"]
+        assert env["LD_LIBRARY_PATH"] == "/usr/local/lib"
+        assert "LD_LIBRARY_PATH_ORIG" not in env
+        assert "DYLD_LIBRARY_PATH" not in env
 
 
 class TestRuntimeManagerGetRuntimePreference:
