@@ -76,7 +76,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "policy-fetch-failure-blocked": "executed by test_remediation_advice_lifecycle::"
     "test_policy_fetch_failure_remediation_clears_the_block",
     "rendering-changed": "needs a locked file rendered by an older APM version",
-    "required-package-unlocked": _POLICY,
+    "required-package-unlocked": "executed end to end by "
+    "tests/integration/test_policy_refusal_stderr_lifecycle.py (RA-015)",
     "unmanaged-file-track": _POLICY,
 }
 

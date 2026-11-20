@@ -189,12 +189,6 @@ LEGACY_RENDER_MIGRATE = _entry(
     "apm install",
     "re-render them for this version",
 )
-RESTORE_EDITED_FORCE = _entry(
-    "drift-restore-edited-force",
-    "apm install --force",
-    "restore them without deleting first (overwrites every local edit and deploys "
-    "despite critical security findings)",
-)
 RESTORE_BUNDLE_EDITED = _entry(
     "drift-restore-bundle-edited",
     "apm install <bundle-path>",
@@ -270,8 +264,9 @@ INSTRUCTION_FRONTMATTER_REJECTED = _entry(
 )
 LOCAL_FILE_UNMANAGED = _entry(
     "local-file-unmanaged",
-    "apm install --force",
-    "overwrite it with the package version",
+    "apm install",
+    "deploy the package version",
+    before="move the local file aside",
 )
 COWORK_SKILLS_DIR_UNDETECTED = _entry(
     "cowork-skills-dir-undetected",
@@ -496,8 +491,9 @@ AGENT_PLUGIN_MCP_UNPORTABLE = _entry(
 )
 UNPACK_CRITICAL_FINDINGS = _entry(
     "unpack-critical-findings",
-    "apm unpack <bundle-path> --force",
-    "deploy the bundle anyway (not recommended)",
+    "apm audit --file <path>",
+    "inspect the critical findings, then drop or replace the bundle or contact its author",
+    before="extract the bundle",
 )
 # -- end W2 bundle --
 # -- end W2 -------------------------------------------------------------------
@@ -641,7 +637,7 @@ LOCAL_DEPENDENCY_UNMAPPED = _entry(
 )
 LOCKFILE_STATE_UNRECONCILED = _entry(
     "lockfile-state-unreconciled",
-    "apm install --force",
+    "apm install",
     "resync the lockfile state",
     then="retry",
 )
@@ -730,7 +726,10 @@ TARGET_NOT_DEPLOYED = _entry(
     "target-not-deployed", "apm install --target {target}", "deploy to {target}"
 )
 STAGED_BUNDLE_DRIFT = _entry(
-    "staged-bundle-drift", "apm install <bundle> --force", "restage the bundle"
+    "staged-bundle-drift",
+    "apm install <bundle>",
+    "restage the bundle",
+    before="delete the edited staged copy under apm_modules",
 )
 INIT_TARGETS_UNDETECTED = _entry(
     "init-targets-undetected",
@@ -1089,7 +1088,10 @@ EXECUTABLES_PIN_MALFORMED = _entry(
     "executables-pin-malformed", "apm approve {package}", "record a valid sha256 pin"
 )
 LOCAL_FILES_COLLIDE = _entry(
-    "local-files-collide", "apm install --force", "overwrite the unmanaged local files"
+    "local-files-collide",
+    "apm install",
+    "deploy the package versions",
+    before="move the local files aside",
 )
 GITHUB_GITLAB_HOST_CONFLICT = _entry(
     "github-gitlab-host-conflict",
@@ -1189,9 +1191,8 @@ BUNDLE_HOOKS_APPROVED = _entry(
 )
 REQUIRED_PACKAGE_UNLOCKED = _entry(
     "required-package-unlocked",
-    "apm install --no-policy",
+    "apm install",
     "record the required packages in the lockfile",
-    then="reinstall normally",
 )
 UNMANAGED_FILE_TRACK = _entry("unmanaged-file-track", "apm install <ref>", "track a flagged file")
 CONTENT_HASHES_MISSING = _entry(

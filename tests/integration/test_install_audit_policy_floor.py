@@ -199,7 +199,7 @@ class TestPolicyBlockFloor:
             audit_phase.run(ctx)
 
         assert any("--no-audit" in w for w in ctx.logger.warnings)
-        assert any("--no-policy" in w for w in ctx.logger.warnings)
+        assert not any("--no-policy" in w for w in ctx.logger.warnings)
 
     def test_block_with_clean_scan_passes(self, monkeypatch, tmp_path):
         """Policy block + no findings -> no error (no false positives)."""

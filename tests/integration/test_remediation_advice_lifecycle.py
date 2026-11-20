@@ -956,6 +956,8 @@ W3_CORE_MODELS_PROOFS: tuple[_TextProof, ...] = (
         lambda _world: _INSTALL_ARGS,
         0,
         _user_file_overwritten,
+        # The printed manual step, as printed: move the local file aside (RA-008).
+        before=_move_aside(_INSTRUCTION),
     ),
     _TextProof(
         "deployment-owners-invalid",

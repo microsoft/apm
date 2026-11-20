@@ -1112,7 +1112,7 @@ def fetch_raw(
             + (
                 " after a proxy miss"
                 if cfg is not None
-                else "; set PROXY_REGISTRY_URL or unset PROXY_REGISTRY_ONLY"
+                else "; set PROXY_REGISTRY_URL to route it through your proxy"
             )
         )
 
@@ -1169,7 +1169,7 @@ def _refuse_direct_egress(source_name: str, what: str) -> None:
             f"PROXY_REGISTRY_ONLY is set: refusing direct fetch of {what}",
             retry_hint=(
                 "Register a GitHub or GitLab marketplace and set PROXY_REGISTRY_URL "
-                "to route it through your proxy, or unset PROXY_REGISTRY_ONLY."
+                "to route it through your proxy."
             ),
         )
 

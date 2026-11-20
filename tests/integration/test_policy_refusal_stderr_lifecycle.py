@@ -9,11 +9,13 @@ progress. Exit codes are unchanged.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 import pytest
 
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration._policy_scope_kit import PolicyScopeWorld, run_step
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.local_github_https_fixture import (
@@ -99,3 +101,43 @@ def test_policy_refusals_and_approve_usage_error_write_stderr(
         _assert_refusal_on_stderr(
             usage, "Error: Specify at least one package", "Try 'apm approve --help'"
         )
+
+
+def test_required_package_missing_from_lock_converges_with_plain_install(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A required package absent from the lock is fixed by installing it, never a bypass."""
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    base = world.publish_package("pkg-a")
+    required = world.publish_package("pkg-req")
+    world.publish_policy(_ALLOW_ALL)
+    project = world.consumer(dependencies=[base.slug])
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=900)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        run_step(runner, ("install",), cwd=project, env=env, step="1-install")
+        world.publish_policy({**_ALLOW_ALL, "dependencies": {"require": [required.slug]}})
+        world.clear_policy_cache()
+        manifest = load_yaml(project / "apm.yml")
+        manifest["dependencies"]["apm"].append(required.slug)
+        dump_yaml(manifest, project / "apm.yml")
+
+        audited = run_step(
+            runner,
+            ("audit", "--ci", "--no-fail-fast", "--format", "json"),
+            cwd=project,
+            env=env,
+            step="2-audit",
+            expected=1,
+        )
+        failed = {c["name"]: c for c in json.loads(audited.stdout)["checks"] if not c["passed"]}
+        assert failed["required-packages-deployed"]["message"].endswith(
+            "Hint: Run 'apm install' to record the required packages in the lockfile."
+        ), failed
+        _assert_no_bypass(audited)
+
+        run_step(runner, ("install",), cwd=project, env=env, step="3-install")
+        locked = {row["repo_url"] for row in load_yaml(project / "apm.lock.yaml")["dependencies"]}
+        assert required.slug in locked, locked
+        run_step(runner, ("audit", "--ci"), cwd=project, env=env, step="4-audit-clean")

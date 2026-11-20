@@ -391,11 +391,11 @@ class InstallLogger(CommandLogger):
             for entry in entries:
                 self.error_detail(f"  {entry}")
         command = "apm install -g" if residue.user_scope else "apm install"
-        force_hint = "(add --force if it skips them as not managed by APM)."
+        # Never a --force hint: it also deploys despite critical findings (RA-008).
         if files:
-            self.info(f"Remove these files, or re-run '{command}' {force_hint}")
+            self.info(f"Remove these files, then re-run '{command}'.")
         else:
-            self.info(f"Re-run '{command}' {force_hint}")
+            self.info(f"Re-run '{command}'.")
         total = len(files) + len(entries)
         self._failed_install_residue_note = (
             f"{total} native target {'item' if total == 1 else 'items'} listed above "

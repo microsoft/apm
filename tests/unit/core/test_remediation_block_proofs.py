@@ -120,20 +120,10 @@ def test_lock_move_aside_allowlist_is_live() -> None:
     assert moved == _MOVE_ASIDE_ALLOWED
 
 
-# RA-008: 'apm install --force' also deploys despite critical security findings,
-# so no remedy may offer --force. These entries predate the rule; each awaits a
-# steward ruling and the set may only shrink.
-_FORCE_PENDING_RULING = frozenset(
-    {
-        "drift-restore-edited-force",
-        "local-file-unmanaged",
-        "local-files-collide",
-        "lockfile-state-unreconciled",
-        "marketplace-config-duplicate",
-        "staged-bundle-drift",
-        "unpack-critical-findings",
-    }
-)
+# RA-008: 'apm install --force' and 'apm unpack --force' also deploy despite
+# critical security findings, so no remedy offers them. The one --force left
+# only overwrites the apm.yml marketplace block (marketplace/migration.py:264).
+_FORCE_ALLOWED = frozenset({"marketplace-config-duplicate"})
 
 
 def _remedy_text(entry) -> str:
@@ -146,18 +136,15 @@ def test_no_remediation_offers_force() -> None:
         for remediation_id, entry in catalog().items()
         if "--force" in _remedy_text(entry)
     }
-    assert forced == _FORCE_PENDING_RULING
+    assert forced == _FORCE_ALLOWED
+    for remediation_id, entry in catalog().items():
+        text = _remedy_text(entry)
+        assert not re.search(r"\b(?:install|unpack)\b[^,;]*--force", text), (remediation_id, text)
 
 
-# RA-015 (G7): no remedy advertises a policy bypass. The one entry below awaits
-# a steward ruling; the set may only shrink.
-_POLICY_BYPASS_PENDING_RULING = frozenset({"required-package-unlocked"})
-
-
-def test_no_remediation_advertises_a_policy_bypass() -> None:
-    bypassing = {
-        remediation_id
-        for remediation_id, entry in catalog().items()
-        if any(token in _remedy_text(entry) for token in ("--no-policy", "APM_POLICY_DISABLE"))
-    }
-    assert bypassing == _POLICY_BYPASS_PENDING_RULING
+# RA-015 (G7): no remedy advertises a policy bypass.
+@pytest.mark.parametrize("remediation_id", sorted(catalog()))
+def test_no_remediation_advertises_a_policy_bypass(remediation_id: str) -> None:
+    text = _remedy_text(catalog()[remediation_id])
+    for token in ("--no-policy", "APM_POLICY_DISABLE"):
+        assert token not in text, (remediation_id, text)

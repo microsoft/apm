@@ -1072,7 +1072,7 @@ class TestCollisionWarningOutput:
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "Skipping" in output
-        assert "--force" in output or "apm install --force" in output
+        assert "Move the local file aside, then run 'apm install'" in " ".join(output.split())
 
     def test_agent_collision_warns_on_stderr(self, tmp_path: Path, capsys):
         """Agent collision should print warning via _rich_warning."""
@@ -1085,7 +1085,7 @@ class TestCollisionWarningOutput:
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "Skipping" in output
-        assert "--force" in output or "apm install --force" in output
+        assert "Move the local file aside, then run 'apm install'" in " ".join(output.split())
 
     def test_command_collision_warns_on_stderr(self, tmp_path: Path, capsys):
         """Command collision should print warning via _rich_warning."""
@@ -1100,7 +1100,7 @@ class TestCollisionWarningOutput:
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "Skipping" in output
-        assert "--force" in output or "apm install --force" in output
+        assert "Move the local file aside, then run 'apm install'" in " ".join(output.split())
 
     def test_hook_collision_warns_on_stderr(self, tmp_path: Path, capsys):
         """Hook collision should print warning via _rich_warning."""
@@ -1113,7 +1113,7 @@ class TestCollisionWarningOutput:
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "Skipping" in output
-        assert "--force" in output or "apm install --force" in output
+        assert "Move the local file aside, then run 'apm install'" in " ".join(output.split())
 
 
 # ---------------------------------------------------------------------------
@@ -1177,7 +1177,7 @@ class TestCheckCollisionDiagnostics:
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "Skipping" in output
-        assert "--force" in output or "apm install --force" in output
+        assert "Move the local file aside, then run 'apm install'" in " ".join(output.split())
 
     def test_no_collision_no_diagnostic_recorded(self, tmp_path: Path):
         """When there is no collision, diagnostics remains empty."""

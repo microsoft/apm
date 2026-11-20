@@ -397,7 +397,7 @@ class SimpleRegistryClient:
         raise RegistryEgressRefusedError(
             f"PROXY_REGISTRY_ONLY is set: refusing direct MCP registry lookup at "
             f"{self.registry_url}. Point MCP_REGISTRY_URL (or 'apm config set "
-            "mcp-registry-url') at your proxied registry, or unset PROXY_REGISTRY_ONLY."
+            "mcp-registry-url') at your proxied registry."
         )
 
     def _is_operator_mirror(self) -> bool:
