@@ -1786,6 +1786,7 @@ def _install_apm_packages(ctx, outcome):
 
     # Every package install and its --dry-run preview enter one pipeline (#4085).
     pipeline_options = dict(
+        post_install_after_services=True,
         force=ctx.force,
         parallel_downloads=ctx.parallel_downloads,
         logger=logger,
@@ -1936,12 +1937,7 @@ def _install_apm_packages(ctx, outcome):
 
         try:
             install_result = _install_apm_dependencies(
-                apm_package,
-                ctx.update,
-                ctx.verbose,
-                ctx.only_packages,
-                **pipeline_options,
-                post_install_after_services=True,
+                apm_package, ctx.update, ctx.verbose, ctx.only_packages, **pipeline_options
             )
             if not isinstance(install_result, InstallResult):
                 install_result = InstallResult(

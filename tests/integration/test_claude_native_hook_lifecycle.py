@@ -21,6 +21,7 @@ from apm_cli.utils.yaml_io import load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
+from tests.utils.lockfile_write_counter import INOTIFY_AVAILABLE, count_lockfile_writes
 
 pytestmark = [pytest.mark.integration, pytest.mark.e2e]
 
@@ -768,3 +769,48 @@ def test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust(
     assert entry["package_type"] == "marketplace_plugin"
     assert entry["native_plugin"]["root"] == ".agents/plugins/skills-bin-tool"
     assert not scenario.trap.exists()
+
+
+@pytest.mark.skipif(not INOTIFY_AVAILABLE, reason="counting lockfile writes requires Linux inotify")
+@pytest.mark.xfail(
+    strict=True,
+    reason="#4329: native Claude registration commits the lockfile before MCP/LSP reconciliation",
+)
+def test_native_claude_install_with_mcp_writes_the_lockfile_once(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An install that registers a native Claude plugin and an MCP server writes once."""
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
+    factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
+    repository = factory.create("native-with-mcp")
+    shutil.copytree(_RUNTIME_ROOT_FIXTURE, repository.worktree / "plugins" / "alpha")
+    revision = factory.commit(repository, message="native plugin fixture").sha
+    dependency = "fixture/native-with-mcp"
+    env = factory.url_rewrite_subprocess_env(repository, f"https://github.com/{dependency}.git")
+    manifest = {
+        "name": "native-consumer",
+        "version": "1.0.0",
+        "targets": ["claude"],
+        "dependencies": {
+            "apm": [{"git": dependency, "ref": revision, "path": "plugins/alpha"}],
+            "mcp": [
+                {"name": "native-srv", "registry": False, "transport": "stdio", "command": "srv"}
+            ],
+        },
+        "executables": {"allow": {}},
+    }
+    (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+
+    def run(*args: str, cwd: Path = isolated.work_root) -> None:
+        result = runner.run(args, scenario_id="native-with-mcp", cwd=cwd, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    run("install", "--global", "--target", "claude", "--only", "apm")
+    run("approve", "--all", cwd=isolated.config_root)
+    with count_lockfile_writes(isolated.config_root) as counter:
+        run("install", "--global", "--target", "claude")
+
+    assert scenario.plugins.is_dir()
+    assert counter.writes == 1, counter.events
