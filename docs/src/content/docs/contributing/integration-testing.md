@@ -61,6 +61,13 @@ APM uses a tiered approach to integration testing:
     -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
   ```
 
+### 3b. **Blast Radius Slice** (PR-time required check)
+- **Workflow**: `.github/workflows/ci-blast-radius.yml`; the required aggregate is `Blast Radius Slice (Linux)` (pull requests only; the merge queue still runs the full suite).
+- **Selection**: `scripts/blast_radius.py plan` selects the integration tests that the nightly `blast-radius-map` artifact (`blast-radius-map-nightly.yml`, per-test coverage contexts) records for each changed `src/` file, plus the owner's `families` and any changed `tests/integration/` test files. Lifecycle smoke is the floor and runs in its own job, so the slice runs its selection minus smoke.
+- **Fails closed**: the full integration suite runs when the map is missing, malformed, older than 48 hours or future-dated; when a changed `src/` path (old path for deletions and renames) matches no owner `modules` glob; when the slice is empty; when pytest cannot collect the slice; or when the harness changed (`tests/conftest.py`, `tests/integration/conftest.py`, `tests/utils/`, `pyproject.toml`, `uv.lock`, `scripts/blast_radius.py`, `scripts/ci_*.py`, `.github/workflows/`, `.github/ci-durations/`). A pull request that touches nothing under `src/`, `tests/` or the harness runs only lifecycle smoke.
+- **Guards**: architecture rule `contracts-tooling-blast-radius-fail-closed` pins each fail-closed branch; `tests/quality/test_ci_topology.py` pins the job, its hermetic environment, the aggregate and the required check.
+- **Run it locally**: `git diff --name-status -M origin/main... > changes.txt && uv run --extra dev python scripts/blast_radius.py plan --map blast-radius-map.json --changes changes.txt --out plan.json`
+
 ### 4. **Live Guardrailing Hero** (scheduled/manual)
 - **Location**: `tests/integration/test_guardrailing_hero_e2e.py`
 - **Purpose**: Preserve the real remote, token-gated packaged CLI hero without multiplying it across the default packaged platform matrix

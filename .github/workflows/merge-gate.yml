@@ -133,7 +133,7 @@ jobs:
           # gate the class of Windows-only regressions fixed in
           # microsoft/apm#2233 rather than surfacing only after landing
           # on main.
-          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Coverage Combine (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux)' }}
+          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Coverage Combine (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Blast Radius Slice (Linux)' }}
           # Poll budget: ci-integration.yml chains Build -> Smoke ->
           # Integration (timeout 20m) -> Release Validation (timeout 20m).
           # Theoretical worst case ~50m; observed today ~5m end-to-end.

@@ -10,11 +10,14 @@ Two halves share this module:
 * ``plan`` decides what one pull request runs. :func:`decide` is the single
   authority: it runs the FULL integration suite whenever the map cannot be
   trusted (missing, malformed, wrong schema, stale or future-dated), when the
-  harness changed, when a changed ``src/`` path has no owner ``modules``
-  glob, or when a ``src/`` change selects nothing. Otherwise it selects the
-  map's tests for the changed sources, the owners' ``families`` and changed
-  integration test files. Lifecycle smoke is the floor: it runs in its own
-  required job, so the slice executes its selection minus smoke.
+  harness changed, when a changed ``src/`` path (old path for deletions and
+  renames) has no owner ``modules`` glob, or when the slice is empty (or a
+  ``src/`` change selects nothing). Otherwise it selects the map's tests for
+  the changed sources, the owners' ``families`` and changed integration test
+  files. Lifecycle smoke is the floor: it runs in its own required job, so the
+  slice executes its selection minus smoke. A slice pytest cannot collect
+  also runs the full suite. The only pass without a run is
+  :func:`nothing_testable_changed` (a pending scope amendment).
 
 Run ``python scripts/blast_radius.py --help`` for the CLI.
 """
@@ -37,6 +40,9 @@ SCHEMA_VERSION = 1
 MAX_MAP_AGE = timedelta(hours=48)
 MAX_CLOCK_SKEW = timedelta(minutes=10)
 MAX_SHARDS = 8
+SHARD_WORKERS = 4
+SHARD_TARGET_SECONDS = 480
+DURATIONS_SEED = ".github/ci-durations/linux-x86_64.json"
 CONTEXT_ENV = "APM_BLAST_RADIUS_CONTEXT"
 SMOKE_MARK_EXPR = "lifecycle_smoke and not lifecycle_merge_group"
 LANE_MARK_EXPR = (
@@ -68,7 +74,8 @@ REASON_MAP_INVALID = "map-missing-or-malformed"
 REASON_MAP_STALE = "map-stale-or-future"
 REASON_HARNESS = "harness-changed"
 REASON_UNOWNED = "unowned-src-change"
-REASON_EMPTY = "empty-slice-with-src-change"
+REASON_EMPTY = "empty-slice"
+REASON_COLLECTION = "slice-collection-failed"
 REASON_SELECTED = "selected"
 REASON_NOTHING_TESTABLE = "no-src-tests-or-harness-change"
 
@@ -193,7 +200,7 @@ def harness_changes(changes: Iterable[Change]) -> tuple[str, ...]:
     )
 
 
-def nothing_testable_changed(changes: Iterable[Change]) -> bool:
+def nothing_testable_changed(changes: Sequence[Change]) -> bool:
     """Scope amendment (pending): no src/, tests/ or harness path changed.
 
     Flip to ``return False`` to restore the literal rule (an empty slice
@@ -216,6 +223,36 @@ def _full(reason: str, detail: Iterable[str] = ()) -> Decision:
     return Decision(MODE_FULL, reason, tuple(sorted(detail)), (INTEGRATION_ROOT.rstrip("/"),))
 
 
+def _changed_integration_tests(
+    changes: Iterable[Change], integration_files: Sequence[str]
+) -> set[str]:
+    present = set(integration_files)
+    return {change.path for change in changes if change.status != "D" and change.path in present}
+
+
+def _covering_tests(
+    src_paths: Sequence[str],
+    owners: Iterable[OwnerOverlay],
+    coverage_map: CoverageMap,
+    integration_files: Sequence[str],
+) -> set[str]:
+    """Map tests for `src_paths` plus the owners' families, within the live suite."""
+    present = set(integration_files)
+    covered = {
+        node
+        for path in src_paths
+        for node in coverage_map.files.get(path, ())
+        if node.split("::", 1)[0] in present
+    }
+    for owner in owners:
+        covered.update(
+            test
+            for test in integration_files
+            if any(fnmatch.fnmatchcase(test, family) for family in owner.families)
+        )
+    return covered
+
+
 def decide(
     changes: Sequence[Change],
     coverage_map: CoverageMap | None,
@@ -223,7 +260,12 @@ def decide(
     owners: Sequence[OwnerOverlay],
     integration_files: Sequence[str],
 ) -> Decision:
-    """The one fail-closed authority for what a pull request runs."""
+    """The one fail-closed authority for what a pull request runs.
+
+    Every branch that cannot trust the slice returns :func:`_full`; the
+    architecture rule ``contracts-tooling-blast-radius-fail-closed`` pins
+    each one.
+    """
     if nothing_testable_changed(changes):
         return Decision(MODE_NOOP, REASON_NOTHING_TESTABLE)
     harness = harness_changes(changes)
@@ -231,34 +273,18 @@ def decide(
         return _full(REASON_HARNESS, harness)
     if map_failure == REASON_MAP_STALE:
         return _full(REASON_MAP_STALE)
-    if coverage_map is None:
+    if map_failure is not None or coverage_map is None:
         return _full(REASON_MAP_INVALID)
-
     src_paths = sorted({p for c in changes for p in c.paths if p.startswith(SRC_ROOT)})
     owned = {path: _owners_for(path, owners) for path in src_paths}
     unowned = [path for path, matched in owned.items() if not matched]
     if unowned:
         return _full(REASON_UNOWNED, unowned)
-
-    targets: set[str] = set()
-    for path in src_paths:
-        targets.update(coverage_map.files.get(path, ()))
     matched_owners = {owner for matched in owned.values() for owner in matched}
-    for owner in matched_owners:
-        targets.update(
-            test
-            for test in integration_files
-            if any(fnmatch.fnmatchcase(test, family) for family in owner.families)
-        )
-    if src_paths and not targets:
-        return _full(REASON_EMPTY, src_paths)
-    targets.update(
-        change.path
-        for change in changes
-        if change.status != "D"
-        and change.path.startswith(INTEGRATION_ROOT)
-        and change.path in integration_files
-    )
+    covered = _covering_tests(src_paths, matched_owners, coverage_map, integration_files)
+    targets = covered | _changed_integration_tests(changes, integration_files)
+    if not targets or (src_paths and not covered):
+        return _full(REASON_EMPTY, src_paths or {p for c in changes for p in c.paths})
     return Decision(
         MODE_SLICE,
         REASON_SELECTED,
@@ -301,20 +327,81 @@ def integration_test_files(root: Path) -> tuple[str, ...]:
     )
 
 
-def _collect(root: Path, targets: Sequence[str], mark_expr: str, args_file: Path) -> int:
-    """Write `targets` to `args_file`, collect them under `mark_expr`, count nodes."""
+@dataclass(frozen=True)
+class Estimate:
+    """Collected nodes and their duration-weighted shard plan."""
+
+    nodes: int
+    shard_count: int = 0
+    serial_seconds: float = 0.0
+    wall_seconds: float = 0.0
+
+
+def _pytest_collect(root: Path, extra: Sequence[str], mark_expr: str, args_file: Path):
+    command = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "--collect-only", "-q"]
+    command += [*extra, "-m", mark_expr, f"@{args_file.resolve()}"]
+    return subprocess.run(  # noqa: S603 - fixed argv of the running interpreter
+        command,
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "APM_E2E_TESTS": "1"},
+    )
+
+
+def _write_args(targets: Sequence[str], args_file: Path) -> None:
     args_file.parent.mkdir(parents=True, exist_ok=True)
     args_file.write_text("\n".join(targets) + "\n", encoding="utf-8")
-    command = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "--collect-only", "-q"]
-    command += ["-m", mark_expr, f"@{args_file.resolve()}"]
-    completed = subprocess.run(  # noqa: S603 - fixed argv of the running interpreter
-        command, cwd=root, capture_output=True, text=True, check=False
-    )
+
+
+def _count(root: Path, targets: Sequence[str], mark_expr: str, args_file: Path) -> int:
+    """Collect `targets` under `mark_expr` and count the nodes."""
+    _write_args(targets, args_file)
+    completed = _pytest_collect(root, (), mark_expr, args_file)
     if completed.returncode not in (0, 5):
         raise RuntimeError(
             f"collection failed ({completed.returncode}): {completed.stdout[-2000:]}"
         )
     return sum(1 for line in completed.stdout.splitlines() if "::" in line)
+
+
+def _estimate(root: Path, targets: Sequence[str], mark_expr: str, args_file: Path) -> Estimate:
+    """Plan shards for `targets` with the CI sharding owner and the committed duration seed."""
+    _write_args(targets, args_file)
+    plan_file = args_file.with_suffix(".shards.json")
+    plan_file.unlink(missing_ok=True)
+    extra = ("-p", "scripts.ci_sharding", "--shard-durations", DURATIONS_SEED)
+    extra += ("--shard-plan-out", str(plan_file.resolve()), "--shard-max", str(MAX_SHARDS))
+    extra += ("--shard-target-seconds", str(SHARD_TARGET_SECONDS))
+    extra += ("--shard-workers", str(SHARD_WORKERS))
+    completed = _pytest_collect(root, extra, mark_expr, args_file)
+    output = completed.stdout + completed.stderr
+    if not plan_file.is_file():
+        if completed.returncode in (0, 4, 5) and "empty selection" in output:
+            return Estimate(0)
+        raise RuntimeError(f"collection failed ({completed.returncode}): {output[-2000:]}")
+    plan = json.loads(plan_file.read_text(encoding="utf-8"))
+    per_shard = max(plan["shard_seconds"], default=0.0) / SHARD_WORKERS
+    return Estimate(
+        nodes=int(plan["selected"]),
+        shard_count=int(plan["shard_count"]),
+        serial_seconds=float(plan["total_seconds"]),
+        wall_seconds=round(max(per_shard, float(plan["largest_unit_seconds"])), 1),
+    )
+
+
+def _estimate_or_full(root: Path, decision: Decision, args_file: Path) -> tuple[Decision, Estimate]:
+    """A slice pytest cannot collect (a stale map node, say) runs the full suite instead."""
+    if decision.mode == MODE_NOOP:
+        return decision, Estimate(0)
+    try:
+        return decision, _estimate(root, decision.targets, SLICE_MARK_EXPR, args_file)
+    except RuntimeError as error:
+        if decision.mode != MODE_SLICE:
+            raise
+        decision = _full(REASON_COLLECTION, (str(error).splitlines()[0],))
+        return decision, _estimate(root, decision.targets, SLICE_MARK_EXPR, args_file)
 
 
 def plan_command(args: argparse.Namespace) -> int:
@@ -330,42 +417,56 @@ def plan_command(args: argparse.Namespace) -> int:
         integration_test_files(root),
     )
     out = Path(args.out)
-    executed = smoke = 0
+    decision, executed = _estimate_or_full(root, decision, out.with_suffix(".args"))
+    smoke = 0
     if decision.mode != MODE_NOOP:
-        executed = _collect(root, decision.targets, SLICE_MARK_EXPR, out.with_suffix(".args"))
         smoke_args = out.with_name(out.stem + "-smoke.args")
-        smoke = _collect(root, (INTEGRATION_ROOT.rstrip("/"),), SMOKE_MARK_EXPR, smoke_args)
-    shard_count = min(MAX_SHARDS, max(1, -(-executed // 150))) if executed else 0
+        smoke = _count(root, (INTEGRATION_ROOT.rstrip("/"),), SMOKE_MARK_EXPR, smoke_args)
     record = {
         "mode": decision.mode,
         "reason": decision.reason,
         "detail": list(decision.detail),
         "owners": list(decision.owners),
         "targets": list(decision.targets),
-        "executed_nodes": executed,
+        "executed_nodes": executed.nodes,
         "smoke_nodes": smoke,
-        "selected_nodes": executed + smoke,
-        "shard_count": shard_count,
+        "selected_nodes": executed.nodes + smoke,
+        "shard_count": executed.shard_count,
+        "estimated_serial_seconds": executed.serial_seconds,
+        "estimated_wall_seconds": executed.wall_seconds,
         "mark_expr": SLICE_MARK_EXPR,
         "map_commit": coverage_map.commit if coverage_map else None,
         "map_generated_at": coverage_map.generated_at.isoformat() if coverage_map else None,
     }
     out.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    if args.github_output:
-        with open(args.github_output, "a", encoding="utf-8") as handle:
+    _publish(decision, executed, smoke, args.github_output, args.summary)
+    keys = ("mode", "reason", "executed_nodes", "smoke_nodes", "estimated_wall_seconds")
+    print(json.dumps({key: record[key] for key in keys}))
+    return 0
+
+
+def _publish(
+    decision: Decision,
+    executed: Estimate,
+    smoke: int,
+    github_output: str | None,
+    summary: str | None,
+) -> None:
+    if github_output:
+        with open(github_output, "a", encoding="utf-8") as handle:
             handle.write(f"mode={decision.mode}\n")
-            handle.write(f"shard_count={shard_count}\n")
-            handle.write(f"shards={json.dumps(list(range(1, shard_count + 1)))}\n")
-    if args.summary:
-        with open(args.summary, "a", encoding="utf-8") as handle:
+            handle.write(f"shard_count={executed.shard_count}\n")
+            handle.write(f"shards={json.dumps(list(range(1, executed.shard_count + 1)))}\n")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as handle:
             handle.write(
                 f"### Blast radius: {decision.mode} ({decision.reason})\n\n"
-                f"- executed nodes: {executed}\n- lifecycle smoke floor: {smoke}\n"
-                f"- shards: {shard_count}\n- owners: {', '.join(decision.owners) or '-'}\n"
+                f"- executed nodes: {executed.nodes}\n- lifecycle smoke floor: {smoke}\n"
+                f"- shards: {executed.shard_count}, "
+                f"estimated wall: {executed.wall_seconds}s\n"
+                f"- owners: {', '.join(decision.owners) or '-'}\n"
                 f"- detail: {', '.join(decision.detail[:20]) or '-'}\n"
             )
-    print(json.dumps({k: record[k] for k in ("mode", "reason", "executed_nodes", "smoke_nodes")}))
-    return 0
 
 
 def _node_id(context: str) -> str | None:

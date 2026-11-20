@@ -166,7 +166,17 @@ jobs:
           echo "::error::Blast-radius plan must succeed; got '$PLAN_RESULT'."
           exit 1
         fi
+        case "$SHARD_COUNT" in
+          ''|*[!0-9]*)
+            echo "::error::Blast-radius plan published no shard count (mode '$MODE')."
+            exit 1
+            ;;
+        esac
         if [ "$SHARD_COUNT" = 0 ]; then
+          if [ "$MODE" = full ]; then
+            echo "::error::A full blast-radius run must execute at least one shard."
+            exit 1
+          fi
           echo "Blast radius $MODE: nothing beyond the lifecycle smoke floor to run."
           exit 0
         fi

@@ -152,15 +152,25 @@
     },
     {
       "id": "ci-validation-topology",
-      "decision": "Windows unit-suite selection run by the PR Windows Compatibility Gate and the main-push and full-validation Windows jobs",
-      "owner": "scripts/ci_selections.py (SELECTIONS)",
+      "decision": "Windows unit-suite selection run by the PR Windows Compatibility Gate and the main-push and full-validation Windows jobs, and the fail-closed blast-radius PR slice (scripts/blast_radius.py decide)",
+      "owner": "scripts/ci_selections.py (SELECTIONS) and scripts/blast_radius.py (decide)",
       "selectors": [
         "scripts/ci_selections.py",
         "scripts/architecture_linter/checks/contracts_ci_topology.py",
         ".github/workflows/ci.yml",
-        ".github/workflows/build-release.yml"
+        ".github/workflows/build-release.yml",
+        "scripts/blast_radius.py",
+        "scripts/architecture_linter/checks/contracts_blast_radius.py",
+        ".github/workflows/ci-blast-radius.yml"
       ],
-      "guards": ["contracts-tooling-ci-validation-topology"]
+      "guards": [
+        "contracts-tooling-blast-radius-empty-slice",
+        "contracts-tooling-blast-radius-harness-change",
+        "contracts-tooling-blast-radius-map-invalid",
+        "contracts-tooling-blast-radius-map-stale",
+        "contracts-tooling-blast-radius-unowned-src",
+        "contracts-tooling-ci-validation-topology"
+      ]
     }
   ]
 }

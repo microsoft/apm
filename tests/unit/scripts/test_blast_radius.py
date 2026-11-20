@@ -73,6 +73,8 @@ def test_owned_src_change_selects_map_families_and_changed_tests() -> None:
         ("M\tsrc/apm_cli/cli.py\n", MAP, None, br.REASON_UNOWNED),
         ("D\tsrc/apm_cli/gone.py\n", MAP, None, br.REASON_UNOWNED),
         (f"R100\tsrc/apm_cli/old_name.py\t{SRC}\n", MAP, None, br.REASON_UNOWNED),
+        ("M\ttests/unit/test_x.py\n", MAP, None, br.REASON_EMPTY),
+        (f"M\t{SRC}\n", MAP, br.REASON_MAP_INVALID, br.REASON_MAP_INVALID),
     ],
     ids=[
         "missing-map",
@@ -82,6 +84,8 @@ def test_owned_src_change_selects_map_families_and_changed_tests() -> None:
         "unowned",
         "unowned-deletion-old-path",
         "unowned-rename-source",
+        "empty-slice-without-src-change",
+        "map-failure-overrides-map",
     ],
 )
 def test_every_untrusted_input_runs_the_full_suite(
@@ -102,10 +106,44 @@ def test_owned_src_change_with_no_covering_test_runs_the_full_suite() -> None:
     assert (decision.mode, decision.reason) == (br.MODE_FULL, br.REASON_EMPTY)
 
 
+def test_map_nodes_of_removed_test_files_do_not_count_as_coverage() -> None:
+    stale_map = br.CoverageMap(NOW, "abc", {SRC: ("tests/integration/test_gone.py::test_x",)})
+    owners = (br.OwnerOverlay("bare", (SRC,), ()),)
+    decision = br.decide(br.parse_name_status(f"M\t{SRC}\n"), stale_map, None, owners, TEST_FILES)
+
+    assert (decision.mode, decision.reason) == (br.MODE_FULL, br.REASON_EMPTY)
+
+
+def test_changed_integration_test_alone_is_its_own_slice() -> None:
+    decision = _decide("M\ttests/integration/test_unrelated.py\n")
+
+    assert decision.mode == br.MODE_SLICE
+    assert decision.targets == ("tests/integration/test_unrelated.py",)
+
+
 def test_only_non_testable_changes_are_a_noop_with_smoke_as_floor() -> None:
     """Pending scope amendment; flip nothing_testable_changed to restore full."""
-    assert _decide("M\tdocs/src/content/docs/index.md\nM\tREADME.md\n").mode == br.MODE_NOOP
-    assert _decide("M\ttests/unit/test_x.py\n").mode == br.MODE_SLICE
+    decision = _decide("M\tdocs/src/content/docs/index.md\nM\tREADME.md\n")
+
+    assert (decision.mode, decision.targets) == (br.MODE_NOOP, ())
+
+
+def test_uncollectable_slice_falls_back_to_the_full_suite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def estimate(_root: Path, targets: tuple[str, ...], _expr: str, _args: Path) -> br.Estimate:
+        calls.append(tuple(targets))
+        if targets != ("tests/integration",):
+            raise RuntimeError("collection failed (4): ERROR: not found")
+        return br.Estimate(nodes=10, shard_count=1)
+
+    monkeypatch.setattr(br, "_estimate", estimate)
+    decision, executed = br._estimate_or_full(tmp_path, _decide(f"M\t{SRC}\n"), tmp_path / "a")
+
+    assert (decision.mode, decision.reason) == (br.MODE_FULL, br.REASON_COLLECTION)
+    assert executed.nodes == 10 and calls[-1] == ("tests/integration",)
 
 
 @pytest.mark.parametrize(

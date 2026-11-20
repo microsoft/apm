@@ -603,6 +603,7 @@ contracts-tests-lifecycle-smoke-partition
 contracts-tests-taxonomy-classification
 contracts-tooling-ado-lock-coordinates
 contracts-tooling-apply-to-placement
+contracts-tooling-blast-radius-fail-closed
 contracts-tooling-cached-policy-shape
 contracts-tooling-ci-validation-topology
 contracts-tooling-dependency-identity

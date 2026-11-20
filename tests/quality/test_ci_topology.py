@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -21,6 +22,7 @@ from tests.quality.repository_python_inventory import (
 )
 from tests.workflow_contracts import (
     WorkflowNode,
+    assert_unconditional,
     load_workflow,
     run_bash,
     shell_commands,
@@ -1622,6 +1624,165 @@ def test_lifecycle_smoke_removed_from_expected_checks_fails() -> None:
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_required(merge_gate)
+
+
+# Blast-radius PR slice (#4117): scripts/blast_radius.py plans the slice and
+# fails closed to the full integration suite; the aggregate is required on PRs.
+BLAST_RADIUS_WORKFLOW = REPO_ROOT / ".github/workflows/ci-blast-radius.yml"
+BLAST_RADIUS_CHECK = "Blast Radius Slice (Linux)"
+BLAST_RADIUS_JOB = "blast-radius"
+BLAST_RADIUS_PLAN_JOB = "blast-radius-plan"
+BLAST_RADIUS_SHARD_JOB = "blast-radius-shard"
+BLAST_RADIUS_PLAN_STEP = "Plan the slice (fails closed to the full suite)"
+BLAST_RADIUS_RUN_STEP = "Run the blast-radius selection minus lifecycle smoke"
+BLAST_RADIUS_AGGREGATE_STEP = "Require the plan and every shard"
+BLAST_RADIUS_PLANNER = ("python", "scripts/blast_radius.py", "plan")
+# (plan result, shard result, mode, shard count) -> the aggregate must pass
+BLAST_RADIUS_AGGREGATE_CASES = (
+    (("success", "success", "slice", "2"), True),
+    (("success", "success", "full", "6"), True),
+    (("success", "skipped", "noop", "0"), True),
+    (("success", "skipped", "slice", "0"), True),
+    (("success", "skipped", "full", "0"), False),
+    (("success", "success", "slice", ""), False),
+    (("success", "failure", "slice", "2"), False),
+    (("success", "skipped", "full", "6"), False),
+    (("success", "cancelled", "full", "6"), False),
+    (("failure", "skipped", "", ""), False),
+    (("cancelled", "skipped", "", ""), False),
+    (("skipped", "success", "full", "6"), False),
+)
+
+
+def _assert_no_credentials(job: WorkflowNode, label: str) -> None:
+    assert "secrets" not in job, f"{label} must not bind secrets"
+    for node in (job, *_run_steps(job)):
+        text = repr({key: node.get(key) for key in ("env", "run", "with")})
+        for key in (*FORBIDDEN_CREDENTIAL_EXPRESSIONS, *FORBIDDEN_NETWORK_ENV):
+            assert key not in text, f"{label} must stay hermetic; found {key}"
+
+
+def _assert_blast_radius_plan(workflow: WorkflowNode) -> None:
+    job = workflow_job(workflow, BLAST_RADIUS_PLAN_JOB)
+    step = workflow_step(job, BLAST_RADIUS_PLAN_STEP)
+    assert_unconditional(step, label=BLAST_RADIUS_PLAN_STEP)
+    assert "continue-on-error" not in job and "if" not in job
+    assert "continue-on-error" not in step
+    commands = [cmd for cmd in shell_commands(step) if "scripts/blast_radius.py" in cmd]
+    assert len(commands) == 1, "the slice must be planned by exactly one planner call"
+    command = commands[0]
+    start = command.index("python")
+    assert tuple(command[start : start + 3]) == BLAST_RADIUS_PLANNER
+    assert {"--map", "--changes", "--out", "--github-output"} <= set(command)
+    assert "|| true" not in step["run"]
+    _assert_no_credentials({"steps": [step]}, BLAST_RADIUS_PLAN_STEP)
+
+
+def _assert_blast_radius_shard(workflow: WorkflowNode) -> None:
+    job = workflow_job(workflow, BLAST_RADIUS_SHARD_JOB)
+    assert job["needs"] == BLAST_RADIUS_PLAN_JOB
+    assert "continue-on-error" not in job
+    assert job["strategy"]["fail-fast"] is False
+    _assert_no_credentials(job, BLAST_RADIUS_SHARD_JOB)
+    step = workflow_step(job, BLAST_RADIUS_RUN_STEP)
+    assert_unconditional(step, label=BLAST_RADIUS_RUN_STEP)
+    assert step["env"]["APM_E2E_TESTS"] == "1"
+    pytest_runs = [cmd for cmd in shell_commands(step) if "pytest" in cmd]
+    assert len(pytest_runs) == 1, "one pytest invocation runs the planned selection"
+    command = pytest_runs[0][pytest_runs[0].index("pytest") :]
+    for required in ("--strict-markers", "scripts.ci_sharding", "@build/blast-radius-plan.args"):
+        assert required in command, f"blast-radius shard must pass {required}"
+    assert command[command.index("-m") + 1] == "$mark_expr"
+    assert command[command.index("--shard-count") + 1] == "$SHARD_COUNT"
+    assert command[command.index("--shard-index") + 1] == "$SHARD_INDEX"
+
+
+def _assert_blast_radius_aggregate(workflow: WorkflowNode) -> None:
+    job = workflow_job(workflow, BLAST_RADIUS_JOB)
+    assert job["name"] == BLAST_RADIUS_CHECK
+    assert job["needs"] == [BLAST_RADIUS_PLAN_JOB, BLAST_RADIUS_SHARD_JOB]
+    assert job["if"] == "always()"
+    assert job["permissions"] == {}
+    assert "continue-on-error" not in job
+    step = workflow_step(job, BLAST_RADIUS_AGGREGATE_STEP)
+    assert len(job["steps"]) == 1 and "if" not in step and "continue-on-error" not in step
+    plan_outputs = "needs." + BLAST_RADIUS_PLAN_JOB + ".outputs."
+    assert step["env"] == {
+        "PLAN_RESULT": "${{ needs." + BLAST_RADIUS_PLAN_JOB + ".result }}",
+        "SHARD_RESULT": "${{ needs." + BLAST_RADIUS_SHARD_JOB + ".result }}",
+        "MODE": "${{ " + plan_outputs + "mode }}",
+        "SHARD_COUNT": "${{ " + plan_outputs + "shard_count }}",
+    }
+    for (plan, shard, mode, count), passes in BLAST_RADIUS_AGGREGATE_CASES:
+        env = {"PLAN_RESULT": plan, "SHARD_RESULT": shard, "MODE": mode, "SHARD_COUNT": count}
+        result = run_bash(step["run"], env=env)
+        assert (result.returncode == 0) is passes, f"aggregate mis-judged {env!r}"
+
+
+def _assert_blast_radius_required(merge_gate: WorkflowNode) -> None:
+    wait_step = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")
+    event, merge_group, pull_request = re.findall(r"'([^']*)'", wait_step["env"]["EXPECTED_CHECKS"])
+    assert event == "merge_group"
+    assert BLAST_RADIUS_CHECK in pull_request.split(","), "PR gate must require the slice"
+    assert BLAST_RADIUS_CHECK not in merge_group.split(","), "merge queue runs the full suite"
+
+
+def _assert_blast_radius_topology(workflow: WorkflowNode, merge_gate: WorkflowNode) -> None:
+    assert set(workflow["on"]) == {"pull_request"}
+    _assert_blast_radius_plan(workflow)
+    _assert_blast_radius_shard(workflow)
+    _assert_blast_radius_aggregate(workflow)
+    _assert_blast_radius_required(merge_gate)
+
+
+def _blast_radius_workflows() -> tuple[WorkflowNode, WorkflowNode]:
+    return (
+        deepcopy(load_workflow(BLAST_RADIUS_WORKFLOW)),
+        deepcopy(load_workflow(REPO_ROOT / ".github/workflows/merge-gate.yml")),
+    )
+
+
+def test_blast_radius_slice_is_required_and_fails_closed() -> None:
+    """The PR slice job exists, stays hermetic, its aggregate fails closed on
+    every missing or failed result, and merge-gate requires it on PRs only."""
+    _assert_blast_radius_topology(*_blast_radius_workflows())
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "not-required",
+        "required-in-merge-queue",
+        "planner-swallowed",
+        "shard-credential",
+        "aggregate-ignores-shards",
+        "aggregate-trusts-empty-count",
+    ],
+)
+def test_blast_radius_slice_drift_fails(mutation: str) -> None:
+    workflow, merge_gate = _blast_radius_workflows()
+    wait_step = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")
+    plan = workflow_step(workflow_job(workflow, BLAST_RADIUS_PLAN_JOB), BLAST_RADIUS_PLAN_STEP)
+    aggregate = workflow_step(workflow_job(workflow, BLAST_RADIUS_JOB), BLAST_RADIUS_AGGREGATE_STEP)
+    if mutation == "not-required":
+        wait_step["env"]["EXPECTED_CHECKS"] = wait_step["env"]["EXPECTED_CHECKS"].replace(
+            f",{BLAST_RADIUS_CHECK}", ""
+        )
+    elif mutation == "required-in-merge-queue":
+        wait_step["env"]["EXPECTED_CHECKS"] = wait_step["env"]["EXPECTED_CHECKS"].replace(
+            "Release Validation (Linux)", f"Release Validation (Linux),{BLAST_RADIUS_CHECK}"
+        )
+    elif mutation == "planner-swallowed":
+        plan["continue-on-error"] = True
+    elif mutation == "shard-credential":
+        step = workflow_step(workflow_job(workflow, BLAST_RADIUS_SHARD_JOB), BLAST_RADIUS_RUN_STEP)
+        step["env"]["GITHUB_APM_PAT"] = "${{ secrets.GITHUB_APM_PAT }}"
+    elif mutation == "aggregate-ignores-shards":
+        aggregate["run"] = aggregate["run"].replace("!= success ]; then", "= never ]; then")
+    else:
+        aggregate["run"] = aggregate["run"].replace("''|*[!0-9]*)", "'never')")
+    with pytest.raises(AssertionError):
+        _assert_blast_radius_topology(workflow, merge_gate)
 
 
 # Shard layout (#4030): PR unit parallelism, main-push Windows unit shards and
