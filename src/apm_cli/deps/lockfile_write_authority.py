@@ -20,7 +20,7 @@ after changing state: an install that deployed files and then exits non-zero
 what reached disk.  Refusals happen before the first write, so nothing is
 staged to commit.  A check refusal raised after staging (an exception class
 with ``refuses_commit = True``, such as an org-policy block), an interrupt
-(Ctrl-C) or a ``sys.exit`` with a non-zero code discards what was staged.  Two explicit commit points
+(Ctrl-C, or SIGTERM, which the CLI raises as one) or a ``sys.exit`` with a non-zero code discards what was staged.  Two explicit commit points
 flush earlier: :func:`flush_lockfile_writes` runs before state outside APM's
 transaction must agree with the lockfile (native plugin registration, user
 lifecycle scripts, a command's own durable checkpoint).  Removal and rollback
@@ -160,9 +160,30 @@ def lockfile_write_scope(writer: LockfileWriter) -> Iterator[None]:
         raise
     else:
         if active.scope is not None:
+            _commit_seam_for_tests()
             _commit(active.scope)
     finally:
         _active_writer.reset(token)
+
+
+def _commit_seam_for_tests() -> None:
+    """Installed-binary fault seam at the success commit point.
+
+    ``APM_TEST_LOCK_COMMIT=hold:<marker>`` writes *marker* and waits so a test
+    can signal the command after it changed state and before it commits;
+    ``APM_TEST_LOCK_COMMIT=kill`` ends the process here, as a killed process
+    would, with nothing committed.
+    """
+    seam = os.environ.get("APM_TEST_LOCK_COMMIT", "")
+    if seam == "kill":
+        os._exit(137)
+    if seam.startswith("hold:"):
+        import time
+
+        Path(seam[len("hold:") :]).write_text("staged\n", encoding="ascii")
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline:
+            time.sleep(0.05)
 
 
 def lockfile_writer(writer: LockfileWriter) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
