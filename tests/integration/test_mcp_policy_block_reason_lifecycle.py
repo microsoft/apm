@@ -62,6 +62,6 @@ def test_blocked_mcp_install_prints_the_reason(apm_binary_path: Path, tmp_path: 
     assert (project / "apm.yml").read_bytes() == manifest
     assert "--no-policy" in output, output
 
-    bypass = _run(apm_binary_path, project, env, "install", "--no-policy", *_MCP[1:])
-    assert bypass.returncode == 0, bypass.stdout + bypass.stderr
+    retried = _run(apm_binary_path, project, env, "install", "--no-policy", *_MCP[1:])
+    assert retried.returncode == 0, retried.stdout + retried.stderr
     assert "fetch" in (project / "apm.yml").read_text(encoding="utf-8")

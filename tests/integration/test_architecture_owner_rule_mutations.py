@@ -2569,7 +2569,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         path="src/apm_cli/commands/compile/cli.py",
         old='_rich_echo(f"  [x] {error}", color="red")',
         new='click.echo(f"  [x] {error}")',
-        intent="A command prints an error line on stdout, bypassing the console stream owner.",
+        intent="A command prints an error line on stdout outside the console stream owner.",
     ),
     MutationCase(
         guard_id="registry-delegation-experimental-flags",

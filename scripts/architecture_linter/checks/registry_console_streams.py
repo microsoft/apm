@@ -129,8 +129,8 @@ def _emitter_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
                 violation(
                     rule_id,
                     path,
-                    f"error line printed by {callee} bypasses the console stream owner; "
-                    "use _rich_error or _rich_echo(color='red') so it goes to stderr",
+                    f"error line printed by {callee} must go through the console stream "
+                    "owner; use _rich_error or _rich_echo(color='red') so it goes to stderr",
                     line=node.lineno,
                 )
             )
