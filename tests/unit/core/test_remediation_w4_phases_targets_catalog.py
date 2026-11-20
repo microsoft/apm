@@ -72,6 +72,7 @@ COMPONENT_ONLY: dict[str, str] = {
     "hook-reconcile-incomplete": _FAULT,
     "hooks-skipped-unapproved": "install reports skipped hooks through exec_gate.log_hooks_skip; "
     "target_warnings.log_hooks_skip has no install caller",
+    "local-bundle-update": "full sentence, both scopes, asserted by test_remediation_gate9_call_sites (#4318)",
 }
 
 

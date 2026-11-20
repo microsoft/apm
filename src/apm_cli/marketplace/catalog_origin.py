@@ -13,7 +13,12 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..core.remediation import MARKETPLACE_DUPLICATE_ALIAS
+from ..core.remediation import (
+    MARKETPLACE_DUPLICATE_ALIAS,
+    MARKETPLACE_ORIGIN_READD,
+    MARKETPLACE_ORIGIN_REINSTALL,
+    either_sentence,
+)
 from .errors import MarketplaceError, MarketplaceOriginConflictError, MarketplaceProvenanceError
 from .registry import get_marketplace_by_name
 from .source_identity import (
@@ -107,10 +112,7 @@ _CATALOG_FIELDS = ("source_url", "source_digest")
 # written by APM 0.37; an older generator stamp is the only legacy evidence.
 _ORIGIN_RECORDING_RELEASE = (0, 37)
 _RELEASE = re.compile(r"^\s*v?(\d+)\.(\d+)")
-_NEXT_STEP = (
-    "Nothing was changed. Re-add the marketplace with 'apm marketplace add', or run a "
-    "full 'apm install', to record it again."
-)
+_NEXT_STEP = f"Nothing was changed. {either_sentence(MARKETPLACE_ORIGIN_READD, MARKETPLACE_ORIGIN_REINSTALL)}"
 
 
 def _predates_origin_recording(apm_version: str | None) -> bool:

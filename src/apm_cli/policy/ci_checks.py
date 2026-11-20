@@ -380,7 +380,7 @@ def _check_exec_status_current(
         passed=False,
         message=(
             f"{n} {noun} an executables decision the gate no longer makes -- "
-            "run 'apm install' without --frozen and commit apm.lock.yaml"
+            f"{remediation.FROZEN_EXEC_DECISIONS_STALE.clause()}"
         ),
         details=[decision.describe() for decision in stale],
     )
@@ -767,8 +767,8 @@ def _check_native_mcp_ownership(
         passed=False,
         message=(
             f"{len(pairs)} existing native MCP entr(ies) differ from their declarations "
-            "and their ownership is not recorded in apm.lock.yaml -- make the entry match "
-            "the declaration or remove it, then run 'apm install'"
+            "and their ownership is not recorded in apm.lock.yaml -- "
+            f"{remediation.NATIVE_MCP_OWNERSHIP_UNRECORDED.clause()}"
         ),
         details=[
             f"MCP server {name!a} target {runtime!a}: the existing entry differs from "

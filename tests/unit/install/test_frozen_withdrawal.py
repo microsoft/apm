@@ -148,14 +148,19 @@ def test_each_kept_reason_is_named_with_a_next_step(
     assert kept_lines(outcome.kept) == [
         "  - kept .claude/skills/adopted/SKILL.md: already on disk before this install "
         "(not written by it); delete or move it aside if it is not yours to keep, then "
-        "rerun 'apm install --frozen'",
+        "run 'apm install --frozen' to retry the frozen install",
         "  - kept .claude/skills/edited/SKILL.md: edited after this install wrote it; "
-        "move it aside, then rerun 'apm install --frozen'",
+        "move it aside, then run 'apm install --frozen' to retry the frozen install",
         "  - kept .claude/skills/stuck/SKILL.md: could not be removed; delete it, then "
-        "rerun 'apm install --frozen'",
+        "run 'apm install --frozen' to retry the frozen install",
     ]
     assert adopted.is_file() and edited.is_file() and stuck.is_file()
     assert refusal_tip(outcome.kept).startswith(
         "Tip: the other unrecorded files were removed again and apm.lock.yaml is unchanged."
     )
-    assert refusal_tip({}).startswith("Tip: the unrecorded files were removed again")
+    assert refusal_tip({}) == (
+        "Tip: the unrecorded files were removed again and apm.lock.yaml is unchanged. "
+        "Run 'apm install' to record what this install deployed in apm.lock.yaml "
+        "(without --frozen, keeping --root DIR or --global if specified), then commit "
+        "the deployed files and apm.lock.yaml."
+    )

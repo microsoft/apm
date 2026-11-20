@@ -77,14 +77,14 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 1012, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 554, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 564, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 585, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 612, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 557, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 567, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 588, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 615, '"--target"'),
     ),
     "uninstall": (
-        Ev("src/apm_cli/commands/uninstall/cli.py", 760, 'argument("packages"'),
-        Ev("src/apm_cli/commands/uninstall/cli.py", 762, '"--dry-run"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 761, 'argument("packages"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 763, '"--dry-run"'),
     ),
     "prune": (
         Ev("src/apm_cli/commands/prune.py", 85, '"--dry-run"'),
@@ -104,8 +104,8 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
     "bundle-install": (Ev(_INSTALL, 1227, "detect_local_bundle"),),
     "mcp-install": (Ev(_INSTALL, 948, '"--mcp"'), Ev(_INSTALL, 880, '"--target"')),
     "approve-deny": (
-        Ev(_APPROVE, 223, 'argument("packages"'),
-        Ev(_APPROVE, 327, 'argument("packages"'),
+        Ev(_APPROVE, 224, 'argument("packages"'),
+        Ev(_APPROVE, 328, 'argument("packages"'),
     ),
     "audit": (
         Ev("src/apm_cli/commands/audit.py", 1418, 'argument("package"'),
@@ -146,11 +146,11 @@ USER_SCOPE_OPS = frozenset(
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 912, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 577, '"--global"'),
-    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 768, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 580, '"--global"'),
+    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 769, '"--global"'),
     "compile": Ev(_COMPILE, 1396, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
-    "approve-deny": Ev(_APPROVE, 238, '"--user"'),
+    "approve-deny": Ev(_APPROVE, 239, '"--user"'),
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 177, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 92, "def prune(ctx, dry_run)"),
@@ -166,7 +166,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "the executable gate governs only executable primitives; a plain file next to a "
         "revoked executable must survive; an org policy dependency deny removes it",
         (
-            Ev(_APPROVE, 262, "hooks, MCP, LSP, bin, canvas"),
+            Ev(_APPROVE, 263, "hooks, MCP, LSP, bin, canvas"),
             Ev("src/apm_cli/policy/install_preflight.py", 218, "Install blocked by org policy"),
         ),
     ),
@@ -213,7 +213,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/commands/uninstall/engine.py", 749, "is an MCP server, not a package"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 912, "was not found in apm.yml"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 741, "cannot remove local-bundle"),
-            Ev("src/apm_cli/commands/update.py", 490, "No APM dependencies to update"),
+            Ev("src/apm_cli/commands/update.py", 493, "No APM dependencies to update"),
             Ev("src/apm_cli/core/command_logger.py", 525, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
@@ -234,7 +234,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U9": (
         "approve/deny with no prior decision is reachable; --list and --pending are read-only",
-        (Ev(_APPROVE, 289, "if list_decisions:"), Ev(_APPROVE, 293, "if pending:")),
+        (Ev(_APPROVE, 290, "if list_decisions:"), Ev(_APPROVE, 294, "if pending:")),
     ),
     "U10": (
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",

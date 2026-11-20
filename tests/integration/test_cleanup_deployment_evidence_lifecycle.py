@@ -304,9 +304,16 @@ def test_uninstall_refusal_changes_nothing_and_its_remedy_runs(
     assert "Uninstall refused" in refused, refused
     for relative in _DEPLOYED:
         assert f"{relative}: {_NO_EVIDENCE}" in refused, refused
-    assert "Move aside any listed file that holds your edits" in refused, refused
-    assert "once with access to the package source" in refused, refused
-    assert "move each listed file aside or delete it" in refused, refused
+    flat = " ".join(refused.split())
+    assert (
+        "Move aside any listed file that holds your edits, then run 'apm install' to "
+        "re-establish deployment evidence (once, with access to the package source), "
+        "then rerun 'apm uninstall'."
+    ) in flat, refused
+    assert (
+        "If the source is unreachable, move each listed file aside or delete it, then run "
+        "'apm uninstall' to finish the uninstall."
+    ) in flat, refused
 
     # Remedy (a), executed as printed: move the edited file aside, install once
     # with the source reachable, then uninstall.

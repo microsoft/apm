@@ -45,7 +45,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.core.remediation import COWORK_SKILLS_DIR_UNDETECTED
+from apm_cli.core.remediation import (
+    COWORK_SKILLS_DIR_UNDETECTED,
+    UNINSTALL_EVIDENCE_REINSTALL,
+    UNINSTALL_EVIDENCE_REMOVE,
+)
 from apm_cli.security.gate import is_python_bytecode_cache_path
 from apm_cli.utils.paths import SpellingAliasIndex
 
@@ -719,13 +723,12 @@ def refusal_reason(verdict: str) -> str:
 def uninstall_evidence_remedies(*, user_scope: bool) -> tuple[str, str]:
     """Return the two runnable remedies when uninstall lacks deletion evidence."""
     flag = " -g" if user_scope else ""
-    return (
-        "Move aside any listed file that holds your edits, then run "
-        f"'apm install{flag}' once with access to the package source, which "
-        f"re-establishes deployment evidence, then rerun 'apm uninstall{flag}'.",
-        "If the source is unreachable, move each listed file aside or delete it, "
-        f"then rerun 'apm uninstall{flag}'.",
-    )
+    reinstall = UNINSTALL_EVIDENCE_REINSTALL.bind(flag=flag)
+    remove = UNINSTALL_EVIDENCE_REMOVE
+    if user_scope:
+        reinstall = reinstall.with_command("apm install -g")
+        remove = remove.with_command("apm uninstall -g")
+    return reinstall.sentence(), remove.sentence()
 
 
 def _keep_without_evidence(

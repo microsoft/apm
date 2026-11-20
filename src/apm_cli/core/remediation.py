@@ -327,6 +327,19 @@ AUDIT_TARGET_FLAG_DISABLED = _entry(
     "apm experimental enable {flag}",
     "audit this installation",
 )
+UNINSTALL_EVIDENCE_REINSTALL = _entry(
+    "uninstall-evidence-reinstall",
+    "apm install",
+    "re-establish deployment evidence (once, with access to the package source)",
+    before="move aside any listed file that holds your edits",
+    then="rerun 'apm uninstall{flag}'",
+)
+UNINSTALL_EVIDENCE_REMOVE = _entry(
+    "uninstall-evidence-remove",
+    "apm uninstall",
+    "finish the uninstall",
+    before="if the source is unreachable, move each listed file aside or delete it",
+)
 # -- end W2 integration --
 # -- W2 marketplace --
 MARKETPLACE_DUPLICATE_ALIAS = _entry(
@@ -409,6 +422,18 @@ MARKETPLACE_REGISTER_MANUAL = _entry(
     "marketplace-register-manual",
     "apm marketplace add <source> --name <name>",
     "register one manually",
+)
+MARKETPLACE_ORIGIN_READD = _entry(
+    "marketplace-origin-readd", "apm marketplace add <source>", "re-add the marketplace"
+)
+MARKETPLACE_ORIGIN_REINSTALL = _entry(
+    "marketplace-origin-reinstall", "apm install", "record it again"
+)
+MARKETPLACE_REF_SWAP_ACCEPT = _entry(
+    "marketplace-ref-swap-accept",
+    "apm update",
+    "accept the new ref (pin '{key}')",
+    before="if the publisher moved this version on purpose",
 )
 # -- end W2 marketplace --
 # -- W2 bundle --
@@ -792,6 +817,19 @@ REGISTRY_PACKAGE_INSTALL = _entry(
 PROJECT_MANIFEST_BOOTSTRAP = _entry(
     "project-manifest-bootstrap", "apm install <org/repo>", "create apm.yml with that package"
 )
+UPDATE_UNDECLARED_PACKAGE = _entry("update-undeclared-package", "apm install {package}", "add it")
+BUNDLE_EXECUTABLES_ALLOW = _entry(
+    "bundle-executables-allow",
+    "apm install <bundle>",
+    "deploy its executables",
+    before=(
+        "review each bundle, run its approve command (the same grant as its key under "
+        "executables.allow in {manifest})"
+    ),
+)
+LOCKFILE_UNMANAGED_PATHS = _entry(
+    "lockfile-unmanaged-paths", "apm install", "repair it", then="retry"
+)
 
 # -- end commands/** (W1) -----------------------------------------------------
 
@@ -937,6 +975,9 @@ LLM_TLS_BOOTSTRAP_MISSING = _entry(
     "apm runtime setup llm",
     "install the OS-trust bootstrap into the llm venv",
     before="use Python 3.10+ or set PIP_CERT to your proxy CA bundle",
+)
+CLAUDE_NATIVE_PLUGIN_DRIFT = _entry(
+    "claude-native-plugin-drift", "apm install --global", "restore it"
 )
 # -- end W3 plugins-runtime --
 # -- W3 core-models --
@@ -1147,6 +1188,36 @@ POLICY_FETCH_FAILURE_BLOCKED = _entry(
     "apm policy status",
     "check that the org policy source{source} is reachable",
     then="retry, or ask your org admin",
+)
+FROZEN_KEPT_ADOPTED = _entry(
+    "frozen-kept-adopted",
+    "apm install --frozen",
+    "retry the frozen install",
+    before="delete or move it aside if it is not yours to keep",
+)
+FROZEN_KEPT_EDITED = _entry(
+    "frozen-kept-edited",
+    "apm install --frozen",
+    "retry the frozen install",
+    before="move it aside",
+)
+FROZEN_KEPT_UNREMOVABLE = _entry(
+    "frozen-kept-unremovable",
+    "apm install --frozen",
+    "retry the frozen install",
+    before="delete it",
+)
+NATIVE_MCP_OWNERSHIP_UNRECORDED = _entry(
+    "native-mcp-ownership-unrecorded",
+    "apm install",
+    "record the native MCP entries' ownership in apm.lock.yaml",
+    before="make each entry match its declaration or remove it",
+)
+FROZEN_EXEC_DECISIONS_STALE = _entry(
+    "frozen-exec-decisions-stale",
+    "apm install",
+    f"record the executables decisions the gate makes now ({_UNFROZEN})",
+    then="commit apm.lock.yaml",
 )
 # -- end W4 frozen-policy --
 # -- W4 drift-trust --
@@ -1395,6 +1466,9 @@ CANVAS_SKIPPED_UNAPPROVED = _entry(
 )
 REPOSITORY_NOT_FOUND = _entry(
     "repository-not-found", "apm uninstall {package}", "remove it from apm.yml"
+)
+LOCAL_BUNDLE_UPDATE = _entry(
+    "local-bundle-update", "apm install <newer-bundle-file>", "update a bundle"
 )
 # -- end W4 phases-targets --
 # -- end install/policy (W4) ---------------------------------------------------

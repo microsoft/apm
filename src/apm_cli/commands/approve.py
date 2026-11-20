@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 import click
 
 from apm_cli.core.remediation import (
+    BUNDLE_EXECUTABLES_ALLOW,
     EXECUTABLES_APPROVED,
     EXECUTABLES_DENIED,
     EXECUTABLES_UNAPPROVED,
@@ -718,8 +719,9 @@ def _show_pending_bundles(manifest: Path, bundles: list) -> None:
         )
     _rich_echo("")
     _rich_info(
-        "Review each bundle, run its approve command (the same grant as its key under "
-        f"executables.allow in {manifest.name}), then rerun '{_install_command(manifest)} <bundle>'.",
+        BUNDLE_EXECUTABLES_ALLOW.bind(manifest=manifest.name)
+        .with_command(f"{_install_command(manifest)} <bundle>")
+        .sentence(),
         symbol="info",
     )
 
