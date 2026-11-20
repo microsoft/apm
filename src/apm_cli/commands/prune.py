@@ -6,6 +6,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import RETIRE_BUNDLE_HOOKS
+
 from ..constants import APM_MODULES_DIR, APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..core.deployment_ledger import DeploymentLedgerCodec
@@ -121,7 +123,7 @@ def prune(ctx, dry_run):
         except BundleHookTargetsUnresolved as e:
             logger.warning(
                 f"Local bundle hooks were NOT re-checked: target resolution failed ({e}). "
-                "Run 'apm install' to re-check them."
+                f"{RETIRE_BUNDLE_HOOKS.sentence()}"
             )
         except Exception as e:
             logger.error(f"Local bundle hook re-check failed: {e}")
