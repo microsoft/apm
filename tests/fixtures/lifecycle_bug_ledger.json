@@ -572,6 +572,7 @@
         "tests/unit/registry/test_extractor.py::test_tar_size_cap_applies_before_reading_past_an_oversized_member",
         "tests/unit/registry/test_extractor.py::test_conflicting_entries_are_refused_before_any_write",
         "tests/unit/registry/test_extractor.py::test_zip_special_file_modes_are_refused",
+        "tests/unit/registry/test_extractor.py::test_unsafe_entry_after_valid_ones_leaves_nothing_written",
         "tests/integration/test_registry_archive_limits_lifecycle.py::test_registry_archive_over_the_limits_is_refused_without_writing"
       ]
     }

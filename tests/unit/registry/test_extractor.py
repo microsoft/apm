@@ -386,3 +386,13 @@ def test_zip_special_file_modes_are_refused(mode, tmp_path):
         extract_zip(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
     assert not (tmp_path / "out" / "odd").exists()
     assert not (tmp_path / "out" / "apm.yml").exists()
+
+
+@pytest.mark.parametrize("fmt", ["tar.gz", "zip"])
+@pytest.mark.parametrize("unsafe", ["../escape.txt", "/abs.txt"], ids=["traversal", "absolute"])
+def test_unsafe_entry_after_valid_ones_leaves_nothing_written(fmt, unsafe, tmp_path):
+    """req-sc-002: refusal on the first unsafe entry leaves no partial output."""
+    data = _build_archive(fmt, [("apm.yml", b"name: x\n"), ("a/b.txt", b"x"), (unsafe, b"x")])
+    with pytest.raises(UnsafeTarballError):
+        _extract(fmt, data, tmp_path / "out")
+    assert not (tmp_path / "out").exists() or not list((tmp_path / "out").rglob("*"))
