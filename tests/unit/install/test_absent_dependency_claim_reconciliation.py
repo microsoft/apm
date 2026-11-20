@@ -36,6 +36,7 @@ from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.diagnostics import DiagnosticCollector
+from tests.utils.deployment_evidence import no_evidence, receipted_evidence
 
 pytestmark = pytest.mark.component
 
@@ -98,6 +99,8 @@ def _block(tmp_path: Path, **overrides: object) -> tuple:
         "active_targets": [KNOWN_TARGETS["codex"]],
         "declared_targets": [KNOWN_TARGETS["codex"]],
         "diagnostics": DiagnosticCollector(),
+        # No local receipt or locked render: present files are never proven (#3701).
+        "evidence": no_evidence(tmp_path),
         "completed_reintegration": _completed(),
         "include_ledger": True,
     }
@@ -608,6 +611,7 @@ def test_skill_result_reconciles_only_proven_claims_and_preserves_other_owners(
         diagnostics=DiagnosticCollector(),
         lockfile_only=guard == "lockfile-only",
         frozen=guard == "frozen",
+        deployment_evidence=receipted_evidence(tmp_path),
     )
 
     LockfileBuilder(ctx)._attach_deployed_files(current)
@@ -669,6 +673,8 @@ def test_skill_receipt_scope_does_not_restrict_install_target_contraction(
         targets=[KNOWN_TARGETS["claude"], KNOWN_TARGETS["codex"]],
         project_root=tmp_path,
         diagnostics=DiagnosticCollector(),
+        # Both markers were deployed by APM on this machine (#3701).
+        deployment_evidence=receipted_evidence(tmp_path),
     )
 
     LockfileBuilder(ctx)._attach_deployed_files(current)

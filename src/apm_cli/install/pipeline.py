@@ -855,6 +855,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         ):
             from apm_cli.utils.console import _rich_info, _rich_warning
 
+            from .phases.cleanup import deployment_evidence
             from .skill_path_migration import (
                 COLLISION_HEADER_TEMPLATE,
                 COLLISION_HINT,
@@ -888,7 +889,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
                             )
                 else:
                     _migration_result = execute_migration(
-                        _migration_plans, ctx.existing_lockfile, ctx.project_root
+                        _migration_plans,
+                        ctx.existing_lockfile,
+                        ctx.project_root,
+                        evidence=deployment_evidence(ctx),
                     )
                     _total = len(_migration_result.deleted) + len(_migration_result.skipped_no_file)
                     if _total > 0:

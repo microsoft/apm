@@ -29,6 +29,7 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases.lockfile import LockfileBuilder
 from apm_cli.integration.cleanup import CleanupResult
 from apm_cli.utils.content_hash import compute_file_hash
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _target(name, root_dir=None, deploy_roots=None):
@@ -39,13 +40,24 @@ def _target(name, root_dir=None, deploy_roots=None):
     return SimpleNamespace(name=name, root_dir=root_dir, primitives=primitives)
 
 
+def _deploy_then_edit(root: Path, path: Path, edited: str = "user edit"):
+    """Receipt *path* as APM deployed it, then apply a user edit (#3701)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("original", encoding="utf-8")
+    evidence = receipted_evidence(path, deploy_root=root)
+    path.write_text(edited, encoding="utf-8")
+    return evidence
+
+
 def _ctx(*, package_deployed_files, existing_lockfile, targets, project_root):
+    # Files present when the context is built carry deployment receipts (#3701).
     return SimpleNamespace(
         frozen=False,
         package_deployed_files=package_deployed_files,
         existing_lockfile=existing_lockfile,
         targets=targets,
         project_root=project_root,
+        deployment_evidence=receipted_evidence(project_root),
     )
 
 
@@ -338,6 +350,7 @@ class TestCurrentInstallGovernance:
             active_targets=[_known("cursor")],
             declared_targets=[_known("cursor")],
             diagnostics=DiagnosticCollector(),
+            evidence=receipted_evidence(tmp_path),
             prior_ledger=DeploymentLedger(records=generic_records),
             generic_governed_values=frozenset({alpha_only}),
         )
@@ -353,8 +366,7 @@ class TestCurrentInstallGovernance:
 
         alpha_only = ".agents/skills/alpha-only/SKILL.md"
         alpha_path = tmp_path / alpha_only
-        alpha_path.parent.mkdir(parents=True)
-        alpha_path.write_text("user edit", encoding="utf-8")
+        evidence = _deploy_then_edit(tmp_path, alpha_path)
         locator = DeploymentLocator(
             kind=LocatorKind.PROJECT_RELATIVE,
             target="agents",
@@ -384,6 +396,7 @@ class TestCurrentInstallGovernance:
             active_targets=[_known("cursor")],
             declared_targets=[_known("cursor")],
             diagnostics=DiagnosticCollector(),
+            evidence=evidence,
             prior_ledger=ledger,
         )
 
@@ -429,6 +442,7 @@ class TestCurrentInstallGovernance:
             active_targets=[_known("cursor")],
             declared_targets=[_known("cursor")],
             diagnostics=DiagnosticCollector(),
+            evidence=receipted_evidence(tmp_path),
             prior_ledger=ledger,
             current_run_trusted=False,
         )
@@ -501,6 +515,7 @@ class TestCurrentInstallGovernance:
             active_targets=[_known(name) for name in active],
             declared_targets=declared_target_profiles(ctx),
             diagnostics=DiagnosticCollector(),
+            evidence=receipted_evidence(tmp_path),
             prior_ledger=DeploymentLedger(records=records),
             owner=owner,
             include_ledger=True,
@@ -584,6 +599,7 @@ class TestCurrentInstallGovernance:
             active_targets=[_known("claude"), _known("copilot")],
             declared_targets=[_known(name) for name in declared_names],
             diagnostics=DiagnosticCollector(),
+            evidence=receipted_evidence(tmp_path),
             prior_ledger=ledger,
             current_run_trusted=trusted,
             owner=owners[0] if dependency else "legacy",
@@ -600,8 +616,7 @@ class TestCurrentInstallGovernance:
 
         path = ".agents/skills/old/SKILL.md"
         deployed = tmp_path / path
-        deployed.parent.mkdir(parents=True)
-        deployed.write_text("user edit", encoding="utf-8")
+        evidence = _deploy_then_edit(tmp_path, deployed)
         locator = DeploymentLocator(
             kind=LocatorKind.PROJECT_RELATIVE,
             target="legacy",
@@ -621,6 +636,7 @@ class TestCurrentInstallGovernance:
             active_targets=targets,
             declared_targets=targets,
             diagnostics=DiagnosticCollector(),
+            evidence=evidence,
             prior_ledger=DeploymentLedger(
                 records={
                     locator.key: DeploymentRecord(
@@ -661,6 +677,7 @@ class TestCurrentInstallGovernance:
             active_targets=[_known("copilot")],
             declared_targets=[_known("copilot")],
             diagnostics=DiagnosticCollector(),
+            evidence=receipted_evidence(tmp_path),
             prior_ledger=DeploymentLedger(
                 records={
                     locator.key: DeploymentRecord(
@@ -723,6 +740,7 @@ class TestCurrentInstallGovernance:
                 active_targets=targets,
                 declared_targets=targets,
                 diagnostics=DiagnosticCollector(),
+                evidence=receipted_evidence(tmp_path),
                 prior_ledger=DeploymentLedger(
                     records={
                         locator.key: DeploymentRecord(
@@ -745,8 +763,7 @@ class TestCurrentInstallGovernance:
 
         alpha_only = ".agents/skills/alpha-only/SKILL.md"
         alpha_path = tmp_path / alpha_only
-        alpha_path.parent.mkdir(parents=True)
-        alpha_path.write_text("user edit", encoding="utf-8")
+        evidence = _deploy_then_edit(tmp_path, alpha_path)
         locator = DeploymentLocator(
             kind=LocatorKind.PROJECT_RELATIVE,
             target="agents",
@@ -776,6 +793,7 @@ class TestCurrentInstallGovernance:
             active_targets=[_known("cursor")],
             declared_targets=[_known("cursor")],
             diagnostics=DiagnosticCollector(),
+            evidence=evidence,
             prior_ledger=ledger,
             cleanup_retained_hashes={alpha_only: original_hash},
         )
@@ -831,6 +849,7 @@ class TestCurrentInstallGovernance:
                 active_targets=[_known("cursor")],
                 declared_targets=[_known("cursor")],
                 diagnostics=DiagnosticCollector(),
+                evidence=receipted_evidence(tmp_path),
                 prior_ledger=ledger,
             )
 
@@ -882,6 +901,7 @@ class TestCurrentInstallGovernance:
             active_targets=[_known("claude")],
             declared_targets=[_known("claude")],
             diagnostics=DiagnosticCollector(),
+            evidence=receipted_evidence(tmp_path),
             prior_ledger=ledger,
             cleanup_retained_hashes={shared: recorded},
         )
@@ -933,6 +953,7 @@ class TestCurrentInstallGovernance:
             active_targets=[_known("claude"), _known("cursor")],
             declared_targets=[_known("claude"), _known("cursor")],
             diagnostics=DiagnosticCollector(),
+            evidence=receipted_evidence(tmp_path),
             prior_ledger=ledger,
         )
 
@@ -951,8 +972,7 @@ class TestCurrentInstallGovernance:
 
         shared = ".agents/skills/scope/SKILL.md"
         shared_path = tmp_path / shared
-        shared_path.parent.mkdir(parents=True)
-        shared_path.write_text("user edit", encoding="utf-8")
+        evidence = _deploy_then_edit(tmp_path, shared_path)
         recorded = "sha256:original"
         locator = DeploymentLocator(
             kind=LocatorKind.PROJECT_RELATIVE,
@@ -982,6 +1002,7 @@ class TestCurrentInstallGovernance:
             active_targets=[_known("claude")],
             declared_targets=[_known("claude")],
             diagnostics=DiagnosticCollector(),
+            evidence=evidence,
             prior_ledger=ledger,
             cleanup_retained_hashes={shared: recorded},
         )
@@ -1029,6 +1050,7 @@ class TestCurrentInstallGovernance:
                 active_targets=[_known("claude")],
                 declared_targets=[_known("claude")],
                 diagnostics=DiagnosticCollector(),
+                evidence=receipted_evidence(tmp_path),
                 prior_ledger=ledger,
                 cleanup_retained_hashes={shared: recorded},
             )
@@ -1354,6 +1376,7 @@ class TestInactiveTargetGhostDrop:
             active_targets=[_known("copilot")],
             declared_targets=None,
             diagnostics=DiagnosticCollector(),
+            evidence=receipted_evidence(tmp_path),
         )
 
         assert not changed
@@ -1413,6 +1436,7 @@ class TestInactiveTargetGhostDrop:
             project_root=tmp_path,
             apm_package=SimpleNamespace(package_path=tmp_path),
             scope=None,
+            deployment_evidence=receipted_evidence(tmp_path),
         )
         LockfileBuilder(ctx)._attach_deployed_files(new)
 
@@ -1478,6 +1502,7 @@ class TestLockModeDefersDiskDeletion:
         kwargs, alpha_only, prior_hashes = _dropped_target_block(tmp_path)
         files, hashes = reconcile_deployed_block(
             diagnostics=DiagnosticCollector(),
+            evidence=receipted_evidence(tmp_path),
             apply_disk_deletion=False,
             **kwargs,
         )
@@ -1499,6 +1524,7 @@ class TestLockModeDefersDiskDeletion:
         kwargs, alpha_only, _ = _dropped_target_block(tmp_path)
         files, _hashes = reconcile_deployed_block(
             diagnostics=DiagnosticCollector(),
+            evidence=receipted_evidence(tmp_path),
             **kwargs,  # apply_disk_deletion defaults to True
         )
 
@@ -1512,9 +1538,11 @@ class TestLockModeDefersDiskDeletion:
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
         kwargs, alpha_only, _ = _dropped_target_block(tmp_path)
+        evidence = receipted_evidence(tmp_path)
         (tmp_path / alpha_only).write_text("user edit", encoding="utf-8")
         files, _hashes = reconcile_deployed_block(
             diagnostics=DiagnosticCollector(),
+            evidence=evidence,
             apply_disk_deletion=False,
             **kwargs,
         )
@@ -1555,6 +1583,7 @@ class TestLockModeDefersDiskDeletion:
             apm_package=SimpleNamespace(package_path=tmp_path),
             scope=None,
             lockfile_only=True,
+            deployment_evidence=receipted_evidence(tmp_path),
         )
 
         LockfileBuilder(ctx)._attach_deployed_files(new)

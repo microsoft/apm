@@ -23,6 +23,7 @@ from tests.spec_conformance._helpers import (
     validate_against,
     waive,
 )
+from tests.utils.deployment_evidence import receipted_evidence
 
 V1 = ("lockfile", "v1-git-only.yml")
 V2 = ("lockfile", "v2-with-registry.yml")
@@ -953,7 +954,7 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.install.manifest_reconcile import union_preserving
     from apm_cli.install.phases import cleanup
-    from apm_cli.integration.cleanup import CleanupResult
+    from apm_cli.integration.cleanup import CleanupResult, DeploymentEvidence
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     def target(name: str, root_dir: str | None = None):
@@ -1032,6 +1033,7 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe(tmp_path):
         deps_to_install=[],
         dependency_graph=None,
         apm_modules_dir=None,
+        deployment_evidence=DeploymentEvidence.none(tmp_path),
     )
     removal = CleanupResult()
     with patch(
@@ -1104,6 +1106,8 @@ def test_lockfile_keeps_shared_root_paths_another_declared_target_governs(tmp_pa
             active_targets=active,
             declared_targets=declared_target_profiles(tmp_path),
             diagnostics=DiagnosticCollector(),
+            # The deploying machine: APM wrote these bytes (req-lk-024).
+            evidence=receipted_evidence(deployed, deploy_root=tmp_path),
             prior_ledger=ledger,
         )
         return files
@@ -1169,6 +1173,8 @@ class TestFinalLockfileTargetContraction:
             active_targets=[KNOWN_TARGETS["claude"]],
             declared_targets=[KNOWN_TARGETS["claude"]],
             diagnostics=DiagnosticCollector(),
+            # The deploying machine: APM wrote these bytes (req-lk-024).
+            evidence=receipted_evidence(tmp_path),
         )
 
         dependency = next(iter(lockfile.dependencies.values()))

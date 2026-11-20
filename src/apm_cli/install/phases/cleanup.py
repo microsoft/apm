@@ -34,11 +34,31 @@ from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
 from apm_cli.core.scope import is_user_scope
 from apm_cli.drift import detect_stale_files
 from apm_cli.integration.base_integrator import BaseIntegrator
-from apm_cli.integration.cleanup import remove_stale_deployed_files
+from apm_cli.integration.cleanup import DeploymentEvidence, remove_stale_deployed_files
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
     from apm_cli.install.service import FrozenDisposition
+
+
+def deployment_evidence(ctx: InstallContext) -> DeploymentEvidence:
+    """Return this install's deletion evidence, built once from the prior lock (#3701).
+
+    Receipts come from the installation-bound session; the render fallback
+    replays ``ctx.existing_lockfile`` (the versions whose files may go), so
+    every install deletion path shares one evidence owner.
+    """
+    evidence = getattr(ctx, "deployment_evidence", None)
+    if not isinstance(evidence, DeploymentEvidence):
+        evidence = DeploymentEvidence.collect(
+            ctx.project_root,
+            user_scope=is_user_scope(getattr(ctx, "scope", None)),
+            lockfile=ctx.existing_lockfile,
+            lockfile_root=ctx.apm_dir,
+            diagnostics=ctx.diagnostics,
+        )
+        ctx.deployment_evidence = evidence
+    return evidence
 
 
 def run(ctx: InstallContext) -> None:
@@ -168,6 +188,7 @@ def _run_cleanup(
                 # cleaner equivalent.
                 targets=None,
                 diagnostics=diagnostics,
+                evidence=deployment_evidence(ctx),
                 recorded_hashes=dict(_orphan_dep.deployed_file_hashes),
                 failed_path_retained=False,
                 user_scope=user_scope,
@@ -249,6 +270,7 @@ def _run_cleanup(
                 # path-safety gates regardless of which target set is used.
                 targets=_targets or None,
                 diagnostics=diagnostics,
+                evidence=deployment_evidence(ctx),
                 recorded_hashes=dict(prev_dep.deployed_file_hashes),
                 user_scope=user_scope,
                 receipt_retirements=receipt_retirements,
