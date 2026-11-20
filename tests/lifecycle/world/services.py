@@ -30,6 +30,7 @@ import contextlib
 import json
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
@@ -99,6 +100,9 @@ POLICY_VARIANTS = (
     "deny-lsp",
     "deny-native",
     "exec-gate-on",
+    "malformed",
+    "garbage_response",
+    "cached_stale",
 )
 DENIED_PACKAGE = "p-exec"
 # exec-gate-on: any org executables signal turns the gate on
@@ -114,8 +118,22 @@ def policy_org(variant: str) -> str:
     return f"policy-{variant}"
 
 
-def policy_documents() -> dict[str, dict[str, object]]:
-    """The served ``apm-policy.yml`` per variant (``unreachable`` serves none)."""
+# malformed: not YAML at all. garbage_response: a 200 whose body is no policy
+# (a sign-in page a proxy or SSO gateway serves instead of the file).
+MALFORMED_POLICY = "name: malformed\nversion: '1.0'\nenforcement: [block\n  : : unclosed\n"
+GARBAGE_POLICY = (
+    "<!DOCTYPE html>\n<html><head><title>Sign in</title></head>"
+    "<body><form action='/login'>Sign in to continue</form></body></html>\n"
+)
+
+
+def policy_documents() -> dict[str, dict[str, object] | str]:
+    """The served ``apm-policy.yml`` per variant (``unreachable`` serves none).
+
+    A ``str`` document is served verbatim; ``cached_stale`` serves a deny
+    policy that ``use_policy`` caches, ages past the fresh window and then
+    unserves (the remote is gone).
+    """
     base = {"version": "1.0", "enforcement": "block"}
     return {
         "allow": {"name": "allow", **base},
@@ -140,6 +158,13 @@ def policy_documents() -> dict[str, dict[str, object]]:
                 "deny": ["**/p-native-claude", "**/p-native-codex", "**/p-native-claude-bin"]
             },
         },
+        "malformed": MALFORMED_POLICY,
+        "garbage_response": GARBAGE_POLICY,
+        "cached_stale": {
+            "name": "cached-stale",
+            **base,
+            "dependencies": {"deny": [f"**/{DENIED_PACKAGE}", f"{ORG}/{DENIED_PACKAGE}"]},
+        },
         "exec-gate-on": {
             "name": "exec-gate-on",
             **base,
@@ -163,6 +188,12 @@ def _json(status: int, payload: object) -> ScriptedResponse:
     return ScriptedResponse(status, {"Content-Type": "application/json"}, body)
 
 
+def _check_slug(slug: str) -> None:
+    owner, _, repo = slug.partition("/")
+    if not owner or not repo or "/" in repo:
+        raise ValueError(f"slug must be owner/repo, got {slug!r}")
+
+
 def _not_found() -> ScriptedResponse:
     return _json(404, {"message": "Not Found"})
 
@@ -184,6 +215,9 @@ class WorldServices:
         self._unserved: dict[str, Path] = {}
         self.routes = routes.Routes()
         self._ref_snapshots: dict[str, dict[str, str]] = {}
+        self._published: set[str] = set()
+        self._overridden: dict[str, Path] = {}
+        self._directory: Path | None = None
         self.registry_proxy = routes.RegistryProxy(self._slug_repository)
 
     @property
@@ -234,6 +268,11 @@ class WorldServices:
         for slug, refs in self._ref_snapshots.items():
             revisions.restore_refs(self._repositories.get(slug) or self._unserved[slug], refs)
         self._ref_snapshots.clear()
+        for slug in self._published:
+            self._repositories.pop(slug, None)
+        self._published.clear()
+        self._repositories.update(self._overridden)
+        self._overridden.clear()
         for slug in list(self._unserved):
             self.restore(slug)
 
@@ -247,9 +286,7 @@ class WorldServices:
         For repositories a test authors itself (``file://`` dependency specs are
         refused by the CLI). Served until the worker's services close.
         """
-        owner, _, repo = slug.partition("/")
-        if not owner or not repo or "/" in repo:
-            raise ValueError(f"slug must be owner/repo, got {slug!r}")
+        _check_slug(slug)
         self._repositories[slug] = origin
 
     def script(
@@ -271,6 +308,36 @@ class WorldServices:
     def forbid_direct(self, forbidden: bool = True) -> None:
         """Proxy-only mode: every direct content host answers 403 (still recorded)."""
         self.routes.direct_forbidden = forbidden
+
+    def _bare_for(self, slug: str) -> Path:
+        if self._directory is None:
+            raise RuntimeError("world services are not running")
+        root = self._directory.parent / "published"
+        root.mkdir(exist_ok=True)
+        return Path(tempfile.mkdtemp(prefix=slug.replace("/", "__") + "-", dir=root))
+
+    def publish(self, slug: str, path: Path, *, tag: str | None = "v1.0.0") -> Path:
+        """Serve directory *path* as a new repository *slug* (one commit, *tag*); until reset.
+
+        Returns the bare repository. Refuses a slug the world already serves:
+        use ``override_repository`` to replace one.
+        """
+        _check_slug(slug)
+        if slug in self._repositories:
+            raise ValueError(f"{slug!r} is already served; use override_repository")
+        bare = revisions.create_repository(self._bare_for(slug), path, tag=tag)
+        self._repositories[slug] = bare
+        self._published.add(slug)
+        return bare
+
+    def override_repository(self, slug: str, path: Path, *, tag: str | None = "v1.0.0") -> Path:
+        """Serve directory *path* in place of world repository *slug* until reset."""
+        if slug not in self._repositories:
+            raise KeyError(f"{slug!r} is not served")
+        bare = revisions.create_repository(self._bare_for(slug), path, tag=tag)
+        self._overridden.setdefault(slug, self._repositories[slug])
+        self._repositories[slug] = bare
+        return bare
 
     def publish_revision(
         self,
@@ -311,6 +378,7 @@ class WorldServices:
         """Start the proxy; ``directory`` receives its private CA material."""
         stack = contextlib.ExitStack()
         self._proxy = stack.enter_context(local_scripted_https_proxy(directory, self.handlers()))
+        self._directory = directory
         self._stack = stack
         return self
 
