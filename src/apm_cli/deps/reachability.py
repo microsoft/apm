@@ -214,26 +214,40 @@ def _is_manifestless_leaf(package_dir: Path) -> bool:
     }
 
 
-def _local_manifest_dir(ref: DependencyReference, source_dir: Path, apm_modules_dir: Path) -> Path:
-    """Return the directory whose manifest declares a local package's edges.
+def _normalized_local_plugin(source_dir: Path) -> APMPackage | None:
+    """Return a local Claude plugin's package as install normalizes it, else None.
 
-    A local source is read in place, except a Claude plugin without
-    ``apm.yml``: install normalizes it into its ``apm_modules`` copy and
-    resolves its dependencies from the manifest written there, so the walk
-    reads that same manifest (#4321). Without one the source stays
-    unverifiable.
+    A local plugin without ``apm.yml`` declares its edges only in the manifest
+    install synthesizes from it (#4321). Normalize a staged copy of the source
+    through the canonical package validator, exactly as install does, so
+    neither the ``apm_modules`` copy is trusted nor the source written. Other
+    local sources return None and are read in place.
     """
-    from apm_cli.models.validation import PackageType, detect_package_type
+    import shutil
+    import tempfile
+
+    from apm_cli.models.validation import (
+        PackageType,
+        detect_package_type,
+        validate_apm_package,
+    )
 
     if not source_dir.is_dir() or manifest_file(source_dir).exists():
-        return source_dir
+        return None
     if detect_package_type(source_dir)[0] is not PackageType.MARKETPLACE_PLUGIN:
-        return source_dir
-    try:
-        copy_dir = installed_package_path(ref, apm_modules_dir)
-    except ValueError:
-        return source_dir
-    return copy_dir if manifest_file(copy_dir).is_file() else source_dir
+        return None
+    with tempfile.TemporaryDirectory(prefix="apm-local-plugin-") as staging:
+        staged = Path(staging) / source_dir.name
+        try:
+            shutil.copytree(
+                source_dir, staged, symlinks=True, ignore=shutil.ignore_patterns(".git")
+            )
+        except OSError as exc:
+            raise ValueError(f"cannot stage local plugin {source_dir}: {exc}") from exc
+        validation = validate_apm_package(staged, source_path=source_dir)
+    if not validation.is_valid or validation.package is None:
+        raise ValueError("; ".join(validation.errors) or f"invalid plugin: {source_dir}")
+    return validation.package
 
 
 def compute_forward_reachable_keys(
@@ -348,7 +362,7 @@ def compute_forward_reachable_keys(
                         matched_key,
                         (parent_repo_url, None if ref.replacement is not None else ref.local_path),
                     )
-            manifest_dir = _local_manifest_dir(ref, real_dir, apm_modules_dir)
+            manifest_dir = real_dir
         else:
             locked = lockfile.dependencies.get(ref.get_unique_key())
             # Several edges may alias one node; it is materialized where the
@@ -383,10 +397,14 @@ def compute_forward_reachable_keys(
                     reachable_via.setdefault(visit_key, (parent_repo_url, None))
             manifest_dir = install_path
 
-        if _is_manifestless_leaf(manifest_dir):
-            continue
         try:
-            package = APMPackage.from_apm_yml(manifest_file(manifest_dir), source_path=manifest_dir)
+            package = _normalized_local_plugin(manifest_dir) if ref.is_local else None
+            if package is None:
+                if _is_manifestless_leaf(manifest_dir):
+                    continue
+                package = APMPackage.from_apm_yml(
+                    manifest_file(manifest_dir), source_path=manifest_dir
+                )
         except (FileNotFoundError, ValueError) as exc:
             # Missing or malformed manifest: this subtree's true children
             # are unknown. Do NOT treat it as childless -- record it and

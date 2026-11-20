@@ -3023,7 +3023,7 @@
     {
       "issue": 4321,
       "fixed_in": "Unreleased",
-      "summary": "apm audit --ci reported skill-subset-consistency as unverified for a local Claude plugin without apm.yml installed with --skill; the audit now reads the manifest install normalized into the apm_modules copy, verifies the selection, and still fails a tampered one.",
+      "summary": "apm audit --ci reported skill-subset-consistency as unverified for a local Claude plugin without apm.yml installed with --skill; the audit now synthesizes that plugin's manifest from the source as install does, never trusting the apm_modules copy, verifies the selection, and still fails a tampered one.",
       "failure_modes": [
         "outcome",
         "observation"

@@ -1,9 +1,10 @@
 """Installed-CLI lifecycle: audit verifies a local plugin's skill subset (#4321).
 
-A local Claude plugin without ``apm.yml`` installed with ``--skill`` is
-normalized into its ``apm_modules`` copy. ``apm audit --ci`` must read that
-same manifest, so the locked selection is verified rather than reported as
-unverified; a tampered selection still fails.
+A local Claude plugin without ``apm.yml`` installed with ``--skill`` declares
+its edges only in the manifest install synthesizes from it. ``apm audit --ci``
+synthesizes that same manifest from the source, never trusting the
+``apm_modules`` copy, so the locked selection is verified rather than
+reported as unverified; a tampered selection still fails.
 """
 
 from __future__ import annotations
@@ -20,7 +21,9 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-INV-I3", "P-OWN-dependency-selection-merge"),
 ]
 
 _AUDIT = ("audit", "--ci", "--no-policy")
@@ -61,6 +64,18 @@ def test_audit_verifies_local_plugin_skill_subset(tmp_path: Path, apm_binary_pat
     warm = runner.run(_AUDIT, cwd=project, env=env)
     assert warm.returncode == 0, _output(warm)
     assert "unverified" not in _output(warm)
+
+    # The apm_modules copy is never trusted: an unreadable edge injected into
+    # its normalized manifest changes neither audit nor a frozen install.
+    copy_manifest = project / "apm_modules/_local/pkg/apm.yml"
+    with copy_manifest.open("a", encoding="utf-8") as handle:
+        handle.write("dependencies:\n  apm:\n    - path: ../../../ghost\n")
+    tampered_copy = runner.run(_AUDIT, cwd=project, env=env)
+    assert tampered_copy.returncode == 0, _output(tampered_copy)
+    frozen = runner.run(("install", "--frozen", "--no-policy"), cwd=project, env=env)
+    assert frozen.returncode == 0, _output(frozen)
+    assert "ghost" not in copy_manifest.read_text(encoding="utf-8")
+    assert not (project / "pkg/apm.yml").exists()
 
     locked_bytes = (project / "apm.lock.yaml").read_bytes()
     lock["dependencies"][0]["skill_subset"] = ["alpha"]
