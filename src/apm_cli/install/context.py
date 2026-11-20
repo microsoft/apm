@@ -189,6 +189,8 @@ class InstallContext:
     package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
     # Managed files install kept without deployment evidence: (owner, entry) (#4360).
     kept_overwrites: list[tuple[str, str]] = field(default_factory=list)
+    # Kept entries a pre-0.36 lock proves edited: "drift" or "blocked" (#4398).
+    kept_overwrite_kinds: dict[str, str] = field(default_factory=dict)
     kept_overwrite_written: list[str] = field(default_factory=list)
     orphan_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
     # Declared members integration left on disk unwritten; cleanup retains them.

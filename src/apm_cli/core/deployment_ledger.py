@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import itertools
 import json
 import os
 import sys
@@ -204,6 +205,12 @@ class DeploymentMaterializationSession:
         self.render_evidence: DeploymentEvidence | None = None
         # Managed files kept because nothing proved APM wrote them: (owner, path).
         self.kept_overwrites: list[tuple[str, Path]] = []
+        # Kept files a pre-0.36 lock proves edited, by resolved path: "drift"
+        # when the package brings the recorded bytes, else "blocked" (#4398).
+        self.kept_edit_kinds: dict[str, str] = {}
+        # A frozen install verifies; it never migrates pre-0.36 renders (#4398).
+        self.frozen = False
+        self._legacy_hashes = legacy_lock_hashes(lockfile)
         self._load()
 
     def _validate_paths(self) -> None:
@@ -418,11 +425,38 @@ class DeploymentMaterializationSession:
                 return True
         except OSError:
             return False
+        if not self.frozen and self.legacy_owned(path, claim):
+            return True
         evidence = self.render_evidence
         return (
             evidence is not None
             and evidence.render_verdict(claim, path, rendered_as=None) == AUTHORIZED
         )
+
+    def legacy_recorded_hash(self, claim: str) -> str | None:
+        """The hash a pre-0.36 lock recorded for *claim*, else ``None`` (#4398)."""
+        return self._legacy_hashes.get(claim.replace("\\", "/"))
+
+    def legacy_owned(self, path: Path, claim: str) -> bool:
+        """Whether a pre-0.36 lock proves APM wrote *path*'s current bytes (#4398).
+
+        APM 0.35 and earlier recorded no receipts, so their lock hash is the
+        only record of what they deployed. It counts only for such a lock,
+        only when the file still holds those bytes, and only when the file
+        is committed unchanged in git, so a forged lock cannot vouch for an
+        uncommitted edit.
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        recorded = self.legacy_recorded_hash(claim)
+        try:
+            return (
+                recorded is not None
+                and compute_file_hash(path) == recorded
+                and git_tracked_clean(path)
+            )
+        except OSError:
+            return False
 
     def _trusted_hash(
         self,
@@ -649,6 +683,74 @@ class DeploymentMaterializationSession:
         cls(project_root, scope, None).retire(deleted)
 
 
+_RECEIPTS_SINCE = (0, 36)
+
+
+def legacy_lock_hashes(lockfile: LockFile | None) -> dict[str, str]:
+    """Map each claim to its recorded hash when *lockfile* predates receipts (#4398).
+
+    APM 0.36 introduced local deployment receipts; a lock written by an
+    earlier APM (or one recording no version) is the only record of what that
+    APM deployed. A claim two owners record with different hashes is dropped.
+    """
+    if lockfile is None or not _predates_receipts(lockfile.apm_version):
+        return {}
+    hashes: dict[str, str] = {}
+    conflicts: set[str] = set()
+    recorded = [dep.deployed_file_hashes for dep in lockfile.dependencies.values()]
+    recorded.append(lockfile.local_deployed_file_hashes)
+    for mapping in recorded:
+        for claim, digest in (mapping or {}).items():
+            key = claim.replace("\\", "/")
+            if hashes.setdefault(key, digest) != digest:
+                conflicts.add(key)
+    for key in conflicts:
+        del hashes[key]
+    return hashes
+
+
+def _predates_receipts(version: str | None) -> bool:
+    if not version:
+        return True
+    parts: list[int] = []
+    for piece in version.split(".")[:2]:
+        digits = "".join(itertools.takewhile(str.isdigit, piece))
+        if not digits:
+            return False
+        parts.append(int(digits))
+    return tuple(parts) < _RECEIPTS_SINCE
+
+
+def git_tracked_clean(path: Path) -> bool:
+    """Whether git tracks *path* with no staged, unstaged or unmerged change.
+
+    Outside a work tree, or on any git error, the answer is ``False``.
+    """
+    import subprocess
+
+    cwd = path.parent
+    try:
+        tracked = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", "--", path.name],
+            cwd=cwd,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        if tracked.returncode != 0:
+            return False
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--", path.name],
+            cwd=cwd,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return status.returncode == 0 and not status.stdout.strip()
+
+
 @contextmanager
 def recorded_writes(
     skill_integrator: Any,
@@ -694,12 +796,39 @@ class OverwriteGate:
             path, claim, self.targets
         )
 
-    def keep(self, path: Path) -> bool:
-        """Record a kept dependency file; its prior lock entry stays (reported at finalize)."""
+    def keep(self, path: Path, *, edit: str | None = None) -> bool:
+        """Record a kept dependency file; its prior lock entry stays (reported at finalize).
+
+        *edit* classifies a file a pre-0.36 lock proves edited: ``"drift"`` or
+        ``"blocked"`` (#4398).
+        """
         if self.session is None or self.owner == ".":
             return False
         self.session.kept_overwrites.append((self.owner, path))
+        if edit is not None:
+            self.session.kept_edit_kinds[path.resolve().as_posix()] = edit
         return True
+
+    def adopt_legacy(self, path: Path, claim: str) -> bool:
+        """A frozen install keeps an unedited pre-0.36 render as it is (#4398)."""
+        return (
+            self.session is not None
+            and self.session.frozen
+            and self.session.legacy_owned(path, claim)
+        )
+
+    def legacy_edit(self, path: Path, claim: str, rendered_hash: str) -> str | None:
+        """Classify a pre-0.36 managed file whose bytes differ from its lock hash.
+
+        ``"drift"`` when the package renders the recorded bytes (a user edit
+        with nothing new to deploy), ``"blocked"`` when it renders new bytes.
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        recorded = self.session.legacy_recorded_hash(claim) if self.session else None
+        if recorded is None or compute_file_hash(path) == recorded:
+            return None
+        return "drift" if rendered_hash == recorded else "blocked"
 
     @property
     def user_scope(self) -> bool:

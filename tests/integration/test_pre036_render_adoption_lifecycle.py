@@ -50,7 +50,7 @@ _USER_EDIT = "\n# local note\n"
 def _kept_line(path: str) -> str:
     return (
         f"Kept {path}: it was modified since APM deployed it. Move it aside, then run "
-        "'apm install' to restore it; or run 'apm install --force' to overwrite it."
+        "'apm install' to restore it, or 'apm install --force' to overwrite it."
     )
 
 
