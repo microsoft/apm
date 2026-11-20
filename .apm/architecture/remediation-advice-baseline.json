@@ -14,8 +14,6 @@
     "src/apm_cli/codex_plugins/client.py": 1,
     "src/apm_cli/codex_plugins/registrar.py": 5,
     "src/apm_cli/codex_plugins/snapshot.py": 1,
-    "src/apm_cli/commands/audit.py": 2,
-    "src/apm_cli/commands/install.py": 5,
     "src/apm_cli/compilation/agents_compiler.py": 3,
     "src/apm_cli/compilation/distributed_compiler.py": 2,
     "src/apm_cli/compilation/root_context_protection.py": 1,

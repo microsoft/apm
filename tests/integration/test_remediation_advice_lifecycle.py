@@ -322,6 +322,18 @@ def _own_redeployed(world: _World, result) -> None:
     assert "# own edited" in (world.consumer.root / _OWN).read_text(encoding="utf-8")
 
 
+def _hide_character(world: _World) -> None:
+    deployed = world.consumer.root / _INSTRUCTION
+    deployed.write_text(
+        deployed.read_text(encoding="utf-8") + "hidden\u200bmark\n", encoding="utf-8"
+    )
+
+
+def _no_hidden_characters(world: _World, _result) -> None:
+    # The induced edit is also drift; the strip clears only the hidden character.
+    assert "\u200b" not in (world.consumer.root / _INSTRUCTION).read_text(encoding="utf-8")
+
+
 TEXT_PROOFS: tuple[_TextProof, ...] = (
     _TextProof(
         "project-manifest-missing",
@@ -349,6 +361,41 @@ TEXT_PROOFS: tuple[_TextProof, ...] = (
         _own_redeployed,
         before=_edit_own_source,
         reprobe=lambda _world: _AUDIT_ARGS[:-2],
+    ),
+    _TextProof(
+        "hidden-characters-present",
+        _installed_world,
+        _hide_character,
+        lambda _world: ("audit",),
+        2,
+        _no_hidden_characters,
+    ),
+    _TextProof(
+        "hidden-characters-previewed",
+        _installed_world,
+        _hide_character,
+        lambda _world: ("audit", "--strip", "--dry-run"),
+        0,
+        _no_hidden_characters,
+        reprobe=lambda _world: ("audit",),
+    ),
+    _TextProof(
+        "frozen-refs-stale",
+        _installed_world,
+        lambda _world: None,
+        lambda _world: ("install", "--frozen", "--update", "--no-policy"),
+        2,
+        _expect_ok,
+        reprobe=lambda _world: ("install", "--frozen", "--no-policy"),
+    ),
+    _TextProof(
+        "project-manifest-missing-install",
+        _bare_world,
+        lambda _world: None,
+        lambda _world: ("install", "--no-policy"),
+        1,
+        _expect_ok,
+        values=lambda world: {"<org/repo>": _slug(world.source), "<target>": "copilot"},
     ),
     _TextProof(
         "dependencies-not-installed",

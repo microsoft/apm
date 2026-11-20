@@ -442,6 +442,40 @@ BUNDLE_TARGET_MISMATCH = _entry(
     "produce a {target}-targeted bundle",
     before="ask the publisher to declare targets: [{target}] in apm.yml",
 )
+HIDDEN_CHARACTERS_PRESENT = _entry(
+    "hidden-characters-present",
+    "apm audit --strip",
+    "remove the hidden characters",
+    before="review the file contents",
+)
+HIDDEN_CHARACTERS_PREVIEWED = _entry(
+    "hidden-characters-previewed", "apm audit --strip", "apply the previewed removal"
+)
+FROZEN_REFS_STALE = _entry(
+    "frozen-refs-stale",
+    "apm update",
+    "refresh refs",
+    then="run 'apm install --frozen' in CI",
+)
+LEGACY_APM_BUNDLE_REPACK = _entry(
+    "legacy-apm-bundle-repack",
+    "apm pack --claude-plugin --archive",
+    "repack it in the plugin format",
+)
+LEGACY_APM_BUNDLE_UNPACK = _entry(
+    "legacy-apm-bundle-unpack", "apm unpack <bundle>", "deploy the legacy bundle"
+)
+NOT_A_BUNDLE_REGISTRY = _entry(
+    "not-a-bundle-registry-install", "apm install <org/package>", "install from a registry"
+)
+NOT_A_BUNDLE_REPACK = _entry(
+    "not-a-bundle-repack", "apm pack", "repack the source as a plugin bundle"
+)
+PROJECT_MANIFEST_MISSING_INSTALL = _entry(
+    "project-manifest-missing-install",
+    "apm install <org/repo> --target <target>",
+    "create apm.yml with that package",
+)
 AUTH_TOKEN_UNEXPORTED = _entry(
     "auth-token-unexported",
     "apm auth {host} --export",

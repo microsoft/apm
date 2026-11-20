@@ -21,11 +21,15 @@ EXECUTED = frozenset(
         "executables-approved",
         "executables-denied",
         "executables-unapproved",
+        "frozen-refs-stale",
+        "hidden-characters-present",
+        "hidden-characters-previewed",
         "installed-files-differ",
         "lockfile-missing-lock",
         "lockfile-unreadable",
         "orphaned-packages-prune",
         "project-manifest-missing",
+        "project-manifest-missing-install",
         "project-owned-file",
         "user-manifest-missing",
     }
@@ -35,7 +39,13 @@ _FAULT = "needs a filesystem or registration fault the hermetic world cannot ind
 _NETWORK = "runs against the network or a real installer"
 _OUTSIDE = "advised by a command outside the executed command families"
 
+_BUNDLE = "needs a packed legacy or invalid bundle archive; covered by the bundle install tests"
+
 COMPONENT_ONLY: dict[str, str] = {
+    "legacy-apm-bundle-repack": _BUNDLE,
+    "legacy-apm-bundle-unpack": _BUNDLE,
+    "not-a-bundle-registry-install": _BUNDLE,
+    "not-a-bundle-repack": _BUNDLE,
     "agent-plugin-bundle-consumer": _OUTSIDE,
     "auth-token-unexported": _NETWORK,
     "bundle-target-mismatch": _OUTSIDE,
