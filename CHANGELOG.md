@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` lists each hook once in its summary when the project targets several harnesses. (#4283)
 - `apm install` prints the org policy status line once, also when it installs MCP servers. (#4283)
 - `apm install --no-policy` prints the policy-disabled warning once, also when it installs MCP servers. (#4283)
+- Windows: `apm install --skill '*'` resets to every skill again instead of receiving the current directory's file names. (#4408)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - Registry transport errors render operating-system error text in printable ASCII, so a TLS failure on macOS no longer prints curly quotes. (#4369)

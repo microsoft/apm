@@ -523,7 +523,9 @@ def main():
     _configure_encoding()
     _route_sigterm_to_interrupt()
     try:
-        cli(obj={})
+        # Click glob-expands argv on Windows by default, so `--skill '*'` became
+        # the current directory's file names (#4407). APM never wants that.
+        cli(obj={}, windows_expand_args=False)
     except Exception as e:
         click.echo(f"{ERROR}Error: {e}{RESET}", err=True)
         sys.exit(1)
