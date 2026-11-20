@@ -15,10 +15,12 @@ is on main (the shared Registry HTTP API fixture may move to ``tests/utils``).
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -37,6 +39,8 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_github_https_fixture import openssl_executable
 from tests.utils.local_scripted_https_proxy import (
     ScriptedHttpsProxy,
+    ScriptedRequest,
+    ScriptedResponse,
     local_scripted_https_proxy,
 )
 
@@ -72,6 +76,7 @@ class _Scenario:
     """One consumer, one local catalog, one scripted registry."""
 
     def __init__(self, tmp_path: Path, binary: Path) -> None:
+        self.policy: dict[str, object] | None = None
         self.isolated = IsolatedApmEnvironment.create(
             tmp_path / "scenario", base_env=dict(os.environ)
         )
@@ -96,7 +101,27 @@ class _Scenario:
 
     def serve(self):
         return local_scripted_https_proxy(
-            self.isolated.root / "tls", {REGISTRY_HOST: self.gateway.handle}
+            self.isolated.root / "tls",
+            {REGISTRY_HOST: self.gateway.handle, "api.github.com": self._org_policy},
+        )
+
+    def _org_policy(self, request: ScriptedRequest) -> ScriptedResponse:
+        """Serve ``contoso/.github`` ``apm-policy.yml`` through the Contents API."""
+        if self.policy is None or request.path != "/repos/contoso/.github/contents/apm-policy.yml":
+            return ScriptedResponse(404)
+        content = base64.b64encode(json.dumps(self.policy).encode()).decode()
+        body = json.dumps({"encoding": "base64", "content": content}).encode()
+        return ScriptedResponse(200, {"Content-Type": "application/json"}, body)
+
+    def adopt_org_policy(self, env: dict[str, str], policy: dict[str, object]) -> None:
+        """Make the consumer a ``contoso`` repository governed by *policy*."""
+        self.policy = policy
+        git = ("git", "-C", str(self.project))
+        subprocess.run((*git, "init", "-q"), check=True, env=env)
+        subprocess.run(
+            (*git, "remote", "add", "origin", "https://github.com/contoso/consumer.git"),
+            check=True,
+            env=env,
         )
 
     def env(self, proxy: ScriptedHttpsProxy) -> dict[str, str]:
@@ -112,6 +137,8 @@ class _Scenario:
         assert result.returncode == 0, _text(result)
 
     def setup(self, env: dict[str, str], dependencies: list[object]) -> None:
+        # The first command may run the CLI's daily self-version check; later
+        # connections must reach the registry only.
         self.ok(env, "experimental", "enable", "registries", step="enable")
         self.ok(env, "marketplace", "add", str(self.catalog), "--name", _CATALOG, step="catalog")
         self.write_manifest(dependencies)
@@ -157,8 +184,9 @@ def _text(result: CommandResult) -> str:
     return f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
 
 
-def _registry_only(proxy: ScriptedHttpsProxy) -> None:
-    hosts = {o.host for o in proxy.observations if o.method != "CONNECT"}
+def _registry_only(proxy: ScriptedHttpsProxy, since: int = 0) -> None:
+    """Assert every connection after *since* went to the registry (no Git or GitHub)."""
+    hosts = {o.host for o in proxy.observations[since:]}
     assert hosts <= {REGISTRY_HOST}, f"unexpected hosts contacted: {sorted(hosts)}"
 
 
@@ -181,12 +209,17 @@ def test_positional_registry_marketplace_install_replays_frozen(
     with scenario.serve() as proxy:
         env = scenario.env(proxy)
         scenario.setup(env, [])
+        baseline = len(proxy.observations)
+        result = scenario.run(env, *_INSTALL, f"{_PLUGIN}@{_CATALOG}#main", step="0-label")
+        assert result.returncode != 0, _text(result)
+        assert "version 'main' not found" in " ".join(_text(result).split()), _text(result)
+        _registry_only(proxy, baseline)
         scenario.ok(env, *_INSTALL, f"{_PLUGIN}@{_CATALOG}", step="1-positional")
         assert scenario.declared() == [{"id": _PACKAGE, "registry": _REGISTRY, "version": "^1.0.0"}]
         _assert_registry_row(scenario.locked())
         lock_bytes = scenario.lock_bytes()
         installed = scenario.package_bytes()
-        _registry_only(proxy)
+        _registry_only(proxy, baseline)
 
         scenario.go_cold()
         scenario.ok(env, *_FROZEN, step="2-frozen-cold")
@@ -197,7 +230,7 @@ def test_positional_registry_marketplace_install_replays_frozen(
         scenario.ok(env, *_INSTALL, step="3-install-cold")
         assert scenario.lock_bytes() == lock_bytes
         assert scenario.package_bytes() == installed
-        _registry_only(proxy)
+        _registry_only(proxy, baseline)
 
 
 def test_object_form_registry_marketplace_declaration_replays_frozen(
@@ -209,6 +242,7 @@ def test_object_form_registry_marketplace_declaration_replays_frozen(
     with scenario.serve() as proxy:
         env = scenario.env(proxy)
         scenario.setup(env, [declaration])
+        baseline = len(proxy.observations)
         scenario.ok(env, *_INSTALL, step="1-install")
         _assert_registry_row(scenario.locked())
         lock_bytes = scenario.lock_bytes()
@@ -223,7 +257,7 @@ def test_object_form_registry_marketplace_declaration_replays_frozen(
         scenario.ok(env, *_INSTALL, step="3-install-cold")
         assert scenario.lock_bytes() == lock_bytes
         assert scenario.package_bytes() == installed
-        _registry_only(proxy)
+        _registry_only(proxy, baseline)
 
         # A selector the locked version still satisfies keeps replaying.
         scenario.write_manifest([{**declaration, "version": "^1.0.0"}])
@@ -241,6 +275,7 @@ def test_registry_marketplace_frozen_replay_fails_closed(
     with scenario.serve() as proxy:
         env = scenario.env(proxy)
         scenario.setup(env, [declaration])
+        baseline = len(proxy.observations)
         scenario.ok(env, *_INSTALL, step="1-install")
         lock_path = scenario.project / "apm.lock.yaml"
         lock_bytes = scenario.lock_bytes()
@@ -262,15 +297,58 @@ def test_registry_marketplace_frozen_replay_fails_closed(
         lock_path.write_bytes(lock_bytes)
 
         scenario.gateway.archive = _tampered_archive()
-        result = scenario.run(env, *_FROZEN, step="4-changed-bytes")
+        result = scenario.run(env, *_FROZEN, step="4-changed-bytes-frozen")
         assert result.returncode != 0, _text(result)
-        assert "hash" in _text(result).lower()
+        assert not (scenario.project / "apm_modules" / _PACKAGE).exists()
+        result = scenario.run(env, *_INSTALL, step="5-changed-bytes")
+        assert result.returncode != 0, _text(result)
+        assert "sha256 mismatch" in " ".join(_text(result).split()), _text(result)
         assert not (scenario.project / "apm_modules" / _PACKAGE).exists()
         assert lock_path.read_bytes() == lock_bytes
 
         scenario.write_manifest([declaration], registries=False)
-        result = scenario.run(env, *_FROZEN, step="5-missing-registry")
+        result = scenario.run(env, *_FROZEN, step="6-missing-registry-frozen")
         assert result.returncode != 0, _text(result)
-        assert "registries" in _text(result)
+        result = scenario.run(env, *_INSTALL, step="7-missing-registry")
+        assert result.returncode != 0, _text(result)
+        assert "registries:" in _text(result), _text(result)
         assert lock_path.read_bytes() == lock_bytes
-        _registry_only(proxy)
+        _registry_only(proxy, baseline)
+
+
+def _registry_policy(required: str) -> dict[str, object]:
+    return {
+        "name": "contoso-policy",
+        "version": "1.0.0",
+        "enforcement": "block",
+        "registry_source": {"require": [required]},
+    }
+
+
+def test_required_registry_policy_applies_to_registry_marketplace_replay(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A required-registry policy judges a replayed row by the registry that serves it."""
+    scenario = _Scenario(tmp_path, apm_binary_path)
+    declaration = {"name": _PLUGIN, "marketplace": _CATALOG}
+    governed = ("install", "--target", "copilot")
+    frozen = ("install", "--frozen", "--target", "copilot")
+    with scenario.serve() as proxy:
+        env = scenario.env(proxy)
+        scenario.setup(env, [declaration])
+        scenario.adopt_org_policy(env, _registry_policy(_REGISTRY))
+        scenario.ok(env, *governed, step="1-install-governed")
+        lock_bytes = scenario.lock_bytes()
+
+        scenario.go_cold()
+        scenario.ok(env, *frozen, step="2-frozen-governed")
+        assert scenario.lock_bytes() == lock_bytes
+
+        scenario.policy = _registry_policy("other")
+        shutil.rmtree(Path(env["APM_CACHE_DIR"]) / "policy_v1")
+        scenario.go_cold()
+        result = scenario.run(env, *frozen, step="3-frozen-other-registry")
+        text = " ".join(_text(result).split())
+        assert result.returncode != 0, text
+        assert f"sourced from registry '{_REGISTRY}'" in text, text
+        assert not (scenario.project / "apm_modules" / _PACKAGE).exists()
