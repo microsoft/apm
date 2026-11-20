@@ -34,7 +34,6 @@ def render_and_exit(
     completes -- this function does NOT exit or return early on its own.
     """
     from apm_cli.deps.lockfile import LockFile, LockfileConflictError, get_lockfile_path
-    from apm_cli.drift import detect_orphans
 
     logger.progress("Dry run mode - showing what would change:")
 
@@ -102,11 +101,7 @@ def render_and_exit(
     except Exception:
         _dryrun_lock = None
     if _dryrun_lock and plan.should_install_apm and not plan.dependency_preview_errors:
-        _orphan_preview = detect_orphans(
-            _dryrun_lock,
-            plan.intended_dependency_keys,
-            only_packages=list(plan.only_packages) if plan.only_packages is not None else None,
-        )
+        _orphan_preview = _preview_orphan_files(_dryrun_lock, plan, logger)
         if _orphan_preview:
             logger.progress(
                 f"Files that would be removed (packages no longer in apm.yml): "
@@ -147,3 +142,30 @@ def render_and_exit(
             ".apm/ content) is not previewed -- it requires running "
             "integration. Run without --dry-run to apply."
         )
+
+
+def _preview_orphan_files(lockfile: LockFile, plan: ProspectiveInstallPlan, logger) -> set[str]:
+    """Return the deployed files the real install's orphan decision would remove.
+
+    The same owner decision the real install acts on, with the retained
+    packages' recorded claims standing in for fresh integration output. A
+    targeted install never retires unrelated packages, so it previews none.
+    """
+    from apm_cli.install.orphans import DeploymentClaims, OrphanOperation, decide_orphan_removal
+
+    if plan.only_packages:
+        return set()
+    decision = decide_orphan_removal(
+        operation=OrphanOperation.INSTALL,
+        roots=(),
+        candidate_universe=lockfile,
+        installed_paths=None,
+        resolved_keys=None,
+        intended=plan.intended_dependency_keys,
+        materialized=None,
+        reachability=None,
+        deployment_claims=DeploymentClaims(live_files=None, retained={}),
+    )
+    for path in sorted({path for files in decision.claimed_files.values() for path in files}):
+        logger.verbose_detail(f"Kept {path}: still deployed by a remaining package")
+    return {path for files in decision.removed_files.values() for path in files}

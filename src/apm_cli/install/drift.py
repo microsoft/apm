@@ -109,6 +109,8 @@ class ReplayConfig:
     user_scope: bool = False
     # Returns the audit's already-fetched org policy for the replayed gate.
     policy_provider: Callable[[], Any] | None = None
+    # Cleanup evidence (#3701) also renders targets the lock recorded.
+    include_recorded_targets: bool = False
 
 
 @dataclass(frozen=True)
@@ -589,6 +591,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         project_root,
         user_scope=config.user_scope,
         lockfile=lock,
+        include_recorded=config.include_recorded_targets,
     )
     targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
     registries: dict[str, str] | None = None

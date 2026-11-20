@@ -51,6 +51,8 @@ def _report_uninstall_outcome(
     mcp_cleanup_fatal: bool,
 ) -> bool:
     """Render the final summary and return whether cleanup was incomplete."""
+    # Cleanup evidence warnings (#3701) name kept files before the outcome.
+    logger.render_summary()
     integration_incomplete = not integration_cleanup.complete
     if not mcp_cleanup_fatal and lsp_cleanup_error is None and not integration_incomplete:
         if integration_cleanup_error is None:
@@ -201,6 +203,7 @@ def _sync_integrations_for_manifest(
     modules_dir,
     deployed_file_hashes,
     default_counts,
+    evidence,
     excluded_survivor_keys=frozenset(),
 ) -> tuple[IntegrationCleanupOutcome, Exception | None]:
     """Run post-uninstall integration cleanup when the manifest is parseable."""
@@ -232,6 +235,7 @@ def _sync_integrations_for_manifest(
                 modules_dir=modules_dir,
                 deployed_file_hashes=deployed_file_hashes,
                 excluded_survivor_keys=excluded_survivor_keys,
+                evidence=evidence,
             ),
             None,
         )
@@ -300,6 +304,7 @@ def _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys) -> None:
 def _cleanup_stale_lsp(
     *,
     apm_package: Any,
+    manifest_path: Any,
     lockfile: Any,
     lockfile_path: Any,
     modules_dir: Any,
@@ -307,10 +312,19 @@ def _cleanup_stale_lsp(
     user_scope: bool,
     logger: Any,
 ) -> tuple[bool, Exception | None]:
-    """Reconcile LSP state after uninstall and render an actionable failure."""
-    try:
-        from ...install.lsp.integration import reconcile_lsp_after_uninstall
+    """Reconcile LSP state after uninstall and render an actionable failure.
 
+    The post-removal manifest is loaded here when MCP cleanup did not already
+    load it, so LSP-only scopes reconcile too (#4045, #3768).
+    """
+    try:
+        from ...install.lsp.integration import (
+            has_recorded_lsp_state,
+            reconcile_lsp_after_uninstall,
+        )
+
+        if apm_package is None and has_recorded_lsp_state(lockfile):
+            apm_package = APMPackage.from_apm_yml(manifest_path)
         updated = reconcile_lsp_after_uninstall(
             apm_package=apm_package,
             lockfile=lockfile,
@@ -342,6 +356,8 @@ def _abort_if_retained_target_cleanup_paths(
     """
     if not outcome.retained_paths:
         return
+    # Name why each file was kept (#3701) before stopping.
+    logger.render_summary()
     outcome.apply_to(lockfile)
     try:
         lockfile.write(lockfile_path)
@@ -356,6 +372,29 @@ def _abort_if_retained_target_cleanup_paths(
         logger.error(f"  - {path}")
     logger.error("Resolve or remove the listed files, then retry uninstall.")
     sys.exit(1)
+
+
+def _uninstall_deletion_evidence(
+    lockfile, lockfile_path, deploy_root, cleanup_keys, logger, *, user_scope: bool
+):
+    """Collect deletion evidence and render it before package sources go (#3701)."""
+    from ...integration.cleanup import DeploymentEvidence
+
+    evidence = DeploymentEvidence.collect(
+        deploy_root,
+        user_scope=user_scope,
+        lockfile=lockfile,
+        lockfile_root=lockfile_path.parent,
+        diagnostics=logger.diagnostics,
+    )
+    if lockfile:
+        evidence.prepare(
+            path
+            for key in cleanup_keys
+            if key in lockfile.dependencies
+            for path in lockfile.dependencies[key].deployed_files
+        )
+    return evidence
 
 
 def _report_package_removal_failure(
@@ -779,6 +818,17 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             )
             return
 
+        # Deletion evidence (#3701): receipts, or the locked render, which is
+        # materialized here while the removed packages' sources still exist.
+        deletion_evidence = _uninstall_deletion_evidence(
+            lockfile,
+            lockfile_path,
+            deploy_root,
+            removed_keys | builtins.set(projected_orphans) | profile_keys,
+            logger,
+            user_scope=scope is InstallScope.USER,
+        )
+
         # Remove package content before releasing declarations or ownership.
         # A failed recursive delete can be partial; retain metadata for retry,
         # rather than claiming that already-deleted files were rolled back.
@@ -825,7 +875,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 recorded_deployed_paths,
                 resolve_reintegration_targets,
             )
-            from ...utils.diagnostics import DiagnosticCollector
 
             cleanup_target_names = list(APMPackage.from_apm_yml(manifest_path).canonical_targets)
             cleanup_targets = resolve_reintegration_targets(
@@ -841,7 +890,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 lockfile=lockfile,
                 active_targets=cleanup_targets,
                 declared_targets=cleanup_targets,
-                diagnostics=DiagnosticCollector(verbose=verbose),
+                diagnostics=logger.diagnostics,
+                evidence=deletion_evidence,
                 dependency_keys=cleanup_keys,
                 remove_selected_ownership=True,
                 selected_outcome=cleanup_outcome,
@@ -951,6 +1001,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             deployed_file_hashes=all_deployed_file_hashes,
             default_counts=cleaned,
             excluded_survivor_keys=profile_keys,
+            evidence=deletion_evidence,
         )
         cleaned = integration_cleanup.counts
         surviving_deployed_files = integration_cleanup.deployed_files
@@ -1038,6 +1089,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         lsp_lock_updated, lsp_cleanup_error = _cleanup_stale_lsp(
             apm_package=apm_package,
+            manifest_path=manifest_path,
             lockfile=lockfile,
             lockfile_path=lockfile_path,
             modules_dir=modules_dir,

@@ -47,6 +47,20 @@ def _session(root: Path, lock: LockFile) -> DeploymentMaterializationSession:
     return DeploymentMaterializationSession(root, InstallScope.PROJECT, lock)
 
 
+def _receipt_evidence(root: Path):
+    """Deletion evidence from this installation's persisted receipts only (#3701)."""
+    from apm_cli.integration.cleanup import DeploymentEvidence
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    return DeploymentEvidence.collect(
+        root,
+        user_scope=False,
+        lockfile=None,
+        lockfile_root=root,
+        diagnostics=DiagnosticCollector(),
+    )
+
+
 def test_receipt_outlives_checked_out_hash_without_adopting_disk(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -327,6 +341,7 @@ def test_cleanup_retires_only_successfully_removed_members(
         dep_key="pkg",
         targets=[TARGET],
         diagnostics=DiagnosticCollector(),
+        evidence=_receipt_evidence(root),
         recorded_hashes={entry: original_hash},
     )
     assert result.skipped_user_edit == [entry]
@@ -338,6 +353,7 @@ def test_cleanup_retires_only_successfully_removed_members(
         dep_key="pkg",
         targets=[TARGET],
         diagnostics=DiagnosticCollector(),
+        evidence=_receipt_evidence(root),
         recorded_hashes={entry: original_hash},
     )
     assert result.deleted == [entry]
@@ -378,17 +394,33 @@ def test_sync_reports_only_successful_removals_for_receipt_retirement(
             raise PermissionError("injected failed skill removal")
         rmtree(directory, *args, **kwargs)
 
+    unlink = Path.unlink
+
+    def unlink_or_refuse(member: Path, *args, **kwargs) -> None:
+        if member == blocked:
+            raise PermissionError("injected failed member removal")
+        unlink(member, *args, **kwargs)
+
     monkeypatch.setattr(shutil, "rmtree", remove)
+    monkeypatch.setattr(Path, "unlink", unlink_or_refuse)
     removed: list[Path] = []
+    # Lockfiles list each skill directory and its members; members are
+    # removed first, under receipt evidence (#3701).
+    managed = set()
+    for member in (path, blocked):
+        managed.add(member.parent.relative_to(root).as_posix())
+        managed.add(member.relative_to(root).as_posix())
     result = SkillIntegrator().sync_integration(
         SimpleNamespace(get_apm_dependencies=lambda: []),
         root,
-        managed_files={member.parent.relative_to(root).as_posix() for member in (path, blocked)},
+        managed_files=managed,
         targets=[TARGET],
         removed_paths=removed,
+        evidence=_receipt_evidence(root),
     )
-    assert result == {"files_removed": 1, "errors": 1}
-    assert removed == [path.parent]
+    assert result == {"files_removed": 2, "errors": 2}
+    assert removed == [path, path.parent]
+    monkeypatch.setattr(Path, "unlink", unlink)
     DeploymentMaterializationSession.retire_removed(root, removed, user_scope=False)
     path.parent.mkdir()
     path.write_bytes(blocked.read_bytes())
@@ -460,6 +492,7 @@ def test_uninstall_retires_before_recreating_and_binding_survivor_receipt(
         lockfile=lock,
         modules_dir=root / "apm_modules",
         survivor_plan=[(dep, info)],
+        evidence=_receipt_evidence(root),
     )
     assert observed == ["retired"]
     assert outcome.counts["skills"] == 1
@@ -975,3 +1008,30 @@ def test_native_receipt_with_drifted_device_number_is_rebound(
     assert rebound.baseline(path, [TARGET]) == compute_file_hash(path)
     rebound.flush()
     assert json.loads(rebound.state_path.read_text(encoding="utf-8"))["root_identity"] == actual
+
+
+def test_non_skill_write_records_receipt_under_target_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every file primitive's final write is receipted, not only skills (#3701)."""
+    root, _path, lock = _fixture(tmp_path, monkeypatch)
+    rule = root / ".claude/rules/style.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("rendered rule\n", encoding="utf-8")
+    session = _session(root, lock)
+    session.record({rule: compute_file_hash(rule)}, [TARGET], "pkg")
+    session.flush()
+    state = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert rule.resolve().as_posix() in state["destinations"].values()
+    assert _session(root, lock).has_receipt(rule)
+
+
+def test_write_outside_every_target_root_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _path, lock = _fixture(tmp_path, monkeypatch)
+    stray = root / "notes/stray.md"
+    stray.parent.mkdir(parents=True)
+    stray.write_text("user\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Cannot record unverified materialization"):
+        _session(root, lock).record({stray: compute_file_hash(stray)}, [TARGET], "pkg")

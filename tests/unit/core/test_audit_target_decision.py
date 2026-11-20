@@ -9,7 +9,11 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
-from apm_cli.core.target_detection import resolve_audit_target_decision
+from apm_cli.core.target_detection import (
+    EffectiveTargetDecision,
+    resolve_audit_target_decision,
+    resolve_deployment_target_decision,
+)
 from apm_cli.deps.lockfile import LockFile
 
 pytestmark = pytest.mark.unit
@@ -33,6 +37,34 @@ def test_audit_target_intent(
     decision = resolve_audit_target_decision(manifest_target=manifest, recorded_targets=recorded)
     assert decision.canonical_targets == expected
     assert decision.source == source
+
+
+@pytest.mark.parametrize(
+    ("manifest", "recorded", "expected", "fallback_calls"),
+    [
+        (["claude"], ("copilot",), ("claude",), 0),
+        (None, ("copilot",), ("copilot",), 0),
+        (None, (), ("opencode",), 1),
+    ],
+)
+def test_deployment_fallback_runs_only_without_declared_or_recorded_targets(
+    manifest: list[str] | None,
+    recorded: tuple[str, ...],
+    expected: tuple[str, ...],
+    fallback_calls: int,
+) -> None:
+    """A saved default or autodetection never retargets a recorded deployment (#4059)."""
+    calls: list[None] = []
+
+    def fallback() -> EffectiveTargetDecision:
+        calls.append(None)
+        return EffectiveTargetDecision(["opencode"], "apm config target")
+
+    decision = resolve_deployment_target_decision(
+        manifest_target=manifest, recorded_targets=recorded, fallback=fallback
+    )
+    assert decision.canonical_targets == expected
+    assert len(calls) == fallback_calls
 
 
 @pytest.mark.parametrize(
