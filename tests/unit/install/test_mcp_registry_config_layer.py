@@ -28,6 +28,7 @@ import requests
 from click.testing import CliRunner, Result
 
 from apm_cli.cli import cli
+from apm_cli.core.remediation import MCP_REGISTRY_ALTERNATIVE
 from apm_cli.integration.mcp_integrator_install import (
     CHOOSING_MCP_REGISTRY_DOCS_URL,
 )
@@ -131,8 +132,8 @@ def _printed_hosts(output: str) -> set[str]:
 def _extract_choice_argv(output: str, registry_url: str) -> list[str]:
     """Extract the printed example command with ``<URL>`` replaced by the user."""
     match = re.search(
-        r"Use another registry \(replace <URL>\): "
-        r'(?P<command>apm install --mcp "[^"]+" --registry <URL>[^\r\n]*)',
+        r"Run '(?P<command>apm install --mcp \"[^\"]+\" --registry <URL>[^'\r\n]*)' "
+        + re.escape(f"to {MCP_REGISTRY_ALTERNATIVE.fixes_promise}"),
         output,
     )
     assert match is not None, output

@@ -782,12 +782,18 @@ class TestHandleRegistryNetworkError:
 
         env = {k: v for k, v in os.environ.items() if k != "MCP_REGISTRY_URL"}
         with patch.dict(os.environ, env, clear=True):
-            result = _handle_registry_network_error(
-                Exception("x"), mock_reg, mock_console, None, "query"
-            )
+            with patch("apm_cli.utils.console._rich_echo") as mock_echo:
+                result = _handle_registry_network_error(
+                    Exception("x"), mock_reg, mock_console, None, "query"
+                )
 
         assert result is True
-        mock_console.print.assert_called()
+        texts = [c.args[0] for c in mock_echo.call_args_list]
+        assert any("Could not query MCP registry at https://r.example.com" in t for t in texts)
+        assert any("Retry shortly" in t for t in texts)
+        # Error and hint both render on stderr (red lines route there by default).
+        for c in mock_echo.call_args_list:
+            assert c.kwargs.get("err") or c.kwargs.get("color") == "red"
 
 
 # ===========================================================================
@@ -1693,6 +1699,7 @@ class TestLocalPathFailureReason:
         assert result is None
 
     def test_nonexistent_path_returns_reason(self, tmp_path: Path) -> None:
+        from apm_cli.core.remediation import LOCAL_PACKAGE_PATH_MISSING
         from apm_cli.install.validation import _local_path_failure_reason
 
         dep_ref = MagicMock()
@@ -1702,8 +1709,9 @@ class TestLocalPathFailureReason:
         result = _local_path_failure_reason(dep_ref)
         assert result == (
             f"Local package path does not exist: {dep_ref.local_path}. "
-            "Restore the source or correct the dependency path, then rerun apm install."
+            f"{LOCAL_PACKAGE_PATH_MISSING.sentence()}"
         )
+        assert "apm install" in result
 
     def test_file_path_returns_reason(self, tmp_path: Path) -> None:
         from apm_cli.install.validation import _local_path_failure_reason

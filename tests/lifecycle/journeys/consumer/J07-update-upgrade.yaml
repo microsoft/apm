@@ -69,7 +69,7 @@ steps:
     exit: 0
     files: []
     key_lines:
-      - "[!] 'apm deps update' is deprecated; use 'apm update' instead."
+      - "[!] 'apm deps update' is deprecated. Run 'apm update' to refresh dependencies with the supported command."
       - "[*] All packages already at latest refs."
   - n: 6
     run: [apm self-update --check]

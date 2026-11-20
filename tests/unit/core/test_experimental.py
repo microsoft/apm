@@ -617,3 +617,16 @@ class TestPackageRegistryFlagRegistration:
         from apm_cli.core.experimental import FLAGS
 
         assert FLAGS["registries"].name == "registries"
+
+
+def test_flag_read_is_a_pure_read(isolated_config):
+    """Reading a flag (or the config) never creates ~/.apm/config.json (H6)."""
+    from apm_cli.config import get_config
+    from apm_cli.core.experimental import FLAGS, is_enabled
+
+    for name in FLAGS:
+        assert is_enabled(name) is FLAGS[name].default
+        assert is_enabled(name, create_config=True) is FLAGS[name].default
+    assert get_config(create=True) == {}
+    assert not isolated_config.exists()
+    assert not isolated_config.parent.exists()

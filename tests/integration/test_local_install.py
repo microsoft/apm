@@ -12,6 +12,7 @@ import tempfile  # noqa: F401
 import pytest
 import yaml
 
+from apm_cli.core.remediation import INSTRUCTION_FRONTMATTER_REJECTED
 from apm_cli.primitives.parser import parse_primitive_file
 from apm_cli.utils.yaml_io import loads_frontmatter
 
@@ -523,7 +524,7 @@ print("ordinary Markdown")
         assert not (consumer / ".github/instructions/test-skill.instructions.md").exists()
         assert not (consumer / ".cursor/rules/a-good.mdc").exists()
         assert not (consumer / ".cursor/rules/test-skill.mdc").exists()
-        assert "Fix or remove the invalid frontmatter, then rerun apm install." in output
+        assert INSTRUCTION_FRONTMATTER_REJECTED.sentence() in " ".join(output.split())
 
     @pytest.mark.parametrize(
         ("escaped", "decoded"),

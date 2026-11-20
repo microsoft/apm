@@ -40,4 +40,6 @@ def not_found_next_step(error: BaseException, dep_ref, *, is_direct: bool) -> st
     """Return the next step for a direct dependency whose repository is missing."""
     if not is_direct or not reports_repository_not_found(error):
         return ""
-    return f" Run 'apm uninstall {dep_ref.get_identity()}' to remove it from apm.yml."
+    from apm_cli.core.remediation import REPOSITORY_NOT_FOUND
+
+    return f" {REPOSITORY_NOT_FOUND.bind(package=dep_ref.get_identity()).sentence()}"
