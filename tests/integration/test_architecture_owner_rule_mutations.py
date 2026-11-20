@@ -5222,9 +5222,9 @@ def test_credential_report_guard_rejects_side_doors(path: str, old: str, new: st
             id="bundle-reads-retired-claims-as-live",
         ),
         pytest.param(
-            "src/apm_cli/install/mcp/command.py",
-            "                    retired = split_mcp_claims(\n",
-            "                    retired = RetiredMcpClaims({}, {}) or split_mcp_claims(\n",
+            "src/apm_cli/install/mcp/entry_integration.py",
+            "        retired = split_mcp_claims(\n",
+            "        retired = RetiredMcpClaims({}, {}) or split_mcp_claims(\n",
             id="install-mcp-reads-retired-claims-as-live",
         ),
         pytest.param(
@@ -5884,3 +5884,35 @@ def test_direct_mcp_entry_judges_policy_through_commit_gate(path: str, old: str,
     assert {(violation.rule_id, violation.path) for violation in report.violations} == {
         (rule_id, path)
     }
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/mcp/command.py",
+            "    run_service_integrations(\n        command,\n",
+            "    MCPIntegrator.install(\n        command,\n",
+            id="mcp-entry-installs-outside-service-stage",
+        ),
+        pytest.param(
+            "src/apm_cli/install/service_integration.py",
+            '            mcp_entry=getattr(ctx, "mcp_entry", None),\n',
+            "            mcp_entry=None,\n",
+            id="service-stage-drops-mcp-entry",
+        ),
+    ],
+)
+def test_direct_mcp_entry_reaches_install_service_stage(path: str, old: str, new: str) -> None:
+    """``install --mcp`` reconciles its server through the install's MCP stage (#4085)."""
+    rule_id = "install-deployment-install-entry-routing"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert {violation.rule_id for violation in report.violations} == {rule_id}
+    assert any(violation.path == path for violation in report.violations)

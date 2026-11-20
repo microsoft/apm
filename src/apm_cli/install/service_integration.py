@@ -226,6 +226,8 @@ def run_service_integrations(  # noqa: PLR0913
             pre_install_lock=existing_lock,
             frozen=frozen_disposition.withhold_lockfile_writes,
             policy_enforced=getattr(ctx, "mcp_policy_enforced", False) is True,
+            # The one server apm install --mcp adds (install/mcp/entry_integration.py).
+            mcp_entry=getattr(ctx, "mcp_entry", None),
         )
     lsp_count = run_lsp_integration(
         apm_package=apm_package,

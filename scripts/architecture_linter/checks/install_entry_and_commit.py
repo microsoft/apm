@@ -1,7 +1,9 @@
 """Install entry routing and commit order analyzers (#4085).
 
 ``install-entry-routing``: every package install, and its ``--dry-run``
-preview, enters ``run_install_pipeline`` through a closed list of callers.
+preview, enters ``run_install_pipeline`` through a closed list of callers;
+``install --mcp`` reconciles its server through the install's MCP service
+stage (``run_service_integrations``).
 
 ``install-commit-order``: every check completes before ``apm.lock.yaml`` and
 deployed files are committed. The commit gate runs before the first
@@ -54,6 +56,8 @@ _ENTRY_CALLERS = frozenset(
     }
 )
 _MCP_COMMAND = "src/apm_cli/install/mcp/command.py"
+_MCP_INTEGRATION = "src/apm_cli/install/mcp/integration.py"
+_SERVICE_INTEGRATION = "src/apm_cli/install/service_integration.py"
 # Closed, shrink-only list of org-policy preflight sites outside the policy
 # package. Local bundle leaves it when it routes through the pipeline.
 _POLICY_PREFLIGHT_SITES = frozenset(
@@ -66,6 +70,15 @@ _POLICY_PREFLIGHT_SITES = frozenset(
 # install --mcp judges its server through the commit gate and refuses it as
 # apm install does.
 _MCP_ENTRY_GATE_CALLS = ("enforce_mcp_policy(", "refuse_blocked_mcp(logger)")
+
+# install --mcp reaches the install's MCP service stage, which records the
+# entry in the lockfile; the command keeps no integrator or lockfile writes.
+_MCP_ENTRY_ROUTE = (
+    (_MCP_COMMAND, "run_service_integrations("),
+    (_SERVICE_INTEGRATION, 'mcp_entry=getattr(ctx, "mcp_entry", None),'),
+    (_MCP_INTEGRATION, "mcp_count = integrate_mcp_entry("),
+)
+_MCP_ENTRY_BYPASS = re.compile(r"\bMCPIntegrator\.(install|update_lockfile|remove_stale)\(")
 
 _PIPELINE_CALL = re.compile(r"\brun_install_pipeline\(")
 _ENTRY_CALL = re.compile(r"\b_install_apm_dependencies\(")
@@ -153,7 +166,30 @@ def check_install_entry_routing(provider: FactsProvider) -> tuple[Violation, ...
         found.append(
             _summary(rule_id, _PIPELINE, "the pipeline must stop --dry-run before any write")
         )
+    found += _mcp_entry_route_violations(provider, rule_id)
     return tuple(found)
+
+
+def _mcp_entry_route_violations(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """install --mcp reconciles through the install's MCP service stage."""
+    found: list[Violation] = []
+    for path, needle in _MCP_ENTRY_ROUTE:
+        code = [text for _number, text in _code_lines(_source_lines(provider, path))]
+        if not any(needle in text for text in code):
+            found.append(
+                _summary(rule_id, path, "install --mcp must reach the install's MCP service stage")
+            )
+    found.extend(
+        violation(
+            rule_id,
+            _MCP_COMMAND,
+            "install --mcp must not install or record MCP servers outside the service stage",
+            line=number,
+        )
+        for number, text in _code_lines(_source_lines(provider, _MCP_COMMAND))
+        if _MCP_ENTRY_BYPASS.search(text)
+    )
+    return found
 
 
 def _ordered(facts: object, first: str, then: str) -> bool:

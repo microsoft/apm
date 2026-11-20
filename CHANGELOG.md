@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
 - Each command writes `apm.lock.yaml` at most once, and `apm compile` refuses a lockfile written by a newer APM before changing files. (closes #4086, #4138)
+- Internal: `apm install --mcp` and `apm mcp install` install and record their server through the same MCP stage as `apm install`, instead of a separate integration path. (#4138)
 
 ### Fixed
 
