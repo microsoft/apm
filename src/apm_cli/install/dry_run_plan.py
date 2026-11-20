@@ -12,6 +12,7 @@ from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy
 from apm_cli.drift import locked_marketplace_row
 from apm_cli.install.package_selection import (
+    complete_partial_selection,
     selected_dependency_identity,
     selected_subtree_dependencies,
 )
@@ -178,6 +179,13 @@ class ProspectiveInstallPlan:
             if self.only_packages is not None
             else resolved_dependencies
         )
+        if self.only_packages is not None:
+            # Preview what a partial install locks: the selection plus unlocked locals (#4198).
+            dependencies = tuple(
+                complete_partial_selection(
+                    dependencies, resolved_dependencies, graph.dependency_tree, lockfile
+                )[0]
+            )
         resolved_keys = {dependency.get_unique_key() for dependency in dependencies}
         marketplace_index = lockfile.marketplace_index() if lockfile is not None else None
         dependencies += tuple(

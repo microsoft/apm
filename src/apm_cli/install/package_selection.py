@@ -92,23 +92,40 @@ def unlocked_local_dependencies(
     return _subtree_dependencies(roots, tree, dependencies) if roots else []
 
 
-def with_unlocked_local_dependencies(
-    ctx: InstallContext, complete: Sequence[DependencyReference]
-) -> list[DependencyReference]:
-    """Add declared local deps the lock lacks to a partial selection, in graph order (#4198)."""
-    lockfile = ctx.existing_lockfile
+def complete_partial_selection(
+    selected: Sequence[DependencyReference],
+    complete: Sequence[DependencyReference],
+    tree: DependencyTree,
+    lockfile: LockFile | None,
+) -> tuple[list[DependencyReference], frozenset[str]]:
+    """Add declared local deps the lock lacks to a partial selection, in graph order (#4198).
+
+    Returns the completed selection and the unique keys added implicitly. The
+    install pipeline and its dry-run preview both call this, so the preview
+    names exactly what a real partial install locks.
+    """
     locked = lockfile.dependencies if lockfile is not None else {}
-    tree = ctx.dependency_graph.dependency_tree
-    keep = {dep.get_identity() for dep in ctx.deps_to_install}
+    keep = {dep.get_identity() for dep in selected}
     implicit = [
         dep
         for dep in unlocked_local_dependencies(tree, complete, locked)
         if dep.get_identity() not in keep
     ]
-    # The CLI --skill overlay targets the named packages, never these (#4198).
-    ctx.implicit_local_keys = frozenset(dep.get_unique_key() for dep in implicit)
     keep |= {dep.get_identity() for dep in implicit}
-    return [dep for dep in complete if dep.get_identity() in keep]
+    completed = [dep for dep in complete if dep.get_identity() in keep]
+    return completed, frozenset(dep.get_unique_key() for dep in implicit)
+
+
+def with_unlocked_local_dependencies(
+    ctx: InstallContext, complete: Sequence[DependencyReference]
+) -> list[DependencyReference]:
+    """Complete the pipeline's partial selection and record the implicit locals (#4198)."""
+    completed, implicit_keys = complete_partial_selection(
+        ctx.deps_to_install, complete, ctx.dependency_graph.dependency_tree, ctx.existing_lockfile
+    )
+    # The CLI --skill overlay targets the named packages, never these (#4198).
+    ctx.implicit_local_keys = implicit_keys
+    return completed
 
 
 def existing_dependency_identities(current_dependencies: list[object]) -> set[str]:
