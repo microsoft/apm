@@ -230,6 +230,42 @@ validation are strict and reject `provisional` metadata. Do not pass the
 internal provisional flag manually; remove the metadata after remeasurement
 and review.
 
+### Test corpus ratchets
+
+Three no-growth ratchets keep the test corpus from getting worse. Each
+records today's debt in a baseline and fails only on new debt. A baseline
+entry whose test or module is gone or fixed is reported as stale (`[i]`) and
+never fails, so parallel cleanups do not conflict. Baselines are sorted JSON
+with one entry per line; entries may only be removed.
+
+1. **Duplicate tests** (`scripts/check_exact_test_duplicates.py`, baseline
+   `tests/quality/exact_test_duplicates.json`). Each test body is hashed as a
+   normalized AST (`ast-body-v1`: docstrings, comments and formatting ignored,
+   literals kept). A test whose body equals another test's body, or whose
+   `Class::name` also exists in another file, fails unless the baseline lists
+   it. Fix: delete the copy, parametrize it, or rename it after the distinct
+   contract it checks.
+2. **Classification and placement** (`tests/quality/test_test_taxonomy.py`,
+   baseline `tests/quality/test_taxonomy_baseline.json`). A module with no
+   behavioral marker, a `unit` module under `tests/integration`, or a
+   `tests/unit` module that spawns processes fails unless listed. Fix: add the
+   marker, or move the module.
+3. **Promise links** (same contract and baseline). Every new test module
+   names the promises it protects in its module-level `pytestmark`, using ids
+   from `tests/quality/promise-catalog.json`: OpenAPM `req-*` ids,
+   `P-OWN-<owner id>` architecture owners, `P-INV-I1`..`P-INV-I9` lifecycle
+   invariants and `P-LAW-<id>` lifecycle laws. Add a missing promise to the
+   catalog in the same pull request. A new id family (`P-<FAMILY>-<id>`) must
+   first be declared in the catalog's `families`; undeclared families fail.
+
+```python
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-accepted-target-vocabulary")]
+```
+
+Moving a listed test or module to another directory under the same name keeps
+its allowance and is reported as moved. Prune stale or moved duplicate entries
+with `--update-baseline`; edit stale or moved taxonomy entries by hand.
+
 ### Anti-patterns (will land as `recommended` findings on review)
 
 - **Editing `scripts/test-integration.sh` per file.** The orchestrator

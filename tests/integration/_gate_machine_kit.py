@@ -440,16 +440,19 @@ class GateMachine(RuleBasedStateMachine):
 
     # -- steps ---------------------------------------------------------------
 
-    def _cells(self, op: str, kinds: tuple[str, ...]) -> None:
+    def _cells(self, op: str, kinds: tuple[str, ...]) -> tuple[str, ...]:
         present = kinds or tuple(kind for kind in SURFACES if kind in self.declared)
+        cells = []
         for kind in present or ("none",):
             source = {"none": "none", "all": "policy"}.get(kind, "path")
             gate = {"none": "none", "all": self.policy}.get(kind) or self.gate_state(kind)
             cell = f"cell:{op}|{source}|{kind}|{gate}|{self.scope}"
+            cells.append(cell)
             VISITED_CELLS.add(cell)
             self.visited.add(cell)
             if currently_in_test_context():
                 hypothesis.event(cell)
+        return tuple(cells)
 
     def _forbidden(self) -> dict[str, tuple[str, ...]]:
         if self.scope == "project":
@@ -477,7 +480,7 @@ class GateMachine(RuleBasedStateMachine):
         reference: Callable[[Observation, Observation, CommandResult | None], list[str]]
         | None = None,
     ) -> CommandResult | None:
-        self._cells(op.name, op.cell_kinds)
+        visited = self._cells(op.name, op.cell_kinds)
         before = self.world.observe()
         result = action()
         after = self.world.observe()
@@ -495,7 +498,13 @@ class GateMachine(RuleBasedStateMachine):
         for cell_id in owners:
             self.record_expected(cell_id)
         guarded = Operation(
-            **{**op.__dict__, "forbidden": self._forbidden(), "allowed": self._allowed()}
+            **{
+                **op.__dict__,
+                "forbidden": self._forbidden(),
+                "allowed": self._allowed(),
+                "cells": visited,
+                "scope": self.scope,
+            }
         )
         check_cross_cutting(before, after, result, _ExpectedWithoutReference(self), guarded)
         return result
@@ -607,7 +616,12 @@ class GateMachine(RuleBasedStateMachine):
         args = ("install", *self.world.global_flag(), *(("--frozen",) if mode == "frozen" else ()))
         name = "install" if mode == "plain" else "install-frozen"
         result = self._step(
-            Operation(name, mutating=True, paired=paired or {}),
+            Operation(
+                name,
+                mutating=True,
+                paired=paired or {},
+                modifiers=("FROZEN",) if mode == "frozen" else (),
+            ),
             lambda: self.world.run(args, name),
             reference=self._install_reference(mode),
         )
