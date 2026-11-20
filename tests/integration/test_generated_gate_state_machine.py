@@ -202,3 +202,40 @@ def test_a_known_cell_does_not_excuse_an_unrelated_surface(tmp_path: Path) -> No
     with pytest.raises(AssertionError, match=r"lsp still deployed but not allowed"):
         check_cross_cutting(before, after, None, model, Operation("install", mutating=True))
     assert model.seen == {"gate-cell-x"}
+
+
+def test_home_allowlist_admits_only_exact_ancestors(tmp_path: Path) -> None:
+    """A project step may create ~/.local/state/gh, but not ~/.local/bin."""
+    home = tmp_path / "home"
+    home.mkdir()
+    state = LifecycleStateSnapshot.capture(tmp_path)
+    before_artifacts = ArtifactSnapshotSet.capture({"home": home})
+    (home / ".local" / "state" / "gh").mkdir(parents=True)
+    (home / ".local" / "state" / "gh" / "device-id").write_text("id\n", encoding="ascii")
+    (home / ".local" / "bin").mkdir()
+    (home / ".local" / "bin" / "evil").write_text("x\n", encoding="ascii")
+    after_artifacts = ArtifactSnapshotSet.capture({"home": home})
+    before = Observation(state, before_artifacts, frozenset(), tmp_path, None)
+    after = Observation(state, after_artifacts, frozenset(), tmp_path, None)
+
+    class _Model:
+        def allowed_surfaces(self) -> frozenset[str]:
+            return frozenset()
+
+        def converged_before(self) -> bool:
+            return False
+
+        def expected_cells(self, op, before, after, result):
+            return {}
+
+        def record_expected(self, cell_id: str) -> None:
+            raise AssertionError(cell_id)
+
+    op = Operation(
+        "install",
+        mutating=True,
+        forbidden={"home": ("*",)},
+        allowed={"home": (".local/state/gh",)},
+    )
+    with pytest.raises(AssertionError, match=r"\['\.local/bin', '\.local/bin/evil'\]"):
+        check_cross_cutting(before, after, None, _Model(), op)

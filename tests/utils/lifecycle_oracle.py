@@ -303,7 +303,12 @@ def _i5_write_set(
     for root_id, snapshot in before.artifacts.snapshots:
         observed = _durable_changes(snapshot, after.artifacts.snapshot(root_id))
         allowed = op.allowed.get(root_id, ())
-        observed -= {path for path in observed if any(_within(path, a) for a in allowed)}
+        # An allowed prefix admits its subtree and its exact ancestor directories.
+        observed -= {
+            path
+            for path in observed
+            if any(_within(path, a) or a.startswith(path + "/") for a in allowed)
+        }
         for prefix in op.forbidden.get(root_id, ()):
             hit = sorted(path for path in observed if _within(path, prefix))
             if hit:

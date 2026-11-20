@@ -486,7 +486,14 @@ class GateMachine(RuleBasedStateMachine):
 
     def _allowed(self) -> dict[str, tuple[str, ...]]:
         if self.scope == "project":
-            return {"home": (".apm/deployment-receipts", ".apm-local", ".local", ".cache")}
+            return {
+                "home": (
+                    ".apm/deployment-receipts",
+                    ".apm-local",
+                    ".local/state/gh",
+                    ".cache/apm",
+                )
+            }
         return {}
 
     def _step(
