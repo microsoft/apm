@@ -13,7 +13,7 @@ description: >-
   candidate ready", "re-check the findings on the release PR", or
   before or after cut-release, even when the user does not say
   "skill". Mode `recheck` re-verifies open findings on a moved head.
-  It never fixes code, opens PRs, tags, or files issues; reviewing one
+  It never fixes code, opens PRs or tags; reviewing one
   PR's diff belongs to autopilot-pr-review-worker and writing the tests
   belongs to apm-lifecycle-tests.
 ---
@@ -59,8 +59,10 @@ version bumps (cut-release), tagging (a human).
   credentials, no real network writes.
 - Neutral briefs. Every brief passes `scripts/brief_lint.py` before it
   is sent. Some model families refuse security-worded briefs.
-- No side effects outside the run directory: never fix code, commit,
-  push, comment, file issues or tag. Security findings route privately.
+- No side effects outside the run directory except filing confirmed
+  non-security findings per the release's bug pipeline (see
+  `references/rubric.md`). Never fix code, commit, push, comment on or
+  push to pull requests, or tag. Security findings route privately.
 - ASCII only in everything this skill writes.
 - Reload `run.json` before every spawn and after every return. Do not
   rely on recall of earlier turns.
