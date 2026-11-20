@@ -689,6 +689,18 @@
       ]
     },
     {
+      "issue": 4270,
+      "fixed_in": "Unreleased",
+      "summary": "A cached install pass classifies a package with a plugin manifest and a root skills/ directory as its fresh fetch does (marketplace_plugin), so an approved Claude plugin installed with -g --trust-bin deploys bin/ inside its native plugin root instead of silently projecting only its skill.",
+      "failure_modes": ["cache", "outcome"],
+      "properties": ["source.ref_cache_coherent", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/unit/install/test_legacy_plugin_compat.py::test_cached_pass_classifies_as_the_fresh_pass",
+        "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
+        "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
+      ]
+    },
+    {
       "issue": 4286,
       "fixed_in": "Unreleased",
       "summary": "Registry URLs are validated against the spec scheme rules (req-sc-006) under both manifest contracts through one owner: a plain http URL is a parse error that names the registry and writes nothing, unless the host is loopback or RFC 1918 private or the entry sets insecure: true.",
@@ -699,18 +711,6 @@
         "tests/integration/test_registry_url_scheme_lifecycle.py::test_loopback_or_insecure_http_registry_is_accepted",
         "tests/unit/test_apm_yml_registries.py::TestRegistryUrlScheme::test_http_to_public_host_is_a_parse_error",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_http_registry_url_needs_local_host_or_insecure"
-      ]
-    },
-    {
-      "issue": 4270,
-      "fixed_in": "Unreleased",
-      "summary": "A cached install pass classifies a package with a plugin manifest and a root skills/ directory as its fresh fetch does (marketplace_plugin), so an approved Claude plugin installed with -g --trust-bin deploys bin/ inside its native plugin root instead of silently projecting only its skill.",
-      "failure_modes": ["cache", "outcome"],
-      "properties": ["source.ref_cache_coherent", "outcome.status_matches_state"],
-      "regression_tests": [
-        "tests/unit/install/test_legacy_plugin_compat.py::test_cached_pass_classifies_as_the_fresh_pass",
-        "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
-        "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
       ]
     }
   ],
