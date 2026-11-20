@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+"""Run one journey step in a world and lint every output line.
+
+Captures stdout, stderr and the exit code separately, writes them to
+the world's log directory, applies the line lint, and extracts the
+hints the CLI printed (commands to run, docs URLs) so the walker can
+execute each one.
+
+stdout: one JSON record (see FIELDS in the skill's report template).
+The exit code of this script is always 0 unless usage is wrong (2);
+the command's own exit code is in the record.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+QUOTED_HINT_RE = re.compile(r"(?:`|')(apm [^`'\n]{1,200})(?:`|')")
+VERB_HINT_RE = re.compile(
+    r"\b(?:[Rr]un|[Tt]ry|[Uu]se|[Rr]erun|[Rr]e-run|[Ss]hare with|[Ii]nstall with):?\s+(apm\s+[^\s|].*?)"
+    r"(?=\s+(?:to|and|or|then|first|instead|before|after)\b|[.;,)]?\s*$)"
+)
+URL_RE = re.compile(r"https://microsoft\.github\.io/apm(?:/([A-Za-z0-9_./-]*))?(#[A-Za-z0-9_-]+)?")
+STATUS_PREFIXES = ("[+]", "[x]", "[!]", "[i]", "[*]", "[>]", "|--", "+-")
+STALE_NAMES = ("python -m apm_cli", "apm_cli.cli", "apm manifest migrate")
+TRACEBACK = ("Traceback (most recent call last)", 'File "/')
+ERROR_MARK = "[x]"
+
+
+def lint_lines(stdout: str, stderr: str, rc: int, *, help_output: bool = False) -> list[dict]:
+    """Return deterministic line-level problems for one command.
+
+    Help screens repeat option descriptions by design, so duplicate-line
+    checks are skipped when ``help_output`` is set.
+    """
+    issues: list[dict] = []
+    for stream_name, text in (("stdout", stdout), ("stderr", stderr)):
+        seen: dict[str, int] = {}
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            bad = [ch for ch in line if ord(ch) > 0x7E or (ord(ch) < 0x20 and ch != "\t")]
+            if bad:
+                codepoints = sorted({f"U+{ord(ch):04X}" for ch in bad})
+                issues.append(
+                    {
+                        "rule": "non-ascii",
+                        "stream": stream_name,
+                        "line": lineno,
+                        "detail": ",".join(codepoints),
+                        "text": line.strip()[:160],
+                    }
+                )
+            for stale in STALE_NAMES:
+                if stale in line:
+                    issues.append(
+                        {
+                            "rule": "stale-command-name",
+                            "stream": stream_name,
+                            "line": lineno,
+                            "detail": stale,
+                            "text": line.strip()[:160],
+                        }
+                    )
+            for marker in TRACEBACK:
+                if line.lstrip().startswith(marker):
+                    issues.append(
+                        {
+                            "rule": "traceback",
+                            "stream": stream_name,
+                            "line": lineno,
+                            "detail": marker,
+                            "text": line.strip()[:160],
+                        }
+                    )
+        if help_output:
+            continue
+        # Duplicates are judged on logical lines, so two different warnings
+        # that happen to wrap onto the same tail text are not flagged.
+        for lineno, logical in enumerate(unwrap(text), start=1):
+            key = logical.strip()
+            if len(key) < 12 or set(key) <= set("-=|+ "):
+                continue
+            if key in seen:
+                issues.append(
+                    {
+                        "rule": "duplicate-line",
+                        "stream": stream_name,
+                        "line": lineno,
+                        "detail": f"first at logical line {seen[key]}",
+                        "text": key[:160],
+                    }
+                )
+            else:
+                seen[key] = lineno
+    if rc != 0 and not stderr.strip():
+        issues.append(
+            {
+                "rule": "error-without-stderr",
+                "stream": "stderr",
+                "line": 0,
+                "detail": f"exit {rc} with empty stderr",
+                "text": "",
+            }
+        )
+    if rc != 0 and any(line.lstrip().startswith(ERROR_MARK) for line in stdout.splitlines()):
+        issues.append(
+            {
+                "rule": "error-on-stdout",
+                "stream": "stdout",
+                "line": 0,
+                "detail": "an [x] line was printed to stdout",
+                "text": "",
+            }
+        )
+    return issues
+
+
+def unwrap(text: str, width: int = 70) -> list[str]:
+    """Join hard-wrapped continuation lines so a wrapped hint reads whole."""
+    lines: list[str] = []
+    prev_physical = ""
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        stripped = line.strip()
+        # A wrap is judged on the previous physical line, not the joined one.
+        # Rich wraps after "keys:" too, so ":" may continue; list items never do.
+        if (
+            lines
+            and stripped
+            and len(prev_physical) >= width
+            and not stripped.startswith(STATUS_PREFIXES)
+            and not stripped.startswith(("|", "- "))
+            and not lines[-1].lstrip().startswith("|")
+            and not prev_physical.endswith((".", "!", "?"))
+        ):
+            lines[-1] = f"{lines[-1].rstrip()} {stripped}"
+        else:
+            lines.append(line)
+        prev_physical = line
+    return lines
+
+
+def _clean_command(cmd: str) -> str:
+    cmd = cmd.split("|", 1)[0].strip()
+    return re.sub(r"\s{2,}.*$", "", cmd).rstrip(".,;:)")
+
+
+def extract_hints(text: str, docs_root: Path | None) -> list[dict]:
+    """Return commands and docs links the CLI told the user to use."""
+    hints: list[dict] = []
+    seen: set[str] = set()
+    for line in unwrap(text):
+        stripped = line.strip()
+        if stripped.startswith("|") and not stripped.startswith("|--"):
+            # Panel rows ("| * Label:   apm cmd   |") carry next-step hints;
+            # help tables ("| apm cmd | description |") do not. Keep the
+            # text after a label colon, drop everything else on such rows.
+            inner = stripped.strip("|").strip()
+            _label, sep, rest = inner.partition(":")
+            if not sep:
+                continue
+            stripped = re.sub(r"\s{2,}.*$", "", rest.strip())
+            if stripped.startswith("apm "):
+                stripped = f"Run {stripped}"
+        candidates = [m.group(1) for m in QUOTED_HINT_RE.finditer(stripped)]
+        candidates += [m.group(1) for m in VERB_HINT_RE.finditer(stripped)]
+        for raw in candidates:
+            cmd = _clean_command(raw)
+            if cmd and cmd not in seen and "<" not in cmd and len(cmd.split()) >= 2:
+                seen.add(cmd)
+                hints.append({"kind": "command", "value": cmd, "line": stripped[:200]})
+        for match in URL_RE.finditer(line):
+            url = match.group(0).rstrip(".,;)")
+            if url in seen:
+                continue
+            seen.add(url)
+            hint = {"kind": "docs-url", "value": url, "line": stripped[:200]}
+            if docs_root is not None:
+                hint["resolves"] = docs_url_resolves(
+                    docs_root, match.group(1) or "", match.group(2)
+                )
+            hints.append(hint)
+    return hints
+
+
+def docs_url_resolves(docs_root: Path, slug: str, anchor: str | None) -> bool:
+    slug = slug.strip("/") or "index"
+    candidates = [
+        docs_root / f"{slug}.md",
+        docs_root / f"{slug}.mdx",
+        docs_root / slug / "index.md",
+        docs_root / slug / "index.mdx",
+    ]
+    page = next((p for p in candidates if p.is_file()), None)
+    if page is None:
+        return False
+    if not anchor:
+        return True
+    wanted = anchor.lstrip("#").lower()
+    for line in page.read_text(encoding="utf-8").splitlines():
+        if line.startswith("#"):
+            heading = line.lstrip("#").strip().lower()
+            slugged = re.sub(r"[^a-z0-9 -]", "", heading).replace(" ", "-")
+            if slugged == wanted:
+                return True
+    return False
+
+
+def _text(value: str | bytes | None) -> str:
+    """Partial output from TimeoutExpired may be bytes even with text=True."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value or ""
+
+
+def write_logs(logs: Path, step_id: str, out: str, err: str) -> tuple[Path, Path]:
+    """Save one invocation's streams under a fresh ``<step>.<n>`` name.
+
+    Repeated captures of the same step never overwrite earlier evidence.
+    """
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", step_id)
+    n = 1
+    while True:
+        stdout_log = logs / f"{safe}.{n}.stdout"
+        try:
+            with stdout_log.open("x", encoding="utf-8") as handle:
+                handle.write(out)
+        except FileExistsError:
+            n += 1
+            continue
+        stderr_log = logs / f"{safe}.{n}.stderr"
+        stderr_log.write_text(err, encoding="utf-8")
+        return stdout_log, stderr_log
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run one step and lint its output.")
+    parser.add_argument("--world", required=True, help="world JSON written by world.py")
+    parser.add_argument("--step-id", required=True, help="journey.step id, e.g. J01.4")
+    parser.add_argument("--cwd", help="working directory (default: the world project)")
+    parser.add_argument("--docs-root", help="docs/src/content/docs to resolve links")
+    parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--stdin", default="", help="text fed to stdin")
+    parser.add_argument("cmd", nargs=argparse.REMAINDER, help="-- command and args")
+    args = parser.parse_args(argv)
+    cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
+    if not cmd:
+        parser.error("missing command after --")
+    world = json.loads(Path(args.world).read_text(encoding="utf-8"))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from world import scrub_env
+
+    env = scrub_env(dict(os.environ), world)
+    cwd = args.cwd or world["project"]
+    try:
+        # The command is the journey step the operator asked to run.
+        proc = subprocess.run(  # noqa: S603
+            cmd,
+            cwd=cwd,
+            env=env,
+            input=args.stdin,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=args.timeout,
+            check=False,
+        )
+        rc, out, err = proc.returncode, proc.stdout, proc.stderr
+    except subprocess.TimeoutExpired as exc:
+        rc, out, err = 124, _text(exc.stdout), _text(exc.stderr) + "\n[capture] timeout"
+    stdout_log, stderr_log = write_logs(Path(world["logs"]), args.step_id, out, err)
+    docs_root = Path(args.docs_root) if args.docs_root else None
+    record = {
+        "step": args.step_id,
+        "cmd": cmd,
+        "cwd": cwd,
+        "rc": rc,
+        "stdout_log": str(stdout_log),
+        "stderr_log": str(stderr_log),
+        "lint": lint_lines(out, err, rc, help_output="--help" in cmd or "-h" in cmd),
+        "hints": extract_hints(out + "\n" + err, docs_root),
+    }
+    print(json.dumps(record, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

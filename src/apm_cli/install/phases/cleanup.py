@@ -38,6 +38,7 @@ from apm_cli.integration.cleanup import DeploymentEvidence, remove_stale_deploye
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
+    from apm_cli.install.service import FrozenDisposition
 
 
 def deployment_evidence(ctx: InstallContext) -> DeploymentEvidence:
@@ -68,9 +69,12 @@ def run(ctx: InstallContext) -> None:
     ``ctx.targets``, ``ctx.logger``, ``ctx.project_root``,
     ``ctx.only_packages``.
     """
+    from apm_cli.install.service import InstallService
+
+    frozen_disposition = InstallService.frozen_disposition(ctx)
     receipt_retirements: list[Path] = []
     try:
-        _run_cleanup(ctx, receipt_retirements)
+        _run_cleanup(ctx, receipt_retirements, frozen_disposition=frozen_disposition)
     finally:
         DeploymentMaterializationSession.retire_removed(
             ctx.project_root,
@@ -79,7 +83,12 @@ def run(ctx: InstallContext) -> None:
         )
 
 
-def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
+def _run_cleanup(
+    ctx: InstallContext,
+    receipt_retirements: list[Path],
+    *,
+    frozen_disposition: FrozenDisposition,
+) -> None:
     """Collect canonical cleanup outcomes without per-package receipt publication."""
     existing_lockfile = ctx.existing_lockfile
     only_packages = ctx.only_packages
@@ -154,7 +163,7 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
         _orphan_deleted_targets: list = []
         for _orphan_key in sorted(decision.candidate_keys):
             _orphan_dep = existing_lockfile.dependencies[_orphan_key]
-            if ctx.frozen:
+            if frozen_disposition.retain_package_orphans:
                 # Frozen never rewrites the lock, so an undeclared package keeps
                 # its files, checkout and claims until a normal install (#3662).
                 orphan_cleanup_retained[_orphan_key] = {
@@ -199,7 +208,7 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
             BaseIntegrator.cleanup_empty_parents(_orphan_deleted_targets, project_root)
         if logger:
             logger.orphan_cleanup(_orphan_total_deleted)
-            if ctx.frozen and orphan_cleanup_retained:
+            if frozen_disposition.retain_package_orphans and orphan_cleanup_retained:
                 logger.frozen_orphans_kept(sorted(orphan_cleanup_retained))
         # Re-decide with the files cleanup could not delete: their packages
         # (and, for a partial install, their dropped ancestors) stay locked.

@@ -348,12 +348,18 @@ def _graph_ctx(info: PackageInfo, *, depth: int = 2, trust: bool = False):
 def test_transitive_plugin_mcp_parks_without_an_executables_block(tmp_path: Path) -> None:
     """H1: the default transitive-MCP refusal holds on the native route with the gate off."""
     from apm_cli.install.exec_gate import native_plugin_verdict
+    from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
     info = _with_mcp(tmp_path)
 
     def plan(**graph):
         ctx = _graph_ctx(info, **graph)
-        return _plan(info, admit=lambda: native_plugin_verdict("owner/plugin", info, None, ctx=ctx))
+        return _plan(
+            info,
+            admit=lambda: native_plugin_verdict(
+                "owner/plugin", info, authorized_exec_map(AUTHORIZED_GATE_DISABLED), ctx=ctx
+            ),
+        )
 
     parked = plan().parked
     assert parked is not None and "transitive plugin with MCP servers" in parked
