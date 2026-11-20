@@ -504,7 +504,6 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
                 "if fingerprint_native_claude_source(source) != own.record.fingerprint:",
                 "and prior.pin == own.pin",
                 "name not in prior_names\n            and existing.exists()",
-                "_migrate_legacy_registration(modules_dir, settings_path, logger)",
                 "write_declaration(",
             ),
             "Claude declarations must derive ownership from the lockfile and verify approved bytes",

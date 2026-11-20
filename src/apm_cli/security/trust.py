@@ -95,6 +95,8 @@ class Admission:
     one_off: bool = False
     # Human-readable cause when the reason alone does not name it.
     detail: str | None = None
+    # The whole-plugin pin that admitted a native plugin; deploy re-checks it.
+    pin: str | None = None
 
 
 def _names(package_keys: tuple[str, ...]) -> set[str]:
@@ -709,7 +711,7 @@ def admit_native_plugin(
         except (OSError, ValueError):
             current = None
         if current is not None and current == pin:
-            return Admission(True, None, layer)
+            return Admission(True, None, layer, pin=pin)
         return Admission(False, REASON_DEFINITION_CHANGED, layer)
     if needs_trust and not one_off:
         # D2: a type-level grant never satisfies transitive MCP trust.
@@ -720,8 +722,18 @@ def admit_native_plugin(
     return Admission(False, REASON_UNAPPROVED, LAYER_DEFAULT_DENY)
 
 
-def parked_plugin_message(package: str, reason: str, detail: str | None = None) -> str:
-    """Return the warning for a native plugin the trust owner parked."""
+def parked_plugin_message(
+    package: str, reason: str, detail: str | None = None, *, approve_cwd: Path | None = None
+) -> str:
+    """Return the warning for a native plugin the trust owner parked.
+
+    *approve_cwd* is the directory whose ``apm.yml`` ``apm approve`` must
+    update (``APM_HOME`` for a user-scope plugin); the hint then works from
+    any working directory.
+    """
+    approve = "apm approve"
+    if approve_cwd is not None:
+        approve = f"cd {_display_dir(approve_cwd)} && apm approve"
     if reason == REASON_APM_REFERENCE:
         return (
             f"Parked native plugin {package}: {detail or 'an executable references .apm/'}; "
@@ -734,15 +746,24 @@ def parked_plugin_message(package: str, reason: str, detail: str | None = None) 
         return (
             f"Parked native plugin {package}: a transitive plugin with MCP servers needs "
             "a pinned approval; 'mcp: true' is not enough\n"
-            f"    Pin: apm approve {package}  |  This run only: --trust-transitive-mcp"
+            f"    Pin: {approve} {package}  |  This run only: --trust-transitive-mcp"
         )
     why = (
         "content changed since approval" if reason == REASON_DEFINITION_CHANGED else "not approved"
     )
     return (
         f"Parked native plugin {package}: {why}\n"
-        f"    Review: apm approve --pending  |  Re-approve: apm approve {package}"
+        f"    Review: {approve} --pending  |  Re-approve: {approve} {package}"
     )
+
+
+def _display_dir(path: Path) -> str:
+    """*path* with the home directory shown as ``~``."""
+    try:
+        relative = Path(path).relative_to(Path.home()).as_posix()
+    except ValueError:
+        return str(path)
+    return "~" if relative == "." else f"~/{relative}"
 
 
 def hooks_package_admissible(allow_executables: Any, package_keys: tuple[str, ...]) -> bool:

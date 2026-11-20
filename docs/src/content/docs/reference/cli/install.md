@@ -235,9 +235,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   retains recovery data; the prior package may no longer be active.
   Follow [Windows recovery guidance](../../../troubleshooting/install-failures/#windows-file-locks-and-incomplete-recovery)
   before retrying.
-  Later Claude-owned metadata changes are not rolled back on failure; APM
-  reports the error and retains ownership intent. Registration success is not
-  runtime proof. See [Claude recovery](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
+  If updating Claude settings for native plugins fails, the settings file and
+  deployed plugin roots are left as they were and the previous lockfile is
+  restored. Registration success is not runtime proof. See
+  [Claude user plugins](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 - **Git-hook isolation.** Dependency Git operations ignore repository-locating
   hook variables, preserving the caller's branch and HEAD. APM allows safe URL
   rewrites but rejects credentials, insecure transports including `http://` and

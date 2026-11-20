@@ -133,14 +133,18 @@ configuration.
 approved plugin root to `~/.agents/plugins/<plugin>/`, generates
 `~/.agents/plugins/.claude-plugin/marketplace.json`, and writes only
 `extraKnownMarketplaces` and `enabledPlugins` into Claude's `settings.json`. No
-`claude` CLI is needed. Plugins with unapproved hooks or declared plugin
-`dependencies` are not declared (warning, exit 0). MCP and LSP servers the
+`claude` CLI is needed. A plugin APM cannot install intact (unapproved
+executables, declared plugin `dependencies`, a skill subset, symlinks,
+`monitors/` or `workflows/`) is parked: not deployed or declared, a warning
+names the package and the next step, and the install continues (exit 0). To
+approve a parked plugin, run `cd ~/.apm && apm approve <package>` (or
+`--pending`). `bin/` deploys inside the plugin root under the same approval
+and org `bin_deploy` policy, and needs `--trust-bin` when not interactive. MCP and LSP servers the
 plugin ships are loaded by Claude from the plugin, not written by APM; the
 whole-plugin approval covers them, and a server org MCP policy blocks, or an
 MCP entry APM cannot read (`.mcpb`/`.dxt`, URL, unreadable file), parks the
 plugin (`enforcement: block`). A transitive plugin with MCP servers needs a pin
-or `--trust-transitive-mcp`, even with no `executables` block. Plugins with
-`monitors/` or `workflows/` are refused. An explicit `false` in
+or `--trust-transitive-mcp`, even with no `executables` block. An explicit `false` in
 `enabledPlugins` is kept. `apm.lock.yaml` records each as `native_plugin`. See
 [admission limits](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
 
@@ -155,12 +159,11 @@ changing hook settings or ownership. Explicitly uninstall the package with
 repair unreadable settings or ownership records first. APM never automatically
 deletes retained-target hooks to migrate them.
 
-Global uninstall retains native plugin data; APM never takes over foreign
-marketplace/plugin ownership. APM's package-replacement rollback does not cover
-Claude-owned metadata; failures retain ownership intent. After repair, reconcile
-remaining declarations with `apm install --global --target claude` for
-Claude-only installs; for mixed targets, retain the full original `--target`
-list. Do not re-add removed package arguments.
+Global uninstall removes the plugin roots and Claude settings keys the previous
+lockfile recorded; your explicit `false`, your own entries and roots you edited
+stay. If updating Claude settings fails, settings are left unchanged and the
+previous lockfile is restored; fix the reported cause and rerun the same
+command.
 
 Cursor and OpenCode user configs are `~/.cursor/mcp.json` and
 `~/.config/opencode/opencode.json`. Global MCP cleanup removes only names

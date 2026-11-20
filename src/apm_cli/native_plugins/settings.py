@@ -1,4 +1,4 @@
-"""APM's only writer of documented native-plugin settings keys.
+"""Only writer for lock-owned native plugins; copilot_plugins/settings.py converges here in #3921.
 
 Harnesses that load a local directory marketplace in place (Claude Code today,
 GitHub Copilot after #3921) read two documented keys from a settings JSON
@@ -15,6 +15,7 @@ keeps every user entry, and never overrides an explicit ``false``.
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -145,9 +146,38 @@ def apply_declaration(
     return change
 
 
+def settings_target(path: Path) -> Path:
+    """The file a settings write lands in: a symlinked document is written through."""
+    return path.resolve() if path.is_symlink() else path
+
+
+def preview_declaration(path: Path, declaration: SettingsDeclaration) -> SettingsChange:
+    """What :func:`write_declaration` would change, without writing anything."""
+    target = settings_target(path)
+    return apply_declaration(copy.deepcopy(read_settings(target)), declaration, target)
+
+
+def snapshot_settings(path: Path) -> bytes | None:
+    """The settings document's exact bytes, or ``None`` when it does not exist."""
+    target = settings_target(path)
+    return target.read_bytes() if target.exists() else None
+
+
+def restore_settings(path: Path, snapshot: bytes | None) -> None:
+    """Put back the bytes (or the absence) :func:`snapshot_settings` recorded."""
+    target = settings_target(path)
+    if snapshot_settings(path) == snapshot:
+        return
+    if snapshot is None:
+        target.unlink(missing_ok=True)
+        return
+    # A snapshot APM may restore was readable as UTF-8 JSON before the write.
+    atomic_write_text(target, snapshot.decode("utf-8"), normalize_line_endings=False)
+
+
 def write_declaration(path: Path, declaration: SettingsDeclaration) -> SettingsChange:
     """Apply *declaration* to the settings file at *path*, writing only on change."""
-    target = path.resolve() if path.is_symlink() else path
+    target = settings_target(path)
     document = read_settings(target)
     change = apply_declaration(document, declaration, target)
     if change.changed:

@@ -479,7 +479,6 @@ def plugin_bin_deployable(
     """Return whether approved marketplace plugin bin files can reach a target."""
     from apm_cli.core.scope import InstallScope
     from apm_cli.models.apm_package import PackageType
-    from apm_cli.security.executables import normalize_bin_deploy_deny_key
 
     if (
         skip_bin
@@ -494,14 +493,21 @@ def plugin_bin_deployable(
         )
     ):
         return False
+    return bin_deploy_denial(package_info, policy) is None
+
+
+def bin_deploy_denial(package_info: Any, policy: Any) -> str | None:
+    """Name the org ``bin_deploy`` rule that blocks this package's bin/, else ``None``."""
+    from apm_cli.security.executables import normalize_bin_deploy_deny_key
+
     bin_policy = getattr(policy, "bin_deploy", None)
     if bin_policy is None:
-        return True
+        return None
     if bin_policy.deny_all:
-        return False
+        return "bin_deploy.deny_all"
     package_key = normalize_bin_deploy_deny_key(package_info.get_canonical_dependency_string())
     denied = {normalize_bin_deploy_deny_key(item) for item in bin_policy.deny}
-    return package_key not in denied
+    return "bin_deploy.deny" if package_key in denied else None
 
 
 def log_bin_status(

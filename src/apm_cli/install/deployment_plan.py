@@ -103,7 +103,7 @@ def prepare_package_deployment(  # noqa: PLR0913
         return PackageDeploymentPlan(selection)
     approvals = check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
     hooks, bin_approved, mcp, canvas, lsp = approvals
-    from .exec_gate import hook_file_admission, native_plugin_verdict
+    from .exec_gate import bin_deploy_denial, hook_file_admission, native_plugin_verdict
 
     hook_filter = hook_file_admission(package_name, package_info, allow_executables)
     _warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger, ctx)
@@ -130,6 +130,13 @@ def prepare_package_deployment(  # noqa: PLR0913
         ctx=ctx,
         read_only=read_only,
     )
+    # The org policy the install gate fetched; callers that pass none
+    # (preflight) defer to it, as effective_allow_map does for trust.
+    org_policy = (
+        policy
+        if policy is not None
+        else getattr(getattr(ctx, "policy_fetch", None), "policy", None)
+    )
     native_claude_plugin = (
         None
         if codex_native is not None
@@ -142,18 +149,21 @@ def prepare_package_deployment(  # noqa: PLR0913
             admit=lambda: native_plugin_verdict(
                 package_name, package_info, allow_executables, ctx=ctx
             ),
-            skip_bin=skip_bin,
-            # The org policy the install gate fetched; callers that pass none
-            # (preflight) defer to it, as effective_allow_map does for trust.
-            policy=policy
-            if policy is not None
-            else getattr(getattr(ctx, "policy_fetch", None), "policy", None),
+            # The whole-plugin verdict approves bin/; only the run's posture applies.
+            skip_bin=resolve_bin_skip(True, trust_bin, non_interactive=not sys.stdout.isatty())[0],
+            policy=org_policy,
+            bin_denied=bin_deploy_denial(package_info, org_policy),
         )
     )
     projection_targets = PackageDeploymentPlan(
         selection, codex_native=codex_native, claude_native=native_claude_plugin
     ).projection_targets
-    native_plugin = codex_native or native_claude_plugin
+    # A parked plugin deploys nothing natively; only its loose targets are planned.
+    native_plugin = codex_native or (
+        native_claude_plugin
+        if native_claude_plugin is not None and not native_claude_plugin.parked
+        else None
+    )
     source_plan = DeployableSourcePlan.create(
         package_info,
         projection_targets,

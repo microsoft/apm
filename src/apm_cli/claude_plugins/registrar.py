@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,8 +21,10 @@ from apm_cli.core.scope import InstallScope, get_deploy_root, is_user_scope
 from apm_cli.native_plugins.layout import (
     NativeLayoutError,
     deploy_plugin,
+    discard_replaced,
     plugins_root,
     prune_empty,
+    restore_replaced,
     retire_plugin,
     write_catalog,
 )
@@ -31,24 +32,25 @@ from apm_cli.native_plugins.record import NativePluginRecord, lock_native_plugin
 from apm_cli.native_plugins.settings import (
     BINDING_CONFLICT,
     BINDING_MOVED,
-    ENABLED_KEY,
     MARKETPLACES_KEY,
     PREVIOUS_LOCK_MISSING,
     NativeSettingsError,
+    SettingsChange,
     SettingsDeclaration,
-    read_settings,
+    preview_declaration,
+    restore_settings,
+    snapshot_settings,
     write_declaration,
 )
-from apm_cli.utils.atomic_io import atomic_write_text
-from apm_cli.utils.path_security import has_symlink_component
 
-from .admission import ClaudeNativePlugin, ClaudeNativePluginError, fingerprint_native_claude_source
+from .admission import (
+    ClaudeNativePlugin,
+    ClaudeNativePluginError,
+    fingerprint_native_claude_source,
+    pin_native_claude_source,
+)
 
 HARNESS = "claude"
-# Earlier, unreleased heads of #3290 drove the claude CLI and kept a ledger.
-LEGACY_MARKETPLACE = "apm-claude"
-LEGACY_LEDGER_RELATIVE = ".claude-plugin/apm-registration.json"
-LEGACY_CATALOG_RELATIVE = ".claude-plugin/marketplace.json"
 
 
 @dataclass(frozen=True)
@@ -99,45 +101,6 @@ def native_ownership(lockfile: Any) -> dict[str, NativeOwnership]:
     }
 
 
-def _migrate_legacy_registration(modules_dir: Path, settings_path: Path, logger: Any) -> None:
-    """Remove registrations made by earlier heads of this route, when provably theirs."""
-    ledger = modules_dir / LEGACY_LEDGER_RELATIVE
-    if not ledger.is_file() or has_symlink_component(modules_dir, ledger):
-        return
-    try:
-        plugins = json.loads(ledger.read_text(encoding="utf-8")).get("plugins") or {}
-        owned = {key for key in plugins if isinstance(key, str)}
-    except (OSError, ValueError, AttributeError):
-        owned = set()
-    document = read_settings(settings_path)
-    marketplaces = document.get(MARKETPLACES_KEY)
-    enabled = document.get(ENABLED_KEY)
-    changed = False
-    if isinstance(marketplaces, dict):
-        legacy = marketplaces.get(LEGACY_MARKETPLACE)
-        path = legacy.get("source", {}).get("path") if isinstance(legacy, dict) else None
-        if isinstance(path, str) and Path(path).resolve() == modules_dir.resolve():
-            del marketplaces[LEGACY_MARKETPLACE]
-            changed = True
-        if not marketplaces:
-            document.pop(MARKETPLACES_KEY, None)
-    if isinstance(enabled, dict):
-        for key in sorted(owned & set(enabled)):
-            if key.endswith("@" + LEGACY_MARKETPLACE):
-                del enabled[key]
-                changed = True
-        if not enabled:
-            document.pop(ENABLED_KEY, None)
-    if changed:
-        atomic_write_text(settings_path, json.dumps(document, indent=2) + "\n")
-    ledger.unlink()
-    catalog = modules_dir / LEGACY_CATALOG_RELATIVE
-    if catalog.is_file():
-        catalog.unlink()
-    if logger:
-        logger.tree_item("Removed the Claude registration left by an earlier APM build.")
-
-
 def _verify_next(
     key: str,
     own: NativeOwnership,
@@ -178,6 +141,58 @@ def _verify_next(
     return source
 
 
+class _Rollback:
+    """What one reconcile changed before Claude settings committed (req-na-004)."""
+
+    def __init__(self, root: Path, marketplace: str, settings_path: Path) -> None:
+        self.root = root
+        self.marketplace = marketplace
+        self.settings_path = settings_path
+        self.created: list[str] = []
+        self.replaced: dict[str, Path] = {}
+        self.settings: bytes | None = None
+        self.snapshotted = False
+
+    def snapshot(self) -> None:
+        self.settings = snapshot_settings(self.settings_path)
+        self.snapshotted = True
+
+    def commit(self) -> None:
+        """Settings committed: the moved-aside previous roots are no longer needed."""
+        for replaced in self.replaced.values():
+            with contextlib.suppress(NativeLayoutError, OSError):
+                discard_replaced(self.root, replaced)
+
+    def undo(self, prior_names: set[str]) -> None:
+        """Restore settings bytes, previous roots and catalog; drop new roots."""
+        if self.snapshotted:
+            with contextlib.suppress(NativeSettingsError, OSError, UnicodeDecodeError):
+                restore_settings(self.settings_path, self.settings)
+        for name in self.created:
+            retire_plugin(self.root, name, None, fingerprint_native_claude_source)
+        for name, replaced in self.replaced.items():
+            with contextlib.suppress(NativeLayoutError, OSError):
+                restore_replaced(self.root, name, replaced)
+        with contextlib.suppress(NativeLayoutError, OSError):
+            write_catalog(
+                self.root,
+                self.marketplace,
+                [name for name in prior_names if (self.root / name).exists()],
+                owned=True,
+            )
+        prune_empty(self.root)
+
+
+def _refuse_binding(change: SettingsChange, settings_path: Path, marketplace: str) -> None:
+    if BINDING_MOVED in change.diagnostics:
+        raise NativeSettingsError(f"{settings_path}: the marketplace binding moved.")
+    if BINDING_CONFLICT in change.diagnostics:
+        raise NativeSettingsError(
+            f"{settings_path} already declares {MARKETPLACES_KEY}.{marketplace} with "
+            "another source. APM did not change it. Remove or rename that entry, then retry."
+        )
+
+
 def reconcile_claude_plugins(
     *,
     modules_dir: Path,
@@ -192,8 +207,11 @@ def reconcile_claude_plugins(
     """Converge deployed roots, the catalog and Claude settings onto *lockfile*.
 
     *previous* is the ownership the lock recorded before this command changed
-    it, or ``None`` when there was no previous lock. A failure leaves settings
-    unchanged and removes roots this run created; the caller restores the lock.
+    it, or ``None`` when there was no previous lock. Settings are checked
+    before any root is deployed. A failure up to the settings commit restores
+    settings bytes and every replaced root, and removes roots this run
+    created; the caller restores the lock. Retirement runs only after the
+    commit and keeps (with a warning) any root it cannot safely remove.
     """
     if not is_user_scope(scope) or dry_run:
         return
@@ -202,7 +220,7 @@ def reconcile_claude_plugins(
     settings_path = claude_settings_path()
     marketplace = marketplace_name(modules_dir.parent)
     binding = (marketplace, str(root))
-    created: list[str] = []
+    rollback = _Rollback(root, marketplace, settings_path)
     prior = dict(previous or {})
     prior_names = {own.record.name for own in prior.values()}
     prior_bindings = {own.record.binding for own in prior.values()}
@@ -215,54 +233,53 @@ def reconcile_claude_plugins(
                 "Remove the old entries from Claude settings and ~/.agents/plugins, delete "
                 "apm.lock.yaml, then run 'apm install --global' again."
             )
-        _migrate_legacy_registration(modules_dir, settings_path, logger)
         following = native_ownership(lockfile) if lockfile is not None else {}
         if not following and not prior_names:
             return
         declared = _declared_plugins(following, lockfile, modules_dir, prepared or {}, prior, root)
+        declaration = SettingsDeclaration(
+            marketplace,
+            root,
+            frozenset(declared),
+            None if previous is None else frozenset(prior_names),
+            next(iter(prior_bindings)) if prior_bindings else None,
+        )
+        _refuse_binding(preview_declaration(settings_path, declaration), settings_path, marketplace)
+        rollback.snapshot()
         changed = 0
-        for name, (_key, own, source) in declared.items():
+        for name, (key, own, source) in declared.items():
             fresh = not (root / name).exists()
-            if deploy_plugin(
-                root, name, source, own.record.fingerprint, fingerprint_native_claude_source
-            ):
+            plan = (prepared or {}).get(key)
+            deployment = deploy_plugin(
+                root,
+                name,
+                source,
+                own.record.fingerprint,
+                fingerprint_native_claude_source,
+                approved_pin=None if plan is None else plan.approved_pin,
+                pin_of=pin_native_claude_source,
+            )
+            if deployment.changed:
                 changed += 1
                 if fresh:
-                    created.append(name)
+                    rollback.created.append(name)
+                if deployment.replaced is not None:
+                    rollback.replaced[name] = deployment.replaced
         write_catalog(root, marketplace, declared, owned=bool(prior_names))
-        change = write_declaration(
-            settings_path,
-            SettingsDeclaration(
-                marketplace,
-                root,
-                frozenset(declared),
-                None if previous is None else frozenset(prior_names),
-                next(iter(prior_bindings)) if prior_bindings else None,
-            ),
-        )
-        if BINDING_MOVED in change.diagnostics:
-            raise NativeSettingsError(f"{settings_path}: the marketplace binding moved.")
-        if BINDING_CONFLICT in change.diagnostics:
-            raise NativeSettingsError(
-                f"{settings_path} already declares {MARKETPLACES_KEY}.{marketplace} with "
-                "another source. APM did not change it. Remove or rename that entry, then retry."
-            )
-        retiring = sorted(prior_names - set(declared))
-        fingerprints = {own.record.name: own.record.fingerprint for own in prior.values()}
-        kept = [
-            name
-            for name in retiring
-            if not retire_plugin(
-                root, name, fingerprints.get(name), fingerprint_native_claude_source
-            )
-        ]
-        prune_empty(root)
+        change = write_declaration(settings_path, declaration)
+        _refuse_binding(change, settings_path, marketplace)
     except (NativeLayoutError, NativeSettingsError, OSError) as exc:
-        _roll_back(root, marketplace, created, prior_names)
+        rollback.undo(prior_names)
         raise ClaudeNativePluginError(f"Claude native plugin declaration failed: {exc}") from exc
     except ClaudeNativePluginError:
-        _roll_back(root, marketplace, created, prior_names)
+        rollback.undo(prior_names)
         raise
+    rollback.commit()
+    retiring = sorted(prior_names - set(declared))
+    fingerprints = {own.record.name: own.record.fingerprint for own in prior.values()}
+    kept = [name for name in retiring if not _retire(root, name, fingerprints.get(name))]
+    with contextlib.suppress(OSError):
+        prune_empty(root)
     if logger and PREVIOUS_LOCK_MISSING in change.diagnostics:
         logger.warning(
             f"{settings_path} already has entries for marketplace '{marketplace}' but no "
@@ -270,6 +287,14 @@ def reconcile_claude_plugins(
             "Claude and remove any you no longer want."
         )
     _report(logger, declared, retiring, kept, changed, change.changed)
+
+
+def _retire(root: Path, name: str, fingerprint: str | None) -> bool:
+    """Retire after the settings commit: keep, never raise, when unsure."""
+    try:
+        return retire_plugin(root, name, fingerprint, fingerprint_native_claude_source)
+    except (NativeLayoutError, ClaudeNativePluginError, OSError):
+        return False
 
 
 def _declared_plugins(
@@ -307,17 +332,6 @@ def _declared_plugins(
     return declared
 
 
-def _roll_back(root: Path, marketplace: str, created: list[str], prior_names: set[str]) -> None:
-    """Undo this run's new roots and catalog; prior roots stay owned by the old lock."""
-    for name in created:
-        retire_plugin(root, name, None, fingerprint_native_claude_source)
-    with contextlib.suppress(NativeLayoutError, OSError):
-        write_catalog(
-            root, marketplace, [name for name in prior_names if (root / name).exists()], owned=True
-        )
-    prune_empty(root)
-
-
 def _report(logger, declared, retiring, kept, changed, settings_changed) -> None:
     if not logger:
         return
@@ -325,8 +339,8 @@ def _report(logger, declared, retiring, kept, changed, settings_changed) -> None
         logger.tree_item(f"{len(retiring)} native Claude plugin(s) removed.")
     for name in kept:
         logger.warning(
-            f"Kept ~/.agents/plugins/{name}: its files changed since APM deployed it. "
-            "Review and delete it yourself; Claude no longer loads it."
+            f"Kept ~/.agents/plugins/{name}: its files changed since APM deployed it or "
+            "could not be removed. Review and delete it yourself; Claude no longer loads it."
         )
     if declared and (changed or settings_changed):
         logger.tree_item(

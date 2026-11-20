@@ -151,13 +151,14 @@ nothing else into your Claude settings:
   root you edited.
 - If a marketplace with APM's name already points somewhere else, the install
   fails and changes nothing.
-- If declaring fails, the previous lockfile is restored, so a retry still owns
-  everything it must remove.
+- If declaring fails, settings and deployed roots are left as they were and the
+  previous lockfile is restored, so a retry still owns everything it must remove.
 
-A plugin is declared only when its executables are approved. If its hooks are
-not approved, or it declares plugin `dependencies` (APM cannot resolve those
-yet), APM neither deploys nor declares it, prints why, and continues; it never
-falls back to copying loose hooks.
+A plugin is declared only when its executables are approved. Otherwise, or when
+APM cannot install it intact (see below), the plugin is parked: APM neither
+deploys nor declares it, names the package and the next step, and continues; it
+never falls back to copying loose files. Approve from the user manifest
+directory, from any shell: `cd ~/.apm && apm approve --pending`.
 
 `apm.lock.yaml` records each deployed plugin as `native_plugin`: its name, its
 root, and one fingerprint over every file's path, bytes and executable bit.
@@ -169,7 +170,9 @@ The route needs `.claude-plugin/plugin.json` and accepts commands, skills,
 agents, hooks, and MCP and LSP servers (`.mcp.json`, `.lsp.json`, or
 `mcpServers` / `lspServers` in the manifest). Claude loads those servers from
 the plugin; APM does not write them into Claude's MCP or LSP config. They are
-covered by the same whole-plugin approval. Org MCP policy (allow, deny,
+covered by the same whole-plugin approval. `bin/` stays inside the deployed
+plugin root, also under that approval; org `bin_deploy` policy parks the plugin,
+and a non-interactive install needs `--trust-bin`. Org MCP policy (allow, deny,
 transport, self-defined) applies to every MCP server Claude would load (root
 `.mcp.json` plus every `mcpServers` form): under `enforcement: block` a
 violating server, or an entry APM cannot read (a `.mcpb`/`.dxt` bundle, a URL,
@@ -177,12 +180,13 @@ an unreadable file), parks the whole plugin; under `warn` it is reported. A
 transitive plugin that ships MCP servers is parked unless it is pinned
 (`apm approve`) or you pass `--trust-transitive-mcp`, even without an
 `executables` block. With other targets selected too, APM still writes the servers for
-those targets. The route refuses partial skill subsets, symlinks, server files
-outside the plugin, `bin/` scripts, `monitors/` and `workflows/` (Claude runs
-their commands; APM cannot vet them) and other manifest capabilities; resolve the
+those targets. The route parks plugins with partial skill subsets, symlinks,
+server files outside the plugin, `monitors/` and `workflows/` (Claude runs their
+commands; APM cannot vet them) and other manifest capabilities; resolve the
 restriction or exclude Claude from that dependency's targets. If the package
-already owns loose Claude hooks, run `apm uninstall --global <package>` first,
-then reinstall to switch it to the native route.
+already owns loose Claude hooks, run
+`apm uninstall --global <package> && apm install --global <package>` to switch
+it to the native route.
 
 :::note[Runtime qualification]
 A human witness on Claude Code 2.1.322 (macOS arm64) observed `SessionStart`

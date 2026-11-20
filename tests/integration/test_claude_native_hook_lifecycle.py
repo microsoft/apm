@@ -539,3 +539,164 @@ def test_transitive_native_plugin_with_mcp_needs_a_pin_or_one_off_trust(
     deployed = json.loads((scenario.plugins / "evilplug/.mcp.json").read_text(encoding="utf-8"))
     assert deployed["mcpServers"] == {"evil": evil}
     assert not scenario.trap.exists()
+
+
+def test_upgrade_retires_the_loose_claude_mcp_entry_of_a_now_native_plugin(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    """A lock from the loose route owns the plugin's server in Claude's MCP config.
+
+    Switching to the native route removes exactly that APM-written entry, keeps
+    the user's own server, records ``native_plugin`` and enables the plugin.
+    """
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.factory import ClientFactory
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.models.dependency.mcp import MCPDependency
+
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
+    factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
+    repository = factory.create("legacy-mcp-plugin")
+    source = repository.worktree / "plugins/tracker"
+    (source / ".claude-plugin").mkdir(parents=True)
+    (source / ".claude-plugin/plugin.json").write_text(
+        '{"name":"owned-mcp","version":"1.0.0"}', encoding="ascii"
+    )
+    server = {"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/server.js"]}
+    (source / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"plugin-tracker": server}}), encoding="utf-8"
+    )
+    (source / "server.js").write_text("// inert\n", encoding="ascii")
+    revision = factory.commit(repository, message="Legacy MCP plugin fixture").sha
+    dependency = "fixture/legacy-mcp"
+    env = factory.url_rewrite_subprocess_env(repository, f"https://github.com/{dependency}.git")
+    manifest = {
+        "name": "legacy-consumer",
+        "version": "1.0.0",
+        "dependencies": {"apm": [{"git": dependency, "ref": revision, "path": "plugins/tracker"}]},
+    }
+    (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    runner = ApmLifecycleRunner(apm_engine_command)
+
+    def install(target: str) -> None:
+        result = runner.run(
+            ("install", "--global", "--target", target),
+            scenario_id="claude-native-legacy-upgrade",
+            cwd=isolated.work_root,
+            env=env,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    # Seed the loose route's state: a lock without native_plugin that owns the
+    # plugin's server for Claude, and the entry APM wrote into Claude's config.
+    install("copilot")
+    lock_path = isolated.config_root / "apm.lock.yaml"
+    lock = LockFile.read(lock_path)
+    assert all(locked.native_plugin is None for locked in lock.dependencies.values())
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lock, {**lock.mcp_target_servers, "claude": ["plugin-tracker"]}
+    )
+    lock.write(lock_path)
+    assert load_yaml(lock_path)["mcp_target_servers"]["claude"] == ["plugin-tracker"]
+    client = ClientFactory.create_client("claude", project_root=isolated.work_root, user_scope=True)
+    written = client.render_server_config(
+        MCPIntegrator._build_self_defined_info(
+            MCPDependency.from_dict(lock.mcp_configs["plugin-tracker"])
+        )
+    )
+    claude_config = isolated.home / ".claude/.claude.json"
+    claude_config.parent.mkdir(parents=True, exist_ok=True)
+    mine = {"command": "my-server", "args": []}
+    claude_config.write_text(
+        json.dumps({"mcpServers": {"plugin-tracker": written, "mine": mine}}), encoding="utf-8"
+    )
+
+    install("claude")
+    servers = json.loads(claude_config.read_text(encoding="utf-8"))["mcpServers"]
+    assert "plugin-tracker" not in servers
+    assert servers["mine"] == mine
+    upgraded = load_yaml(lock_path)
+    assert upgraded["dependencies"][0]["native_plugin"]["name"] == "owned-mcp"
+    key = f"owned-mcp@{marketplace_name(isolated.config_root)}"
+    assert scenario.declared()["enabledPlugins"][key] is True
+    assert (scenario.plugins / "owned-mcp/.mcp.json").is_file()
+    assert not scenario.trap.exists()
+
+
+def test_bin_plugin_deploys_inside_its_native_root_once_approved_and_trusted(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    """bin/ rides in the native root under the whole-plugin approval and --trust-bin.
+
+    Unapproved or untrusted, the plugin is parked (exit 0) while a clean plugin
+    in the same manifest installs; no loose copy reaches ~/.claude/skills, and
+    uninstall removes the deployed root and its settings key.
+    """
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
+    factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
+    repository = factory.create("bin-plugins")
+    tool = repository.worktree / "plugins/tool"
+    (tool / ".claude-plugin").mkdir(parents=True)
+    (tool / ".claude-plugin/plugin.json").write_text('{"name":"bin-tool"}', encoding="ascii")
+    (tool / "bin").mkdir()
+    (tool / "bin/tool").write_text("#!/bin/sh\necho TOOL\n", encoding="ascii")
+    (tool / "bin/tool").chmod(0o755)
+    clean = repository.worktree / "plugins/clean"
+    (clean / ".claude-plugin").mkdir(parents=True)
+    (clean / ".claude-plugin/plugin.json").write_text('{"name":"clean-tool"}', encoding="ascii")
+    (clean / "skills/hello").mkdir(parents=True)
+    (clean / "skills/hello/SKILL.md").write_text("---\nname: hello\n---\nhello\n")
+    revision = factory.commit(repository, message="bin/ plugin fixtures").sha
+    dependency = "fixture/bin-plugins"
+    env = factory.url_rewrite_subprocess_env(repository, f"https://github.com/{dependency}.git")
+    manifest = {
+        "name": "bin-consumer",
+        "version": "1.0.0",
+        "dependencies": {
+            "apm": [
+                {"git": dependency, "ref": revision, "path": f"plugins/{label}"}
+                for label in ("tool", "clean")
+            ]
+        },
+        "executables": {"allow": {}},
+    }
+    (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    runner = ApmLifecycleRunner(apm_engine_command)
+    mkt = marketplace_name(isolated.config_root)
+    package = f"{dependency}/plugins/tool"
+
+    def run(*args: str, cwd: Path = isolated.work_root) -> str:
+        result = runner.run(args, scenario_id="claude-native-bin", cwd=cwd, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return " ".join((result.stdout + result.stderr).split())
+
+    def enabled() -> dict:
+        return scenario.declared().get("enabledPlugins", {})
+
+    output = run("install", "--global", "--target", "claude", "--trust-bin")
+    assert f"Parked native plugin {package}: not approved" in output
+    assert "&& apm approve --pending" in output
+    assert enabled() == {f"clean-tool@{mkt}": True}
+    assert not (scenario.plugins / "bin-tool").exists()
+
+    run("approve", "--all", cwd=isolated.config_root)
+    output = run("install", "--global", "--target", "claude")
+    assert f"Parked native plugin {package}: its bin/ executables are not trusted" in output
+    assert "--trust-bin" in output
+    assert f"bin-tool@{mkt}" not in enabled()
+
+    run("install", "--global", "--target", "claude", "--trust-bin")
+    deployed = scenario.plugins / "bin-tool/bin/tool"
+    assert deployed.read_text(encoding="ascii") == "#!/bin/sh\necho TOOL\n"
+    if os.name != "nt":
+        assert deployed.stat().st_mode & stat.S_IXUSR
+    assert enabled() == {f"clean-tool@{mkt}": True, f"bin-tool@{mkt}": True}
+    assert not list((isolated.home / ".claude").rglob("bin/tool"))
+
+    run("uninstall", "--global", package)
+    assert not (scenario.plugins / "bin-tool").exists()
+    assert enabled() == {f"clean-tool@{mkt}": True}
+    assert not scenario.trap.exists()

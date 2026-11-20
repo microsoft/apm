@@ -19,6 +19,11 @@ _NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]*")
 _FINGERPRINT = re.compile(r"sha256:[0-9a-f]{64}")
 
 
+def is_safe_plugin_name(value: object) -> bool:
+    """Whether *value* is a plugin name safe as a directory and settings key."""
+    return isinstance(value, str) and _NAME.fullmatch(value) is not None
+
+
 class NativePluginRecordError(ValueError):
     """A ``native_plugin`` lock record is malformed."""
 
@@ -35,11 +40,11 @@ class NativePluginRecord:
     """Directory that marketplace pointed at: the binding retries must match."""
 
     def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or _NAME.fullmatch(self.name) is None:
+        if not is_safe_plugin_name(self.name):
             raise NativePluginRecordError(f"invalid native plugin name: {self.name!r}")
         if not isinstance(self.fingerprint, str) or not _FINGERPRINT.fullmatch(self.fingerprint):
             raise NativePluginRecordError("invalid native plugin fingerprint")
-        if not isinstance(self.marketplace, str) or _NAME.fullmatch(self.marketplace) is None:
+        if not is_safe_plugin_name(self.marketplace):
             raise NativePluginRecordError("invalid native plugin marketplace name")
         if not isinstance(self.marketplace_path, str) or not self.marketplace_path:
             raise NativePluginRecordError("native plugin marketplace path is required")

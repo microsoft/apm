@@ -208,6 +208,18 @@ def test_unsafe_migration_never_queues_native_registration(tmp_path: Path) -> No
     assert config.read_text() == "not-json"
 
 
+def test_loose_hook_refusal_names_the_package_and_both_steps(tmp_path: Path) -> None:
+    info = _fixture(tmp_path / ".apm/apm_modules/owned")
+    (tmp_path / ".claude").mkdir()
+    HookIntegrator().integrate_package_hooks_claude(info, tmp_path, user_scope=True)
+    with pytest.raises(ClaudeNativePluginError) as error:
+        _integrate(tmp_path, info)
+    assert "Cannot switch owner/hooks to native Claude" in str(error.value)
+    assert "Run: apm uninstall --global owner/hooks && apm install --global owner/hooks" in str(
+        error.value
+    )
+
+
 def test_hook_denial_does_not_register_a_commands_only_subset(tmp_path: Path) -> None:
     """req-na-005: an unapproved plugin is parked, neither declared nor split."""
     info = _fixture(tmp_path / ".apm/apm_modules/owned")

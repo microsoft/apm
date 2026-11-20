@@ -13,12 +13,14 @@ from pathlib import Path
 import pytest
 
 from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
+from apm_cli.claude_plugins import registrar
 from apm_cli.claude_plugins.admission import (
+    ClaudeNativePlugin,
     ClaudeNativePluginError,
     fingerprint_native_claude_source,
+    pin_native_claude_source,
 )
 from apm_cli.claude_plugins.registrar import (
-    LEGACY_LEDGER_RELATIVE,
     marketplace_binding,
     marketplace_name,
     native_ownership,
@@ -29,6 +31,7 @@ from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile, LockfileFormatError
 from apm_cli.native_plugins.record import NativePluginRecord
 from apm_cli.native_plugins.settings import (
+    BINDING_CONFLICT,
     NativeSettingsError,
     SettingsDeclaration,
     write_declaration,
@@ -105,14 +108,24 @@ class _Home:
         )
         self.lock.dependencies[repo] = dependency
 
-    def reconcile(self, previous) -> None:
+    def reconcile(self, previous, prepared=None) -> None:
         reconcile_claude_plugins(
             modules_dir=self.modules,
             scope=InstallScope.USER,
             previous=previous,
             lockfile=self.lock,
+            prepared=prepared,
             deploy_root=self.home,
         )
+
+    def prepared(self, repo: str, approved_pin: str) -> dict[str, ClaudeNativePlugin]:
+        record = self.lock.dependencies[repo].native_plugin
+        root = self.modules / repo
+        return {
+            repo: ClaudeNativePlugin(
+                repo, record.name, root, record.fingerprint, approved_pin=approved_pin
+            )
+        }
 
     def declared(self) -> dict:
         return json.loads(self.settings.read_text()) if self.settings.exists() else {}
@@ -202,30 +215,62 @@ def test_binding_conflict_refuses_and_rolls_back_new_roots(home) -> None:
     assert not home.plugins.exists()
 
 
-def test_earlier_build_registration_is_migrated_only_when_provably_apm(home) -> None:
-    ledger = home.modules / LEGACY_LEDGER_RELATIVE
-    ledger.parent.mkdir(parents=True)
-    ledger.write_text(json.dumps({"plugins": {"old@apm-claude": {}}}))
-    home.settings.parent.mkdir(parents=True)
-    home.settings.write_text(
-        json.dumps(
-            {
-                "extraKnownMarketplaces": {
-                    "apm-claude": {"source": {"source": "directory", "path": str(home.modules)}}
-                },
-                "enabledPlugins": {"old@apm-claude": False, "user@apm-claude": True},
-            }
-        )
-    )
+def test_failed_settings_commit_restores_replaced_roots_and_settings_bytes(
+    home, monkeypatch: pytest.MonkeyPatch
+) -> None:
     home.source("owner/alpha", "alpha")
     home.reconcile(None)
-    declared = home.declared()
-    assert "apm-claude" not in declared["extraKnownMarketplaces"]
-    assert declared["enabledPlugins"] == {
-        "user@apm-claude": True,
-        f"alpha@{home.marketplace}": True,
-    }
-    assert not ledger.exists()
+    previous = native_ownership(home.lock)
+    deployed_fingerprint = previous["owner/alpha"].record.fingerprint
+    before = home.settings.read_bytes()
+    home.source("owner/alpha", "alpha", body="v2", commit="b")
+    home.source("owner/beta", "beta")
+    real_write = registrar.write_declaration
+
+    def conflicting_write(path, declaration):
+        change = real_write(path, declaration)
+        change.diagnostics.append(BINDING_CONFLICT)
+        return change
+
+    monkeypatch.setattr(registrar, "write_declaration", conflicting_write)
+    with pytest.raises(ClaudeNativePluginError, match="another source"):
+        home.reconcile(previous)
+    assert fingerprint_native_claude_source(home.plugins / "alpha") == deployed_fingerprint
+    assert not (home.plugins / "beta").exists()
+    assert home.settings.read_bytes() == before
+    assert sorted(path.name for path in home.plugins.iterdir()) == [".claude-plugin", "alpha"]
+
+
+def test_unreadable_retiring_root_is_kept_without_undoing_the_commit(
+    home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    control = _Home(tmp_path / "control", monkeypatch)
+    for each in (control, home):
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(each.home / ".claude"))
+        each.source("owner/alpha", "alpha")
+        each.reconcile(None)
+    previous = {each: native_ownership(each.lock) for each in (control, home)}
+    planted = home.plugins / "alpha/commands/link.md"
+    planted.symlink_to(home.plugins / "alpha/commands/status.md")
+    for each in (control, home):
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(each.home / ".claude"))
+        del each.lock.dependencies["owner/alpha"]
+        each.reconcile(previous[each])
+    assert planted.is_symlink()
+    assert not (control.plugins / "alpha").exists()
+    assert home.settings.read_bytes() == control.settings.read_bytes()
+    assert home.declared() == {"extraKnownMarketplaces": {}, "enabledPlugins": {}}
+
+
+def test_deploy_refuses_a_copy_that_differs_from_the_approved_pin(home) -> None:
+    home.source("owner/alpha", "alpha")
+    with pytest.raises(ClaudeNativePluginError, match="approved with 'apm approve'"):
+        home.reconcile(None, home.prepared("owner/alpha", "sha256:" + "0" * 64))
+    assert not home.plugins.exists()
+    assert not home.settings.exists()
+    pin = pin_native_claude_source(home.modules / "owner/alpha")
+    home.reconcile(None, home.prepared("owner/alpha", pin))
+    assert (home.plugins / "alpha/commands/status.md").read_text() == "v1"
 
 
 def test_audit_verifies_source_and_deployed_copy_against_the_lock(home) -> None:

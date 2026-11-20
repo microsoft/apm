@@ -67,11 +67,25 @@ def test_incidental_manifest_does_not_override_apm_intent(tmp_path: Path) -> Non
     assert _plan(info) is None
 
 
-def test_partial_selection_refused(tmp_path: Path) -> None:
-    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+def _parked(plan, *fragments: str) -> None:
+    """An admission ineligibility parks with the package and one next step."""
+    assert plan is not None and plan.parked is not None
+    assert plan.parked.startswith("Parked native plugin owner/plugin: "), plan.parked
+    for fragment in fragments:
+        assert fragment in plan.parked, plan.parked
+    assert len(plan.parked.splitlines()) == 2
 
-    with pytest.raises(ClaudeNativePluginError, match="subset"):
-        _plan(_plugin(tmp_path), skill_subset=("only-one",))
+
+def test_partial_selection_parks(tmp_path: Path) -> None:
+    _parked(_plan(_plugin(tmp_path), skill_subset=("only-one",)), "skills:", "Remove")
+
+
+def test_missing_manifest_and_unsafe_name_park(tmp_path: Path) -> None:
+    info = _plugin(tmp_path)
+    write_json(info.install_path / ".claude-plugin/plugin.json", {"name": "../escape"})
+    _parked(_plan(info), "'../escape'", "fix 'name'")
+    (info.install_path / ".claude-plugin/plugin.json").unlink()
+    _parked(_plan(info), ".claude-plugin/plugin.json", "exclude Claude")
 
 
 def test_reset_to_complete_skill_selection_is_not_a_subset(tmp_path: Path) -> None:
@@ -124,16 +138,13 @@ def test_declared_plugin_dependencies_park_with_one_diagnostic(tmp_path: Path) -
     assert "plugin dependencies" in plan.parked
 
 
-def test_unqualified_capabilities_fail_closed(tmp_path: Path) -> None:
-    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
-
+def test_unqualified_capabilities_park(tmp_path: Path) -> None:
     info = _plugin(tmp_path)
     write_json(
         info.install_path / ".claude-plugin/plugin.json",
         {"name": "owned", "commands": [], "experimental": {"unsafe": True}},
     )
-    with pytest.raises(ClaudeNativePluginError, match="capabilit"):
-        _plan(info)
+    _parked(_plan(info), "experimental", "exclude Claude")
 
 
 _STDIO = {"mcpServers": {"tracker": {"command": "${CLAUDE_PLUGIN_ROOT}/bin/tracker"}}}
@@ -213,15 +224,12 @@ def test_warn_enforcement_reports_without_parking(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("field", ["mcpServers", "lspServers"])
-def test_server_file_outside_the_plugin_is_refused(tmp_path: Path, field: str) -> None:
-    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
-
+def test_server_file_outside_the_plugin_parks(tmp_path: Path, field: str) -> None:
     info = _plugin(tmp_path)
     write_json(
         info.install_path / ".claude-plugin/plugin.json", {"name": "owned", field: "../x.json"}
     )
-    with pytest.raises(ClaudeNativePluginError, match=field):
-        _plan(info)
+    _parked(_plan(info), field, "fix the manifest")
 
 
 def test_native_claude_servers_are_not_expressed_for_claude() -> None:
@@ -239,14 +247,12 @@ def test_native_claude_servers_are_not_expressed_for_claude() -> None:
 
 
 def test_source_symlink_is_not_native_loadable(tmp_path: Path) -> None:
-    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     info = _plugin(tmp_path)
     (info.install_path / "linked").symlink_to(tmp_path, target_is_directory=True)
-    with pytest.raises(ClaudeNativePluginError, match="symlink"):
-        _plan(info)
+    _parked(_plan(info), "symlink", "regular files")
     with pytest.raises(ValueError, match="symlink"):
         DeployableSourcePlan.create(
             info,
@@ -357,25 +363,37 @@ def test_transitive_plugin_mcp_parks_without_an_executables_block(tmp_path: Path
 
 
 @pytest.mark.parametrize("entry", ["monitors", "workflows"])
-def test_unmodeled_auto_loaded_roots_are_refused(tmp_path: Path, entry: str) -> None:
+def test_unmodeled_auto_loaded_roots_park(tmp_path: Path, entry: str) -> None:
     """H2: Claude runs monitors/ and workflows/ commands that APM cannot vet."""
-    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
-
     info = _plugin(tmp_path)
     (info.install_path / entry).mkdir()
     write_json(info.install_path / entry / f"{entry}.json", {entry: [{"command": "curl x|sh"}]})
-    with pytest.raises(ClaudeNativePluginError, match=entry):
-        _plan(info)
+    _parked(_plan(info), entry)
 
 
 @pytest.mark.parametrize("key", ["monitors", "workflows", "outputStyles", "settings"])
-def test_unmodeled_manifest_capabilities_are_refused(tmp_path: Path, key: str) -> None:
-    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
-
+def test_unmodeled_manifest_capabilities_park(tmp_path: Path, key: str) -> None:
     info = _plugin(tmp_path)
     write_json(info.install_path / ".claude-plugin/plugin.json", {"name": "owned", key: "./x"})
-    with pytest.raises(ClaudeNativePluginError, match=key):
-        _plan(info)
+    _parked(_plan(info), key)
+
+
+def test_bin_deploys_under_the_whole_plugin_approval_and_bin_policy(tmp_path: Path) -> None:
+    """bin/ rides in the plugin root: approval, org bin_deploy and --trust-bin decide it."""
+    from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
+
+    info = _plugin(tmp_path)
+    (info.install_path / "bin").mkdir()
+    (info.install_path / "bin/tool").write_text("#!/bin/sh\necho tool\n")
+    pin = native_plugin_fingerprint(info.install_path)
+    approved = {"owner/plugin": {"plugin": pin}}
+    admitted = _plan(info, admit=_admit(info, approved), skip_bin=False)
+    assert admitted.parked is None and admitted.approved_pin == pin
+    unapproved = _plan(info, admit=_admit(info, {}), skip_bin=False)
+    _parked(unapproved, "not approved", "&& apm approve --pending")
+    denied = _plan(info, admit=_admit(info, approved), skip_bin=False, bin_denied="bin_deploy.deny")
+    _parked(denied, "bin_deploy.deny", "bin/")
+    _parked(_plan(info, admit=_admit(info, approved), skip_bin=True), "bin/", "--trust-bin")
 
 
 def _manifest(info: PackageInfo, **fields) -> PackageInfo:

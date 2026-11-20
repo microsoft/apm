@@ -12,6 +12,7 @@ import json
 import shutil
 import uuid
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.utils.atomic_io import atomic_write_text
@@ -89,15 +90,41 @@ def prune_empty(root: Path) -> None:
             empty.rmdir()
 
 
+@dataclass(frozen=True)
+class Deployment:
+    """Outcome of :func:`deploy_plugin`.
+
+    *replaced* is the previous root, moved aside rather than deleted, so the
+    caller can :func:`restore_replaced` it on rollback or
+    :func:`discard_replaced` it once the harness settings committed.
+    """
+
+    changed: bool
+    replaced: Path | None = None
+
+
 def deploy_plugin(
-    root: Path, name: str, source_root: Path, fingerprint: str, fingerprint_of: Fingerprint
-) -> bool:
-    """Make ``root/name`` an exact copy of the approved bytes; return whether it changed."""
+    root: Path,
+    name: str,
+    source_root: Path,
+    fingerprint: str,
+    fingerprint_of: Fingerprint,
+    *,
+    approved_pin: str | None = None,
+    pin_of: Fingerprint | None = None,
+) -> Deployment:
+    """Make ``root/name`` an exact copy of the approved bytes.
+
+    The staged copy must carry *fingerprint* and, when the plugin was admitted
+    by a whole-plugin approval, that approval's *approved_pin* as computed by
+    *pin_of*; otherwise nothing at ``root/name`` changes.
+    """
     destination = _checked(root, root / name)
     if destination.is_dir() and fingerprint_of(destination) == fingerprint:
-        return False
+        return Deployment(False)
     root.mkdir(parents=True, exist_ok=True)
     staging = _checked(root, root / f"{_STAGING}{name}-{uuid.uuid4().hex}")
+    replaced: Path | None = None
     try:
         for relative in native_plugin_files(source_root):
             target = staging / relative
@@ -108,16 +135,34 @@ def deploy_plugin(
                 f"The copy of {name} does not match its approved fingerprint. Its source in "
                 "apm_modules changed during install; run the install again."
             )
-        retiring = root / f"{_STAGING}retiring-{name}-{uuid.uuid4().hex}"
+        if approved_pin is not None and pin_of is not None and pin_of(staging) != approved_pin:
+            raise NativeLayoutError(
+                f"The copy of native plugin {name} does not match the content approved with "
+                "'apm approve'. Nothing was deployed; review it with 'apm approve --pending' "
+                "and approve it again."
+            )
         if destination.exists():
-            destination.rename(retiring)
+            replaced = _checked(root, root / f"{_STAGING}retiring-{name}-{uuid.uuid4().hex}")
+            destination.rename(replaced)
         staging.rename(destination)
-        if retiring.exists():
-            safe_rmtree(retiring, root)
     finally:
         if staging.exists():
             safe_rmtree(staging, root)
-    return True
+    return Deployment(True, replaced)
+
+
+def restore_replaced(root: Path, name: str, replaced: Path) -> None:
+    """Undo :func:`deploy_plugin`: put the moved-aside root back at ``root/name``."""
+    destination = _checked(root, root / name)
+    if destination.exists():
+        safe_rmtree(destination, root)
+    replaced.rename(destination)
+
+
+def discard_replaced(root: Path, replaced: Path) -> None:
+    """Delete a moved-aside root once the new copy is committed."""
+    if replaced.exists():
+        safe_rmtree(_checked(root, replaced), root)
 
 
 def retire_plugin(
@@ -125,8 +170,9 @@ def retire_plugin(
 ) -> bool:
     """Remove an owned deployed root; keep one whose bytes changed since deploy.
 
-    Returns ``False`` when the root was kept because it differs from
-    *fingerprint* (a user edit); ``True`` when it is gone.
+    Returns ``False`` when the root was kept: it differs from *fingerprint*
+    (a user edit), cannot be fingerprinted (an unreadable file or a planted
+    symlink), or cannot be removed. ``True`` when it is gone.
     """
     destination = _checked(root, root / name)
     if not destination.exists():
@@ -135,7 +181,10 @@ def retire_plugin(
         try:
             if fingerprint_of(destination) != fingerprint:
                 return False
-        except (OSError, ValueError):
+        except (OSError, ValueError, RuntimeError):
             return False
-    safe_rmtree(destination, root)
+    try:
+        safe_rmtree(destination, root)
+    except OSError:
+        return False
     return True

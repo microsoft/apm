@@ -136,6 +136,7 @@ def _check_native_claude_transition(
     package_info: Any,
     project_root: Path,
     targets: list[Any],
+    package: str,
 ) -> None:
     """Refuse native activation over retained or unreadable loose hook state."""
     from apm_cli.claude_plugins.admission import ClaudeNativePluginError
@@ -149,14 +150,12 @@ def _check_native_claude_transition(
         dry_run=True,
     )
     if reconcile_stats.get("errors") or reconcile_stats.get("files_removed"):
-        recovery = (
-            "Repair unreadable hook settings or ownership. Inspect: "
-            + ", ".join(reconcile_stats.get("failed_paths", []))
-            if reconcile_stats.get("errors")
-            else "Remove existing loose hooks with 'apm uninstall --global <package>' first."
-        )
+        failed = ", ".join(reconcile_stats.get("failed_paths", []))
+        recovery = f"Repair unreadable hook settings or ownership. Inspect: {failed}"
+        if not reconcile_stats.get("errors"):
+            recovery = f"Run: apm uninstall --global {package} && apm install --global {package}"
         raise ClaudeNativePluginError(
-            "Cannot switch to native Claude. Hook settings were preserved. " + recovery
+            f"Cannot switch {package} to native Claude. Hook settings were preserved. {recovery}"
         )
 
 
@@ -424,6 +423,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             package_info,
             project_root,
             [target for target in targets if target.name in native_target_names],
+            package_name,
         )
         if not projection_targets:
             from apm_cli.claude_plugins.admission import queue_native_claude

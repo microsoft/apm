@@ -147,21 +147,20 @@ def test_trust_bin_none_deploys_with_warning(tmp_path: Path) -> None:
     assert any("adds executables to Claude Code's PATH" in msg for msg in logger.warning_messages)
 
 
-def test_service_refuses_user_scope_claude_plugin_bin_before_target_write(tmp_path: Path) -> None:
-    """A user-scope Claude plugin shipping bin/ is refused before any write.
+def test_user_scope_claude_plugin_bin_routes_natively_under_policy_and_scan(
+    tmp_path: Path,
+) -> None:
+    """A user-scope Claude plugin keeps bin/ inside its native root (#3290).
 
-    Claude at user scope takes the native plugin route (#3290), which does not
-    model plugin bin/ yet, so a hostile authorized bin never reaches a target.
+    No loose copy reaches ``~/.claude/skills``; the org ``bin_deploy`` policy
+    parks the whole plugin, and the hidden-character scan of the native root
+    blocks hostile bin content before anything is queued for deployment.
     """
-    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+    from apm_cli.models.dependency import DependencyReference
+    from apm_cli.policy.schema import ApmPolicy, BinDeployPolicy
 
     project_root = tmp_path / "home"
     (project_root / ".claude").mkdir(parents=True)
-    package_info, source_bin = _write_marketplace_plugin(
-        tmp_path / "packages" / "hostile-tool",
-        manifest_name="hostile-tool",
-    )
-    source_bin.write_text("#!/bin/sh\necho hostile \u202e\n", encoding="utf-8")
     dispatch = get_dispatch_table()
     integrators = {name: entry.integrator_class() for name, entry in dispatch.items()}
     bundle = IntegratorBundle(
@@ -173,7 +172,18 @@ def test_service_refuses_user_scope_claude_plugin_bin_before_target_write(tmp_pa
         hook=integrators["hooks"],
         canvas=integrators["canvas"],
     )
-    with pytest.raises(ClaudeNativePluginError, match="bin"):
+
+    def integrate(label: str, policy: Any = None) -> tuple[Any, DiagnosticCollector]:
+        package_info, source_bin = _write_marketplace_plugin(
+            tmp_path / "packages" / label, manifest_name=label
+        )
+        package_info.dependency_ref = DependencyReference.parse(f"owner/{label}")
+        if label == "hostile-tool":
+            source_bin.write_text("#!/bin/sh\necho hostile \u202e\n", encoding="utf-8")
+        ctx = SimpleNamespace(
+            claude_native_plugins={}, claude_native_keys=set(), blocked_executables=[]
+        )
+        diagnostics = DiagnosticCollector()
         integrate_package_primitives(
             package_info,
             project_root,
@@ -182,11 +192,32 @@ def test_service_refuses_user_scope_claude_plugin_bin_before_target_write(tmp_pa
             integrators=bundle,
             force=False,
             managed_files=None,
-            diagnostics=DiagnosticCollector(),
-            package_name="owner/hostile-tool",
+            diagnostics=diagnostics,
+            package_name=f"owner/{label}",
             scope=InstallScope.USER,
             trust_bin=True,
+            ctx=ctx,
+            policy=policy,
         )
+        return ctx, diagnostics
+
+    ctx, _ = integrate("clean-tool")
+    plugin = ctx.claude_native_plugins["owner/clean-tool"]
+    assert (plugin.source_root / "bin/tool").is_file()
+
+    denied, diagnostics = integrate(
+        "denied-tool", ApmPolicy(bin_deploy=BinDeployPolicy(deny=("owner/denied-tool",)))
+    )
+    assert denied.claude_native_plugins == {}
+    messages = " ".join(
+        item.message for items in diagnostics.by_category().values() for item in items
+    )
+    assert "Parked native plugin owner/denied-tool" in messages
+    assert "bin_deploy.deny" in messages
+
+    hostile, diagnostics = integrate("hostile-tool")
+    assert hostile.claude_native_plugins == {}
+    assert diagnostics.has_critical_security
 
     assert not (project_root / ".claude" / "skills").exists()
     assert not (project_root / ".agents").exists()

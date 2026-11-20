@@ -26,22 +26,51 @@ def retire_runtime_claim(
     stored_config: dict | None,
     managed_target_servers: dict[str, set[str]] | None,
     native_hashes: dict[str, dict[str, str]] | None,
+    current_render: bool = False,
 ) -> None:
-    """Drop APM's claim on *name* for *runtime*, removing only an entry APM wrote."""
+    """Drop APM's claim on *name* for *runtime*, removing only an entry APM wrote.
+
+    *current_render* also accepts the entry the adapter renders today from the
+    stored declaration as APM's (the removal baseline): a server now loaded
+    natively was written in the current shape. A transport the adapter now
+    refuses was never written in it, so only earlier renders prove that case.
+    """
     from apm_cli.integration.mcp_integrator_install import _remove_native_entry
 
-    from .ownership import managed_unsupported_connection
+    from .ownership import (
+        NativeMcpConnectionState,
+        _native_config_key,
+        compare_native_mcp_connection,
+        managed_unsupported_connection,
+    )
 
     claims = (managed_target_servers or {}).get(runtime, set())
     if name not in claims:
         return
+    native_hash = (native_hashes or {}).get(runtime, {}).get(name)
     key = managed_unsupported_connection(
         client,
         name,
         requested_info=requested_info,
         stored_config=stored_config,
-        native_hash=(native_hashes or {}).get(runtime, {}).get(name),
+        native_hash=native_hash,
     )
+    if key is None and current_render:
+        state = compare_native_mcp_connection(
+            client,
+            name,
+            requested_info=requested_info,
+            stored_config=stored_config,
+            managed=True,
+            native_hash=native_hash,
+        )
+        if state in (
+            NativeMcpConnectionState.MATCHING_MANAGED,
+            NativeMcpConnectionState.UPDATE_MANAGED,
+        ):
+            key = _native_config_key(
+                client, name, requested_info=requested_info, stored_config=stored_config
+            )
     if key is not None:
         _remove_native_entry(client, key, logger)
     # Reached only after a successful removal (cleanup failures raise).
@@ -79,4 +108,5 @@ def retire_native_runtime_claims(
                 stored_config=stored_mcp_configs.get(dep.name),
                 managed_target_servers=managed_target_servers,
                 native_hashes=native_hashes,
+                current_render=True,
             )
