@@ -1883,10 +1883,10 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="install-deployment-cleanup-retains-kept-members",
         rule_id="install-deployment-cleanup-retains-kept-members",
-        path="src/apm_cli/integration/cleanup.py",
-        old="        if evidence.kept(stale_path):\n",
-        new="        if evidence.kept(stale_path) and not _stale_set:\n",
-        intent="Cleanup deletes a skill member the install kept because it was not rewritten.",
+        path="src/apm_cli/install/phases/cleanup.py",
+        old="                stale -= set(kept)\n",
+        new="                stale -= set()\n",
+        intent="Cleanup drops the integrate phase's skip set and deletes a kept member.",
     ),
     MutationCase(
         guard_id="install-deployment-codex-agent-link-resolution",

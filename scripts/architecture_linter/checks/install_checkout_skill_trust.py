@@ -104,9 +104,27 @@ def check_cleanup_retains_kept_members(provider: FactsProvider) -> tuple[Violati
             ),
             "src/apm_cli/install/phases/cleanup.py": (
                 'kept=getattr(ctx, "kept_deployed_values", frozenset()),',
+                "kept = kept_prior_values(ctx, prev_dep.deployed_files)",
+                "stale -= set(kept)",
+            ),
+            "src/apm_cli/install/phases/post_deps_local.py": (
+                "_kept = kept_prior_values(ctx, list(_persist_lock.local_deployed_files))",
+                "_current_files = sorted({*ctx.local_deployed_files, *_kept})",
             ),
         },
-        "Skipped skill members reach the cleanup chokepoint as kept",
+        "Cleanup consumes the integrate phase's skip set before computing stale files",
+    )
+    # Closed world: the only stale computation is the one that subtracts the skip set.
+    failures.extend(
+        _duplicate_definition_lines(
+            provider,
+            rule_id=GUARD_KEPT_MEMBERS,
+            prefix="src/apm_cli/",
+            pattern=re.compile(r"(?<!def )\bdetect_stale_files\("),
+            owner="src/apm_cli/install/phases/cleanup.py",
+            message="Stale files are computed only where the skip set is subtracted",
+            respect_exempt=False,
+        )
     )
     if not _kept_gate_first(provider):
         failures.append(

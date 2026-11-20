@@ -2423,7 +2423,9 @@
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_branch_switch_then_source_edit_never_deletes_skill_members",
         "tests/integration/test_checkout_switch_skill_lifecycle.py::test_discarded_deploy_then_source_edit_installs",
         "tests/unit/integration/test_cleanup_helper.py::test_member_this_install_kept_is_retained_despite_evidence",
-        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_member_removed_from_source_is_still_cleaned"
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_member_removed_from_source_is_still_cleaned",
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_scope_branch_switch_then_source_edit_never_deletes_skill_members",
+        "tests/integration/test_checkout_switch_skill_lifecycle.py::test_member_skipped_as_modified_is_never_stale"
       ]
     },
     {

@@ -443,3 +443,113 @@ def test_member_removed_from_source_is_still_cleaned(tmp_path: Path, apm_binary_
     assert not (world.project / _X / "references/a.md").exists()
     assert f"{_X}/references/a.md" not in _locked_files(world.project)
     assert "No references." in (world.project / _X / "SKILL.md").read_text(encoding="ascii")
+
+
+# ---------------------------------------------------------------------------
+# #4230 at user scope, and a trigger that needs no receipt from another lock.
+# ---------------------------------------------------------------------------
+
+_USER_GITIGNORE = (
+    "/*\n!/.gitignore\n!/pkgs/\n!/.agents/\n/.agents/*\n!/.agents/skills/\n"
+    "!/.apm/\n/.apm/*\n!/.apm/apm.yml\n!/.apm/apm.lock.yaml\n"
+)
+
+
+def _user_world(tmp_path: Path, apm_binary_path: Path) -> tuple[_World, Path]:
+    """A HOME under git with a local skill package installed with -g."""
+    world = _new_world(tmp_path, apm_binary_path)
+    home = world.isolated.home
+    package = home / "pkgs/x"
+    _write(package / "apm.yml", "name: x\nversion: 1.0.0\n")
+    _write(package / ".apm/skills/x/SKILL.md", _LOCAL_SKILL)
+    _write(package / ".apm/skills/x/references/a.md", "reference a, version A\n")
+    manifest = Path(world.env["APM_HOME"]) / "apm.yml"
+    _write(
+        manifest,
+        f"name: user\nversion: 1.0.0\ntargets: [copilot]\n"
+        f"dependencies:\n  apm:\n    - {package.as_posix()}\n",
+    )
+    _write(home / ".gitignore", _USER_GITIGNORE)
+    first = world.apm("install", "-g", cwd=home)
+    assert first.returncode == 0, _output(first)
+    _init_repo(world, home)
+    _commit_all(world, "A: deploy skill x", root=home)
+    return world, package
+
+
+def test_user_scope_branch_switch_then_source_edit_never_deletes_skill_members(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """-g: the #4230 sequence on a HOME under git keeps every member and lock row."""
+    world, package = _user_world(tmp_path, apm_binary_path)
+    home = world.isolated.home
+    lock = Path(world.env["APM_HOME"]) / "apm.lock.yaml"
+    members = set(_tree(home, _X))
+    assert members == {f"{_X}/SKILL.md", f"{_X}/references/a.md"}
+
+    world.git("checkout", "-q", "-b", "B", cwd=home)
+    _write(package / ".apm/skills/x/SKILL.md", _LOCAL_SKILL + "Read a (B).\n")
+    _write(package / ".apm/skills/x/references/a.md", "reference a, version B\n")
+    assert world.apm("install", "-g", cwd=home).returncode == 0
+    _commit_all(world, "B: edit and redeploy", root=home)
+    for branch in ("main", "B", "main"):
+        world.git("checkout", "-q", branch, cwd=home)
+        before = _tree(home, _X)
+        result = world.apm("install", "-g", cwd=home)
+        _assert_nothing_deleted(before, home)
+        assert result.returncode == 0, _output(result)
+        assert "Cleaned" not in _output(result), _output(result)
+        assert set(_tree(home, _X)) == members
+
+    _write(package / ".apm/skills/x/SKILL.md", _LOCAL_SKILL + "Read a (A2).\n")
+    before = _tree(home, _X)
+    lock_before = lock.read_bytes()
+    result = world.apm("install", "-g", cwd=home)
+    output = _output(result)
+    _assert_nothing_deleted(before, home)
+    assert "Cleaned" not in output, output
+    assert set(_tree(home, _X)) == members
+    if result.returncode != 0:
+        assert lock.read_bytes() == lock_before
+    assert set(_locked_files_at(lock)) >= members
+
+
+def _locked_files_at(lock: Path) -> set[str]:
+    data = yaml.safe_load(lock.read_text(encoding="utf-8"))
+    files = set(data.get("local_deployed_files") or ())
+    for dependency in data.get("dependencies") or ():
+        files.update(dependency.get("deployed_files") or ())
+    return {path.rstrip("/") for path in files}
+
+
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_member_skipped_as_modified_is_never_stale(
+    tmp_path: Path, apm_binary_path: Path, scope: str
+) -> None:
+    """A user-edited member skipped as modified keeps its file and lock row; no cleanup runs."""
+    if scope == "project":
+        world = _new_world(tmp_path, apm_binary_path)
+        _committed_local_project(world)
+        root, args = world.project, ("install",)
+        lock = world.project / "apm.lock.yaml"
+    else:
+        world, _package = _user_world(tmp_path, apm_binary_path)
+        root, args = world.isolated.home, ("install", "-g")
+        lock = Path(world.env["APM_HOME"]) / "apm.lock.yaml"
+    edited = root / _X / "SKILL.md"
+    edited.write_text(edited.read_text(encoding="ascii") + "USER EDIT\n", encoding="ascii")
+    sibling = (root / _X / "references/a.md").read_bytes()
+    lock_before = lock.read_bytes()
+    before = _tree(root, _X)
+
+    for _ in range(2):
+        result = world.apm(*args, cwd=root)
+        output = _output(result)
+        _assert_nothing_deleted(before, root)
+        assert result.returncode == 0, output
+        assert _MODIFIED in output, output
+        for cleanup_line in ("Kept user-edited file", "Skipped removing", "Cleaned"):
+            assert cleanup_line not in output, output
+        assert edited.read_text(encoding="ascii").endswith("USER EDIT\n")
+        assert (root / _X / "references/a.md").read_bytes() == sibling
+        assert lock.read_bytes() == lock_before
