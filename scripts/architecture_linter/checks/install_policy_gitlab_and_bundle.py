@@ -249,8 +249,12 @@ _LOCAL_BUNDLE_PREFLIGHT_NEEDLES = (
 )
 
 
-def _has_cache_only_preflight(provider: FactsProvider) -> bool:
-    """Return whether the sole canonical preflight call explicitly runs cache-only."""
+def _has_online_preflight(provider: FactsProvider) -> bool:
+    """Return whether the sole canonical preflight call resolves policy online.
+
+    A local bundle install resolves org policy as a package install does; a
+    cache-only lookup reads a cold cache as "no policy" (#4027).
+    """
     index = provider.tree_index(_LOCAL_BUNDLE_HANDLER)
     if index is None:
         return False
@@ -263,11 +267,8 @@ def _has_cache_only_preflight(provider: FactsProvider) -> bool:
             and node.func.id == "run_policy_preflight"
         )
     )
-    return len(calls) == 1 and any(
-        keyword.arg == "cache_only"
-        and isinstance(keyword.value, ast.Constant)
-        and keyword.value.value is True
-        for keyword in calls[0].keywords
+    return len(calls) == 1 and not any(
+        keyword.arg in ("cache_only", None) for keyword in calls[0].keywords
     )
 
 
@@ -286,12 +287,13 @@ def check_local_bundle_preflight(provider: FactsProvider) -> tuple[Violation, ..
             "Local bundle installs must route policy through install_preflight.py",
         )
     )
-    if not _has_cache_only_preflight(provider):
+    if not _has_online_preflight(provider):
         findings.append(
             _report(
                 rule_id,
                 _LOCAL_BUNDLE_HANDLER,
-                "Local bundle policy preflight must explicitly run cache-only",
+                "Local bundle policy preflight must resolve org policy as package "
+                "installs do, never cache-only",
             )
         )
     return tuple(findings)

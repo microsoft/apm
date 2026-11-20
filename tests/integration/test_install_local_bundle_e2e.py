@@ -190,33 +190,42 @@ _original_subprocess_run = subprocess.run
 _original_subprocess_popen = subprocess.Popen
 
 
+def _is_local_git_read(cmd) -> bool:
+    """``git remote get-url`` reads local config; it never touches the network."""
+    return isinstance(cmd, (list, tuple)) and list(cmd[1:3]) == ["remote", "get-url"]
+
+
 def _network_sentinel_subprocess_run(*args, **kwargs):
-    """Block git/gh/curl/wget subprocess calls to prove air-gap."""
+    """Fail git/gh/curl/wget network calls as an offline host would."""
     cmd = args[0] if args else kwargs.get("args", [])
+    if _is_local_git_read(cmd):
+        return _original_subprocess_run(*args, **kwargs)
     if isinstance(cmd, (list, tuple)) and cmd:
         binary = str(cmd[0])
         basename = os.path.basename(binary)
         if basename in ("git", "gh", "curl", "wget"):
-            raise AssertionError(f"Unexpected network I/O via subprocess: {basename}")
+            raise OSError(f"Network unreachable (offline host): {basename}")
     elif isinstance(cmd, str) and cmd:
         token = cmd.split()[0] if cmd.split() else ""
         basename = os.path.basename(token)
         if basename in ("git", "gh", "curl", "wget"):
-            raise AssertionError(f"Unexpected network I/O via subprocess: {basename}")
+            raise OSError(f"Network unreachable (offline host): {basename}")
     return _original_subprocess_run(*args, **kwargs)
 
 
 def _network_sentinel_subprocess_popen(*args, **kwargs):
     cmd = args[0] if args else kwargs.get("args", [])
+    if _is_local_git_read(cmd):
+        return _original_subprocess_popen(*args, **kwargs)
     if isinstance(cmd, (list, tuple)) and cmd:
         basename = os.path.basename(str(cmd[0]))
         if basename in ("git", "gh", "curl", "wget"):
-            raise AssertionError(f"Unexpected network I/O via Popen: {basename}")
+            raise OSError(f"Network unreachable (offline host): {basename}")
     elif isinstance(cmd, str) and cmd:
         token = cmd.split()[0] if cmd.split() else ""
         basename = os.path.basename(token)
         if basename in ("git", "gh", "curl", "wget"):
-            raise AssertionError(f"Unexpected network I/O via Popen: {basename}")
+            raise OSError(f"Network unreachable (offline host): {basename}")
     return _original_subprocess_popen(*args, **kwargs)
 
 
@@ -711,6 +720,8 @@ class TestInstallLocalBundleDryRun:
             no_policy: bool,
             logger: object,
             migrate_user_legacy: bool = True,
+            dry_run: bool = False,
+            policy_fetch_result: object = None,
         ) -> dict | None:
             captured["project_root"] = project_root
             captured["user_scope"] = user_scope
@@ -1005,7 +1016,7 @@ class TestLocalBundleHashFormatCrossFlow:
 
 
 class TestLocalInstallAirGap:
-    """Prove that local-bundle install does zero network I/O."""
+    """Local-bundle install works offline; policy follows fetch_failure_default."""
 
     @pytest.mark.parametrize(
         ("policy_config", "expected_message"),
@@ -1044,7 +1055,7 @@ class TestLocalInstallAirGap:
             patch("subprocess.Popen", side_effect=_network_sentinel_subprocess_popen),
             patch(
                 "requests.Session.send",
-                side_effect=AssertionError("Unexpected network I/O: requests"),
+                side_effect=ConnectionError("Network unreachable (offline host): requests"),
             ),
         ):
             result = _invoke_install(
@@ -1059,33 +1070,32 @@ class TestLocalInstallAirGap:
         assert expected_message in result.output.lower()
         assert not (project / ".agents" / "skills" / "coding" / "SKILL.md").exists()
 
-    def test_local_install_zero_network_io(
+    def test_local_install_succeeds_offline(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Monkeypatch all known network entry points to assert no calls.
+        """Every network entry point fails as on an offline host; install still succeeds.
 
-        If ANY network call is made during local-bundle install, the
-        sentinel raises AssertionError immediately and propagates because
-        the runner is invoked with ``catch_exceptions=False``.
+        The org policy lookup fails like any package install's would and, under
+        the default ``fetch_failure_default: warn``, the bundle still deploys.
         """
         bundle = _make_plugin_bundle(tmp_path / "src")
         tarball = _make_tarball(tmp_path / "archives", bundle)
         project = _make_project(tmp_path / "dst")
 
         def _fail_urlopen(*a, **kw):
-            raise AssertionError("Unexpected network I/O: urllib.request.urlopen")
+            raise OSError("Network unreachable (offline host): urllib.request.urlopen")
 
         def _fail_requests(*a, **kw):
-            raise AssertionError("Unexpected network I/O: requests")
+            raise OSError("Network unreachable (offline host): requests")
 
         def _fail_httpx(*a, **kw):
-            raise AssertionError("Unexpected network I/O: httpx")
+            raise OSError("Network unreachable (offline host): httpx")
 
         def _fail_socket_connect(*a, **kw):
-            raise AssertionError("Unexpected network I/O: socket.create_connection")
+            raise OSError("Network unreachable (offline host): socket.create_connection")
 
         def _fail_socket_socket(*a, **kw):
-            raise AssertionError("Unexpected network I/O: socket.socket")
+            raise OSError("Network unreachable (offline host): socket.socket")
 
         patches = [
             patch("urllib.request.urlopen", side_effect=_fail_urlopen),
@@ -1618,9 +1628,15 @@ class TestInstallLocalBundleLsp:
                 return PolicyFetchResult(policy=policy, source="test", outcome="found")
             return PolicyFetchResult(policy=None, source="", outcome="absent")
 
-        with patch(
-            "apm_cli.policy.install_preflight.discover_policy_with_chain",
-            side_effect=discover_policy,
+        with (
+            patch(
+                "apm_cli.policy.discovery.discover_policy_with_chain",
+                side_effect=discover_policy,
+            ),
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                side_effect=discover_policy,
+            ),
         ):
             result = _invoke_install(
                 project,
@@ -1714,6 +1730,32 @@ class TestInstallLocalBundleLsp:
         assert not (
             project / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
         ).exists()
+
+    def test_bundle_install_discovers_org_policy_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.policy.discovery import PolicyFetchResult
+
+        bundle = self._bundle(tmp_path / "source")
+        project = _make_project(tmp_path / "consumer", targets=["claude"])
+        absent = PolicyFetchResult(policy=None, source="", outcome="absent")
+
+        with (
+            patch(
+                "apm_cli.policy.discovery.discover_policy_with_chain", return_value=absent
+            ) as trust_reads,
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=absent,
+            ) as preflight_reads,
+        ):
+            result = _invoke_install(
+                project, str(bundle), "--target", "claude", monkeypatch=monkeypatch
+            )
+
+        assert result.exit_code == 0, result.output
+        # The trust map and the policy preflight share one discovery.
+        assert trust_reads.call_count + preflight_reads.call_count == 1
 
     def test_copilot_aliases_are_normalized_for_bundle_lsp(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

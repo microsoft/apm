@@ -1203,12 +1203,10 @@ def resolve_project_exec_allow_map(
     allow_map, resolved = executable_context
     if resolved:
         return allow_map
-    policy = None
-    if not no_policy:
-        from apm_cli.policy.discovery import discover_policy_with_chain
-
-        policy = getattr(discover_policy_with_chain(project_root), "policy", None)
     from apm_cli.core.scope import manifest_root
+    from apm_cli.policy.outcome_routing import resolve_trust_policy
+
+    policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)
 
     return effective_exec_map_for_project(
         manifest_root(project_root, user_scope=user_scope),

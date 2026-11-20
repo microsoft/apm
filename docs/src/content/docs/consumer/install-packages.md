@@ -92,7 +92,8 @@ approved. Bundle MCP servers are recorded in the lockfile, so they pass `apm aud
 and `apm install --frozen` and survive other installs and uninstalls; `apm install -g
 <bundle>` records them in `$APM_HOME/apm.lock.yaml`. A `bundle:` entry counts only
 when the lockfile also records its deployment, and org MCP policy still applies to
-it. With `-g`, bundle executable approvals are read from `~/.apm/apm.yml`, never the
+it. Org policy resolves as for a package install; when it cannot be resolved,
+`policy.fetch_failure_default` decides. With `-g`, bundle executable approvals are read from `~/.apm/apm.yml`, never the
 current directory's `apm.yml`. To build one, see
 [Build a plugin](../../producer/build-a-plugin/).
 

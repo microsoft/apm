@@ -40,12 +40,13 @@ from apm_cli.install.registry_wiring import (
     resolver_last_registry_resolution,
 )
 from apm_cli.install.source_helpers import (
+    content_hash_mismatch_hint,
     ensure_carried_licenses_match,
     locked_parent_identity,
     materialized_manifest_snapshot,
     record_carried_package_hash,
     record_package_digests,
-    supply_chain_mismatch_hint,
+    update_accepts_new_content,
 )
 from apm_cli.install.source_helpers import (
     format_package_type_label as _format_package_type_label,
@@ -863,19 +864,16 @@ class FreshDependencySource(DependencySource):
             )
             _carried_paths = record_carried_package_hash(ctx, dep_key, install_path, package_info)
 
-            # Supply-chain protection: verify content hash on fresh
-            # downloads when the lockfile already records a hash.
-            # Skip when ``ctx.expected_hash_change_deps`` marks this dep
-            # (set by resolve.py's BFS callback and _resolve_download_strategy
-            # when branch-ref drift or the v<=0.12.2 self-heal forces a
-            # re-download whose hash is legitimately expected to differ from
-            # the lockfile record).
-            # Thread-safety: resolve phase completes before integrate runs,
-            # so the set is stable here.  integrate.py's own .add() is
-            # idempotent (set semantics) and runs single-threaded.
+            # Supply-chain protection: verify content hash on fresh downloads
+            # when the lockfile records one, unless an update moved the commit
+            # or ``ctx.expected_hash_change_deps`` marks this dep (resolve.py's
+            # BFS callback and _resolve_download_strategy set it when branch-ref
+            # drift or the v<=0.12.2 self-heal makes a hash change expected).
+            # Thread-safety: the set is stable once resolve completes, and
+            # integrate.py's own .add() is idempotent and single-threaded.
             _expected_hash_deps = ctx.expected_hash_change_deps
             if (
-                not ctx.update_refs
+                not update_accepts_new_content(ctx, dep_locked_chk, resolved_commit)
                 and dep_key not in _expected_hash_deps
                 and dep_locked_chk
                 and dep_locked_chk.content_hash
@@ -899,9 +897,11 @@ class FreshDependencySource(DependencySource):
                             f"Content hash mismatch for {dep_key}: "
                             f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
                             "The downloaded content differs from the lockfile record. "
-                            + supply_chain_mismatch_hint(ctx, dep_key)
+                            + content_hash_mismatch_hint(ctx, dep_key)
                         )
-            ensure_carried_licenses_match(ctx, dep_key, install_path, dep_locked_chk)
+            ensure_carried_licenses_match(
+                ctx, dep_key, install_path, dep_locked_chk, resolved_commit
+            )
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
