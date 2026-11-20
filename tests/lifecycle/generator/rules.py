@@ -83,8 +83,8 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/update.py", 514, '"--target"'),
     ),
     "uninstall": (
-        Ev("src/apm_cli/commands/uninstall/cli.py", 583, 'argument("packages"'),
-        Ev("src/apm_cli/commands/uninstall/cli.py", 585, '"--dry-run"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 584, 'argument("packages"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 586, '"--dry-run"'),
     ),
     "prune": (
         Ev("src/apm_cli/commands/prune.py", 71, '"--dry-run"'),
@@ -147,7 +147,7 @@ USER_SCOPE_OPS = frozenset(
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 917, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 479, '"--global"'),
-    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 591, '"--global"'),
+    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 592, '"--global"'),
     "compile": Ev(_COMPILE, 1378, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 100, '"--global"'),
     "approve-deny": Ev(_APPROVE, 216, '"--user"'),
@@ -210,9 +210,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev(_INSTALL, 971, '"--url"'),
             Ev("src/apm_cli/models/dependency/reference.py", 860, '"registry" in entry'),
             Ev("src/apm_cli/marketplace/registration.py", 45, "No marketplace.json found"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 698, "is an MCP server, not a package"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 857, "was not found in apm.yml"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 690, "cannot remove local-bundle"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 710, "is an MCP server, not a package"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 869, "was not found in apm.yml"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 702, "cannot remove local-bundle"),
             Ev("src/apm_cli/commands/update.py", 448, "No APM dependencies to update"),
             Ev("src/apm_cli/commands/prune.py", 199, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
