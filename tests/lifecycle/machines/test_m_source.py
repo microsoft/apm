@@ -302,31 +302,7 @@ def _lsp_survivor(machine, op, before=None, after=None, result=None) -> bool:
     )
 
 
-def _skill_dirs(observation: Observation) -> int:
-    paths = observation.artifacts.snapshot("project").paths
-    return sum(1 for path in paths if path.count("/") == 2 and path.startswith(".agents/skills/"))
-
-
-def _unattributed_rebuild(machine, op, before, after, result) -> bool:
-    """#4219: uninstall repeats one unattributed integration pair per surviving package."""
-    del machine, before
-    return (
-        result is not None
-        and op.name == "uninstall"
-        and "DRYRUN" not in op.modifiers
-        and result.returncode == 0
-        and _skill_dirs(after) >= 2
-    )
-
-
 KNOWN_CELLS = (
-    KnownCell(
-        "uninstall-unattributed-rebuild",
-        "I9",
-        "#4219",
-        r"^duplicate 'integrated' line(: .*)?$",
-        _unattributed_rebuild,
-    ),
     KnownCell(
         "uninstall-lsp-survivor",
         "I7",

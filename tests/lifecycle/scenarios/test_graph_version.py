@@ -52,7 +52,6 @@ pytestmark = [
 ]
 
 CHAIN = ("g-a", "g-b", "g-c", "g-d")
-UNINSTALL_NOISE = Known("#4160", r"duplicate 'integrated' line")
 DIAMOND = {"p-parent": ("p-child",), "p-parent2": ("p-child",)}
 # What a first project install writes besides the deployed skills.
 INSTALL_WRITES = (
@@ -114,7 +113,7 @@ def test_diamond_keeps_shared_child_until_last_parent(lifecycle_world) -> None:
     assert len(scenario.lock_names()) == 3
 
     # Re-integrating the survivors prints their lines without package headers.
-    first = scenario.run("uninstall p-parent", known={"I9": UNINSTALL_NOISE})
+    first = scenario.run("uninstall p-parent")
     assert_changes(
         first.changed,
         ("project:apm.yml", "project:apm.lock.yaml", "project:apm_modules*", *_skills("p-parent")),

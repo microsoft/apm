@@ -442,14 +442,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^(\[!\] (?:Org policy not applied|Using stale cached org policy)[^\n]*)$.*^\1$",
     ),
     KnownOutputCell(
-        "install-empty-org-policy-banner-per-phase",
-        "I9",
-        "#4241",
-        _runs("install"),
-        r"Org policy at org:\S+ is present but empty",
-        output=r"^\[!\] Org policy at \S+ is present but empty.*^  \[\+\] .*^\+- MCP Servers",
-    ),
-    KnownOutputCell(
         "install-frozen-mcp-targeting-twice",
         "I9",
         "#4196",

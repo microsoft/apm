@@ -29,7 +29,7 @@ import shutil
 
 import pytest
 
-from tests.lifecycle.scenarios._kit import Known, Scenario, assert_changes
+from tests.lifecycle.scenarios._kit import Scenario, assert_changes
 from tests.lifecycle.world import use_policy
 
 pytestmark = [
@@ -54,8 +54,6 @@ CLASSES = ("cold", "warm-valid", "warm-stale-modules", "warm-stale-checkout")
 OPS = ("install", "install --frozen", "audit --ci")
 # audit --ci replays the stale apm_modules copy and blames the intact deployed
 # file; install --frozen on the same state refreshes the copy and succeeds.
-STALE_COPY_AUDIT = {"R": Known("#4165", r"exited 1, expected \[0\]")}
-STALE_COPY_PAIR = {"I3": Known("#4165", r"audit --ci exited 1 but install --frozen exited 0")}
 # The exact changed set of each (class, op) beyond bookkeeping, as patterns.
 CHANGES: dict[tuple[str, str], tuple[str, ...]] = {
     ("cold", "install"): ("project:apm_modules*", "cache:git*"),
@@ -113,16 +111,10 @@ def test_cache_class_by_operation(lifecycle_world, cache_class, op) -> None:
     locked = scenario.lock().get_package_dependencies()[0].deployed_file_hashes[DEPLOYED_SKILL]
     _prepare(scenario, cache, cache_class)
 
-    stale_copy = cache_class == "warm-stale-modules"
     if op == "install --frozen":
-        step = scenario.pair(
-            audit_known=STALE_COPY_AUDIT if stale_copy else None,
-            frozen_known=STALE_COPY_PAIR if stale_copy else None,
-        )
+        step = scenario.pair()
     elif op == "audit --ci":
-        step = scenario.run(
-            op, read_only=True, exit=0, known=STALE_COPY_AUDIT if stale_copy else None
-        )
+        step = scenario.run(op, read_only=True, exit=0)
     else:
         step = scenario.run(op)
     assert_changes(step.changed, CHANGES[cache_class, op], label=f"{cache_class} {op}")
