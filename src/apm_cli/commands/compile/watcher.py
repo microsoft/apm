@@ -8,6 +8,9 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import (
+    PROJECT_MANIFEST_MISSING,
+)
 from apm_cli.core.scope import manifest_file
 
 from ...compilation import AgentsCompiler, CompilationConfig
@@ -295,7 +298,7 @@ def _watch_mode(
 
         if not watch_paths:
             logger.warning("No APM directories found to watch")
-            logger.progress("Run 'apm init' to create an APM project")
+            logger.progress(PROJECT_MANIFEST_MISSING.sentence())
             return
 
         observer.start()

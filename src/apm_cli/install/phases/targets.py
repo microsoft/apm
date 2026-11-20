@@ -258,18 +258,15 @@ def _gate_cowork_target(
             ):
                 import sys as _sys
 
+                from apm_cli.core.remediation import COWORK_SKILLS_DIR_REQUIRED
+
+                _cowork_fix = (
+                    f"Set APM_COPILOT_COWORK_SKILLS_DIR, or {COWORK_SKILLS_DIR_REQUIRED.clause()}."
+                )
                 if _sys.platform.startswith("linux"):
-                    _cowork_msg = (
-                        "Cowork has no auto-detection on Linux.\n"
-                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
-                        "apm config set copilot-cowork-skills-dir <path>"
-                    )
+                    _cowork_msg = f"Cowork has no auto-detection on Linux.\n{_cowork_fix}"
                 else:
-                    _cowork_msg = (
-                        "Cowork: no OneDrive path detected.\n"
-                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
-                        "apm config set copilot-cowork-skills-dir <path>"
-                    )
+                    _cowork_msg = f"Cowork: no OneDrive path detected.\n{_cowork_fix}"
                 if ctx.logger:
                     ctx.logger.error(_cowork_msg, symbol="cross")
                 raise SystemExit(1)
@@ -279,9 +276,11 @@ def _gate_cowork_target(
         _cowork_in_set = any(t.name == "copilot-cowork" for t in targets)
         if _cowork_in_set:
             if ctx.logger:
+                from apm_cli.core.remediation import COWORK_TARGET_USER_SCOPE
+
                 ctx.logger.error(
                     "The 'copilot-cowork' target requires --global (user scope). "
-                    "Run: apm install --target copilot-cowork --global"
+                    + COWORK_TARGET_USER_SCOPE.sentence()
                 )
             raise SystemExit(1)
 

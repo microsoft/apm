@@ -4,6 +4,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ..core.remediation import (
+    MARKETPLACE_FETCH_FAILED,
+    MARKETPLACE_ORIGIN_RESTORE,
+    MARKETPLACE_ORIGIN_SWITCH,
+    MARKETPLACE_UNREGISTERED_SHORTHAND,
+    MARKETPLACE_UNREGISTERED_URL,
+    either_sentence,
+)
+
 if TYPE_CHECKING:
     from .resolver import CrossRepoMisconfigRisk
 
@@ -24,11 +33,12 @@ class MarketplaceNotFoundError(MarketplaceError):
         # URL that works for them. Callers should pass the current host
         # (e.g. default_host()); fall back to github.com to preserve the
         # public-cloud default.
+        register = either_sentence(
+            MARKETPLACE_UNREGISTERED_URL.bind(host=host), MARKETPLACE_UNREGISTERED_SHORTHAND
+        )
         super().__init__(
-            f"Marketplace '{name}' is not registered. "
-            f"Run 'apm marketplace add https://{host}/OWNER/REPO' "
-            f"or 'apm marketplace add OWNER/REPO' to register it, "
-            f"or 'apm marketplace list' to see registered marketplaces."
+            f"Marketplace '{name}' is not registered. {register} "
+            "Run 'apm marketplace list' to see registered marketplaces."
         )
 
 
@@ -100,16 +110,14 @@ class MarketplaceOriginConflictError(MarketplaceError):
                 f"'apm marketplace add' under the name {marketplace_name!r}."
             )
         else:
-            restore = (
-                "To keep the locked marketplace, run: apm marketplace add "
-                f"{shlex.quote(locked)} --name {shlex.quote(marketplace_name)} "
-                "(add --ref or --path if the original registration used them)."
-            )
+            restore = MARKETPLACE_ORIGIN_RESTORE.bind(
+                source=shlex.quote(locked), name=shlex.quote(marketplace_name)
+            ).sentence()
+        switch = MARKETPLACE_ORIGIN_SWITCH.bind(plugin=repr(plugin_name)).clause()
         super().__init__(
             f"marketplace {marketplace_name!r} now points at {current}, but apm.lock.yaml "
             f"recorded {plugin_name!r} from {locked}. Nothing was changed. {restore} "
-            f"To switch marketplaces on purpose, remove {plugin_name!r} from apm.yml, run "
-            "'apm install', then add it back and run 'apm install' again."
+            f"To switch marketplaces on purpose, {switch}."
         )
 
 
@@ -131,7 +139,7 @@ class MarketplaceFetchError(MarketplaceError):
         retry = (
             retry_hint
             if retry_hint is not None
-            else f"Run 'apm marketplace update {name}' to retry."
+            else MARKETPLACE_FETCH_FAILED.bind(name=name).sentence()
         )
         super().__init__(f"Failed to fetch marketplace '{name}'{detail}. {retry}")
 

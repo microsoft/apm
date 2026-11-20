@@ -9,6 +9,7 @@ from pathlib import Path
 import click
 
 from ...core.command_logger import CommandLogger
+from ...install.locking import serialized_lifecycle_unless
 from ...marketplace.errors import MarketplaceYmlError
 from ...marketplace.migration import migrate_marketplace_yml
 from . import marketplace
@@ -29,6 +30,7 @@ from . import marketplace
     help="Show the proposed apm.yml changes without writing them",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+@serialized_lifecycle_unless("dry_run")
 def migrate(force, dry_run, verbose):
     """Convert legacy marketplace.yml to an apm.yml marketplace block."""
     logger = CommandLogger("marketplace-migrate", verbose=verbose)

@@ -1376,6 +1376,36 @@ def test_failed_direct_dependency_stops_before_integration() -> None:
     ("path", "old", "new"),
     [
         (
+            "src/apm_cli/install/phases/integrate.py",
+            '            "prompts": _root_result["prompts"],',
+            '            "installed": int(_local_changed > 0),\n'
+            '            "prompts": _root_result["prompts"],',
+        ),
+        (
+            "src/apm_cli/install/template.py",
+            "            deltas[k] = int_result[k]\n",
+            '            deltas[k] = int_result[k]\n        deltas["installed"] = 1\n',
+        ),
+    ],
+)
+def test_install_count_routes_through_outcome_owner(path: str, old: str, new: str) -> None:
+    """Root content or a converged package never counts as installed on its own (#4184)."""
+    rule_id = "install-deployment-outcome"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (
             "src/apm_cli/security/trust_fingerprint.py",
             "return compute_native_plugin_pin(plugin_root)",
             "return compute_native_plugin_hash(plugin_root)",
@@ -1438,6 +1468,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="for surface in primitive_surfaces(project_root, scoped, user_scope=user_scope):",
         new="for surface in ():",
         intent="Automatic audit discovery stops enumerating canonical primitive surfaces.",
+    ),
+    MutationCase(
+        guard_id="contracts-tests-conformance-behavioral-coverage",
+        rule_id="contracts-tests-conformance-behavioral-coverage",
+        path="tests/spec_conformance/gen_statement.py",
+        old='behavioral = [r for r in rows if r.get("kind") == BEHAVIORAL]',
+        new="behavioral = list(rows)",
+        intent="Conformance status counts text/shape tests as implementation coverage.",
     ),
     MutationCase(
         guard_id="contracts-tests-taxonomy-classification",
@@ -1683,6 +1721,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="is_generated_python_artifact(relative)",
         new="False",
         intent="Skill lockfile inventory stops excluding generated Python artifacts.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-remediation-advice",
+        rule_id="contracts-tooling-remediation-advice",
+        path="src/apm_cli/commands/experimental.py",
+        old='logger.progress("Tip: apm experimental enable <name>")',
+        new="logger.progress(\"Run 'apm install' to restore the deployed files\")",
+        intent="A command spells remediation advice outside the catalog owner.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-remediation-drift-kinds",
+        rule_id="contracts-tooling-remediation-drift-kinds",
+        path="src/apm_cli/core/remediation.py",
+        old='        "unrecorded": RESYNC_UNRECORDED,\n',
+        new="",
+        intent="An emitted drift kind loses its remediation row.",
     ),
     MutationCase(
         guard_id="contracts-tooling-root-context-write-eligibility",
@@ -2035,6 +2089,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="@serialized_lifecycle\ndef set(",
         new="def set(",
         intent="Config mutation stops routing through the canonical lifecycle lock.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-lifecycle-serialization-closed-world",
+        rule_id="install-deployment-lifecycle-serialization-closed-world",
+        path="src/apm_cli/commands/runtime.py",
+        old="def status():",
+        new="def status_report():",
+        intent="A CLI command lands without a lifecycle serialization classification.",
     ),
     MutationCase(
         guard_id="install-deployment-local-bundle-hook-trust",
@@ -2703,6 +2765,30 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Compilation gains a direct write that bypasses CompiledOutputWriter.",
     ),
     MutationCase(
+        guard_id="registry-delegation-console-construction",
+        rule_id="registry_delegation.console_construction",
+        path="src/apm_cli/commands/experimental.py",
+        old="        table = new_table(",
+        new="        table = Table(",
+        intent="A command builds a Rich table outside the ASCII table factory.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-console-streams",
+        rule_id="registry_delegation.console_streams",
+        path="src/apm_cli/commands/compile/cli.py",
+        old='_rich_echo(f"  [x] {error}", color="red")',
+        new='click.echo(f"  [x] {error}")',
+        intent="A command prints an error line on stdout outside the console stream owner.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-experimental-flags",
+        rule_id="registry_delegation.experimental_flags",
+        path="src/apm_cli/version_output.py",
+        old='        if is_enabled("verbose_version"):',
+        new="        if False:",
+        intent="A registered experimental flag loses its only reader.",
+    ),
+    MutationCase(
         guard_id="registry-delegation-harness-user-root-resolution",
         rule_id="registry_delegation.harness_user_root_resolution",
         path="src/apm_cli/integration/lsp_integrator.py",
@@ -2737,6 +2823,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             '    raw_targets = vars(package).get("targets")\n'
         ),
         intent="Package-target authorization re-reads the raw manifest targets field.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-module-ownership",
+        rule_id="registry_delegation.module_ownership",
+        path=".apm/architecture/unowned-modules.json",
+        old='    "src/apm_cli/__init__.py",\n',
+        new="",
+        intent="A module with no owner drops off the shrink-only unowned allowlist.",
     ),
     MutationCase(
         guard_id="registry-delegation-output-diagnostics",
@@ -5254,18 +5348,6 @@ def test_consumer_manifest_guard_rejects_anchor_bypasses(path: str, old: str, ne
             "f\"one: {detail.strip().replace('[x] ', '')}\"",
             id="caller-replaces-status-symbol",
         ),
-        pytest.param(
-            "src/apm_cli/commands/outdated.py",
-            "console=new_console(),",
-            "console=Console(),",
-            id="command-builds-unicode-rich-console",
-        ),
-        pytest.param(
-            "src/apm_cli/commands/outdated.py",
-            "from apm_cli.utils.console import new_console\n",
-            "from rich.console import Console as new_console\n",
-            id="command-imports-rich-console",
-        ),
     ],
 )
 def test_output_diagnostics_guard_keeps_target_errors_plain(path: str, old: str, new: str) -> None:
@@ -5280,6 +5362,157 @@ def test_output_diagnostics_guard_keeps_target_errors_plain(path: str, old: str,
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+# ---------------------------------------------------------------------------
+# Console construction, library output and experimental flags (#4089)
+# ---------------------------------------------------------------------------
+
+
+def _assert_only_rule_fires(
+    rule_ids: tuple[str, ...], rule_id: str, path: str, old: str, new: str
+) -> None:
+    """Apply one mutation to *path*; among *rule_ids* only *rule_id* reports it."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, rule_ids, source_overrides={path: mutated})
+    assert report.failures == ()
+    assert {violation.rule_id for violation in report.violations} == {rule_id}
+    assert any(violation.path == path for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new"),
+    [
+        pytest.param(
+            "registry_delegation.console_construction",
+            "src/apm_cli/commands/outdated.py",
+            "console=new_console(),",
+            "console=Console(),",
+            id="command-builds-unicode-rich-console",
+        ),
+        pytest.param(
+            "registry_delegation.console_construction",
+            "src/apm_cli/commands/outdated.py",
+            "from apm_cli.utils.console import new_console\n",
+            "from rich.console import Console as new_console\n",
+            id="command-imports-rich-console",
+        ),
+        pytest.param(
+            "registry_delegation.console_construction",
+            "src/apm_cli/output/formatters.py",
+            "            strategy_table = new_table(",
+            "            strategy_table = Table(",
+            id="formatter-builds-rich-table",
+        ),
+        pytest.param(
+            "registry_delegation.console_construction",
+            "src/apm_cli/output/formatters.py",
+            "    from rich.text import Text\n",
+            "    from rich.text import Text\n    from rich import box\n",
+            id="formatter-picks-its-own-box",
+        ),
+        pytest.param(
+            "registry_delegation.output_diagnostics",
+            "src/apm_cli/adapters/client/codex.py",
+            "            # The integrator's install tree reports success once (#3994, #4089).\n",
+            '            print(f"Configured MCP server {config_key!r} for Codex CLI")\n',
+            id="adapter-prints-its-own-success",
+        ),
+        pytest.param(
+            "registry_delegation.output_diagnostics",
+            "src/apm_cli/adapters/client/hermes.py",
+            "from ...core.command_logger import library_logger\n",
+            "from ...utils.console import _rich_error as library_logger\n",
+            id="adapter-imports-rich-helper",
+        ),
+        pytest.param(
+            "registry_delegation.output_diagnostics",
+            "src/apm_cli/core/safe_installer.py",
+            'self.logger.error(f"  x {server_ref}: {error}")',
+            'click.echo(f"  x {server_ref}: {error}")',
+            id="safe-installer-echoes-raw",
+        ),
+        pytest.param(
+            "registry_delegation.experimental_flags",
+            "src/apm_cli/core/experimental.py",
+            '    "registries": ExperimentalFlag(',
+            '    "ghost": ExperimentalFlag(name="ghost", description="x."),\n'
+            '    "registries": ExperimentalFlag(',
+            id="registered-flag-without-reader",
+        ),
+        pytest.param(
+            "registry_delegation.experimental_flags",
+            "src/apm_cli/install/helpers/reconciliation_scope.py",
+            "    if diagnostics is None or not diagnostics.verbose:\n",
+            "    if diagnostics is None:\n",
+            id="inactive-resolver-notice-not-verbose-gated",
+        ),
+        pytest.param(
+            "registry_delegation.experimental_flags",
+            "src/apm_cli/commands/audit.py",
+            'Used with --ci for policy checks.",',
+            'Used with --ci for policy checks. [experimental]",',
+            id="ga-policy-help-marked-experimental",
+        ),
+        pytest.param(
+            "registry_delegation.experimental_flags",
+            "src/apm_cli/commands/audit.py",
+            'help="Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations",',
+            'help="Scan installed packages for hidden Unicode characters",',
+            id="audit-help-drops-integrity-mode",
+        ),
+        pytest.param(
+            "registry_delegation.experimental_flags",
+            "src/apm_cli/core/experimental.py",
+            "    del create_config\n",
+            "    from apm_cli.config import ensure_config_exists\n\n    ensure_config_exists()\n",
+            id="flag-read-creates-config",
+        ),
+    ],
+)
+def test_output_owner_guards_catch_bypasses(rule_id: str, path: str, old: str, new: str) -> None:
+    """Each owner sub-check catches its bypass, and only its rule fires (#4089)."""
+    rule_ids = (
+        "registry_delegation.console_construction",
+        "registry_delegation.experimental_flags",
+        "registry_delegation.output_diagnostics",
+    )
+    _assert_only_rule_fires(rule_ids, rule_id, path, old, new)
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new"),
+    [
+        pytest.param(
+            "contracts-tooling-remediation-advice",
+            "src/apm_cli/commands/install.py",
+            '"config state, or when deployed files do not match the hashes it records "',
+            '"config state "',
+            id="frozen-help-drops-hash-refusal",
+        ),
+        pytest.param(
+            "contracts-tooling-remediation-advice",
+            "src/apm_cli/commands/init.py",
+            "    if write:\n        discover_flag = True\n",
+            "    if write:\n        pass\n",
+            id="init-apply-stops-implying-discover",
+        ),
+        pytest.param(
+            "contracts-tooling-remediation-drift-kinds",
+            "src/apm_cli/core/remediation.py",
+            '        "orphaned": RESYNC_DEPLOYED,\n',
+            "",
+            id="drift-kind-orphaned-loses-its-row",
+        ),
+    ],
+)
+def test_remediation_guards_catch_regressions(rule_id: str, path: str, old: str, new: str) -> None:
+    """DX5, DX6 and H7 regressions each trip only their own rule (#4090)."""
+    rule_ids = ("contracts-tooling-remediation-advice", "contracts-tooling-remediation-drift-kinds")
+    _assert_only_rule_fires(rule_ids, rule_id, path, old, new)
 
 
 # ---------------------------------------------------------------------------

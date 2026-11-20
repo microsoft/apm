@@ -11,8 +11,9 @@ on:
     branches: [ main ]
     paths:
       - 'docs/src/content/docs/specs/**'
-      - 'tests/fixtures/spec-conformance/**'
-      - 'tests/spec_conformance/**'
+      # A req marker may sit on any test under tests/, so any test change can
+      # move the statement.
+      - 'tests/**'
       - 'src/apm_cli/**'
       - 'pyproject.toml'
       - 'CONFORMANCE.md'
@@ -54,7 +55,7 @@ jobs:
       # the generator. An execution shard's coverage map is not authoritative.
       - name: Collect full marker coverage
         run: |
-          uv run --frozen --extra dev pytest tests/spec_conformance --collect-only \
+          uv run --frozen --extra dev pytest tests --collect-only -p no:xdist \
             -p no:randomly \
             --no-header \
             -q

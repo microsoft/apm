@@ -8,6 +8,9 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    EXPERIMENTAL_FLAG_DISABLED,
+)
 from apm_cli.core.scope import manifest_file
 
 from ..core.command_logger import CommandLogger
@@ -233,7 +236,7 @@ def _require_external_scanners(logger, key: str) -> None:
     if not is_enabled("external_scanners"):
         logger.error(
             f"'{key}' requires the external-scanners experimental flag. "
-            "Run: apm experimental enable external-scanners"
+            f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='external-scanners').sentence()}"
         )
         sys.exit(1)
 
@@ -264,11 +267,11 @@ def config(ctx):
         logger = CommandLogger("config")
         try:
             # Lazy import rich table
-            from rich.table import Table  # type: ignore
+            from apm_cli.utils.console import new_table
 
             console = _get_console()
             # Create configuration display
-            config_table = Table(
+            config_table = new_table(
                 title="Current APM Configuration",
                 show_header=True,
                 header_style="bold cyan",
@@ -446,7 +449,7 @@ def set(key, value):  # noqa: F811
         if not is_enabled("registries"):
             logger.error(
                 f"'{key}' requires the registries experimental flag. "
-                "Run: apm experimental enable registries"
+                f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='registries').sentence()}"
             )
             sys.exit(1)
         reg_name, field = registry_match.group(1), registry_match.group(2)
@@ -507,7 +510,7 @@ def set(key, value):  # noqa: F811
         if not is_enabled("copilot_cowork"):
             logger.error(
                 "copilot-cowork-skills-dir requires the copilot-cowork experimental flag. "
-                "Run: apm experimental enable copilot-cowork"
+                f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='copilot-cowork').sentence()}"
             )
             sys.exit(1)
         from ..config import get_copilot_cowork_skills_dir, set_copilot_cowork_skills_dir
@@ -609,7 +612,7 @@ def set(key, value):  # noqa: F811
         if not is_enabled("external_scanners"):
             logger.error(
                 "audit-on-install requires the external-scanners experimental flag. "
-                "Run: apm experimental enable external-scanners"
+                f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='external-scanners').sentence()}"
             )
             sys.exit(1)
         from ..config import get_audit_on_install, set_audit_on_install
@@ -681,7 +684,7 @@ def get(key):
             if not is_enabled("registries"):
                 logger.error(
                     f"'{key}' requires the registries experimental flag. "
-                    "Run: apm experimental enable registries"
+                    f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='registries').sentence()}"
                 )
                 sys.exit(1)
             reg_name, field = registry_match.group(1), registry_match.group(2)
@@ -823,7 +826,7 @@ def unset(key):
         if not is_enabled("registries"):
             logger.error(
                 f"'{key}' requires the registries experimental flag. "
-                "Run: apm experimental enable registries"
+                f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='registries').sentence()}"
             )
             sys.exit(1)
         reg_name, field = registry_match.group(1), registry_match.group(2)

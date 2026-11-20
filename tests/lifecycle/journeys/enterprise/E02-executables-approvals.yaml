@@ -17,7 +17,7 @@ steps:
     exit: 0
     files: [apm.lock.yaml, .gitignore, apm_modules/]
     key_lines:
-      - "[!] lifecycle/p-exec: hooks skipped (not approved in executables.allow). Run 'apm approve lifecycle/p-exec' to approve."
+      - "[!] lifecycle/p-exec: hooks skipped (not approved in executables.allow). Run 'apm approve lifecycle/p-exec' to approve its hooks."
       - "[!] 1 package(s) have executable primitives parked pending approval; install completed without deploying them."
       - "Parked MCP server 'p-exec-mcp' (lifecycle/p-exec): executables not approved"
     forbidden_lines: [allowExecutables, no bin/, integrated]
@@ -28,14 +28,14 @@ steps:
     key_lines:
       - "1 package(s) with unapproved or changed executables:"
       - "[not approved]"
-      - "Review each definition, then run 'apm approve <package>' to pin it."
+      - "Review each definition, then run 'apm approve <package>' to pin its executables."
   - n: 3
     run: [apm approve lifecycle/p-exec, apm install]
     exit: 0
     files: [apm.yml, apm.lock.yaml, .github/hooks/p-exec-session.json, .mcp.json]
     key_lines:
       - "[+] Approved lifecycle/p-exec at these exact definitions (1 hook file, 1 MCP server, 1 bin item)"
-      - "[i] Updated apm.yml (1 approved). Run 'apm install' to deploy; commit apm.yml to share."
+      - "[i] Updated apm.yml (1 approved). Run 'apm install' to deploy the approved executables. Commit apm.yml to share."
       - "hook(s) integrated -> .github/hooks/"
       - "p-exec-mcp -> Copilot CLI (configured)"
     forbidden_lines: [hooks skipped]
