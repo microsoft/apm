@@ -1069,7 +1069,7 @@ def test_orphaned_receipt_collection_keeps_every_doubtful_receipt(tmp_path, monk
     home = tmp_path / "apm-home"
     receipts = home / "deployment-receipts"
     receipts.mkdir(parents=True)
-    monkeypatch.setattr("apm_cli.core.scope.get_apm_home", lambda: home)
+    monkeypatch.setenv("APM_HOME", str(home))
     live = tmp_path / "live"
     live.mkdir()
 

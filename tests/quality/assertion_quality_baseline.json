@@ -737,6 +737,7 @@
       "tests/integration/test_integrators_validation_rules.py": 1,
       "tests/integration/test_intellij_target.py": 4,
       "tests/integration/test_lockfile_transitive_replay_e2e.py": 2,
+      "tests/integration/test_lockfile_writer_mapping.py": 2,
       "tests/integration/test_marketplace_adapters_coverage.py": 9,
       "tests/integration/test_marketplace_add_generic_git.py": 1,
       "tests/integration/test_marketplace_add_local.py": 1,
