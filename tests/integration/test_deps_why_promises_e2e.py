@@ -135,6 +135,7 @@ def truncated_chain_project(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.req("req-rs-005")
 def test_promise_a_apm_deps_why_prints_human_chain_from_root_to_target(
     runner, linear_chain_project: Path
 ):
