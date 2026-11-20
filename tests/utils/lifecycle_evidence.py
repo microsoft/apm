@@ -544,10 +544,11 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\[\*\] Running installer\.\.\.\n\x1b\[",
     ),
     KnownOutputCell(
-        "install-echoes-non-ascii-path",
+        "command-echoes-non-ascii-path",
         "I6",
         "#4330",
-        _runs("install"),
+        # Any command that echoes a user path (install, deps list, export-patch, ...).
+        lambda _args, _scenario: True,
         r"stdout has characters outside printable ASCII",
         # A path (after a separator) with a non-ASCII character the test's own
         # working directory does not explain; the cwd echo itself passes I6.
