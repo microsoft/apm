@@ -182,9 +182,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   `--force` remains explicitly destructive and also bypasses the critical
   security-scan block; it is not the routine remedy.
 
-- **Stale-file cleanup.** `Cleaned N stale deployed files for DEPENDENCY` names
-  the affected dependency, not a deletion location. Cleanup removes deployed
-  files; a local dependency's source directory is not cleaned.
+- **Stale-file cleanup.** `Cleaned N stale deployed files for DEPENDENCY:` names
+  the affected dependency, then lists each removed path (a skill directory once,
+  with a trailing `/`). Cleanup removes deployed files; a local dependency's
+  source directory is not cleaned.
 
 - **Historical missing-file claims.** Normal `apm install` retires an obsolete
   dependency file claim and its hash when the file is already absent and
