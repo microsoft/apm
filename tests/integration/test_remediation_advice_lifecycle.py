@@ -396,3 +396,13 @@ def test_command_remediation_clears_the_reported_state(
     promise = catalog()[proof.remediation_id].fixes_promise
     advice = f"'{' '.join(command)}' to {promise}"
     assert advice not in _normalized(again), _result_evidence(again)
+
+
+# -- W3 executed proofs (modules outside commands/ and the W2 areas) ----------
+# -- W3 deps-compilation proofs --
+# -- end W3 deps-compilation proofs --
+# -- W3 plugins-runtime proofs --
+# -- end W3 plugins-runtime proofs --
+# -- W3 core-models proofs --
+# -- end W3 core-models proofs --
+# -- end W3 executed proofs ---------------------------------------------------

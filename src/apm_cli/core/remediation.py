@@ -471,6 +471,15 @@ RUNTIME_MISSING = _entry(
 
 # -- end commands/** (W1) -----------------------------------------------------
 
+# -- W3 (every other src/apm_cli module) -------------------------------------
+# -- W3 deps-compilation --
+# -- end W3 deps-compilation --
+# -- W3 plugins-runtime --
+# -- end W3 plugins-runtime --
+# -- W3 core-models --
+# -- end W3 core-models --
+# -- end W3 -------------------------------------------------------------------
+
 
 __all__ = [
     "DRIFT_KIND_REMEDIATION",
