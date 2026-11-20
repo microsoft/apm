@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol
 
+from apm_cli.core.remediation import EXPERIMENTAL_FLAG_DISABLED
 from apm_cli.core.target_catalog import get_target_capability
 
 
@@ -46,10 +47,10 @@ def emit_disabled_experimental_target_hint(
     if is_enabled(capability.experimental_flag, create_config=create_config):
         return False
     if logger is not None:
+        flag = capability.experimental_flag.replace("_", "-")
         logger.progress(
             f"The '{capability.name}' target requires an experimental flag. "
-            f"Run: apm experimental enable "
-            f"{capability.experimental_flag.replace('_', '-')}",
+            f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag=flag).sentence()}",
             symbol="info",
         )
     return True

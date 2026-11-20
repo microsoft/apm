@@ -173,7 +173,9 @@ def test_relocate_path_reports_disappeared_source(tmp_path: Path) -> None:
     modules.mkdir()
     staging = ResolutionStagingSession(modules)
 
-    with pytest.raises(FileNotFoundError, match="Run 'apm install' again"):
+    with pytest.raises(
+        FileNotFoundError, match="Run 'apm install' to materialize the package again"
+    ):
         staging.relocate_path(modules / "missing", modules / "Missing")
 
 

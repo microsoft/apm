@@ -985,5 +985,243 @@ def test_w3_core_models_remediation_clears_the_reported_state(
 # -- W4 drift-trust proofs --
 # -- end W4 drift-trust proofs --
 # -- W4 phases-targets proofs --
+#
+# Install phases report a local package they cannot materialize, a selector
+# install over changed replace: rules, an agents-tree asset they skip, a Cowork
+# skills directory they cannot locate and canvas extensions the executables
+# gate parks. Each proof runs the printed command after the manual step the
+# advice names and observes the report is gone.
+
+_W4_KIT = "w4-local-kit"
+_W4_ASSET = ".apm/agents/diagram.png"
+_W4_COWORK_ARGS = (*_INSTALL_ARGS, "--global", "--target", "copilot-cowork")
+
+
+def _w4_local_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = _publish(scenario, "advice-kit", instruction="advice")
+    kit = scenario.consumers.create(_W4_KIT)
+    scenario.consumers.add_agent(kit, "helper", "---\ndescription: Helper\n---\n# helper\n")
+    consumer = scenario.consumers.create("w4-consumer", targets=("copilot",))
+    scenario.consumers.add_relative_dependency(consumer, kit)
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+def _w4_kit_root(world: _World) -> Path:
+    return world.consumer.root.parent / _W4_KIT
+
+
+def _w4_hide_kit(world: _World) -> None:
+    _w4_kit_root(world).rename(world.consumer.root.parent / "w4-moved-kit")
+
+
+def _w4_restore_kit(world: _World) -> None:
+    (world.consumer.root.parent / "w4-moved-kit").rename(_w4_kit_root(world))
+
+
+def _w4_single_file_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    world = _w4_local_world(tmp_path, apm_binary_path)
+    manifest = load_yaml(world.consumer.manifest_path)
+    manifest["dependencies"]["apm"] = [{"path": f"../{_W4_KIT}/.apm/agents/helper.agent.md"}]
+    dump_yaml(manifest, world.consumer.manifest_path)
+    return world
+
+
+def _w4_agent_file(world: _World) -> Path:
+    return _w4_kit_root(world) / ".apm" / "agents" / "helper.agent.md"
+
+
+def _w4_break_frontmatter(world: _World) -> None:
+    _w4_agent_file(world).write_text("---\ndescription: [open\n---\n# helper\n", encoding="ascii")
+
+
+def _w4_fix_frontmatter(world: _World) -> None:
+    _w4_agent_file(world).write_text("---\ndescription: Helper\n---\n# helper\n", encoding="ascii")
+
+
+def _w4_add_asset(world: _World) -> None:
+    (_w4_kit_root(world) / _W4_ASSET).write_bytes(b"\x89PNG")
+
+
+def _w4_agent_deployed(world: _World, result) -> None:
+    _expect_ok(world, result)
+    assert (world.consumer.root / ".github" / "agents" / "helper.agent.md").is_file()
+
+
+def _w4_replacing_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    world = _w4_local_world(tmp_path, apm_binary_path)
+    manifest = load_yaml(world.consumer.manifest_path)
+    manifest["$schema"] = (
+        "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+    )
+    manifest["replace"] = [
+        {
+            "for": {"git": "https://github.com/unused-replacement-fixture/base.git"},
+            "with": {"path": "../intentionally-absent"},
+        }
+    ]
+    dump_yaml(manifest, world.consumer.manifest_path)
+    _run_success(
+        world.scenario,
+        world.consumer,
+        _INSTALL_ARGS,
+        environment=world.source.environment,
+        scenario_id="remediation-w4-replace-install",
+    )
+    return world
+
+
+def _w4_drop_replacements(world: _World) -> None:
+    manifest = load_yaml(world.consumer.manifest_path)
+    manifest["replace"] = []
+    dump_yaml(manifest, world.consumer.manifest_path)
+
+
+def _w4_cowork_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = _publish(scenario, "advice-kit", instruction="advice")
+    consumer = scenario.consumers.create("w4-cowork-consumer")
+    user_manifest = scenario.isolated.config_root / "apm.yml"
+    user_manifest.parent.mkdir(parents=True, exist_ok=True)
+    dump_yaml({"name": "me", "version": "1.0.0"}, user_manifest)
+    _run_success(
+        scenario,
+        consumer,
+        ("experimental", "enable", "copilot-cowork"),
+        environment=source.environment,
+        scenario_id="remediation-w4-cowork-flag",
+    )
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+def _w4_cowork_dir(world: _World) -> Path:
+    return world.scenario.isolated.home / "cowork-skills"
+
+
+def _w4_canvas_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    from tests.integration.test_required_lifecycle_state_machine import _OWNER
+
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    package = scenario.sources.create("canvas-kit")
+    scenario.sources.add_canvas(package, "demo", "export default {};\n")
+    repository = scenario.repositories.create("canvas-kit", source_tree=package.root)
+    commit = scenario.repositories.commit(repository, message="seed canvas-kit")
+    remote_url = f"https://github.com/{_OWNER}/canvas-kit"
+    source = _PublishedPackage(
+        package=package,
+        repository=repository,
+        commit=commit,
+        remote_url=remote_url,
+        dependency={"git": remote_url, "ref": commit.sha, "alias": "canvas-kit"},
+        environment=scenario.repositories.url_rewrite_subprocess_env(repository, remote_url),
+    )
+    consumer = scenario.consumers.create(
+        "w4-canvas-consumer", dependencies=(source.dependency,), targets=("copilot",)
+    )
+    manifest = load_yaml(consumer.manifest_path)
+    manifest["executables"] = {"allow": {}}
+    dump_yaml(manifest, consumer.manifest_path)
+    _run_success(
+        scenario,
+        consumer,
+        ("experimental", "enable", "canvas"),
+        environment=source.environment,
+        scenario_id="remediation-w4-canvas-flag",
+    )
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+def _w4_canvas_deployed(world: _World, result) -> None:
+    _expect_ok(world, result)
+    canvas = world.consumer.root / ".github" / "extensions" / "demo" / "extension.mjs"
+    assert canvas.is_file(), _result_evidence(result)
+
+
+W4_PHASES_TARGETS_PROOFS: tuple[_TextProof, ...] = (
+    _TextProof(
+        "local-package-path-missing",
+        _w4_local_world,
+        _w4_hide_kit,
+        lambda _world: _INSTALL_ARGS,
+        1,
+        _w4_agent_deployed,
+        before=_w4_restore_kit,
+    ),
+    _TextProof(
+        "local-package-content-invalid",
+        _w4_single_file_world,
+        _w4_break_frontmatter,
+        lambda _world: _INSTALL_ARGS,
+        1,
+        _w4_agent_deployed,
+        before=_w4_fix_frontmatter,
+    ),
+    _TextProof(
+        "replacement-rules-partial-install",
+        _w4_replacing_world,
+        _w4_drop_replacements,
+        lambda _world: (*_INSTALL_ARGS, f"../{_W4_KIT}"),
+        1,
+        _w4_agent_deployed,
+    ),
+    _TextProof(
+        "agent-source-asset-skipped",
+        _w4_local_world,
+        _w4_add_asset,
+        lambda _world: _INSTALL_ARGS,
+        0,
+        _w4_agent_deployed,
+        before=lambda world: (_w4_kit_root(world) / _W4_ASSET).unlink(),
+    ),
+    _TextProof(
+        "cowork-skills-dir-required",
+        _w4_cowork_world,
+        lambda _world: None,
+        lambda _world: _W4_COWORK_ARGS,
+        1,
+        _expect_ok,
+        values=lambda world: {"<path>": str(_w4_cowork_dir(world))},
+    ),
+    _TextProof(
+        "canvas-skipped-unapproved",
+        _w4_canvas_world,
+        lambda _world: None,
+        lambda _world: _INSTALL_ARGS,
+        0,
+        _w4_canvas_deployed,
+        values=lambda world: {"{package}": _slug(world.source)},
+    ),
+)
+
+
+@pytest.mark.parametrize("proof", W4_PHASES_TARGETS_PROOFS, ids=lambda proof: proof.remediation_id)
+def test_w4_phases_targets_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
+) -> None:
+    # Like test_command_remediation_clears_the_reported_state, but binds the
+    # "{name}" values a call site fills in before matching the printed advice.
+    from apm_cli.core.remediation import catalog
+
+    world = proof.world(tmp_path, apm_binary_path)
+    proof.induce(world)
+    values = proof.values(world)
+    bound = {key[1:-1]: value for key, value in values.items() if key.startswith("{")}
+    entry = catalog()[proof.remediation_id].bind(**bound)
+
+    reported = _run(world, proof.probe(world), "remediation-reported")
+    assert reported.returncode == proof.reported_exit, _result_evidence(reported)
+    assert entry.option() in _normalized(reported), _result_evidence(reported)
+    argv = tuple(values.get(token, token) for token in entry.argv()[1:])
+    assert not any(token.startswith("<") for token in argv), argv
+
+    proof.before(world)
+    advised = _run(world, argv, f"remediation-run-{proof.remediation_id}")
+    assert advised.returncode == 0, _result_evidence(advised)
+
+    again = _run(world, _reprobe_args(proof, world), "remediation-cleared")
+    proof.cleared(world, again)
+    assert entry.option() not in _normalized(again), _result_evidence(again)
+
+
 # -- end W4 phases-targets proofs --
 # -- end W4 executed proofs ---------------------------------------------------

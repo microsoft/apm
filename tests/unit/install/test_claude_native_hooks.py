@@ -215,9 +215,11 @@ def test_loose_hook_refusal_names_the_package_and_both_steps(tmp_path: Path) -> 
     with pytest.raises(ClaudeNativePluginError) as error:
         _integrate(tmp_path, info)
     assert "Cannot switch owner/hooks to native Claude" in str(error.value)
-    assert "Run: apm uninstall --global owner/hooks && apm install --global owner/hooks" in str(
-        error.value
-    )
+    from apm_cli.core.remediation import CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS
+
+    advice = CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS.bind(package="owner/hooks").sentence()
+    assert advice in str(error.value)
+    assert "'apm install --global owner/hooks'" in advice
 
 
 def test_hook_denial_does_not_register_a_commands_only_subset(tmp_path: Path) -> None:

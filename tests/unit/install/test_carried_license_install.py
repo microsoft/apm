@@ -120,7 +120,7 @@ def test_carried_mismatch_hint_names_the_deliberate_re_pin(tmp_path: Path, scope
         )
     message = " ".join(str(exc_info.value).split())
     lockfile = tmp_path / "apm-root" / "apm.lock.yaml"
-    assert f"remove the 'owner/repo/sub' entry from {lockfile} and run '{command}'" in message
+    assert f"remove the 'owner/repo/sub' entry from {lockfile}, then run '{command}'" in message
 
 
 def test_update_keeps_the_carried_check_for_an_unchanged_commit(tmp_path: Path) -> None:
