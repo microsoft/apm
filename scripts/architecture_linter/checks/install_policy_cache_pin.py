@@ -30,7 +30,8 @@ _CACHE_NAMES = frozenset({"_get_cache_dir", "POLICY_CACHE_DIR"})
 _OWNER_NEEDLES = (
     "def _cached_policy_matches(serialized: str, meta: dict) -> bool:",
     "hmac.compare_digest(recorded, _policy_fingerprint(serialized))",
-    "if not _cached_policy_matches(serialized, meta):",
+    "if not _cached_policy_verified(serialized, meta, expected_hash):",
+    "return _cached_pin_matches(raw_bytes_hash, expected_hash) and _cached_policy_matches(",
     "policy, _warnings = load_policy(serialized)",
 )
 

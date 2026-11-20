@@ -1881,6 +1881,37 @@ def _detect_garbage(
     return None  # Not garbage -- proceed with normal parsing
 
 
+def _cached_pin_matches(raw_bytes_hash: str, expected_hash: str | None) -> bool:
+    """Whether a cache entry's recorded raw-bytes hash satisfies the project pin.
+
+    Pin verification (#827): if the project pinned a hash and the cache was
+    written without one (legacy entry) or with a different one, the entry is
+    not used, so the fetcher verifies the pin against fresh authoritative
+    bytes.
+    """
+    if expected_hash is None:
+        return True
+    try:
+        exp_algo, exp_hex = _split_hash_pin(expected_hash)
+    except ProjectPolicyConfigError:
+        return False
+    return raw_bytes_hash.lower() == f"{exp_algo}:{exp_hex}"
+
+
+def _cached_policy_verified(serialized: str, meta: dict, expected_hash: str | None) -> bool:
+    """Whether a cached policy document may be used (#827, #4218).
+
+    The recorded raw-bytes hash must satisfy the project pin, and the cached
+    document must be the one this entry recorded: content that no longer
+    matches its fingerprint is never applied, so the caller fetches again and
+    verifies the pin on fresh bytes.
+    """
+    raw_bytes_hash = meta.get("raw_bytes_hash", "") or ""
+    return _cached_pin_matches(raw_bytes_hash, expected_hash) and _cached_policy_matches(
+        serialized, meta
+    )
+
+
 def _cached_policy_matches(serialized: str, meta: dict) -> bool:
     """Whether a cached policy document is the one its metadata recorded."""
     recorded = meta.get("fingerprint")
@@ -1939,25 +1970,8 @@ def _read_cache_entry(
             return None  # Past MAX_STALE_TTL, unusable
 
         raw_bytes_hash = meta.get("raw_bytes_hash", "") or ""
-
-        # Pin verification (#827): if the project pinned a hash and the
-        # cache was written without one (legacy entry) or with a different
-        # one, ignore the cache so the fetcher can verify the pin against
-        # fresh authoritative bytes.
-        if expected_hash is not None:
-            try:
-                exp_algo, exp_hex = _split_hash_pin(expected_hash)
-                expected_norm = f"{exp_algo}:{exp_hex}"
-            except ProjectPolicyConfigError:
-                return None
-            if raw_bytes_hash.lower() != expected_norm:
-                return None
-
-        # The cached document must be the one this entry recorded (#4218):
-        # content that no longer matches its fingerprint is never applied, so
-        # the caller fetches again and verifies the pin on fresh bytes.
         serialized = policy_file.read_text(encoding="utf-8")
-        if not _cached_policy_matches(serialized, meta):
+        if not _cached_policy_verified(serialized, meta, expected_hash):
             return None
 
         # The sidecar preserves warnings from the authored cold input. Parser
