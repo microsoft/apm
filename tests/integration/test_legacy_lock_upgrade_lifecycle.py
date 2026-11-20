@@ -273,16 +273,19 @@ def _assert_kept_partial_apply(
     ) in " ".join(flat)
     audit, frozen = world.run("audit", "--ci"), world.run("install", "--frozen")
     assert (audit[0], frozen[0]) == (1, 1), (audit, frozen)
-    # Remedy 1: move the kept file aside; the next install restores and converges.
+    # Remedy: export the edit (RA-008: --force is no Kept remedy). This fixture's
+    # package is a local path, whose source already lives on disk, so there is
+    # nothing to export upstream; the command says so and keeps the edit.
+    patches = world.project.parent / "kept-patches"
+    exported = " ".join(world.ok("export-patch", "--out", str(patches)).split())
+    assert "nothing to export upstream" in exported, exported
+    assert target.read_bytes() == edited_bytes
+    # Then move the kept file aside; the next install restores it and converges.
     aside = world.project.parent / "kept-aside"
     target.rename(aside)
     world.ok("install")
     _assert_lock_matches_disk(world)
-    # Remedy 2: an edited copy is overwritten by --force, then install converges.
-    target.write_bytes(edited_bytes)
-    world.ok("install", "--force")
     world.ok("install")
-    _assert_lock_matches_disk(world)
     assert aside.read_bytes() == edited_bytes
 
 
