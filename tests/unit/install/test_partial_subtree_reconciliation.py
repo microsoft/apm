@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install import orphans
 from apm_cli.install.package_selection import previous_selected_subtree_keys
 from apm_cli.install.phases import cleanup
 from apm_cli.install.phases.lockfile import LockfileBuilder
@@ -78,8 +79,8 @@ def test_replacement_bound_candidate_fails_closed():
 def test_retained_descendant_pins_its_dropped_ancestors():
     lock = _chain_lock()
     dropped = frozenset({"acme/b", "acme/c"})
-    assert cleanup._pin_retained_ancestors(lock, dropped, frozenset({"acme/c"})) == dropped
-    assert cleanup._pin_retained_ancestors(lock, dropped, frozenset()) == frozenset()
+    assert orphans._pin_retained_ancestors(lock, dropped, frozenset({"acme/c"})) == dropped
+    assert orphans._pin_retained_ancestors(lock, dropped, frozenset()) == frozenset()
 
 
 def _builder(existing: LockFile, **fields) -> LockfileBuilder:
@@ -165,6 +166,22 @@ def _materialize(root: Path, *relative: str) -> None:
         (root / path / "apm.yml").write_text("name: x\n", encoding="utf-8")
 
 
+def _targeted_decision(tmp_path: Path, lock: LockFile, *, retained=(), materialized=()):
+    return orphans.decide_orphan_removal(
+        operation=orphans.OrphanOperation.TARGETED_INSTALL,
+        roots=("acme/top",),
+        candidate_universe=lock,
+        installed_paths=orphans.InstalledPaths(root=tmp_path, packages=None),
+        resolved_keys=frozenset(),
+        intended=None,
+        materialized=list(materialized),
+        reachability=None,
+        deployment_claims=orphans.DeploymentClaims(
+            live_files=frozenset(), retained={key: {} for key in retained}
+        ),
+    )
+
+
 def test_pinned_nested_package_survives_parent_module_removal(tmp_path):
     parent = LockedDependency(repo_url="acme/repo", depth=2, resolved_by="acme/top")
     child = LockedDependency(
@@ -176,9 +193,10 @@ def test_pinned_nested_package_survives_parent_module_removal(tmp_path):
     )
     lock = _lock(parent, child)
     _materialize(tmp_path, "acme/repo", "acme/repo/skills/child")
-    dropped = frozenset({parent.get_unique_key(), child.get_unique_key()})
     ctx = _module_ctx(tmp_path, lock)
-    cleanup._remove_dropped_package_dirs(ctx, dropped, frozenset({child.get_unique_key()}))
+    decision = _targeted_decision(tmp_path, lock, retained=[child.get_unique_key()])
+    assert decision.retained_keys == {parent.get_unique_key(), child.get_unique_key()}
+    cleanup._remove_dropped_package_dirs(ctx, decision)
     assert (tmp_path / "acme/repo/skills/child").is_dir()
 
 
@@ -189,7 +207,7 @@ def test_unresolved_marketplace_declaration_does_not_block_module_removal(tmp_pa
     unresolved = MagicMock()
     unresolved.get_install_path.side_effect = ValueError("marketplace entry not resolved")
     ctx = _module_ctx(tmp_path, lock, declared=[unresolved])
-    cleanup._remove_dropped_package_dirs(
-        ctx, frozenset({dropped_dep.get_unique_key()}), frozenset()
-    )
+    decision = _targeted_decision(tmp_path, lock, materialized=[unresolved])
+    assert decision.removed_paths == ("acme/dropped",)
+    cleanup._remove_dropped_package_dirs(ctx, decision)
     assert not (tmp_path / "acme/dropped").exists()

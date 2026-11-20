@@ -184,7 +184,9 @@ def decide_orphan_removal(
         resolved_keys: Keys the complete resolution retains (targeted
             install); ``None`` when resolution was incomplete, which removes
             nothing.
-        intended: Manifest intent: declared references or resolved keys.
+        intended: Manifest intent: declared references or resolved keys. A
+            targeted install settles its resolve-time decision by passing
+            every previous key except the dropped descendants.
         materialized: References this run materializes in ``apm_modules``,
             whose copies removal must keep.
         reachability: Forward-walk inputs; the owner fails closed on an
@@ -220,6 +222,10 @@ def decide_orphan_removal(
     if operation is OrphanOperation.INSTALL:
         candidates = _intent_candidates(lockfile, intended)
         rescued = frozenset(lockfile.dependencies) - candidates - {_SELF_KEY}
+    elif intended is not None:
+        # Settling a targeted install: intent already excludes exactly the
+        # descendants the resolve-time decision dropped.
+        candidates, rescued = _intent_candidates(lockfile, intended), frozenset()
     else:
         candidates, rescued = _targeted_candidates(lockfile, roots, resolved_keys)
     return _settle_install(
@@ -238,7 +244,7 @@ def _intent_keys(
 ) -> set[str]:
     """Map manifest intent to lock keys, including a declaration's locked row."""
     keys: set[str] = set()
-    marketplace_index = lockfile.marketplace_index() if lockfile is not None else None
+    marketplace_index = None
     for entry in intended:
         if isinstance(entry, str):
             keys.add(entry)
@@ -246,6 +252,8 @@ def _intent_keys(
         key = entry.get_unique_key()
         keys.add(key)
         if lockfile is not None and (entry.is_marketplace or key.startswith("_marketplace/")):
+            if marketplace_index is None:
+                marketplace_index = lockfile.marketplace_index()
             locked = lockfile.get_dependency(key, marketplace_index=marketplace_index)
             if locked is not None:
                 keys.add(locked.get_unique_key())

@@ -286,25 +286,23 @@ def _orphan_decision(
     apm_modules_dir = getattr(ctx, "apm_modules_dir", None)
     lockfile = ctx.existing_lockfile
     partial = bool(ctx.only_packages)
-    if partial:
-        from apm_cli.install.package_selection import selected_removal_roots
-
-        roots = selected_removal_roots(ctx.only_packages, ctx.all_apm_deps, lockfile)
     return decide_orphan_removal(
         operation=OrphanOperation.TARGETED_INSTALL if partial else OrphanOperation.INSTALL,
-        roots=roots if partial else (),
+        roots=(),
         candidate_universe=lockfile,
         installed_paths=(
             InstalledPaths(root=apm_modules_dir, packages=None)
             if isinstance(apm_modules_dir, Path)
             else None
         ),
-        # Same evidence the resolve phase decided with: an incomplete
-        # resolution drops nothing.
-        resolved_keys=(
-            None if not partial or ctx.callback_failures else ctx.update_plan_complete_dep_keys
+        resolved_keys=None,
+        # A partial install settles the resolve phase's decision: every
+        # previous entry except the selected packages' dropped descendants.
+        intended=(
+            set(lockfile.dependencies) - frozenset(getattr(ctx, "partial_dropped_dep_keys", ()))
+            if partial
+            else ctx.intended_dep_keys
         ),
-        intended=None if partial else ctx.intended_dep_keys,
         materialized=materialized,
         reachability=None,
         deployment_claims=DeploymentClaims(live_files=surviving_files, retained=retained),
