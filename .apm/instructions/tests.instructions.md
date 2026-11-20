@@ -106,8 +106,9 @@ production code must follow (see
 
 - **Fold review follow-ups.** Review follow-ups on test changes are fixed and
   folded into the PR where they were found (or a successor PR in the same lane
-  if that PR already merged); do not file a follow-up issue. Only explicit
-  design or scope decisions may be tracked as issues.
+  if that PR already merged); do not file a follow-up issue. Only design or
+  scope decisions explicitly made by a maintainer (a human) may be tracked as
+  issues.
 
 - **Targeted runs during iteration.** Run the specific test file first
   (`uv run pytest tests/unit/install/test_X.py -x`) before running the

@@ -70,20 +70,20 @@ dependencies:
   - .agents/skills/autopilot-pr-merge-worker/references/mergeability-gate.md
   - .agents/skills/autopilot-pr-merge-worker/scripts/owner_touch_gate.py
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-merge-worker/SKILL.md: sha256:b5ebb1bde90fea920fdfb12961ffeafb23ba6ac7c98d42719215d8e61d4189b0
+    .agents/skills/autopilot-pr-merge-worker/SKILL.md: sha256:b46089049ea07557cb021e39f7824472af7966c44f56c63bb2dc7632f3e9ca08
     .agents/skills/autopilot-pr-merge-worker/apm.yml: sha256:e421410ed6fe9e77256036f998036bdad5b8706e1d185d8a0414d285f9f9cfa9
     .agents/skills/autopilot-pr-merge-worker/assets/ci-recovery-checklist.md: sha256:99a56f316d6f8c859703e281d4c8177771e47d642dc098da0d8441813336d59b
     .agents/skills/autopilot-pr-merge-worker/assets/completion-schema.json: sha256:6e0a06fa98f3e0544f5ebd6039da28f9cbdfeccd807565365b761265f8515a5c
     .agents/skills/autopilot-pr-merge-worker/assets/conflict-resolution-prompt.md: sha256:0fa203cd3d38d6728556970bb750e62b10ee8f399bbff70ed1a58aa2caaa82d3
     .agents/skills/autopilot-pr-merge-worker/assets/copilot-classification-prompt.md: sha256:911f8b2e2203d3847d08dbc52e34393b457c4d4b2486ea43847d609d092012ce
-    .agents/skills/autopilot-pr-merge-worker/assets/fold-vs-defer-rubric.md: sha256:ec1c9374d351a273080b2e18d31635143d8ca2ef1a5f58e5e310c25ee12e0b19
+    .agents/skills/autopilot-pr-merge-worker/assets/fold-vs-defer-rubric.md: sha256:a11249c76fa21a20c3c4f5e7757faab2df1e5baf4800aab367d59bee863a53e1
     .agents/skills/autopilot-pr-merge-worker/assets/pr-comment-templates.md: sha256:9306b9342e6fcce0ec68c72663461972267228c44f69b893e0f1848cd5ce7aed
     .agents/skills/autopilot-pr-merge-worker/assets/worker-prompt.md: sha256:80700a84005636a5b5966ee487d1b854cbd3c391f392a47300eb1b11cd2e5ccf
     .agents/skills/autopilot-pr-merge-worker/references/mergeability-gate.md: sha256:156f5eaaf1494b1aa23b9ac65e73bd06b5e44312c3cff0ded3b1ac0442ebfff3
     .agents/skills/autopilot-pr-merge-worker/scripts/owner_touch_gate.py: sha256:7cc26972deb8f44fb070c964ae28a289324ae5387a96bb442760fe0b2026f1e5
   source: local
   local_path: ./packages/autopilot/autopilot-pr-merge-worker
-  content_hash: sha256:c2d8546fe1b2d4eb8fe874d7929098cd9b4824064b607fbe222491be61bdee88
+  content_hash: sha256:71c36ff7f4c1786e71ac26af9cb6fdd7302fb265d5551cde4012dd7c007ee985
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-pr-review-scheduler
   name: autopilot-pr-review-scheduler
@@ -253,12 +253,12 @@ dependencies:
   - .agents/skills/autopilot-pr-review-worker/evals/trigger-evals.json
   - .agents/skills/autopilot-pr-review-worker/scripts/check_required_agents.py
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:c0b4f93271814a800aba4e476c4d32c3dbc76e4f20a0c5b3d370dbfbf72586fb
+    .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:9a3d8de1135b7cc2fa2e8ab95683b7b0e0481a10a516f794d5e43041649e1ce9
     .agents/skills/autopilot-pr-review-worker/apm.yml: sha256:9af47f3903be23621b93f8892a2918a83b32bab24756243a43592e60f111c09e
     .agents/skills/autopilot-pr-review-worker/assets/ceo-return-schema.json: sha256:30e38bcb18cfdca8d5d56b384febf84e726e7376872d75e194277d3e1cb12293
     .agents/skills/autopilot-pr-review-worker/assets/panel-mode.md: sha256:b222c0914f5eee985c74c56abb0d3028e92e5b5704872a99a4234fe839dca143
     .agents/skills/autopilot-pr-review-worker/assets/panelist-return-schema.json: sha256:6a6e9a3d4914be3c4c9635d534138cb078da366733d49eccb54bc9faddfe846b
-    .agents/skills/autopilot-pr-review-worker/assets/recommendation-template.md: sha256:7a6b8fd0f3dc86ccf8b58cb93233019b8ec8ae2731e922f1b93b2dae2548ea72
+    .agents/skills/autopilot-pr-review-worker/assets/recommendation-template.md: sha256:d4f488c0c4b57cebe7d28102c9cdc90ded9e2cd8af6956a473a27f8b9e21cced
     .agents/skills/autopilot-pr-review-worker/assets/shared-brief.example.json: sha256:ed29ab0264be660d1796d19b2c51aa974879743d1b5617afb86e1b7705a241f8
     .agents/skills/autopilot-pr-review-worker/evals/README.md: sha256:64f63f20aefeb2e864e15311567124400189c6d2e004aea676a6e674ac41bba8
     .agents/skills/autopilot-pr-review-worker/evals/fixtures/01-ship-now-pr1084-shape.json: sha256:108fc261680f17bdade3e2bdf8e64fc908d16a37ec9c29c53169b394530bdd67
@@ -275,7 +275,7 @@ dependencies:
   local_path: ../autopilot-pr-review-worker
   declaring_parent: ./packages/autopilot/autopilot-pr-review-scheduler
   anchored_local_path: packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:c5cdef1395dc7bc47e7d6314dfe6e99742a31a4f13c9bf48b0a3d0e137c266d7
+  content_hash: sha256:f3b81fb55a8c11f2099b8674dad33d2beaaa17212246663ba81354fd5e4fd170
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-pr-triage-worker
   name: autopilot-pr-triage-worker
@@ -949,7 +949,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-merge-worker
   active_owner: ./packages/autopilot/autopilot-pr-merge-worker
-  content_hash: sha256:b5ebb1bde90fea920fdfb12961ffeafb23ba6ac7c98d42719215d8e61d4189b0
+  content_hash: sha256:b46089049ea07557cb021e39f7824472af7966c44f56c63bb2dc7632f3e9ca08
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-merge-worker/apm.yml
@@ -1003,7 +1003,7 @@ deployments:
   owners:
   - ./packages/autopilot/autopilot-pr-merge-worker
   active_owner: ./packages/autopilot/autopilot-pr-merge-worker
-  content_hash: sha256:ec1c9374d351a273080b2e18d31635143d8ca2ef1a5f58e5e310c25ee12e0b19
+  content_hash: sha256:a11249c76fa21a20c3c4f5e7757faab2df1e5baf4800aab367d59bee863a53e1
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-merge-worker/assets/pr-comment-templates.md
@@ -1084,7 +1084,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:c0b4f93271814a800aba4e476c4d32c3dbc76e4f20a0c5b3d370dbfbf72586fb
+  content_hash: sha256:9a3d8de1135b7cc2fa2e8ab95683b7b0e0481a10a516f794d5e43041649e1ce9
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/apm.yml
@@ -1129,7 +1129,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:7a6b8fd0f3dc86ccf8b58cb93233019b8ec8ae2731e922f1b93b2dae2548ea72
+  content_hash: sha256:d4f488c0c4b57cebe7d28102c9cdc90ded9e2cd8af6956a473a27f8b9e21cced
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/assets/shared-brief.example.json
@@ -3244,7 +3244,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:03f9cc4100ad389488890e6c840532eba39a36900fb2a41d0c271698f05e84b2
+  content_hash: sha256:3cab56fa349c547a05183065853a9044d8da4b9a913067eabca15dab55ae363b
 local_deployed_files:
 - .agents/skills/apm-lifecycle-tests
 - .agents/skills/apm-lifecycle-tests/SKILL.md
@@ -3729,4 +3729,4 @@ local_deployed_file_hashes:
   .github/instructions/integrators.instructions.md: sha256:19919cbd04031a8a09be8aa0860aa941640b8313df74439e7bfac31310aa1b13
   .github/instructions/linting.instructions.md: sha256:eff0adddaba18a07be2ecb50fbc02003d7446e3633dc2c82659b2eba2328dd83
   .github/instructions/python.instructions.md: sha256:8acd2bb824eb8d70a1977dfef309a5a122b49320d22222dd8d3544ca08712bca
-  .github/instructions/tests.instructions.md: sha256:03f9cc4100ad389488890e6c840532eba39a36900fb2a41d0c271698f05e84b2
+  .github/instructions/tests.instructions.md: sha256:3cab56fa349c547a05183065853a9044d8da4b9a913067eabca15dab55ae363b

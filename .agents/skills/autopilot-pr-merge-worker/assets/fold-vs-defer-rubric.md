@@ -73,8 +73,9 @@ deferred_items:
 
 A deferral never becomes a follow-up issue for a review finding. Review
 follow-ups are fixed and folded into the PR where they were found (or a
-successor PR in the same lane if that PR already merged). Only an
-explicit design or scope decision may be tracked as an issue; name that
+successor PR in the same lane if that PR already merged). Only a design
+or scope decision explicitly made by a maintainer (a human) may be
+tracked as an issue; name that
 decision in `scope_boundary_crossed`.
 
 ## Anti-reasons for deferral (NEVER use these)

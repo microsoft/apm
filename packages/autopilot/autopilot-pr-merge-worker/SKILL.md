@@ -236,8 +236,9 @@ ONCE; on a second malformed return, mark the row blocked and continue.
   with a one-line boundary note.
 - No follow-up issues: review follow-ups are fixed and folded into the
   PR where they were found (or a successor PR in the same lane if that
-  PR already merged); do not file a follow-up issue. Only explicit
-  design or scope decisions may be tracked as issues.
+  PR already merged); do not file a follow-up issue. Only design or
+  scope decisions explicitly made by a maintainer (a human) may be
+  tracked as issues.
 - Mutation-break gate: every regression-trap test added is proven by
   deleting the guard it protects and confirming the test fails
   without it, then restoring the guard.
