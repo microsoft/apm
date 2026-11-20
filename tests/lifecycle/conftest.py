@@ -9,16 +9,33 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from tests.lifecycle import driver, oracles
 from tests.lifecycle.obligations import ReceiptWitnessPlugin, load_catalog
 from tests.lifecycle.world.fixtures import lifecycle_template, lifecycle_world
+from tests.quality.taxonomy import directory_marker
+from tests.quality.taxonomy_inventory_plugin import BEHAVIORAL_MARKERS
 from tests.utils.apm_lifecycle_runner import CommandResult
 
 __all__ = ["lifecycle_template", "lifecycle_world"]
 
 _PLUGIN_NAME = "lifecycle-receipts"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Apply the behavioral marker a lifecycle family directory determines (tm006)."""
+    root = Path(__file__).resolve().parents[2]
+    for item in items:
+        path = Path(str(item.fspath)).resolve()
+        if not path.is_relative_to(root):
+            continue
+        implied = directory_marker(path.relative_to(root).as_posix())
+        if implied and not any(item.get_closest_marker(name) for name in BEHAVIORAL_MARKERS):
+            item.add_marker(implied)
 
 
 def pytest_configure(config: pytest.Config) -> None:
