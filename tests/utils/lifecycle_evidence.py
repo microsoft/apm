@@ -370,9 +370,22 @@ def _scenario(*ids: str) -> Callable[[tuple[str, ...], str], bool]:
     return lambda _args, scenario_id: scenario_id in ids
 
 
+def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], bool]:
+    """Cell predicate: *command* runs inside one of the lifecycle scenarios *ids*."""
+    return lambda args, scenario_id: _command_name(args) == command and scenario_id in ids
+
+
 # Product defects the oracle observes on main; each one names its issue and
 # is keyed by the surface family (command, flags, output shape) it occurs in.
 KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
+    KnownOutputCell(
+        "audit-json-replay-error-has-no-json",
+        "I6",
+        "#4287",
+        _scenario_runs("audit", "root-source-replacement"),
+        r"JSON mode printed invalid JSON",
+        output=r"\A\Z",
+    ),
     KnownOutputCell(
         "install-no-policy-warning-per-phase",
         "I9",
