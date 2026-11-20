@@ -54,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` and `apm prune` remove deployment receipts under `~/.apm/deployment-receipts/` whose project directory no longer exists. (closes #4176, #4255)
 - `apm install` accepts unchanged skills after a branch or worktree switch, keeps skill files it does not rewrite, and names the recovery when it refuses. (#4258)
 - `apm update` names an installed local bundle it leaves untouched and says how to update it (`apm install <newer-bundle-file>`), instead of only reporting no APM dependencies. (#4338)
+- `apm uninstall` no longer prints the remaining packages' integration lines, unattributed and once per surviving package, when it rebuilds them. (#4160, #4338)
+- `apm uninstall` prints each output line at most once per cause when packages survive the removal. (#4219, #4338)
 - `apm update` re-verifies each marketplace dependency's recorded provenance against its registered catalog: it restores the catalog origin and digest, and refuses a lockfile whose provenance no longer matches. (#4338)
 - A top-level `workspaces:` key in `apm.yml` now gets a warning that names it as reserved for OpenAPM v0.2, and `dependencies.conflict_resolution: nest` refuses the install before anything is written. (#4283)
 - A lockfile whose `apm_version` is `unknown` now moves APM-written entries out of the retired `.github/mcp.json` and reports it, like a lockfile from an earlier known version. (#4283)
