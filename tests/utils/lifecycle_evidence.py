@@ -384,11 +384,6 @@ def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], 
     return lambda args, scenario_id: _command_name(args) == command and scenario_id in ids
 
 
-_FROZEN_MCP_TARGETING = r"\[i\] (?:Targeting (?:declared targets?|specific runtimes?)|Skipped targets without MCP support)"
-_POLICY_PHASE_BANNER = (
-    r"Policy enforcement disabled by --no-policy|Org policy at \S+ is present but empty"
-)
-
 # Product defects the oracle observes on main; each one names its issue and
 # is keyed by the surface family (command, flags, output shape) it occurs in.
 KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
@@ -401,31 +396,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A\Z",
     ),
     KnownOutputCell(
-        "install-policy-banner-per-phase",
-        "I9",
-        "#4241",
-        _runs("install"),
-        _POLICY_PHASE_BANNER,
-        # The APM and MCP phases each print the policy banner (--no-policy or an empty org policy).
-        output=rf"^\[!\] (?:{_POLICY_PHASE_BANNER}).*^  \[\+\] .*^\+- MCP Servers",
-    ),
-    KnownOutputCell(
-        "install-org-policy-banner-per-phase",
-        "I9",
-        "#4249",
-        _runs("install"),
-        r"\[!\] Policy: org:",
-        output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^\+- MCP Servers",
-    ),
-    KnownOutputCell(
-        "install-org-policy-banner-when-mcp-blocked",
-        "I9",
-        "#4267",
-        _runs("install"),
-        r"\[!\] Policy: org:",
-        output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^  \[x\] \d+ dependenc\w* blocked by org policy",
-    ),
-    KnownOutputCell(
         "approve-org-policy-warning-twice",
         "I9",
         "#4178",
@@ -433,15 +403,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         r"\[!\] (Org policy not applied|Using stale cached org policy)",
         # Only runs that print the same warning line twice (a single warning is correct).
         output=r"^(\[!\] (?:Org policy not applied|Using stale cached org policy)[^\n]*)$.*^\1$",
-    ),
-    KnownOutputCell(
-        "install-frozen-mcp-targeting-twice",
-        "I9",
-        "#4196",
-        _runs("install", "--frozen"),
-        _FROZEN_MCP_TARGETING,
-        # Auto-detected targets print no targeting line, so there is nothing to repeat.
-        output=rf"\A(?=.*^\+- MCP Servers)(?=.*^{_FROZEN_MCP_TARGETING})",
     ),
     KnownOutputCell(
         "uninstall-unattributed-survivor-lines",
@@ -471,19 +432,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=(
             r"^(\[!\] Parked MCP server [^\n]*?(?:: denied|from transitive package)[^\n]*)$"
             r".*^\1$"
-        ),
-    ),
-    KnownOutputCell(
-        "install-hook-line-per-target",
-        "I9",
-        "#4243",
-        _runs("install"),
-        r"repeats a (line|diagnostic): '\|   ",
-        # One hook integrated into two targets that render it the same way (Claude
-        # and Windsurf, or a hook file) is listed once per target, back to back.
-        output=(
-            r"^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, \.windsurf/hooks\.json$"
-            r"|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n  \|   Hook file integrated: "
         ),
     ),
     KnownOutputCell(
