@@ -24,22 +24,21 @@ GUARD = "install-deployment-package-content-hash"
 OWNER = "src/apm_cli/utils/content_hash.py"
 RECORDER = "src/apm_cli/install/source_helpers.py"
 LOCKFILE = "src/apm_cli/deps/lockfile.py"
+PROMOTER = "src/apm_cli/install/phases/content_hash_stream.py"
+STREAM_RULE = "return existing is None or existing.framed_content_hashes"
 
 _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
     OWNER: (
         ('return relative.as_posix().encode("utf-8") + b"\\0" + mode', "frame path, NUL, mode"),
         ("hashlib.sha256(payload).digest()", "frame each file by its own digest"),
-        ("framed.update(_frame_entry(rel_path, payload))", "frame the package stream"),
+        ("framed_hasher.update(_frame_entry(rel_path, payload))", "frame the package stream"),
         (
             "hasher.update(_frame_entry(relative, path.read_bytes(), mode if include_mode",
             "frame native pins",
         ),
     ),
     RECORDER: (
-        (
-            "framed = existing is None or existing.framed_content_hashes",
-            "record in the lock stream",
-        ),
+        ("framed = records_framed_content_hashes(", "record in the stream owner's stream"),
         ("ctx.package_framed_hashes[dep_key] = digests.framed", "keep the promotion digest"),
     ),
     LOCKFILE: (
@@ -48,14 +47,19 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
             'framed_content_hashes=data.get("lockfile_version") == FRAMED_CONTENT_HASH_VERSION',
             "derive the stream from the lockfile version",
         ),
+        (STREAM_RULE, "own the recording stream rule"),
     ),
     "src/apm_cli/install/phases/lockfile.py": (
-        ("self._promote_content_hashes(lockfile)", "promote only in the lockfile phase"),
-        ('if getattr(self.ctx, "frozen", False)', "never promote under --frozen"),
+        ("promote_content_hashes(self.ctx, lockfile)", "promote only in the lockfile phase"),
         (
-            "return digests.framed if digests.legacy == dep.content_hash else None",
-            "re-hash verified rows",
+            "framed=records_framed_content_hashes(self.ctx.existing_lockfile)",
+            "flag built rows with the recording stream",
         ),
+    ),
+    PROMOTER: (
+        ('if getattr(ctx, "frozen", False)', "never promote under --frozen"),
+        ("elif recorded_framed and dep.content_hash_framed:", "trust framed rows only from v4"),
+        ("framed = verified_framed_digest(", "re-hash carried rows only from verified bytes"),
     ),
     "src/apm_cli/deps/carried_license.py": (("framed=framed", "verify in the row's stream"),),
     "src/apm_cli/install/phases/_redownload.py": (
@@ -83,6 +87,30 @@ _OWNED_DEFINITIONS = re.compile(
 )
 _TREE_HASHER = re.compile(r"\.update\(.*\.as_posix\(\)\.encode\(")
 _RAW_COMPARE = re.compile(r"compute_package_hash\([^)]*\)\s*[!=]=|[!=]=\s*compute_package_hash\(")
+_STREAM_CALL = re.compile(
+    r"(?<![\w.])(?:\w+\.)?(compute_package_hash|verify_package_hash|compute_local_package_hash)\("
+)
+
+
+def _calls_without_stream(text: str) -> list[int]:
+    """Line numbers of package-hash calls whose arguments do not name ``framed=``."""
+    lines: list[int] = []
+    for match in _STREAM_CALL.finditer(text):
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        if (
+            text[: match.start()].rstrip().endswith("def")
+            or "#" in text[line_start : match.start()]
+        ):
+            continue
+        depth, end = 1, match.end()
+        while end < len(text) and depth:
+            depth += {"(": 1, ")": -1}.get(text[end], 0)
+            end += 1
+        if "framed=" not in text[match.end() : end]:
+            lines.append(text.count("\n", 0, match.start()) + 1)
+    return lines
+
+
 _RECORD_WRITE = re.compile(r"package_(framed_)?hashes\[[^\]]+\]\s*=(?!=)")
 
 
@@ -95,9 +123,15 @@ def _closed_world(provider: FactsProvider) -> list[Violation]:
         if failures:
             findings.extend(failures)
             continue
-        for number, line in enumerate(getattr(facts, "lines", ()), start=1):
+        lines = getattr(facts, "lines", ())
+        if path != OWNER:
+            for number in _calls_without_stream("\n".join(lines)):
+                findings.append(_summary(GUARD, path, f"line {number}: pass the stream as framed="))
+        for number, line in enumerate(lines, start=1):
             reason = None
-            if path != OWNER and (_OWNED_DEFINITIONS.search(line) or _TREE_HASHER.search(line)):
+            if path != LOCKFILE and STREAM_RULE.removeprefix("return ") in line:
+                reason = "ask deps.lockfile.records_framed_content_hashes for the stream"
+            elif path != OWNER and (_OWNED_DEFINITIONS.search(line) or _TREE_HASHER.search(line)):
                 reason = "hash package trees only in utils/content_hash.py"
             elif path != OWNER and _RAW_COMPARE.search(line):
                 reason = "verify a recorded hash with verify_package_hash in the row's stream"

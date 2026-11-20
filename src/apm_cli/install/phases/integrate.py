@@ -237,7 +237,7 @@ def _resolve_download_strategy(
     if _already_resolved_sha_match and receipt and receipt[0] == install_path.resolve():
         from apm_cli.utils.content_hash import verify_package_hash
 
-        if verify_package_hash(install_path, receipt[1]):
+        if verify_package_hash(install_path, receipt[1], framed=True):
             content_hash_already_verified = True
             ctx.content_hash_verified_deps.add(dep_key)
 

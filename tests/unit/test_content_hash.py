@@ -194,14 +194,14 @@ class TestVerifyPackageHash:
         """Verification passes when content matches."""
         (tmp_path / "a.txt").write_text("hello")
         expected = compute_package_hash(tmp_path)
-        assert verify_package_hash(tmp_path, expected) is True
+        assert verify_package_hash(tmp_path, expected, framed=True) is True
 
     def test_mismatched_hash(self, tmp_path):
         """Verification fails when content changed."""
         (tmp_path / "a.txt").write_text("original")
         expected = compute_package_hash(tmp_path)
         (tmp_path / "a.txt").write_text("tampered")
-        assert verify_package_hash(tmp_path, expected) is False
+        assert verify_package_hash(tmp_path, expected, framed=True) is False
 
     def test_missing_file_fails(self, tmp_path):
         """Verification fails when file is deleted."""
@@ -209,14 +209,14 @@ class TestVerifyPackageHash:
         (tmp_path / "b.txt").write_text("more")
         expected = compute_package_hash(tmp_path)
         (tmp_path / "b.txt").unlink()
-        assert verify_package_hash(tmp_path, expected) is False
+        assert verify_package_hash(tmp_path, expected, framed=True) is False
 
     def test_added_file_fails(self, tmp_path):
         """Verification fails when an extra file is added."""
         (tmp_path / "a.txt").write_text("data")
         expected = compute_package_hash(tmp_path)
         (tmp_path / "extra.txt").write_text("injected")
-        assert verify_package_hash(tmp_path, expected) is False
+        assert verify_package_hash(tmp_path, expected, framed=True) is False
 
 
 # ---------------------------------------------------------------------------

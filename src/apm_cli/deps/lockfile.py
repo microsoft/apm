@@ -333,6 +333,11 @@ def has_conflict_markers(text: str) -> bool:
     return _CONFLICT_MARKER_RE.search(text) is not None
 
 
+def records_framed_content_hashes(existing: LockFile | None) -> bool:
+    """Stream an install records package hashes in: the existing lockfile's, framed if new."""
+    return existing is None or existing.framed_content_hashes
+
+
 def require_supported_lockfile_version(data: object) -> str:
     """Return a supported declared version or fail closed.
 

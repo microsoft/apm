@@ -79,3 +79,24 @@ def test_native_hash_refuses_publisher_symlinks(tmp_path: Path, position: str) -
         hashed = source
     with pytest.raises(PathTraversalError, match="refuses symlink"):
         compute_native_bundle_hash(hashed)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Git owner executable-bit observation requires POSIX")
+def test_native_pins_keep_their_values_through_the_shared_framing(tmp_path: Path) -> None:
+    """Hash framing hardening must not move existing native plugin pins (#4000)."""
+    from apm_cli.utils.content_hash import compute_native_plugin_hash, compute_native_plugin_pin
+
+    (tmp_path / "run.sh").write_bytes(b"#!/bin/sh\necho ok\n")
+    (tmp_path / "run.sh").chmod(0o755)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "a.md").write_bytes(b"alpha\r\n")
+    (tmp_path / "docs" / "a.md").chmod(0o644)
+    (tmp_path / ".claude-plugin").mkdir()
+    (tmp_path / ".claude-plugin" / "plugin.json").write_bytes(b'{"name":"p"}\n')
+
+    with_mode = "sha256:500baca30a4b08c81d71b912c325ed68a54c51855b157bdca0be271da7de7892"
+    assert compute_native_bundle_hash(tmp_path) == with_mode
+    assert compute_native_plugin_hash(tmp_path) == with_mode
+    assert compute_native_plugin_pin(tmp_path) == (
+        "sha256:84e6044326b475f5c05cc423b9dc0a907ee287ce45cda28be9bcb24ea145a192"
+    )

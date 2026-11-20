@@ -168,8 +168,9 @@ def record_package_digests(ctx: Any, dep_key: str, digests: Any) -> str:
     bytes this run accepted. The framed digest is kept beside it so the
     lockfile phase can promote the lock to version 4 without re-reading.
     """
-    existing = getattr(ctx, "existing_lockfile", None)
-    framed = existing is None or existing.framed_content_hashes
+    from apm_cli.deps.lockfile import records_framed_content_hashes
+
+    framed = records_framed_content_hashes(getattr(ctx, "existing_lockfile", None))
     ctx.package_hashes[dep_key] = digests.select(framed=framed)
     ctx.package_framed_hashes[dep_key] = digests.framed
     return ctx.package_hashes[dep_key]

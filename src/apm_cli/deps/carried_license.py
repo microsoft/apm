@@ -274,6 +274,26 @@ def verify_locked_package(
     )
 
 
+def verified_framed_digest(
+    package_root: Path, legacy_hash: str, records: Iterable[CarriedLicense]
+) -> str | None:
+    """Framed digest of a cached package whose legacy-stream hash still verifies.
+
+    Lockfile promotion to version 4 re-hashes a carried row only from bytes
+    that match its recorded version 1-3 hash and intact licence copies.
+    """
+    records = tuple(records or ())
+    try:
+        if not carried_copies_intact(package_root, records):
+            return None
+        digests = _content_hash.compute_package_digests(
+            package_root, exclude=carried_license_paths(records)
+        )
+    except (OSError, ValueError):
+        return None
+    return digests.framed if digests.legacy == legacy_hash else None
+
+
 def records_to_lock_data(records: Iterable[CarriedLicense]) -> list[dict[str, str]]:
     """Serialize carried licences for ``apm.lock.yaml``."""
     return [{"path": r.path, "source": r.source, "hash": r.hash} for r in records]

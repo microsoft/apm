@@ -570,6 +570,7 @@ def test_frozen_consumer_accepts_equivalent_local_content_hash_encodings(
     if hash_format == "legacy-envelope":
         promoted = runner.run(("install", "--no-policy"), cwd=consumer.root, env=environment)
         assert promoted.returncode == 0, promoted.stdout + promoted.stderr
+        assert 'lockfile_version "4"' in promoted.stdout + promoted.stderr
         rewritten = load_yaml(lockfile)
         assert rewritten["lockfile_version"] == "4"
         assert rewritten["dependencies"][0]["content_hash"] == framed

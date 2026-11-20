@@ -67,18 +67,31 @@ def compute_package_digests(package_path: Path, *, exclude: Collection[str] = ()
             download result or the lockfile record, never from disk, so the
             hash keeps describing the upstream payload.
     """
+    legacy, framed = _hash_package_tree(package_path, exclude, legacy=True, framed=True)
+    return PackageDigests(legacy, framed)
+
+
+def _hash_package_tree(
+    package_path: Path, exclude: Collection[str], *, legacy: bool, framed: bool
+) -> tuple[str, str]:
+    """Feed only the requested streams; an unrequested stream returns ``""``."""
     if not package_path.is_dir():
-        return PackageDigests(_EMPTY_HASH, _EMPTY_HASH)
-    legacy = hashlib.sha256()
-    framed = hashlib.sha256()
+        return (_EMPTY_HASH if legacy else ""), (_EMPTY_HASH if framed else "")
+    legacy_hasher = hashlib.sha256() if legacy else None
+    framed_hasher = hashlib.sha256() if framed else None
     for rel_path in _package_files(package_path):
         if exclude and rel_path.as_posix() in exclude:
             continue
         payload = (package_path / rel_path).read_bytes()
-        legacy.update(rel_path.as_posix().encode("utf-8"))
-        legacy.update(payload)
-        framed.update(_frame_entry(rel_path, payload))
-    return PackageDigests(f"sha256:{legacy.hexdigest()}", f"sha256:{framed.hexdigest()}")
+        if legacy_hasher is not None:
+            legacy_hasher.update(rel_path.as_posix().encode("utf-8"))
+            legacy_hasher.update(payload)
+        if framed_hasher is not None:
+            framed_hasher.update(_frame_entry(rel_path, payload))
+    return (
+        f"sha256:{legacy_hasher.hexdigest()}" if legacy_hasher else "",
+        f"sha256:{framed_hasher.hexdigest()}" if framed_hasher else "",
+    )
 
 
 def compute_package_hash(
@@ -95,7 +108,10 @@ def compute_package_hash(
     Returns:
         Hash string in format ``"sha256:<hex_digest>"``.
     """
-    return compute_package_digests(package_path, exclude=exclude).select(framed=framed)
+    legacy, framed_digest = _hash_package_tree(
+        package_path, exclude, legacy=not framed, framed=framed
+    )
+    return framed_digest if framed else legacy
 
 
 def _package_files(
@@ -290,7 +306,7 @@ def verify_package_hash(
     expected_hash: str,
     *,
     exclude: Collection[str] = (),
-    framed: bool = True,
+    framed: bool,
 ) -> bool:
     """Verify a package's content matches the expected hash.
 
