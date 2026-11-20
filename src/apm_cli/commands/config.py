@@ -8,7 +8,8 @@ from pathlib import Path
 
 import click
 
-from ..constants import APM_YML_FILENAME
+from apm_cli.core.scope import manifest_file
+
 from ..core.command_logger import CommandLogger
 from ..install.locking import serialized_lifecycle
 from ..version import get_version
@@ -248,7 +249,7 @@ def config(ctx):
             config_table.add_column("Value", style="cyan")
 
             # Show apm.yml if in project
-            if Path(APM_YML_FILENAME).exists():
+            if manifest_file(Path(".")).exists():
                 apm_config = _load_apm_config()
                 config_table.add_row("Project", "Name", apm_config.get("name", "Unknown"))
                 config_table.add_row("", "Version", apm_config.get("version", "Unknown"))
@@ -335,7 +336,7 @@ def config(ctx):
             # Fallback display
             logger.progress("Current APM Configuration:")
 
-            if Path(APM_YML_FILENAME).exists():
+            if manifest_file(Path(".")).exists():
                 apm_config = _load_apm_config()
                 click.echo(f"\n{HIGHLIGHT}Project (apm.yml):{RESET}")
                 click.echo(f"  Name: {apm_config.get('name', 'Unknown')}")

@@ -686,7 +686,9 @@ class APMPackage:
                 }
             elif group is not None:
                 data[dependency_key] = resolve_plugin_root_placeholders(group, package_path)
-        source_manifest = manifest_path or package_path / "apm.yml"
+        from apm_cli.core.scope import manifest_file
+
+        source_manifest = manifest_path or manifest_file(package_path)
         resolved_source = source_path.resolve() if source_path is not None else None
 
         from .manifest_contract import negotiate_manifest_contract

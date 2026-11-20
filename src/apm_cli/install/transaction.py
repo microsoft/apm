@@ -12,6 +12,7 @@ from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import acquire_lifecycle_lock
 from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.results import InstallDisposition, InstallResult
@@ -254,7 +255,7 @@ def resolution_for_context(ctx: Any) -> ResolutionStagingSession:
     """Return the context transaction's journal, creating a legacy adapter."""
     if ctx.transaction is None:
         ctx.transaction = InstallTransaction(
-            manifest_path=ctx.source_root / "apm.yml",
+            manifest_path=manifest_file(ctx.source_root),
             apm_modules_dir=ctx.apm_modules_dir,
             validation=None,
             logger=ctx.logger,
@@ -280,7 +281,7 @@ def transactional_pipeline(
                 manifest_path = get_manifest_path(scope)
                 modules_dir = get_modules_dir(scope)
             except (AttributeError, TypeError):
-                manifest_path = Path.cwd() / "apm.yml"
+                manifest_path = manifest_file(Path.cwd())
                 modules_dir = Path.cwd() / "apm_modules"
             transaction = InstallTransaction(
                 manifest_path=manifest_path,

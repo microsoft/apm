@@ -13,6 +13,8 @@ import click
 from colorama import Fore, Style
 from colorama import init as colorama_init
 
+from apm_cli.core.scope import manifest_file
+
 from ..agent_plugins.validation import is_valid_plugin_name as _is_valid_agent_plugin_name
 from ..constants import (
     APM_MODULES_DIR,
@@ -235,9 +237,10 @@ def _standalone_installed_packages(
         if p in lockfile_keys:
             standalone.append(p)
             continue
-        if (apm_modules_dir / p / APM_YML_FILENAME).exists() or (
-            apm_modules_dir / p / SKILL_MD_FILENAME
-        ).is_file():
+        if (
+            manifest_file(apm_modules_dir / p).exists()
+            or (apm_modules_dir / p / SKILL_MD_FILENAME).is_file()
+        ):
             standalone.append(p)
     return standalone
 
@@ -253,7 +256,7 @@ def _check_orphaned_packages():
         List[str]: List of orphaned package names in org/repo or org/project/repo format
     """
     try:
-        if not Path(APM_YML_FILENAME).exists():
+        if not manifest_file(Path(".")).exists():
             return []
 
         apm_modules_dir = Path(APM_MODULES_DIR)
@@ -264,7 +267,7 @@ def _check_orphaned_packages():
             from ..deps.lockfile import LockFile, get_lockfile_path
             from ..models.apm_package import APMPackage
 
-            apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+            apm_package = APMPackage.from_apm_yml(manifest_file(Path(".")))
             declared_deps = apm_package.get_all_apm_dependencies()
             lockfile = LockFile.read(get_lockfile_path(Path.cwd()))
             expected = _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir)
@@ -388,7 +391,7 @@ def _check_and_notify_updates():
 
 def _load_apm_config():
     """Load configuration from apm.yml."""
-    if Path(APM_YML_FILENAME).exists():
+    if manifest_file(Path(".")).exists():
         from ..models.manifest_io import load_manifest
 
         return load_manifest(APM_YML_FILENAME)
@@ -504,7 +507,7 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
     """
     cwd = (start or Path.cwd()).resolve()
     for candidate in (cwd, *cwd.parents):
-        manifest = candidate / "apm.yml"
+        manifest = manifest_file(candidate)
         if manifest.is_file():
             return manifest
     return None

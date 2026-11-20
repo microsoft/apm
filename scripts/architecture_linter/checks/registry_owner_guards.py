@@ -247,7 +247,7 @@ _APM_HOME_OWNER = "src/apm_cli/core/scope.py"
 
 _APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
     "src/apm_cli/config.py": "CONFIG_DIR = os.fspath(get_apm_home())",
-    "src/apm_cli/core/lifecycle_scripts.py": 'return get_apm_home() / "apm.yml"',
+    "src/apm_cli/core/lifecycle_scripts.py": "return get_manifest_path(InstallScope.USER)",
     "src/apm_cli/core/script_trust.py": 'return get_apm_home() / "scripts-trust.json"',
     "src/apm_cli/core/script_executors.py": 'return get_apm_home() / "logs" / "scripts.log"',
     "src/apm_cli/install/locking.py": "lock_path = get_apm_home() / _LIFECYCLE_LOCK_NAME",

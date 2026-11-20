@@ -6,6 +6,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 from ..constants import APM_MODULES_DIR, APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..core.deployment_ledger import DeploymentLedgerCodec
@@ -109,14 +111,14 @@ def prune(ctx, dry_run):
     logger = CommandLogger("prune", dry_run=dry_run)
     registration_token = _publish_native_registration(Path.cwd())
     try:
-        if not Path(APM_YML_FILENAME).exists():
+        if not manifest_file(Path(".")).exists():
             logger.error("No apm.yml found. Run 'apm init' first.")
             sys.exit(1)
 
         logger.start("Analyzing installed packages vs apm.yml...")
 
         try:
-            apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+            apm_package = APMPackage.from_apm_yml(manifest_file(Path(".")))
             from ..install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
 
             reconcile_scope_bundle_hooks(
@@ -508,7 +510,7 @@ def _publish_native_registration(project_root: Path):
     manifest_target = None
     with contextlib.suppress(Exception):
         manifest_target = package_target_selection(
-            APMPackage.from_apm_yml(project_root / APM_YML_FILENAME)
+            APMPackage.from_apm_yml(manifest_file(project_root))
         )
     try:
         targets = resolve_targets(project_root, user_scope=False, explicit_target=manifest_target)

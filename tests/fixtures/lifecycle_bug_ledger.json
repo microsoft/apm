@@ -529,6 +529,17 @@
         "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
         "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
       ]
+    },
+    {
+      "issue": 4087,
+      "fixed_in": "0.37.0",
+      "summary": "User-scope (-g) commands read policy settings from $HOME/apm.yml instead of the user manifest in $APM_HOME, and derived org policy from a git checkout at HOME, although the docs state user scope has no git remote.",
+      "failure_modes": ["routing", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_user_scope_manifest_lifecycle.py::test_global_fetch_failure_default_comes_from_user_manifest",
+        "tests/integration/test_user_scope_manifest_lifecycle.py::test_global_commands_do_not_discover_policy_from_home_git_remote"
+      ]
     }
   ],
   "lifecycle_contracts": [

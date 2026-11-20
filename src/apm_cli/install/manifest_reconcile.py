@@ -31,6 +31,8 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.scope import manifest_file
+
 from .helpers.reconciliation_scope import (
     _has_gated_resolver,
     _is_manifest_target,
@@ -402,7 +404,7 @@ def declared_target_profiles(
     from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
     from apm_cli.models.manifest_targets import read_manifest_target_declaration
 
-    declaration = read_manifest_target_declaration(project_root / "apm.yml", lenient=True)
+    declaration = read_manifest_target_declaration(manifest_file(project_root), lenient=True)
     if declaration is None:
         return None
     try:

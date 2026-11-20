@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import click
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import serialized_lifecycle, serialized_lifecycle_unless
 
 # Import existing APM components
@@ -257,7 +258,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     display_keys: dict[str, str] = {}
     declared_deps = []
     try:
-        apm_yml_path = apm_dir / APM_YML_FILENAME
+        apm_yml_path = manifest_file(apm_dir)
         if apm_yml_path.exists():
             project_package = APMPackage.from_apm_yml(apm_yml_path)
             declared_deps = project_package.get_all_apm_dependencies()
@@ -366,7 +367,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             continue
         if candidate.name.startswith(".") and candidate.parent != apm_modules_path:
             continue
-        has_apm_yml = (candidate / APM_YML_FILENAME).exists()
+        has_apm_yml = manifest_file(candidate).exists()
         has_skill_md = (candidate / SKILL_MD_FILENAME).exists()
         # A canonical Agent Plugin root is a package even though it carries
         # neither apm.yml nor a root SKILL.md -- it is installed as one unit.
@@ -454,7 +455,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         try:
             version = "unknown"
             if has_apm_yml:
-                package = APMPackage.from_apm_yml(candidate / APM_YML_FILENAME)
+                package = APMPackage.from_apm_yml(manifest_file(candidate))
                 version = package.version or "unknown"
             else:
                 version = _agent_plugin_version(candidate) or version
@@ -778,7 +779,7 @@ def _build_dep_tree(apm_dir):
     # Load project info
     project_name = DEFAULT_BOOTSTRAP_PROJECT_NAME
     try:
-        apm_yml_path = apm_dir / APM_YML_FILENAME
+        apm_yml_path = manifest_file(apm_dir)
         if apm_yml_path.exists():
             root_package = APMPackage.from_apm_yml(apm_yml_path)
             project_name = root_package.name
@@ -847,7 +848,7 @@ def _build_dep_tree(apm_dir):
     for candidate in sorted(apm_modules_path.rglob("*")):
         if not candidate.is_dir() or candidate.name.startswith("."):
             continue
-        has_apm = (candidate / APM_YML_FILENAME).exists()
+        has_apm = manifest_file(candidate).exists()
         has_skill = (candidate / SKILL_MD_FILENAME).exists()
         if not has_apm and not has_skill:
             continue
@@ -1132,7 +1133,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     from ...deps.lockfile_generator import require_current_cli
 
     require_current_cli(project_root, command="apm deps update")
-    apm_yml_path = project_root / APM_YML_FILENAME
+    apm_yml_path = manifest_file(project_root)
 
     if not apm_yml_path.exists():
         scope_hint = str(project_root) if global_ else "current directory"

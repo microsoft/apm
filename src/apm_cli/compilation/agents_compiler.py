@@ -10,6 +10,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple  # noqa: UP035
 
+from apm_cli.core.scope import manifest_file
+
 from ..core.target_catalog import accepted_target_values, get_target_capability
 from ..core.target_detection import (
     CompileTargetType,
@@ -189,7 +191,7 @@ class CompilationConfig:
         try:
             from pathlib import Path
 
-            if Path("apm.yml").exists():
+            if manifest_file(Path(".")).exists():
                 from ..utils.yaml_io import load_yaml
 
                 apm_config = load_yaml("apm.yml") or {}
