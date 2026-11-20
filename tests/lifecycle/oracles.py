@@ -535,11 +535,13 @@ def _i7_failure_preserves_state(
         found.append(Violation("I7", f"failed {op.name} changed the lockfile"))
     if after.deployed != before.deployed:
         found.append(Violation("I7", f"failed {op.name} changed deployed surfaces"))
+    report = _requested_report(result.command)
     changed = [
         path
         for path in _changed_paths(before.artifacts, after.artifacts)
         if path.split(":", 1)[1].rsplit("/", 1)[-1] not in {"apm.yml", "apm.lock.yaml"}
         and not any(_bookkeeping(path.split(":", 1)[1], prefix) for prefix in _FAILURE_BOOKKEEPING)
+        and path.split(":", 1)[1] != report
     ]
     if changed:
         found.append(Violation("I7", f"failed {op.name} changed durable files: {changed}"))
@@ -548,6 +550,24 @@ def _i7_failure_preserves_state(
             Violation("I7", f"failed {op.name} exited {result.returncode} without announcing why")
         )
     return found
+
+
+def _requested_report(command) -> str | None:
+    """The relative ``-o/--output`` file a command was asked to write, if any.
+
+    A failing ``audit --ci -o report.sarif`` still writes its report: that is
+    the output it was asked for, not state the failure changed.
+    """
+    args = list(command or ())
+    for index, arg in enumerate(args):
+        if arg in ("-o", "--output") and index + 1 < len(args):
+            value = args[index + 1]
+        elif arg.startswith("--output="):
+            value = arg.split("=", 1)[1]
+        else:
+            continue
+        return None if Path(value).is_absolute() else Path(value).as_posix()
+    return None
 
 
 def _bookkeeping(path: str, prefix: str) -> bool:

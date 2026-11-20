@@ -61,7 +61,7 @@ steps:
         - "..."
         - "| [!]      | dependency-allowlist     | 1 dependency(ies) not in allow list (enforcement: warn)     |"
         - "..."
-        - "12 check(s) passed; 1 reports violations under 'enforcement: warn' and fail once the policy switches to block."
+        - "13 check(s) passed; 1 reports violations under 'enforcement: warn' and fail once the policy switches to block."
     key_lines: ["| [!]      | dependency-allowlist", "[+] No drift detected"]
     forbidden_lines: ["[x]"]
   - n: 4
@@ -128,6 +128,11 @@ known_cells:
     tracking: "#4224"
     step: 4
     match: "exited 1 without an \\[x\\] or error line"
+  - id: e01-sarif-audit-fails-without-announcing-why
+    law: I7
+    tracking: "#4224"
+    step: 4
+    match: "exited 1 without announcing why"
   - id: e01-sarif-audit-prints-no-advice
     law: O8
     tracking: "#4224"
