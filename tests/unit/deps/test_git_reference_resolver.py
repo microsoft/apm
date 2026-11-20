@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import types
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -154,6 +155,28 @@ def _loopback_http_stub(
         server.server_close()
 
 
+@contextmanager
+def _competing_sleeper() -> Iterator[None]:
+    """Keep another thread calling time.sleep(0.001), as an xdist worker's
+    server or leaked threads do, for the whole block."""
+    stop = threading.Event()
+    slept = threading.Event()
+
+    def _sleep_loop() -> None:
+        while not stop.is_set():
+            time.sleep(0.001)
+            slept.set()
+
+    thread = threading.Thread(target=_sleep_loop, daemon=True)
+    thread.start()
+    try:
+        assert slept.wait(timeout=5), "competing sleeper never slept"
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=2)
+
+
 # ---------------------------------------------------------------------------
 # resolve_commit_sha_for_ref
 # ---------------------------------------------------------------------------
@@ -246,13 +269,14 @@ class TestResolveCommitShaForRef:
                 "resolve",
                 return_value=types.SimpleNamespace(token=None),
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep") as sleep,
+            patch("apm_cli.deps.download_strategies._backoff_sleep") as backoff,
+            _competing_sleeper(),
         ):
             result = downloader._refs.resolve_commit_sha_for_ref(dep, "main")
 
         assert result is None
         assert server.hits == 1
-        sleep.assert_not_called()
+        backoff.assert_not_called()
 
     def test_primary_http_transient_rate_limit_still_retries(self):
         """Primary HTTP work keeps the shared transient retry policy."""
@@ -265,14 +289,15 @@ class TestResolveCommitShaForRef:
 
         with (
             _loopback_http_stub(responses) as (server, api_url),
-            patch("apm_cli.deps.download_strategies.time.sleep") as sleep,
+            patch("apm_cli.deps.download_strategies._backoff_sleep") as backoff,
+            _competing_sleeper(),
         ):
             response = downloader._resilient_get(api_url, {}, timeout=1)
 
         assert response.status_code == 200
         assert response.content == sha
         assert server.hits == 2
-        sleep.assert_called_once_with(0.01)
+        backoff.assert_called_once_with(0.01)
 
 
 # ---------------------------------------------------------------------------

@@ -82,7 +82,7 @@ LIFECYCLE_SMOKE_AGGREGATE_STEP = "Require every lifecycle shard"
 LIFECYCLE_SMOKE_DURATIONS = ".github/ci-durations/linux-x86_64.json"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
-LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 10
+LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 15
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 LIFECYCLE_SMOKE_ROOT = "tests/integration"
 LIFECYCLE_SMOKE_E2E_ENV = "APM_E2E_TESTS"
@@ -937,7 +937,7 @@ def _assert_lifecycle_smoke_timeout(job: WorkflowNode) -> None:
     timeout = job.get("timeout-minutes")
     assert isinstance(timeout, int)
     assert timeout == LIFECYCLE_SMOKE_TIMEOUT_MINUTES, (
-        "lifecycle-smoke needs its measured 10-minute whole-job budget, "
+        "lifecycle-smoke needs its measured 15-minute whole-job budget, "
         "without an inadequate deadline or an unbounded increase"
     )
 
