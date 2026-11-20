@@ -37,9 +37,7 @@ _PLUGIN_CHANGES = (
 _PLUGIN_UNLOCKED = (
     "#4225 the user lockfile does not record the files a native Claude plugin deployed"
 )
-_UNINSTALL_SIBLING = (
-    "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
-)
+_UNINSTALL_SIBLING = "#4446 uninstall rebuild agreement on gated surfaces"
 _XFAIL = {
     **{
         f"G|{path}|{change}|native": _NOT_APPROVABLE

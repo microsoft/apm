@@ -77,11 +77,6 @@ ADO_PAT = "lifecyclesentineladopat".ljust(52, "q")
 MCP_SECRET = "lifecycle-mcp-header-sentinel-4b9e1c"
 
 
-def _pending(phrase: str) -> str:
-    """Reason of a strict expected failure whose tracking issue is maintainer-routed."""
-    return f"S-pending (neutral issue to follow): {phrase}"
-
-
 # -- credential arrangements -------------------------------------------------
 
 
@@ -369,10 +364,6 @@ _ORIGIN_STATE = (_ORIGIN_LOCK, _ORIGIN_MANIFEST, ".agents/skills/p-skill")
 _ORIGIN_GIT = ("git", "-c", "user.name=lifecycle", "-c", "user.email=lifecycle@example.invalid")
 
 
-def _origin_pending(phrase: str) -> str:
-    return f"S-pending (neutral issue to follow): {phrase}"
-
-
 def _origin_plugin(name: str, repo: str) -> dict:
     return {
         "name": name,
@@ -591,7 +582,7 @@ ORIGIN_ROWS: dict[str, _OriginExpect] = {
     "M|update|lock-row-edited": _OriginExpect(
         0,
         present=(_ORIGIN_SKILL,),
-        xfail=_origin_pending("update restores the recorded marketplace provenance"),
+        xfail="#4228 update restores the recorded marketplace provenance",
     ),
 }
 

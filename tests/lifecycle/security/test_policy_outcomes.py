@@ -488,7 +488,7 @@ _STALE_BLOCK = TRUST_BLOCK + r"org policy refresh failed and the cached policy"
 SKILL = ".agents/skills/p-skill/SKILL.md"
 HOOK = ".github/hooks/p-exec-session.json"
 
-_OFFLINE = "S-pending (neutral issue to follow): offline use of cached policy"
+_OFFLINE = "#4456 offline use of cached policy"
 _PARTIAL_UNINSTALL = "#4185 uninstall exits 1 after it already changed the manifest, lock and disk"
 _CHECK_FAILED = r"check\(s\) failed"
 _UNAVAILABLE = r"Org policy unavailable \("
@@ -870,7 +870,7 @@ SITE_SLICES["install-dry-run-preflight"] = SiteSlice(
             0,
             (KNOB_BLOCK,),
             unchanged=("*",),
-            xfail="S-pending (neutral issue to follow): dry-run preview of policy outcome",
+            xfail="#4455 dry-run preview of policy outcome",
         ),
         "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), unchanged=("*",)),
         "cache=cold": Expect(0, (DENIED,), unchanged=("*",), policy_fetch=True),
@@ -881,9 +881,7 @@ SITE_SLICES["install-dry-run-preflight"] = SiteSlice(
 )
 
 # commands/update.py -- the re-gate short circuit of an update with nothing to change.
-_SHORTCIRCUIT = (
-    "S-pending (neutral issue to follow): update and install exit agreement under policy"
-)
+_SHORTCIRCUIT = "#4458 update and install exit agreement under policy"
 SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
     arrange=_installed_parked_exec,
     command=lambda world: "apm update",

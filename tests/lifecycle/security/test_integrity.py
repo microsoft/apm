@@ -276,11 +276,6 @@ def _edit_files(name: str, edit: Callable[[str], str]) -> Callable[[Path], None]
     return change
 
 
-def _pending(phrase: str) -> str:
-    """Reason of a strict expected failure whose tracking issue is maintainer-routed."""
-    return f"S-pending (neutral issue to follow): {phrase}"
-
-
 @dataclass(frozen=True)
 class Tamper:
     """One out-of-band change; ``apply`` may register cleanups on the stack."""
@@ -306,7 +301,7 @@ class Expect:
     policy_fetch: bool | None = None
     # True: the op read the marketplace catalog over the network; False: it did not.
     catalog_fetch: bool | None = None
-    xfail: str | None = None  # _pending(<phrase>) -> strict expected failure
+    xfail: str | None = None  # "#<open issue> <phrase>" -> strict expected failure
     smoke: bool = False
 
 
@@ -918,7 +913,7 @@ def _repack_changed_bundle(world: World, stack: contextlib.ExitStack) -> None:
 
 
 _BUNDLE_PARKED = r"hooks are executable and not approved for this exact bundle content"
-_BUNDLE_RETIRES = _pending("bundle reinstall retires a hook whose approval no longer matches")
+_BUNDLE_RETIRES = "#4216 bundle reinstall retires a hook whose approval no longer matches"
 
 BUNDLE_APPROVAL_PINS = _bundle_slice(
     tampers={
@@ -1036,7 +1031,7 @@ def _change_upstream_policy(world: World, stack: contextlib.ExitStack) -> None:
     _expire_policy_cache(world)
 
 
-_PIN_CACHE = _pending("policy cache content verified against the pin before use")
+_PIN_CACHE = "#4218 policy cache content verified against the pin before use"
 _PIN_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill", ".github")
 
 POLICY_HASH_PIN = ArtifactSlice(

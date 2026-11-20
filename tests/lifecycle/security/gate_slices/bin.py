@@ -30,7 +30,7 @@ _ALL = (
     "policy-dep-deny",
     "revoke-approval",
 )
-_DRY_RUN = "S-pending (neutral issue to follow): dry-run preview of gate removal"
+_DRY_RUN = "#4454 dry-run preview of gate removal"
 _BUNDLE = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
 _BIN_UNLOCKED = (
     "#4225 the user lockfile does not record the bin/ files a marketplace plugin deployed"
