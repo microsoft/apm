@@ -19,6 +19,12 @@ from apm_cli.security.trust_fingerprint import hook_file_fingerprint
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.spec_conformance._helpers import assert_spec_contains
 
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-executable-trust-fingerprint"),
+]
+
+
 HOOK_ITEM = ".apm/hooks/guard.json"
 
 

@@ -16,6 +16,11 @@ from apm_cli.install.outcome import require_requested_components, uninstall_next
 from apm_cli.install.validation import inaccessible_package_reason
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-install-outcome"),
+]
+
 
 @pytest.mark.parametrize(
     ("user_scope", "package", "retry"),

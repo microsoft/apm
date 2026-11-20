@@ -25,6 +25,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-LAW-routing.authorized_targets_only"),
 ]
 
 _TARGET = "copilot"

@@ -34,6 +34,24 @@ if TYPE_CHECKING:
     from apm_cli.models.dependency.mcp import MCPDependency
 
 
+def _log_install_summary(logger, deployed, staged_instructions, skipped, targets) -> None:
+    """Report the file count and name the folders a local bundle install wrote to (#4192)."""
+    msg = f"Installed {len(deployed) + len(staged_instructions)} file(s) from local bundle"
+    if skipped:
+        msg += f" ({skipped} skipped)"
+    logger.success(msg)
+    if not deployed:
+        return
+    from .deployed_paths import destination_folders, destination_tree_lines
+
+    for line in destination_tree_lines(
+        f"{len(deployed)} file(s) deployed",
+        destination_folders(deployed, targets),
+        bool(getattr(logger, "verbose", False)),
+    ):
+        logger.tree_item(line)
+
+
 def install_local_bundle(
     *,
     bundle_info,
@@ -404,19 +422,7 @@ def install_local_bundle(
 
             lockfile.write(lockfile_path)
 
-        msg = f"Installed {len(deployed) + len(staged_instructions)} file(s) from local bundle"
-        if skipped:
-            msg += f" ({skipped} skipped)"
-        logger.success(msg)
-        if deployed:
-            from .deployed_paths import destination_folders, destination_tree_lines
-
-            for line in destination_tree_lines(
-                f"{len(deployed)} file(s) deployed",
-                destination_folders(deployed, targets),
-                bool(getattr(logger, "verbose", False)),
-            ):
-                logger.tree_item(line)
+        _log_install_summary(logger, deployed, staged_instructions, skipped, targets)
 
         # Issue #1207 D2.b: post-install compile hint for staged instructions.
         if staged_instructions and not dry_run:

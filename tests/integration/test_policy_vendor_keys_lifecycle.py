@@ -21,6 +21,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-LAW-outcome.status_matches_state"),
 ]
 
 _POLICY = """\

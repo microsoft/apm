@@ -23,6 +23,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-LAW-outcome.status_matches_state"),
 ]
 
 _POLICY = "name: org\nversion: 1.0.0\nenforcement: block\ndependencies:\n  deny: [evil/*]\n"

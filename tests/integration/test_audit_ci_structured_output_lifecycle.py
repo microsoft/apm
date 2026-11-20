@@ -23,6 +23,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-INV-I8", "P-LAW-outcome.status_matches_state"),
 ]
 
 _TARGET = "copilot"

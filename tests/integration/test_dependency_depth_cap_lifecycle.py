@@ -24,6 +24,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-INV-I7", "P-LAW-transaction.failed_command_preserves_state"),
 ]
 
 _TARGET = "copilot"
