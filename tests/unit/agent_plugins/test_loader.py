@@ -137,7 +137,7 @@ def test_inventory_accepts_portable_descriptor_mode_difference(
         )
 
     monkeypatch.setattr(
-        "apm_cli.agent_plugins.assets.os.fstat",
+        "os.fstat",
         fstat_with_different_permission_bits,
     )
 
@@ -169,7 +169,7 @@ def test_inventory_rejects_path_replacement_before_open(
         asset_path.write_text("replacement", encoding="utf-8")
         return real_open(path, flags)
 
-    monkeypatch.setattr("apm_cli.agent_plugins.assets.os.open", replace_then_open)
+    monkeypatch.setattr("os.open", replace_then_open)
 
     with pytest.raises(AssetInventoryError, match="changed during inventory"):
         AssetInventory(tmp_path).collect_file(asset_path)
@@ -703,8 +703,8 @@ def test_manifest_swap_to_symlink_is_rejected_before_read(
         manifest.symlink_to(moved)
         return real_open(path, flags)
 
-    monkeypatch.setattr("apm_cli.agent_plugins.io.os.O_NOFOLLOW", 0, raising=False)
-    monkeypatch.setattr("apm_cli.agent_plugins.io.os.open", swap_then_open)
+    monkeypatch.setattr("os.O_NOFOLLOW", 0, raising=False)
+    monkeypatch.setattr("os.open", swap_then_open)
 
     _assert_present_manifest_cannot_reach_claude(tmp_path, "changed during validation")
 
@@ -724,7 +724,7 @@ def test_manifest_swap_to_fifo_cannot_block_or_fall_back(
         os.mkfifo(manifest)
         return real_open(path, flags)
 
-    monkeypatch.setattr("apm_cli.agent_plugins.io.os.open", swap_then_open)
+    monkeypatch.setattr("os.open", swap_then_open)
 
     _assert_present_manifest_cannot_reach_claude(tmp_path, "regular file")
 

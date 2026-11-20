@@ -210,7 +210,7 @@ class TestAtomicWrite:
         """os.replace is called to atomically move the temp file."""
         pins = {"mkt/plug": "ref1"}
 
-        with patch("apm_cli.marketplace.version_pins.os.replace", wraps=os.replace) as mock_replace:
+        with patch("os.replace", wraps=os.replace) as mock_replace:
             save_ref_pins(pins, pins_dir=str(tmp_path))
             mock_replace.assert_called_once()
             args = mock_replace.call_args[0]

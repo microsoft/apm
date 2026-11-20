@@ -61,19 +61,19 @@ class TestRuntimeManagerIsRuntimeAvailable:
         binary_dir = tmp_path / "copilot"
         binary_dir.mkdir()
         # is_file() returns False for directories
-        with patch("apm_cli.runtime.manager.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             assert manager.is_runtime_available("copilot") is False
 
     def test_binary_in_system_path_returns_true(self, tmp_path):
         manager = RuntimeManager()
         manager.runtime_dir = tmp_path  # nothing here
-        with patch("apm_cli.runtime.manager.shutil.which", return_value="/usr/bin/copilot"):
+        with patch("shutil.which", return_value="/usr/bin/copilot"):
             assert manager.is_runtime_available("copilot") is True
 
     def test_binary_not_found_returns_false(self, tmp_path):
         manager = RuntimeManager()
         manager.runtime_dir = tmp_path
-        with patch("apm_cli.runtime.manager.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             assert manager.is_runtime_available("copilot") is False
 
 
@@ -81,7 +81,7 @@ class TestRuntimeManagerListRuntimes:
     def test_all_not_installed_when_nothing_found(self, tmp_path):
         manager = RuntimeManager()
         manager.runtime_dir = tmp_path
-        with patch("apm_cli.runtime.manager.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             result = manager.list_runtimes()
         assert set(result.keys()) == {"copilot", "codex", "llm", "gemini"}
         for name, info in result.items():  # noqa: B007
@@ -93,7 +93,7 @@ class TestRuntimeManagerListRuntimes:
         manager.runtime_dir = tmp_path
         binary = tmp_path / "codex"
         binary.write_text("fake")
-        with patch("apm_cli.runtime.manager.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             proc = MagicMock()
             proc.returncode = 1
             mock_run.return_value = proc
@@ -104,8 +104,8 @@ class TestRuntimeManagerListRuntimes:
     def test_runtime_found_in_system_path(self, tmp_path):
         manager = RuntimeManager()
         manager.runtime_dir = tmp_path
-        with patch("apm_cli.runtime.manager.shutil.which", return_value="/usr/bin/llm"):
-            with patch("apm_cli.runtime.manager.subprocess.run") as mock_run:
+        with patch("shutil.which", return_value="/usr/bin/llm"):
+            with patch("subprocess.run") as mock_run:
                 proc = MagicMock()
                 proc.returncode = 1
                 mock_run.return_value = proc
@@ -118,7 +118,7 @@ class TestRuntimeManagerListRuntimes:
         manager.runtime_dir = tmp_path
         binary = tmp_path / "llm"
         binary.write_text("fake")
-        with patch("apm_cli.runtime.manager.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             proc = MagicMock()
             proc.returncode = 0
             proc.stdout = "1.2.3\n"
@@ -131,7 +131,7 @@ class TestRuntimeManagerListRuntimes:
         manager.runtime_dir = tmp_path
         binary = tmp_path / "llm"
         binary.write_text("fake")
-        with patch("apm_cli.runtime.manager.subprocess.run", side_effect=Exception("timeout")):
+        with patch("subprocess.run", side_effect=Exception("timeout")):
             result = manager.list_runtimes()
         assert result["llm"]["version"] == "unknown"
 
@@ -143,7 +143,7 @@ class TestRuntimeManagerRemoveRuntime:
 
     def test_copilot_npm_success(self):
         manager = RuntimeManager()
-        with patch("apm_cli.runtime.manager.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             proc = MagicMock()
             proc.returncode = 0
             mock_run.return_value = proc
@@ -158,7 +158,7 @@ class TestRuntimeManagerRemoveRuntime:
 
     def test_copilot_npm_failure(self):
         manager = RuntimeManager()
-        with patch("apm_cli.runtime.manager.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             proc = MagicMock()
             proc.returncode = 1
             proc.stderr = "error"
@@ -168,7 +168,7 @@ class TestRuntimeManagerRemoveRuntime:
     def test_copilot_npm_exception(self):
         manager = RuntimeManager()
         with patch(
-            "apm_cli.runtime.manager.subprocess.run",
+            "subprocess.run",
             side_effect=Exception("npm not found"),
         ):
             assert manager.remove_runtime("copilot") is False

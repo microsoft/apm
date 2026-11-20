@@ -17,8 +17,16 @@ RULE_AQ001 = "AQ001_constant_assertion"
 RULE_AQ002 = "AQ002_broad_pytest_raises"
 RULE_AQ003 = "AQ003_unobserved_outcome"
 RULE_AQ004 = "AQ004_patches_owner_it_imports"
+RULE_AQ005 = "AQ005_global_patch_through_namespace"
 RULE_AQ006 = "AQ006_e2e_not_driving_installed_cli"
-EMPTY_RULES = {RULE_AQ001: {}, RULE_AQ002: {}, RULE_AQ003: {}, RULE_AQ004: {}, RULE_AQ006: {}}
+EMPTY_RULES = {
+    RULE_AQ001: {},
+    RULE_AQ002: {},
+    RULE_AQ003: {},
+    RULE_AQ004: {},
+    RULE_AQ005: {},
+    RULE_AQ006: {},
+}
 
 
 def _run(root: Path, baseline: Path, *extra: str) -> subprocess.CompletedProcess[str]:
@@ -441,3 +449,59 @@ def test_provisional_baseline_requires_explicit_allow(tmp_path: Path) -> None:
     assert provisional.stderr == ""
     assert finalized.returncode == 0
     assert finalized.stderr == ""
+
+
+def _write_project_module(root: Path, dotted: str) -> None:
+    path = root / "src" / Path(*dotted.split("."))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    (path.parent / "__init__.py").write_text("", encoding="utf-8")
+    path.with_suffix(".py").write_text("import os\nimport time\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        'patch("pkg.retry.time.sleep")',
+        'mock.patch("pkg.retry.subprocess.run", return_value=None)',
+        'patch.dict("pkg.retry.os.environ", {"A": "1"})',
+        'monkeypatch.setattr("pkg.retry.sys.platform", "win32")',
+        'patch(target="pkg.retry.os.path.exists")',
+    ],
+)
+def test_aq005_global_patch_through_project_namespace_fails(tmp_path: Path, call: str) -> None:
+    root = tmp_path / "repo"
+    _write_project_module(root, "pkg.retry")
+    _write_test(root, f"def test_sample(monkeypatch):\n    {call}\n")
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, EMPTY_RULES)
+
+    result = _run(root, baseline)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert f"tests/test_sample.py:2: {RULE_AQ005}" in result.stderr
+    assert "patch an owner seam, or the stdlib target itself" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        'patch("time.sleep")',
+        'patch("pkg.retry._backoff_sleep")',
+        'patch("pkg.types.Kind")',
+        'patch("pkg.retry.requests.get")',
+        'patch.object(retry.time, "sleep")',
+    ],
+)
+def test_aq005_allows_direct_seam_and_shadowing_targets(tmp_path: Path, call: str) -> None:
+    root = tmp_path / "repo"
+    _write_project_module(root, "pkg.retry")
+    _write_project_module(root, "pkg.types")
+    _write_test(root, f"def test_sample():\n    {call}\n")
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, EMPTY_RULES)
+
+    result = _run(root, baseline)
+
+    assert result.returncode == 0, result.stderr
+    assert "AQ005=0" in result.stdout

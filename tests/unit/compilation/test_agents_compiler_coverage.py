@@ -317,7 +317,7 @@ class TestWriteOutputFile(unittest.TestCase):
         # path. Parent directory is now auto-created by CompiledOutputWriter,
         # so we cannot rely on a missing-parent failure mode.
         with patch(
-            "apm_cli.utils.atomic_io.os.replace",
+            "os.replace",
             side_effect=OSError("simulated rename failure"),
         ):
             compiler._write_output_file(target, "content")
