@@ -1397,3 +1397,36 @@ def test_area_remediation_clears_the_reported_state(
     tmp_path: Path, apm_binary_path: Path, proof: _TextProof
 ) -> None:
     _check_text_proof(tmp_path, apm_binary_path, proof)
+
+
+def test_local_bundle_approval_hint_is_the_catalog_remedy_and_runs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4436: a parked bundle hook prints the catalog remedy; running it registers the hook."""
+    from apm_cli.core.remediation import LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED
+    from tests.integration._marketplace_pack_kit import MarketplacePackWorld, output
+    from tests.integration.test_local_bundle_hooks_lifecycle import _hook_entries, _packed_bundle
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("consumer", targets=("claude",))
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {}
+    dump_yaml(manifest, consumer / "apm.yml")
+
+    text = output(world.apm(consumer, "install", str(bundle), "--no-policy"))
+    remedy = LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED.bind(exec_type="hooks", manifest="apm.yml")
+    assert remedy.sentence() in text, text
+    assert not (consumer / ".claude" / "settings.json").exists()
+
+    # Run the printed remedy: add the printed key, then the printed command.
+    printed = re.search(r'allow: "([^"]+)": hooks: true', text)
+    assert printed is not None, text
+    assert re.sub(r"\s+", "", printed.group(1)) == key
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {"allow": {key: {"hooks": True}}}
+    dump_yaml(manifest, consumer / "apm.yml")
+    command = shlex.split(remedy.command.replace("<bundle-path>", str(bundle)))
+    world.apm(consumer, *command[1:], "--no-policy")
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+    world.apm(consumer, "audit", "--ci", "--no-policy")

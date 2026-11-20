@@ -1209,6 +1209,12 @@ BUNDLE_HOOKS_RETIRED = _entry(
     "redeploy its hooks",
     before="approve the bundle",
 )
+LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED = _entry(
+    "local-bundle-executables-unapproved",
+    "apm install <bundle-path>",
+    "register the approved {exec_type}",
+    before="add the key above under executables.allow in {manifest}",
+)
 MCP_UPDATE_FLAG = _entry("mcp-update-flag", "apm update", "update MCP entries")
 MCP_REGISTRY_URL_INVALID = _entry(
     "mcp-registry-url-invalid",

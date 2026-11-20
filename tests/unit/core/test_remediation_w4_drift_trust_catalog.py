@@ -60,6 +60,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "bundle-instructions-staged": "an informational hint every local bundle install with "
     "staged instructions prints; the advised compile does not silence it",
     "claude-plugin-cache-invalid": "needs a corrupted legacy Claude Plugin cache entry",
+    "local-bundle-executables-unapproved": "a manifest edit precedes the command; executed by "
+    "test_local_bundle_approval_hint_is_the_catalog_remedy_and_runs",
     "mcp-registry-url-invalid": "the retried --mcp install resolves against the live default "
     "MCP registry (network)",
     "mcp-update-flag": "usage refusal; the reported state is the flag combination, not "

@@ -749,18 +749,21 @@ def local_bundle_approval_hint(approval_key: str, exec_type: str, *, user_scope:
     Grants come from the scope's manifest: the project ``apm.yml``, or the
     user manifest (``$APM_HOME/apm.yml``) that ``apm install -g`` reads.
     """
+    from apm_cli.core.remediation import LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED
     from apm_cli.core.scope import InstallScope, get_manifest_path
 
     target = (
         f"the user manifest {get_manifest_path(InstallScope.USER)}" if user_scope else "apm.yml"
     )
+    remedy = LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED
+    if user_scope:
+        remedy = remedy.with_command("apm install -g <bundle-path>")
     return (
         f"To approve this exact local bundle, add to {target}:\n"
         "executables:\n"
         "  allow:\n"
         f'    "{approval_key}":\n'
-        f"      {exec_type}: true\n"
-        "Then rerun the install."
+        f"      {exec_type}: true\n" + remedy.bind(exec_type=exec_type, manifest=target).sentence()
     )
 
 
