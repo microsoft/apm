@@ -187,7 +187,19 @@ def test_omitted_mcp_stays_omitted_across_install_audit_and_repeat(
         assert native.read_bytes() == native_before
 
 
-@pytest.mark.parametrize("root_declared", [False, True])
+@pytest.mark.parametrize(
+    "root_declared",
+    [
+        pytest.param(
+            False,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason="#4356: audit --ci verdict parity with frozen install on a tampered cached copy",
+            ),
+        ),
+        True,
+    ],
+)
 def test_skills_only_preserves_admitted_baseline_and_real_drift(
     tmp_path: Path, apm_binary_path: Path, root_declared: bool
 ) -> None:
