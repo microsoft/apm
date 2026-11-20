@@ -483,11 +483,12 @@ HASH = r"(?i)policy hash mismatch"
 EMPTY = r"present but empty"
 DENIED = r"denied by pattern"
 TRUST_BLOCK = r"Blocked by org policy: "
+# A stale cached policy that declares fetch_failure=block blocks audit as it blocks install.
+_STALE_BLOCK = TRUST_BLOCK + r"org policy refresh failed and the cached policy"
 SKILL = ".agents/skills/p-skill/SKILL.md"
 HOOK = ".github/hooks/p-exec-session.json"
 
 _OFFLINE = "S-pending (neutral issue to follow): offline use of cached policy"
-_PIN_DISAGREE = "S-pending (neutral issue to follow): audit and install disagree on policy pin"
 _PARTIAL_UNINSTALL = "#4185 uninstall exits 1 after it already changed the manifest, lock and disk"
 _CHECK_FAILED = r"check\(s\) failed"
 _UNAVAILABLE = r"Org policy unavailable \("
@@ -768,11 +769,7 @@ SITE_SLICES["audit-ci"] = SiteSlice(
     classes={
         "cache_miss_fetch_fail/block": Expect(1, (r"Policy fetch failed: HTTP 503", _CI_FAILED)),
         "cache_miss_fetch_fail/warn": Expect(0, (r"enforcement skipped",)),
-        "hash_mismatch": Expect(
-            1,
-            (HASH,),
-            xfail=_PIN_DISAGREE,
-        ),
+        "hash_mismatch": Expect(1, (HASH,)),
         "absent/block": Expect(1, (r"No org policy found", _CI_FAILED)),
         "absent/warn": Expect(0),
         "no_git_remote/block": Expect(1, (r"Could not determine org from git remote", _CI_FAILED)),
@@ -786,7 +783,7 @@ SITE_SLICES["audit-ci"] = SiteSlice(
         "garbage_response/block": Expect(1, (r"is not a YAML mapping", _CI_FAILED)),
         "garbage_response/warn": Expect(0, (_unavailable("garbage_response"),)),
         "incomplete_chain": Expect(1, (r"Policy fetch failed: Policy chain incomplete",)),
-        "cached_stale/org-block": Expect(1, (_CHECK_FAILED,)),
+        "cached_stale/org-block": Expect(1, (_STALE_BLOCK,)),
         "cached_stale/warn": Expect(1, (_CHECK_FAILED,)),
         "cache=cold": Expect(1, (_CHECK_FAILED,), policy_fetch=True),
         "cache=warm-fresh": Expect(1, (_CHECK_FAILED,), policy_fetch=False),
@@ -948,7 +945,7 @@ SITE_SLICES["mcp-admission(trust.py)"] = SiteSlice(
         "no_git_remote/warn": Expect(0, (_CONSENT_OK,), forbids=(_UNAVAILABLE,)),
         "disabled": Expect(0, (_CONSENT_OK,), forbids=(_UNAVAILABLE,)),
         "found": Expect(1, (_CONSENT_OK, _CHECK_FAILED), forbids=(_UNAVAILABLE,)),
-        "cached_stale/org-block": Expect(1, (_CONSENT_OK, _CHECK_FAILED), forbids=(_UNAVAILABLE,)),
+        "cached_stale/org-block": Expect(1, (_STALE_BLOCK,)),
         "cached_stale/warn": Expect(1, (_CONSENT_OK, _CHECK_FAILED), forbids=(_UNAVAILABLE,)),
         "cache=cold": Expect(
             1, (_CONSENT_OK, _CHECK_FAILED), forbids=(_UNAVAILABLE,), policy_fetch=True
@@ -958,7 +955,7 @@ SITE_SLICES["mcp-admission(trust.py)"] = SiteSlice(
         ),
         "cache=stale<7d": Expect(1, (_CHECK_FAILED,), forbids=(_UNAVAILABLE,), xfail=_OFFLINE),
         "cache=stale>7d-or-expired": Expect(0, (_unavailable("cache_miss_fetch_fail"),)),
-        "hash_mismatch": Expect(1, (HASH,), xfail=_PIN_DISAGREE),
+        "hash_mismatch": Expect(1, (HASH,)),
     },
 )
 
