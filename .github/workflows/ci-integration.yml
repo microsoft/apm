@@ -19,10 +19,13 @@
 #     aggregates all PR-time signals. The check names produced by THIS
 #     workflow are not required at PR time; they run on the
 #     `gh-readonly-queue/main/*` SHA the merge queue creates.
-#   - This workflow intentionally does NOT trigger on pull_request,
-#     pull_request_target or push. Doing so would let a fork PR check out
-#     and run code with the secrets declared below, a supply-chain attack
-#     vector. Only merge_group and workflow_dispatch, forever.
+#   - It also runs on PRs labeled `full-integration` (labeling needs triage
+#     access). Every job is skipped on unlabeled PRs, and merge-gate.yml
+#     requires these checks at PR time only when the label is present. Add
+#     the label, then push, so the gate re-evaluates with it. Fork PRs never
+#     receive repository secrets on `pull_request`, so a labeled fork PR
+#     runs without them. Never add `pull_request_target` or `push`: those
+#     would hand secrets to PR code.
 #
 # Trust model:
 #   - merge_group only fires when a user with write access enqueues a PR.
@@ -42,7 +45,7 @@
 # Lanes (all on the tentative merge commit):
 #   - hermetic integration, duration-balanced shards planned by the same
 #     planner as build-release.yml (scripts/ci_sharding.py), while the binary
-#     builds; at most 8 shards, about 12-16 min end to end;
+#     builds; at most 12 shards, about 12-16 min end to end;
 #   - network-dependent integration in one small lane that retries only
 #     failed tests, so a DNS blip cannot fail a long hermetic shard;
 #   - release validation, in parallel with integration.
@@ -61,6 +64,15 @@ on:
     types: [ checks_requested ]
   # Rehearse the merge-time lanes on a branch head (write access only).
   workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+    types: [ labeled, synchronize, reopened ]
+
+# A newer push or label event on the same PR supersedes the older full run;
+# merge_group and dispatch runs are never cancelled.
+concurrency:
+  group: ci-integration-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -68,6 +80,7 @@ permissions:
 jobs:
   build:
     name: Build (Linux)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -108,10 +121,13 @@ jobs:
 
   # Plans duration-balanced hermetic shards while the binary builds. Same
   # planner and durations as build-release.yml's integration-plan: the
-  # nightly integration-durations artifact, or the committed seed. Durations
-  # are measured without --cov, so the target leaves room for its overhead.
+  # nightly integration-durations artifact, or the committed seed. Those are
+  # measured without --cov. Coverage barely slows the subprocess-driven
+  # lifecycle tests but slows the in-process architecture suites about 3x,
+  # so their weights are tripled before planning (merge-queue.json).
   integration-plan:
     name: Integration Shard Plan (Linux)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -146,10 +162,19 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
         run: |
+          python3 - <<'PY'
+          import json
+          durations = json.load(open("shard-plan/linux-x86_64.json"))
+          weighted = {
+              node: seconds * 3 if node.startswith("tests/integration/test_architecture") else seconds
+              for node, seconds in durations.items()
+          }
+          json.dump(weighted, open("shard-plan/merge-queue.json", "w"))
+          PY
           uv run --frozen python -m pytest tests/integration --collect-only -q \
             -p no:cacheprovider -p scripts.ci_sharding -m "$HERMETIC_MARK_EXPR" \
-            --shard-durations shard-plan/linux-x86_64.json --shard-plan-out shard-plan/plan.json \
-            --shard-target-seconds 420 --shard-workers 4 --shard-max 8 | tail -n 1
+            --shard-durations shard-plan/merge-queue.json --shard-plan-out shard-plan/plan.json \
+            --shard-target-seconds 300 --shard-workers 4 --shard-max 12 | tail -n 1
           cat shard-plan/plan.json
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
@@ -168,6 +193,7 @@ jobs:
 
   smoke-test:
     name: Smoke Test (Linux)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration')
     needs: [build]
     runs-on: ubuntu-24.04
     steps:
@@ -213,6 +239,7 @@ jobs:
 
   scaling-guards:
     name: Scaling Guards (Linux)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -239,6 +266,7 @@ jobs:
 
   integration-tests-shard:
     name: Integration Tests Shard ${{ matrix.shard }} (Linux)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration')
     needs: [build, smoke-test, integration-plan]
     runs-on: ubuntu-24.04
     strategy:
@@ -324,14 +352,14 @@ jobs:
           PYTEST_EXTRA_ARGS: >-
             -p scripts.ci_sharding
             --shard-count ${{ needs.integration-plan.outputs.count }} --shard-index ${{ matrix.shard }}
-            --shard-durations shard-plan/linux-x86_64.json
+            --shard-durations shard-plan/merge-queue.json
             -n 4 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0 --durations=15
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
         # Keep an outer cap above the runtime setup and sharded integration
         # suite so runner variance does not turn into an unbounded job.
-        timeout-minutes: 20
+        timeout-minutes: 25
 
       - name: Rename coverage data for shard
         if: always()
@@ -354,6 +382,7 @@ jobs:
   # lane. A failure re-runs only the failed tests, at most twice.
   integration-network:
     name: Integration Tests Network (Linux)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration')
     needs: [build, smoke-test]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -427,7 +456,7 @@ jobs:
   integration-tests:
     name: Integration Tests (Linux)
     needs: [integration-plan, integration-tests-shard, integration-network, scaling-guards]
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration'))
     runs-on: ubuntu-24.04
     steps:
       # Coverage summary runs first (with if: always()) so we get
@@ -505,6 +534,7 @@ jobs:
   # Validates the shipped binary in isolation, in parallel with integration.
   release-validation:
     name: Release Validation (Linux)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-integration')
     needs: [build, smoke-test]
     runs-on: ubuntu-24.04
     steps:

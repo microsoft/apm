@@ -4,7 +4,8 @@ merge-gate.yml's merge_group EXPECTED_CHECKS is the merge-time authority.
 Two guards keep it honest:
 
 * ``contracts-tooling-ci-merge-time-topology`` -- ci-integration.yml runs only
-  on merge_group / workflow_dispatch and shards through the build-release
+  on merge_group, workflow_dispatch and `full-integration`-labeled PRs (never
+  pull_request_target or push) and shards through the build-release
   planner, merge-gate.yml branches EXPECTED_CHECKS on merge_group, and
   tests/quality/test_ci_topology.py keeps the closed-world assertions that
   every merge_group check has exactly one merge_group producer.
@@ -29,12 +30,18 @@ _TOPOLOGY_GUARD = "tests/quality/test_ci_topology.py"
 _FRESHNESS_WORKFLOW = ".github/workflows/merge-queue-freshness.yml"
 _FRESHNESS_SCRIPT = "scripts/merge_queue_freshness.py"
 
-_SECRET_REACHING_TRIGGER = re.compile(r"^  (pull_request|pull_request_target|push):", re.MULTILINE)
+_SECRET_REACHING_TRIGGER = re.compile(r"^  (pull_request_target|push):", re.MULTILINE)
+_LABEL_GATE = (
+    "github.event_name != 'pull_request' || "
+    "contains(github.event.pull_request.labels.*.name, 'full-integration')"
+)
 
 _TOPOLOGY_NEEDLES: dict[str, tuple[str, ...]] = {
     _INTEGRATION: (
         "\n  merge_group:\n",
         "\n  workflow_dispatch:\n",
+        "\n  pull_request:\n",
+        _LABEL_GATE,
         "-p scripts.ci_sharding",
         "shard: ${{ fromJSON(needs.integration-plan.outputs.shards) }}",
         "--shard-count ${{ needs.integration-plan.outputs.count }}",

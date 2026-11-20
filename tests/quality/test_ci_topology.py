@@ -1578,7 +1578,7 @@ def test_macos_arm_split_drift_fails(release_workflow: WorkflowNode, mutation: s
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 MERGE_GATE_WAIT_STEP = "Wait for all required checks"
 MERGE_GROUP_EVENT = "merge_group"
-MERGE_TIME_TRIGGERS = frozenset({MERGE_GROUP_EVENT, "workflow_dispatch"})
+MERGE_TIME_TRIGGERS = frozenset({MERGE_GROUP_EVENT, "workflow_dispatch", "pull_request"})
 MERGE_TIME_PLAN_JOB = "integration-plan"
 MERGE_TIME_NETWORK_JOB = "integration-network"
 MERGE_TIME_FAN_IN_JOB = "integration-tests"
@@ -1586,7 +1586,7 @@ MERGE_TIME_PLAN_STEP = "Plan shards"
 MERGE_TIME_NETWORK_STEP = "Run network-dependent integration tests"
 MERGE_TIME_SHARD_MATRIX = "${{ fromJSON(needs.integration-plan.outputs.shards) }}"
 MERGE_TIME_SHARD_COUNT = "--shard-count ${{ needs.integration-plan.outputs.count }}"
-MERGE_TIME_MAX_SHARDS = "8"
+MERGE_TIME_MAX_SHARDS = "12"
 PLANNER_MARK_ENV = ("HERMETIC_MARK_EXPR", "NETWORK_MARK_EXPR")
 GLOBAL_COVERAGE_CHECK = "Coverage Combine (Linux)"
 GLOBAL_COVERAGE_JOB = "coverage-combine"
@@ -1597,7 +1597,9 @@ FRESHNESS_STEP = "Require a recent merge_group run"
 FRESHNESS_SCRIPT = "scripts/merge_queue_freshness.py"
 FRESHNESS_WINDOW_DAYS = "3"
 _EXPECTED_CHECKS_EXPRESSION = re.compile(
-    r"^\$\{\{\s*github\.event_name == 'merge_group' && '([^']+)' \|\| '([^']+)'\s*\}\}$"
+    r"^\$\{\{\s*github\.event_name == 'merge_group' && '([^']+)' \|\| "
+    r"contains\(github\.event\.pull_request\.labels\.\*\.name, 'full-integration'\) "
+    r"&& '([^']+)' \|\| '([^']+)'\s*\}\}$"
 )
 _MATRIX_REFERENCE = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}")
 
@@ -1610,7 +1612,8 @@ def _expected_checks(merge_gate: WorkflowNode) -> dict[str, tuple[str, ...]]:
     assert match, f"EXPECTED_CHECKS must branch on merge_group explicitly: {expression!r}"
     contexts = {
         MERGE_GROUP_EVENT: tuple(name.strip() for name in match.group(1).split(",")),
-        "pull_request": tuple(name.strip() for name in match.group(2).split(",")),
+        "pull_request_labeled": tuple(name.strip() for name in match.group(2).split(",")),
+        "pull_request": tuple(name.strip() for name in match.group(3).split(",")),
     }
     for event, names in contexts.items():
         assert all(names), f"{event} EXPECTED_CHECKS contains an empty name"
@@ -1631,11 +1634,17 @@ def _workflow_events(workflow: WorkflowNode) -> frozenset[str]:
 
 
 def _runs_on_merge_group(job: WorkflowNode) -> bool:
-    """A job-level condition that names another event excludes merge_group."""
+    """A job-level condition that pins another event excludes merge_group.
+
+    `github.event_name != 'pull_request' || ...` keeps merge_group;
+    `github.event_name == 'workflow_dispatch'` or `!= 'merge_group'` drops it.
+    """
     condition = str(job.get("if", ""))
-    if "github.event_name" not in condition:
-        return True
-    return f"== '{MERGE_GROUP_EVENT}'" in condition and f"!= '{MERGE_GROUP_EVENT}'" not in condition
+    pinned = set(re.findall(r"github\.event_name == '([a-z_]+)'", condition))
+    excluded = set(re.findall(r"github\.event_name != '([a-z_]+)'", condition))
+    if pinned and MERGE_GROUP_EVENT not in pinned:
+        return False
+    return MERGE_GROUP_EVENT not in excluded
 
 
 def _check_names(job_id: str, job: WorkflowNode) -> tuple[str, ...]:
@@ -1699,7 +1708,9 @@ def _assert_merge_group_checks_are_produced(
     )
     ambiguous = {name: producers[name] for name in merge_time if len(producers[name]) > 1}
     assert not ambiguous, f"merge_group checks produced by more than one job: {ambiguous}"
-    weaker = sorted(set(contexts["pull_request"]) - set(merge_time))
+    weaker = sorted(
+        (set(contexts["pull_request"]) | set(contexts["pull_request_labeled"])) - set(merge_time)
+    )
     assert not weaker, f"PR-time required checks missing from the merge-time gate: {weaker}"
 
 
@@ -1744,7 +1755,7 @@ def _assert_merge_time_integration_authority(
     assert network_env["PYTEST_MARK_EXPR"] == release["env"]["NETWORK_MARK_EXPR"]
 
     fan_in = workflow_job(integration, MERGE_TIME_FAN_IN_JOB)
-    assert fan_in.get("if") == "always()"
+    assert str(fan_in.get("if", "")).startswith("always() && ")
     assert set(fan_in["needs"]) >= {
         MERGE_TIME_PLAN_JOB,
         MERGE_GROUP_INTEGRATION_JOB,
@@ -1835,9 +1846,13 @@ def _gate_merge_time_checks(workflows: dict[str, WorkflowNode], names: str) -> N
     wait_step = workflow_step(
         workflow_job(workflows["merge-gate.yml"], "gate"), MERGE_GATE_WAIT_STEP
     )
-    pull_request = _expected_checks(workflows["merge-gate.yml"])["pull_request"]
+    contexts = _expected_checks(workflows["merge-gate.yml"])
+    labeled = ",".join(contexts["pull_request_labeled"])
+    unlabeled = ",".join(contexts["pull_request"])
     wait_step["env"]["EXPECTED_CHECKS"] = (
-        f"${{{{ github.event_name == 'merge_group' && '{names}' || '{','.join(pull_request)}' }}}}"
+        f"${{{{ github.event_name == 'merge_group' && '{names}' || "
+        "contains(github.event.pull_request.labels.*.name, 'full-integration') "
+        f"&& '{labeled}' || '{unlabeled}' }}}}"
     )
 
 
@@ -1915,7 +1930,7 @@ def test_pr_time_check_missing_from_merge_time_gate_fails(
         )
 
 
-@pytest.mark.parametrize("event", ["pull_request", "pull_request_target", "push"])
+@pytest.mark.parametrize("event", ["pull_request_target", "push"])
 def test_merge_time_integration_secret_reaching_trigger_fails(
     mutable_workflows: dict[str, WorkflowNode], event: str
 ) -> None:
@@ -2007,3 +2022,83 @@ def test_merge_queue_freshness_alarm_suppressed_fails(
 
     with pytest.raises(AssertionError):
         _assert_merge_queue_freshness_alarm(mutable_workflows[FRESHNESS_WORKFLOW])
+
+
+# Opt-in full integration before the queue (#4116): ci-integration.yml runs on
+# workflow_dispatch and on PRs labeled `full-integration`; merge-gate.yml
+# requires its checks at PR time only when that label is present.
+FULL_INTEGRATION_LABEL = "full-integration"
+FULL_INTEGRATION_GATE = (
+    "github.event_name != 'pull_request' || "
+    f"contains(github.event.pull_request.labels.*.name, '{FULL_INTEGRATION_LABEL}')"
+)
+FULL_INTEGRATION_CHECKS = (
+    "Build (Linux)",
+    "Smoke Test (Linux)",
+    "Integration Tests (Linux)",
+    "Release Validation (Linux)",
+)
+_GATE_CONTEXTS = re.compile(
+    r"^\$\{\{ github\.event_name == 'merge_group' && '([^']+)' \|\| "
+    r"contains\(github\.event\.pull_request\.labels\.\*\.name, 'full-integration'\) "
+    r"&& '([^']+)' \|\| '([^']+)' \}\}$"
+)
+
+
+def _integration_triggers(workflow: WorkflowNode) -> dict:
+    triggers = workflow["on"]
+    assert isinstance(triggers, dict)
+    return triggers
+
+
+def _assert_full_integration_opt_in(integration: WorkflowNode, merge_gate: WorkflowNode) -> None:
+    triggers = _integration_triggers(integration)
+    assert set(triggers) == {"merge_group", "workflow_dispatch", "pull_request"}, sorted(triggers)
+    assert triggers["pull_request"] == {
+        "branches": ["main"],
+        "types": ["labeled", "synchronize", "reopened"],
+    }
+    for job_id, job in integration["jobs"].items():
+        condition = str(job.get("if", ""))
+        assert FULL_INTEGRATION_GATE in condition, (
+            f"{job_id} must be skipped on PRs without the {FULL_INTEGRATION_LABEL} label"
+        )
+
+    wait = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")
+    match = _GATE_CONTEXTS.match(str(wait["env"]["EXPECTED_CHECKS"]))
+    assert match, "EXPECTED_CHECKS must branch on merge_group, then on the label"
+    merge_time, labeled, unlabeled = (
+        tuple(name.strip() for name in group.split(",")) for group in match.groups()
+    )
+    assert not set(FULL_INTEGRATION_CHECKS) & set(unlabeled)
+    assert labeled == (*unlabeled, *FULL_INTEGRATION_CHECKS)
+    assert set(FULL_INTEGRATION_CHECKS) <= set(merge_time)
+
+
+def test_ci_integration_can_be_dispatched() -> None:
+    integration = load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW)
+    assert "workflow_dispatch" in _integration_triggers(integration)
+
+
+def test_full_integration_label_runs_and_gates_only_labeled_prs() -> None:
+    _assert_full_integration_opt_in(
+        load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW),
+        load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml"),
+    )
+
+
+@pytest.mark.parametrize("mutation", ["ungated-job", "pull-request-target", "unlabeled-gate"])
+def test_full_integration_opt_in_drift_fails(mutation: str) -> None:
+    integration = deepcopy(load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW))
+    merge_gate = deepcopy(load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml"))
+    if mutation == "ungated-job":
+        del integration["jobs"]["build"]["if"]
+    elif mutation == "pull-request-target":
+        integration["on"]["pull_request_target"] = {"branches": ["main"]}
+    else:
+        wait = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")
+        expression = str(wait["env"]["EXPECTED_CHECKS"])
+        head, _, unlabeled = expression.rpartition(" || '")
+        wait["env"]["EXPECTED_CHECKS"] = f"{head} || 'Build (Linux),{unlabeled}"
+    with pytest.raises(AssertionError):
+        _assert_full_integration_opt_in(integration, merge_gate)
