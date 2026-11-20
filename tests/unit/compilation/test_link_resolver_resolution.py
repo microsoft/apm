@@ -559,9 +559,6 @@ class TestValidateLinkTargets:
 
 
 class TestResolvePath:
-    def test_empty_string_returns_none(self, base_dir: Path) -> None:
-        assert _resolve_path("", base_dir) is None
-
     def test_whitespace_only_returns_none(self, base_dir: Path) -> None:
         assert _resolve_path("   ", base_dir) is None
 

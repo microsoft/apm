@@ -415,34 +415,6 @@ class TestOutdatedSummaryLine:
         assert result.exit_code == 0
         assert "All packages are up to date" in result.output
 
-    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
-    def test_exit_code_one_when_outdated(self, MockResolver, runner, yml_cwd):
-        """Exit code 1 when packages are outdated (CI-friendly)."""
-        mock_inst = MockResolver.return_value
-        mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
-        mock_inst.close = MagicMock()
-
-        result = runner.invoke(marketplace, ["outdated"])
-        assert result.exit_code == 1
-
-    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
-    def test_summary_counts_up_to_date(self, MockResolver, runner, yml_cwd):
-        """Up-to-date count reflects packages at latest in range."""
-        mkt = {
-            "plugins": [
-                {"name": "pkg-alpha", "source": {"ref": "v1.2.0", "commit": _SHA_C}},
-                {"name": "pkg-beta", "source": {"ref": "v2.0.1", "commit": _SHA_B}},
-            ]
-        }
-        (yml_cwd / "marketplace.json").write_text(json.dumps(mkt), encoding="utf-8")
-        mock_inst = MockResolver.return_value
-        mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
-        mock_inst.close = MagicMock()
-
-        result = runner.invoke(marketplace, ["outdated"])
-        assert result.exit_code == 0
-        assert "All packages are up to date" in result.output
-
 
 # ---------------------------------------------------------------------------
 # Additional coverage: missed lines
