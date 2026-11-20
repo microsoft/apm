@@ -13,6 +13,8 @@ import pytest
 from apm_cli.deps.bare_cache import bare_clone_with_fallback, fetch_sha_into_bare
 from apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 def _git(cwd: Path, *args: str) -> str:
     result = subprocess.run(

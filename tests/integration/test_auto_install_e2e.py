@@ -24,6 +24,7 @@ import pytest
 E2E_MODE = os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes")
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.requires_e2e_mode,
     pytest.mark.requires_apm_binary,
     # Mutates os.environ["HOME"]; must be serialized on a single xdist worker.

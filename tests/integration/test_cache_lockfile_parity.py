@@ -34,6 +34,7 @@ import pytest
 from tests.utils.hermetic_packaged_sample import HermeticPackagedSample
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
 ]
 

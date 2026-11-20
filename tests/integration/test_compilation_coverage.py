@@ -21,6 +21,8 @@ from apm_cli.compilation.distributed_compiler import DistributedAgentsCompiler
 from apm_cli.compilation.link_resolver import LinkResolutionContext, UnifiedLinkResolver
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
+pytestmark = pytest.mark.component
+
 
 class TestContextOptimizerIntegration:
     """Integration tests for context optimizer with realistic project structures."""

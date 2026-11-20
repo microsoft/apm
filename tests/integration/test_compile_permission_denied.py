@@ -11,6 +11,8 @@ from apm_cli.compilation.constants import AGENTS_MD_GENERATED_MARKER
 
 from ..utils.constitution_fixtures import DEFAULT_CONSTITUTION, temp_project_with_constitution
 
+pytestmark = pytest.mark.e2e
+
 
 @pytest.mark.skipif(
     sys.platform == "win32", reason="Windows handles read-only directories differently"

@@ -11,6 +11,8 @@ import pytest
 from apm_cli.integration import PromptIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.integration
 class TestAutoIntegrationEndToEnd:

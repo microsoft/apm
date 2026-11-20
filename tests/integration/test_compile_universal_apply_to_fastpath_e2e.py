@@ -6,11 +6,15 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.compilation.context_optimizer import ContextOptimizer
 from apm_cli.compilation.inventory import CompileInventory
+
+pytestmark = pytest.mark.component
+
 
 UNIVERSAL_SENTINEL = "Universal fast path sentinel."
 EXPLICIT_SENTINEL = "Explicit all files sentinel."

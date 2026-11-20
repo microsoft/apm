@@ -22,6 +22,9 @@ from apm_cli.integration.canvas_integrator import (
     is_canvas_bundle_path,
 )
 
+pytestmark = pytest.mark.component
+
+
 # ------------------------------------------------------------------
 # Fixtures
 # ------------------------------------------------------------------

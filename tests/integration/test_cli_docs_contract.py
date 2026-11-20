@@ -6,8 +6,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from apm_cli.cli import cli
 from scripts.check_cli_docs import registry_docs_mismatches
+
+pytestmark = pytest.mark.component
+
 
 ROOT = Path(__file__).resolve().parents[2]
 CHECKER = ROOT / "scripts" / "check_cli_docs.py"

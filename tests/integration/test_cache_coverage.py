@@ -16,6 +16,8 @@ from apm_cli.cache.git_cache import GitCache
 from apm_cli.cache.paths import get_git_checkouts_path, get_git_db_path
 from apm_cli.cache.url_normalize import cache_shard_key
 
+pytestmark = pytest.mark.component
+
 
 class TestGitCacheShardinig:
     """Test git cache sharding and paths."""

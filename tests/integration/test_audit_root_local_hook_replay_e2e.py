@@ -18,6 +18,8 @@ from apm_cli.install.drift import (
 )
 from apm_cli.integration.targets import resolve_targets
 
+pytestmark = pytest.mark.component
+
 
 def _write_root_local_codex_hook_project(project: Path) -> None:
     """Create a project whose own .apm directory ships a Codex hook."""

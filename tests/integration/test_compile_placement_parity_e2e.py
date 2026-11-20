@@ -11,6 +11,9 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.compilation.context_optimizer import ContextOptimizer
 
+pytestmark = pytest.mark.component
+
+
 INSTRUCTIONS = {
     "src-ts": "src/**/*.ts",
     "vendor-ts": "vendor/**/*.ts",

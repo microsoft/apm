@@ -34,6 +34,9 @@ from apm_cli.commands.audit import (
 )
 from apm_cli.security.content_scanner import ScanFinding
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # _audit_outcome_cause
 # ---------------------------------------------------------------------------

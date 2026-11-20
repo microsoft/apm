@@ -24,6 +24,7 @@ from apm_cli.core.token_manager import GitHubTokenManager
 E2E_MODE = os.environ.get("APM_E2E_TESTS", "").lower() in ("1", "true", "yes")
 
 pytestmark = [
+    pytest.mark.unit,
     pytest.mark.integration,
     pytest.mark.requires_e2e_mode,
 ]

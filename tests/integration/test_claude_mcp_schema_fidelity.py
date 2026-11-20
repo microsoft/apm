@@ -39,6 +39,9 @@ import pytest
 
 from apm_cli.adapters.client.claude import ClaudeClientAdapter
 
+pytestmark = pytest.mark.component
+
+
 FIXTURES = Path(__file__).parent / "fixtures" / "claude_mcp_golden"
 
 

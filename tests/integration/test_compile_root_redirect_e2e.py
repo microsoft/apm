@@ -24,6 +24,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.e2e
+
 
 def _make_project(root: Path) -> None:
     (root / "apm.yml").write_text("name: root-redirect-e2e\nversion: 0.1.0\n", encoding="utf-8")
