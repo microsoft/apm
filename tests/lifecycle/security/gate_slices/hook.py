@@ -15,6 +15,7 @@ _ALL = (
     "revoke-approval",
 )
 _LOCAL = ("definition-changed", "local-deny", "revoke-approval")
+_BUNDLE = tuple(change for change in _ALL if change != "policy-dep-deny")
 _UPDATE_REDEFINED = "S-pending (neutral issue to follow): update and install agreement on gated surfaces after a definition change"
 _UPDATE_DEP_DENY = "S-pending (neutral issue to follow): update and install agreement on a policy-denied dependency"
 _UNINSTALL_SIBLING = (
@@ -28,6 +29,8 @@ _XFAIL = {
     **{f"G|dry-run|{change}|hook": _DRY_RUN for change in ("local-deny", "org-deny")},
     "G|dry-run|revoke-approval|hook": _DRY_RUN,
 }
+_BUNDLE_KEEPS = "S-pending (neutral issue to follow): reinstalling a local bundle keeps hook files the gate no longer allows"
+_XFAIL.update({f"G|bundle-install|{change}|hook": _BUNDLE_KEEPS for change in _BUNDLE})
 _SMOKE = {"G|install|revoke-approval|hook", "G|frozen|local-deny|hook"}
 
 # G path -> (changes with a row, surface files)
@@ -40,6 +43,8 @@ _PATHS = {
     "dry-run": (("local-deny", "org-deny", "revoke-approval"), _PROJECT),
     "install-g": (_LOCAL, _USER),
     "frozen-g": (_LOCAL, _USER),
+    # gate_paths/bundle_install.py: the hook of the local bundle p-exec:bundle.
+    "bundle-install": (_BUNDLE, _PROJECT),
 }
 
 SLICE = GateSlice(
