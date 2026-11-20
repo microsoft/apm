@@ -317,3 +317,12 @@ def test_packed_bundle_lock_names_the_packer(tmp_path, stamping):
     enriched = yaml.safe_load(enrich_lockfile_for_pack(source, "plugin", "all"))
     assert enriched["apm_version"] == "0.40.0"
     assert source.apm_version == "0.35.0"
+
+
+def test_noop_write_from_a_fresh_lock_keeps_the_recorded_stamp(tmp_path, stamping):
+    """A rebuilt but unchanged lock keeps its bytes and generator, never dropping the stamp."""
+    path = _older_lock(tmp_path, LockFile(apm_version="0.1.0", mcp_servers=["same"]))
+    before = path.read_bytes()
+    LockFile(mcp_servers=["same"]).write(path)
+    assert path.read_bytes() == before
+    assert stamping(path) == "0.1.0"

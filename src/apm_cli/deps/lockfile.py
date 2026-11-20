@@ -1799,7 +1799,10 @@ class LockFile:
             self.generated_at = datetime.now(UTC).isoformat()
         else:
             self.generated_at = None
-        if not unchanged and not _keeps_untranslated_mcp_stamp(self, existing):
+        if unchanged:
+            # A no-op keeps the recorded generator, even from a freshly built lock.
+            self.apm_version = existing.apm_version
+        elif not _keeps_untranslated_mcp_stamp(self, existing):
             # The generator gate's only signal: whoever changes it owns it (#3962).
             self.apm_version = installed_apm_version()
         serialized = self.to_yaml()
