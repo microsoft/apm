@@ -48,6 +48,7 @@ from apm_cli.core.remediation import (
     PROJECT_MANIFEST_MISSING,
     USER_MANIFEST_MISSING,
 )
+from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import serialized_lifecycle
 
 from ..core.command_logger import InstallLogger
@@ -189,12 +190,12 @@ def _run_lock(
     """Resolve dependencies and write apm.lock.yaml (bare ``apm lock``)."""
     import os
 
-    from apm_cli.core.scope import InstallScope, get_apm_dir
+    from apm_cli.core.scope import InstallScope, get_manifest_path
     from apm_cli.models.apm_package import APMPackage
 
     if global_:
         scope = InstallScope.USER
-        manifest_path = get_apm_dir(scope) / "apm.yml"
+        manifest_path = get_manifest_path(scope)
         if not manifest_path.is_file():
             _rich_error(
                 f"No apm.yml found in {manifest_path.parent}. {USER_MANIFEST_MISSING.sentence()}"
@@ -224,7 +225,7 @@ def _run_lock(
         os.chdir(project_root)
 
     try:
-        apm_package = APMPackage.from_apm_yml(Path("apm.yml"))
+        apm_package = APMPackage.from_apm_yml(manifest_file(Path(".")))
     except (FileNotFoundError, ValueError) as e:
         _rich_error(f"Failed to parse apm.yml: {e}")
         sys.exit(1)

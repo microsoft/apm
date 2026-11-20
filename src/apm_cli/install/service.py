@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.core import remediation
+from apm_cli.core.scope import manifest_file
 from apm_cli.install.request import InstallRequest
 from apm_cli.models.results import InstallDisposition
 
@@ -630,8 +631,8 @@ class InstallService:
                 # Only selected, verified local manifests can introduce further
                 # local declarations. Do not inspect orphan lock entries or
                 # expand local paths declared by untrusted remote packages.
-                if (source / "apm.yml").is_file():
-                    package = APMPackage.from_apm_yml(source / "apm.yml", source_path=source)
+                if manifest_file(source).is_file():
+                    package = APMPackage.from_apm_yml(manifest_file(source), source_path=source)
                     for child in package.get_apm_dependencies():
                         child = rules.bind(
                             child,

@@ -22,6 +22,8 @@ from typing import Any, Protocol
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.formats import BundleFormat
 from ..utils.yaml_io import load_yaml
 from .remediation import CLAUDE_PLUGIN_LAYOUT
@@ -187,7 +189,7 @@ class MarketplaceProducer:
         if source == ConfigSource.LEGACY_YML:
             yml_for_builder = project_root / "marketplace.yml"
         else:
-            yml_for_builder = project_root / "apm.yml"
+            yml_for_builder = manifest_file(project_root)
 
         mkt_opts = MktBuildOptions(
             dry_run=options.dry_run,

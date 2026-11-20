@@ -49,6 +49,7 @@ from apm_cli.core.remediation import (
     LOCKFILE_UNREADABLE,
     PROJECT_MANIFEST_MISSING,
 )
+from apm_cli.core.scope import manifest_file
 
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
@@ -661,7 +662,7 @@ def export_patch(out_dir, dry_run, verbose):
 def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbose: bool) -> None:
     project_root = Path.cwd()
 
-    if not (project_root / APM_YML_FILENAME).exists():
+    if not manifest_file(project_root).exists():
         logger.error(f"No {APM_YML_FILENAME} found. {PROJECT_MANIFEST_MISSING.sentence()}")
         sys.exit(1)
 

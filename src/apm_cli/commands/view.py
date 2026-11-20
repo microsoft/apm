@@ -14,8 +14,9 @@ import click
 from apm_cli.core.remediation import (
     DEPENDENCIES_NOT_INSTALLED,
 )
+from apm_cli.core.scope import manifest_file
 
-from ..constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
+from ..constants import APM_MODULES_DIR, SKILL_MD_FILENAME
 from ..core.auth import AuthResolver
 from ..core.command_logger import CommandLogger
 from ..deps.github_downloader import GitHubPackageDownloader
@@ -67,7 +68,7 @@ def resolve_package_path(
         logger.error(str(exc))
         return None
     if direct_match.is_dir() and (
-        (direct_match / APM_YML_FILENAME).exists() or (direct_match / SKILL_MD_FILENAME).exists()
+        manifest_file(direct_match).exists() or (direct_match / SKILL_MD_FILENAME).exists()
     ):
         return direct_match
 
@@ -378,7 +379,7 @@ def _display_registry_versions(
     try:
         from ..models.apm_package import APMPackage
 
-        apm_yml = Path(".") / "apm.yml"
+        apm_yml = manifest_file(Path("."))
         if apm_yml.is_file():
             pkg = APMPackage.from_apm_yml(apm_yml)
             project_registries = pkg.registries
@@ -517,7 +518,7 @@ def _effective_default_registry(project_root: Path) -> str | None:
     project_registries = None
     project_default = None
     try:
-        apm_yml = project_root / "apm.yml"
+        apm_yml = manifest_file(project_root)
         if apm_yml.is_file():
             from ..models.apm_package import APMPackage
 
@@ -588,7 +589,7 @@ def display_versions(
     # this prevents mis-routing when the user is outside an APM project or
     # running with --global (project_root=None).
     _pr = project_root if project_root is not None else Path(".")
-    if (_pr / "apm.yml").is_file():
+    if manifest_file(_pr).is_file():
         _, _, _locked_source = _lookup_lockfile_ref(package, _pr)
         if _locked_source == "registry":
             _display_registry_versions(package, dep_ref, logger)
@@ -607,9 +608,9 @@ def display_versions(
             _display_registry_versions(package, dep_ref, logger, registry_name=_default_reg)
             return
 
-    from ..deps.registry_proxy import is_enforce_only
+    from ..deps.egress_route import EgressSurface, is_refused
 
-    if is_enforce_only():
+    if is_refused(EgressSurface.SOURCE_ENUMERATION):
         logger.error(
             f"Cannot list versions for '{package}' in registry-only mode: "
             "APM does not list versions through the registry proxy and "

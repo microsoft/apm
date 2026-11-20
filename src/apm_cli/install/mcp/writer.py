@@ -14,7 +14,8 @@ from typing import Any, Union
 
 import click
 
-from ...constants import APM_YML_FILENAME
+from apm_cli.core.scope import manifest_file
+
 from ...core.null_logger import NullCommandLogger
 from ...core.remediation import PROJECT_MANIFEST_MISSING
 
@@ -68,7 +69,7 @@ def add_mcp_to_apm_yml(
     from ...utils.yaml_io import dump_yaml_roundtrip
 
     log = logger if logger is not None else NullCommandLogger()
-    apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
+    apm_yml_path = manifest_path or manifest_file(Path("."))
     if not apm_yml_path.exists():
         raise click.UsageError(
             f"{apm_yml_path}: no apm.yml found. {PROJECT_MANIFEST_MISSING.sentence()}"

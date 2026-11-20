@@ -134,10 +134,14 @@
     },
     {
       "id": "apm-home-resolution",
-      "decision": "APM-owned user metadata root",
-      "owner": "core/scope.py (get_apm_home)",
+      "decision": "APM-owned user metadata root, and which apm.yml is the manifest for a directory and a command scope (project root at project scope, $APM_HOME at user scope with no git remote); policy settings and discovery read that root, never the deploy root",
+      "owner": "core/scope.py (get_apm_home, manifest_file, get_manifest_path, manifest_root, scope_manifest_path, is_user_scope_root, policy_discovery_uses_git_remote)",
       "selectors": ["src/apm_cli/core/scope.py"],
-      "guards": ["registry-delegation-apm-home-resolution", "install-deployment-bundle-user-scope-root"]
+      "guards": [
+        "registry-delegation-apm-home-resolution",
+        "install-deployment-bundle-user-scope-root",
+        "registry-delegation-scope-manifest-path"
+      ]
     },
     {
       "id": "harness-user-root-resolution",

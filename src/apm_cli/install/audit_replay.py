@@ -24,6 +24,7 @@ from apm_cli.core.remediation import (
     USER_PACKAGE_COPIES_STALE,
     USER_PACKAGE_MATERIALIZATION_MISSING,
 )
+from apm_cli.core.scope import manifest_file
 from apm_cli.deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
 from apm_cli.install.drift import (
     CheckLogger,
@@ -107,7 +108,7 @@ def prepare_ci_audit_replay(
     from apm_cli.models.manifest_io import InvalidManifestError
 
     try:
-        manifest = APMPackage.from_apm_yml(project_root / "apm.yml")
+        manifest = APMPackage.from_apm_yml(manifest_file(project_root))
     except InvalidManifestError as exc:
         # Reported as a failed check, so JSON/SARIF output still renders.
         raise CiAuditReplayError(str(exc)) from exc
@@ -219,11 +220,11 @@ def resolve_ci_audit_materialization(
     MCP/LSP servers or the workspace's own content needs none, whichever of
     ``apm install -g`` or ``apm update -g`` wrote it (#3781).
     """
-    from apm_cli.constants import APM_MODULES_DIR, APM_YML_FILENAME
+    from apm_cli.constants import APM_MODULES_DIR
     from apm_cli.core.scope import get_workspace_deploy_root
 
     lockfile_path = get_lockfile_path(project_root)
-    if not (project_root / APM_YML_FILENAME).exists() or not lockfile_path.exists():
+    if not manifest_file(project_root).exists() or not lockfile_path.exists():
         return CiAuditMaterialization()
     warm = (project_root / APM_MODULES_DIR).exists()
     mismatches: tuple[str, ...] = ()

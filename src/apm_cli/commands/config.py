@@ -11,8 +11,8 @@ import click
 from apm_cli.core.remediation import (
     EXPERIMENTAL_FLAG_DISABLED,
 )
+from apm_cli.core.scope import manifest_file
 
-from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..install.locking import serialized_lifecycle
 from ..utils.credential_rendering import redact_secrets, render_config_value
@@ -281,7 +281,7 @@ def config(ctx):
             config_table.add_column("Value", style="cyan")
 
             # Show apm.yml if in project
-            if Path(APM_YML_FILENAME).exists():
+            if manifest_file(Path(".")).exists():
                 apm_config = _load_apm_config()
                 _add_table_row(config_table, "Project", "Name", apm_config.get("name", "Unknown"))
                 _add_table_row(config_table, "", "Version", apm_config.get("version", "Unknown"))
@@ -376,7 +376,7 @@ def config(ctx):
             # Fallback display
             logger.progress("Current APM Configuration:")
 
-            if Path(APM_YML_FILENAME).exists():
+            if manifest_file(Path(".")).exists():
                 apm_config = _load_apm_config()
                 click.echo(f"\n{HIGHLIGHT}Project (apm.yml):{RESET}")
                 _echo_setting("Name", apm_config.get("name", "Unknown"), indent="  ")

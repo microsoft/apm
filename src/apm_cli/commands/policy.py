@@ -191,13 +191,16 @@ def _build_report(
     result: PolicyFetchResult,
     chain: list[str],
     counts: dict[str, int],
+    *,
+    scope: str = "project",
 ) -> dict[str, Any]:
     """Assemble the structured report consumed by both renderers."""
     source_label = _redact_policy_ref(result.source) if result.source else "n/a"
-    if result.outcome in ("absent", "no_git_remote", "disabled"):
-        source_label = source_label or "n/a"
+    if scope == "user" and not result.source:
+        source_label = "none"
 
     return {
+        "scope": scope,
         "outcome": result.outcome or "unknown",
         "source": source_label,
         "enforcement": _enforcement_label(result),
@@ -226,6 +229,7 @@ def _render_json(report: dict[str, Any]) -> None:
 def _render_table(report: dict[str, Any]) -> None:
     """Render the report as a Rich table (with a plain-text fallback)."""
     rows = [
+        ("Scope", report["scope"]),
         ("Outcome", report["outcome"]),
         ("Source", report["source"]),
         ("Enforcement", report["enforcement"]),
@@ -329,7 +333,14 @@ def policy():
         "always 0 for human / SIEM use."
     ),
 )
-def status(policy_source, no_cache, as_json, output_format, check):
+@click.option(
+    "--global",
+    "-g",
+    "global_",
+    is_flag=True,
+    help="Show the user-scope (apm install -g) policy posture instead of the project's.",
+)
+def status(policy_source, no_cache, as_json, output_format, check, global_):
     """Render a diagnostic snapshot of the active APM policy.
 
     Default exit code is always 0 -- discovery failures are reported in
@@ -338,8 +349,10 @@ def status(policy_source, no_cache, as_json, output_format, check):
     no usable policy is resolved (anything other than ``outcome=found``),
     which is suitable for CI pre-checks.
     """
+    from ..core.scope import manifest_root
+
     logger = CommandLogger("policy status")
-    project_root = Path.cwd()
+    project_root = manifest_root(Path.cwd(), user_scope=global_)
 
     try:
         result = discover_policy_with_chain(
@@ -362,7 +375,7 @@ def status(policy_source, no_cache, as_json, output_format, check):
 
     chain = _resolve_chain_refs(result, project_root)
     counts = _count_rules(result.policy)
-    report = _build_report(result, chain, counts)
+    report = _build_report(result, chain, counts, scope="user" if global_ else "project")
 
     use_json = as_json or output_format.lower() == "json"
     try:

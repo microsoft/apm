@@ -42,6 +42,7 @@ from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
 
 from apm_cli.core.remediation import LIFECYCLE_SCRIPTS_UNTRUSTED
+from apm_cli.core.scope import manifest_file
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -435,15 +436,15 @@ def _get_policy_scripts_dir() -> Path:
 
 def _get_user_apm_yml() -> Path:
     """Return the user-level apm.yml path (~/.apm/apm.yml or $APM_HOME/apm.yml)."""
-    from apm_cli.core.scope import get_apm_home
+    from apm_cli.core.scope import InstallScope, get_manifest_path
 
-    return get_apm_home() / "apm.yml"
+    return get_manifest_path(InstallScope.USER)
 
 
 def _get_project_apm_yml(project_root: str | None = None) -> Path:
     """Return the project-level apm.yml path at the repo root."""
     root = Path(project_root) if project_root else Path.cwd()
-    return root / "apm.yml"
+    return manifest_file(root)
 
 
 def _load_scripts_from_dir(

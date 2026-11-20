@@ -13,6 +13,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
+from apm_cli.core.scope import manifest_file
+
 from ..core.remediation import (
     CONTENT_HASHES_MISSING,
     REQUIRED_PACKAGE_UNLOCKED,
@@ -52,7 +54,7 @@ def _load_raw_apm_yml(project_root: Path) -> dict | None:
     """
     import yaml
 
-    apm_yml_path = project_root / "apm.yml"
+    apm_yml_path = manifest_file(project_root)
     if not apm_yml_path.exists():
         return None
     try:
@@ -1666,7 +1668,7 @@ def run_policy_checks(
     result = CIAuditResult()
 
     # Load manifest
-    apm_yml_path = project_root / "apm.yml"
+    apm_yml_path = manifest_file(project_root)
     if not apm_yml_path.exists():
         return result
 

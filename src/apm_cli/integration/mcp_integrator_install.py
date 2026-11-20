@@ -25,6 +25,7 @@ from apm_cli.core.apm_yml import (
 )
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.core.remediation import MCP_REGISTRY_ALTERNATIVE
+from apm_cli.core.scope import manifest_file
 from apm_cli.core.target_catalog import accepted_target_values
 from apm_cli.install.errors import (
     InstallFailureAlreadyRendered,
@@ -1131,7 +1132,7 @@ def _resolve_target_runtimes(
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
         if apm_config is None:
-            apm_yml = project_root_path / "apm.yml"
+            apm_yml = manifest_file(project_root_path)
             try:
                 if apm_yml.exists():
                     apm_config = load_yaml(apm_yml)

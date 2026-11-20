@@ -16,6 +16,8 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
+
 from ..core.remediation import (
     PACK_DEPENDENCY_UNATTESTED,
     PACK_INSTALLED_FILES_MISSING,
@@ -932,7 +934,7 @@ def export_plugin_bundle(
     lockfile = LockFile.read(lockfile_path)
 
     # 2. Read apm.yml
-    apm_yml_path = project_root / "apm.yml"
+    apm_yml_path = manifest_file(project_root)
     package = APMPackage.from_apm_yml(apm_yml_path)
     pkg_name = package.name
     pkg_version = package.version or "0.0.0"

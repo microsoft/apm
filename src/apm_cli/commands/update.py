@@ -66,6 +66,7 @@ from apm_cli.core.remediation import (
     CLI_BINARY_OUTDATED,
     USER_MANIFEST_MISSING,
 )
+from apm_cli.core.scope import manifest_file
 
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger
@@ -162,7 +163,7 @@ def _executables_need_reconcile(
     if lockfile is None:
         return False
     from apm_cli.core.scope import InstallScope as _Scope
-    from apm_cli.core.scope import get_deploy_root, get_manifest_path
+    from apm_cli.core.scope import get_deploy_root, get_manifest_path, manifest_root
     from apm_cli.install.exec_gate import lock_exec_decisions_stale
     from apm_cli.integration.targets import resolve_audit_targets
 
@@ -170,7 +171,9 @@ def _executables_need_reconcile(
         from apm_cli.install.exec_gate import ExecPolicyUnavailable
         from apm_cli.policy.outcome_routing import classify_project_policy
 
-        route = classify_project_policy(get_deploy_root(scope))
+        route = classify_project_policy(
+            manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER)
+        )
         # A blocking or unresolved outcome fails toward running the install
         # gate, which routes the same outcome and reports it.
         if route.blocks or route.unresolved:
@@ -308,7 +311,7 @@ def _run_mcp_lsp_integration(
     from apm_cli.policy.install_preflight import PolicyBlockError
 
     clear_apm_yml_cache()
-    apm_package = APMPackage.from_apm_yml(Path("apm.yml"))
+    apm_package = APMPackage.from_apm_yml(manifest_file(Path(".")))
     effective_target = target_decision.value if target_decision is not None else None
 
     old_mcp_servers: set = set()
@@ -563,14 +566,14 @@ def update(
         apm update org/pkg-a org/pkg-b  # Refresh only the named packages
         apm update -g                   # Refresh user-scope deps (~/.apm/)
     """
-    from apm_cli.core.scope import InstallScope, get_apm_dir
+    from apm_cli.core.scope import InstallScope, get_manifest_path
     from apm_cli.integration.targets import should_use_legacy_skill_paths
 
     if global_:
         # User scope: operate on $APM_HOME/apm.yml. The cwd manifest walk and
         # the self-update back-compat shim apply only to project scope.
         scope = InstallScope.USER
-        manifest_path = get_apm_dir(scope) / "apm.yml"
+        manifest_path = get_manifest_path(scope)
         if not manifest_path.is_file():
             _rich_error(
                 f"No apm.yml found in {manifest_path.parent}. {USER_MANIFEST_MISSING.sentence()}"
@@ -738,7 +741,7 @@ def _run_dep_update_locked(
         scope = InstallScope.PROJECT
 
     try:
-        apm_package = APMPackage.from_apm_yml(Path("apm.yml"))
+        apm_package = APMPackage.from_apm_yml(manifest_file(Path(".")))
     except (FileNotFoundError, ValueError) as e:
         _rich_error(f"Failed to parse apm.yml: {e}")
         sys.exit(1)
@@ -796,7 +799,7 @@ def _run_dep_update_locked(
         if not revision_pin_updates or plan_state.revision_pins_applied:
             return
         try:
-            apply_revision_pin_updates(Path("apm.yml"), revision_pin_updates)
+            apply_revision_pin_updates(manifest_file(Path(".")), revision_pin_updates)
         except Exception as e:
             _rich_error(f"Failed to update apm.yml revision pins: {e}")
             sys.exit(1)

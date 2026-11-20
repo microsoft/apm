@@ -515,47 +515,23 @@ def build_ssh_url(
 def build_https_clone_url(
     host: str,
     repo_ref: str,
-    token: str | None = None,
     port: int | None = None,
 ) -> str:
-    """Build an HTTPS clone URL. If token provided, use x-access-token format (no escaping done).
+    """Build a credential-free HTTPS clone URL.
+
+    Credentials never travel in the URL; they are injected through git env
+    (``http.extraheader`` / credential helpers) by :class:`AuthResolver`.
 
     ``port`` is embedded in the netloc (``host:port``) when set so custom
     HTTPS ports (e.g. self-hosted Git servers on 8443) are preserved.
-    Returned Git-family URLs always carry the ``.git`` suffix, matching SSH,
-    plain-HTTP, and GitLab builders.
-
-    Note: callers must avoid logging raw token-bearing URLs.
+    Returned Git-family URLs always carry the ``.git`` suffix, matching the
+    SSH and plain-HTTP builders.
     """
     netloc = f"{host}:{port}" if port else host
-    if token:
-        # Use x-access-token format which is compatible with GitHub Enterprise and GH Actions
-        return f"https://x-access-token:{token}@{netloc}/{repo_ref}.git"
-    # Keep the .git suffix on the anonymous form too: hosts like GitBucket
-    # serve smart-HTTP only at the .git path (no redirect), while GitHub /
-    # GitLab / Bitbucket / Gitea accept both. This also keeps parity with
-    # the token, SSH, and plain-HTTP builders, which all emit .git.
+    # Keep the .git suffix: hosts like GitBucket serve smart-HTTP only at
+    # the .git path (no redirect), while GitHub / GitLab / Bitbucket / Gitea
+    # accept both. This also keeps parity with the SSH and plain-HTTP builders.
     return f"https://{netloc}/{repo_ref}.git"
-
-
-def build_gitlab_https_clone_url(
-    host: str,
-    repo_ref: str,
-    token: str,
-    port: int | None = None,
-) -> str:
-    """Build a GitLab-compatible HTTPS clone URL using oauth2 + PAT (not GitHub x-access-token).
-
-    GitLab accepts personal or OAuth tokens as the password with username ``oauth2``.
-    Values are URL-encoded so tokens may contain reserved characters.
-    ``port`` is embedded in the netloc when set for self-managed GitLab HTTPS.
-
-    Note: callers must avoid logging raw token-bearing URLs; use sanitizers on errors.
-    """
-    user = urllib.parse.quote("oauth2", safe="")
-    password = urllib.parse.quote(token, safe="")
-    netloc = f"{host}:{port}" if port else host
-    return f"https://{user}:{password}@{netloc}/{repo_ref}.git"
 
 
 # Azure DevOps URL builders
@@ -565,20 +541,19 @@ def build_ado_https_clone_url(
     org: str,
     project: str,
     repo: str,
-    token: str | None = None,
     host: str = "dev.azure.com",
     port: int | None = None,
 ) -> str:
-    """Build Azure DevOps HTTPS clone URL.
+    """Build a credential-free Azure DevOps HTTPS clone URL.
 
-    Azure DevOps accepts PAT as password with any username, or as bearer token.
     The standard format is: https://dev.azure.com/{org}/{project}/_git/{repo}
+    PATs and bearer tokens are injected through git env by
+    :class:`AuthResolver`, never embedded in the URL.
 
     Args:
         org: Azure DevOps organization name
         project: Azure DevOps project name
         repo: Repository name
-        token: Optional Personal Access Token for authentication
         host: Azure DevOps host (default: dev.azure.com)
         port: Optional non-default HTTPS port for Azure DevOps Server
 
@@ -588,9 +563,6 @@ def build_ado_https_clone_url(
     quoted_project = urllib.parse.quote(project, safe="")
     netloc = f"{host}:{port}" if port is not None else host
     org_path = "" if is_visualstudio_legacy_hostname(host) else f"{org}/"
-    if token:
-        # ADO uses PAT as password with empty username
-        return f"https://{token}@{netloc}/{org_path}{quoted_project}/_git/{repo}"
     return f"https://{netloc}/{org_path}{quoted_project}/_git/{repo}"
 
 

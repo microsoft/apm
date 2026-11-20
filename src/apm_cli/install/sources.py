@@ -32,6 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.primitive_classification import warn_unrecognized_plugin_schema
 from apm_cli.install.registry_wiring import (
@@ -129,7 +130,6 @@ class LocalDependencySource(DependencySource):
     def acquire(self) -> Materialization | None:
         from apm_cli.agent_plugins.errors import AgentPluginError
         from apm_cli.bundle.local_bundle import route_agent_plugin_package
-        from apm_cli.constants import APM_YML_FILENAME
         from apm_cli.core.scope import InstallScope
         from apm_cli.deps._shared import materialize_marketplace_manifest
         from apm_cli.deps.installed_package import (
@@ -239,7 +239,7 @@ class LocalDependencySource(DependencySource):
             details = "; ".join(validation.errors) or "validator returned no package"
             raise DirectDependencyError(f"Local Agent Plugin is invalid: {details}")
         elif validation.legacy_metadata_only:
-            local_apm_yml = install_path / APM_YML_FILENAME
+            local_apm_yml = manifest_file(install_path)
             local_pkg = APMPackage.from_apm_yml(
                 local_apm_yml,
                 source_path=original_src,
@@ -385,7 +385,6 @@ class CachedDependencySource(DependencySource):
     def acquire(self) -> Materialization | None:
         from apm_cli.agent_plugins.errors import AgentPluginError
         from apm_cli.bundle.local_bundle import route_agent_plugin_package
-        from apm_cli.constants import APM_YML_FILENAME
         from apm_cli.deps.installed_package import (
             InstalledPackage,
             extensions_from_resolved_package,
@@ -489,7 +488,7 @@ class CachedDependencySource(DependencySource):
                 )
             pkg_type = validation_result.package_type
         else:
-            apm_yml_path = install_path / APM_YML_FILENAME
+            apm_yml_path = manifest_file(install_path)
             pkg_type, _ = detect_package_type(install_path)
             pkg_type = preserve_normalized_marketplace_plugin_type(
                 install_path,

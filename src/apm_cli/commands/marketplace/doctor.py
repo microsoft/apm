@@ -8,6 +8,7 @@ from pathlib import Path
 from apm_cli.core.remediation import (
     MARKETPLACE_CONFIG_LEGACY,
 )
+from apm_cli.core.scope import manifest_file
 
 from ...core.command_logger import CommandLogger
 from ...marketplace.errors import MarketplaceYmlError
@@ -39,7 +40,7 @@ def _executable_trust_drift_check(
     is reported so the operator can repair ``apm.yml``. Points the operator at
     ``apm policy explain <pkg>`` for per-package detail.
     """
-    apm_path = project_root / "apm.yml"
+    apm_path = manifest_file(project_root)
     if not apm_path.is_file():
         return None
     try:
@@ -234,7 +235,7 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
 
     # Check 4: marketplace config presence + parsability
     project_root = Path.cwd()
-    apm_path = project_root / "apm.yml"
+    apm_path = manifest_file(project_root)
     legacy_path = project_root / "marketplace.yml"
     yml_obj = None
     config_passed = True

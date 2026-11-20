@@ -689,9 +689,9 @@ def outdated(global_, verbose, parallel_checks):
     elif has_unknown:
         logger.progress("Some dependencies could not be checked")
     if has_unknown:
-        from ..deps.registry_proxy import is_enforce_only
+        from ..deps.egress_route import EgressSurface, is_refused
 
-        if is_enforce_only():
+        if is_refused(EgressSurface.SOURCE_ENUMERATION):
             logger.info(
                 "PROXY_REGISTRY_ONLY is set: git dependencies cannot be checked for "
                 "newer versions because APM does not list versions through the registry proxy. "

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.scope import manifest_file
+
 if TYPE_CHECKING:
     from apm_cli.deps.dependency_graph import DependencyNode
     from apm_cli.install.context import InstallContext
@@ -217,7 +219,7 @@ def materialized_manifest_snapshot(
         or package_type == PackageType.MARKETPLACE_PLUGIN
     ):
         return package
-    manifest = install_path / "apm.yml"
+    manifest = manifest_file(install_path)
     if not manifest.exists():
         return package
 

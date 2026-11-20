@@ -261,6 +261,13 @@ def self_update(check: bool) -> None:
                 logger.progress("To update, reinstall from the repository.")
             return
 
+        from ..deps.egress_route import EgressRoute, EgressSurface, route_for
+
+        route = route_for(EgressSurface.SELF_UPDATE)
+        if route is not EgressRoute.DIRECT:
+            logger.error(f"The APM release route is {route.value}; cannot self-update.")
+            sys.exit(1)
+
         logger.progress(f"Current version: {current_version}")
         logger.start("Checking for updates...")
 

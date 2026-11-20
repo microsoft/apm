@@ -666,8 +666,9 @@ class TestProxyAwareFetch:
         assert result == self._MARKETPLACE_JSON
         mock_resolver.try_with_fallback.assert_called_once()
 
-    def test_proxy_only_blocks_github_fallback(self):
+    def test_proxy_only_blocks_github_fallback(self, monkeypatch):
         """Proxy returns None + enforce_only -- returns None, no GitHub call."""
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
         source = _make_source()
         cfg = self._make_cfg(enforce_only=True)
         with (
@@ -1040,7 +1041,7 @@ class TestDirectFetchHostRouting:
         assert result == self._JSON
         mock_get.assert_not_called()
 
-    def test_proxy_only_blocks_gitlab_v4_fallback(self):
+    def test_proxy_only_blocks_gitlab_v4_fallback(self, monkeypatch):
         """PROXY_REGISTRY_ONLY=1 + proxy miss MUST NOT fall through to the GitLab v4 raw API.
 
         Policy-enforcement promise: when the org pins all marketplace fetches to
@@ -1049,6 +1050,7 @@ class TestDirectFetchHostRouting:
         -- to the GitLab host as a fallback. Mirrors the equivalent guarantee
         for the GitHub Contents API.
         """
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
         source = MarketplaceSource(
             name="gl",
             owner="acme",
@@ -1077,8 +1079,9 @@ class TestDirectFetchHostRouting:
         assert result is None
         mock_get.assert_not_called()
 
-    def test_proxy_only_blocks_github_contents_fallback(self):
+    def test_proxy_only_blocks_github_contents_fallback(self, monkeypatch):
         """Companion guarantee: PROXY_REGISTRY_ONLY=1 also blocks GitHub Contents fallback."""
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
         source = _make_source()
         cfg = MagicMock()
         cfg.host = "art.example.com"
@@ -1318,13 +1321,14 @@ class TestFetchRaw:
             )
         assert result == b"hello"
 
-    def test_raises_when_proxy_only_blocks_github(self):
+    def test_raises_when_proxy_only_blocks_github(self, monkeypatch):
         # PROXY_REGISTRY_ONLY=1 must keep us off GitHub even when the
         # proxy has no entry.  Because that path cannot verify whether
         # the file exists, fetch_raw must raise MarketplaceError instead
         # of returning None -- otherwise audit would silently report the
         # plugin as NO_MANIFEST in proxy-only environments rather than
         # surfacing it as unverifiable.
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
         cfg = MagicMock(enforce_only=True)
         with (
             patch(
