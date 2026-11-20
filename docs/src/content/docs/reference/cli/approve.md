@@ -292,9 +292,26 @@ ignores the personal store when it checks MCP consent, so CI and laptops agree.
 
 Existing `owner/repo#1.2.0` keys still match the package regardless of the
 installed version; `apm approve` folds them into the version-blind key. Local
-bundle grants are different: copy the full `name#version@sha256:<digest>` key
-from the install diagnostic. A changed local bundle does not inherit the prior
-grant.
+bundle grants are different: they bind the full `name#version@sha256:<digest>`
+key the install diagnostic prints. A changed local bundle does not inherit the
+prior grant.
+
+### Local bundles
+
+`apm install <bundle>` parks a local bundle's hooks, MCP, and LSP servers until
+its exact content key is approved, and prints that key. Approve it with:
+
+```bash
+apm approve "hookpkg#1.0.0@sha256:<digest>"   # the key the install printed
+apm install ./hookpkg-1.0.0                  # rerun the install to deploy
+```
+
+This writes the same grant as adding the key under `executables.allow` in
+`apm.yml` (or `$APM_HOME/config.json` with `--user`; use `-g` for a bundle
+installed with `apm install -g`). Either path works. `apm approve --pending`
+lists parked bundles with their keys. A key with a wrong digest, or a key
+printed before the bundle's bytes changed, is refused: `apm approve` exits 1
+with an `[x]` line and writes nothing.
 
 ## Examples
 

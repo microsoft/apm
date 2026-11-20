@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm approve` accepts the local-bundle key `apm install <bundle>` prints, writing the same `executables.allow` grant; a wrong or stale key is refused, nothing written. (#4437, #4490)
 - `apm install` accepts unchanged skills after a branch or worktree switch, keeps skill files it does not rewrite, and names the recovery when it refuses. (#4258)
 - `apm update` names an installed local bundle it leaves untouched and says how to update it (`apm install <newer-bundle-file>`), instead of only reporting no APM dependencies. (#4338)
 - `apm uninstall` no longer prints the remaining packages' integration lines, unattributed and once per surviving package, when it rebuilds them. (#4160, #4338)

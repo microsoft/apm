@@ -176,12 +176,11 @@ def install_local_bundle(
             else []
         )
         bundle_approval_key = _bundle_approval_key(bundle_info, allow_executables)
-        _record_parked_bundle_executables(
+        _record_bundle_executables(
             bundle_info,
             str(alias or bundle_info.package_id),
             bundle_approval_key,
             (bundle_mcp_deps, bundle_lsp_deps),
-            allow_executables,
             scope_dir=None if dry_run else _bundle_lock_root(global_),
         )
         bundle_mcp_deps = _filter_bundle_executables(
@@ -651,32 +650,25 @@ def _declared_bundle_exec_types(bundle_info, mcp_deps: list, lsp_deps: list) -> 
     return tuple(declared)
 
 
-def _record_parked_bundle_executables(
+def _record_bundle_executables(
     bundle_info,
     slug: str,
     approval_key: str | None,
     service_deps: tuple[list, list],
-    allow_executables,
     *,
     scope_dir: Path | None,
 ) -> None:
-    """Record which declared executable types this install parks (#4221); not on dry runs."""
-    from ..security.executables import package_type_approved
-    from .local_bundle_pending import record_parked_executables
+    """Record this install's exact-content key and executable types; not on dry runs.
+
+    ``apm approve --pending`` lists the types trust still parks (#4221);
+    ``apm approve <key>`` grants only a key an install recorded (#4437).
+    """
+    from .local_bundle_pending import record_bundle_executables
 
     if scope_dir is None:
         return
     declared = _declared_bundle_exec_types(bundle_info, *service_deps)
-    parked = (
-        []
-        if approval_key is None
-        else [
-            exec_type
-            for exec_type in declared
-            if not package_type_approved(allow_executables, (approval_key,), exec_type)
-        ]
-    )
-    record_parked_executables(scope_dir, slug, approval_key, parked)
+    record_bundle_executables(scope_dir, slug, approval_key, declared if approval_key else ())
 
 
 def _bundle_owner_key(bundle_info) -> str:

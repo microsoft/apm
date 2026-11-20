@@ -3461,6 +3461,16 @@
         "tests/integration/test_marketplace_ref_swap_lifecycle.py::test_update_accepts_a_swapped_ref_visibly_and_frozen_audit_agree",
         "tests/unit/marketplace/test_versioned_resolver.py::TestWarningHandler::test_ref_swap_is_refused_not_warned"
       ]
+    },
+    {
+      "issue": 4437,
+      "fixed_in": "Unreleased",
+      "summary": "apm approve accepts the content-bound local-bundle key the install diagnostic prints and writes the same executables.allow grant, so the rerun install registers the bundle's executables; a key with a wrong digest, or one printed before the bundle bytes changed, is refused (exit 1, an [x] line) with no state change.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_local_bundle_hooks_lifecycle.py::test_approve_grants_the_printed_local_bundle_key"
+      ]
     }
   ],
   "lifecycle_contracts": [
