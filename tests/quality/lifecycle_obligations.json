@@ -21057,7 +21057,7 @@
   },
   "U10": {
    "evidence": [
-    "src/apm_cli/commands/compile/cli.py:685",
+    "src/apm_cli/commands/compile/cli.py:684",
     "src/apm_cli/commands/compile/cli.py:716"
    ],
    "text": "compile renders hook/mcp/lsp only; --validate reads MCP declarations"
@@ -21089,8 +21089,8 @@
   },
   "U6": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:33",
-    "src/apm_cli/commands/pack.py:34"
+    "src/apm_cli/commands/pack.py:32",
+    "src/apm_cli/commands/pack.py:33"
    ],
    "text": "pack provenance is the dependencies / marketplace block, not SRC"
   },
@@ -21118,5 +21118,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "3a94ffc2211992121f49e019d4c0182107bbf416e34397ce0228c4c1ef1ce8b4"
+ "sha256": "fd0f4d7d0eb330a8891f09088f232f1b2f107b6556419b3c52cdf9322191ae10"
 }

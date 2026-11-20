@@ -96,7 +96,11 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/lock.py", 115, '"--no-policy"'),
         Ev("src/apm_cli/commands/lock.py", 121, '"--target"'),
     ),
-    "pack": (Ev(_PACK, 183, '"--target"'), Ev(_PACK, 219, '"--dry-run"'), Ev(_PACK, 222, '"--force"')),
+    "pack": (
+        Ev(_PACK, 183, '"--target"'),
+        Ev(_PACK, 219, '"--dry-run"'),
+        Ev(_PACK, 222, '"--force"'),
+    ),
     "bundle-install": (Ev(_INSTALL, 1233, "detect_local_bundle"),),
     "mcp-install": (Ev(_INSTALL, 953, '"--mcp"'), Ev(_INSTALL, 885, '"--target"')),
     "approve-deny": (
@@ -129,7 +133,16 @@ REFUSAL_EVIDENCE: Mapping[tuple[str, ...], Ev] = {
 }
 # Commands with a user-scope form; any other command refuses -g (U5 for pack).
 USER_SCOPE_OPS = frozenset(
-    {"install", "update", "uninstall", "compile", "lock", "bundle-install", "mcp-install", "approve-deny"}
+    {
+        "install",
+        "update",
+        "uninstall",
+        "compile",
+        "lock",
+        "bundle-install",
+        "mcp-install",
+        "approve-deny",
+    }
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 917, '"--global"'),
@@ -164,12 +177,18 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     "U4": (
         "a declared target change without a receipt is reachable; only receipt-backed "
         "contraction needs a prior lock",
-        (Ev("src/apm_cli/install/manifest_reconcile.py", 756, "canonical target-contraction owner"),),
+        (
+            Ev(
+                "src/apm_cli/install/manifest_reconcile.py",
+                756,
+                "canonical target-contraction owner",
+            ),
+        ),
     ),
     "U5": ("pack -g is a syntactic refusal", (Ev(_PACK, 162, '@click.command(name="pack"'),)),
     "U6": (
         "pack provenance is the dependencies / marketplace block, not SRC",
-        (Ev(_PACK, 33, "dependencies: block"), Ev(_PACK, 34, "marketplace: block")),
+        (Ev(_PACK, 32, "dependencies: block"), Ev(_PACK, 33, "marketplace: block")),
     ),
     "U7": (
         "mcp-install acts on the requested server; other primitives keep no-collateral-write",
@@ -191,7 +210,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U10": (
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",
-        (Ev(_COMPILE, 685, "def _run_validation_mode"), Ev(_COMPILE, 716, "get_mcp_dependencies")),
+        (Ev(_COMPILE, 684, "def _run_validation_mode"), Ev(_COMPILE, 716, "get_mcp_dependencies")),
     ),
     "E1": (
         "hosts are equivalent except lock identity (HOSTID)",
@@ -200,7 +219,11 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     "E2": (
         "targets are equivalent except MCP ownership (MCPOWN)",
         (
-            Ev("src/apm_cli/install/mcp/retired_destinations.py", 84, "_FIRST_ROOT_MCP_JSON_RELEASE"),
+            Ev(
+                "src/apm_cli/install/mcp/retired_destinations.py",
+                84,
+                "_FIRST_ROOT_MCP_JSON_RELEASE",
+            ),
             Ev(
                 "src/apm_cli/install/mcp/retired_destinations.py",
                 163,

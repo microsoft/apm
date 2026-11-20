@@ -133,12 +133,20 @@ def _counts(space: Space, statuses: Mapping[str, str], lanes: Mapping[str, str],
         "exception_pairs": exception,
         "must_cover": sum(entry.must_cover for entry in space.obligations.values()),
         "mapped": len(space.mapped),
-        "mapped_by_rule": dict(sorted(Counter(chain[0] for _, chain in space.mapped.values()).items())),
+        "mapped_by_rule": dict(
+            sorted(Counter(chain[0] for _, chain in space.mapped.values()).items())
+        ),
         "removed": len(space.removed),
-        "removed_by_rule": dict(sorted(Counter(rules[0] for rules in space.removed.values()).items())),
+        "removed_by_rule": dict(
+            sorted(Counter(rules[0] for rules in space.removed.values()).items())
+        ),
         "status": dict(sorted(Counter(statuses.values()).items())),
         "baseline_by_lane": dict(
-            sorted(Counter(lanes[key] for key, status in statuses.items() if status == "baseline").items())
+            sorted(
+                Counter(
+                    lanes[key] for key, status in statuses.items() if status == "baseline"
+                ).items()
+            )
         ),
         "rows": len(rows),
         "row_steps": sum(len(row.steps) for row in rows),
@@ -149,7 +157,9 @@ def generate() -> tuple[str, dict[str, str]]:
     """(obligation list JSON text, row file name -> YAML text)."""
     space = build_space()
     rows = covering.cover(space.obligations)
-    witness = {cell: WITNESS.format(row.id) for row in rows for step in row.steps for cell in step.cells}
+    witness = {
+        cell: WITNESS.format(row.id) for row in rows for step in row.steps for cell in step.cells
+    }
     statuses, lanes, obligations = {}, {}, {}
     for key in sorted(space.obligations):
         entry = space.obligations[key]
@@ -182,7 +192,9 @@ def generate() -> tuple[str, dict[str, str]]:
         ),
         "generator": "python -m tests.lifecycle.generator",
         "lanes": LANES,
-        "factors": {name: list(values) for name, values in FACTORS.items() if name not in MODIFIERS},
+        "factors": {
+            name: list(values) for name, values in FACTORS.items() if name not in MODIFIERS
+        },
         "modifiers": list(MODIFIERS),
         "exception_factors": {name: list(values) for name, values in EXCEPTION_FACTORS.items()},
         "parameters": {
@@ -194,7 +206,10 @@ def generate() -> tuple[str, dict[str, str]]:
             for rule, (text, evidence) in sorted(RULES.items())
         },
         "counts": _counts(space, statuses, lanes, rows),
-        "rows": {name: hashlib.sha256(text.encode("ascii")).hexdigest() for name, text in sorted(rendered.items())},
+        "rows": {
+            name: hashlib.sha256(text.encode("ascii")).hexdigest()
+            for name, text in sorted(rendered.items())
+        },
         "obligations": obligations,
         "mapped": {
             key: {"maps_to": target, "rules": list(chain)}
@@ -217,7 +232,11 @@ def drift() -> list[str]:
     present = {path.name for path in ROWS_DIR.glob(f"{ROW_PREFIX}*.yaml")}
     for name in sorted(present | set(rows)):
         path = ROWS_DIR / name
-        if name not in rows or name not in present or path.read_text(encoding="ascii") != rows[name]:
+        if (
+            name not in rows
+            or name not in present
+            or path.read_text(encoding="ascii") != rows[name]
+        ):
             problems.append(f"tests/lifecycle/replay/rows/{name}")
     return problems
 

@@ -134,12 +134,22 @@ def _probes(plan: Plan, target: str, first: str, decided: str | None) -> list[St
     """Probe steps over the current state: every command and modifier the replay runs."""
     select = ("--target", target)
     steps = [
-        *(_cmd("install", "install", mods={mod}) for mod in ("DRYRUN", "FORCE", "UPDATE", "NOPOLICY")),
+        *(
+            _cmd("install", "install", mods={mod})
+            for mod in ("DRYRUN", "FORCE", "UPDATE", "NOPOLICY")
+        ),
         _cmd("install", "install", *select, mods={"SELECT"}),
-        *(_cmd("install", "install", mods={"FROZEN", *extra}) for extra in ((), ("DRYRUN",), ("FORCE",), ("NOPOLICY",))),
+        *(
+            _cmd("install", "install", mods={"FROZEN", *extra})
+            for extra in ((), ("DRYRUN",), ("FORCE",), ("NOPOLICY",))
+        ),
         _cmd("install", "install", *select, mods={"FROZEN", "SELECT"}),
-        _cmd("install", "install", *select, mods={"DRYRUN", "FORCE", "UPDATE", "NOPOLICY", "SELECT"}),
-        _cmd("install", "install", *select, mods={"FROZEN", "DRYRUN", "FORCE", "NOPOLICY", "SELECT"}),
+        _cmd(
+            "install", "install", *select, mods={"DRYRUN", "FORCE", "UPDATE", "NOPOLICY", "SELECT"}
+        ),
+        _cmd(
+            "install", "install", *select, mods={"FROZEN", "DRYRUN", "FORCE", "NOPOLICY", "SELECT"}
+        ),
         _cmd("update", "update", mods={"DRYRUN"}),
         _cmd("update", "update"),
         _cmd("update", "update", first, mods={"SELECT"}, names=(first,)),
@@ -164,8 +174,20 @@ def _probes(plan: Plan, target: str, first: str, decided: str | None) -> list[St
         _cmd("audit", "audit", first, mods={"SELECT"}, names=(first,)),
         _cmd("audit", "audit", first, mods={"DRYRUN", "NOPOLICY", "SELECT"}, names=(first,)),
         _cmd("audit", "audit", "--ci"),
-        _cmd("approve-deny", "approve", "--list", fixed=("rule|U9|approve-list-read-only",), unchanged=EVERYTHING),
-        _cmd("approve-deny", "approve", "--pending", fixed=("rule|U9|approve-pending-read-only",), unchanged=EVERYTHING),
+        _cmd(
+            "approve-deny",
+            "approve",
+            "--list",
+            fixed=("rule|U9|approve-list-read-only",),
+            unchanged=EVERYTHING,
+        ),
+        _cmd(
+            "approve-deny",
+            "approve",
+            "--pending",
+            fixed=("rule|U9|approve-pending-read-only",),
+            unchanged=EVERYTHING,
+        ),
     ]
     if plan.git and set(plan.packages) <= set(GIT_PUBLISHED):
         # pack refuses local-path dependencies; pack x SRC is not a coordinate (U6).
@@ -186,7 +208,9 @@ def _mcp_block(target: str) -> list[Step]:
     return [
         _cmd("mcp-install", "install", "--mcp", server, mods=mods, unchanged=NON_MCP_SURFACES)
         if not extra
-        else _cmd("mcp-install", "install", "--mcp", server, *extra, mods=mods, unchanged=NON_MCP_SURFACES)
+        else _cmd(
+            "mcp-install", "install", "--mcp", server, *extra, mods=mods, unchanged=NON_MCP_SURFACES
+        )
         for mods, extra in (
             ({"DRYRUN"}, ()),
             (set(), ()),
@@ -208,22 +232,62 @@ def script(plan: Plan, target: str) -> list[Step]:
         _cmd("audit", "audit"),
         _cmd("prune", "prune", mods={"DRYRUN"}),
         _cmd("update", "update", mods={"DRYRUN"}),
-        _cmd("approve-deny", "approve", "--pending", fixed=("rule|U9|approve-pending-read-only",), unchanged=EVERYTHING),
+        _cmd(
+            "approve-deny",
+            "approve",
+            "--pending",
+            fixed=("rule|U9|approve-pending-read-only",),
+            unchanged=EVERYTHING,
+        ),
         _cmd("install", "install", mods={"FROZEN"}),
         _cmd("pack", "pack", mods={"DRYRUN"}),
-        _cmd("mcp-install", "install", "--mcp", REGISTRY_SERVER, mods={"DRYRUN"}, unchanged=NON_MCP_SURFACES),
+        _cmd(
+            "mcp-install",
+            "install",
+            "--mcp",
+            REGISTRY_SERVER,
+            mods={"DRYRUN"},
+            unchanged=NON_MCP_SURFACES,
+        ),
     ]
     if plan.opening == "lock":
         steps.append(_cmd("lock", "lock", essential=True))
     if plan.opening == "mcp":
-        steps.append(_cmd("mcp-install", "install", "--mcp", REGISTRY_SERVER, essential=True, unchanged=NON_MCP_SURFACES))
+        steps.append(
+            _cmd(
+                "mcp-install",
+                "install",
+                "--mcp",
+                REGISTRY_SERVER,
+                essential=True,
+                unchanged=NON_MCP_SURFACES,
+            )
+        )
     opening = {"force": {"FORCE"}, "update": {"UPDATE"}}.get(plan.opening, set())
-    steps.append(_cmd("install", "install", *packages, mods={"SELECT", *opening}, names=packages, essential=True))
+    steps.append(
+        _cmd(
+            "install",
+            "install",
+            *packages,
+            mods={"SELECT", *opening},
+            names=packages,
+            essential=True,
+        )
+    )
     decided = None
     if executables and plan.gate in ("approve", "deny"):
         verb = plan.gate
         decided = "allowed" if verb == "approve" else "denied"
-        steps.append(_cmd("approve-deny", verb, *executables, mods={"SELECT"}, names=executables, essential=True))
+        steps.append(
+            _cmd(
+                "approve-deny",
+                verb,
+                *executables,
+                mods={"SELECT"},
+                names=executables,
+                essential=True,
+            )
+        )
     steps.append(_cmd("install", "install", essential=True))
     steps += _probes(plan, target, first, decided)
     if plan.mcp:
@@ -231,7 +295,16 @@ def script(plan: Plan, target: str) -> list[Step]:
     if executables and plan.gate in ("approve", "unapproved"):
         # unapproved -> approve; approve -> revoke after deploy.
         verb = "approve" if plan.gate == "unapproved" else "deny"
-        steps.append(_cmd("approve-deny", verb, *executables, mods={"SELECT"}, names=executables, essential=True))
+        steps.append(
+            _cmd(
+                "approve-deny",
+                verb,
+                *executables,
+                mods={"SELECT"},
+                names=executables,
+                essential=True,
+            )
+        )
         steps.append(_cmd("install", "install", essential=True))
         steps += _probes(plan, target, first, "allowed" if verb == "approve" else None)
     steps += [_cmd("prune", "prune", mods={"DRYRUN"}), _cmd("prune", "prune")]
@@ -239,7 +312,9 @@ def script(plan: Plan, target: str) -> list[Step]:
         # With an LSP server in the lock, apm uninstall exits 1 (#4161).
         return steps
     order = packages
-    steps.append(_cmd("uninstall", "uninstall", order[0], mods={"DRYRUN", "SELECT"}, names=(order[0],)))
+    steps.append(
+        _cmd("uninstall", "uninstall", order[0], mods={"DRYRUN", "SELECT"}, names=(order[0],))
+    )
     for name in order:
         steps.append(_cmd("uninstall", "uninstall", name, mods={"SELECT"}, names=(name,)))
     return steps
@@ -286,7 +361,9 @@ def _units(state: _State, step: Step, plan: Plan, kinds) -> list[dict[str, str]]
     for name in names:
         source = "git" if plan.git and name in GIT_PUBLISHED else "local-path"
         for kind in kinds[name]:
-            gate = "none" if kind in PLAIN_PRIMS else _GATE_STATES[state.gate.get(name, "unapproved")]
+            gate = (
+                "none" if kind in PLAIN_PRIMS else _GATE_STATES[state.gate.get(name, "unapproved")]
+            )
             units.append({"SRC": source, "PRIM": kind, "GATE": gate})
     return units
 
@@ -323,7 +400,9 @@ def simulate(plan: Plan, steps: Sequence[Step], targets: Sequence[str]) -> list[
             "NET": "online",
             **dict.fromkeys(step.mods, ON),
         }
-        visited.append(context_cells(scalar, _units(state, step, plan, WORLD_KINDS)) | set(step.fixed))
+        visited.append(
+            context_cells(scalar, _units(state, step, plan, WORLD_KINDS)) | set(step.fixed)
+        )
         _apply(state, step, WORLD_KINDS)
     return visited
 
@@ -363,7 +442,11 @@ def _gate_row(index: int, plan: Plan, obligations, covered: set[str]) -> tuple[R
             new.update(fresh)
     sources = {name: "git" for name in plan.packages if plan.git and name in GIT_PUBLISHED}
     row = Row(f"cover-{index:02d}-{plan.slug}", "gate", plan.packages, targets, sources, kept)
-    row.cell = {"OP": "install", "SRC": "git" if plan.git else "local-path", "TGT": "multi-unchanged" if plan.multi else "single-unchanged"}
+    row.cell = {
+        "OP": "install",
+        "SRC": "git" if plan.git else "local-path",
+        "TGT": "multi-unchanged" if plan.multi else "single-unchanged",
+    }
     return row, new
 
 
@@ -381,7 +464,10 @@ def cover(obligations: Mapping[str, Entry]) -> list[Row]:
     rows: list[Row] = []
     covered: set[str] = set()
     while len(rows) < MAX_ROWS:
-        plan, reach = max(candidates, key=lambda item: (len(item[1] - covered), -len(item[0].packages), item[0].slug))
+        plan, reach = max(
+            candidates,
+            key=lambda item: (len(item[1] - covered), -len(item[0].packages), item[0].slug),
+        )
         if not reach - covered:
             break
         row, new = _gate_row(len(rows) + 1, plan, obligations, covered)
@@ -438,7 +524,11 @@ def refusal_rows(obligations: Mapping[str, Entry], start: int) -> list[Row]:
     for offset in range(0, len(steps), REFUSALS_PER_ROW):
         chunk = steps[offset : offset + REFUSALS_PER_ROW]
         index = start + offset // REFUSALS_PER_ROW
-        setup = [_cmd("install", "install", "p-skill", mods={"SELECT"}, names=("p-skill",), essential=True)]
+        setup = [
+            _cmd(
+                "install", "install", "p-skill", mods={"SELECT"}, names=("p-skill",), essential=True
+            )
+        ]
         row = Row(
             f"cover-{index:02d}-refusals",
             "refusal",

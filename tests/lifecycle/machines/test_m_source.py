@@ -58,6 +58,14 @@ from tests.lifecycle.world.services import (
     REGISTRY_SERVER,
 )
 
+
+@pytest.fixture(autouse=True)
+def lifecycle_output_oracle():
+    """Replace the global output hook: every machine step already checks I6, I8 and I9
+    through ``check_cross_cutting``, which also honors the strict known cells below."""
+    yield
+
+
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.integration,
@@ -243,7 +251,70 @@ def _dry_run_pins(machine, op, before, after, result) -> bool:
     return result is not None and "DRYRUN" in op.modifiers and _pins_written(before, after)
 
 
+def _gated_rows(observation: Observation) -> bool:
+    lock = observation.lock
+    return lock is not None and any(
+        dependency.to_dict().get("exec_status") == "gated_pending_approval"
+        for dependency in lock.get_package_dependencies()
+    )
+
+
+def _lock_drops_exec_status(machine, op, before, after, result) -> bool:
+    del after
+    return result is not None and op.name == "lock" and machine.converged and _gated_rows(before)
+
+
+def _lsp_survivor(machine, op, before=None, after=None, result=None) -> bool:
+    """#4214: uninstall with a surviving LSP-only local package fails its cleanup."""
+    del before, after
+    return (
+        result is not None
+        and result.returncode == 1
+        and op.name == "uninstall"
+        and "DRYRUN" not in op.modifiers
+        and machine.lsp_survives
+    )
+
+
+def _skill_dirs(observation: Observation) -> int:
+    paths = observation.artifacts.snapshot("project").paths
+    return sum(1 for path in paths if path.count("/") == 2 and path.startswith(".agents/skills/"))
+
+
+def _unattributed_rebuild(machine, op, before, after, result) -> bool:
+    """#4219: uninstall repeats one unattributed integration pair per surviving package."""
+    del machine, before
+    return (
+        result is not None
+        and op.name == "uninstall"
+        and "DRYRUN" not in op.modifiers
+        and result.returncode == 0
+        and _skill_dirs(after) >= 2
+    )
+
+
 KNOWN_CELLS = (
+    KnownCell(
+        "uninstall-unattributed-rebuild",
+        "I9",
+        "#4219",
+        r"^duplicate 'integrated' line$",
+        _unattributed_rebuild,
+    ),
+    KnownCell(
+        "uninstall-lsp-survivor",
+        "I7",
+        "#4214",
+        r"^failed uninstall changed (the manifest|the lockfile|deployed surfaces)$",
+        _lsp_survivor,
+    ),
+    KnownCell(
+        "lock-drops-exec-status",
+        "I2",
+        "#4213",
+        r"^lock or manifest semantics changed on a converged state$",
+        _lock_drops_exec_status,
+    ),
     KnownCell(
         "dry-run-writes-ref-pin",
         "I5",
@@ -267,6 +338,7 @@ class SourceMachine(MachineBase):
         self.network = "online"
         self.converged = False
         self.registered = False
+        self.lsp_survives = False
 
     # -- model -----------------------------------------------------------------
 
@@ -281,7 +353,9 @@ class SourceMachine(MachineBase):
     def remote(self) -> bool:
         return bool({"remote-skill", "remote-exec", "p-registry"} & set(self.slots))
 
-    def exits(self, op: str) -> frozenset[int]:
+    def exits(self, op: str, *, dry_run: bool = False) -> frozenset[int]:
+        if op == "uninstall" and self.lsp_survives and not dry_run:
+            return frozenset({0, 1})  # strict known cell #4214 owns the exit 1
         if self.network == "offline" and self.remote() and op in ("install", "update", "lock"):
             return frozenset({0, 1})
         return frozenset({0})
@@ -342,7 +416,7 @@ class SourceMachine(MachineBase):
             requested = self._without(requested, choices)
         allowed = requested if op not in _KEEPING else self._keeping(requested)
         preview = self.preview(op, args, choices) if dry_run and op not in _NO_DRY_RUN else None
-        converged = self.converged and self.network != "offline"
+        converged = self.converged and self.network != "offline" and op != "uninstall"
         step = self.step(
             (op, *args),
             exits=self.exits(op),
@@ -356,6 +430,8 @@ class SourceMachine(MachineBase):
             self.credit(step, op, choices, preview)
             self.model = requested
             self.converged = op not in _KEEPING or self.converged
+            if op == "lock" and _gated_rows(step.before):
+                self.converged = False  # #4213: the rewritten lock is not install-converged
         return step
 
     def preview(
@@ -363,7 +439,7 @@ class SourceMachine(MachineBase):
     ) -> tuple[Step, frozenset[str]] | None:
         step = self.step(
             (op, *args, "--dry-run"),
-            exits=self.exits(op),
+            exits=self.exits(op, dry_run=True),
             cells=self.cells(op, "dry-run", choices),
             read_only=True,
             mutating=False,
@@ -437,6 +513,10 @@ class SourceMachine(MachineBase):
     def _keeping(self, model: ModelState) -> ModelState:
         return model.declare(*self.model.declared)
 
+    def installed_lsp(self) -> bool:
+        lock = self.bench.lock_path
+        return lock.is_file() and "_local/p-lsp" in lock.read_text(encoding="utf-8")
+
     def _choices(self) -> list[Choice]:
         return list(self.slots.values())
 
@@ -446,11 +526,8 @@ class SourceMachine(MachineBase):
     def register_marketplace(self) -> None:
         """``apm marketplace add``: register, repeat (I2), and refuse an unknown catalog (I7)."""
         url = self.bench.world.services.marketplace_url
-        # The repeat re-fetches and refreshes the catalog's recency stamp
-        # (cache/marketplace/*.meta.json fetched_at, cache.successful_reads_refresh_recency),
-        # which I2 does not yet treat as bookkeeping; so it is not claimed converged.
-        for _attempt in range(2):
-            self.egress(self.marketplace_add(url, {0}, False))
+        for converged in (False, True):
+            self.egress(self.marketplace_add(url, {0}, converged))
         self.egress(self.marketplace_add(url.rsplit("/", 1)[0] + "/no-such-catalog", {1}, False))
         self.registered = True
 
@@ -524,7 +601,19 @@ class SourceMachine(MachineBase):
         choice = self.slots.get(slot)
         if choice is None or not applies("uninstall", choice.form):
             return
-        self.command("uninstall", (self.selector(choice),), (choice,), dry_run)
+        self.lsp_survives = "p-lsp" in self.slots and slot != "p-lsp" and self.installed_lsp()
+        step = self.command("uninstall", (self.selector(choice),), (choice,), dry_run)
+        if self.lsp_survives and step.result.returncode == 1:
+            self.lsp_survives = False
+            self.converged = False
+            self.model = self._without(self.model, (choice,))
+            self.slots.pop(slot, None)
+            self.entries.pop(slot, None)
+            # Execute the printed hint: "Run 'apm install' to resync remaining integrations."
+            assert "Run 'apm install' to resync" in step.result.stdout, step.result.stdout
+            self.reconcile("install", False)
+            return
+        self.lsp_survives = False
         if self.entries.get(slot) not in self._apm_entries():
             self.slots.pop(slot, None)
             self.entries.pop(slot, None)

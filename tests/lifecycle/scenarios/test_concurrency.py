@@ -42,7 +42,7 @@ import yaml
 from tests.lifecycle import driver
 from tests.lifecycle.model.expected import expected_exit
 from tests.lifecycle.oracles import check_cross_cutting
-from tests.lifecycle.scenarios._kit import Known, Scenario, Step, _StepModel
+from tests.lifecycle.scenarios._kit import Known, Scenario, Step, StepModel
 from tests.utils.apm_lifecycle_runner import CommandResult
 
 pytestmark = [
@@ -187,31 +187,22 @@ def _args(scenario: Scenario, writer: Writer) -> tuple[str, ...]:
 def _plan(scenario: Scenario, model, roots, args: tuple[str, ...]):
     """(requested model, model after the command, declared roots after it) from *model*.
 
-    Mirrors ``Scenario._requested`` and ``Scenario._advance`` for one writer of
+    Uses ``Scenario.requested`` and ``Scenario.planned_roots`` for one writer of
     the pair, which the kit's sequential ``run`` cannot drive.
     """
-    saved = scenario.model, scenario.roots
-    scenario.model, scenario.roots = model, roots
-    try:
-        requested = scenario._requested(args)
-    finally:
-        scenario.model, scenario.roots = saved
-    names = {name for name, spec in scenario.specs.items() if spec in args[1:]}
-    if args[0] == "install":
-        roots = roots | names
-    elif args[0] == "uninstall":
-        roots = roots - names
+    requested = scenario.requested(args, model=model, roots=roots)
+    roots = scenario.planned_roots(args, roots)
     advanced = requested.installed() if args[0] in _RECONCILING else requested
     return requested, advanced, frozenset(roots)
 
 
 def _check(scenario, writer, args, before, after, result, model, others_home) -> None:
-    op = scenario._operation(args)
+    op = scenario.operation(args)
     if "home" in op.forbidden:
         allowed = dict(op.allowed)
         allowed["home"] = (*allowed.get("home", ()), *writer.home_writes, *others_home)
         op = replace(op, allowed=allowed)
-    step_model = _StepModel(model, scenario.kinds, False, {}, scenario.expected_seen)
+    step_model = StepModel(model, scenario.kinds, False, {}, scenario.expected_seen)
     check_cross_cutting(before, after, result, step_model, op)
 
 

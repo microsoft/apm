@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import re
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -169,7 +170,7 @@ class Bench:
             managed.clear()
         return Observation(
             state=state,
-            artifacts=ArtifactSnapshotSet.capture(self.roots()),
+            artifacts=_without_recency(ArtifactSnapshotSet.capture(self.roots())),
             deployed=frozenset(deployed),
             deploy_root=self.deploy_root,
             lock=lock,
@@ -200,6 +201,21 @@ class Bench:
             semantic_bytes=semantic,
         )
         return state, lock
+
+
+# Cache recency stamps a successful catalog read must refresh
+# (cache.successful_reads_refresh_recency): not durable state, so I2 and I5 skip them.
+_RECENCY = re.compile(r"^\.apm/cache/marketplace/[^/]+\.meta\.json$")
+
+
+def _without_recency(artifacts: ArtifactSnapshotSet) -> ArtifactSnapshotSet:
+    snapshots = []
+    for root_id, snapshot in artifacts.snapshots:
+        if root_id == "home":
+            entries = tuple(e for e in snapshot.entries if not _RECENCY.match(e.relative_path))
+            snapshot = replace(snapshot, entries=entries)
+        snapshots.append((root_id, snapshot))
+    return ArtifactSnapshotSet(snapshots=tuple(snapshots))
 
 
 def _read(path: Path) -> bytes | None:

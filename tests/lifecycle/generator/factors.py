@@ -124,7 +124,11 @@ def compile_staged_targets() -> tuple[str, ...]:
     deployed (install/services.py:1055).
     """
     return tuple(
-        sorted(name for name, profile in KNOWN_TARGETS.items() if "instructions" not in profile.primitives)
+        sorted(
+            name
+            for name, profile in KNOWN_TARGETS.items()
+            if "instructions" not in profile.primitives
+        )
     )
 
 

@@ -82,7 +82,7 @@ class Known:
 
 
 @dataclass
-class _StepModel:
+class StepModel:
     """The ``OracleModel`` view of one scenario step."""
 
     model: ModelState
@@ -375,8 +375,8 @@ class Scenario:
         args = self._args(line)
         command = args[0]
         if requested is None:
-            requested = self._requested(args)
-        op = self._operation(args, read_only=read_only, paired=paired, **fields)
+            requested = self.requested(args)
+        op = self.operation(args, read_only=read_only, paired=paired, **fields)
         allowed_exit = (
             frozenset({exit})
             if exit is not None
@@ -390,7 +390,7 @@ class Scenario:
             cells[law] = (ExpectedCell(label, cell.match),)
             self.expected_all.add(label)
         converged = self.model.converged and requested == self.model
-        model = _StepModel(requested, self.kinds, converged, cells, self.expected_seen)
+        model = StepModel(requested, self.kinds, converged, cells, self.expected_seen)
         before = self.observe()
         result = self._drive(args, output_cells=bool(set(cells) & _OUTPUT_LAWS))
         after = self.observe()
@@ -463,7 +463,7 @@ class Scenario:
         finally:
             driver.OUTPUT_HOOKS.extend(hooks)
 
-    def _operation(self, args: tuple[str, ...], **fields: object) -> Operation:
+    def operation(self, args: tuple[str, ...], **fields: object) -> Operation:
         user = self.scope == "user"
         defaults: dict[str, object] = {
             "forbidden": {"project": ("*",)} if user else {"home": ("*",)},
@@ -482,12 +482,7 @@ class Scenario:
     ) -> None:
         if result.returncode != 0 or "DRYRUN" in op.modifiers:
             return
-        by_spec = {spec: name for name, spec in self.specs.items()}
-        names = {by_spec[arg] for arg in args[1:] if arg in by_spec}
-        if op.command == "install":
-            self.roots |= names
-        elif op.command == "uninstall":
-            self.roots -= names
+        self.roots = self.planned_roots(args)
         if op.command in _RECONCILING and "FROZEN" not in op.modifiers:
             self.model = requested.installed()
         elif op.command in _RECONCILING:
@@ -495,18 +490,25 @@ class Scenario:
         else:
             self.model = requested
 
-    def _requested(self, args: tuple[str, ...]) -> ModelState:
-        """The model after the user's request, before the CLI reconciles it."""
-        by_spec = {spec: name for name, spec in self.specs.items()}
-        names = [by_spec[arg] for arg in args[1:] if arg in by_spec]
+    def requested(
+        self,
+        args: tuple[str, ...],
+        *,
+        model: ModelState | None = None,
+        roots: Iterable[str] | None = None,
+    ) -> ModelState:
+        """The model after the user's request *args*, before the CLI reconciles it.
+
+        From the scenario's current model and roots, or from *model* / *roots*.
+        """
+        model = self.model if model is None else model
+        roots = frozenset(self.roots if roots is None else roots)
+        names = self._names(args)
         command = args[0]
         if command not in _SELECTING or "--dry-run" in args:
-            return self.model
-        if command == "install" and names:
-            return self._declared(self.roots | set(names))
-        if command == "uninstall":
-            return self._declared(self.roots - set(names))
-        model = self.model
+            return model
+        if command in {"install", "uninstall"} and (names or command == "uninstall"):
+            return self._declared(self.planned_roots(args, roots), model)
         for name in names:
             if command == "approve":
                 model = model.approve(name, self.kinds[name])
@@ -514,11 +516,28 @@ class Scenario:
                 model = model.deny(name, self.kinds[name])
         return model
 
-    def _declared(self, roots: Iterable[str]) -> ModelState:
-        """The model with *roots* declared, plus their transitive closure."""
+    def planned_roots(
+        self, args: tuple[str, ...], roots: Iterable[str] | None = None
+    ) -> frozenset[str]:
+        """The declared roots after a successful *args* (``install`` adds, ``uninstall`` drops)."""
+        roots = frozenset(self.roots if roots is None else roots)
+        if "--dry-run" in args:
+            return roots
+        if args[0] == "install":
+            return roots | self._names(args)
+        if args[0] == "uninstall":
+            return roots - self._names(args)
+        return roots
+
+    def _names(self, args: tuple[str, ...]) -> frozenset[str]:
+        by_spec = {spec: name for name, spec in self.specs.items()}
+        return frozenset(by_spec[arg] for arg in args[1:] if arg in by_spec)
+
+    def _declared(self, roots: Iterable[str], model: ModelState | None = None) -> ModelState:
+        """*model* (default: the current one) with *roots* declared, plus their closure."""
+        model = self.model if model is None else model
         closure = expected_lock_rows(ModelState(declared=frozenset(roots)), self.requires)
-        model = self.model.undeclare(*(self.model.declared - closure))
-        return model.declare(*(closure - self.model.declared))
+        return model.undeclare(*(model.declared - closure)).declare(*(closure - model.declared))
 
     def _args(self, line: str | Sequence[str]) -> tuple[str, ...]:
         args = driver.command_args(line)
@@ -534,11 +553,10 @@ def _entry_spec(entry: object) -> str:
 def serve_repository(world, slug: str, origin: Path) -> None:
     """Serve the bare repository *origin* as ``https://github.com/<slug>`` in *world*.
 
-    The world services serve only the repositories published at template
-    build; a scenario that authors its own repository (an annotated tag, a
-    deeper graph) registers it here for the rest of the worker session.
+    For a repository a scenario authors itself (an annotated tag, a deeper
+    graph); served for the rest of the worker session.
     """
-    world.services._repositories[slug] = origin
+    world.services.serve(slug, origin)
 
 
 def identity(world, name: str) -> str:

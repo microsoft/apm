@@ -19,8 +19,8 @@ the generated rows need, without changing the row schema it reads:
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from collections.abc import Mapping
+from dataclasses import replace
 from functools import cache
 from pathlib import Path
 
@@ -42,6 +42,31 @@ def required_strengths(path: Path = OBLIGATIONS_PATH) -> Mapping[str, str]:
     return {key: entry["strength"] for key, entry in data["obligations"].items()}
 
 
+def credit(
+    cell: str,
+    before: oracles.Observation,
+    after: oracles.Observation,
+    result,
+    unchanged: tuple[str, ...] = (),
+    *,
+    scope: str = "project",
+) -> None:
+    """Credit one generated obligation through the oracle entry point."""
+    oracles.check_obligation(
+        cell,
+        strength=required_strengths()[cell],
+        before=before,
+        after=after,
+        result=result,
+        evidence=oracles.Evidence(
+            exit=result.returncode,
+            ascii_output=True,
+            unchanged={"project": unchanged} if unchanged else {},
+        ),
+        scope=scope,
+    )
+
+
 def load_covering_row(path: Path) -> tuple[Row, Mapping[str, object]]:
     """The row as ``rows.py`` reads it, plus the raw document for the extensions."""
     return load_row(path), yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -54,6 +79,7 @@ class CoveringReplay(RowReplay):
         super().__init__(world, row, **kwargs)
         self.sources: Mapping[str, str] = dict(document["world"].get("sources", {}))
         self.credited: list[str] = []
+        self._refusal = False
 
     def step(self, step: object) -> None:
         # A pinned refusal is a new request, never a repeat of the converged
@@ -69,26 +95,13 @@ class CoveringReplay(RowReplay):
         after = self.observe()
         unchanged = tuple(step.get("unchanged", ()))
         for cell in cells:
-            evidence = oracles.Evidence(
-                exit=self.last.returncode,
-                ascii_output=True,
-                unchanged={"project": unchanged} if unchanged else {},
-            )
-            oracles.check_obligation(
-                cell,
-                strength=required_strengths()[cell],
-                before=before,
-                after=after,
-                result=self.last,
-                evidence=evidence,
-                scope=self.row.scope,
-            )
+            credit(cell, before, after, self.last, unchanged, scope=self.row.scope)
             self.credited.append(cell)
 
     def _requested(self, args: tuple[str, ...]):
         """``install --mcp`` declares a server and a refusal is a new request: neither repeats."""
         requested = super()._requested(args)
-        if "--mcp" in args or getattr(self, "_refusal", False):
+        if "--mcp" in args or self._refusal:
             return replace(requested, converged=False)
         return requested
 
