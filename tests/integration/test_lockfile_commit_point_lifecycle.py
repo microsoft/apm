@@ -103,6 +103,53 @@ def test_interrupt_at_the_commit_point_restores_deploys_and_discards_the_lock(
     world.assert_converges()
 
 
+def _sigterm_after_an_unsnapshotted_deploy(
+    tmp_path: Path, apm_binary_path: Path
+) -> tuple[FaultWorld, str, str]:
+    """SIGTERM a plain install (no deploy snapshot) at its commit point."""
+    world = build_world(tmp_path, apm_binary_path)
+    agent = world.project / "packages/alpha/.apm/agents/alpha.agent.md"
+    agent.write_text(agent.read_text(encoding="ascii") + "v2\n", encoding="ascii")
+    deployed = ".github/agents/alpha.agent.md"
+    process = _held_at_commit(world, apm_binary_path, tmp_path / "held", "install", "--no-policy")
+    assert (world.project / deployed).read_text(encoding="ascii").endswith("v2\n")
+    os.killpg(process.pid, signal.SIGTERM)
+    output, _ = process.communicate(timeout=120)
+    assert process.returncode != 0, output
+    return world, deployed, output
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="#4282: SIGTERM after a deploy without a snapshot leaves files the lock does not record",
+)
+def test_sigterm_without_a_deploy_snapshot_keeps_the_lock_equal_to_disk(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world, _deployed, output = _sigterm_after_an_unsnapshotted_deploy(tmp_path, apm_binary_path)
+    audit = world.apm("audit", "--ci", "--no-policy")
+    assert audit.returncode == 0, f"{output}\n{evidence(audit)}"
+
+
+def test_sigterm_without_a_deploy_snapshot_is_reported_by_audit_and_converged(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world, deployed, _output = _sigterm_after_an_unsnapshotted_deploy(tmp_path, apm_binary_path)
+
+    audit = world.apm("audit", "--ci", "--no-policy")
+    assert audit.returncode != 0, evidence(audit)
+    assert f"hash-drift: {deployed}" in audit.stdout + audit.stderr, evidence(audit)
+
+    world.assert_converges()
+    converged = [world.snapshot(root) for root in _TARGET_ROOTS]
+    lock = world.lockfile_bytes()
+    repeat = world.install()
+    assert repeat.returncode == 0, evidence(repeat)
+    assert world.lockfile_bytes() == lock
+    for snapshot, root in zip(converged, _TARGET_ROOTS, strict=True):
+        assert_unchanged(snapshot, world.snapshot(root))
+
+
 @pytest.mark.parametrize("audited", [False, True], ids=["plain", "audited"])
 @pytest.mark.parametrize("change", ["new-package", "changed-package"])
 def test_a_killed_install_is_reported_by_audit_and_converged_by_the_next_install(
