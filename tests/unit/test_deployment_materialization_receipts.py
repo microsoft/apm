@@ -107,6 +107,7 @@ def test_hashless_claim_trusts_a_receipt_only_while_disk_holds_it(
     assert _session(root, lock).baseline(path, [TARGET]) == old_hash
     path.write_text("user edit\n", encoding="utf-8")
     assert _session(root, lock).baseline(path, [TARGET]) is None
+    assert path.read_text(encoding="utf-8") == "user edit\n"
 
 
 @pytest.mark.parametrize("target_name", ["claude", "hermes", "copilot-cowork"])

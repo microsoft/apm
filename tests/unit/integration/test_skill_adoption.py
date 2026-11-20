@@ -117,8 +117,10 @@ def test_member_matches_its_own_trusted_receipt_or_the_render(
     def trusted(path: Path) -> str | None:
         return receipt if path == anchor else None
 
+    on_disk = anchor.read_bytes()
     members = _members(source, destination, trusted=trusted)
     assert bool(members) is adoptable
+    assert anchor.read_bytes() == on_disk
 
 
 def test_missing_destination_is_not_adoptable(tmp_path: Path) -> None:
@@ -321,4 +323,6 @@ def test_receipt_from_another_checkout_falls_through_to_the_render(tmp_path: Pat
     update.integrator._materialization_session.baseline = lambda _path, _targets: (
         "sha256:" + "b" * 64
     )
+    on_disk = anchor.read_bytes()
     assert _locked_baselines(update) == {anchor: compute_file_hash(anchor)}
+    assert anchor.read_bytes() == on_disk

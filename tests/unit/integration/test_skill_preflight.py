@@ -389,3 +389,4 @@ def test_untrusted_refusal_names_a_movable_directory_and_its_scope(
     message = untrusted_baseline_message(f"{entry}/SKILL.md", shown, user_scope=user_scope)
     assert f"move {expected}/ aside" in message
     assert message.endswith(f"then run {command}.")
+    assert not destination.exists()
