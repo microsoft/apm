@@ -738,7 +738,7 @@ def _finish_selected_profile_uninstall(
 @click.pass_context
 @serialized_lifecycle
 @lockfile_writer(LockfileWriter.UNINSTALL)
-def uninstall(ctx, packages, dry_run, verbose, global_):
+def uninstall(ctx, packages, dry_run, verbose, global_):  # noqa: PLR0915
     """Remove APM packages from apm.yml and apm_modules (like npm uninstall).
 
     This command removes packages from both the apm.yml dependencies list
