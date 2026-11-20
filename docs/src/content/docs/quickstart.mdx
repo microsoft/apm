@@ -35,13 +35,14 @@ Copilot or Claude Code.
      [+] vercel-labs/agent-skills #main @1a2c79d4
      |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
      [!] 1 dependency unpinned: vercel-labs/agent-skills -- apm.lock.yaml pins the
-   resolved commit; add #tag in apm.yml to track releases on update
+   resolved commit; to track releases on update, add a semver range in apm.yml
+   such as #^1.0.0 (a tag like #v1.0.0 stays put)
    [*] Installed 1 APM dependency in 6.5s.
    ```
 
    This skill follows the repository's `main` branch, so APM points out that the lockfile
    records the exact commit you got, `1a2c79d4`. Teammates get that commit until you run
-   `apm update`. Add `#<tag>` to the install to follow tagged releases instead.
+   `apm update`. Add a semver range such as `#^1.0.0` to follow tagged releases; a fixed tag like `#v1.0.0` stays on that release.
 
 3. **Install a plugin from a marketplace.** A marketplace is a published list of plugins;
    this is Anthropic's.

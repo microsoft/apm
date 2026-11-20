@@ -263,3 +263,35 @@ class TestFinalizeUnpinnedWarning:
         pkg = MagicMock(spec=[])  # no dep_ref attribute
         ctx = _make_ctx(unpinned_count=1, installed_packages=[pkg], diagnostics=diag)
         run(ctx)  # should not raise
+
+
+def test_unpinned_hint_example_tracks_releases_when_followed() -> None:
+    """Following the hint's example moves 'apm update' to a newer release (#3994).
+
+    A literal tag (#v1.0.0) pins; the hint must suggest a semver range that the
+    git-semver resolver moves forward when v1.1.0 is published.
+    """
+    import re
+    from unittest.mock import MagicMock
+
+    from apm_cli.deps.git_semver_resolver import GitSemverResolver
+    from apm_cli.install.phases.finalize import UNPINNED_HINT
+    from apm_cli.marketplace.ref_resolver import RemoteRef
+    from apm_cli.models.apm_package import DependencyReference
+
+    suggested = re.search(r"such as #(\S+)", UNPINNED_HINT).group(1)
+    dep = DependencyReference.parse(f"acme/tools#{suggested}")
+    assert dep.ref_kind == "semver"
+
+    refs = MagicMock()
+    refs.list_remote_refs.return_value = [
+        RemoteRef(name="refs/tags/v1.0.0", sha="a" * 40),
+        RemoteRef(name="refs/tags/v1.1.0", sha="b" * 40),
+    ]
+    resolution = GitSemverResolver(refs).resolve(
+        owner_repo="acme/tools",
+        package_name="tools",
+        constraint=dep.reference,
+        now_iso="2026-01-01T00:00:00+00:00",
+    )
+    assert resolution.resolved_tag == "v1.1.0"

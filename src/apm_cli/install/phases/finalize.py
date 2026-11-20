@@ -29,6 +29,15 @@ _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS = frozenset(
 )
 
 
+# apm.lock.yaml already pins the resolved commit; the ref in apm.yml decides
+# what 'apm update' moves to. A literal tag pins it; only a semver range
+# tracks releases (#3994).
+UNPINNED_HINT = (
+    "apm.lock.yaml pins the resolved commit; to track releases on update, "
+    "add a semver range in apm.yml such as #^1.0.0 (a tag like #v1.0.0 stays put)"
+)
+
+
 def _compile_hint_targets(
     ctx: InstallContext, *, user_scope: bool, scoped_instructions_only: bool = False
 ) -> tuple[list[str], frozenset[str]]:
@@ -243,12 +252,7 @@ def run(ctx: InstallContext) -> InstallResult:
                 _unique_names.append(_n)
 
         noun = "dependency" if ctx.unpinned_count == 1 else "dependencies"
-        # apm.lock.yaml already pins the resolved commit; the ref in apm.yml
-        # decides what 'apm update' moves to.
-        _hint = (
-            "apm.lock.yaml pins the resolved commit; add #tag in apm.yml to "
-            "track releases on update"
-        )
+        _hint = UNPINNED_HINT
         if _unique_names:
             _shown = _unique_names[:5]
             _suffix = ", ".join(_shown)
