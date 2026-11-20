@@ -22,6 +22,7 @@ from apm_cli.install.lsp.integration import (
     run_lsp_integration,
     run_owned_lsp_integration,
 )
+from apm_cli.install.service import FrozenDisposition
 from apm_cli.models.dependency.lsp import LSPDependency
 
 # ---------------------------------------------------------------------------
@@ -484,6 +485,7 @@ def test_mcp_only_service_install_does_not_reconcile_lsp(tmp_path) -> None:
             diagnostics=None,
             explicit_target=["claude"],
             target_decision=target_decision,
+            frozen_disposition=FrozenDisposition(replay=False),
         )
 
     assert run_lsp.call_args.kwargs["should_install"] is False
@@ -1020,6 +1022,7 @@ class TestLspCapabilityPreflight:
                 diagnostics=None,
                 explicit_target="cursor",
                 target_decision=EffectiveTargetDecision("cursor", "--target flag"),
+                frozen_disposition=FrozenDisposition(replay=False),
             )
 
         run_mcp.assert_not_called()
