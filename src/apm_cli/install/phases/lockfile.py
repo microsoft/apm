@@ -326,9 +326,12 @@ class LockfileBuilder:
         # not removed, so a "Repaired inactive-target entries" report would be
         # misleading.
         lockfile_only = getattr(self.ctx, "lockfile_only", False)
+        from apm_cli.install.service import InstallService
+
+        frozen_disposition = InstallService.frozen_disposition(self.ctx)
         completed_reintegrations = (
             {}
-            if lockfile_only or getattr(self.ctx, "frozen", False)
+            if lockfile_only or frozen_disposition.withhold_lockfile_writes
             else getattr(self.ctx, "package_completed_reintegrations", {})
         )
         canonical_records = {}

@@ -124,6 +124,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     from apm_cli.integration.skill_adoption import locked_skill_sources
 
     from .phases import integrate as _integrate_phase
+    from .service import InstallService
 
     session = (
         None
@@ -138,7 +139,9 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
             contextlib.nullcontext()
             if ctx.lockfile_only
             else ctx.integrators["skill"].ownership_snapshot(
-                replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
+                replay_lockfile=(
+                    ctx.existing_lockfile if InstallService.frozen_disposition(ctx).replay else None
+                ),
                 materialization_session=session,
             )
         ):
