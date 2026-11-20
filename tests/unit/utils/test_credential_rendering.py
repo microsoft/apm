@@ -180,7 +180,7 @@ def test_proxy_plaintext_warning_drops_url_userinfo(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("PROXY_REGISTRY_URL", f"http://alice:{_SECRET}@proxy.invalid/art/apm")
     monkeypatch.setenv("PROXY_REGISTRY_TOKEN", _SECRET)
     monkeypatch.delenv("PROXY_REGISTRY_ALLOW_HTTP", raising=False)
-    monkeypatch.setattr(registry_proxy, "_emitted_warnings", set())
+    registry_proxy._emitted_warnings.clear()
     messages: list[str] = []
     monkeypatch.setattr(
         "apm_cli.utils.console._rich_warning", lambda message, *a, **k: messages.append(message)
@@ -196,7 +196,7 @@ def test_proxy_plaintext_warning_masks_query_credentials(monkeypatch: pytest.Mon
     monkeypatch.setenv("PROXY_REGISTRY_URL", f"http://proxy.invalid/art/apm?token={_SECRET}")
     monkeypatch.setenv("PROXY_REGISTRY_TOKEN", _SECRET)
     monkeypatch.delenv("PROXY_REGISTRY_ALLOW_HTTP", raising=False)
-    monkeypatch.setattr(registry_proxy, "_emitted_warnings", set())
+    registry_proxy._emitted_warnings.clear()
     messages: list[str] = []
     monkeypatch.setattr(
         "apm_cli.utils.console._rich_warning", lambda message, *a, **k: messages.append(message)

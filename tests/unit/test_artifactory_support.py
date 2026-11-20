@@ -1207,9 +1207,9 @@ class TestRegistryConfig:
         from apm_cli.deps import registry_proxy
 
         printed: list[str] = []
+        registry_proxy._emitted_warnings.clear()
         with (
             patch.dict(os.environ, env, clear=True),
-            patch.object(registry_proxy, "_emitted_warnings", set()),
             patch(
                 "apm_cli.utils.console._rich_warning",
                 side_effect=lambda message, *a, **k: printed.append(message),

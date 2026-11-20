@@ -352,6 +352,26 @@ def test_pack_refuses_credential_files(tmp_path: Path, name: str) -> None:
     assert not (tmp_path / "build").exists()
 
 
+@pytest.mark.req("req-sc-008")
+@pytest.mark.parametrize(
+    ("host", "attached"),
+    [("proxy.example.com", False), ("127.0.0.1", True)],
+    ids=["public-host", "loopback"],
+)
+def test_proxy_token_is_not_attached_over_http_to_a_public_host(
+    monkeypatch: pytest.MonkeyPatch, host: str, attached: bool
+) -> None:
+    from apm_cli.deps import registry_proxy
+
+    for name in ("ARTIFACTORY_BASE_URL", "ARTIFACTORY_APM_TOKEN", "PROXY_REGISTRY_ALLOW_HTTP"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PROXY_REGISTRY_URL", f"http://{host}/artifactory/github")
+    monkeypatch.setenv("PROXY_REGISTRY_TOKEN", "sc008-token")
+    config = registry_proxy.RegistryConfig.from_env()
+    assert config is not None
+    assert ("Authorization" in config.headers_for("http", host)) is attached
+
+
 def test_token_text_is_redacted_from_diagnostics() -> None:
     message = f"fatal: could not read from https://x-access-token:{_FAKE_PAT}@github.com/a/b"
     assert _FAKE_PAT not in _redact_secrets(message)
