@@ -1563,5 +1563,14 @@ def test_frozen_and_audit_agree_on_a_git_row_without_content_hash_by_default(
             (("audit", "--ci", "--no-policy"), "audit-unhashed"),
             (("install", "--frozen", "--no-policy"), "frozen-unhashed"),
         ):
-            run_step(runner, args, cwd=project, env=env, step=step)
+            result = run_step(runner, args, cwd=project, env=env, step=step)
             assert tree_snapshot(project, exclude=(".git", "apm_modules")) == before, step
+            if step == "audit-unhashed":
+                # #4453: one advisory names the row and the knob that requires hashes.
+                advisory = [
+                    line for line in result.stderr.splitlines() if "without a content hash" in line
+                ]
+                assert len(advisory) == 1, result.stderr
+                text = " ".join(result.stderr.split())
+                assert f"verified by commit only: {pkg.slug}." in text, result.stderr
+                assert "security.integrity.require_hashes: true" in text, result.stderr

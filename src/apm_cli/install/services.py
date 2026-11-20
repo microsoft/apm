@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
+from apm_cli.core.remediation import CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import destination_tree_lines as _destination_tree_lines
@@ -32,6 +33,7 @@ from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_
 from .project_package import build_project_local_package_info
 from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
 from .target_warnings import log_canvas_skip as _log_canvas_skip
+from .target_warnings import warn_unsupported_primitives
 
 if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
@@ -133,7 +135,7 @@ def _check_native_claude_transition(
         failed = ", ".join(reconcile_stats.get("failed_paths", []))
         recovery = f"Repair unreadable hook settings or ownership. Inspect: {failed}"
         if not reconcile_stats.get("errors"):
-            recovery = f"Run: apm uninstall --global {package} && apm install --global {package}"
+            recovery = CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS.bind(package=package).sentence()
         raise ClaudeNativePluginError(
             f"Cannot switch {package} to native Claude. Hook settings were preserved. {recovery}"
         )
@@ -329,8 +331,6 @@ def integrate_package_primitives(  # noqa: PLR0913
             diagnostics=diagnostics,
             logger=logger,
         )
-
-    from apm_cli.install.target_warnings import warn_unsupported_primitives
 
     warn_unsupported_primitives(
         package_info,
@@ -663,13 +663,15 @@ def integrate_package_primitives(  # noqa: PLR0913
             ),
         )
 
-    # A3: warm-cache visibility. If nothing was integrated for any kind AND
-    # no skill was created, emit one annotation so the user knows the dep
-    # was evaluated (the [+] header above already carries the SHA).
+    # A3: warm-cache visibility. If nothing changed (adopted files never count),
+    # say so once; the [+] header above already carries the SHA.
     _total_integrated = sum(_info["files"] for _info in _per_kind.values())
-    _total_integrated += int(skill_result.skill_created)
-    _total_integrated += int(skill_result.sub_skills_promoted)
+    _total_integrated += _skill_count
     _total_integrated += int(skill_result.bin_deployed)
+    result["files_changed"] = _total_integrated
+    # Merged hook entries this package contributes, written or unchanged (#4033).
+    _hooks = _per_kind.get("hooks", {})
+    result["hooks_contributed"] = _hooks.get("files", 0) + _hooks.get("adopted", 0)
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 

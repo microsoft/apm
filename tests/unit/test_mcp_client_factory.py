@@ -106,7 +106,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         """Invalid existing TOML should not be treated as an empty config."""
         Path(self.config_path).write_text('invalid = "unterminated', encoding="utf-8")
 
-        with patch("apm_cli.adapters.client.codex._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             config = self.adapter.get_current_config()
 
         self.assertIsNone(config)
@@ -124,7 +124,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         }
 
         original = Path(self.config_path).read_text(encoding="utf-8")
-        with patch("apm_cli.adapters.client.codex._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             result = self.adapter.configure_mcp_server("test-server", "my_server")
 
         self.assertFalse(result)
@@ -163,7 +163,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         server_config = config["mcp_servers"]["my_server"]
         self.assertEqual(server_config["command"], "npx")
 
-    @patch("apm_cli.adapters.client._remote_shapes._rich_warning")
+    @patch("apm_cli.core.null_logger._rich_warning")
     @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
     def test_configure_mcp_server_sse_remote_rejected(self, mock_find_server, mock_warn):
         """SSE remotes are rejected with a warning that points to streamable-http."""
@@ -403,7 +403,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         self.assertEqual(config["http_headers"], {"X-Region": "us-east-1"})
         self.assertNotIn("env_http_headers", config)
 
-    @patch("apm_cli.adapters.client.codex._rich_warning")
+    @patch("apm_cli.core.null_logger._rich_warning")
     def test_mixed_literal_and_placeholder_is_skipped_with_warning(self, mock_warn):
         """Codex has no field for a value that is part literal, part variable."""
         config = self.adapter._format_server_config(
@@ -416,7 +416,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         mock_warn.assert_called_once()
         self.assertIn("X-Mixed", mock_warn.call_args[0][0])
 
-    @patch("apm_cli.adapters.client.codex._rich_warning")
+    @patch("apm_cli.core.null_logger._rich_warning")
     def test_shell_default_placeholder_is_skipped_with_warning(self, mock_warn):
         """``${VAR:-}`` is a reference Codex cannot resolve from either field.
 
@@ -433,7 +433,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         mock_warn.assert_called_once()
         self.assertIn("Authorization", mock_warn.call_args[0][0])
 
-    @patch("apm_cli.adapters.client.codex._rich_warning")
+    @patch("apm_cli.core.null_logger._rich_warning")
     def test_input_variable_header_is_not_swept_into_the_skip_path(self, mock_warn):
         """``${input:...}`` is collected elsewhere and keeps its own handling.
 
@@ -444,9 +444,9 @@ class TestCodexClientAdapter(unittest.TestCase):
             self._remote_with_headers([("X-Project", "${input:proj}")])
         )
         self.assertEqual(config["http_headers"], {"X-Project": "${input:proj}"})
-        mock_warn.assert_not_called()
+        self.assertFalse([c for c in mock_warn.call_args_list if "Skipping header" in c.args[0]])
 
-    @patch("apm_cli.adapters.client.codex._rich_warning")
+    @patch("apm_cli.core.null_logger._rich_warning")
     def test_bearer_placeholder_outside_authorization_is_skipped(self, mock_warn):
         """Only Authorization has a bearer field; elsewhere the shape is mixed."""
         config = self.adapter._format_server_config(
@@ -458,7 +458,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         mock_warn.assert_called_once()
         self.assertIn("X-Auth", mock_warn.call_args[0][0])
 
-    @patch("apm_cli.adapters.client.codex._rich_warning")
+    @patch("apm_cli.core.null_logger._rich_warning")
     def test_malformed_header_references_are_skipped(self, mock_warn) -> None:
         """Native fields accept complete references, not normalized malformed values."""
         for value in (
@@ -508,7 +508,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         self.assertNotIn("private-synthetic-value", message)
         self.assertIn("export the whole header value", message)
 
-    @patch("apm_cli.adapters.client.codex._rich_warning")
+    @patch("apm_cli.core.null_logger._rich_warning")
     def test_format_server_config_streamable_http_rejects_non_https(self, mock_warn):
         """Non-HTTPS remote URLs are rejected to prevent cleartext header leakage."""
         server_info = {
@@ -531,7 +531,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         self.assertIn("evil-remote", warn_message)
         self.assertIn("https://", warn_message)
 
-    @patch("apm_cli.adapters.client.codex._rich_warning")
+    @patch("apm_cli.core.null_logger._rich_warning")
     @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
     def test_configure_mcp_server_http_remote_rejected(self, mock_find_server, mock_warn):
         """End-to-end: an http:// remote URL never lands in the Codex config."""
@@ -587,7 +587,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         )
         self.assertEqual(figma["http_headers"], {"Authorization": "Bearer ghp_xxx"})
 
-    @patch("apm_cli.adapters.client.codex._rich_warning")
+    @patch("apm_cli.core.null_logger._rich_warning")
     def test_format_server_config_streamable_http_rejects_empty_url(self, mock_warn):
         """Empty / whitespace-only remote URLs are rejected with a clear message."""
         for empty_value in ("", "   ", None):
@@ -616,9 +616,9 @@ class TestCodexClientAdapter(unittest.TestCase):
                     f"Expected empty/missing URL wording; got: {msg!r}",
                 )
 
-    @patch("apm_cli.adapters.client.codex._rich_success")
+    @patch("apm_cli.core.null_logger._rich_success")
     @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
-    def test_configure_mcp_server_streamable_http_emits_rich_success(
+    def test_configure_mcp_server_streamable_http_does_not_echo_success(
         self, mock_find_server, mock_success
     ):
         """Successful streamable-HTTP registration emits a green _rich_success line."""
@@ -634,15 +634,13 @@ class TestCodexClientAdapter(unittest.TestCase):
         }
         result = self.adapter.configure_mcp_server("figma/figma")
         self.assertTrue(result)
-        mock_success.assert_called_once()
-        msg = mock_success.call_args[0][0]
-        self.assertIn("figma", msg)
-        self.assertIn("Codex CLI", msg)
+        # The integrator's install tree reports success once (#4089).
+        mock_success.assert_not_called()
 
-    @patch("apm_cli.adapters.client.codex._rich_success")
+    @patch("apm_cli.core.null_logger._rich_success")
     @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")
-    def test_configure_mcp_server_stdio_emits_rich_success(self, mock_find_server, mock_success):
-        """stdio registrations also emit _rich_success (not bare print)."""
+    def test_configure_mcp_server_stdio_does_not_echo_success(self, mock_find_server, mock_success):
+        """stdio registrations leave the success line to the install tree (#4089)."""
         mock_find_server.return_value = {
             "id": "test-id",
             "name": "test-server",
@@ -658,7 +656,7 @@ class TestCodexClientAdapter(unittest.TestCase):
         }
         result = self.adapter.configure_mcp_server("test-server", "my_server")
         self.assertTrue(result)
-        mock_success.assert_called_once()
+        mock_success.assert_not_called()
 
     @patch("apm_cli.adapters.client.codex._log")
     @patch("apm_cli.registry.client.SimpleRegistryClient.find_server_by_reference")

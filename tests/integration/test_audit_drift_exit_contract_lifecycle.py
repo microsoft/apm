@@ -92,8 +92,8 @@ def test_plain_audit_drift_line_severity_matches_exit_code(
 
         # Execute the printed restore hint: delete the modified file, rerun install.
         hint = (
-            "  [i] To restore the locked content, delete the modified files and rerun "
-            "'apm install', then commit the result"
+            "  [i] Delete the edited skill files, then run 'apm install' to restore the "
+            "locked content"
         )
         assert any(line.startswith(hint) for line in lines), output(drifted)
         deployed.unlink()

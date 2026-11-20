@@ -25,6 +25,13 @@ from typing import TYPE_CHECKING
 
 import click
 
+from apm_cli.core.remediation import (
+    EXECUTABLES_APPROVED,
+    EXECUTABLES_DENIED,
+    EXECUTABLES_UNAPPROVED,
+    INSTALLED_FILES_DIFFER,
+    LOCKFILE_RECORDS_INCONSISTENT,
+)
 from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import serialized_lifecycle
 
@@ -297,7 +304,17 @@ def approve_cmd(
             _approve_all_pending(manifest, user_scope, allow, deny, logger=logger)
             return
 
-        packages = _canonical_specs(manifest, packages)
+        from ..security.executables import _is_content_bound_key
+
+        bundle_keys = tuple(pkg for pkg in packages if _is_content_bound_key(pkg))
+        packages = tuple(pkg for pkg in packages if not _is_content_bound_key(pkg))
+        bundles = _resolve_bundle_keys(manifest, bundle_keys)
+        packages = _canonical_specs(manifest, packages) if packages else ()
+        if bundle_keys:
+            _approve_bundles(manifest, user_scope, allow, deny, bundles, logger=logger)
+            if not packages:
+                return
+            allow, deny = _load_store(manifest, user_scope)
         _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)
     except PolicyViolationError as exc:
         _report_policy_block(exc)
@@ -389,7 +406,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) ->
         _rich_info(f"Updated {_store_label(user_scope)} ({changed} denied).", symbol="info")
         # Deployed hooks keep firing until install retires them (#3924).
         _rich_info(
-            f"Run '{_install_command(manifest)}' to remove executables already deployed.",
+            EXECUTABLES_DENIED.with_command(_install_command(manifest)).sentence(),
             symbol="info",
         )
 
@@ -667,10 +684,7 @@ def _show_pending(manifest: Path, *, logger: CommandLogger) -> None:
             _rich_echo(f"  {_identity(decl)}: {decl.summary_line()}")
             _echo_pins(decl, pins, _item_states(ctx, decl, pins))
         _rich_echo("")
-        _rich_info(
-            "Review each definition, then run 'apm approve <package>' to pin it.",
-            symbol="info",
-        )
+        _rich_info(EXECUTABLES_UNAPPROVED.sentence(), symbol="info")
     if bundles:
         _show_pending_bundles(manifest, bundles)
 
@@ -688,6 +702,9 @@ def _pending_bundles(manifest: Path, ctx) -> list:
 
 
 def _show_pending_bundles(manifest: Path, bundles: list) -> None:
+    from ..security.trust import approve_command
+
+    user_scope = _install_command(manifest).endswith("-g")
     _rich_warning(f"{len(bundles)} local bundle(s) with parked executables:")
     for bundle in bundles:
         _rich_echo(
@@ -696,10 +713,13 @@ def _show_pending_bundles(manifest: Path, bundles: list) -> None:
         )
         # The key is copied into apm.yml, so it is never wrapped.
         _rich_echo(f'    "{bundle.approval_key}"', soft_wrap=True)
+        _rich_echo(
+            f"    {approve_command(bundle.approval_key, user_scope=user_scope)}", soft_wrap=True
+        )
     _rich_echo("")
     _rich_info(
-        f"Review the bundle, add its approval key under executables.allow in {manifest.name}, "
-        "then rerun 'apm install <bundle>'.",
+        "Review each bundle, run its approve command (the same grant as its key under "
+        f"executables.allow in {manifest.name}), then rerun '{_install_command(manifest)} <bundle>'.",
         symbol="info",
     )
 
@@ -776,6 +796,86 @@ def _approve_packages(
     if selected:
         _record_and_save(manifest, user_scope, allow, deny, selected, logger=logger)
     if missing:
+        sys.exit(1)
+
+
+def _resolve_bundle_keys(manifest: Path, keys: Sequence[str]) -> list:
+    """Match each content-bound key to the bundle its install recorded, or exit 1 (#4437).
+
+    The key the install printed binds the bundle's exact content digest. A key
+    with a wrong digest, or one a later install of changed bundle bytes
+    replaced, matches no recorded bundle and is refused before any write.
+    """
+    from ..install.local_bundle_pending import recorded_bundle
+    from ..security.trust import approve_command
+
+    resolved = []
+    unmatched = []
+    for key in dict.fromkeys(keys):
+        bundle = recorded_bundle(manifest.parent, key)
+        if bundle is None:
+            unmatched.append(key)
+        else:
+            resolved.append(bundle)
+    if unmatched:
+        review = approve_command("--pending", user_scope=_install_command(manifest).endswith("-g"))
+        for key in unmatched:
+            _rich_error(
+                f"{key}: no installed local bundle has this exact content (wrong digest, "
+                f"or the bundle changed since the key was printed). Nothing written. Review: {review}",
+                symbol="error",
+            )
+        sys.exit(1)
+    return resolved
+
+
+def _approve_bundles(
+    manifest: Path,
+    user_scope: bool,
+    allow: dict,
+    deny: dict,
+    bundles: list,
+    *,
+    logger: CommandLogger,
+) -> None:
+    """Grant parked bundle executables under their exact key: the executables.allow entry."""
+    from dataclasses import replace
+
+    if not bundles:
+        return
+    cleared = []
+    for bundle in bundles:
+        entry = allow.get(bundle.approval_key)
+        grant = dict(entry) if isinstance(entry, dict) else {}
+        grant.update(dict.fromkeys(bundle.exec_types, True))
+        allow[bundle.approval_key] = grant
+        if deny.pop(bundle.approval_key, None) is not None:
+            cleared.append(bundle.approval_key)
+    _save_store(manifest, user_scope, allow, deny)
+    for key in cleared:
+        _rich_info(f"Cleared deny for {key} in {_store_label(user_scope)}.", symbol="info")
+    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
+    blocked = {bundle.approval_key for bundle in _pending_bundles(manifest, ctx)}
+    for bundle in bundles:
+        if bundle.approval_key in blocked:
+            _rich_error(
+                f"{bundle.approval_key} is still denied by another trust layer; the approval "
+                "has no effect until that deny is lifted.",
+                symbol="error",
+            )
+        else:
+            _rich_success(
+                f"Approved local bundle '{bundle.slug}': {', '.join(bundle.exec_types)}",
+                symbol="check",
+            )
+    approved = len([b for b in bundles if b.approval_key not in blocked])
+    if approved:
+        _rich_info(
+            f"Updated {_store_label(user_scope)} ({approved} approved). "
+            f"Rerun '{_install_command(manifest)} <bundle>' to deploy.",
+            symbol="info",
+        )
+    if blocked & {bundle.approval_key for bundle in bundles}:
         sys.exit(1)
 
 
@@ -873,7 +973,7 @@ def _record_declaration(allow: dict, decl: ExecutableDeclaration) -> str | None:
     if not decl.content_verified:
         _rich_error(
             f"{identity}: installed files differ from apm.lock.yaml; not approved. "
-            "Run 'apm install' to restore them, then retry."
+            f"{INSTALLED_FILES_DIFFER.sentence()}"
         )
         return None
     pins = _pins_for(decl)
@@ -1057,10 +1157,10 @@ def _record_and_save(
             _rich_success(line, symbol="check")
     if successes:
         install = _install_command(manifest)
-        share = "" if user_scope or install.endswith("-g") else "; commit apm.yml to share"
+        share = "" if user_scope or install.endswith("-g") else " Commit apm.yml to share."
         _rich_info(
             f"Updated {_store_label(user_scope)} ({len(successes)} approved). "
-            f"Run '{_install_command(manifest)}' to deploy{share}.",
+            f"{EXECUTABLES_APPROVED.with_command(install).sentence()}{share}",
             symbol="info",
         )
         if share and not had_pins and has_any_pins(allow):
@@ -1234,8 +1334,8 @@ def scan_installed_executable_packages(manifest: Path) -> list:
         except LocalResolutionError as exc:
             raise click.ClickException(
                 "Cannot inspect installed packages because apm.lock.yaml has "
-                f"invalid local dependency ancestry: {exc}. Run 'apm install' "
-                "to regenerate the lockfile, then retry."
+                f"invalid local dependency ancestry: {exc}. "
+                f"{LOCKFILE_RECORDS_INCONSISTENT.sentence()}"
             ) from exc
         for locked in lockfile.get_package_dependencies():
             try:

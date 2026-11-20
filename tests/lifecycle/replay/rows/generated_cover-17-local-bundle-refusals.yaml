@@ -34,7 +34,7 @@ when:
   - '*'
 - run: apm prune
   exit: 0
-  message: Nothing to prune
+  message: No orphaned packages found\. Nothing to prune\.
   cells:
   - rule|U8|prune-leaves-a-local-bundle-untouched
   unchanged:

@@ -94,7 +94,10 @@ def _repack(
 
 
 def _hook_entries(project: Path) -> dict[str, list[str]]:
-    settings = json.loads((project / ".claude" / "settings.json").read_text())
+    path = project / ".claude" / "settings.json"
+    if not path.exists():
+        return {}
+    settings = json.loads(path.read_text())
     return {
         event: [entry["matcher"] for entry in entries]
         for event, entries in settings.get("hooks", {}).items()
@@ -214,8 +217,8 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     assert "not approved for this exact bundle content" in text, text
     assert _hook_entries(consumer) == {"PreToolUse": ["Write"]}
 
-    # Apply the printed remedy as printed (no runnable 'apm approve' exists for a
-    # local bundle key): the apm.yml executables.allow snippet, then reinstall.
+    # Apply the printed remedy as printed: the apm.yml executables.allow snippet,
+    # then reinstall ('apm approve <key>' writes the same entry, #4437).
     printed = re.search(
         r"add to apm\.yml: executables: allow: \"([^\"]+)\": (\w+): true Then rerun the install",
         text,
@@ -330,6 +333,33 @@ def test_approve_pending_lists_parked_bundle_executables(
     assert "All packages with executables are approved." in pending, pending
 
 
+def test_update_names_a_bundle_whose_executables_are_parked(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4441: 'apm update' names a parked bundle and its next step, and changes nothing."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("parked-update-consumer", targets=("claude",))
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {}
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle))
+    durable = ("apm.yml", "apm.lock.yaml", "apm_modules/.local-bundle-pending.json")
+    before = {name: (consumer / name).read_bytes() for name in durable}
+
+    updated = output(world.apm(consumer, "update", "--yes"))
+
+    assert "Local bundle 'hookpkg': hooks parked, awaiting approval." in updated, updated
+    assert "apm approve --pending" in updated, updated
+    assert "executables.allow" in updated, updated
+    assert {name: (consumer / name).read_bytes() for name in durable} == before
+
+    # Once the exact key is approved and the bundle reinstalled, nothing is parked.
+    _allow(consumer, key)
+    world.apm(consumer, "install", str(bundle))
+    assert "awaiting approval" not in output(world.apm(consumer, "update", "--yes"))
+
+
 def _skill_bundle(world: MarketplacePackWorld, tmp_path: Path) -> Path:
     producer = world.isolated.work_root / "skillpkg"
     write(
@@ -383,3 +413,79 @@ def test_bundle_skill_migration_removes_receipted_legacy_copies(
     assert not legacy.exists()
     local = world.lock(consumer).get("local_deployed_files") or []
     assert not any(path.startswith(".github/skills/") for path in local), local
+
+
+def _squeezed(result) -> str:
+    """Combined output with all whitespace removed, so a wrapped key still matches."""
+    return re.sub(r"\s+", "", result.stdout + result.stderr)
+
+
+def _printed_key(text: str) -> str:
+    """The exact-content key the install diagnostic printed, as the user copies it."""
+    printed = re.search(r"executables: allow: \"([^\"]+)\": hooks: true", text)
+    assert printed is not None, text
+    return re.sub(r"\s+", "", printed.group(1))
+
+
+def _approval_state(world: MarketplacePackWorld, project: Path) -> tuple[dict, bytes | None]:
+    """Project bytes plus the user config store: what a refused approve must not touch."""
+    config = Path(world.env["APM_HOME"]) / "config.json"
+    return tree_bytes(project), config.read_bytes() if config.exists() else None
+
+
+def _assert_refused(world: MarketplacePackWorld, project: Path, key: str) -> None:
+    """I7/#4189: exit 1, an [x] line naming the key, and no project or user-store write."""
+    before = _approval_state(world, project)
+    refused = world.apm(project, "approve", key, expect=1)
+    assert f"[x]{key}:noinstalledlocalbundlehasthisexactcontent" in _squeezed(refused)
+    assert _approval_state(world, project) == before
+
+
+def test_approve_grants_the_printed_local_bundle_key(tmp_path: Path, apm_binary_path: Path) -> None:
+    """#4437: 'apm approve <printed key>' equals the executables.allow entry; stale keys fail."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("approve-key-consumer", targets=("claude",))
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {}
+    dump_yaml(manifest, consumer / "apm.yml")
+    printed = _printed_key(output(world.apm(consumer, "install", str(bundle))))
+    assert printed == key, (printed, key)
+    assert not (consumer / ".claude" / "settings.json").exists()
+
+    # A key with a wrong digest, or for a bundle that is not installed, is refused.
+    digest = key.rsplit(":", 1)[1]
+    _assert_refused(
+        world, consumer, key[: -len(digest)] + ("0" if digest[0] != "0" else "1") * len(digest)
+    )
+    _assert_refused(world, consumer, "otherpkg" + key[len("hookpkg") :])
+
+    # --pending prints a runnable approve command for the printed key; running it
+    # writes the executables.allow entry, and the rerun install registers the hooks.
+    pending = world.apm(consumer, "approve", "--pending")
+    commands = re.findall(r"apm approve '([^']+)'", pending.stdout)
+    assert commands == [key], pending.stdout
+    approved = output(world.apm(consumer, "approve", commands[0]))
+    assert "[+] Approved local bundle 'hookpkg': hooks" in approved, approved
+    assert load_yaml(consumer / "apm.yml")["executables"] == {"allow": {key: {"hooks": True}}}
+    world.apm(consumer, "install", str(bundle))
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+    assert _run_hook(world, consumer, "Bash") == "hookpkg\n"
+    _assert_lock_matches_disk(world, consumer)
+    pending = output(world.apm(consumer, "approve", "--pending"))
+    assert "All packages with executables are approved." in pending, pending
+    # Approving the installed key again converges: no byte changes.
+    before = tree_bytes(consumer)
+    world.apm(consumer, "approve", printed)
+    assert tree_bytes(consumer) == before
+
+    # Changed bundle bytes park again under a new key; the old key is now stale.
+    changed, new_key = _repack(world, producer, tmp_path, "1.0.1", "#!/bin/sh\necho v2\n")
+    assert _printed_key(output(world.apm(consumer, "install", str(changed)))) == new_key
+    assert "Bash" not in json.dumps(_hook_entries(consumer)), "the stale grant ran new bytes"
+    _assert_refused(world, consumer, key)
+
+    world.apm(consumer, "approve", new_key)
+    world.apm(consumer, "install", str(changed))
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+    assert _run_hook(world, consumer, "Bash") == "v2\n"

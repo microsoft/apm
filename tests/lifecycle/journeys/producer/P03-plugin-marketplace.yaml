@@ -95,7 +95,7 @@ steps:
     key_lines:
       - "[+] Marketplace 'alice-dev' registered (1 plugin)"
       - "[+] <PROJECT>/my-plugin (local)"
-      - "[*] Installed 1 APM dependency in <DUR>."
+      - "[*] Updated apm.lock.yaml in <DUR>."
     forbidden_lines: ["[x]", "[!]"]
 known_cells:
   - id: marketplace-outdated-local-source-ls-remote

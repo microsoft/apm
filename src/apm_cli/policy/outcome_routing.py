@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import POLICY_FETCH_FAILURE_BLOCKED
 from apm_cli.install.errors import PolicyViolationError
 
 if TYPE_CHECKING:  # pragma: no cover - type-checking only
@@ -172,11 +173,17 @@ def classify_discovery_outcome(
                 or outcome
             )
             cause = outcome_cause(outcome, source, err_text)
-            reason = (
+            sentences = [
                 f"no enforceable org policy was resolved (outcome={outcome}) and "
                 "project apm.yml has policy.fetch_failure_default=block "
-                f"(source={source}). {cause}" + (f". {hint}" if hint else "")
-            )
+                f"(source={source})",
+                cause.rstrip("."),
+            ]
+            if hint:
+                sentences.append(hint.rstrip("."))
+            named = f" ({source})" if source != "unknown" else ""
+            remedy = POLICY_FETCH_FAILURE_BLOCKED.bind(source=named).sentence()
+            reason = ". ".join([*sentences, remedy])
         return DiscoveryRoute(
             outcome,
             route,

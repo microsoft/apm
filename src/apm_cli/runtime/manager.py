@@ -13,6 +13,7 @@ from pathlib import Path
 import click
 from colorama import Fore, Style
 
+from ..core.remediation import LLM_TLS_BOOTSTRAP_MISSING
 from ..core.tls_trust import build_child_tls_env, ensure_child_tls_bootstrap
 from ..core.token_manager import setup_runtime_environment
 from ..utils.subprocess_env import external_process_env
@@ -285,8 +286,7 @@ class RuntimeManager:
             if not ensure_child_tls_bootstrap(venv_path):
                 click.echo(
                     f"{Fore.YELLOW}[!]  Could not install OS-trust bootstrap into the llm venv; "
-                    "use Python 3.10+ or set PIP_CERT to your proxy CA bundle, then re-run "
-                    "`apm runtime setup llm`. See: "
+                    f"{LLM_TLS_BOOTSTRAP_MISSING.clause()}. See: "
                     "https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
                     f"{Style.RESET_ALL}"
                 )
