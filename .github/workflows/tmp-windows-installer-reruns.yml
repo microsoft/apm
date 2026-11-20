@@ -1,0 +1,40 @@
+# TEMPORARY evidence harness for #4029 / PR #4036. Removed before the PR
+# leaves draft. Runs the exact "Windows installer" job command from
+# build-release.yml (which only runs on pushes to main) on 10 independent
+# windows-latest runners so the PR can record 10 consecutive green runs.
+name: TMP Windows installer reruns (#4029)
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/tmp-windows-installer-reruns.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installer:
+    name: Windows installer (rerun ${{ matrix.attempt }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        attempt: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --extra dev --extra build
+      - name: Test install.ps1 end-to-end (Windows)
+        shell: pwsh
+        env:
+          APM_E2E_TESTS: "1"
+        run: >-
+          uv run --frozen pytest
+          tests/integration/test_windows_installer_launchers.py
+          -vv -ra --tb=short
