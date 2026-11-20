@@ -1204,6 +1204,139 @@ NATIVE_PLUGIN_CACHE_DIFFERS = _entry(
 )
 # -- end W4 drift-trust --
 # -- W4 phases-targets --
+# Advice printed by install/phases, install/presentation and the install
+# target, staging and source helpers.
+INSTALL_AUDIT_FORCE = _entry(
+    "install-audit-force",
+    "apm install --force",
+    "install despite the critical findings (downgrades the audit block to a warning)",
+)
+CODEX_ADMISSION_STALE = _entry(
+    "codex-admission-stale",
+    "apm install",
+    "admit the Codex native plugins again",
+    before="review the executables approval",
+)
+CODEX_NATIVE_LOOSE_FILES = _entry(
+    "codex-native-loose-files",
+    "apm install -g --target codex",
+    "register the Codex native plugin",
+    before="preserve or relocate your edits and resolve the cleanup conflicts",
+)
+ROOT_CONTEXT_COMPILE = _entry("root-context-compile", "apm compile", "update {outputs}")
+USER_ROOT_CONTEXT_COMPILE = _entry(
+    "user-root-context-compile", "apm compile -g", "update root context files for {targets}"
+)
+EXECUTABLES_PARKED = _entry(
+    "executables-parked",
+    "apm approve {package}",
+    "trust its executables",
+    then="run 'apm install' to deploy them",
+)
+LOCAL_PACKAGE_PATH_MISSING = _entry(
+    "local-package-path-missing",
+    "apm install",
+    "materialize the local package",
+    before="restore the source or correct the dependency path",
+)
+LOCAL_PACKAGE_UNREADABLE = _entry(
+    "local-package-unreadable",
+    "apm install",
+    "materialize the local package",
+    before="check the source permissions and symlink target",
+)
+LOCAL_PACKAGE_CONTENT_INVALID = _entry(
+    "local-package-content-invalid",
+    "apm install",
+    "materialize the local package",
+    before="use UTF-8 Markdown with valid YAML frontmatter",
+)
+REPLACEMENT_RULES_PARTIAL_INSTALL = _entry(
+    "replacement-rules-partial-install",
+    "apm install",
+    "apply the complete replacement table (a partial install with package selectors cannot)",
+)
+COWORK_SKILLS_DIR_REQUIRED = _entry(
+    "cowork-skills-dir-required",
+    "apm config set copilot-cowork-skills-dir <path>",
+    "point APM at the Cowork skills directory",
+)
+COWORK_TARGET_USER_SCOPE = _entry(
+    "cowork-target-user-scope",
+    "apm install --target copilot-cowork --global",
+    "deploy to Copilot Cowork at user scope",
+)
+AGENT_SOURCE_UNREADABLE = _entry(
+    "agent-source-unreadable",
+    "apm install",
+    "deploy the agent",
+    before="fix the file permissions",
+)
+AGENT_SOURCE_ASSET_SKIPPED = _entry(
+    "agent-source-asset-skipped",
+    "apm install",
+    "deploy the agents without skipping the asset",
+    before="move the asset to a supported package surface or inline the content",
+)
+CASING_MIGRATION_SOURCE_MISSING = _entry(
+    "casing-migration-source-missing", "apm install", "materialize the package again"
+)
+CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS = _entry(
+    "claude-native-switch-loose-hooks",
+    "apm uninstall --global {package}",
+    "remove the loose hook deployment",
+    then="run 'apm install --global {package}' to activate it as a native Claude plugin",
+)
+SKILL_PATH_MIGRATION_CONFLICT = _entry(
+    "skill-path-migration-conflict",
+    "apm install",
+    "migrate the skills to .agents/skills/",
+    before="remove the conflicting file(s)",
+)
+SKILL_PATH_MIGRATION_LEGACY = _entry(
+    "skill-path-migration-legacy",
+    "apm install --legacy-skill-paths",
+    "keep per-client skill paths",
+)
+CONTENT_HASH_CACHE_CLEAN = _entry(
+    "content-hash-cache-clean",
+    "apm cache clean",
+    "discard the cached package copies",
+    then="retry",
+)
+CONTENT_HASH_REPIN = _entry(
+    "content-hash-repin",
+    "apm install",
+    "re-pin the dependency to the new content",
+    before="remove the '{dep_key}' entry from {lockfile}",
+)
+CONTENT_HASH_REPIN_GLOBAL = _entry(
+    "content-hash-repin-global",
+    "apm install -g",
+    "re-pin the dependency to the new content",
+    before="remove the '{dep_key}' entry from {lockfile}",
+)
+MATERIALIZED_MANIFEST_INVALID = _entry(
+    "materialized-manifest-invalid",
+    "apm install",
+    "materialize the dependency again",
+    before="restore valid dependency metadata",
+)
+HOOK_RECONCILE_INCOMPLETE = _entry(
+    "hook-reconcile-incomplete", "apm install", "finish reconciling these hook configs"
+)
+HOOKS_SKIPPED_UNAPPROVED = _entry(
+    "hooks-skipped-unapproved",
+    "apm approve {package}",
+    "approve its hooks",
+    then="run 'apm install' to deploy them",
+)
+CANVAS_SKIPPED_UNAPPROVED = _entry(
+    "canvas-skipped-unapproved",
+    "apm approve {package}",
+    "approve its canvas extensions",
+    then="run 'apm install' to deploy them",
+)
 # -- end W4 phases-targets --
 # -- end install/policy (W4) ---------------------------------------------------
 

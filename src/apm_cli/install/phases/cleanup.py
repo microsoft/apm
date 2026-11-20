@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+from apm_cli.core.remediation import ORPHANED_PACKAGES_PRUNE
 from apm_cli.core.scope import is_user_scope
 from apm_cli.drift import detect_stale_files
 from apm_cli.integration.base_integrator import BaseIntegrator
@@ -330,7 +331,7 @@ def _remove_dropped_package_dirs(ctx: InstallContext, decision) -> None:
         except (OSError, PathTraversalError) as exc:
             ctx.diagnostics.warn(
                 f"Could not remove dropped dependency copy apm_modules/{relative}: {exc}",
-                detail="Run 'apm prune' to retry.",
+                detail=ORPHANED_PACKAGES_PRUNE.sentence(),
             )
             continue
         deleted.append(package_dir)
@@ -367,7 +368,7 @@ def _trim_superseded_package_roots(ctx: InstallContext, decision) -> None:
                     display = entry.relative_to(apm_modules_dir).as_posix()
                     ctx.diagnostics.warn(
                         f"Could not remove superseded content apm_modules/{display}: {exc}",
-                        detail="Run 'apm prune' to remove leftover orphaned packages.",
+                        detail=ORPHANED_PACKAGES_PRUNE.sentence(),
                     )
 
 

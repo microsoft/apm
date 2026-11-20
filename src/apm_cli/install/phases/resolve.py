@@ -11,6 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import REPLACEMENT_RULES_PARTIAL_INSTALL
 from apm_cli.install.helpers.ref_reuse import (
     annotate_update_plan_refs,
 )
@@ -982,10 +983,8 @@ def run(ctx: InstallContext) -> None:
             ctx.existing_lockfile, getattr(ctx.apm_package, "replace_rules", None)
         )
         if not unchanged:
-            raise RuntimeError(
-                "Replacement rules changed during a partial install. Run 'apm install' "
-                "without package selectors to apply the complete replacement table."
-            )
+            advice = REPLACEMENT_RULES_PARTIAL_INSTALL.sentence()
+            raise RuntimeError(f"Replacement rules changed during a partial install. {advice}")
     _ensure_modules_dir(ctx)
     staging_session = resolution_for_context(ctx)
     materialization_reader = _materialization.CachedMaterializationPathReader()

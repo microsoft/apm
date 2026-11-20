@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import ROOT_CONTEXT_COMPILE, USER_ROOT_CONTEXT_COMPILE
 from apm_cli.utils.console import _rich_success
 
 if TYPE_CHECKING:
@@ -143,7 +144,8 @@ def _project_compile_hint(target_names: list[str], families: frozenset[str], ver
     """Render the single project-scope ``apm compile`` hint line."""
     targets = ", ".join(target_names)
     outputs = " / ".join(_root_context_outputs(families))
-    return f"Instructions {verb} for {targets}. Run 'apm compile' to update {outputs}."
+    advice = ROOT_CONTEXT_COMPILE.bind(outputs=outputs).sentence()
+    return f"Instructions {verb} for {targets}. {advice}"
 
 
 def _hint_project_compile_needed(ctx: InstallContext) -> None:
@@ -270,10 +272,8 @@ def _hint_global_root_context(ctx: InstallContext) -> None:
 
     if ctx.logger:
         targets = ", ".join(target_names)
-        message = (
-            "Applicable instructions are available. Run 'apm compile -g' "
-            f"to update root context files for: {targets}."
-        )
+        advice = USER_ROOT_CONTEXT_COMPILE.bind(targets=targets).sentence()
+        message = f"Applicable instructions are available. {advice}"
         ctx.logger.info(message, symbol="info")
 
 
