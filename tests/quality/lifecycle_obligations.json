@@ -23655,9 +23655,9 @@
   },
   "U-BIN": {
    "evidence": [
-    "src/apm_cli/install/exec_gate.py:701",
-    "src/apm_cli/install/exec_gate.py:702",
-    "src/apm_cli/install/exec_gate.py:705"
+    "src/apm_cli/install/exec_gate.py:830",
+    "src/apm_cli/install/exec_gate.py:831",
+    "src/apm_cli/install/exec_gate.py:834"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
@@ -23681,7 +23681,7 @@
   },
   "U3": {
    "evidence": [
-    "src/apm_cli/core/deployment_ledger.py:864"
+    "src/apm_cli/core/deployment_ledger.py:868"
    ],
    "text": "edited is defined relative to a receipt; present with unknown provenance has no lock"
   },
@@ -23720,7 +23720,7 @@
     "src/apm_cli/commands/uninstall/engine.py:749",
     "src/apm_cli/commands/uninstall/engine.py:912",
     "src/apm_cli/commands/uninstall/engine.py:741",
-    "src/apm_cli/commands/update.py:493",
+    "src/apm_cli/commands/update.py:557",
     "src/apm_cli/core/command_logger.py:289",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
@@ -23735,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "06e575f3732161530423423e44ee748566d294c648bf753a623320dd07cbc622"
+ "sha256": "bedcff960cd47ce07f4aea8d8b8566c452b86e54ec27741e154c1755bc72376c"
 }

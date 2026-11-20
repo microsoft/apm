@@ -77,14 +77,14 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 1026, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 576, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 586, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 607, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 634, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 640, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 650, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 671, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 698, '"--target"'),
     ),
     "uninstall": (
-        Ev("src/apm_cli/commands/uninstall/cli.py", 761, 'argument("packages"'),
-        Ev("src/apm_cli/commands/uninstall/cli.py", 763, '"--dry-run"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 789, 'argument("packages"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 791, '"--dry-run"'),
     ),
     "prune": (
         Ev("src/apm_cli/commands/prune.py", 85, '"--dry-run"'),
@@ -146,8 +146,8 @@ USER_SCOPE_OPS = frozenset(
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 926, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 599, '"--global"'),
-    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 769, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 663, '"--global"'),
+    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 797, '"--global"'),
     "compile": Ev(_COMPILE, 1396, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
     "approve-deny": Ev(_APPROVE, 239, '"--user"'),
@@ -172,7 +172,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U3": (
         "edited is defined relative to a receipt; present with unknown provenance has no lock",
-        (Ev("src/apm_cli/core/deployment_ledger.py", 864, "class DeploymentLedgerCodec"),),
+        (Ev("src/apm_cli/core/deployment_ledger.py", 868, "class DeploymentLedgerCodec"),),
     ),
     "U4": (
         "a declared target change without a receipt is reachable; only receipt-backed "
@@ -213,7 +213,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/commands/uninstall/engine.py", 749, "is an MCP server, not a package"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 912, "was not found in apm.yml"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 741, "cannot remove local-bundle"),
-            Ev("src/apm_cli/commands/update.py", 493, "No APM dependencies to update"),
+            Ev("src/apm_cli/commands/update.py", 557, "No APM dependencies to update"),
             Ev("src/apm_cli/core/command_logger.py", 289, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
@@ -227,9 +227,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 701, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 702, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 705, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 830, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 831, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 834, 'target.name == "claude"'),
         ),
     ),
     "U9": (
