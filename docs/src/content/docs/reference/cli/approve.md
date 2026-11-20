@@ -202,7 +202,10 @@ Re-approving replaces the package's pins with the current definitions.
 
 It exits 1 when any requested package was refused, or when you decline the
 first-approval prompt (`Nothing written.`), so a script never commits an
-approval that was not recorded. The first pinned approval in a project also
+approval that was not recorded. It also exits 1, writing nothing, when the
+org policy outcome blocks, exactly as `apm install` would (for example an
+unreachable policy under `policy.fetch_failure_default: block`); run
+`apm policy status --no-cache` to diagnose. The first pinned approval in a project also
 prints `Teammates need APM 0.37 or later to read pinned approvals.`
 
 `--pending` marks each item `[approved]`, `[approved, any content]`,
