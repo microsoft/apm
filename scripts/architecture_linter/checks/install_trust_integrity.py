@@ -6,6 +6,9 @@
   caller that reads ``.policy`` and drops the outcome fails closed here.
 * ``apm update`` keeps the content-hash check for a dependency whose
   resolved commit did not move.
+* Every registry download routes through ``download_registry_package``,
+  which verifies an unchanged registry version against its locked hash
+  (#4125).
 * ``apm unpack`` refuses executable content before it writes anything.
 * ``apm install -g <bundle>`` keeps its lock, approvals and gate config
   under ``APM_HOME`` (``core.scope``), never the home directory.
@@ -30,6 +33,7 @@ from scripts.architecture_linter.models import Violation
 
 GUARD_TRUST_POLICY_OUTCOME = "install-deployment-trust-policy-outcome"
 GUARD_UPDATE_CONTENT_INTEGRITY = "install-deployment-update-content-integrity"
+GUARD_UPDATE_REGISTRY_INTEGRITY = "install-deployment-update-registry-integrity"
 GUARD_UNPACK_EXECUTABLES = "install-deployment-unpack-executable-refusal"
 GUARD_BUNDLE_USER_SCOPE_ROOT = "install-deployment-bundle-user-scope-root"
 GUARD_LOCAL_BUNDLE_HOOK_TRUST = "install-deployment-local-bundle-hook-trust"
@@ -41,6 +45,7 @@ _EXEC_GATE = "src/apm_cli/install/exec_gate.py"
 _LOCAL_BUNDLE = "src/apm_cli/install/local_bundle_handler.py"
 _SOURCES = "src/apm_cli/install/sources.py"
 _INTEGRATE = "src/apm_cli/install/phases/integrate.py"
+_RESOLVE = "src/apm_cli/install/phases/resolve.py"
 _HELPERS = "src/apm_cli/install/source_helpers.py"
 _UNPACKER = "src/apm_cli/bundle/unpacker.py"
 _INSTALL_COMMAND = "src/apm_cli/commands/install.py"
@@ -198,6 +203,69 @@ def check_update_content_integrity(provider: FactsProvider) -> tuple[Violation, 
                     line=number,
                 )
             )
+    return tuple(findings)
+
+
+# Registry identity is name plus exact version: one predicate decides whether
+# the locked version moved, and one download owner verifies the locked hash.
+_REGISTRY_HELPER_NEEDLES = (
+    (
+        'and version == getattr(locked_dep, "version", None)',
+        "locked_version_unchanged must compare the exact locked registry version",
+    ),
+    (
+        "or not locked_version_unchanged(locked_dep, version)",
+        "download_registry_package must ask locked_version_unchanged",
+    ),
+    (
+        'or expected.removeprefix("sha256:").lower() == actual.removeprefix("sha256:").lower()',
+        "download_registry_package must compare the locked resolved_hash",
+    ),
+)
+_REGISTRY_DOWNLOADERS = (_SOURCES, _RESOLVE)
+
+
+def check_update_registry_integrity(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Registry downloads verify an unchanged version against its locked hash."""
+    findings: list[Violation] = []
+    helpers, failures = _facts_for(provider, _HELPERS, GUARD_UPDATE_REGISTRY_INTEGRITY)
+    findings.extend(failures)
+    if not failures:
+        findings.extend(
+            _summary(GUARD_UPDATE_REGISTRY_INTEGRITY, _HELPERS, message)
+            for needle, message in _REGISTRY_HELPER_NEEDLES
+            if not _present(helpers, needle)
+        )
+    for path in _REGISTRY_DOWNLOADERS:
+        facts, path_failures = _facts_for(provider, path, GUARD_UPDATE_REGISTRY_INTEGRITY)
+        findings.extend(path_failures)
+        if not path_failures and not _present(facts, "download_registry_package("):
+            findings.append(
+                _summary(
+                    GUARD_UPDATE_REGISTRY_INTEGRITY,
+                    path,
+                    "Registry downloads must route through download_registry_package",
+                )
+            )
+    # Closed world: no registry resolver download outside the owner.
+    for path in _python_paths(provider, "src/apm_cli/"):
+        if path.startswith("src/apm_cli/deps/registry/"):
+            continue
+        path_facts, path_failures = _facts_for(provider, path, GUARD_UPDATE_REGISTRY_INTEGRITY)
+        if path_failures:
+            continue
+        for call in path_facts.calls:
+            receiver, _, name = call.qualname.rpartition(".")
+            if name == "download_package" and "registry" in receiver.lower():
+                findings.append(
+                    violation(
+                        GUARD_UPDATE_REGISTRY_INTEGRITY,
+                        path,
+                        f"{call.scope} downloads a registry package directly; "
+                        "call install.source_helpers.download_registry_package",
+                        line=call.line,
+                    )
+                )
     return tuple(findings)
 
 
