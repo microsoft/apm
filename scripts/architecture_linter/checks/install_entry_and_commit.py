@@ -8,7 +8,8 @@ deployed files are committed. The commit gate runs before the first
 integrator write and on the staged lockfile before its writer scope commits
 it (#4086); merged MCP policy is enforced
 from a closed list of sites; the frozen pre-deploy check runs before the
-pipeline; ``InstallTransaction`` has one definition.
+pipeline; ``install --mcp`` judges policy through the commit gate;
+``InstallTransaction`` has one definition.
 """
 
 from __future__ import annotations
@@ -48,16 +49,19 @@ _ENTRY_CALLERS = frozenset(
         "src/apm_cli/commands/deps/cli.py",
     }
 )
+_MCP_COMMAND = "src/apm_cli/install/mcp/command.py"
 # Closed, shrink-only list of org-policy preflight sites outside the policy
-# package. Local bundle and --mcp leave it when they route through the pipeline.
+# package. Local bundle leaves it when it routes through the pipeline.
 _POLICY_PREFLIGHT_SITES = frozenset(
     {
         _COMMAND,
         _COMMIT_GATE,
         "src/apm_cli/install/local_bundle_handler.py",
-        "src/apm_cli/install/mcp/command.py",
     }
 )
+# install --mcp judges its server through the commit gate and refuses it as
+# apm install does.
+_MCP_ENTRY_GATE_CALLS = ("enforce_mcp_policy(", "refuse_blocked_mcp(logger)")
 
 _PIPELINE_CALL = re.compile(r"\brun_install_pipeline\(")
 _ENTRY_CALL = re.compile(r"\b_install_apm_dependencies\(")
@@ -157,7 +161,7 @@ def _ordered(facts: object, first: str, then: str) -> bool:
 def check_install_commit_order(provider: FactsProvider) -> tuple[Violation, ...]:
     """Every install check completes before the lockfile and deployed files commit."""
     rule_id = GUARD_COMMIT_ORDER
-    paths = (_INTEGRATE, _PIPELINE, _SERVICE, _COMMIT_GATE, _TRANSACTION)
+    paths = (_INTEGRATE, _PIPELINE, _SERVICE, _COMMIT_GATE, _TRANSACTION, _MCP_COMMAND)
     loaded = {}
     failures: list[Violation] = []
     for path in paths:
@@ -204,9 +208,17 @@ def check_install_commit_order(provider: FactsProvider) -> tuple[Violation, ...]
             "def check_before_lockfile(",
             "enforce_installed_hash_policy(ctx, prospective)",
             "enforce_mcp_policy(",
+            "def refuse_blocked_mcp(",
         )
     ):
         found.append(_summary(rule_id, _COMMIT_GATE, "the commit gate owns every pre-commit check"))
+    mcp_text = "\n".join(text for _number, text in _code_lines(_lines(loaded[_MCP_COMMAND])))
+    if not all(call in mcp_text for call in _MCP_ENTRY_GATE_CALLS):
+        found.append(
+            _summary(
+                rule_id, _MCP_COMMAND, "install --mcp must judge policy through the commit gate"
+            )
+        )
     found += _closed_list_violations(
         provider,
         rule_id,

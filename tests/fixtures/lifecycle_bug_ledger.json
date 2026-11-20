@@ -558,7 +558,7 @@
     {
       "issue": 4085,
       "fixed_in": "0.37.0",
-      "summary": "A blocked transitive MCP server failed the install after the lockfile and deployed files were written, and install --dry-run previewed with a second planner that missed that decision.",
+      "summary": "A blocked transitive MCP server failed the install after the lockfile and deployed files were written, and install --dry-run previewed with a second planner that missed that decision; install --mcp judged policy outside the commit gate and rendered a different refusal.",
       "failure_modes": [
         "outcome",
         "transaction"
@@ -571,6 +571,7 @@
         "tests/integration/test_install_commit_order_lifecycle.py::test_blocked_transitive_mcp_on_fresh_project_commits_nothing",
         "tests/integration/test_install_commit_order_lifecycle.py::test_blocked_transitive_mcp_keeps_previous_install_byte_identical",
         "tests/integration/test_install_commit_order_lifecycle.py::test_dry_run_reaches_the_install_decision_for_transitive_mcp",
+        "tests/integration/test_install_commit_order_lifecycle.py::test_direct_mcp_entry_reaches_the_install_policy_verdict",
         "tests/integration/test_policy_install_e2e.py::TestI8TransitiveMCPDenied::test_transitive_mcp_blocked"
       ]
     },
