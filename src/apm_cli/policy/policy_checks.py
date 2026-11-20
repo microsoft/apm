@@ -227,13 +227,13 @@ def _check_required_packages(
         )
 
     index = _required_policy_index(deps, dep_names)
-    missing: list[str] = []
+    subjects: list[PolicySubject] = []
     for req in policy.effective_require:
         pkg_name = req.split("#", 1)[0]
         if index.find_name(pkg_name) is None:
-            missing.append(pkg_name)
+            subjects.append(_unresolved_required_subject(index, pkg_name))
 
-    if not missing:
+    if not subjects:
         return CheckResult(
             name="required-packages",
             passed=True,
@@ -242,13 +242,51 @@ def _check_required_packages(
     return CheckResult(
         name="required-packages",
         passed=False,
-        message=f"{len(missing)} required package(s) missing from manifest",
-        details=missing,
-        subjects=tuple(
-            PolicySubject(name, "required by org policy but not declared", remedy=PolicyRemedy.ADD)
-            for name in missing
-        ),
+        message=f"{len(subjects)} required package(s) missing from manifest."
+        + _wrong_host_hint(index, subjects),
+        details=[subject.ref for subject in subjects],
+        subjects=tuple(subjects),
     )
+
+
+def _unresolved_required_subject(index: DependencyPolicyIndex, pkg_name: str) -> PolicySubject:
+    """Explain a ``require`` entry that identifies no declared dependency.
+
+    When the same package is declared on another host, name both fixes;
+    otherwise the package must be added to apm.yml.
+    """
+    fix = _wrong_host_fix(index, pkg_name)
+    if fix is not None:
+        return PolicySubject(pkg_name, f"required by org policy, but {fix}", remedy=None)
+    return PolicySubject(pkg_name, "required by org policy but not declared", PolicyRemedy.ADD)
+
+
+def _wrong_host_fix(index: DependencyPolicyIndex, pkg_name: str) -> str | None:
+    """Describe a same-path package declared on another host, manifest fix first.
+
+    The declared host is not trusted by default: it may be a typosquat, so the
+    policy rewrite is offered only for a host the reader trusts.
+    """
+    mismatch = index.host_mismatch(pkg_name)
+    if mismatch is None:
+        return None
+    wanted, declared = mismatch
+    where = declared.host or "a local path"
+    return (
+        f"'{pkg_name}' is declared on {where}, not {wanted} -- declare it on {wanted}, "
+        f"or, if {where} is trusted, change the policy require entry to "
+        f"'{declared.require_entry}'"
+    )
+
+
+def _wrong_host_hint(index: DependencyPolicyIndex, subjects: Iterable[PolicySubject]) -> str:
+    """Append the wrong-host fixes to a check message.
+
+    ``apm audit --ci`` prints the message and details, not subject reasons, so
+    the fix must be in the message to reach the user.
+    """
+    fixes = [fix for subject in subjects if (fix := _wrong_host_fix(index, subject.ref))]
+    return f" {'; '.join(fixes)}." if fixes else ""
 
 
 def _check_required_packages_deployed(
@@ -276,42 +314,49 @@ def _check_required_packages_deployed(
         )
 
     index = _required_policy_index(deps, dep_names)
-    lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
-    not_present: list[str] = []
+    unresolved: list[PolicySubject] = []
+    absent: list[PolicySubject] = []
     for req in policy.effective_require:
         pkg_name = req.split("#", 1)[0]
-        lock_name = index.find_name(pkg_name)
-        if lock_name is None:
-            continue  # not in manifest -- check 3 handles this
+        match = index.find(pkg_name)
+        if match is None:
+            # Never skip: the entry cannot locate its lock row by identity.
+            unresolved.append(_unresolved_required_subject(index, pkg_name))
+        elif match.locked_in(lock) is None:
+            # PRESENCE, not deployment: the package must appear in the lockfile.
+            absent.append(
+                PolicySubject(
+                    pkg_name,
+                    "required package absent from the lockfile -- run "
+                    "`apm install --no-policy` to repair it, then reinstall normally",
+                    remedy=None,
+                )
+            )
 
-        # PRESENCE, not deployment: the package must appear in the lockfile.
-        if lock_by_name.get(lock_name) is None:
-            not_present.append(pkg_name)
-
-    if not not_present:
+    if not unresolved and not absent:
         return CheckResult(
             name="required-packages-deployed",
             passed=True,
             message="All required packages present in lockfile",
         )
+    messages: list[str] = []
+    if absent:
+        messages.append(
+            f"{len(absent)} required package(s) absent from the lockfile. Hint: run "
+            "`apm install --no-policy` to repair the lockfile, then reinstall normally."
+        )
+    if unresolved:
+        messages.append(
+            f"{len(unresolved)} require entry(ies) match no declared package."
+            + _wrong_host_hint(index, unresolved)
+        )
+    subjects = absent + unresolved
     return CheckResult(
         name="required-packages-deployed",
         passed=False,
-        message=(
-            f"{len(not_present)} required package(s) absent from the lockfile. "
-            "Hint: run `apm install --no-policy` to repair the lockfile, "
-            "then reinstall normally."
-        ),
-        details=not_present,
-        subjects=tuple(
-            PolicySubject(
-                name,
-                "required package absent from the lockfile -- run "
-                "`apm install --no-policy` to repair it, then reinstall normally",
-                remedy=None,
-            )
-            for name in not_present
-        ),
+        message=" ".join(messages),
+        details=[subject.ref for subject in subjects],
+        subjects=tuple(subjects),
     )
 
 
@@ -341,14 +386,16 @@ def _check_required_executable_untrusted(
     from ..security.executables import TRUST_DEPLOYED
 
     index = _required_policy_index(deps, dep_names)
-    lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
     untrusted: list[str] = []
+    misnamed: list[PolicySubject] = []
     for req in required:
         pkg_name = req.split("#", 1)[0]
-        lock_name = index.find_name(pkg_name)
-        if lock_name is None:
-            continue  # presence is audited by required-packages / -deployed
-        locked = lock_by_name.get(lock_name)
+        match = index.find(pkg_name)
+        if match is None:
+            if index.host_mismatch(pkg_name) is not None:
+                misnamed.append(_unresolved_required_subject(index, pkg_name))
+            continue  # undeclared: presence is audited by required-packages / -deployed
+        locked = match.locked_in(lock)
         # Trusted when exec_status is absent (no executables declared) or when
         # the executable gate recorded a deployed state. Gated or denied
         # required executables are untrusted.
@@ -357,30 +404,40 @@ def _check_required_executable_untrusted(
         ):
             untrusted.append(pkg_name)
 
-    if not untrusted:
+    if not untrusted and not misnamed:
         return CheckResult(
             name="required-executable-untrusted",
             passed=True,
             message="All required executables are trusted",
         )
-    recommend = set(exec_policy.recommend or ())
-    bulk_eligible = [pkg for pkg in untrusted if pkg in recommend]
-    remedy = "Trust them to deploy: `apm approve <package>` per package."
-    if bulk_eligible:
-        remedy += " Org-recommended packages can be bulk-trusted with `apm approve --recommended`."
+    messages: list[str] = []
+    if untrusted:
+        recommend = set(exec_policy.recommend or ())
+        remedy = "Trust them to deploy: `apm approve <package>` per package."
+        if any(pkg in recommend for pkg in untrusted):
+            remedy += (
+                " Org-recommended packages can be bulk-trusted with `apm approve --recommended`."
+            )
+        messages.append(f"{len(untrusted)} required executable(s) present but untrusted. {remedy}")
+    if misnamed:
+        messages.append(
+            f"{len(misnamed)} required executable(s) name another host."
+            + _wrong_host_hint(index, misnamed)
+        )
+    subjects = [
+        PolicySubject(
+            pkg,
+            f"required executable present but untrusted -- trust it with `apm approve {pkg}`",
+            remedy=None,
+        )
+        for pkg in untrusted
+    ] + misnamed
     return CheckResult(
         name="required-executable-untrusted",
         passed=False,
-        message=(f"{len(untrusted)} required executable(s) present but untrusted. {remedy}"),
-        details=untrusted,
-        subjects=tuple(
-            PolicySubject(
-                pkg,
-                f"required executable present but untrusted -- trust it with `apm approve {pkg}`",
-                remedy=None,
-            )
-            for pkg in untrusted
-        ),
+        message=" ".join(messages),
+        details=[subject.ref for subject in subjects],
+        subjects=tuple(subjects),
     )
 
 
@@ -405,17 +462,16 @@ def _check_required_package_version(
     warnings: list[PolicySubject] = []
 
     index = _required_policy_index(deps, dep_names)
-    lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
 
     for _req, parts in pinned:
         pkg_name, expected_ref = parts[0], parts[1]
 
-        match = index.find_name(pkg_name)
         # Without a manifest dependency there is no host/source authority from
-        # which to derive casing. Preserve the legacy raw lock lookup; check 3
-        # reports the required package as absent.
-        lock_name = match if match is not None else pkg_name
-        locked = lock_by_name.get(lock_name)
+        # which to derive casing: an undeclared name keeps the legacy raw lock
+        # lookup (checks 3 and 4 report it unmatched). A same-path package
+        # declared on another host is never compared; check 3 names the fix.
+        match = index.find_or_undeclared(pkg_name)
+        locked = match.locked_in(lock) if match is not None else None
         if locked is not None:
             actual_ref = locked.resolved_ref or ""
             if actual_ref != expected_ref:
