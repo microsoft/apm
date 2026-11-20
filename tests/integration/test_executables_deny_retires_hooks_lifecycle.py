@@ -26,6 +26,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.promise("P-INV-I3", "P-OWN-frozen-install-mutation-eligibility"),
 ]
 
 _SCRIPT = "hooky-guard.sh"
