@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -191,3 +192,78 @@ def test_user_enabled_registration_is_left_in_place(codex_home) -> None:
     assert not (apm_home / ".codex-native/ownership.json").exists()
     assert (home / ".agents/skills/example/SKILL.md").is_file()
     assert not marker.exists()
+
+
+_REMOTE = "https://git.example.invalid/acme/example-plugin.git"
+
+
+@pytest.mark.parametrize("downloads", ["parallel", "sequential"])
+def test_cached_copy_from_the_retired_route_is_split_installed(
+    codex_home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, downloads: str
+) -> None:
+    """An old-route ``apm_modules`` copy plus its lock row still deploys after retirement."""
+    from apm_cli.utils.content_hash import compute_package_hash
+    from tests.utils.local_git_repository import LocalGitRepositoryFactory
+
+    apm_home, codex, home, _key, source, marker = codex_home
+    repositories = LocalGitRepositoryFactory(tmp_path / "repositories", env=dict(os.environ))
+    repository = repositories.create("example-plugin", source_tree=source)
+    commit = repositories.commit(repository, message="publish example")
+    repositories.tag(repository, "v1.0.0", commit)
+    for name, value in repositories.url_rewrite_subprocess_env(repository, _REMOTE).items():
+        monkeypatch.setenv(name, value)
+    entry = {"git": _REMOTE, "ref": "v1.0.0"}
+    dependency = DependencyReference.parse_from_dict(entry)
+    key = dependency.get_unique_key()
+    dump_yaml(
+        {
+            "name": "consumer",
+            "version": "1.0.0",
+            "targets": ["codex"],
+            "dependencies": {"apm": [entry]},
+            "allowExecutables": {key: {"mcp": True}},
+        },
+        apm_home / "apm.yml",
+    )
+    # The removed route kept the raw bundle in apm_modules and locked its hash.
+    cached = dependency.get_install_path(apm_home / "apm_modules")
+    cached.parent.mkdir(parents=True)
+    shutil.copytree(source, cached)
+    dump_yaml(
+        {
+            "lockfile_version": "1",
+            "apm_version": "0.36.1",
+            "dependencies": [
+                {
+                    "repo_url": dependency.repo_url,
+                    "host": dependency.host,
+                    "resolved_ref": "v1.0.0",
+                    "resolved_commit": commit.sha,
+                    "depth": 1,
+                    "package_type": "marketplace_plugin",
+                    "content_hash": compute_package_hash(cached),
+                }
+            ],
+        },
+        apm_home / "apm.lock.yaml",
+    )
+    snapshot = _seed_legacy_registration(apm_home, codex, key, enabled=False)
+
+    install = ("install", "--global", "--target", "codex", "--no-policy")
+    if downloads == "sequential":
+        install = (*install, "--parallel-downloads", "0")
+    output = _run(*install)
+
+    assert "Retired 1 Codex plugin registration(s) made by an earlier APM version" in output
+    assert "Codex: split-installed 1 plugin(s) at user scope (example)" in output
+    assert not snapshot.exists()
+    assert not any(name.startswith("example@apm-") for name in _config(codex)["plugins"])
+    assert (home / ".agents/skills/example/SKILL.md").is_file(), output
+    assert "example" in _config(codex).get("mcp_servers", {}), output
+    assert not marker.exists(), "APM must never run the codex binary"
+
+    lock_after = (apm_home / "apm.lock.yaml").read_bytes()
+    again = _run(*install)
+    assert "Retired" not in again
+    assert (home / ".agents/skills/example/SKILL.md").is_file()
+    assert (apm_home / "apm.lock.yaml").read_bytes() == lock_after

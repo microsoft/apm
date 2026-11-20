@@ -7,7 +7,7 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.constants import APM_DIR
+from apm_cli.constants import APM_DIR, APM_YML_FILENAME
 from apm_cli.core.remediation import CLAUDE_PLUGIN_CACHE_INVALID
 from apm_cli.core.scope import manifest_file
 from apm_cli.deps.plugin_parser import has_normalized_plugin_skill_sources_receipt
@@ -16,9 +16,14 @@ from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.apm_package import APMPackage, PackageType
 from apm_cli.models.validation import (
     gather_detection_evidence,
+    validate_apm_package,
     validate_legacy_marketplace_plugin,
 )
-from apm_cli.utils.content_hash import compute_package_hash, same_package_digest
+from apm_cli.utils.content_hash import (
+    compute_package_digests,
+    compute_package_hash,
+    same_package_digest,
+)
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -34,6 +39,7 @@ _PLUGIN_SKILL_SOURCES_RECEIPT = Path(APM_DIR) / ".plugin-skill-sources.json"
 _PARSER_SHADOWED_TYPES = frozenset(
     {PackageType.APM_PACKAGE, PackageType.SKILL_BUNDLE, PackageType.HYBRID}
 )
+_CODEX_PLUGIN_MANIFEST = Path(".codex-plugin") / "plugin.json"
 
 
 def preserve_normalized_marketplace_plugin_type(
@@ -124,6 +130,72 @@ def matches_fresh_legacy_plugin_hash(
     if cleanup_issues:
         raise _staging_cleanup_error(dep_key, cleanup_issues)
     return same_package_digest(legacy_hash, locked_dependency.content_hash)
+
+
+def matches_retired_codex_route_hash(
+    package_path: Path,
+    dep_key: str,
+    *,
+    lockfile: LockFile | None,
+    package_type: PackageType | None,
+    exclude: Collection[str] = (),
+) -> bool:
+    """Accept the conversion-only hash delta of a bundle the retired Codex route locked (#3920).
+
+    The removed app-server route locked a ``.codex-plugin`` bundle's raw bytes
+    and never converted it. The split install converts it by adding only
+    ``apm.yml`` and ``.apm/``. Accept the fresh hash only when the tree minus
+    those additions hashes to the locked value AND converting exactly those
+    locked bytes again reproduces the fresh tree, so nothing else can ride
+    along with the conversion.
+    """
+    locked_dependency = lockfile.get_dependency(dep_key) if lockfile is not None else None
+    manifest = package_path / _CODEX_PLUGIN_MANIFEST
+    if (
+        locked_dependency is None
+        or not locked_dependency.content_hash
+        or locked_dependency.package_type != PackageType.MARKETPLACE_PLUGIN.value
+        or package_type != PackageType.MARKETPLACE_PLUGIN
+        or not manifest.is_file()
+    ):
+        return False
+    _reject_unsafe_cache_paths(
+        package_path, dep_key, (manifest, package_path / APM_YML_FILENAME, package_path / APM_DIR)
+    )
+    framed = locked_dependency.content_hash_framed
+    fresh = compute_package_digests(package_path, exclude=exclude, legacy=False).framed
+
+    staging = ResolutionStagingSession(package_path.parent)
+    replacement = staging.prepare_replacement(package_path)
+    try:
+        shutil.copytree(package_path, replacement, symlinks=True)
+        (replacement / APM_YML_FILENAME).unlink(missing_ok=True)
+        if (replacement / APM_DIR).is_dir():
+            shutil.rmtree(replacement / APM_DIR)
+        # The locked bytes are hashed in the stream the lock row records.
+        matches = same_package_digest(
+            compute_package_digests(replacement, exclude=exclude, legacy=not framed).select(
+                framed=framed
+            ),
+            locked_dependency.content_hash,
+        )
+        if matches:
+            converted = validate_apm_package(replacement, source_path=replacement)
+            matches = (
+                converted.is_valid
+                and converted.package_type == PackageType.MARKETPLACE_PLUGIN
+                and same_package_digest(
+                    compute_package_digests(replacement, exclude=exclude, legacy=False).framed,
+                    fresh,
+                )
+            )
+    except BaseException:
+        staging.rollback()
+        raise
+    cleanup_issues = staging.rollback()
+    if cleanup_issues:
+        raise _staging_cleanup_error(dep_key, cleanup_issues)
+    return matches
 
 
 def upgrade_cached_legacy_plugin(
