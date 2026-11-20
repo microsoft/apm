@@ -1391,6 +1391,43 @@ def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) 
     assert any(violation.rule_id == rule_id for violation in report.violations)
 
 
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/core/deployment_ledger.py",
+            "if self._trusted_hash(path, targets, self._write_locator) is not None:",
+            "if self.lockfile_hash_matches(path, self._claims):",
+            id="lockfile-hash-authorizes",
+        ),
+        pytest.param(
+            "src/apm_cli/core/deployment_ledger.py",
+            "    integrator._overwrite_gate = OverwriteGate(",
+            "    integrator._unused_gate = OverwriteGate(",
+            id="gate-not-bound",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/prompt_integrator.py",
+            "skip, adopted = self._check_adopt_or_skip(",
+            "skip, adopted = self._adopt_without_evidence(",
+            id="writer-bypasses-owner",
+        ),
+    ],
+)
+def test_overwrite_evidence_guard_is_closed_world(path: str, old: str, new: str) -> None:
+    """No write path replaces a managed file without receipt or render evidence (#4360)."""
+    rule_id = "install-deployment-overwrite-evidence"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
 @dataclass(frozen=True)
 class MutationCase:
     """One guard's minimal source mutation and the rule that must catch it.
@@ -1839,6 +1876,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    def check_collision(",
         new="    def check_collision_disabled(",
         intent="BaseIntegrator drops a mandatory file-level deploy/sync/cleanup method.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-overwrite-evidence",
+        rule_id="install-deployment-overwrite-evidence",
+        path="src/apm_cli/integration/base_integrator.py",
+        old="(gate and gate.authorizes(target_path, rel_path))",
+        new="(gate is not None)",
+        intent="A managed file is overwritten without asking the install-bound evidence gate.",
     ),
     MutationCase(
         guard_id="install-deployment-bundle-admission-owner",

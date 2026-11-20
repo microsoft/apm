@@ -34,7 +34,7 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
 )
 from apm_cli.utils.diagnostics import CATEGORY_COLLISION, DiagnosticCollector
-from tests.utils.deployment_evidence import receipted_evidence
+from tests.utils.deployment_evidence import prove_overwrites, receipted_evidence
 
 
 def _sync(integrator, target: str, root: Path, managed: set[str] | None) -> dict:
@@ -197,8 +197,9 @@ class TestPromptCollisionDetection:
         assert result.files_skipped == 1
         assert (prompts_dir / "review.prompt.md").read_text() == "# user version"
 
-    def test_managed_file_not_collision(self, tmp_path: Path):
+    def test_managed_file_not_collision(self, tmp_path: Path, monkeypatch):
         """File listed in managed_files is overwritten (not a collision)."""
+        prove_overwrites(monkeypatch)
         prompts_dir = tmp_path / ".github" / "prompts"
         prompts_dir.mkdir(parents=True)
         (prompts_dir / "review.prompt.md").write_text("# old")
@@ -513,8 +514,9 @@ class TestCommandCollisionDetection:
         # Verify user content is preserved
         assert (cmds_dir / "review.md").read_text() == "# user version"
 
-    def test_managed_file_not_collision(self, tmp_path: Path):
+    def test_managed_file_not_collision(self, tmp_path: Path, monkeypatch):
         """File listed in managed_files is overwritten (not a collision)."""
+        prove_overwrites(monkeypatch)
         cmds_dir = tmp_path / ".claude" / "commands"
         cmds_dir.mkdir(parents=True)
         (cmds_dir / "review.md").write_text("# old")
@@ -677,8 +679,9 @@ class TestHookCollisionDetection:
         # Verify user content is preserved
         assert json.loads((hooks_dir / "test-pkg-hooks.json").read_text()) == {"user": True}
 
-    def test_managed_file_not_collision(self, tmp_path: Path):
+    def test_managed_file_not_collision(self, tmp_path: Path, monkeypatch):
         """Hook file in managed_files is overwritten (not a collision)."""
+        prove_overwrites(monkeypatch)
         hooks_dir = tmp_path / ".github" / "hooks"
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "test-pkg-hooks.json").write_text('{"old": true}')

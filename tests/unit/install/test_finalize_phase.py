@@ -42,6 +42,8 @@ class _FakeCtx:
     scope: Any = field(default_factory=lambda: InstallScope.PROJECT)
     dry_run: bool = False
     targets: list[Any] = field(default_factory=list)
+    kept_overwrites: list[tuple[str, str]] = field(default_factory=list)
+    kept_overwrite_written: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

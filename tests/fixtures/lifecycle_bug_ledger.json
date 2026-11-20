@@ -2428,6 +2428,18 @@
         "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
         "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
       ]
+    },
+    {
+      "issue": 4360,
+      "fixed_in": "Unreleased",
+      "summary": "A receipt-less apm install replaced a user-edited managed instruction, agent, prompt, command or rule file, even when only a lockfile hash vouched for it; it now replaces one only with a local deployment receipt or bytes equal to the locked render, and otherwise keeps it, names it and exits 1.",
+      "failure_modes": ["ownership", "outcome"],
+      "properties": ["ownership.preserve_unowned", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_receiptless_overwrite_lifecycle.py::test_receiptless_install_keeps_each_edited_kind",
+        "tests/integration/test_receiptless_overwrite_lifecycle.py::test_receiptless_install_adopts_render_equal_files",
+        "tests/integration/test_receiptless_overwrite_lifecycle.py::test_receiptless_upgrade_replaces_files_equal_to_the_locked_render"
+      ]
     }
   ],
   "lifecycle_contracts": [

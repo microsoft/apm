@@ -667,7 +667,9 @@ def run(ctx: InstallContext) -> None:
     from apm_cli.install.lsp.integration import preflight_lsp_targets
 
     preflight_lsp_targets(ctx)
-    session = getattr(ctx.integrators.get("skill"), "_materialization_session", None)
+    session = getattr(
+        getattr(ctx, "integrators", {}).get("skill"), "_materialization_session", None
+    )
     if session is not None:
         from apm_cli.install.phases.cleanup import deployment_evidence
 
