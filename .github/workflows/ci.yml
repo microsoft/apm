@@ -399,7 +399,8 @@ jobs:
           tests/quality/test_test_taxonomy.py \
           tests/quality/test_quality_baselines.py \
           tests/quality/test_lifecycle_bug_ledger.py \
-          tests/quality/test_ci_topology.py
+          tests/quality/test_ci_topology.py \
+          tests/quality/test_promise_obligations.py
 
   test-architecture-scaling:
     name: Architecture Scaling (Linux)
@@ -819,7 +820,7 @@ jobs:
           -p scripts.ci_sharding --shard-count 3 --shard-index "$LIFECYCLE_SHARD" \
           --shard-durations .github/ci-durations/linux-x86_64.json \
           -n 4 --dist loadgroup --durations=20 \
-          -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
+          -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration tests/lifecycle
 
     # The M-GATE spines write their visited cells to build/gate-cells/;
     # gate-cell-coverage merges every shard's set.
