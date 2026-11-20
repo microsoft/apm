@@ -24,6 +24,8 @@ from apm_cli.compilation.template_builder import (
 )
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
+pytestmark = pytest.mark.component
+
 
 def _make_instruction(
     *,

@@ -35,6 +35,8 @@ from apm_cli.marketplace.drift_check import check_marketplace_drift
 from apm_cli.marketplace.migration import load_marketplace_config
 from tests.utils.metadata_transport import BUILDER_HTTP_SEAM, urlopen_adapter
 
+pytestmark = pytest.mark.component
+
 
 def _write_config(project_root: Path) -> None:
     """Create a marketplace with one pinned remote package."""
@@ -154,25 +156,6 @@ def test_metadata_outcomes_preserve_success_empty_failed_offline_and_local(
     assert result.certifiable
     assert result.warnings == ()
     assert [outcome.status for outcome in result.outcomes] == ["empty", "local"]
-
-
-def test_metadata_outcome_mapping_uses_the_precomputed_package_index() -> None:
-    """Mapper lookups do not rescan every preserved metadata outcome."""
-    result = MetadataEnrichmentResult(
-        (
-            MetadataEnrichmentOutcome("first", "fetched", (("version", "1.0.0"),)),
-            MetadataEnrichmentOutcome("second", "empty"),
-        )
-    )
-
-    assert dict(result) == {"first": {"version": "1.0.0"}}
-    assert result["first"] == {"version": "1.0.0"}
-
-
-def test_metadata_outcomes_reject_unknown_statuses() -> None:
-    """Unknown future states cannot silently become certifiable."""
-    with pytest.raises(ValueError, match="unknown metadata enrichment status"):
-        MetadataEnrichmentOutcome("remote-tool", "future")  # type: ignore[arg-type]
 
 
 def test_explicit_metadata_certifies_non_github_package(

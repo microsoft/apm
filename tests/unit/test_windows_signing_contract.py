@@ -22,6 +22,8 @@ from tests.workflow_contracts import (
     workflow_step_index,
 )
 
+pytestmark = pytest.mark.component
+
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build-release.yml"
 

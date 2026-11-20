@@ -17,6 +17,8 @@ from apm_cli.commands.lifecycle import lifecycle_test
 
 from .conftest import fire_via_context, touch_cmd, trust, write_project
 
+pytestmark = pytest.mark.component
+
 
 def test_execute_withholds_untrusted_project_scripts(
     apm_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

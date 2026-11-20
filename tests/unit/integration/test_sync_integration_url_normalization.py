@@ -8,7 +8,11 @@ import tempfile
 from pathlib import Path
 from unittest.mock import Mock
 
+import pytest
+
 from apm_cli.integration import AgentIntegrator, PromptIntegrator
+
+pytestmark = pytest.mark.component
 
 
 class TestSyncIntegrationURLNormalization:

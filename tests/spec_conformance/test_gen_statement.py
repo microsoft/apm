@@ -6,6 +6,8 @@ import json
 import subprocess
 import sys
 
+import pytest
+
 from tests.spec_conformance._manifest import REPO_ROOT
 from tests.spec_conformance.gen_statement import (
     CONFORMANCE_JSON,
@@ -14,6 +16,8 @@ from tests.spec_conformance.gen_statement import (
     SPEC_VERSION,
     USER_SCOPE_DISCLOSURE,
 )
+
+pytestmark = pytest.mark.component
 
 
 def _run_gen() -> None:

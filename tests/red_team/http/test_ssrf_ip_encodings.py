@@ -24,6 +24,8 @@ import pytest
 
 from .conftest import make_http_script
 
+pytestmark = pytest.mark.unit
+
 # (label, url, canonical-loopback-or-private-equivalent)
 # Hostnames that ipaddress.ip_address() CANNOT parse as a literal -- these
 # defeat a naive ipaddress-only guard.

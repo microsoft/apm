@@ -18,6 +18,8 @@ from apm_cli.utils.http_credentials import (
     origin_bounded_request,
 )
 
+pytestmark = pytest.mark.component
+
 
 class _Recorder(ThreadingHTTPServer):
     daemon_threads = True

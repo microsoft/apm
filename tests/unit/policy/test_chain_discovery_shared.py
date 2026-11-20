@@ -27,6 +27,8 @@ from apm_cli.policy.discovery import (
 )
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
+pytestmark = pytest.mark.unit
+
 # Patch targets -- all live in apm_cli.policy.discovery (same module)
 _PATCH_DISCOVER = "apm_cli.policy.discovery.discover_policy"
 _PATCH_WRITE_CACHE = "apm_cli.policy.discovery._write_cache"

@@ -416,14 +416,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^\+- MCP Servers",
     ),
     KnownOutputCell(
-        "install-empty-org-policy-notice-per-phase",
-        "I9",
-        "#4241",
-        _runs("install"),
-        r"\[!\] Org policy at \S+ is present but empty",
-        output=r"\A(?=.*^\[!\] Org policy at \S+ is present but empty).*^  \[\+\] .*^\+- MCP Servers",
-    ),
-    KnownOutputCell(
         "install-org-policy-banner-when-mcp-blocked",
         "I9",
         "#4267",
@@ -448,6 +440,22 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         r"repeats a (line|diagnostic): '\|-- ",
         # Survivor tree lines with no package line naming them, one of them repeated.
         output=r"\A(?!.*^  \[\+\] ).*^  (\|-- [^\n]*)$.*^  \1$",
+    ),
+    KnownOutputCell(
+        "pack-dry-run-plugin-notes-twice",
+        "I9",
+        "#4291",
+        _runs("pack", "--dry-run"),
+        r"Left out of the plugin|Would write plugin manifest",
+        output=r"^\[!\] Left out of the plugin: ",
+    ),
+    KnownOutputCell(
+        "install-frozen-parked-mcp-notice-per-phase",
+        "I9",
+        "#4299",
+        _runs("install", "--frozen"),
+        r"Parked MCP server .*: denied",
+        output=r"^\[!\] Parked MCP server .*: denied.*^\+- MCP Servers",
     ),
     KnownOutputCell(
         "install-hook-line-per-target",
@@ -582,13 +590,8 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "#4336",
         _runs("install"),
         r"repeats a line: '\|   \w+: runs ",
-        # Not the per-target shape #4243 owns.
-        output=(
-            r"\A(?!.*(?:^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, "
-            r"\.windsurf/hooks\.json$|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n"
-            r"  \|   Hook file integrated: ))"
-            r".*^\s*(\|   \w+: runs [^\n]*)$.*^\s*\1$"
-        ),
+        # The same hook summary line printed twice back to back in one package block.
+        output=r"^  (\|   \w+: runs [^\n]*)\n  \1$",
     ),
     KnownOutputCell(
         "pack-plugin-manifest-notes-twice",

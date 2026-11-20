@@ -12,6 +12,8 @@ from apm_cli.deps.github_rate_limit import (
     github_throttle_error,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _response(status_code: int, headers: dict[str, str] | None = None) -> SimpleNamespace:
     """Build the smallest response shape consumed by the classifier."""

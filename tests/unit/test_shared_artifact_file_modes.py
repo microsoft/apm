@@ -21,7 +21,7 @@ from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils import atomic_io
 from apm_cli.utils.atomic_io import atomic_write_text, umask_file_mode
 
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
 posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not enforced")
 

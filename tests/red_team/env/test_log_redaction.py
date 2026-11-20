@@ -24,6 +24,8 @@ from apm_cli.core.script_executors import _append_to_script_log, _redact_secrets
 
 from .fixtures.helpers import read_script_log
 
+pytestmark = pytest.mark.component
+
 
 class TestLogRedactionGaps:
     """Suffix-gap secret values must not persist in cleartext to the log."""

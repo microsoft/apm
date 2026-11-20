@@ -219,7 +219,7 @@ to force serial execution. The default selection in `pyproject.toml` excludes
 
 For performance changes, prefer deterministic operation-count regressions over
 wall-clock thresholds. Run the consolidated scan regressions with
-`uv run --extra dev pytest -q tests/unit/test_performance_scan_regressions.py`.
+`uv run --extra dev pytest -q tests/unit/test_performance_scan_regressions.py tests/integration/test_performance_scan_regressions.py`.
 They check deferred error-only imports, at most two indexed ZIP member lookups,
 and uninstall deduplication without comparing previously selected entries.
 Archive parsing and canonical dependency matching retain their existing costs.

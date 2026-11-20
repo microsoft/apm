@@ -13,7 +13,11 @@ from __future__ import annotations
 import threading
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.registry.operations import MCPServerOperations
+
+pytestmark = pytest.mark.unit
 
 SERVERS = ["server-a", "server-b", "server-c"]
 
