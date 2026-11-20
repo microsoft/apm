@@ -83,8 +83,8 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/update.py", 548, '"--target"'),
     ),
     "uninstall": (
-        Ev("src/apm_cli/commands/uninstall/cli.py", 723, 'argument("packages"'),
-        Ev("src/apm_cli/commands/uninstall/cli.py", 725, '"--dry-run"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 726, 'argument("packages"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 728, '"--dry-run"'),
     ),
     "prune": (
         Ev("src/apm_cli/commands/prune.py", 77, '"--dry-run"'),
@@ -147,7 +147,7 @@ USER_SCOPE_OPS = frozenset(
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 933, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 513, '"--global"'),
-    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 731, '"--global"'),
+    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 734, '"--global"'),
     "compile": Ev(_COMPILE, 1391, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 102, '"--global"'),
     "approve-deny": Ev(_APPROVE, 216, '"--user"'),
@@ -210,9 +210,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev(_INSTALL, 987, '"--url"'),
             Ev("src/apm_cli/models/dependency/reference.py", 860, '"registry" in entry'),
             Ev("src/apm_cli/marketplace/registration.py", 45, "No marketplace.json found"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 731, "is an MCP server, not a package"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 895, "was not found in apm.yml"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 723, "cannot remove local-bundle"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 713, "is an MCP server, not a package"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 877, "was not found in apm.yml"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 705, "cannot remove local-bundle"),
             Ev("src/apm_cli/commands/update.py", 451, "No APM dependencies to update"),
             Ev("src/apm_cli/commands/prune.py", 210, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
@@ -229,7 +229,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         (
             Ev("src/apm_cli/install/exec_gate.py", 680, "PackageType.MARKETPLACE_PLUGIN"),
             Ev("src/apm_cli/install/exec_gate.py", 681, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 682, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 684, 'target.name == "claude"'),
         ),
     ),
     "U9": (
@@ -314,8 +314,9 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     UNINSTALL_MCP_REFUSALS["mcp-registry"]: (1, r"was not found in apm\.yml"),
     UNINSTALL_MCP_REFUSALS["inline-mcp"]: (1, r"is an MCP server, not a package"),
     LOCAL_BUNDLE_REFUSALS["uninstall"]: (1, r"is a local bundle\. Bundles installed with"),
-    # The update names the bundle it leaves untouched (#4318).
-    LOCAL_BUNDLE_REFUSALS["update"]: (0, r"Local bundle p-exec not updated"),
+    # p-exec ships only executables the gate parks, so its bundle install records
+    # nothing: update has no bundle to name (#4318 names a recorded one).
+    LOCAL_BUNDLE_REFUSALS["update"]: (0, r"No APM dependencies"),
     LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"Nothing to prune"),
 }
 # Refusal rule cells whose current message is a defect: (tracking issue, a regex

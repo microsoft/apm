@@ -122,7 +122,7 @@ def _run_hook(world: MarketplacePackWorld, project: Path, matcher: str) -> str:
 
 
 def _assert_lock_matches_disk(world: MarketplacePackWorld, project: Path) -> None:
-    """I1: every local-bundle file the lock records exists with its recorded hash."""
+    """I1: the bundle's recorded files match disk, and every deployed bundle script is recorded."""
     from apm_cli.utils.content_hash import compute_file_hash
 
     hashes = world.lock(project)["local_deployed_file_hashes"]
@@ -131,7 +131,7 @@ def _assert_lock_matches_disk(world: MarketplacePackWorld, project: Path) -> Non
         assert compute_file_hash(project / rel) == digest, rel
     scripts = {
         path.relative_to(project).as_posix()
-        for path in (project / ".claude" / "hooks").rglob("*")
+        for path in (project / ".claude" / "hooks" / "hookpkg").rglob("*")
         if path.is_file()
     }
     assert scripts <= set(hashes), scripts - set(hashes)

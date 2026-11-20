@@ -1118,3 +1118,21 @@ class TestLegacyLockfileGracefulSkip:
         # tracked files to compare against
         mock_rm.assert_not_called()
         ctx.logger.stale_cleanup.assert_not_called()
+
+
+def test_evidence_built_before_integration_learns_the_skip_set(tmp_path: Path) -> None:
+    """#4230: evidence cached early (for overwrite checks) still retains kept members."""
+    from types import SimpleNamespace
+
+    from apm_cli.install.phases.cleanup import deployment_evidence
+    from apm_cli.integration.cleanup import DeploymentEvidence
+
+    member = ".agents/skills/x/references/a.md"
+    early = DeploymentEvidence(deploy_root=tmp_path, receipts={}, render=None, kept=())
+    ctx = SimpleNamespace(deployment_evidence=early, kept_deployed_values=frozenset())
+    assert not deployment_evidence(ctx).kept(member)
+    ctx.kept_deployed_values = frozenset({member})
+    evidence = deployment_evidence(ctx)
+    assert evidence is early
+    assert evidence.kept(member) and evidence.kept(".agents/skills/x")
+    assert not tmp_path.joinpath(member).exists()

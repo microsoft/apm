@@ -103,7 +103,8 @@ def check_cleanup_retains_kept_members(provider: FactsProvider) -> tuple[Violati
                 "ctx.kept_deployed_values = _kept_skill_values(ctx)",
             ),
             "src/apm_cli/install/phases/cleanup.py": (
-                'kept=getattr(ctx, "kept_deployed_values", frozenset()),',
+                'kept = getattr(ctx, "kept_deployed_values", frozenset())',
+                "evidence.retain(kept)",
                 "kept = kept_prior_values(ctx, prev_dep.deployed_files)",
                 "stale -= set(kept)",
             ),

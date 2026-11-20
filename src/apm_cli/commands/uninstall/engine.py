@@ -235,24 +235,6 @@ class _LocalRefreshLogger:
         )
 
 
-class _SurvivorRebuildLogger:
-    """Logger for the survivor rebuild after an uninstall (#4160, #4219).
-
-    Survivors are redeployed from their recorded selection, so their
-    per-primitive integration lines carry no news and no package header:
-    they are dropped. Warnings and errors pass through unchanged.
-    """
-
-    def __init__(self, logger: CommandLogger) -> None:
-        self._logger = logger
-
-    def tree_item(self, _message: str) -> None:
-        return None
-
-    def __getattr__(self, name: str):
-        return getattr(self._logger, name)
-
-
 class LocalSurvivorRefreshError(RuntimeError):
     """Raised when a shared local install slot cannot preserve its survivors."""
 
@@ -1375,6 +1357,24 @@ def _native_hook_state_exists(project_root: Path, targets: list[object]) -> bool
         ).exists():
             return True
     return False
+
+
+class _SurvivorRebuildLogger:
+    """Logger for the survivor rebuild after an uninstall (#4160, #4219).
+
+    Survivors are redeployed from their recorded selection, so their
+    per-primitive integration lines carry no news and no package header:
+    they are dropped. Warnings and errors pass through unchanged.
+    """
+
+    def __init__(self, logger: CommandLogger) -> None:
+        self._logger = logger
+
+    def tree_item(self, _message: str) -> None:
+        return None
+
+    def __getattr__(self, name: str):
+        return getattr(self._logger, name)
 
 
 def _sync_integrations_after_uninstall(

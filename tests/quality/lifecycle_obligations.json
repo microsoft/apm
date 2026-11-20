@@ -23630,7 +23630,7 @@
   "generated_cover-14-refusals.yaml": "670950509c0f185887feb8e014bced0c85b8b3a9b89ba01d1521b7dcdd3bb763",
   "generated_cover-15-refusals.yaml": "6bfca20083437cf5708ee57a4467837d456a0526dac39ab373a40e0730d17c57",
   "generated_cover-16-source-refusals.yaml": "dabc3fdbb50c3b1dfcf110c5831e492e34dfce99da84fec4d815d9bb0e1bc473",
-  "generated_cover-17-local-bundle-refusals.yaml": "fa2fb9ff70cb5b3b8caea7de2936bd3884dfcd447fa52b611b5d877b42773d96"
+  "generated_cover-17-local-bundle-refusals.yaml": "1ab5035a669a1ebe463eb541d3b6da7e78b01cb98ec924a591a9033f4038208a"
  },
  "rules": {
   "E1": {
@@ -23657,7 +23657,7 @@
    "evidence": [
     "src/apm_cli/install/exec_gate.py:680",
     "src/apm_cli/install/exec_gate.py:681",
-    "src/apm_cli/install/exec_gate.py:682"
+    "src/apm_cli/install/exec_gate.py:684"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
@@ -23717,9 +23717,9 @@
     "src/apm_cli/commands/install.py:987",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
-    "src/apm_cli/commands/uninstall/engine.py:731",
-    "src/apm_cli/commands/uninstall/engine.py:895",
-    "src/apm_cli/commands/uninstall/engine.py:723",
+    "src/apm_cli/commands/uninstall/engine.py:713",
+    "src/apm_cli/commands/uninstall/engine.py:877",
+    "src/apm_cli/commands/uninstall/engine.py:705",
     "src/apm_cli/commands/update.py:451",
     "src/apm_cli/commands/prune.py:210",
     "src/apm_cli/integration/canvas_integrator.py:5"
@@ -23735,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "abadac0869b282b9c5cfcd88a09039bb91236778a080bead4200dc9711b61275"
+ "sha256": "14d83629d6596a643235477ab519299937ab19c4ff7f21827447b892373be5f7"
 }

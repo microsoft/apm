@@ -49,14 +49,18 @@ def deployment_evidence(ctx: InstallContext) -> DeploymentEvidence:
     every install deletion path shares one evidence owner.
     """
     evidence = getattr(ctx, "deployment_evidence", None)
-    if not isinstance(evidence, DeploymentEvidence):
+    kept = getattr(ctx, "kept_deployed_values", frozenset())
+    if isinstance(evidence, DeploymentEvidence):
+        # Evidence may be built before integration finishes; the skip set is the run's latest.
+        evidence.retain(kept)
+    else:
         evidence = DeploymentEvidence.collect(
             ctx.project_root,
             user_scope=is_user_scope(getattr(ctx, "scope", None)),
             lockfile=ctx.existing_lockfile,
             lockfile_root=ctx.apm_dir,
             diagnostics=ctx.diagnostics,
-            kept=getattr(ctx, "kept_deployed_values", frozenset()),
+            kept=kept,
         )
         ctx.deployment_evidence = evidence
     return evidence
