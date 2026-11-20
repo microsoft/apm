@@ -9,7 +9,7 @@ sidebar:
 
 ```bash
 apm approve [PACKAGE_REF...] [OPTIONS]
-apm policy explain <PACKAGE_REF>
+apm policy explain [-g] <PACKAGE_REF>
 ```
 
 ## Description
@@ -178,6 +178,7 @@ that layer and how to lift it.
 | `--recommended` | Pin and approve the org `executables.recommend` set. |
 | `--list` | Show the fleet-level effective trust decision and deciding layer per installed package. |
 | `--user` | Write the grant, in the same pinned shape, to `$APM_HOME/config.json` instead of `apm.yml`. Works outside a project, for packages `apm install -g` installed. |
+| `-g`, `--global` | Approve packages `apm install -g` installed, from any directory. Writes the user-scope `apm.yml` (`$APM_HOME/apm.yml`); run `apm install -g` to deploy. Parked notices at user scope print this form. |
 
 #### Output
 
@@ -210,7 +211,8 @@ Re-approving replaces the package's pins with the current definitions.
 `apm approve` with no package and no `--pending`, `--all`, `--recommended`
 or `--list` is a usage error (exit 2).
 
-It exits 1 when any requested package was refused, or when you decline the
+It exits 1 when a requested package is not installed, when any requested
+package was refused, or when you decline the
 first-approval prompt (`Nothing written.`), so a script never commits an
 approval that was not recorded. It also exits 1, writing nothing, when the
 org policy outcome blocks, exactly as `apm install` would (for example an
@@ -233,6 +235,7 @@ to `apm policy status` (the policy-chain view).
 
 ```bash
 apm policy explain owner/repo
+apm policy explain -g owner/repo   # a package apm install -g installed
 ```
 
 For a fleet-level view, `apm doctor` runs an executable-trust drift check that

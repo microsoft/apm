@@ -2361,6 +2361,23 @@
       ]
     },
     {
+      "issue": 4154,
+      "fixed_in": "Unreleased",
+      "summary": "A native plugin parked at user scope is approved with the printed apm approve -g command; approve reads the same unit the install gate parked; an unapproved Codex bundle parks with nothing deployed; approving a package that is not installed exits 1.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_user_scope_claude_plugin_is_approved_by_the_printed_command",
+        "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_user_scope_codex_bundle_parks_and_the_printed_command_approves_it",
+        "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_approve_exits_1_when_it_approves_nothing"
+      ]
+    },
+    {
       "issue": 4171,
       "fixed_in": "Unreleased",
       "summary": "Redact credential values in command output: stored tokens render through one owner as a fixed mask with presence reported, and URL userinfo, URL query values and credential flag values are redacted across config reads, diagnostics, SBOM export and registry error messages.",
@@ -2445,6 +2462,24 @@
       "regression_tests": [
         "tests/integration/test_hook_approval_pin_parity_lifecycle.py::test_frozen_and_audit_refuse_alike_when_a_hook_pin_does_not_match",
         "tests/integration/test_hook_approval_pin_parity_lifecycle.py::test_install_retires_a_hook_whose_pin_no_longer_matches"
+      ]
+    },
+    {
+      "issue": 4189,
+      "fixed_in": "Unreleased",
+      "summary": "apm deny resolves a marketplace install spec to the installed package's identity, keys the store by that identity, and the next install retires the package's executables; a spec that matches nothing exits 1 without writing.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_approval_identity_lifecycle.py::test_approve_and_deny_by_install_spec_reach_the_installed_package",
+        "tests/integration/test_approval_identity_lifecycle.py::test_unresolvable_install_spec_exits_1_without_writing",
+        "tests/integration/test_approval_identity_lifecycle.py::test_deny_by_install_spec_stays_retired_through_update_and_frozen",
+        "tests/integration/test_approval_identity_lifecycle.py::test_install_spec_keyed_store_entry_applies_to_the_package_identity"
       ]
     },
     {
@@ -2800,6 +2835,36 @@
       ]
     },
     {
+      "issue": 4245,
+      "fixed_in": "Unreleased",
+      "summary": "apm approve resolves the marketplace spec a package was installed with to that package and approves it; an unresolvable spec exits 1.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_approval_identity_lifecycle.py::test_approve_and_deny_by_install_spec_reach_the_installed_package",
+        "tests/integration/test_approval_identity_lifecycle.py::test_unresolvable_install_spec_exits_1_without_writing"
+      ]
+    },
+    {
+      "issue": 4246,
+      "fixed_in": "Unreleased",
+      "summary": "apm policy explain names the deny entry and how to lift it for a denied package, using the package identity.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_approval_identity_lifecycle.py::test_approve_and_deny_by_install_spec_reach_the_installed_package"
+      ]
+    },
+    {
       "issue": 4251,
       "fixed_in": "Unreleased",
       "summary": "Vendor-extension target ids (x-<vendor>-<name>) were rejected at manifest parse; they now parse and are named as unsupported instead of deploying or being ignored.",
@@ -2970,6 +3035,17 @@
       ],
       "regression_tests": [
         "tests/integration/test_audit_ci_structured_output_lifecycle.py::test_audit_ci_structured_output_reports_a_failed_replay"
+      ]
+    },
+    {
+      "issue": 4323,
+      "fixed_in": "Unreleased",
+      "summary": "apm pack refuses, in every bundle format and under --dry-run, to pack a file whose name matches the credential-file patterns (.env, .env.*, *.pem, *.key, id_rsa, id_ed25519), naming each path and writing no bundle.",
+      "failure_modes": ["auth", "transaction"],
+      "properties": ["auth.credentials_isolated", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_pack_credential_files_lifecycle.py::test_pack_refuses_credential_files_naming_each_path",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files"
       ]
     }
   ],

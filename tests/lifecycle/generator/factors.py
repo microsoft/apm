@@ -44,7 +44,7 @@ SOURCES = (
     "native-plugin",
 )
 PLAIN_PRIMS = ("skill", "other-file")
-# The executable domain of the gate (commands/approve.py:170).
+# The executable domain of the gate (commands/approve.py:255).
 EXECUTABLE_PRIMS = ("hook", "mcp", "lsp", "bin", "canvas")
 PRIMS = (*PLAIN_PRIMS, *EXECUTABLE_PRIMS)
 TARGET_CHANGES = tuple(
