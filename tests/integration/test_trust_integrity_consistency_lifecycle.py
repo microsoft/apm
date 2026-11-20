@@ -648,14 +648,42 @@ def test_unpack_applies_org_dependency_policy(tmp_path: Path, apm_binary_path: P
             runner, _unpack(bundle, target), cwd=target, env=env, step="denied", expected=1
         )
 
-        assert f"{ORG}/pkg-a" in output(result), output(result)
+        assert f"{ORG}/pkg-a" in _ascii_output(result), output(result)
         assert tree_snapshot(target) == before, output(result)
 
-        # Control: the same bundle unpacks once the org policy allows it.
-        world.publish_policy(_POLICY)
-        world.clear_policy_cache()
-        result = run_step(runner, _unpack(bundle, target), cwd=target, env=env, step="allowed")
+        # A preview reports the block, exits 0 and writes nothing.
+        preview = run_step(
+            runner, (*_unpack(bundle, target), "--dry-run"), cwd=target, env=env, step="preview"
+        )
+        assert "Would be blocked by policy" in output(preview), output(preview)
+        assert tree_snapshot(target) == before, output(preview)
+
+        # The printed escape hatch deploys the same bundle.
+        hatch = {**env, "APM_POLICY_DISABLE": "1"}
+        result = run_step(runner, _unpack(bundle, target), cwd=target, env=hatch, step="hatch")
         assert (target / _SKILL).is_file(), output(result)
+
+
+def test_unpack_reports_warn_policy_violations_and_deploys(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_package("pkg-a")
+    world.publish_policy(
+        {**_POLICY, "enforcement": "warn", "dependencies": {"deny": [f"{ORG}/pkg-a"]}}
+    )
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+        target = _unpack_target(world)
+
+        result = run_step(runner, _unpack(bundle, target), cwd=target, env=env, step="warned")
+
+    text = " ".join(_ascii_output(result).split())
+    assert f"denied by pattern: {ORG}/pkg-a" in text, text
+    assert (target / _SKILL).is_file()
 
 
 def test_unpack_refuses_altered_bytes_when_policy_requires_hashes(
@@ -725,34 +753,39 @@ def test_unpack_records_deployed_files_in_the_project_lockfile(
 ) -> None:
     world = PolicyScopeWorld(tmp_path, dict(os.environ))
     world.publish_package("pkg-a")
+    world.publish_policy(_POLICY)
     runner = _runner(apm_binary_path)
 
     with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
         env = fx.child_environment(world.git_env())
         bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
-    project = _plain_dir(world, "project", project=True)
-    env = world.isolated.subprocess_env()
-    before = tree_snapshot(project)
+        project = _unpack_target(world)
+        before = tree_snapshot(project)
 
-    result = run_step(runner, _unpack(bundle, project), cwd=project, env=env, step="unpack")
+        result = run_step(runner, _unpack(bundle, project), cwd=project, env=env, step="unpack")
 
-    _ascii_output(result)
-    after = tree_snapshot(project)
-    assert set(after) - set(before) == {_SKILL, "apm.lock.yaml"}
-    assert {k: v for k, v in after.items() if k in before} == before
-    lock = load_yaml(project / "apm.lock.yaml")
-    assert lock["local_deployed_files"] == [_SKILL]
-    assert lock["local_deployed_file_hashes"][_SKILL].startswith("sha256:")
+        _ascii_output(result)
+        after = tree_snapshot(project)
+        assert set(after) - set(before) == {_SKILL, "apm.lock.yaml"}
+        assert {k: v for k, v in after.items() if k in before} == before
+        lock = load_yaml(project / "apm.lock.yaml")
+        assert lock["local_deployed_files"] == [_SKILL]
+        assert lock["local_deployed_file_hashes"][_SKILL].startswith("sha256:")
 
-    # Converged: unpacking the same bundle again changes no bytes.
-    run_step(runner, _unpack(bundle, project), cwd=project, env=env, step="unpack-again")
-    assert tree_snapshot(project) == after
+        # Converged: unpacking again into the default output (cwd) changes no bytes.
+        run_step(runner, ("unpack", str(bundle)), cwd=project, env=env, step="unpack-again")
+        assert tree_snapshot(project) == after
 
-    # The record is what audit reads: altered bytes are reported.
-    audit = ("audit", "--ci", "--no-drift")
-    run_step(runner, audit, cwd=project, env=env, step="audit-clean")
-    (project / _SKILL).write_text("# altered\n", encoding="utf-8")
-    result = run_step(runner, audit, cwd=project, env=env, step="audit-altered", expected=1)
+        # A later install keeps the recorded files.
+        run_step(runner, ("install",), cwd=project, env=env, step="install")
+        assert (project / _SKILL).read_bytes() == (bundle / _SKILL).read_bytes()
+        assert load_yaml(project / "apm.lock.yaml")["local_deployed_files"] == [_SKILL]
+
+        # The record is what audit reads: altered bytes are reported.
+        audit = ("audit", "--ci", "--no-drift")
+        run_step(runner, audit, cwd=project, env=env, step="audit-clean")
+        (project / _SKILL).write_text("# altered\n", encoding="utf-8")
+        result = run_step(runner, audit, cwd=project, env=env, step="audit-altered", expected=1)
     assert "content-integrity" in output(result), output(result)
     assert _SKILL in "".join(output(result).split()), output(result)
 

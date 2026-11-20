@@ -1012,6 +1012,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
             verified_msg = " (verified)" if result.verified else ""
             logger.success(f"Unpacked {len(result.files)} file(s){verified_msg}")
         record_unpacked_files(Path(output), result.written_files, logger)
+        logger.render_summary()
 
     except PolicyViolationError as exc:
         logger.refusal(str(exc))
