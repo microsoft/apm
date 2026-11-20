@@ -56,7 +56,7 @@ def check_immutable_requirements(provider: FactsProvider) -> tuple[Violation, ..
         "src/apm_cli/deps/apm_resolver.py": ("requirements.add(node)", "ImmutableRequirements("),
         "src/apm_cli/install/phases/resolve.py": (
             "reference_resolver=downloader",
-            "frozen=ctx.frozen",
+            "frozen=InstallService.frozen_disposition(ctx).replay",
         ),
         "src/apm_cli/install/service.py": ("frozen=request.frozen",),
         "src/apm_cli/install/pipeline.py": ("frozen=frozen",),

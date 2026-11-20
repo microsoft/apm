@@ -34,6 +34,8 @@ EXCLUDED_ROOTS: tuple[str, ...] = (
     "mutants",
     ".idea",
     ".vscode",
+    # Gitignored install output a test may create and remove mid-walk.
+    "apm_modules",
 )
 
 # These names are generated wherever they occur.  The remaining names in

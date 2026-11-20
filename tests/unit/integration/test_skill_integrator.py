@@ -27,6 +27,7 @@ from apm_cli.models.apm_package import (
     PackageType,
     ResolvedReference,
 )
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _setup_agents_orphan_cleanup(project_root: Path, skill_names: list[str]) -> None:
@@ -3090,12 +3091,17 @@ class TestCursorSkillIntegration:
         cursor_skill.mkdir(parents=True)
         (cursor_skill / "SKILL.md").write_text("# Old\n")
 
-        managed_files = {".agents/skills/old-skill"}
+        # Lockfiles list the directory and its members; members need
+        # deployment evidence (#3701). Both entries count as removed.
+        managed_files = {".agents/skills/old-skill", ".agents/skills/old-skill/SKILL.md"}
         result = self.integrator.sync_integration(
-            None, self.project_root, managed_files=managed_files
+            None,
+            self.project_root,
+            managed_files=managed_files,
+            evidence=receipted_evidence(self.project_root),
         )
 
-        assert result["files_removed"] == 1
+        assert result["files_removed"] == 2
         assert not cursor_skill.exists()
 
     # ========== Test: SKILL.md content preserved ==========
@@ -3262,16 +3268,17 @@ class TestSyncIntegrationDynamicPrefixes:
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text("# Skill")
 
-        managed = {".agents/skills/my-skill"}
+        managed = {".agents/skills/my-skill", ".agents/skills/my-skill/SKILL.md"}
         apm_package = Mock()
         result = self.integrator.sync_integration(
             apm_package,
             self.project_root,
             managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
             targets=[resolved],
         )
 
-        assert result["files_removed"] == 1
+        assert result["files_removed"] == 2  # member file + directory (#3701)
         assert not skills_dir.exists()
 
     def test_manifest_removal_with_config_opencode(self):
@@ -3293,16 +3300,17 @@ class TestSyncIntegrationDynamicPrefixes:
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text("# Skill")
 
-        managed = {".agents/skills/test-skill"}
+        managed = {".agents/skills/test-skill", ".agents/skills/test-skill/SKILL.md"}
         apm_package = Mock()
         result = self.integrator.sync_integration(
             apm_package,
             self.project_root,
             managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
             targets=[resolved],
         )
 
-        assert result["files_removed"] == 1
+        assert result["files_removed"] == 2  # member file + directory (#3701)
         assert not skills_dir.exists()
 
     def test_manifest_removal_preserves_unmanaged(self):
@@ -3317,16 +3325,17 @@ class TestSyncIntegrationDynamicPrefixes:
         (skills_dir / "user-skill").mkdir(parents=True)
         (skills_dir / "user-skill" / "SKILL.md").write_text("# User")
 
-        managed = {".agents/skills/managed-skill"}
+        managed = {".agents/skills/managed-skill", ".agents/skills/managed-skill/SKILL.md"}
         apm_package = Mock()
         result = self.integrator.sync_integration(
             apm_package,
             self.project_root,
             managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
             targets=[copilot],
         )
 
-        assert result["files_removed"] == 1
+        assert result["files_removed"] == 2  # member file + directory (#3701)
         assert not (skills_dir / "managed-skill").exists()
         assert (skills_dir / "user-skill").exists()
 
@@ -3336,15 +3345,16 @@ class TestSyncIntegrationDynamicPrefixes:
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text("# Orphan")
 
-        managed = {".agents/skills/orphan-skill"}
+        managed = {".agents/skills/orphan-skill", ".agents/skills/orphan-skill/SKILL.md"}
         apm_package = Mock()
         result = self.integrator.sync_integration(
             apm_package,
             self.project_root,
             managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
-        assert result["files_removed"] == 1
+        assert result["files_removed"] == 2  # member file + directory (#3701)
 
 
 class TestUninstallPhase2SkillTargets:
