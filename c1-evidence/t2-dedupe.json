@@ -1,0 +1,10 @@
+{
+  "partition": "train2 dedupe integration and unit residual",
+  "steps_done": [1],
+  "folds": {},
+  "decisions": [
+    "Step 1: deleted 216 D5 equal copies in scope; test_install_sources_phase3w4.py left with no tests and was removed.",
+    "Step 1: for test_github_downloader_validation_flow.py vs test_github_downloader_phase3w4.py the copies were deleted from the phase3w4 file so the behavior-named module keeps the tests (D5 equality is symmetric)."
+  ],
+  "counts_left": {"same_body_groups": null, "unclassified_modules": null, "placement_offenders": null, "weak_tests": null}
+}

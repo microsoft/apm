@@ -309,11 +309,6 @@ class TestPartitionManagedFiles:
         result = BaseIntegrator.partition_managed_files(mf)
         assert ".opencode/agents/foo.md" in result["agents_opencode"]
 
-    def test_skills_cross_target_bucket(self):
-        mf = {".agents/skills/my-skill/skill.md"}
-        result = BaseIntegrator.partition_managed_files(mf)
-        assert ".agents/skills/my-skill/skill.md" in result["skills"]
-
     def test_hooks_cross_target_bucket(self):
         mf = {".github/hooks/pre-tool-use.sh"}
         result = BaseIntegrator.partition_managed_files(mf)
