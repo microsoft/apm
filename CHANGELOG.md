@@ -144,6 +144,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm deps list` no longer exits 1 with "Invalid local package path ''" in a project with its own `.apm/` content. (closes #3994, #4004)
 - `apm init` adds `-t <harness>` to its install step when no target is set or detectable, and truncated table cells use ASCII `...`. (closes #3994, #4004)
 - `apm pack --format agent-plugin` packs a project that declares no dependencies without a lockfile, so both formats `apm plugin init` advertises work on a fresh scaffold. (closes #3994, #4004)
+- `apm audit` and `apm audit --ci` tell you to reinstall the bundle (`apm install <bundle-path>`) to restore an edited file a local bundle deployed, since plain `apm install` never redeploys it. (closes #3994, #4004)
 - `apm pack` shares each bundle format with the command that accepts it (`apm unpack` for `--format apm`), and `apm unpack` names a plugin-format bundle and points to `apm install` instead of reporting missing files. (closes #3994, #4004)
 - `apm mcp show` offers `apm install --mcp <name>` instead of a "coming soon" step and no longer claims GitHub toolsets for any `io.github.*` server; `apm run` passes `exec` once for the documented `codex exec` script and never passes a literal `<` to `llm`. (closes #3994, #4004)
 

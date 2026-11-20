@@ -131,7 +131,7 @@ When some files are missing or unrecorded instead, APM prints `Run 'apm install'
 
 Cause: deployed primitive files in the project differ from the content recorded in `apm.lock.yaml`. Either the files were edited locally, or the lockfile was updated without re-running install.
 
-Fix: for missing or unrecorded files, run `apm install`. Plain `apm install` can keep a local edit to a managed file, so for `modified` files delete them, rerun `apm install`, and commit the result. `apm install --force` also restores them, but it overwrites every local edit and deploys despite critical security findings. If the local edits were intentional, vendor them into the source package or a local override before re-installing.
+Fix: for missing or unrecorded files, run `apm install`. Plain `apm install` can keep a local edit to a managed file, so for `modified` files delete them, rerun `apm install`, and commit the result. `apm install --force` also restores them, but it overwrites every local edit and deploys despite critical security findings. Files a local bundle deployed (shown as `[local-bundle]`) come back only from the bundle: delete them and rerun `apm install <bundle-path>`. If the local edits were intentional, vendor them into the source package or a local override before re-installing.
 
 For `unmanaged-conflict`, the file is yours, not a managed edit: install skipped
 it (or refused the skill plan). Rename the conflicting local file or skill, or

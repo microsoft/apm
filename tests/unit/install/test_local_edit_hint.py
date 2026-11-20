@@ -175,6 +175,15 @@ class TestDriftTextHint:
         assert out.index("apm export-patch") < out.index("apm install --force")
         assert "Run 'apm install' to re-sync" not in out
 
+    def test_bundle_file_restore_names_the_bundle_reinstall(self) -> None:
+        """'apm install' never redeploys bundle files; reinstalling the bundle does (#3994)."""
+        out = render_drift_text(
+            [DriftFinding(path=".claude/agents/a.md", kind="modified", package="local-bundle")]
+        )
+        flat = " ".join(out.split())
+        assert "reinstall the bundle that deployed them ('apm install <bundle-path>')" in flat
+        assert "rerun 'apm install'," not in flat
+
     def test_local_path_package_findings_get_no_hint(self, tmp_path: Path) -> None:
         lock = _lockfile(tmp_path, **{".github/a.md": (_ORIGINAL, _EDITED)})
         key = next(iter(lock.dependencies))

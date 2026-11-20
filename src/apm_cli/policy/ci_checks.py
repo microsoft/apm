@@ -901,9 +901,11 @@ def _check_content_integrity(
         )
     if hash_mismatches:
         parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
+        from ..deps.file_provenance import LOCAL_BUNDLE_OWNER
         from ..install.local_edits import restore_drifted_files_remedy
 
-        remedies.append(restore_drifted_files_remedy())
+        owners = {drift.owner == LOCAL_BUNDLE_OWNER for drift in hash_mismatches}
+        remedies.extend(restore_drifted_files_remedy(bundle=bundle) for bundle in sorted(owners))
     if staged_drift:
         parts.append(f"{len(staged_drift)} staged file(s) with hash drift")
         remedies.append("'apm install <bundle> --force' to restage drifted files")

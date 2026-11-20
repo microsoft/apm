@@ -36,12 +36,19 @@ def local_edit_hint(count: int, *, installing: bool = False) -> str:
     )
 
 
-def restore_locked_content_hint(subject: str) -> str:
+def restore_locked_content_hint(subject: str, *, bundle: bool = False) -> str:
     """Return the hint naming the commands that restore edited managed files.
 
     A plain ``apm install`` can keep a local edit to a managed file, so it is
-    not a restore command on its own.
+    not a restore command on its own. Files a local bundle deployed are not
+    redeployed by ``apm install`` at all; only reinstalling the bundle
+    restores them (#3994).
     """
+    if bundle:
+        return (
+            f"To restore the locked content, delete {subject} and reinstall the bundle "
+            "that deployed them ('apm install <bundle-path>'), then commit the result"
+        )
     return (
         f"To restore the locked content, delete {subject} and rerun 'apm install', "
         "then commit the result ('apm install --force' also restores them, but "
@@ -49,8 +56,10 @@ def restore_locked_content_hint(subject: str) -> str:
     )
 
 
-def restore_drifted_files_remedy() -> str:
+def restore_drifted_files_remedy(*, bundle: bool = False) -> str:
     """Return the audit remedy clause for files whose bytes drifted from the lock."""
+    if bundle:
+        return "'apm install <bundle-path>' after deleting the drifted bundle files"
     return "'apm install' after deleting the drifted files (plain install keeps local edits)"
 
 
