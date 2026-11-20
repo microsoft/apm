@@ -172,7 +172,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U3": (
         "edited is defined relative to a receipt; present with unknown provenance has no lock",
-        (Ev("src/apm_cli/core/deployment_ledger.py", 781, "class DeploymentLedgerCodec"),),
+        (Ev("src/apm_cli/core/deployment_ledger.py", 814, "class DeploymentLedgerCodec"),),
     ),
     "U4": (
         "a declared target change without a receipt is reachable; only receipt-backed "
@@ -263,7 +263,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
             Ev("src/apm_cli/install/services.py", 823, "staged_files"),
-            Ev("src/apm_cli/install/services.py", 1025, '"instructions" not in target.primitives'),
+            Ev("src/apm_cli/install/services.py", 1026, '"instructions" not in target.primitives'),
         ),
     ),
 }

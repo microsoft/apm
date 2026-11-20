@@ -317,7 +317,7 @@ def install_local_bundle(
             migrate_lockfile_if_needed(_bundle_lock_root(global_))
             lockfile_path = get_lockfile_path(_bundle_lock_root(global_))
             lockfile = LockFile.read(lockfile_path) or LockFile()
-            from ..core.deployment_ledger import DeploymentLedgerCodec
+            from ..core.deployment_ledger import DeploymentLedgerCodec, record_bundle_receipts
             from ..integration.cleanup import DeploymentEvidence
             from ..utils.diagnostics import DiagnosticCollector
 
@@ -347,6 +347,15 @@ def install_local_bundle(
                 staged=staged_instructions,
                 staged_hashes=result.get("staged_file_hashes", {}),
                 staged_fallback_hashes=staged_fallbacks,
+            )
+            # Receipts are a bundle file's only deletion evidence (#4223); a
+            # dry run writes nothing, so it reports no written files.
+            record_bundle_receipts(
+                project_root,
+                scope=scope,
+                targets=targets,
+                written=result.get("written_files", []),
+                lockfile=lockfile,
             )
 
             _kept_legacy = (
