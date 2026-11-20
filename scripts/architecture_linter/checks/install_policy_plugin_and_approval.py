@@ -144,7 +144,7 @@ _APPROVAL_ADAPTER = "src/apm_cli/commands/approve.py"
 _POLICY_OUTCOME_DEF = re.compile(r"^POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset\(")
 
 
-_POLICY_OUTCOME_IMPORT = "from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES"
+_POLICY_OUTCOME_IMPORT = "from ..policy.outcome_routing import resolve_trust_policy"
 
 
 _POLICY_OUTCOME_LITERALS = re.compile(
@@ -176,7 +176,7 @@ def check_approval_outcome_routing(provider: FactsProvider) -> tuple[Violation, 
             _report(
                 rule_id,
                 _APPROVAL_ADAPTER,
-                "Approval fallback outcomes must import POLICY_RESOLUTION_FAILURE_OUTCOMES; "
+                "Approval must route policy outcomes through resolve_trust_policy; "
                 f"missing: {_POLICY_OUTCOME_IMPORT}",
             )
         )
@@ -186,8 +186,8 @@ def check_approval_outcome_routing(provider: FactsProvider) -> tuple[Violation, 
             _report(
                 rule_id,
                 _APPROVAL_ADAPTER,
-                "Approval fallback outcomes must not restate policy outcome string "
-                "literals; use POLICY_RESOLUTION_FAILURE_OUTCOMES",
+                "Approval must not restate policy outcome string literals; "
+                "use resolve_trust_policy",
                 line,
                 column,
             )

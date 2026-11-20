@@ -248,30 +248,34 @@ dependencies:
   - .agents/skills/autopilot-pr-review-worker/evals/fixtures/02-needs-rework-shape.rendered.md
   - .agents/skills/autopilot-pr-review-worker/evals/fixtures/03-panel-mode-walkthrough.md
   - .agents/skills/autopilot-pr-review-worker/evals/render_eval.py
+  - .agents/skills/autopilot-pr-review-worker/evals/roster-cases.json
+  - .agents/skills/autopilot-pr-review-worker/evals/roster_eval.py
   - .agents/skills/autopilot-pr-review-worker/evals/trigger-evals.json
   - .agents/skills/autopilot-pr-review-worker/scripts/check_required_agents.py
   deployed_file_hashes:
-    .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:5d4568a08e3dfae2e47e74c347293f71ff1a76c9fe1d19abf6a325aeb9bf8c79
+    .agents/skills/autopilot-pr-review-worker/SKILL.md: sha256:fabe0cf37810eaacd5dbeab0b40603e1ac8d1bd708fe878498a154d488957ad2
     .agents/skills/autopilot-pr-review-worker/apm.yml: sha256:9af47f3903be23621b93f8892a2918a83b32bab24756243a43592e60f111c09e
     .agents/skills/autopilot-pr-review-worker/assets/ceo-return-schema.json: sha256:30e38bcb18cfdca8d5d56b384febf84e726e7376872d75e194277d3e1cb12293
-    .agents/skills/autopilot-pr-review-worker/assets/panel-mode.md: sha256:2d535e4ee141fcb865df7689f2be100d636e3dfa0410054d610cf9a1d9623c8d
-    .agents/skills/autopilot-pr-review-worker/assets/panelist-return-schema.json: sha256:2ce80d676ba141c578e77adabf777dd72c966328c2951107cbc178f321ab09c9
+    .agents/skills/autopilot-pr-review-worker/assets/panel-mode.md: sha256:b222c0914f5eee985c74c56abb0d3028e92e5b5704872a99a4234fe839dca143
+    .agents/skills/autopilot-pr-review-worker/assets/panelist-return-schema.json: sha256:6a6e9a3d4914be3c4c9635d534138cb078da366733d49eccb54bc9faddfe846b
     .agents/skills/autopilot-pr-review-worker/assets/recommendation-template.md: sha256:b757b09997a900f0f1e07b47c7815736b33f6824fa13bfabd5192491c4664321
     .agents/skills/autopilot-pr-review-worker/assets/shared-brief.example.json: sha256:ed29ab0264be660d1796d19b2c51aa974879743d1b5617afb86e1b7705a241f8
-    .agents/skills/autopilot-pr-review-worker/evals/README.md: sha256:3f458fad235db5750336a9cb7622fc2331562364de7728251f023bee35e57108
+    .agents/skills/autopilot-pr-review-worker/evals/README.md: sha256:64f63f20aefeb2e864e15311567124400189c6d2e004aea676a6e674ac41bba8
     .agents/skills/autopilot-pr-review-worker/evals/fixtures/01-ship-now-pr1084-shape.json: sha256:108fc261680f17bdade3e2bdf8e64fc908d16a37ec9c29c53169b394530bdd67
     .agents/skills/autopilot-pr-review-worker/evals/fixtures/01-ship-now-pr1084-shape.rendered.md: sha256:ca1fdd3cd24e0fd8ec15b37690c597921ebf1c872270166edb2727d54ee155d8
-    .agents/skills/autopilot-pr-review-worker/evals/fixtures/02-needs-rework-shape.json: sha256:faa41c6c83c4a7955447bcb8fc0ad5a3b8afb4235db257462f649ba0a901913e
-    .agents/skills/autopilot-pr-review-worker/evals/fixtures/02-needs-rework-shape.rendered.md: sha256:b69cd113a428b61d8bbb9381a85261b3ee3acd3f101c08d06419e26aab03bba8
-    .agents/skills/autopilot-pr-review-worker/evals/fixtures/03-panel-mode-walkthrough.md: sha256:42388926b5147daedc5a4205778f8b4edac1beec650f15b5e70008e81116c660
+    .agents/skills/autopilot-pr-review-worker/evals/fixtures/02-needs-rework-shape.json: sha256:f1d7652aa514aac3e662a84d08301cf22d30a0eabeedaeb481548a7bcb61436a
+    .agents/skills/autopilot-pr-review-worker/evals/fixtures/02-needs-rework-shape.rendered.md: sha256:1a419f7ffbd3c8b3921c64f8e154002f1cc7f4d9482bdcc33f810ce3c810da85
+    .agents/skills/autopilot-pr-review-worker/evals/fixtures/03-panel-mode-walkthrough.md: sha256:9e3fc8202d028967028645df6a7526d18d97a55952da81a217b6adeb7059f369
     .agents/skills/autopilot-pr-review-worker/evals/render_eval.py: sha256:690baf6267775077ad011b98839eda1001e207bbae78a7a8454c4d39bb8a2864
+    .agents/skills/autopilot-pr-review-worker/evals/roster-cases.json: sha256:ce67cff7b23f6d88b60c91e147e2cc1a5aaa79e98bb7b7e3fd24ffc0d6e7c29d
+    .agents/skills/autopilot-pr-review-worker/evals/roster_eval.py: sha256:7b46f5ec4f4281d80edd0b7160c09de15f2faf5af4c323b8bb9a0334ddd440ad
     .agents/skills/autopilot-pr-review-worker/evals/trigger-evals.json: sha256:76d6da23bde1c6b6f0b0bf883ba8b5bf065f0db73f69182cfd98449716bc0d84
     .agents/skills/autopilot-pr-review-worker/scripts/check_required_agents.py: sha256:5b393ee410b144838b10d0909beb61baf3d43192b10966eafb3d3a3ad65035b6
   source: local
   local_path: ../autopilot-pr-review-worker
   declaring_parent: ./packages/autopilot/autopilot-pr-review-scheduler
   anchored_local_path: packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:9766f19ef5ed6b79d03bdd4fd71780bb5d159dd2289380d9c14754f9a2dd066d
+  content_hash: sha256:71a014fce18c5bb376f2e6c91bdd1ae446f7dbb7a00301e14691319409ac652e
   declared_license: Apache-2.0
 - repo_url: _local/autopilot-pr-triage-worker
   name: autopilot-pr-triage-worker
@@ -369,7 +373,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:bec1dbffa164226931bc2402f4b7e3c7184c53d7a969294d7503de70164143a5
+  content_hash: sha256:d2a23bceb7560b4aed263825dc54ecb9c882b0ea03b4dface753961608139686
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-lifecycle-tests/assets/templates.md
@@ -1080,7 +1084,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:5d4568a08e3dfae2e47e74c347293f71ff1a76c9fe1d19abf6a325aeb9bf8c79
+  content_hash: sha256:fabe0cf37810eaacd5dbeab0b40603e1ac8d1bd708fe878498a154d488957ad2
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/apm.yml
@@ -1107,7 +1111,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:2d535e4ee141fcb865df7689f2be100d636e3dfa0410054d610cf9a1d9623c8d
+  content_hash: sha256:b222c0914f5eee985c74c56abb0d3028e92e5b5704872a99a4234fe839dca143
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/assets/panelist-return-schema.json
@@ -1116,7 +1120,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:2ce80d676ba141c578e77adabf777dd72c966328c2951107cbc178f321ab09c9
+  content_hash: sha256:6a6e9a3d4914be3c4c9635d534138cb078da366733d49eccb54bc9faddfe846b
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/assets/recommendation-template.md
@@ -1143,7 +1147,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:3f458fad235db5750336a9cb7622fc2331562364de7728251f023bee35e57108
+  content_hash: sha256:64f63f20aefeb2e864e15311567124400189c6d2e004aea676a6e674ac41bba8
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/evals/fixtures/01-ship-now-pr1084-shape.json
@@ -1170,7 +1174,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:faa41c6c83c4a7955447bcb8fc0ad5a3b8afb4235db257462f649ba0a901913e
+  content_hash: sha256:f1d7652aa514aac3e662a84d08301cf22d30a0eabeedaeb481548a7bcb61436a
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/evals/fixtures/02-needs-rework-shape.rendered.md
@@ -1179,7 +1183,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:b69cd113a428b61d8bbb9381a85261b3ee3acd3f101c08d06419e26aab03bba8
+  content_hash: sha256:1a419f7ffbd3c8b3921c64f8e154002f1cc7f4d9482bdcc33f810ce3c810da85
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/evals/fixtures/03-panel-mode-walkthrough.md
@@ -1188,7 +1192,7 @@ deployments:
   owners:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
-  content_hash: sha256:42388926b5147daedc5a4205778f8b4edac1beec650f15b5e70008e81116c660
+  content_hash: sha256:9e3fc8202d028967028645df6a7526d18d97a55952da81a217b6adeb7059f369
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/evals/render_eval.py
@@ -1198,6 +1202,24 @@ deployments:
   - local:packages/autopilot/autopilot-pr-review-worker
   active_owner: local:packages/autopilot/autopilot-pr-review-worker
   content_hash: sha256:690baf6267775077ad011b98839eda1001e207bbae78a7a8454c4d39bb8a2864
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/autopilot-pr-review-worker/evals/roster-cases.json
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
+  content_hash: sha256:ce67cff7b23f6d88b60c91e147e2cc1a5aaa79e98bb7b7e3fd24ffc0d6e7c29d
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/autopilot-pr-review-worker/evals/roster_eval.py
+  runtime: null
+  scope: project
+  owners:
+  - local:packages/autopilot/autopilot-pr-review-worker
+  active_owner: local:packages/autopilot/autopilot-pr-review-worker
+  content_hash: sha256:7b46f5ec4f4281d80edd0b7160c09de15f2faf5af4c323b8bb9a0334ddd440ad
 - kind: project-relative
   target: copilot
   value: .agents/skills/autopilot-pr-review-worker/evals/trigger-evals.json
@@ -2790,7 +2812,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:7a640ffb7619aa1d4b7954ddd3cfa5f43a7421124bf63ee64aeb4bd76df0928d
+  content_hash: sha256:8a0579f4df6d30e48f59732695c3f260c388635164306c92e111817c6d05c3f9
 - kind: project-relative
   target: copilot
   value: .agents/skills/release-acceptance/assets/report-template.md
@@ -2853,7 +2875,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:03fbd47154a1536e62f1fdfe639b0f0a670a41ee5d59d451e7381ab73929ca3a
+  content_hash: sha256:381b112284542d64af548b026329efd2aca87dcd229ea6cb360d9c0c91c19651
 - kind: project-relative
   target: copilot
   value: .agents/skills/release-acceptance/references/verifier-brief.md
@@ -3132,7 +3154,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:0fd1d562f95bc0491fe2748417c60f5be35ed2b016757fc148421fcbb9f0ca9f
+  content_hash: sha256:637c44b825f5239caf67770ae2cebe8e53f43f2935ddae20c4aeb7235a28924d
 - kind: project-relative
   target: copilot
   value: .github/instructions/architecture.instructions.md
@@ -3222,7 +3244,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:58265539158320a3a63f12d03aece9579d4087145763dc3d23edc75ad73a982b
+  content_hash: sha256:8189bf09cd14eca1844bf835d662dc40aeff2c4b1be1ff43cba077a39666fea9
 local_deployed_files:
 - .agents/skills/apm-lifecycle-tests
 - .agents/skills/apm-lifecycle-tests/SKILL.md
@@ -3435,7 +3457,7 @@ local_deployed_files:
 - .github/instructions/python.instructions.md
 - .github/instructions/tests.instructions.md
 local_deployed_file_hashes:
-  .agents/skills/apm-lifecycle-tests/SKILL.md: sha256:bec1dbffa164226931bc2402f4b7e3c7184c53d7a969294d7503de70164143a5
+  .agents/skills/apm-lifecycle-tests/SKILL.md: sha256:d2a23bceb7560b4aed263825dc54ecb9c882b0ea03b4dface753961608139686
   .agents/skills/apm-lifecycle-tests/assets/templates.md: sha256:4c667790e491026e93fcd6e1d8303f2a60ddf050d6e5cf1e471182064f5d3219
   .agents/skills/apm-lifecycle-tests/evals/README.md: sha256:a21a6da3a317e27d6d52d6f1680c7235ab05af15b67db1c73d31eb9fb86749c8
   .agents/skills/apm-lifecycle-tests/evals/content-evals.json: sha256:97825cf74f804c8e898e0a9b2ba599f7d79f9b4e47415d5327667a0591223694
@@ -3660,14 +3682,14 @@ local_deployed_file_hashes:
   .agents/skills/docs-sync/evals/trigger-evals.json: sha256:b0da21a8a6e588676247a9a15d792ef6596389f16ae100f83fa423ee47992501
   .agents/skills/oss-growth/SKILL.md: sha256:90b5d0369032de850f2255910f4cf5caafb7d60f07bda8a2146d394bfa459918
   .agents/skills/python-architecture/SKILL.md: sha256:f06e50b8c40d7e5a732a5405a603efd80da58de2b6f6b293f0f6b58f28eefe7b
-  .agents/skills/release-acceptance/SKILL.md: sha256:7a640ffb7619aa1d4b7954ddd3cfa5f43a7421124bf63ee64aeb4bd76df0928d
+  .agents/skills/release-acceptance/SKILL.md: sha256:8a0579f4df6d30e48f59732695c3f260c388635164306c92e111817c6d05c3f9
   .agents/skills/release-acceptance/assets/report-template.md: sha256:8a512357cc6f59095b6f3cb7680ceba468bb20e703a868dc5584943f5f348535
   .agents/skills/release-acceptance/evals/README.md: sha256:1e09b02c12fd6d0a78aa425635344088a97d09d6efcbfe56678f42a760711bde
   .agents/skills/release-acceptance/evals/content-evals.json: sha256:4069b6f9b0e6f122ac68baa7e612dc2f026f1d6be090879766cff5d839c2502a
   .agents/skills/release-acceptance/evals/trigger-evals.json: sha256:342290adca5441be54d6222fc3dac31de73c60ba3ef5c0ef7e8cfc8f237d61b5
   .agents/skills/release-acceptance/references/atlas-protocol.md: sha256:f93d0ecbe9cbfce3c7e91a5f216b98a18615fd35895f2135519ed95e7db1a302
   .agents/skills/release-acceptance/references/lenses.md: sha256:87a609b1c929329f698dc8630ab15ed7fc15ec591cf9770cee16974960c092cc
-  .agents/skills/release-acceptance/references/rubric.md: sha256:03fbd47154a1536e62f1fdfe639b0f0a670a41ee5d59d451e7381ab73929ca3a
+  .agents/skills/release-acceptance/references/rubric.md: sha256:381b112284542d64af548b026329efd2aca87dcd229ea6cb360d9c0c91c19651
   .agents/skills/release-acceptance/references/verifier-brief.md: sha256:d0d9a9d1bb1a2721f1130feba1ce583b1bb2c86509e37396e962ada9ceb2c004
   .agents/skills/release-acceptance/references/walker-brief.md: sha256:3e0190461cbcdef88f81b750ab2016a7f64465f25525c122b398335640c3c539
   .agents/skills/release-acceptance/scripts/brief_lint.py: sha256:faefe5c3c41d9e9f7b5b89ebecdf33c0036393c9df27d396c5af789b10c43869
@@ -3697,7 +3719,7 @@ local_deployed_file_hashes:
   .github/agents/spec-swagger-editor.agent.md: sha256:4ef74b972d475ff5dd9f42e31f077300a118d1f22ac6761513877d2b8e1b54da
   .github/agents/spec-tag-architect.agent.md: sha256:1f3b95bcf2f34d3fd81bfa4fd9ef39a49ffff91fc6aaab9244abb0399c2d6da0
   .github/agents/supply-chain-security-expert.agent.md: sha256:cd79bc0c60ab0d8ea375420b3932c6616314629d4e668d468f4dc4af51d252fe
-  .github/agents/test-coverage-expert.agent.md: sha256:0fd1d562f95bc0491fe2748417c60f5be35ed2b016757fc148421fcbb9f0ca9f
+  .github/agents/test-coverage-expert.agent.md: sha256:637c44b825f5239caf67770ae2cebe8e53f43f2935ddae20c4aeb7235a28924d
   .github/instructions/architecture.instructions.md: sha256:71c0da596267f223b6a536234c3ac8e8c565fa7f289bbf23d0fe568bd9681859
   .github/instructions/changelog.instructions.md: sha256:575bafcc313df6387b5724ae002858bd0d0020aee10eeb780a057f53eedf0dac
   .github/instructions/cicd.instructions.md: sha256:a5f19cafb5b53ddce3d6ce842d8ef36f1335b70d789f8261f0286d03237cd28a
@@ -3707,4 +3729,4 @@ local_deployed_file_hashes:
   .github/instructions/integrators.instructions.md: sha256:19919cbd04031a8a09be8aa0860aa941640b8313df74439e7bfac31310aa1b13
   .github/instructions/linting.instructions.md: sha256:42ee2a5aa3bd0a81e4c54e1900d96f4fb5118597367cd34b4ac34a8d0adffa5c
   .github/instructions/python.instructions.md: sha256:8acd2bb824eb8d70a1977dfef309a5a122b49320d22222dd8d3544ca08712bca
-  .github/instructions/tests.instructions.md: sha256:58265539158320a3a63f12d03aece9579d4087145763dc3d23edc75ad73a982b
+  .github/instructions/tests.instructions.md: sha256:8189bf09cd14eca1844bf835d662dc40aeff2c4b1be1ff43cba077a39666fea9

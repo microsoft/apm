@@ -56,6 +56,7 @@ def test_skipped_integration_preserves_prior_files_and_lock_claims(
         package_cleanup_retained={},
         package_hashes={dep_key: current_content_hash},
         project_root=tmp_path,
+        apm_dir=tmp_path,
         targets=[],
         diagnostics=diagnostics,
         logger=None,

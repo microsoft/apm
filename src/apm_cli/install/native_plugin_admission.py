@@ -25,22 +25,6 @@ if TYPE_CHECKING:
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
-def agent_plugin_exec_types(package_info: Any) -> tuple[str, ...]:
-    """Return the executable trust types an Agent Plugin's IR declares."""
-    from apm_cli.security.executables import EXEC_TYPE_BIN, EXEC_TYPE_MCP
-
-    package = getattr(package_info, "package", None)
-    plugin = getattr(package, "agent_plugin", None) if package is not None else None
-    components = getattr(plugin, "components", None)
-    servers = getattr(components, "mcp_servers", ()) if components is not None else ()
-    types: list[str] = []
-    if servers:
-        types.append(EXEC_TYPE_MCP)
-    if any(getattr(server, "executables", ()) for server in servers):
-        types.append(EXEC_TYPE_BIN)
-    return tuple(types)
-
-
 def plugin_root_exec_types(install_path: Any) -> tuple[str, ...]:
     """Exec trust types of NATIVE-layout root components (see the trust owner)."""
     from apm_cli.security.trust import native_root_exec_types
@@ -112,8 +96,8 @@ def finalize_native_plugin(
         EXEC_TYPE_HOOKS,
         EXEC_TYPE_LSP,
         EXEC_TYPE_MCP,
-        scan_package_executables,
     )
+    from apm_cli.security.trust import agent_plugin_exec_types, native_plugin_exec_types
 
     # SECURITY: a per-dependency or package target subset that excludes copilot
     # drops native registration; the plugin is not deployable to any other
@@ -121,25 +105,16 @@ def finalize_native_plugin(
     if COPILOT_TARGET_NAME not in {getattr(t, "name", t) for t in targets}:
         return result
 
-    ir_exec_types = agent_plugin_exec_types(package_info)
-    record_native_exec_status(ctx, package_name, package_info, ir_exec_types)
+    install_path = getattr(package_info, "install_path", None)
+    record_native_exec_status(
+        ctx, package_name, package_info, agent_plugin_exec_types(install_path)
+    )
 
     # For a natively registered plugin, PRESENCE IS DEPLOYMENT: Copilot loads the
-    # WHOLE directory live from apm_modules, so an unapproved hooks/agents/canvas/
-    # lsp component the IR does not model still executes. Gate on the UNION of the
-    # IR exec types (mcp/bin), every exec type scan_package_executables finds in
-    # APM's own .apm/ layout, and every NATIVE root-layout component the scanner
-    # is blind to (see plugin_root_exec_types).
-    on_disk_types: tuple[str, ...] = ()
-    install_path = getattr(package_info, "install_path", None)
-    if install_path is not None:
-        package = getattr(package_info, "package", None)
-        version = getattr(package, "version", "") or "" if package is not None else ""
-        on_disk_types = scan_package_executables(
-            Path(install_path), package_name, version
-        ).exec_types
+    # WHOLE directory live from apm_modules, so every component the trust owner
+    # finds (root mcp.json, .apm/ layout, native root layout) gates registration.
     present_types = (
-        set(ir_exec_types) | set(on_disk_types) | set(plugin_root_exec_types(install_path))
+        set(native_plugin_exec_types(Path(install_path))) if install_path is not None else set()
     )
 
     approvals = {

@@ -218,6 +218,28 @@
         "transport-platform-credential-origin-scope",
         "transport-platform-origin-bounded-redirect"
       ]
+    },
+    {
+      "id": "credential-value-rendering",
+      "decision": "How credential values render in command output: stored secrets show a fixed mask with presence reported, other config values drop URL userinfo, mask URL query values and redact labelled secrets and credential flag values, every apm config output call renders values through the owner, and free-text diagnostics, debug logs, script logs and SBOM export redact through one pattern and one URL userinfo stripper",
+      "owner": "utils/credential_rendering.py (render_credential_value, render_config_value, is_credential_key, redact_secrets, SECRET_RE, redact_url_userinfo, mask_known_values); consumers: commands/config.py (_echo_setting, _add_table_row, every output call), core/auth.py (SecretRedactionFilter), core/auth_outcome.py (sanitize_diagnostic_detail), core/script_executors.py, export/purl.py (scrub_url), install/mcp/warnings.py, deps/registry_proxy.py, deps/registry/client.py, deps/registry/auth.py, deps/registry/resolver.py, models/apm_package.py",
+      "selectors": [
+        "src/apm_cli/utils/credential_rendering.py",
+        "src/apm_cli/commands/config.py"
+      ],
+      "guards": ["transport-platform-credential-value-rendering"]
+    },
+    {
+      "id": "archive-extraction-limits",
+      "decision": "Which limits every archive extraction applies, for every accepted format (tar.gz and zip): entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries (#4235)",
+      "owner": "utils/archive.py (safe_extract_tar, safe_extract_zip, read_zip_member; shared _archive_member_target, _claim_member and _stream_member); consumers: deps/registry/extractor.py, bundle/unpacker.py, bundle/local_bundle.py, deps/download_strategies.py",
+      "selectors": [
+        "src/apm_cli/utils/archive.py",
+        "src/apm_cli/deps/registry/extractor.py"
+      ],
+      "guards": [
+        "transport-platform-archive-extraction-limits"
+      ]
     }
   ]
 }

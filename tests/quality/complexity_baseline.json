@@ -367,8 +367,7 @@
     },
     "src/apm_cli/install/local_bundle_handler.py": {
       "install_local_bundle": [
-        "PLR0913",
-        "PLR0915"
+        "PLR0913"
       ]
     },
     "src/apm_cli/install/lsp/integration.py": {
@@ -609,12 +608,6 @@
       ],
       "_fetch_github_contents": [
         "PLR0911"
-      ]
-    },
-    "src/apm_cli/policy/parser.py": {
-      "validate_policy": [
-        "C901",
-        "PLR0912"
       ]
     },
     "src/apm_cli/policy/policy_checks.py": {
