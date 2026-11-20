@@ -474,19 +474,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         ),
     ),
     KnownOutputCell(
-        "install-hook-line-per-target",
-        "I9",
-        "#4243",
-        _runs("install"),
-        r"repeats a (line|diagnostic): '\|   ",
-        # One hook integrated into two targets that render it the same way (Claude
-        # and Windsurf, or a hook file) is listed once per target, back to back.
-        output=(
-            r"^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, \.windsurf/hooks\.json$"
-            r"|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n  \|   Hook file integrated: "
-        ),
-    ),
-    KnownOutputCell(
         "install-registry-lookup-per-registry",
         "I9",
         "#4244",
@@ -575,14 +562,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _runs("uninstall"),
         r"repeats a (line|diagnostic): '\[(\+|i)\] .*(found in apm\.yml|from dependencies\.apm in apm\.yml)",
         output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "update-deny-all-lifecycle-notice-repeats",
-        "I9",
-        "#4333",
-        _runs("update"),
-        r"Lifecycle scripts suppressed by org policy",
-        output=r"^\s*(\[!\] Lifecycle scripts suppressed by org policy[^\n]*)$.*^\s*\1$",
     ),
     KnownOutputCell(
         "install-verbose-diagnostics-repeat",

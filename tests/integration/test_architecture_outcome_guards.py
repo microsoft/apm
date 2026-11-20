@@ -121,8 +121,7 @@ def test_requested_plugin_skill_with_no_match_fails_closed(
     assert "engineering/resolving-merge-conflicts" in result.output
     assert "matched no declared skills" in result.output
     assert "tdd" in result.output
-    assert "update the package manifest" in result.output
-    assert "then reinstall" in result.output
+    assert "Run 'apm install ../plugin --skill engineering/tdd'" in " ".join(result.output.split())
     assert not (consumer / "apm.lock.yaml").exists()
     assert not (consumer / ".claude" / "skills" / "resolving-merge-conflicts").exists()
 
@@ -657,3 +656,37 @@ def test_incomplete_policy_chain_always_fails_closed() -> None:
             logger=MagicMock(),
             fetch_failure_default="warn",
         )
+
+
+@pytest.mark.parametrize(
+    ("requested", "available", "next_step"),
+    (
+        pytest.param(("nope",), ("beta", "alpha"), "apm install o/r#v1 --skill alpha", id="miss"),
+        pytest.param(
+            ("beta", "nope", "alpha"),
+            ("alpha", "beta"),
+            "apm install o/r#v1 --skill beta --skill alpha",
+            id="partial-keeps-available",
+        ),
+        pytest.param(("nope",), (), "apm install o/r#v1", id="none-available"),
+    ),
+)
+def test_requested_component_miss_names_one_runnable_install(
+    requested: tuple[str, ...], available: tuple[str, ...], next_step: str
+) -> None:
+    """A --skill miss ends with one runnable install that selects available skills (#4206)."""
+    from apm_cli.install.outcome import require_requested_components
+
+    diagnostics = MagicMock()
+    assert not require_requested_components(
+        diagnostics,
+        option="--skill",
+        component="skill",
+        requested=requested,
+        available=available,
+        package="o/r",
+        install_spec="o/r#v1",
+    )
+    (message,), _kwargs = diagnostics.error.call_args
+    assert message.count("Run '") == 1, message
+    assert f"Run '{next_step}' to install " in message, message
