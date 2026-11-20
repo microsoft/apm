@@ -29,6 +29,7 @@ import click
 
 from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
 from ..bundle.formats import BundleFormat
+from .deployed_paths import log_bundle_deployed
 
 if TYPE_CHECKING:
     from apm_cli.models.dependency.mcp import MCPDependency
@@ -407,16 +408,7 @@ def install_local_bundle(
         msg = f"Installed {len(deployed) + len(staged_instructions)} file(s) from local bundle"
         if skipped:
             msg += f" ({skipped} skipped)"
-        logger.success(msg)
-        if deployed:
-            from .deployed_paths import destination_folders, destination_tree_lines
-
-            for line in destination_tree_lines(
-                f"{len(deployed)} file(s) deployed",
-                destination_folders(deployed, targets),
-                bool(getattr(logger, "verbose", False)),
-            ):
-                logger.tree_item(line)
+        log_bundle_deployed(logger, msg, deployed, targets)
 
         # Issue #1207 D2.b: post-install compile hint for staged instructions.
         if staged_instructions and not dry_run:
