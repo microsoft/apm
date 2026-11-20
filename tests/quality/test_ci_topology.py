@@ -8,7 +8,7 @@ import tomllib
 from collections import Counter
 from collections.abc import Sequence
 from copy import deepcopy
-from itertools import product
+from itertools import pairwise, product
 from pathlib import Path
 
 import pytest
@@ -658,6 +658,226 @@ def test_ratchet_aggregate_cannot_suppress_failure(provisional_ci: WorkflowNode)
     step["run"] = step["run"].replace("exit 1", ":")
     with pytest.raises(AssertionError, match="invalid results"):
         _assert_ratchet_split(provisional_ci)
+
+
+# Windows units on pull requests (#4115, PERF-H2). Every required Windows
+# gate shard runs its slice of the Windows unit suite through the
+# ci-validation-topology owner (scripts/ci_selections.py), the same selection
+# main push runs, plus its slice of the windows_compat integration family.
+# No Windows job may spell a unit-suite run of its own.
+BUILD_RELEASE_WORKFLOW = REPO_ROOT / ".github/workflows/build-release.yml"
+WINDOWS_GATE_SHARD_JOBS = (
+    "windows-compat-gate-1",
+    "windows-compat-gate-2",
+    "windows-compat-gate-3",
+)
+WINDOWS_UNIT_STEP = "Run Windows unit suite"
+WINDOWS_COMPAT_STEP = "Run cross-platform contract family"
+WINDOWS_FULL_UNIT_STEP = "Run unit tests (Windows diagnostics)"
+WINDOWS_UNIT_OWNER = ("python", "-m", "scripts.ci_selections", "windows-unit")
+WINDOWS_UNIT_ROOTS = ("tests/unit", "tests/test_console.py")
+_PYTEST_VALUE_FLAGS = ("-p", "-m", "-n", "--dist", "--shard-count", "--shard-index")
+
+
+def _owner_tail(command: Sequence[str]) -> list[str] | None:
+    """Arguments after the owner invocation, or None when the command bypasses it."""
+    width = len(WINDOWS_UNIT_OWNER)
+    for index in range(len(command) - width + 1):
+        if tuple(command[index : index + width]) == WINDOWS_UNIT_OWNER:
+            return list(command[index + width :])
+    return None
+
+
+def _pytest_roots(command: Sequence[str]) -> list[str]:
+    """Positional test paths of a pytest command (flag values excluded)."""
+    if not any(token.endswith("pytest") for token in command):
+        return []
+    tokens = list(command)
+    start = max(i for i, token in enumerate(tokens) if token.endswith("pytest")) + 1
+    roots: list[str] = []
+    skip = False
+    for token in tokens[start:]:
+        if skip:
+            skip = False
+        elif token in _PYTEST_VALUE_FLAGS or token.startswith("--shard-durations"):
+            skip = "=" not in token
+        elif not token.startswith("-"):
+            roots.append(token)
+    return roots
+
+
+def _is_windows_job(job: WorkflowNode) -> bool:
+    include = job.get("strategy", {}).get("matrix", {}).get("include", [])
+    return "windows" in str(job.get("runs-on", "")) or any(
+        isinstance(row, dict) and "windows" in str(row.get("os", "")) for row in include
+    )
+
+
+def _test_commands(step: WorkflowNode) -> list[list[str]]:
+    """Tokenize the step's pytest and owner lines; other shell lines may be PowerShell."""
+    commands: list[list[str]] = []
+    for line in str(step.get("run", "")).replace("\\\n", " ").splitlines():
+        if "pytest" not in line and "scripts.ci_selections" not in line:
+            continue
+        try:
+            commands.append(shlex.split(line, comments=True, posix=True))
+        except ValueError:
+            commands.append(line.split())
+    return commands
+
+
+def _windows_unit_runs(job: WorkflowNode) -> list[tuple[WorkflowNode, list[str]]]:
+    """Every step command that runs the unit suite on Windows, owner-routed or not."""
+    runs: list[tuple[WorkflowNode, list[str]]] = []
+    for step in _run_steps(job):
+        if "run" not in step or "matrix.platform != 'windows'" in str(step.get("if", "")):
+            continue
+        for command in _test_commands(step):
+            roots = _pytest_roots(command)
+            if _owner_tail(command) is not None or set(roots) & set(WINDOWS_UNIT_ROOTS):
+                runs.append((step, command))
+    return runs
+
+
+def _assert_windows_units_route_through_owner(workflow: WorkflowNode, label: str) -> None:
+    for job_id, job in workflow["jobs"].items():
+        if not _is_windows_job(job):
+            continue
+        for _step, command in _windows_unit_runs(job):
+            assert _owner_tail(command) is not None, (
+                f"{label} job {job_id!r} runs Windows units without scripts/ci_selections.py: "
+                f"{shlex.join(command)}"
+            )
+
+
+def _assert_owner_shard_step(job: WorkflowNode, label: str, shard_count: int) -> WorkflowNode:
+    runs = _windows_unit_runs(job)
+    assert len(runs) == 1, f"{label} must run the Windows unit suite exactly once"
+    step, command = runs[0]
+    assert _owner_tail(command) == [
+        "--shard-count",
+        str(shard_count),
+        "--shard-index",
+        "$env:SHARD",
+    ], f"{label} must run its Windows unit shard through scripts/ci_selections.py"
+    assert "if" not in step and "continue-on-error" not in step, label
+    return step
+
+
+def _assert_pr_windows_units(ci: WorkflowNode, release: WorkflowNode) -> None:
+    from scripts.ci_selections import SELECTIONS
+
+    owner = SELECTIONS["windows-unit"]
+    assert _pytest_roots(["pytest", *owner]) == list(WINDOWS_UNIT_ROOTS)
+    assert "-m" not in owner and "-k" not in owner, "Windows units must not be filtered"
+    assert ("-n", "4") in set(pairwise(owner))
+
+    for workflow, label in ((ci, "ci.yml"), (release, "build-release.yml")):
+        _assert_windows_units_route_through_owner(workflow, label)
+
+    push_jobs = sorted(job_id for job_id in release["jobs"] if job_id.startswith("windows-unit-"))
+    assert push_jobs, "main push must keep its Windows unit shards"
+    for job_id in push_jobs:
+        _assert_owner_shard_step(release["jobs"][job_id], job_id, len(push_jobs))
+    full_step = workflow_step(workflow_job(release, "build-windows"), WINDOWS_FULL_UNIT_STEP)
+    assert [_owner_tail(command) for command in _test_commands(full_step)] == [[]]
+
+    count = len(WINDOWS_GATE_SHARD_JOBS)
+    for index, job_id in enumerate(WINDOWS_GATE_SHARD_JOBS, 1):
+        job = workflow_job(ci, job_id)
+        assert job["env"] == {"SHARD": str(index)}
+        unit_step = _assert_owner_shard_step(job, job_id, count)
+        assert unit_step.get("name") == WINDOWS_UNIT_STEP
+        compat = workflow_step(job, WINDOWS_COMPAT_STEP)
+        # Integration contracts still run when a unit fails, for full signal.
+        assert compat.get("if") == "${{ !cancelled() }}"
+        assert "continue-on-error" not in compat
+        [command] = [c for c in _test_commands(compat) if _pytest_roots(c)]
+        pairs = set(pairwise(command))
+        assert ("-m", "windows_compat") in pairs
+        assert ("--shard-count", str(count)) in pairs
+        assert ("--shard-index", "$env:SHARD") in pairs
+        assert _pytest_roots(command) == ["tests/integration"]
+
+
+@pytest.fixture
+def provisional_release() -> WorkflowNode:
+    return deepcopy(load_workflow(BUILD_RELEASE_WORKFLOW))
+
+
+def test_pr_windows_gate_runs_every_windows_unit_node() -> None:
+    _assert_pr_windows_units(
+        load_workflow(REPO_ROOT / ".github/workflows/ci.yml"),
+        load_workflow(BUILD_RELEASE_WORKFLOW),
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "marker-only-units",
+        "drop-unit-step",
+        "unit-shard-count",
+        "skip-unit-step",
+        "tolerate-unit-failure",
+        "skip-compat-step",
+        "unit-root-in-compat",
+        "compat-root-dropped",
+        "push-bypasses-owner",
+        "full-run-bypasses-owner",
+        "owner-marker-filter",
+    ],
+)
+def test_pr_windows_unit_drift_fails(
+    provisional_ci: WorkflowNode,
+    provisional_release: WorkflowNode,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    shard = workflow_job(provisional_ci, WINDOWS_GATE_SHARD_JOBS[-1])
+    steps = shard["steps"]
+    compat = workflow_step(shard, WINDOWS_COMPAT_STEP)
+    if mutation == "marker-only-units":
+        # The pre-#4115 selection: windows_compat units only.
+        steps.remove(workflow_step(shard, WINDOWS_UNIT_STEP))
+        compat["run"] = compat["run"].replace("tests/integration", "tests/unit tests/integration")
+    elif mutation == "drop-unit-step":
+        steps.remove(workflow_step(shard, WINDOWS_UNIT_STEP))
+    elif mutation == "unit-shard-count":
+        unit = workflow_step(shard, WINDOWS_UNIT_STEP)
+        unit["run"] = unit["run"].replace("--shard-count 3", "--shard-count 2")
+    elif mutation == "skip-unit-step":
+        workflow_step(shard, WINDOWS_UNIT_STEP)["if"] = "github.event_name != 'pull_request'"
+    elif mutation == "tolerate-unit-failure":
+        workflow_step(shard, WINDOWS_UNIT_STEP)["continue-on-error"] = True
+    elif mutation == "skip-compat-step":
+        compat["if"] = "success()"
+    elif mutation == "unit-root-in-compat":
+        compat["run"] = compat["run"].replace("tests/integration", "tests/integration tests/unit")
+    elif mutation == "compat-root-dropped":
+        compat["run"] = compat["run"].replace("tests/integration", "tests/integration/x.py")
+    elif mutation == "push-bypasses-owner":
+        step = workflow_step(
+            workflow_job(provisional_release, "windows-unit-1"), WINDOWS_FULL_UNIT_STEP
+        )
+        step["run"] = step["run"].replace(
+            " ".join(WINDOWS_UNIT_OWNER), "python -m pytest tests/unit tests/test_console.py"
+        )
+    elif mutation == "full-run-bypasses-owner":
+        step = workflow_step(
+            workflow_job(provisional_release, "build-windows"), WINDOWS_FULL_UNIT_STEP
+        )
+        step["run"] = "uv run pytest tests/unit tests/test_console.py -n auto"
+    else:
+        from scripts import ci_selections
+
+        monkeypatch.setitem(
+            ci_selections.SELECTIONS,
+            "windows-unit",
+            (*ci_selections.SELECTIONS["windows-unit"], "-m", "windows_compat"),
+        )
+    with pytest.raises(AssertionError):
+        _assert_pr_windows_units(provisional_ci, provisional_release)
 
 
 def _assert_lifecycle_smoke_marker_registered(markers: list[str]) -> None:

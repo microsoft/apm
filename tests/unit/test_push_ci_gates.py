@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.ci_selections import SELECTIONS
 from tests.workflow_contracts import load_workflow, run_bash, workflow_step
 
 pytestmark = pytest.mark.component
@@ -80,14 +81,20 @@ def test_push_shards_execute_the_original_suites() -> None:
         for i in range(1, count + 1):
             job = jobs[f"{group}-{i}"]
             step = workflow_step(job, name)
+            run = step["run"]
+            if group == "windows-unit":
+                # The owner holds the selection; expand it to check what runs.
+                owner = "python -m scripts.ci_selections windows-unit"
+                assert run.count(owner) == 1
+                run = run.replace(owner, "python -m pytest " + " ".join(SELECTIONS[group]))
             assert job["env"]["SHARD"] == str(i)
             assert "if" not in step and not step.get("continue-on-error")
-            assert f"python -m pytest {selection} " in step["run"]
-            assert "--collect-only" not in step["run"]
-            assert f"--shard-count {count} --shard-index" in step["run"]
-            assert f"--shard-durations .github/ci-durations/{seed}.json" in step["run"]
+            assert f"python -m pytest {selection} " in run
+            assert "--collect-only" not in run
+            assert f"--shard-count {count} --shard-index" in run
+            assert f"--shard-durations .github/ci-durations/{seed}.json" in run
             if group == "windows-unit":
                 assert job["if"] == BRANCH_PUSH and job["runs-on"] == "windows-latest"
                 assert step["timeout-minutes"] == 60
-                assert "-n auto --dist worksteal" in step["run"]
-                assert "-vv --tb=short --show-capture=no --no-showlocals" in step["run"]
+                assert "-n 4 --dist worksteal" in run
+                assert "-vv --tb=short --show-capture=no --no-showlocals" in run

@@ -455,16 +455,17 @@ failure, cancellation, skipping or a missing result fails it. This remains a
 diagnostic check outside `merge-gate.yml`'s `EXPECTED_CHECKS`, not a new required
 merge gate. A passing test summary does not override a cancelled job.
 
-The required Windows compatibility gate selects `windows_compat` tests within
-`tests/unit` and `tests/integration`, with `APM_E2E_TESTS=1` for marked real-CLI
-contracts. It runs only that marker subset, not the full integration suite.
-Its collection guard requires a non-empty subset, not a fixed test count.
-Every module under those roots must import on Windows before marker deselection.
+The required Windows compatibility gate runs the full Windows unit suite through
+`scripts/ci_selections.py`, the same selection main push runs, then the
+`windows_compat` tests in `tests/integration` with `APM_E2E_TESTS=1` for marked
+real-CLI contracts. It runs only that integration marker subset, not the full
+integration suite. Its collection guard requires a non-empty subset, not a fixed
+test count. Every module under those roots must import on Windows before marker deselection.
 Import Unix-only modules such as `pwd` or `fcntl` inside the helpers that need
 them, not at module scope. The collection guard checks this with Unix-only
 standard modules unavailable, even on Linux and macOS.
 The nested collection subprocess has a 300-second hard timeout: pytest must
-import and collect both roots before applying the marker, including on release
+import and collect the whole root before applying the marker, including on release
 runners sharing CPU with other test workers. Plugin autoload remains disabled,
 and a collection timeout fails the check rather than skipping it.
 Collection proves a test is selected; a successful Windows job provides
@@ -541,8 +542,9 @@ version is already on PyPI.
 On qualifying PRs and merge groups, `Spec conformance gate` requires three
 serial pytest shards on isolated runners plus the statement check. Only the
 statement job's full collection is used to regenerate `CONFORMANCE.{json,md}`.
-On every PR, `Windows Compatibility Gate` requires three serial shards on
-parallel Windows runners; `Lifecycle Smoke (Linux)` and the two
+On every PR, `Windows Compatibility Gate` requires three shards on parallel
+Windows runners (units with four xdist workers, then serial `windows_compat`
+integration); `Lifecycle Smoke (Linux)` and the two
 `Build & Test` shards are split the same way. The seeds in
 `.github/ci-durations/` (`windows-unit`, `windows-compat`, `linux-unit`,
 `spec-conformance`, and `linux-x86_64` for lifecycle smoke) weight the current
@@ -585,15 +587,18 @@ release qualification or change required checks.
 
 ### Windows unit hang diagnostics
 
-The Windows full-unit step in `.github/workflows/build-release.yml` runs:
+The Windows unit steps in `.github/workflows/build-release.yml` and the PR
+`Windows Compatibility Gate` run the selection owned by `scripts/ci_selections.py`:
 
 ```sh
-uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal -vv --tb=short --show-capture=no --no-showlocals
+uv run --frozen python -m scripts.ci_selections windows-unit [--shard-count N --shard-index I]
 ```
+
+which runs `pytest tests/unit tests/test_console.py -n 4 --dist worksteal -vv --tb=short --show-capture=no --no-showlocals`.
 
 `PYTHONUNBUFFERED=1` keeps named test starts and outcomes visible while the suite runs. Captured test output and local-variable dumps remain disabled. These diagnostics identify candidate unfinished tests, not stack frames or the exact blocked phase; an outcome can appear before fixture teardown completes.
 
-The 60-minute step limit fails closed on a hang; it is not proof that tests pass or a root-cause fix. Test selection and parallelism are unchanged. The PR-time `windows_compat` gate exercises live name visibility during setup, call, and teardown after a failed call.
+The 60-minute step limit fails closed on a hang; it is not proof that tests pass or a root-cause fix. The PR-time gate exercises live name visibility during setup, call, and teardown after a failed call.
 
 ### GitHub Actions Authentication
 

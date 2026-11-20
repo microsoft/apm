@@ -2988,7 +2988,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:56e7a4904da99aa330c760c80e8657e5312edd4804e0e20f874da77c092c2946
+  content_hash: sha256:d90dbc74235da6e75c9b5bd0c464129ff2306311ec2708ecbc1342761f1d2b94
 local_deployed_files:
 - .agents/skills/apm-spec-guardian
 - .agents/skills/apm-spec-guardian/SKILL.md
@@ -3423,4 +3423,4 @@ local_deployed_file_hashes:
   .github/instructions/integrators.instructions.md: sha256:19919cbd04031a8a09be8aa0860aa941640b8313df74439e7bfac31310aa1b13
   .github/instructions/linting.instructions.md: sha256:7ae1682c738ef69df94018235353ad802052160004364bf591980735c1881022
   .github/instructions/python.instructions.md: sha256:8acd2bb824eb8d70a1977dfef309a5a122b49320d22222dd8d3544ca08712bca
-  .github/instructions/tests.instructions.md: sha256:56e7a4904da99aa330c760c80e8657e5312edd4804e0e20f874da77c092c2946
+  .github/instructions/tests.instructions.md: sha256:d90dbc74235da6e75c9b5bd0c464129ff2306311ec2708ecbc1342761f1d2b94

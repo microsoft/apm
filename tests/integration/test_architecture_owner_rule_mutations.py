@@ -1248,6 +1248,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Policy cache serializer stops routing through the canonical shape helper.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-ci-validation-topology",
+        rule_id="contracts-tooling-ci-validation-topology",
+        path=".github/workflows/ci.yml",
+        old="uv run --frozen python -m scripts.ci_selections windows-unit",
+        new="uv run --frozen python -m pytest -m windows_compat tests/unit",
+        intent="The PR Windows gate falls back to its own windows_compat-only unit selection.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-compile-inventory",
         rule_id="registry_delegation.compile_inventory_authority",
         path="src/apm_cli/compilation/inventory.py",
