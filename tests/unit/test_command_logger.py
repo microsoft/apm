@@ -10,6 +10,7 @@ from apm_cli.core.command_logger import (
     InstallLogger,
     _ValidationOutcome,
 )
+from apm_cli.core.remediation import DRY_RUN_INCOMPLETE
 from apm_cli.integration.cleanup import CleanupResult
 
 
@@ -219,9 +220,25 @@ class TestCommandLogger:
         )
         assert logger.stale_cleanup("/home/user/local-agent", cleanup) == len(listed)
         assert mock_info.call_args_list == [
-            call(f"{header} for /home/user/local-agent:", symbol="info"),
+            call(f"{header} for _local/local-agent:", symbol="info"),
             *(call(f"  - {path}", soft_wrap=True) for path in listed),
         ]
+
+    @pytest.mark.parametrize(
+        ("dep_key", "label"),
+        [
+            ("C:\\Users\\me\\local-agent", "_local/local-agent"),
+            ("~/pkgs/local-agent", "_local/local-agent"),
+            ("owner/repo", "owner/repo"),
+            ("<local .apm/>", "<local .apm/>"),
+        ],
+    )
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_stale_cleanup_never_prints_machine_paths(self, mock_info, dep_key, label):
+        CommandLogger("test").stale_cleanup(dep_key, CleanupResult(deleted=["a.md", "b.md"]))
+        assert mock_info.call_args_list[0] == call(
+            f"Cleaned 2 stale deployed files for {label}:", symbol="info"
+        )
 
     @patch("apm_cli.core.command_logger._rich_info")
     def test_stale_cleanup_without_deletions_is_silent(self, mock_info):
@@ -414,8 +431,7 @@ class TestInstallLogger:
         logger.install_summary(apm_count=count, mcp_count=0, disposition=InstallDisposition.DRY_RUN)
         mock_warning.assert_called_once()
         assert mock_warning.call_args.args[0] == (
-            f"Dry run incomplete: {count} locally known APM {noun}. "
-            "Run 'apm install' without --dry-run to resolve the full plan."
+            f"Dry run incomplete: {count} locally known APM {noun}. {DRY_RUN_INCOMPLETE.sentence()}"
         )
 
     @patch("apm_cli.core.command_logger._rich_warning")

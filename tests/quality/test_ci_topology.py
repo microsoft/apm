@@ -48,6 +48,8 @@ RATCHET_SCALING_JOB = "test-architecture-scaling"
 RATCHET_EXECUTION_JOBS = (RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB)
 # A job that hits its cap ends "cancelled", which hides the ratchet result.
 RATCHET_TIMEOUT_MINUTES = {RATCHET_CONTRACT_JOB: 15, RATCHET_SCALING_JOB: 5}
+MAIN_PUSH_RATCHET_WORKFLOW = "main-architecture-ratchets.yml"
+MAIN_PUSH_RATCHET_CHECK = "Architecture Ratchet Contracts (main)"
 RATCHET_AGGREGATE_STEP = "Require the architecture contracts"
 RATCHET_SCALING_CHECK = "Architecture Scaling (Linux)"
 ARCHITECTURE_SCALING_TARGETS = (
@@ -412,7 +414,27 @@ def _assert_topology(root: Path, inventory: dict[str, str]) -> None:
                 continue
             if repository_modules.intersection(_pytest_targets(job)):
                 ratchet_callers.append((workflow_path.name, job_name))
-    assert ratchet_callers == [("ci.yml", RATCHET_CONTRACT_JOB)]
+    assert ratchet_callers == [
+        ("ci.yml", RATCHET_CONTRACT_JOB),
+        (MAIN_PUSH_RATCHET_WORKFLOW, RATCHET_CONTRACT_JOB),
+    ]
+    _assert_main_push_ratchets(load_workflow(workflows / MAIN_PUSH_RATCHET_WORKFLOW), ci)
+
+
+def _assert_main_push_ratchets(main_push: WorkflowNode, ci: WorkflowNode) -> None:
+    """Every push to main re-runs ci.yml's exact ratchet contract job.
+
+    Without it, a change that reaches main outside merge_group skips the
+    ratchet contracts and main goes red with no signal. The push copy must
+    never opt into provisional baselines.
+    """
+    assert main_push["on"] == {"push": {"branches": ["main"]}}
+    assert main_push["env"] == {"PYTHON_VERSION": ci["env"]["PYTHON_VERSION"]}
+    assert list(main_push["jobs"]) == [RATCHET_CONTRACT_JOB]
+    expected = deepcopy(workflow_job(ci, RATCHET_CONTRACT_JOB))
+    expected["name"] = MAIN_PUSH_RATCHET_CHECK
+    expected["steps"][4].pop("env")
+    assert workflow_job(main_push, RATCHET_CONTRACT_JOB) == expected
 
 
 @pytest.fixture(scope="module")
@@ -645,6 +667,36 @@ def test_ratchet_execution_step_drift_fails(
         steps[4]["run"] += " -k false"
     with pytest.raises(AssertionError):
         _assert_ratchet_split(provisional_ci)
+
+
+def _main_push_and_ci() -> tuple[WorkflowNode, WorkflowNode]:
+    workflows = REPO_ROOT / ".github" / "workflows"
+    return (
+        load_workflow(workflows / MAIN_PUSH_RATCHET_WORKFLOW),
+        load_workflow(workflows / "ci.yml"),
+    )
+
+
+def test_main_push_reruns_the_ratchet_contracts() -> None:
+    _assert_main_push_ratchets(*_main_push_and_ci())
+
+
+@pytest.mark.parametrize("mutation", ["trigger", "selection", "provisional", "skip"])
+def test_main_push_ratchet_drift_fails(mutation: str) -> None:
+    main_push, ci = _main_push_and_ci()
+    job = workflow_job(main_push, RATCHET_CONTRACT_JOB)
+    if mutation == "trigger":
+        main_push["on"] = {"pull_request": {"branches": ["main"]}}
+    elif mutation == "selection":
+        job["steps"][4]["run"] = job["steps"][4]["run"].replace(
+            "tests/quality/test_test_taxonomy.py", ""
+        )
+    elif mutation == "provisional":
+        job["steps"][4]["env"] = {ALLOW_PROVISIONAL_KEY: "1"}
+    else:
+        job["if"] = "false"
+    with pytest.raises(AssertionError):
+        _assert_main_push_ratchets(main_push, ci)
 
 
 @pytest.mark.parametrize("job_id", RATCHET_EXECUTION_JOBS)
@@ -2835,3 +2887,34 @@ def test_every_quality_module_runs_in_some_workflow_job() -> None:
         if not any(module == target or module.startswith(f"{target}/") for target in targets)
     ]
     assert orphans == [], f"no workflow job runs these modules: {orphans}"
+
+
+CACHE_FULL_MATRIX_NODE = (
+    "tests/integration/test_architecture_linter_session_cache.py::"
+    "test_session_cache_findings_match_uncached_runs_full_matrix"
+)
+
+
+def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
+    """The env-gated full-matrix cache replay has a schedule, not only "on demand".
+
+    PR shards keep the per-group sample; the nightly lifecycle workflow (also
+    dispatched on each release-candidate ref) replays the full matrix with
+    PYTEST_PERF=1, and its tracking-issue signal waits for that job.
+    """
+    workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml")
+    assert "schedule" in workflow["on"]
+    assert "ref" in workflow["on"]["workflow_dispatch"]["inputs"]
+    job = workflow_job(workflow, "architecture-cache-full-matrix")
+    assert job["steps"][0]["with"]["ref"] == "${{ inputs.ref }}"
+    assert all(key not in job for key in ("if", "continue-on-error"))
+    step = workflow_step(job, "Replay the full owner mutation matrix through the session cache")
+    assert "if" not in step and "continue-on-error" not in step
+    assert effective_env(workflow, job, step)["PYTEST_PERF"] == "1"
+    tokens = step["run"].replace("\\\n", " ").split()
+    assert CACHE_FULL_MATRIX_NODE in tokens
+    assert ("-m", "benchmark") in set(pairwise(tokens))
+    signal = workflow_job(workflow, "signal")
+    assert "architecture-cache-full-matrix" in signal["needs"]
+    result = workflow_step(signal, "Open, update or close the tracking issue")["env"]["RESULT"]
+    assert "needs.architecture-cache-full-matrix.result" in result

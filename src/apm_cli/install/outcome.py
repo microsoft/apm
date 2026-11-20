@@ -36,6 +36,46 @@ _SUCCESS_SUMMARY_DISPOSITIONS = frozenset(
 )
 
 
+_CHANGED_COUNTER_KEYS = (
+    "prompts",
+    "agents",
+    "skills",
+    "sub_skills",
+    "instructions",
+    "commands",
+    "hooks",
+    "canvases",
+)
+
+
+def integration_changed_files(result: dict) -> int:
+    """Return how many deployed files one package's integration changed (#4184).
+
+    ``integrate_package_primitives`` is the single owner of this count: it
+    records ``files_changed`` once every primitive kind ran. Early-exit results
+    (no targets, refused packages) fall back to the per-kind counters, which
+    count only fresh writes, never adopted or unchanged files.
+    """
+    changed = result.get("files_changed")
+    if isinstance(changed, int):
+        return changed
+    return sum(int(result.get(key, 0) or 0) for key in _CHANGED_COUNTER_KEYS)
+
+
+def package_install_count(result: dict | None, *, fetched: bool) -> int:
+    """Return 1 when one package counts as installed this run, else 0 (#4184).
+
+    A package counts when its bytes were freshly fetched, when integration
+    changed any deployed file, or when it was natively registered (an Agent
+    Plugin deploys no primitives by design). A converged package counts zero.
+    """
+    if fetched:
+        return 1
+    if not result:
+        return 0
+    return int(integration_changed_files(result) > 0 or bool(result.get("native_plugin")))
+
+
 def diagnostic_error_count(diagnostics: object | None) -> int:
     """Return a defensive integer error count."""
     if diagnostics is None:
@@ -270,4 +310,22 @@ def local_bundle_update_next_step(names, file_count: int, scope) -> str:
     return (
         f"{subject} not updated: 'apm update' refreshes apm.yml dependencies only. "
         f"To update a bundle, run 'apm install {flag}<newer-bundle-file>'."
+    )
+
+
+def local_bundle_parked_next_step(slug: str, exec_types, scope) -> str:
+    """Name a local bundle whose executables stay parked and how to approve them (#4441).
+
+    Same remedy as ``apm approve --pending``: approve the exact key under
+    ``executables.allow``, then reinstall the bundle.
+    """
+    from apm_cli.core.remediation import LOCAL_BUNDLE_EXECUTABLES_PARKED
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.security.trust import approve_command
+
+    pending = approve_command("--pending", user_scope=is_user_scope(scope))
+    remedy = LOCAL_BUNDLE_EXECUTABLES_PARKED.with_command(pending)
+    return (
+        f"Local bundle '{slug}': {', '.join(exec_types)} parked, awaiting approval. "
+        f"{remedy.sentence()}"
     )

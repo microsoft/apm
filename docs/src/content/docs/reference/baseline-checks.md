@@ -40,6 +40,7 @@ first failure to skip expensive I/O.
 | `no-orphaned-packages` | block | `ci_checks.py` | yes |
 | `skill-subset-consistency` | block | `ci_checks.py` | yes |
 | `config-consistency` | block | `ci_checks.py` | yes |
+| `native-mcp-ownership` | block | `ci_checks.py` | yes |
 | `content-integrity` | block | `ci_checks.py` | yes |
 | `hook-approval-pins` | block | `ci_checks.py` | yes |
 | `includes-consent` | advisory | `ci_checks.py` | yes (advisory; promotable by policy) |
@@ -158,6 +159,12 @@ the [policy schema](../policy-schema/).
 - **Frozen skills-only replay.** `apm install --only apm --frozen` preserves the admitted MCP baseline and exact lockfile and native-configuration bytes. Existing frozen source and consent checks still apply: a baseline that already admitted transitive MCP requires an approval in `apm.yml` or the same explicit `--trust-transitive-mcp`. `--only apm` still prevents native MCP integration; omission evidence never grants consent.
 - **Remediation.** Repeat the intended install selection or restore an unreadable package source. For skills-only use `apm install --only apm`, or `apm install --global --target agent-skills --only apm` for the global skills-only case. Older lockfiles, empty MCP fields, and missing, damaged or stale omission evidence do not establish intent: audit reports unknown selection rather than assuming success. Do not enable MCP or add `--trust-transitive-mcp` merely to clear the finding; for a consent failure, approve the package. Audit itself does not reconcile or write configuration.
 
+### `native-mcp-ownership`
+
+- **What it verifies.** That no MCP runtime holds a same-name entry that differs from a self-defined declared server whose ownership the lockfile does not record. `apm install --frozen` refuses the same entry, so both commands reach one verdict.
+- **Fails when.** Such an entry exists. The detail names the server and the target. An entry equal to the declaration, including one switched off with `enabled = false`, passes and stays the user's.
+- **Remediation.** Make the entry match the declaration or remove it, then run `apm install`. Audit does not change the native configuration.
+
 ### `content-integrity`
 
 - **What it verifies.** Two independent signals, including local `.apm/` deployments recorded through the synthesized self-entry:
@@ -189,7 +196,7 @@ the [policy schema](../policy-schema/).
 
 ## Run order and fail-fast
 
-The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `exec-status-current`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
+The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `local-bundle-hooks`, `hook-approval-pins`, `exec-status-current`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
 
 With fail-fast on (the default), the runner stops at the first failing check. `apm audit --ci --no-fail-fast` evaluates every check so the report lists every problem at once.
 

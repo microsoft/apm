@@ -118,9 +118,43 @@ jobs:
             -n 4 --dist loadgroup --durations=20 -m "not live" \
             --ignore=tests/lifecycle/journeys tests/lifecycle
 
+  # PR integration shards keep only the per-group sample of the linter session
+  # cache's byte-equality guard; the full owner-mutation replay (~15 min) runs
+  # here, nightly and on every release-candidate dispatch.
+  architecture-cache-full-matrix:
+    name: Architecture Cache Full Matrix (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Replay the full owner mutation matrix through the session cache
+        env:
+          PYTEST_PERF: "1"
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -m benchmark \
+            tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_full_matrix
+
   signal:
     name: Lifecycle Journeys Nightly Signal
-    needs: [journeys, lifecycle-full]
+    needs: [journeys, lifecycle-full, architecture-cache-full-matrix]
     if: always() && github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -130,7 +164,7 @@ jobs:
       - name: Open, update or close the tracking issue
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          RESULT: ${{ needs.journeys.result == 'success' && needs.lifecycle-full.result || needs.journeys.result }}
+          RESULT: ${{ needs.journeys.result != 'success' && needs.journeys.result || needs.lifecycle-full.result != 'success' && needs.lifecycle-full.result || needs.architecture-cache-full-matrix.result }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |

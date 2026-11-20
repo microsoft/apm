@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import (
+    BIN_EXECUTABLES_NOT_RETRUSTED,
+    BIN_EXECUTABLES_UNTRUSTED,
+)
+
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
@@ -722,8 +727,20 @@ def executable_skip_reason(
     if exec_type in denied.get(package_name, frozenset()):
         explain = explain_command(label, user_scope=user_scope)
         return f"{kind} skipped (denied). Run '{explain}' to see which deny applies."
-    approve = approve_command(label, user_scope=user_scope)
-    return f"{kind} skipped (not approved in executables.allow). Run '{approve}' to approve."
+    from apm_cli.core import remediation
+    from apm_cli.security.executables import EXEC_TYPE_BIN, EXEC_TYPE_CANVAS, EXEC_TYPE_HOOKS
+
+    # Only these kinds are skipped as unapproved here; another kind is a caller bug.
+    approve = {
+        EXEC_TYPE_BIN: remediation.BIN_EXECUTABLES_UNAPPROVED,
+        EXEC_TYPE_CANVAS: remediation.CANVAS_SKIPPED_UNAPPROVED,
+        EXEC_TYPE_HOOKS: remediation.HOOKS_UNAPPROVED,
+    }[exec_type]
+    command = approve_command(label, user_scope=user_scope)
+    return (
+        f"{kind} skipped (not approved in executables.allow). "
+        f"{approve.bind(package=label).with_command(command).sentence()}"
+    )
 
 
 def log_bin_status(
@@ -762,12 +779,12 @@ def log_bin_status(
     elif skill_result.bin_skipped_reason == "not_trusted":
         log_fn(
             "  |-- bin/ executables skipped (not trusted). "
-            f"Run 'apm install --trust-bin {package_label}' to deploy."
+            f"{BIN_EXECUTABLES_UNTRUSTED.bind(package=package_label).sentence()}"
         )
     elif skill_result.bin_skipped_reason == "not_retrusted_on_uninstall":
         log_fn(
             "  |-- bin/ executables not re-deployed during uninstall cleanup. "
-            f"Run 'apm install --trust-bin {package_label}' to restore them."
+            f"{BIN_EXECUTABLES_NOT_RETRUSTED.bind(package=package_label).sentence()}"
         )
 
 

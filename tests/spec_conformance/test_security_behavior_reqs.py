@@ -267,7 +267,7 @@ def test_rejected_archive_leaves_no_partial_extraction(tmp_path: Path) -> None:
 
 
 @pytest.mark.req("req-sc-005")
-@pytest.mark.xfail(strict=True, reason="S-pending")
+@pytest.mark.xfail(strict=True, reason="#4324 opt-in strict host-class credential scope")
 @pytest.mark.usefixtures("isolated_credentials")
 def test_token_scoped_to_its_host_class() -> None:
     """A credential for one registrable domain is not resolved for another."""

@@ -10,19 +10,27 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.deps import lockfile_write_authority as authority
-from apm_cli.deps.lockfile_write_authority import LockfileWriter
-from apm_cli.utils import atomic_io
+from apm_cli.deps.lockfile_write_authority import (
+    LockfileWriter,
+    LockfileWriterObservation,
+    observe_lockfile_writers,
+)
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
+from tests.utils.lockfile_write_counter import (
+    INOTIFY_AVAILABLE,
+    LockfileWriteCounter,
+    count_lockfile_writes,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.component, pytest.mark.promise("P-INV-I1")]
 
@@ -44,47 +52,32 @@ _HTTP_MCP = ("--transport", "http", "--url", "https://mcp.example.invalid/mcp")
 _NO_POLICY = ("--no-policy", "--trust-transitive-mcp")
 
 
-@dataclass
-class _Recorder:
-    declared: list[LockfileWriter] = field(default_factory=list)
-    opened: list[LockfileWriter] = field(default_factory=list)
-    persisted: int = 0
-
-    def clear(self) -> None:
-        self.declared.clear()
-        self.opened.clear()
-        self.persisted = 0
-
-
 @pytest.fixture
-def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    """Record declared writers, opened write scopes and lockfile persists."""
-    record = _Recorder()
-    original_scope = authority.lockfile_write_scope
-    original_class = authority._WriteScope
-    original_write = atomic_io.atomic_write_text
+def recorder() -> Iterator[LockfileWriterObservation]:
+    """Declared writers and opened write scopes, from the authority's public seam (#4473).
 
-    @contextmanager
-    def declaring(writer: LockfileWriter) -> Iterator[None]:
-        if authority._active_writer.get() is None:
-            record.declared.append(writer)
-        with original_scope(writer):
-            yield
+    Persisted writes are observed on disk by ``_lock_writes``.
+    """
+    with observe_lockfile_writers() as observation:
+        yield observation
 
-    class _Opening(original_class):  # type: ignore[misc, valid-type]
-        def __init__(self, writer: LockfileWriter) -> None:
-            super().__init__(writer)
-            record.opened.append(writer)
 
-    def persisting(path: Path, *args: object, **kwargs: object) -> None:
-        if Path(path).name == _LOCKFILE:
-            record.persisted += 1
-        original_write(path, *args, **kwargs)
+@contextmanager
+def _lock_writes(root: Path) -> Iterator[LockfileWriteCounter | None]:
+    """Count persisted lockfile writes under *root* where inotify can (Linux)."""
+    if not INOTIFY_AVAILABLE:
+        yield None
+        return
+    with count_lockfile_writes(root) as counter:
+        yield counter
 
-    monkeypatch.setattr(authority, "lockfile_write_scope", declaring)
-    monkeypatch.setattr(authority, "_WriteScope", _Opening)
-    monkeypatch.setattr(atomic_io, "atomic_write_text", persisting)
-    return record
+
+def _persisted(writes: LockfileWriteCounter | None) -> int | None:
+    """Atomic lockfile publications seen; an in-place write fails outright."""
+    if writes is None:
+        return None
+    assert writes.in_place_writes == 0, writes.events
+    return writes.writes
 
 
 @dataclass(frozen=True)
@@ -166,36 +159,39 @@ def _writer_steps(
 
 
 def test_each_lock_writing_command_maps_to_its_registered_writer(
-    tmp_path: Path, recorder: _Recorder
+    tmp_path: Path, recorder: LockfileWriterObservation
 ) -> None:
     world = _world(tmp_path / "mapping")
     steps = _writer_steps(world, _bundle(world), _apm_bundle(world))
 
     for args, cwd, writer in steps:
         recorder.clear()
-        _ok(cwd, world.environment, *args)
+        with _lock_writes(cwd) as writes:
+            _ok(cwd, world.environment, *args)
+        assert (cwd / _LOCKFILE).is_file(), args
         assert recorder.declared == [writer], (args, recorder.declared)
-        assert recorder.persisted <= 1, (args, recorder.persisted)
+        assert _persisted(writes) in (None, 0, 1), (args, writes)
 
     assert set(LockfileWriter) == {writer for _args, _cwd, writer in steps}
 
 
 def test_install_with_mcp_and_lsp_persists_the_lockfile_once(
-    tmp_path: Path, recorder: _Recorder
+    tmp_path: Path, recorder: LockfileWriterObservation
 ) -> None:
     world = _world(tmp_path / "services")
     root = world.project.root
 
-    _ok(root, world.environment, "install", *_NO_POLICY)
+    with _lock_writes(root) as writes:
+        _ok(root, world.environment, "install", *_NO_POLICY)
 
-    lock = load_yaml(root / _LOCKFILE)
+    lock = yaml.safe_load((root / _LOCKFILE).read_text(encoding="utf-8"))
     assert lock.get("mcp_servers") and lock.get("lsp_servers"), lock
     assert recorder.opened == [LockfileWriter.INSTALL]
-    assert recorder.persisted == 1
+    assert _persisted(writes) in (None, 1), writes
 
 
 def test_newer_generator_lockfile_is_refused_before_any_writer_scope_opens(
-    tmp_path: Path, recorder: _Recorder
+    tmp_path: Path, recorder: LockfileWriterObservation
 ) -> None:
     world = _world(tmp_path / "refusal")
     bundle = _bundle(world)
@@ -210,10 +206,13 @@ def test_newer_generator_lockfile_is_refused_before_any_writer_scope_opens(
 
     for args, cwd, writer in _writer_steps(world, bundle, apm_bundle):
         before = _tree(cwd)
+        lock_before = (cwd / _LOCKFILE).read_bytes()
         recorder.clear()
-        assert _invoke(cwd, world.environment, *args) != 0, args
+        with _lock_writes(cwd) as writes:
+            assert _invoke(cwd, world.environment, *args) != 0, args
+        assert (cwd / _LOCKFILE).read_bytes() == lock_before, writer
         assert recorder.opened == [], (writer, recorder.opened)
-        assert recorder.persisted == 0, writer
+        assert _persisted(writes) in (None, 0), (writer, writes)
         assert _tree(cwd) == before, writer
 
 

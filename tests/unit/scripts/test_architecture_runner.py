@@ -598,6 +598,7 @@ def test_literal_group_import_converts_system_exit_to_import_error(
 
 
 _EXPECTED_RULE_ID_TEXT = """
+contracts-tests-conformance-behavioral-coverage
 contracts-tests-executable-contract-authorities
 contracts-tests-lifecycle-smoke-partition
 contracts-tests-taxonomy-classification
@@ -630,6 +631,8 @@ contracts-tooling-policy-content-hash
 contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation
 contracts-tooling-python-artifact-membership
+contracts-tooling-remediation-advice
+contracts-tooling-remediation-drift-kinds
 contracts-tooling-source-replacements
 contracts-tooling-strip-charset
 contracts-tooling-update-plan-recorded-ref
@@ -689,6 +692,7 @@ install-deployment-manifest-inheritance-includes
 install-deployment-manifest-snapshot
 install-deployment-marketplace-mutation-lock
 install-deployment-lifecycle-serialization
+install-deployment-lifecycle-serialization-closed-world
 install-deployment-mcp-admission
 install-deployment-mcp-native-comparison
 install-deployment-mcp-ownership-migration
@@ -798,7 +802,10 @@ registry_delegation.cli_startup_imports
 registry_delegation.command_machine_output
 registry_delegation.compile_inventory_authority
 registry_delegation.compiled_output_writes
+registry_delegation.console_construction
+registry_delegation.console_streams
 registry_delegation.diagnostic_ascii_owner
+registry_delegation.experimental_flags
 registry_delegation.experimental_target_hints
 registry_delegation.harness_user_root_resolution
 registry_delegation.host_backend_dispatch
@@ -808,6 +815,7 @@ registry_delegation.lifecycle_docs_aggregate
 registry_delegation.lockfile_version_authority
 registry_delegation.logger_redaction_attachment
 registry_delegation.manifest_schema_negotiation
+registry_delegation.module_ownership
 registry_delegation.native_locator_target_names
 registry_delegation.output_diagnostics
 registry_delegation.policy_ref_redaction

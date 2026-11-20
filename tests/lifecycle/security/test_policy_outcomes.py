@@ -497,7 +497,6 @@ def _routed_block(outcome: str) -> tuple[str, ...]:
 SKILL = ".agents/skills/p-skill/SKILL.md"
 HOOK = ".github/hooks/p-exec-session.json"
 
-_OFFLINE = "S-pending (neutral issue to follow): offline use of cached policy"
 _PARTIAL_UNINSTALL = "#4185 uninstall exits 1 after it already changed the manifest, lock and disk"
 _CHECK_FAILED = r"check\(s\) failed"
 _UNAVAILABLE = r"Org policy unavailable \("
@@ -549,7 +548,6 @@ SITE_SLICES["install-pipeline"] = SiteSlice(
             1,
             (DENIED, r"(?i)stale"),
             absent=(SKILL, HOOK),
-            xfail=_OFFLINE,
         ),
         "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), present=(SKILL,)),
     },
@@ -574,7 +572,7 @@ SITE_SLICES["mcp-install-preflight"] = SiteSlice(
         "cache=warm-fresh": Expect(
             0, (r"\(cached, fetched \d+s ago\) -- enforcement=block",), policy_fetch=False
         ),
-        "cache=stale<7d": Expect(0, (r"(?i)stale",), command=_local_mcp, xfail=_OFFLINE),
+        "cache=stale<7d": Expect(0, (r"(?i)stale",), command=_local_mcp),
         "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), command=_local_mcp),
     },
 )
@@ -613,7 +611,6 @@ SITE_SLICES["lifecycle-scripts"] = SiteSlice(
             absent=(SCRIPT_MARKER,),
             setup=_aged(2 * _HOUR, "exec-deny-all"),
             home_writes=SCRIPT_LOG,
-            xfail=_OFFLINE,
         ),
         "cache=stale>7d-or-expired": Expect(
             0,
@@ -683,7 +680,7 @@ SITE_SLICES["bundle-allow-map(getattr cache_only)"] = SiteSlice(
         "cached_stale/warn": Expect(0, (r"\(cached, fetched 2h ago\)",), absent=(HOOK,)),
         "cache=warm-fresh": Expect(0, (r"\(cached, fetched \d+s ago\)",), absent=(HOOK,)),
         "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), absent=(HOOK,)),
-        "cache=stale<7d": Expect(0, (r"(?i)stale",), absent=(HOOK,), xfail=_OFFLINE),
+        "cache=stale<7d": Expect(0, (r"(?i)stale",), absent=(HOOK,)),
     },
 )
 
@@ -765,7 +762,7 @@ SITE_SLICES["exec-map(getattr: uninstall/hook rebuild/lsp)"] = SiteSlice(
         "cache=stale>7d-or-expired": Expect(
             0, (_not_applied("cache_miss_fetch_fail"),), absent=(HOOK, SKILL)
         ),
-        "cache=stale<7d": Expect(0, (r"Using stale cached org policy",), xfail=_OFFLINE),
+        "cache=stale<7d": Expect(0, (r"Using stale cached org policy",)),
     },
 )
 
@@ -796,7 +793,7 @@ SITE_SLICES["audit-ci"] = SiteSlice(
         "cached_stale/warn": Expect(1, (_CHECK_FAILED,)),
         "cache=cold": Expect(1, (_CHECK_FAILED,), policy_fetch=True),
         "cache=warm-fresh": Expect(1, (_CHECK_FAILED,), policy_fetch=False),
-        "cache=stale<7d": Expect(1, (_CHECK_FAILED,), xfail=_OFFLINE),
+        "cache=stale<7d": Expect(1, (_CHECK_FAILED,)),
         "cache=stale>7d-or-expired": Expect(0, (r"enforcement skipped",)),
     },
 )
@@ -872,9 +869,7 @@ SITE_SLICES["policy-status"] = SiteSlice(
         "cached_stale/warn": _status("cached_stale"),
         "cache=cold": _status("found"),
         "cache=warm-fresh": _status("found"),
-        "cache=stale<7d": Expect(
-            0, (r"Outcome\s*\|\s*cached_stale\s",), unchanged=("*",), xfail=_OFFLINE
-        ),
+        "cache=stale<7d": Expect(0, (r"Outcome\s*\|\s*cached_stale\s",), unchanged=("*",)),
         "cache=stale>7d-or-expired": _status("cache_miss_fetch_fail"),
     },
 )
@@ -888,20 +883,16 @@ SITE_SLICES["install-dry-run-preflight"] = SiteSlice(
             0,
             (KNOB_BLOCK,),
             unchanged=("*",),
-            xfail="S-pending (neutral issue to follow): dry-run preview of policy outcome",
         ),
         "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), unchanged=("*",)),
         "cache=cold": Expect(0, (DENIED,), unchanged=("*",), policy_fetch=True),
         "cache=warm-fresh": Expect(0, (DENIED,), unchanged=("*",), policy_fetch=False),
-        "cache=stale<7d": Expect(0, (DENIED,), unchanged=("*",), xfail=_OFFLINE),
+        "cache=stale<7d": Expect(0, (DENIED,), unchanged=("*",)),
         "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), unchanged=("*",)),
     },
 )
 
 # commands/update.py -- the re-gate short circuit of an update with nothing to change.
-_SHORTCIRCUIT = (
-    "S-pending (neutral issue to follow): update and install exit agreement under policy"
-)
 SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
     arrange=_installed_parked_exec,
     command=lambda world: "apm update",
@@ -915,7 +906,7 @@ SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
         "no_git_remote/warn": Expect(0, present=(SKILL,)),
         "empty/block": Expect(1, (KNOB_BLOCK,)),
         "empty/warn": Expect(0, present=(SKILL,)),
-        "found": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
+        "found": Expect(1, (DENIED,)),
         "disabled": Expect(0, present=(SKILL,)),
         "malformed/block": Expect(1, (KNOB_BLOCK,), present=(SKILL,)),
         "malformed/warn": Expect(0, (r"is malformed",), present=(SKILL,)),
@@ -923,10 +914,11 @@ SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
         "garbage_response/warn": Expect(0, (r"is not valid YAML",), present=(SKILL,)),
         "incomplete_chain": Expect(1, (r"inheritance chain is incomplete",), present=(SKILL,)),
         "cached_stale/org-block": Expect(1, (r"fetch_failure=block",)),
-        "cached_stale/warn": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
-        "cache=cold": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
-        "cache=warm-fresh": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
-        "cache=stale<7d": Expect(1, (DENIED,), xfail=_OFFLINE),
+        "cached_stale/warn": Expect(1, (DENIED,)),
+        "cache=cold": Expect(1, (DENIED,)),
+        "cache=warm-fresh": Expect(1, (DENIED,)),
+        # A stale cache under 7 days is applied as a fresh one (#4456).
+        "cache=stale<7d": Expect(1, (DENIED,)),
         "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), present=(SKILL,)),
     },
 )
@@ -988,7 +980,7 @@ SITE_SLICES["mcp-admission(trust.py)"] = SiteSlice(
         "cache=warm-fresh": Expect(
             1, (_CONSENT_OK, _CHECK_FAILED), forbids=(_UNAVAILABLE,), policy_fetch=False
         ),
-        "cache=stale<7d": Expect(1, (_CHECK_FAILED,), forbids=(_UNAVAILABLE,), xfail=_OFFLINE),
+        "cache=stale<7d": Expect(1, (_CHECK_FAILED,), forbids=(_UNAVAILABLE,)),
         "cache=stale>7d-or-expired": Expect(0, (_unavailable("cache_miss_fetch_fail"),)),
         "hash_mismatch": Expect(1, (HASH,)),
     },
@@ -1007,7 +999,7 @@ SITE_SLICES["bundle-install-preflight(cache_only)"] = SiteSlice(
         "cache=warm-fresh": Expect(
             0, (r"\(cached, fetched \d+s ago\)",), absent=(HOOK,), policy_fetch=False
         ),
-        "cache=stale<7d": Expect(0, (r"(?i)stale",), absent=(HOOK,), xfail=_OFFLINE),
+        "cache=stale<7d": Expect(0, (r"(?i)stale",), absent=(HOOK,)),
         "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), absent=(HOOK,)),
     },
 )

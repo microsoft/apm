@@ -534,9 +534,9 @@ def _gitlab_content_result(
 ) -> PolicyFetchResult:
     """Parse, validate, and cache fetched GitLab policy content."""
     from .discovery import (
-        PolicyFetchResult,
         _compute_hash_normalized,
         _detect_garbage,
+        _malformed_refresh,
         _verify_hash_pin,
     )
 
@@ -551,11 +551,8 @@ def _gitlab_content_result(
     try:
         policy, warnings = load_policy(content)
     except PolicyValidationError as exc:
-        return PolicyFetchResult(
-            error=f"Invalid policy in {repo_ref}: {exc}",
-            source=source_label,
-            outcome="malformed",
-            warnings=exc.warnings,
+        return _malformed_refresh(
+            cache_entry, f"Invalid policy in {repo_ref}: {exc}", source_label, exc.warnings
         )
 
     actual_hash = _compute_hash_normalized(content, expected_hash)

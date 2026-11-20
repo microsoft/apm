@@ -130,11 +130,19 @@ def enforce_mcp_policy(
     )
 
 
-def refuse_blocked_mcp(logger: Any) -> NoReturn:
-    """Render the MCP policy refusal every install entry shows, then fail the install."""
+def refuse_blocked_mcp(logger: Any, exc: BaseException | None = None) -> NoReturn:
+    """Render the MCP policy refusal every install entry shows, then fail the install.
+
+    A discovery-level block (no ``audit_result``, e.g. ``fetch_failure_default:
+    block`` with no reachable policy) prints its own reason (#4179); a check
+    refusal already reported its violations, so it prints the summary line.
+    """
     from apm_cli.install.errors import InstallFailureAlreadyRendered
 
-    logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
+    if exc is not None and getattr(exc, "audit_result", None) is None and str(exc):
+        logger.refusal(str(exc))
+    else:
+        logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
     logger.render_summary()
     raise InstallFailureAlreadyRendered("MCP server(s) blocked by org policy") from None
 

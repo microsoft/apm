@@ -116,6 +116,21 @@ def preview_declared_policy(ctx: Any, plan: Any, logger: Any) -> None:
     )
 
 
+def enforce_declared_policy(
+    project_root: Any, apm_deps: list, mcp_deps: list | None, logger: Any, *, dry_run: bool
+) -> None:
+    """Apply org policy to declared dependencies when no install pipeline runs (#4458)."""
+    from apm_cli.policy.install_preflight import run_policy_preflight
+
+    run_policy_preflight(
+        project_root=project_root,
+        apm_deps=apm_deps,
+        mcp_deps=mcp_deps,
+        logger=logger,
+        dry_run=dry_run,
+    )
+
+
 def install_pipeline_options(
     ctx: Any, outcome: Any, *, logger: Any, install_mcp: bool, lsp_preflight: Any
 ) -> dict[str, Any]:

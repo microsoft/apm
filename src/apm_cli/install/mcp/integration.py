@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.mcp.entry_integration import McpEntryRequest
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.integration.mcp_integrator_install import ResolvedMcpTargets
     from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency.mcp import MCPDependency
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -334,6 +335,7 @@ def run_mcp_integration(  # noqa: PLR0913
     claude_native_keys: frozenset[str] = frozenset(),
     policy_enforced: bool = False,
     mcp_entry: "McpEntryRequest | None" = None,
+    resolved_targets: "ResolvedMcpTargets | None" = None,
 ) -> tuple[int, dict]:
     """Run MCP server integration after APM package installation.
 
@@ -377,6 +379,7 @@ def run_mcp_integration(  # noqa: PLR0913
         mcp_entry: The server ``apm install --mcp`` adds (#4085). Only it is
             installed and re-targeted; the commit gate judged it before
             apm.yml was written, and every other recorded server is kept.
+        resolved_targets: MCP targets this run already resolved, reused as-is.
 
     Returns:
         Tuple of ``(mcp_count, mcp_apm_config)``. ``mcp_apm_config`` is the
@@ -597,6 +600,7 @@ def run_mcp_integration(  # noqa: PLR0913
                         scope=scope,
                         managed_target_servers=managed_target_servers,
                         native_hashes=native_hashes,
+                        resolved_targets=resolved_targets,
                     )
                     if mcp_deps
                     else 0

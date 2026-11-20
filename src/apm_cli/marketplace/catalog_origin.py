@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..core.remediation import MARKETPLACE_DUPLICATE_ALIAS
 from .errors import MarketplaceError, MarketplaceOriginConflictError, MarketplaceProvenanceError
 from .registry import get_marketplace_by_name
 from .source_identity import (
@@ -95,7 +96,8 @@ def duplicate_origin_warning(source: MarketplaceSource, existing: MarketplaceSou
     return (
         f"Marketplace '{source.name}' points at the same catalog as '{existing.name}' "
         f"({marketplace_origin(source)}). Both names resolve the same plugins; "
-        f"if this was unintended, run: apm marketplace remove {shlex.quote(source.name)}"
+        "if this was unintended, "
+        f"{MARKETPLACE_DUPLICATE_ALIAS.bind(name=shlex.quote(source.name)).clause()}."
     )
 
 
@@ -134,17 +136,21 @@ def _legacy_lock(lockfile: LockFile) -> bool:
     return True
 
 
-def _declared_row_keeps_provenance(lockfile: LockFile, declared: Iterable[object]) -> None:
-    """Refuse a marketplace declaration whose locked row lost all its provenance.
+def _declared_row_keeps_provenance(lockfile: LockFile, declared: Iterable[object]) -> list[str]:
+    """Restore or refuse a marketplace declaration whose locked row lost its provenance.
 
     apm.yml is the source of truth: an entry declared as ``name@marketplace``
     (or with a ``marketplace:`` key) must keep its marketplace provenance in
-    the lock, so a stripped row is never re-recorded from the catalog unseen.
+    the lock. A row that names another alias but records the declared alias's
+    registered origin is restored to the declared alias and returned for the
+    caller to report; a stripped row, or one recording another origin, is
+    refused, so it is never re-recorded from the catalog unseen.
     """
     from ..models.dependency import DependencyReference
     from .dependency_confusion import admit_marketplace_resolution
     from .resolver import resolve_marketplace_plugin
 
+    restored: list[str] = []
     for ref in declared:
         alias = getattr(ref, "marketplace_name", None)
         plugin = getattr(ref, "marketplace_plugin_name", None)
@@ -165,11 +171,26 @@ def _declared_row_keeps_provenance(lockfile: LockFile, declared: Iterable[object
             resolution.canonical
         )
         key = resolved.get_unique_key()
-        if key in lockfile.dependencies:
-            raise MarketplaceProvenanceError(
-                f"apm.yml declares {plugin}@{alias}, but apm.lock.yaml records {key} "
-                f"without its marketplace provenance. {_NEXT_STEP}"
-            )
+        dep = lockfile.dependencies.get(key)
+        if dep is None:
+            continue
+        if _records_declared_origin(dep, alias):
+            dep.discovered_via, dep.marketplace_plugin_name = alias, plugin
+            restored.append(f"{key} ({plugin}@{alias})")
+            continue
+        raise MarketplaceProvenanceError(
+            f"apm.yml declares {plugin}@{alias}, but apm.lock.yaml records {key} "
+            f"without its marketplace provenance. {_NEXT_STEP}"
+        )
+    return restored
+
+
+def _records_declared_origin(dep: LockedDependency, alias: str) -> bool:
+    """Whether *dep* records the origin the user registered for *alias*."""
+    if not (dep.discovered_via and dep.source_url):
+        return False
+    current = marketplace_origin(get_marketplace_by_name(alias))
+    return same_marketplace_origin(dep.source_url, current)
 
 
 def _registered_local_catalog(alias: str) -> bool:
@@ -218,8 +239,7 @@ def reverify_locked_provenance(
     if lockfile is None:
         return []
     legacy = _legacy_lock(lockfile)
-    _declared_row_keeps_provenance(lockfile, _declared_dependencies(manifest))
-    restored: list[str] = []
+    restored = _declared_row_keeps_provenance(lockfile, _declared_dependencies(manifest))
     for dep in lockfile.dependencies.values():
         if not any(getattr(dep, field) for field in _PROVENANCE_FIELDS):
             continue

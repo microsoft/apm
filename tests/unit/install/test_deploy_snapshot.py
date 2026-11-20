@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 
@@ -31,15 +30,13 @@ def _tree(root: Path) -> dict[str, bytes | str]:
     return state
 
 
-def test_audit_off_takes_no_snapshot() -> None:
-    ctx = SimpleNamespace(dry_run=False, lockfile_only=False)
-    decision = SimpleNamespace(mode="off")
-    with (
-        patch("apm_cli.core.install_audit.decide_for_install", return_value=decision),
-        patch.object(DeployTargetSnapshot, "capture") as capture,
-    ):
-        assert capture_audit_gated_snapshot(ctx) is None
-    capture.assert_not_called()
+def test_audit_off_takes_no_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "apm-home"
+    monkeypatch.setenv("APM_HOME", str(home))
+    ctx = SimpleNamespace(dry_run=False, lockfile_only=False, no_policy=True, audit_override=None)
+
+    assert capture_audit_gated_snapshot(ctx) is None
+    assert not (home / "install-snapshots").exists()
 
 
 def test_restore_returns_every_path_to_its_captured_bytes(tmp_path: Path) -> None:

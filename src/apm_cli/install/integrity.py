@@ -47,6 +47,32 @@ def unhashed_dependencies(
     return flagged
 
 
+def unhashed_dependencies_advisory(
+    deps: list[LockedDependency], policy: IntegrityPolicy | None
+) -> str | None:
+    """Return one advisory naming unhashed entries when hashes are not required.
+
+    With ``require_hashes`` enabled the fail-closed check names them instead.
+    """
+    if require_hashes_enabled(policy):
+        return None
+    missing = unhashed_dependencies(deps)
+    if not missing:
+        return None
+    from .mcp.registry import _redact_url_credentials
+
+    names = ", ".join(
+        sorted(
+            _redact_url_credentials(d.repo_url) if "://" in d.repo_url else d.repo_url
+            for d in missing
+        )
+    )
+    return (
+        f"Locked dependencies without a content hash, verified by commit only: {names}. "
+        "Set security.integrity.require_hashes: true in org policy to require hashes."
+    )
+
+
 def enforce_require_hashes(deps: list[LockedDependency], *, enabled: bool) -> None:
     """Fail closed when ``require_hashes`` is on and any entry lacks a hash.
 
@@ -84,10 +110,12 @@ def enforce_installed_hash_policy(ctx: InstallContext, lockfile: LockFile | None
 
     lockfile_path = get_lockfile_path(ctx.apm_dir)
     if lockfile is None:
+        from ..core.remediation import LOCKFILE_UNREADABLE
+
         raise PolicyViolationError(
             "security.integrity.require_hashes is enabled but the lockfile at "
-            f"{lockfile_path} could not be read (missing or corrupt); "
-            "failing closed. Re-run 'apm install' to regenerate it."
+            f"{lockfile_path} could not be read (missing or corrupt); failing closed. "
+            f"{LOCKFILE_UNREADABLE.bind(path=lockfile_path).sentence()}"
         )
     try:
         enforce_require_hashes(lockfile.get_package_dependencies(), enabled=True)

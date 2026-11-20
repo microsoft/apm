@@ -340,3 +340,40 @@ def test_update_refuses_a_marketplace_declaration_whose_lock_row_lost_provenance
     assert (frozen.returncode == 0) == (audit.returncode == 0), (
         _output(frozen) + " || " + _output(audit)
     )
+
+
+def test_update_restores_a_row_to_its_declared_alias_and_frozen_and_audit_agree(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4228: a row naming another alias but the declared origin is restored (I3 after)."""
+    consumer, runner, environment, lock_path = _provenance_world(
+        tmp_path,
+        apm_binary_path,
+        dependencies=({"name": _PLUGIN, "marketplace": _MARKETPLACE},),
+    )
+
+    def run(*args: str):
+        return runner.run(args, scenario_id=f"4228-{args[0]}", cwd=consumer.root, env=environment)
+
+    install = run("install", "--target", "codex", "--no-policy", "--parallel-downloads", "0")
+    assert install.returncode == 0, _output(install)
+    before = _locked_dependency(lock_path)
+    lock = load_yaml(lock_path)
+    lock["dependencies"][0]["discovered_via"] = "origin-elsewhere"
+    dump_yaml(lock, lock_path)
+
+    update = run("update", "--yes", "--target", "codex", "--parallel-downloads", "0")
+
+    assert update.returncode == 0, _output(update)
+    assert "Restored marketplace provenance" in _output(update), _output(update)
+    after = _locked_dependency(lock_path)
+    assert {name: after.get(name) for name in _PROVENANCE} == {
+        name: before[name] for name in _PROVENANCE
+    }, _output(update)
+    restored = lock_path.read_bytes()
+    # I3 on the restored lock: --frozen and audit --ci both pass and change no byte.
+    frozen = run("install", "--frozen", "--target", "codex", "--parallel-downloads", "0")
+    assert frozen.returncode == 0, _output(frozen)
+    audit = run("audit", "--ci", "--no-policy")
+    assert audit.returncode == 0, _output(audit)
+    assert lock_path.read_bytes() == restored

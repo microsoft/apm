@@ -173,8 +173,8 @@ def run_mcp_policy_preflight(
                 effective_target=target_decision.canonical_targets,
                 effective_target_source=target_decision.source,
             )
-    except PolicyBlockError:
-        refuse_blocked_mcp(logger)
+    except PolicyBlockError as exc:
+        refuse_blocked_mcp(logger, exc)
 
 
 def _reconcile_mcp_entry(

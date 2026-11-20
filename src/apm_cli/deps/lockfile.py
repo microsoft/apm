@@ -44,6 +44,7 @@ from ..models.dependency.subsets import SkillTargetSelection, canonical_target_s
 from ..native_plugins.record import NativePluginRecord, NativePluginRecordError
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
 from .lockfile_extensions import carry_vendor_extensions, vendor_extensions
+from .lockfile_version_remedy import with_version_remedy
 
 logger = logging.getLogger(__name__)
 
@@ -1786,9 +1787,9 @@ class LockFile:
                     existing = type(self)._from_validated_data(
                         _validate_lockfile_container(existing_data)
                     )
-                except UnsupportedLockfileVersionError:
+                except UnsupportedLockfileVersionError as exc:
                     if legacy_timestamp_present:
-                        raise
+                        raise with_version_remedy(exc, path) from exc
                     existing = None
                 except LockfileFormatError:
                     existing = None
@@ -1846,8 +1847,8 @@ class LockFile:
             if has_conflict_markers(text):
                 raise LockfileConflictError(path)
             lock = cls.from_yaml(text)
-        except (LockfileFormatError, UnsupportedLockfileVersionError):
-            raise
+        except LockfileFormatError as exc:
+            raise with_version_remedy(exc, path)  # noqa: B904 -- the helper chains its cause
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:
             raise LockfileFormatError(f"Invalid lockfile at {path}: {exc}") from exc
         from .lockfile_generator import warn_if_newer

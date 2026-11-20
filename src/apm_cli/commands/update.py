@@ -62,6 +62,10 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from apm_cli.core.remediation import (
+    CLI_BINARY_OUTDATED,
+    USER_MANIFEST_MISSING,
+)
 from apm_cli.core.scope import manifest_file
 
 from ..core.auth import AuthResolver
@@ -186,6 +190,25 @@ def _executables_need_reconcile(
             get_deploy_root(scope), user_scope=scope is _Scope.USER, lockfile=lockfile
         ),
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+    )
+
+
+def _enforce_policy_without_changes(
+    apm_package: Any, scope: InstallScope, logger: InstallLogger, dry_run: bool
+) -> None:
+    """Apply org policy to the declared dependencies when an update changes nothing."""
+    from apm_cli.core.scope import InstallScope as _Scope
+    from apm_cli.core.scope import get_deploy_root, manifest_root
+    from apm_cli.install.pipeline_entry import enforce_declared_policy
+
+    from ..models.dependency.replacement import project_manifest_dependencies
+
+    enforce_declared_policy(
+        manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER),
+        list(project_manifest_dependencies(apm_package)),
+        list(apm_package.get_all_mcp_dependencies()) or None,
+        logger,
+        dry_run=dry_run,
     )
 
 
@@ -472,11 +495,36 @@ def _handle_service_only_update(
 def _explain_local_bundles(scope: Any, apm_package: Any, logger: InstallLogger) -> None:
     """Name the installed local bundles 'apm update' leaves untouched (#4318)."""
     from apm_cli.install.local_bundle_hook_trust import installed_local_bundles
-    from apm_cli.install.outcome import local_bundle_update_next_step
+    from apm_cli.install.outcome import (
+        local_bundle_parked_next_step,
+        local_bundle_update_next_step,
+    )
 
     names, file_count = installed_local_bundles(scope, apm_package)
     if names or file_count:
         logger.info(local_bundle_update_next_step(names, file_count, scope))
+    for slug, exec_types in _parked_local_bundles(scope, apm_package):
+        logger.info(local_bundle_parked_next_step(slug, exec_types, scope))
+
+
+def _parked_local_bundles(scope: Any, apm_package: Any) -> list[tuple[str, tuple[str, ...]]]:
+    """Installed local bundles whose executables the current trust still parks (#4441)."""
+    from apm_cli.core.scope import get_apm_dir, get_deploy_root, is_user_scope
+    from apm_cli.install.local_bundle_pending import pending_bundles
+    from apm_cli.security.executables import (
+        package_type_approved,
+        resolve_project_exec_allow_map,
+    )
+
+    allow = resolve_project_exec_allow_map(
+        get_deploy_root(scope), apm_package, user_scope=is_user_scope(scope), no_policy=True
+    )
+    return [
+        (bundle.slug, bundle.exec_types)
+        for bundle in pending_bundles(
+            get_apm_dir(scope), lambda key, kind: package_type_approved(allow, (key,), kind)
+        )
+    ]
 
 
 def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
@@ -618,8 +666,7 @@ def update(
         manifest_path = get_manifest_path(scope)
         if not manifest_path.is_file():
             _rich_error(
-                f"No apm.yml found in {manifest_path.parent}. "
-                "Run 'apm install -g <org/repo>' to create one."
+                f"No apm.yml found in {manifest_path.parent}. {USER_MANIFEST_MISSING.sentence()}"
             )
             sys.exit(1)
         if check_only:
@@ -641,12 +688,12 @@ def update(
             if target is not None:
                 _rich_warning(
                     "--target is ignored when forwarding to 'apm self-update' "
-                    "(no apm.yml found). Use 'apm self-update' directly.",
+                    f"(no apm.yml found). {CLI_BINARY_OUTDATED.sentence()}",
                     symbol="warning",
                 )
             _rich_warning(
-                "'apm update' refreshes APM dependencies. To update the CLI binary, "
-                "use 'apm self-update'. Forwarding for back-compat (deprecated).",
+                "'apm update' refreshes APM dependencies. "
+                f"{CLI_BINARY_OUTDATED.sentence()} Forwarding for back-compat (deprecated).",
                 symbol="warning",
             )
             ctx.invoke(_self_update_cmd, check=check_only)
@@ -769,8 +816,7 @@ def _run_dep_update_locked(
     # the CLI binary.
     if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
         _rich_info(
-            "'apm update' refreshes APM dependencies. "
-            "Use 'apm self-update' to update the CLI binary.",
+            f"'apm update' refreshes APM dependencies. {CLI_BINARY_OUTDATED.sentence()}",
             symbol="info",
         )
 
@@ -903,6 +949,9 @@ def _run_dep_update_locked(
                         "All dependencies already at their latest matching refs.",
                         symbol="check",
                     )
+                # Nothing to change still judges the installed set against org
+                # policy, as install does (#4458).
+                _enforce_policy_without_changes(apm_package, scope, logger, dry_run)
                 return False
             plan_state.cache_rehydration_requested = True
 
@@ -990,7 +1039,8 @@ def _run_dep_update_locked(
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
     except PolicyViolationError as e:
-        _rich_error(str(e), symbol="error", err=True)
+        logger.render_summary()
+        _rich_error(f"{e} Nothing was written.", symbol="error", err=True)
         sys.exit(1)
     except (DirectDependencyError, RequiredIntegrationError) as e:
         logger.error(str(e))
