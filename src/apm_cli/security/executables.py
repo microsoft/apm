@@ -1775,11 +1775,9 @@ def warn_allow_executables_alias_once(logger: Any | None = None) -> None:
     if _ALIAS_DEPRECATION_WARNED:
         return
     _ALIAS_DEPRECATION_WARNED = True
-    msg = (
-        "'allowExecutables' in apm.yml is deprecated; it now maps to "
-        "'executables.allow'. It will migrate automatically on your next "
-        "'apm approve'/'apm deny'."
-    )
+    from ..core.deprecations import deprecation_message
+
+    msg = deprecation_message("allow-executables")
     if logger is not None:
         logger.warning(msg, symbol="warning")
         return

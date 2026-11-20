@@ -21,6 +21,8 @@ registry-delegation-output-diagnostics  AC12 doctor-status STATUS_SYMBOLS
                                         owner check; #3754 policy discovery
                                         returns diagnostics as data; #4089
                                         adapters emit through CommandLogger
+registry-delegation-deprecation-catalog Deprecation warning text lives only
+                                        in core/deprecations.py (#4019)
 registry-delegation-compiled-output-    AC2 "Compiled output writes must use
 writes                                  CompiledOutputWriter"
 registry-delegation-build-id-verification Build IDs are verified in their
@@ -53,6 +55,10 @@ from scripts.architecture_linter.checks.python_semantics import (
     binding_nodes,
     direct_definitions,
     import_bound_name,
+)
+from scripts.architecture_linter.checks.registry_deprecation_catalog import (
+    DEPRECATION_CATALOG,
+    check_deprecation_catalog_text,
 )
 from scripts.architecture_linter.checks.registry_output_guards import (
     library_output_findings,
@@ -498,7 +504,7 @@ def _target_deprecation_findings(
         for definition in facts.definitions
     ):
         emitters.add(path)
-    if path != _TARGET_DEPRECATION_OWNER:
+    if path != DEPRECATION_CATALOG:
         findings.extend(
             violation(
                 rule_id,
@@ -1962,6 +1968,15 @@ RULES: tuple[Rule, ...] = (
             "adapters and the safe installer emit through CommandLogger."
         ),
         check=_check_output_diagnostics,
+    ),
+    Rule(
+        id="registry_delegation.deprecation_catalog",
+        group=GROUP,
+        guard_ids=("registry-delegation-deprecation-catalog",),
+        description="Deprecation warning text is spelled only in core/deprecations.py.",
+        check=lambda provider: check_deprecation_catalog_text(
+            provider, "registry_delegation.deprecation_catalog"
+        ),
     ),
     Rule(
         id="registry_delegation.compiled_output_writes",
