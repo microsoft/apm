@@ -682,8 +682,7 @@
         "outcome.status_matches_state"
       ],
       "regression_tests": [
-        "tests/integration/test_frozen_replay_output_lifecycle.py::test_frozen_mcp_replay_prints_targeting_line_once[project-manifest-targets]",
-        "tests/integration/test_frozen_replay_output_lifecycle.py::test_frozen_mcp_replay_prints_targeting_line_once[user-explicit-target]"
+        "tests/integration/test_frozen_replay_output_lifecycle.py::test_frozen_mcp_replay_prints_targeting_line_once"
       ]
     },
     {
