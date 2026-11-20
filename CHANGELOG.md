@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm uninstall` validates every recorded path and the remaining packages' trust before changing state, so a refused uninstall leaves `apm.yml`, the lockfile and deployed files unchanged. (closes #4185, #PR)
 - `apm uninstall` keeps your own files inside a removed package's skill directory and succeeds, as `apm prune` does. (closes #4162, #PR)
+- `apm install` refuses a symlinked `apm.lock.yaml` before it deploys anything, at project and user scope. (closes #4168, #PR)
 - `apm install` stops before writing `apm.lock.yaml` or deployed files when a check fails, and `--dry-run` previews through the same pipeline. (#4138)
 - `apm install --frozen` succeeds as a no-op when `apm.yml` declares no APM, MCP or LSP dependency, matching `apm audit --ci`. (closes #4050, #4138)
 - Cleanup no longer removes a target root such as a pre-existing `.github/` when it retires the last file APM deployed there, so repeat installs are byte-stable. (closes #4132, #4138)

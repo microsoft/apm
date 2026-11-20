@@ -1785,6 +1785,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="install --dry-run previews without the install pipeline.",
     ),
     MutationCase(
+        guard_id="install-deployment-install-lockfile-preflight",
+        rule_id="install-deployment-install-lockfile-preflight",
+        path="src/apm_cli/install/helpers/plan_inputs.py",
+        old="    if not ctx.apm_dir or ctx.frozen or ctx.dry_run or ctx.lockfile_only:\n",
+        new=(
+            "    if not (ctx.update_refs and ctx.apm_dir) or ctx.frozen or ctx.dry_run "
+            "or ctx.lockfile_only:\n"
+        ),
+        intent="Only updates refuse a symlinked lockfile up front, so installs deploy first.",
+    ),
+    MutationCase(
         guard_id="install-deployment-install-scope-selection",
         rule_id="install-deployment-install-scope-selection",
         path="src/apm_cli/commands/install.py",

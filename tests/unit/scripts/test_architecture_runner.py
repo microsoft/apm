@@ -650,6 +650,7 @@ install-deployment-git-object-field-authority
 install-deployment-gitlab-facade-orchestration
 install-deployment-gitlab-policy-adapter
 install-deployment-incomplete-chain-routing
+install-deployment-install-lockfile-preflight
 install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
