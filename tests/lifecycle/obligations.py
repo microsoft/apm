@@ -233,7 +233,12 @@ class ReceiptWitnessPlugin:
 
     def pytest_configure(self, config: pytest.Config) -> None:
         if not os.environ.get(receipts.DIRECTORY_ENV):
-            os.environ[receipts.DIRECTORY_ENV] = str(_receipts_dir(config))
+            directory = _receipts_dir(config)
+            os.environ[receipts.DIRECTORY_ENV] = str(directory)
+            # The default cache directory holds one session; an explicitly
+            # configured directory may merge several (e.g. CI shards).
+            if not os.environ.get("PYTEST_XDIST_WORKER"):
+                receipts.drop_completed_sessions(directory)
         if not os.environ.get("PYTEST_XDIST_WORKER"):
             os.environ.setdefault(receipts.SESSION_ENV, uuid.uuid4().hex[:12])
 

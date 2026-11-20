@@ -126,6 +126,16 @@ def merge_session(directory: Path, session: str) -> Path | None:
     return merged
 
 
+def drop_completed_sessions(directory: Path) -> None:
+    """Remove earlier merged sessions so the next reader judges only the newest run.
+
+    Receipts from earlier partial runs, older code or an older catalog would
+    otherwise make a witness that did not run this time look under-covered.
+    """
+    for path in directory.glob("session-*.jsonl") if directory.is_dir() else ():
+        path.unlink(missing_ok=True)
+
+
 def _read(path: Path) -> Iterable[Receipt]:
     for line in path.read_text(encoding="ascii").splitlines():
         if line.strip():

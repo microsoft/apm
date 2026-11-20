@@ -15,6 +15,7 @@ import json
 import os
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,6 +24,7 @@ from tests.lifecycle.obligations import (
     OBLIGATIONS_PATH,
     PROMISE_PREFIX,
     Obligation,
+    ReceiptWitnessPlugin,
     load_catalog,
     promise_ids,
     uncovered,
@@ -256,6 +258,32 @@ def test_a_refusal_never_witnesses_a_success_obligation() -> None:
     assert Obligation("P-INV-I7|op:install", "I7", "install").covered_by(
         receipts.Receipt("n", {"op": "install"}, "", (), "project", "", "I7", "refusal")
     )
+
+
+def test_a_new_session_drops_stale_default_receipts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Earlier partial runs in the default cache must not judge this run's witnesses."""
+    for name in (receipts.DIRECTORY_ENV, receipts.SESSION_ENV, "PYTEST_XDIST_WORKER"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+    default = tmp_path / "default"
+    default.mkdir()
+    stale = receipts.Receipt("n", {"op": "install"}, "", (), "project", "", "I4", "pass")
+    (default / "session-old.jsonl").write_text(stale.to_json() + "\n", encoding="ascii")
+    config = SimpleNamespace(cache=SimpleNamespace(mkdir=lambda _name: default))
+    plugin = ReceiptWitnessPlugin(load_catalog())
+
+    plugin.pytest_configure(config)
+    assert os.environ[receipts.DIRECTORY_ENV] == str(default)
+    assert receipts.load(default) == []
+
+    explicit = tmp_path / "explicit"
+    explicit.mkdir()
+    (explicit / "session-shard.jsonl").write_text(stale.to_json() + "\n", encoding="ascii")
+    monkeypatch.setenv(receipts.DIRECTORY_ENV, str(explicit))
+    plugin.pytest_configure(config)
+    assert receipts.load(explicit) == [stale]
 
 
 # -- merged receipts of a lifecycle run ---------------------------------------
