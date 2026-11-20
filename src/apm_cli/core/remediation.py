@@ -193,6 +193,87 @@ RESYNC_AFTER_UNMANAGED_CONFLICT = _entry(
 # -- W2 integration --
 # -- end W2 integration --
 # -- W2 marketplace --
+MARKETPLACE_DUPLICATE_ALIAS = _entry(
+    "marketplace-duplicate-alias",
+    "apm marketplace remove {name}",
+    "drop the duplicate alias",
+)
+MARKETPLACE_FETCH_FAILED = _entry(
+    "marketplace-fetch-failed",
+    "apm marketplace update {name}",
+    "refetch the marketplace",
+)
+MARKETPLACE_GIT_ACCESS_FAILED = _entry(
+    "marketplace-git-access-failed",
+    "apm marketplace update {name}",
+    "refetch the marketplace",
+    before="correct Git access",
+)
+MARKETPLACE_GIT_REWRITE_REJECTED = _entry(
+    "marketplace-git-rewrite-rejected",
+    "apm marketplace update {name}",
+    "refetch the marketplace",
+    before="correct the matching Git configuration",
+)
+MARKETPLACE_UNREGISTERED_URL = _entry(
+    "marketplace-unregistered-url",
+    "apm marketplace add https://{host}/<owner>/<repo>",
+    "register it",
+)
+MARKETPLACE_UNREGISTERED_SHORTHAND = _entry(
+    "marketplace-unregistered-shorthand",
+    "apm marketplace add <owner>/<repo>",
+    "register it on the default host",
+)
+MARKETPLACE_ORIGIN_RESTORE = _entry(
+    "marketplace-origin-restore",
+    "apm marketplace add {source} --name {name}",
+    "keep the locked marketplace (add --ref or --path if the original registration used them)",
+)
+MARKETPLACE_ORIGIN_SWITCH = _entry(
+    "marketplace-origin-switch",
+    "apm install",
+    "drop the plugin locked from the old marketplace",
+    before="remove {plugin} from apm.yml",
+    then="add it back and run 'apm install' again",
+)
+MARKETPLACE_YML_COMPILE = _entry(
+    "marketplace-yml-compile", "apm pack", "compile it to marketplace.json"
+)
+MARKETPLACE_BLOCK_COMPILE = _entry(
+    "marketplace-block-compile",
+    "apm pack",
+    "compile this block to .claude-plugin/marketplace.json",
+)
+MARKETPLACE_MANUAL_KEPT = _entry(
+    "marketplace-manual-kept",
+    "apm marketplace remove {name}",
+    "unregister the manual marketplace",
+    then="re-run 'apm install -g' to let the user manifest manage it",
+)
+MARKETPLACE_RECONCILE_FAILED = _entry(
+    "marketplace-reconcile-failed",
+    "apm install -g",
+    "reconcile the user manifest marketplaces",
+    before="fix the source of {target} in {path} or remove it",
+)
+MARKETPLACE_HOST_CONFLICT = _entry(
+    "marketplace-host-conflict",
+    "apm marketplace add {source}",
+    "register it from the host embedded in SOURCE",
+    before="drop --host",
+)
+MARKETPLACES_OUTSIDE_USER_MANIFEST = _entry(
+    "marketplaces-outside-user-manifest",
+    "apm install -g",
+    "register them from the user manifest",
+    before="move the entries to the user manifest ({path})",
+)
+MARKETPLACE_REGISTER_MANUAL = _entry(
+    "marketplace-register-manual",
+    "apm marketplace add <source> --name <name>",
+    "register one manually",
+)
 # -- end W2 marketplace --
 # -- W2 bundle --
 # -- end W2 bundle --

@@ -38,6 +38,10 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
+from ..core.remediation import (
+    MARKETPLACE_GIT_ACCESS_FAILED,
+    MARKETPLACE_GIT_REWRITE_REJECTED,
+)
 from ..utils.http_credentials import (
     CredentialScopedSession,
     RedirectRefusedError,
@@ -637,10 +641,7 @@ def _fetch_git(
         return MarketplaceFetchError(
             source.name,
             reason,
-            retry_hint=(
-                "Correct the matching Git configuration, then run "
-                f"'apm marketplace update {source.name}' to retry."
-            ),
+            retry_hint=MARKETPLACE_GIT_REWRITE_REJECTED.bind(name=source.name).sentence(),
         )
 
     cache = GitCache(get_cache_root(), refresh=False)
@@ -701,9 +702,7 @@ def _fetch_git(
         raise MarketplaceFetchError(
             source.name,
             str(exc),
-            retry_hint=(
-                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
-            ),
+            retry_hint=MARKETPLACE_GIT_ACCESS_FAILED.bind(name=source.name).sentence(),
         ) from exc
     except subprocess.CalledProcessError as exc:
         # Map "object not found" / "couldn't find remote ref" to None so the
@@ -716,18 +715,14 @@ def _fetch_git(
         raise MarketplaceFetchError(
             source.name,
             "git fetch failed; verify the remote, configured Git credentials, or SSH key",
-            retry_hint=(
-                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
-            ),
+            retry_hint=MARKETPLACE_GIT_ACCESS_FAILED.bind(name=source.name).sentence(),
         ) from exc
     except Exception as exc:
         logger.debug("Generic-git fetch failed for '%s': %s", source.name, type(exc).__name__)
         raise MarketplaceFetchError(
             source.name,
             "git fetch failed; verify the remote, configured Git credentials, or SSH key",
-            retry_hint=(
-                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
-            ),
+            retry_hint=MARKETPLACE_GIT_ACCESS_FAILED.bind(name=source.name).sentence(),
         ) from exc
 
     target = Path(checkout_dir) / file_path

@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..core.remediation import MARKETPLACE_MANUAL_KEPT, MARKETPLACE_RECONCILE_FAILED
 from .errors import MarketplaceError
 from .models import ORIGIN_MANIFEST, MarketplaceSource
 from .registration import ParsedSource, parse_registration_source, probe_registration
@@ -151,8 +152,8 @@ def _report_conflict(
         current = f" (currently {shown})"
     logger.warning(
         f"Kept manual marketplace '{name}'{current}: it was added with 'apm marketplace add', "
-        "so the user manifest entry was not applied. To let the user manifest manage it, "
-        f"run 'apm marketplace remove {name}' and re-run 'apm install -g'."
+        "so the user manifest entry was not applied. "
+        f"{MARKETPLACE_MANUAL_KEPT.bind(name=name).sentence()}"
     )
 
 
@@ -260,10 +261,8 @@ def reconcile_user_marketplaces_for_install(
         return True
     names = [name for name, _ in report.failed]
     target = f"'{names[0]}'" if len(names) == 1 else "each failed entry"
-    logger.error(
-        f"Marketplace reconcile failed for: {', '.join(names)}. Fix the source of {target} "
-        f"in {manifest_path.as_posix()} or remove it, then re-run 'apm install -g'."
-    )
+    fix = MARKETPLACE_RECONCILE_FAILED.bind(target=target, path=manifest_path.as_posix())
+    logger.error(f"Marketplace reconcile failed for: {', '.join(names)}. {fix.sentence()}")
     return False
 
 

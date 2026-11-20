@@ -402,6 +402,87 @@ def test_command_remediation_clears_the_reported_state(
 # -- W2 integration proofs --
 # -- end W2 integration proofs --
 # -- W2 marketplace proofs --
+#
+# Marketplaces are local directories, so the real source parser, probe, fetch
+# and registry run hermetically against the isolated user root.
+
+_W2_MARKETPLACE = "w2-acme"
+
+
+def _w2_marketplace_root(world: _World) -> Path:
+    return world.scenario.isolated.package_root / _W2_MARKETPLACE
+
+
+def _w2_create_marketplace(world: _World) -> None:
+    root = _w2_marketplace_root(world)
+    root.mkdir()
+    catalog = {
+        "name": _W2_MARKETPLACE,
+        "plugins": [{"name": "w2-plugin", "description": "demo plugin", "source": "./p"}],
+    }
+    (root / "marketplace.json").write_text(json.dumps(catalog), encoding="utf-8")
+
+
+def _w2_marketplaces_yaml(world: _World) -> str:
+    source = _w2_marketplace_root(world).as_posix()
+    return f"marketplaces:\n  - name: {_W2_MARKETPLACE}\n    source: {source}\n"
+
+
+def _w2_declare_in_user_manifest(world: _World) -> None:
+    manifest = world.scenario.isolated.config_root / "apm.yml"
+    manifest.write_text(
+        f"name: me\nversion: 1.0.0\n{_w2_marketplaces_yaml(world)}", encoding="utf-8"
+    )
+
+
+def _w2_declare_in_project(world: _World) -> None:
+    _w2_create_marketplace(world)
+    world.consumer.manifest_path.write_text(
+        f"name: proj\nversion: 1.0.0\n{_w2_marketplaces_yaml(world)}", encoding="utf-8"
+    )
+
+
+def _w2_move_to_user_manifest(world: _World) -> None:
+    world.consumer.manifest_path.write_text("name: proj\nversion: 1.0.0\n", encoding="utf-8")
+    _w2_declare_in_user_manifest(world)
+
+
+def _w2_registered(world: _World, result) -> None:
+    _expect_ok(world, result)
+    registry = world.scenario.isolated.config_root / "marketplaces.json"
+    names = {entry["name"] for entry in json.loads(registry.read_text("utf-8"))["marketplaces"]}
+    assert _W2_MARKETPLACE in names, names
+
+
+W2_MARKETPLACE_PROOFS: tuple[_TextProof, ...] = (
+    _TextProof(
+        "marketplace-reconcile-failed",
+        _bare_world,
+        _w2_declare_in_user_manifest,
+        lambda _world: ("install", "-g"),
+        1,
+        _w2_registered,
+        before=_w2_create_marketplace,
+    ),
+    _TextProof(
+        "marketplaces-outside-user-manifest",
+        _bare_world,
+        _w2_declare_in_project,
+        lambda _world: ("install",),
+        1,
+        _w2_registered,
+        before=_w2_move_to_user_manifest,
+    ),
+)
+
+
+@pytest.mark.parametrize("proof", W2_MARKETPLACE_PROOFS, ids=lambda proof: proof.remediation_id)
+def test_w2_marketplace_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
+) -> None:
+    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+
+
 # -- end W2 marketplace proofs --
 # -- W2 bundle proofs --
 # -- end W2 bundle proofs --
