@@ -38,7 +38,16 @@
   "tests/unit/compilation/test_agents_compiler_coverage.py::TestMergeResults::test_merge_single_result_passes_through": "tests/unit/compilation/test_compile_cli_surface.py::TestMergeResults::test_merge_single_result_passes_through",
   "tests/unit/compilation/test_agents_compiler_coverage.py::TestMergeResults::test_merge_two_results_combines_content": "tests/unit/compilation/test_compile_cli_surface.py::TestMergeResults::test_merge_multiple_results_success",
   "tests/unit/compilation/test_agents_compiler_coverage.py::TestMergeResults::test_merge_any_failure_propagates": "tests/unit/compilation/test_compile_cli_surface.py::TestMergeResults::test_merge_results_with_one_failure",
-  "tests/unit/compilation/test_agents_compiler_coverage.py::TestMergeResults::test_merge_empty_paths_excluded": "tests/unit/compilation/test_compile_cli_surface.py::TestMergeResults::test_merge_empty_paths_excluded"
+  "tests/unit/compilation/test_agents_compiler_coverage.py::TestMergeResults::test_merge_empty_paths_excluded": "tests/unit/compilation/test_compile_cli_surface.py::TestMergeResults::test_merge_empty_paths_excluded",
+  "tests/unit/commands/test_audit_phase3.py::TestHasActionableFindings::test_critical_returns_true": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
+  "tests/unit/commands/test_audit_phase3.py::TestHasActionableFindings::test_info_only_returns_false": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
+  "tests/unit/commands/test_audit_phase3.py::TestHasActionableFindings::test_mixed_info_and_critical": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
+  "tests/unit/commands/test_audit_phase3.py::TestHasActionableFindings::test_multiple_files_with_info_only": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
+  "tests/unit/commands/test_audit_phase3.py::TestHasActionableFindings::test_warning_returns_true": "tests/unit/commands/test_audit_error_handling.py::TestHasActionableFindings::test_actionable_when_any_finding_is_not_info",
+  "tests/unit/commands/test_install_phase3.py::TestCheckPackageConflicts::test_unknown_type_is_skipped": "tests/unit/commands/test_install_resolve_refs.py::TestCheckPackageConflicts::test_no_parseable_deps_returns_empty_set",
+  "tests/unit/commands/test_install_phase3.py::TestSplitArgvAtDoubleDash::test_double_dash_at_start_gives_empty_clean": "tests/unit/commands/test_install_resolve_refs.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
+  "tests/unit/commands/test_install_phase3.py::TestSplitArgvAtDoubleDash::test_empty_argv_returns_empty": "tests/unit/commands/test_install_resolve_refs.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash",
+  "tests/unit/commands/test_install_phase3.py::TestSplitArgvAtDoubleDash::test_no_double_dash_returns_full_argv_empty_command": "tests/unit/commands/test_install_resolve_refs.py::TestSplitArgvAtDoubleDash::test_splits_argv_at_double_dash"
  },
  "decisions": [
   "step0: the 6 nodes unmapped after 011445baa/08030d1b4 each have a same-named or same-scenario survivor in the kept module whose assertions are a superset (pack: exact share line and extra help flags; distributed: same asserts on a markerless fixture constant, plus suppressed_empty_paths default)",
@@ -62,7 +71,8 @@
   "step5 lane split: pure marketplace plugin helper tests (_resolve_ref from test_marketplace_plugin.py and test_marketplace_coverage.py merged into one TestResolveRef class, plus TestParseTags and TestVerifySource) -> new tests/unit/commands/test_marketplace_plugin_refs.py marked unit with promise P-OWN-marketplace-entry-ref-verification (owner commands/marketplace/plugin)",
   "ratchets: test_test_taxonomy passes with the two new promise-carrying modules; test_quality_baselines fails until the integrator remeasures (pre-existing growth outside scope, AQ003 growth from step 3 lane marking, AQ004 occurrences that moved with verbatim classes; scope AQ004 total 257 -> 217, AQ001 2 -> 0)",
   "step5 output rewrites: tests that asserted on MagicMock logger calls now drive a real CommandLogger and assert on captured stdout+stderr (the console stream is process-global and earlier tests may route it to stderr); verified stable across repeated -n 4 runs",
-  "step5 remaining: 790 AQ003 findings left (AQ001 0, AQ002 0). They assert return values of pure helpers or read-only filesystem analysis inside component modules; no output, exit code or durable state exists to assert without padding. Reducing them further needs module splits into new unit modules, which need promise ids with a real owner fit; only self-update and marketplace plugin refs had one"
+  "step5 remaining: 790 AQ003 findings left (AQ001 0, AQ002 0). They assert return values of pure helpers or read-only filesystem analysis inside component modules; no output, exit code or durable state exists to assert without padding. Reducing them further needs module splits into new unit modules, which need promise ids with a real owner fit; only self-update and marketplace plugin refs had one",
+  "mapping vs original base 998606e: test_audit_phase3 / test_install_phase3 copies removed by the earlier consolidation were twins of tests now folded into parametrized cases; declared as folds to those survivors"
  ],
  "counts_left": {
   "same_body_groups": 0,
