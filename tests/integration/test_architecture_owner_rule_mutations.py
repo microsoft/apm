@@ -3499,7 +3499,7 @@ _ORPHAN_RULE = "install-deployment-orphan-selection"
             "src/apm_cli/commands/prune.py",
             "        orphaned_packages = list(decision.removed_paths)\n",
             "        orphaned_packages = [key for key in lockfile.dependencies if key not in wanted]\n",
-            "orphaned_packages must come from the decide_orphan_removal decision",
+            "Removal sites must not filter installed or locked sets",
             id="renamed-evidence-predicate",
         ),
         pytest.param(
