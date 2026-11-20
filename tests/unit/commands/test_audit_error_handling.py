@@ -474,6 +474,28 @@ class TestRichTableMarkupEscaping:
         # No green "All N passed" next to a violation (#3994).
         success.assert_not_called()
 
+    def test_failed_check_details_follow_their_header_to_stderr(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Results stay on stdout; failed-check headers and details go to stderr (RA-004)."""
+        from apm_cli.commands.audit import _render_ci_results
+        from apm_cli.policy.models import CheckResult, CIAuditResult
+
+        detail = "Content hash mismatch for org/pkg"
+        result = CIAuditResult(
+            checks=[
+                CheckResult(name="lockfile-exists", passed=True, message="ok"),
+                CheckResult(name="skill-subset", passed=False, message="bad", details=[detail]),
+                CheckResult(name="drift", passed=False, message="bad", details=[detail]),
+            ]
+        )
+        _render_ci_results(result)
+        out, err = capsys.readouterr()
+        assert "lockfile-exists" in out
+        assert detail not in out
+        assert err.count(detail) == 2
+        assert err.index("skill-subset details:") < err.index(detail) < err.index("drift details:")
+
     def test_strip_preview_keeps_bracketed_path(self) -> None:
         console = self._console()
         findings = {".github/prompts/[x]note.md": [_make_finding("critical")]}
