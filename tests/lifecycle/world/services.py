@@ -35,7 +35,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from tests.lifecycle.world import registry as package_registry
-from tests.lifecycle.world import routes
+from tests.lifecycle.world import revisions, routes
 from tests.utils.local_scripted_https_proxy import (
     Handler,
     ScriptedHttpsProxy,
@@ -183,6 +183,7 @@ class WorldServices:
         self.ado_auth_required = False
         self._unserved: dict[str, Path] = {}
         self.routes = routes.Routes()
+        self._ref_snapshots: dict[str, dict[str, str]] = {}
         self.registry_proxy = routes.RegistryProxy(self._slug_repository)
 
     @property
@@ -230,6 +231,9 @@ class WorldServices:
         self.proxy.clear()
         self.ado_auth_required = False
         self.routes.clear()
+        for slug, refs in self._ref_snapshots.items():
+            revisions.restore_refs(self._repositories.get(slug) or self._unserved[slug], refs)
+        self._ref_snapshots.clear()
         for slug in list(self._unserved):
             self.restore(slug)
 
@@ -267,6 +271,25 @@ class WorldServices:
     def forbid_direct(self, forbidden: bool = True) -> None:
         """Proxy-only mode: every direct content host answers 403 (still recorded)."""
         self.routes.direct_forbidden = forbidden
+
+    def publish_revision(
+        self,
+        slug: str,
+        files: Mapping[str, str | bytes | None],
+        *,
+        message: str = "lifecycle revision",
+        tag: str | None = None,
+    ) -> str:
+        """Commit *files* on ``main`` of served *slug* (``None`` deletes a file); return the sha.
+
+        ``tag`` creates or moves that tag to the new commit, so the same ref
+        resolves to changed content. ``reset`` restores every ref.
+        """
+        repository = self._repositories.get(slug)
+        if repository is None:
+            raise KeyError(f"{slug!r} is not served")
+        self._ref_snapshots.setdefault(slug, revisions.snapshot_refs(repository))
+        return revisions.publish_revision(repository, files, message=message, tag=tag)
 
     def unserve(self, slug: str) -> None:
         """Stop serving repository *slug*: every host answers 404 for it until ``restore``.

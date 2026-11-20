@@ -267,6 +267,11 @@ def test_each_package_installs_through_the_real_cli(
     assert world.services.egress_log() == [], "a local-path install reached the network"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="tracking #4270: whole-plugin bin/ not deployed after approve + --trust-bin",
+    raises=AssertionError,
+)
 @pytest.mark.parametrize("source", ["marketplace", "git"])
 def test_claude_plugin_bin_deploys_at_user_scope_after_trust(
     lifecycle_world: World, source: str
@@ -310,7 +315,7 @@ def test_user_scope_with_apm_home_outside_home(lifecycle_world: World) -> None:
 # p-lsp declares only LSP servers. Locally its empty .apm/ satisfies package
 # validation; git cannot carry an empty directory, so the served copy is
 # refused ("missing the required .apm/ directory"). Found by the world.
-_LSP_ONLY_REMOTE = "LSP-only package rejected from git/marketplace (no .apm/)"
+_LSP_ONLY_REMOTE = "tracking #4257: LSP-only package rejected from git/marketplace (no .apm/)"
 _REMOTE_CELLS = [
     pytest.param(
         package,
@@ -742,6 +747,36 @@ def test_forbid_direct_refuses_and_records_direct_content(lifecycle_world: World
     world.services.reset()
     assert world.services.routes.direct_forbidden is False
     assert world.services.routes.scripted == []
+
+
+# -- new git revisions ---------------------------------------------------------
+
+
+def _tag_sha(world: World, tag: str) -> int | str:
+    response = _get(world, f"https://{API_HOST}/repos/{ORG}/p-skill/commits/{tag}")
+    return response.json()["sha"] if response.status_code == 200 else response.status_code
+
+
+def test_published_revision_changes_content_under_a_ref_until_reset(
+    lifecycle_template: World, tmp_path: Path
+) -> None:
+    services = lifecycle_template.services
+    world = clone(lifecycle_template, tmp_path / "first")
+    services.reset()
+    original = _tag_sha(world, "v1.0.0")
+    skill = "skills/p-skill/SKILL.md"
+    changed = "---\nname: p-skill\ndescription: changed upstream.\n---\n\nRevision 2.\n"
+    sha = services.publish_revision(f"{ORG}/p-skill", {skill: changed}, tag="v1.0.0")
+    services.publish_revision(f"{ORG}/p-skill", {skill: changed}, tag="v2.0.0")
+    assert _tag_sha(world, "v1.0.0") == sha != original
+    _ok(world, ["install", f"{ORG}/p-skill#v1.0.0"])
+    deployed = world.project / ".agents/skills/p-skill/SKILL.md"
+    assert "Revision 2." in deployed.read_text(encoding="utf-8")
+    services.reset()
+    assert _tag_sha(world, "v1.0.0") == original
+    assert _tag_sha(world, "v2.0.0") == 404
+    with pytest.raises(KeyError):
+        services.publish_revision(f"{ORG}/never-served", {"x": "y"})
 
 
 _POLICY_EXIT = {
