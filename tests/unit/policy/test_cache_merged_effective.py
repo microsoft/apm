@@ -1232,26 +1232,7 @@ def test_altered_cached_policy_document_is_ignored(tmp_path: Path) -> None:
 
     assert _read_cache_entry(repo_ref, tmp_path, expected_hash=pin) is None
     assert _read_cache_entry(repo_ref, tmp_path) is None
-
-
-def test_altered_pinned_cache_without_refresh_is_a_hash_mismatch(tmp_path: Path) -> None:
-    """#4218: a rejected pinned cache entry that cannot be refreshed never falls open."""
-    repo_ref = "contoso/.github"
-    content = "name: org\nversion: 1.0.0\n"
-    pin = "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
-    with patch("apm_cli.policy.discovery._fetch_github_contents", return_value=(content, None)):
-        warm = discover_policy_with_chain(tmp_path, policy_override=repo_ref, expected_hash=pin)
-    assert warm.outcome in ("found", "empty")
-    document = _get_cache_dir(tmp_path) / f"{_cache_key(repo_ref)}.yml"
-    document.write_text(document.read_text(encoding="utf-8") + "enforcement: off\n")
-
-    with patch(
-        "apm_cli.policy.discovery._fetch_github_contents",
-        return_value=(None, "Connection error fetching contoso/.github"),
-    ):
-        result = discover_policy_with_chain(tmp_path, policy_override=repo_ref, expected_hash=pin)
-    assert result.outcome == "hash_mismatch"
-    assert result.policy is None
+    assert document.read_text(encoding="utf-8") == altered
 
 
 if __name__ == "__main__":

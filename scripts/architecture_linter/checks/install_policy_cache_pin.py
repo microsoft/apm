@@ -1,5 +1,7 @@
 """Cached org policy is verified before use, in one reader (#4218).
 
+* ``policy/_cache_verify.py`` checks a cached document against the project
+  pin and the fingerprint recorded with it (``_cached_policy_verified``).
 * ``policy/discovery.py`` is the only module that locates the policy cache
   (``_get_cache_dir`` / ``POLICY_CACHE_DIR``).
 * ``_read_cache_entry`` is the only function there that parses a cached
@@ -29,12 +31,15 @@ _OWNER = "src/apm_cli/policy/discovery.py"
 _READER = "_read_cache_entry"
 _VERIFY = "_cached_policy_verified"
 _CACHE_NAMES = frozenset({"_get_cache_dir", "POLICY_CACHE_DIR"})
+_VERIFIER = "src/apm_cli/policy/_cache_verify.py"
 _OWNER_NEEDLES = (
+    "if not _cached_policy_verified(serialized, meta, expected_hash):",
+    "policy, _warnings = load_policy(serialized)",
+)
+_VERIFIER_NEEDLES = (
     "def _cached_policy_matches(serialized: str, meta: dict) -> bool:",
     "hmac.compare_digest(recorded, _policy_fingerprint(serialized))",
-    "if not _cached_policy_verified(serialized, meta, expected_hash):",
     "return _cached_pin_matches(raw_bytes_hash, expected_hash) and _cached_policy_matches(",
-    "policy, _warnings = load_policy(serialized)",
 )
 
 
@@ -93,11 +98,19 @@ def check_policy_cache_pin(provider: FactsProvider) -> tuple[Violation, ...]:
     owner, failures = _facts_for(provider, _OWNER, rule)
     if failures:
         return tuple(failures)
+    verifier, failures = _facts_for(provider, _VERIFIER, rule)
+    if failures:
+        return tuple(failures)
     findings = [
         _summary(rule, _OWNER, f"The policy cache reader lost: {needle}")
         for needle in _OWNER_NEEDLES
         if not _present(owner, needle)
     ]
+    findings.extend(
+        _summary(rule, _VERIFIER, f"The cached policy verification lost: {needle}")
+        for needle in _VERIFIER_NEEDLES
+        if not _present(verifier, needle)
+    )
     index = owner.tree_index
     if index is not None:
         for function in index.functions():
