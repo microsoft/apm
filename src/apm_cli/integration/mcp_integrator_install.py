@@ -235,6 +235,10 @@ class ResolvedMcpTargets:
 
     runtimes: tuple[str, ...] | None
 
+    def runtime_list(self) -> list[str] | None:
+        """Return a mutable copy of the runtimes, or ``None``."""
+        return None if self.runtimes is None else list(self.runtimes)
+
 
 def resolve_mcp_targets(**kwargs: Any) -> ResolvedMcpTargets:
     """Resolve (and announce) the MCP target runtimes once for this run.
@@ -1853,9 +1857,10 @@ def run_mcp_install(  # noqa: PLR0913
     else:
         logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
 
-    # Runtime detection, gating, and scope filtering
-    if resolved_targets is None:
-        resolved_targets = resolve_mcp_targets(
+    # Runtime detection, gating, and scope filtering (once per run, #4089)
+    target_runtimes = (
+        resolved_targets
+        or resolve_mcp_targets(
             runtime=runtime,
             exclude=exclude,
             verbose=verbose,
@@ -1868,7 +1873,7 @@ def run_mcp_install(  # noqa: PLR0913
             logger=logger,
             console=console,
         )
-    target_runtimes = None if resolved_targets.runtimes is None else list(resolved_targets.runtimes)
+    ).runtime_list()
     if target_runtimes is None:
         if fail_on_write_error:
             raise RequiredIntegrationError(
