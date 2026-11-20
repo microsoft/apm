@@ -321,12 +321,24 @@ def test_context_protection_cannot_regress_to_root_only(
             "hash_mismatches, unresolved_hash_paths = _local_hash_loop(",
             id="audit-bypasses-shared-verifier",
         ),
+        pytest.param(
+            "src/apm_cli/install/service.py",
+            "missing, _gitignored = find_missing_deployed_files(deploy_root, committed, targets)",
+            "missing, _gitignored = [], False",
+            id="frozen-skips-presence-verification",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "missing, gitignored_skipped = find_missing_deployed_files(project_root, lock, targets)",
+            "missing, gitignored_skipped = _local_presence_loop(project_root, lock, targets)",
+            id="audit-bypasses-shared-presence-verifier",
+        ),
     ],
 )
 def test_frozen_and_audit_share_deployed_hash_verifier(
     path: str, original: str, replacement: str
 ) -> None:
-    """``install --frozen`` and ``audit --ci`` re-verify hashes through one owner (#3654)."""
+    """``install --frozen`` and ``audit --ci`` share presence and hash verifiers (#3654, #4043)."""
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(original) == 1
     rule = "install-deployment-frozen-mutation-eligibility"

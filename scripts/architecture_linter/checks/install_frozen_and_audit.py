@@ -68,11 +68,18 @@ def _last_line_re(facts: object, pattern: re.Pattern[str]) -> int | None:
 
 
 _FROZEN_OWNER = "src/apm_cli/install/service.py"
-# req-lk-017: frozen install and audit content-integrity share one verifier.
+# req-lk-017: frozen install and audit share one deployed-file presence
+# verifier (#4043) and one content-integrity hash verifier.
 _DEPLOYED_HASH_VERIFIER = "src/apm_cli/policy/ci_checks.py"
 _DRIFT_DIFF = "src/apm_cli/install/drift.py"
 _DEPLOYED_HASH_FRAGMENTS = (
     (_FROZEN_OWNER, "resolve_audit_scope(lockfile_path.parent, committed)"),
+    (_FROZEN_OWNER, "= find_missing_deployed_files(deploy_root, committed, targets)"),
+    (_DEPLOYED_HASH_VERIFIER, "def find_missing_deployed_files("),
+    (
+        _DEPLOYED_HASH_VERIFIER,
+        "missing, gitignored_skipped = find_missing_deployed_files(project_root, lock, targets)",
+    ),
     (_FROZEN_OWNER, "= verify_deployed_file_hashes(deploy_root, committed, targets)"),
     (_DEPLOYED_HASH_VERIFIER, "def verify_deployed_file_hashes("),
     (

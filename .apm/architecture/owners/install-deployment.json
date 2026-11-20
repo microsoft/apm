@@ -89,8 +89,8 @@
     },
     {
       "id": "frozen-install-mutation-eligibility",
-      "decision": "Frozen install mutation eligibility, the only read of the install frozen flag, and post-deploy deployed-hash re-verification (req-lk-017)",
-      "owner": "install/service.py (InstallService; frozen_disposition is the single frozen-flag reader and its FrozenDisposition is what cleanup, lockfile and service integration consume); deployed-hash verification shared with audit content-integrity through policy/ci_checks.py (verify_deployed_file_hashes)",
+      "decision": "Frozen install mutation eligibility, the only read of the install frozen flag, and post-deploy deployed-file presence and hash re-verification (req-lk-017)",
+      "owner": "install/service.py (InstallService; frozen_disposition is the single frozen-flag reader and its FrozenDisposition is what cleanup, lockfile and service integration consume); deployed-file presence and hash verification shared with audit deployed-files-present and content-integrity through policy/ci_checks.py (find_missing_deployed_files, verify_deployed_file_hashes)",
       "selectors": ["src/apm_cli/install/service.py"],
       "guards": [
         "install-deployment-frozen-mutation-eligibility",
