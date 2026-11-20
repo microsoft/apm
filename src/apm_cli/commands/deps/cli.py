@@ -23,9 +23,8 @@ from ...models.manifest_io import InvalidManifestError
 from ...utils.path_security import PathTraversalError
 from .._helpers import (
     UnknownPackageError,
-    _build_expected_install_paths,
     _expand_with_ancestors,
-    _find_orphaned_packages,
+    _inspect_installed_orphans,
     _standalone_installed_packages,
     resolve_requested_packages,
 )
@@ -414,14 +413,14 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     # stricter warning for a real package above a declared subdirectory stays,
     # at every depth (unlike the depth-capped suppression set above).
     try:
-        expected_paths = _build_expected_install_paths(
-            declared_deps, lockfile_for_check, apm_modules_path, preserve_installed_case=True
+        inspection = _inspect_installed_orphans(
+            declared_deps,
+            lockfile_for_check,
+            apm_modules_path,
+            [name for _c, name, _h, _s in scanned_candidates],
         )
-        selected_orphans = set(
-            _find_orphaned_packages(
-                [name for _c, name, _h, _s in scanned_candidates], expected_paths
-            )
-        )
+        expected_paths = inspection.expected_paths
+        selected_orphans = set(inspection.removed_paths)
         expected_ancestors = {
             "/".join(parts[:depth])
             for parts in (path.replace("\\", "/").split("/") for path in expected_paths)

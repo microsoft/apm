@@ -32,7 +32,6 @@ def render_and_exit(
     completes -- this function does NOT exit or return early on its own.
     """
     from apm_cli.deps.lockfile import LockFile, LockfileConflictError, get_lockfile_path
-    from apm_cli.drift import detect_orphans
 
     logger.progress("Dry run mode - showing what would change:")
 
@@ -96,12 +95,39 @@ def render_and_exit(
         _dryrun_lock = None
     except Exception:
         _dryrun_lock = None
-    if _dryrun_lock and plan.should_install_apm and not plan.dependency_preview_errors:
-        _orphan_preview = detect_orphans(
-            _dryrun_lock,
-            plan.intended_dependency_keys,
-            only_packages=list(plan.only_packages) if plan.only_packages is not None else None,
+    if (
+        _dryrun_lock
+        and plan.should_install_apm
+        and not plan.dependency_preview_errors
+        and not plan.only_packages
+    ):
+        from apm_cli.install.orphans import (
+            DeploymentClaims,
+            OrphanOperation,
+            decide_orphan_removal,
         )
+
+        # The same owner decision the real install acts on, with the retained
+        # packages' recorded claims standing in for fresh integration output.
+        _orphan_decision = decide_orphan_removal(
+            operation=OrphanOperation.INSTALL,
+            roots=(),
+            candidate_universe=_dryrun_lock,
+            installed_paths=None,
+            resolved_keys=None,
+            intended=plan.intended_dependency_keys,
+            materialized=None,
+            reachability=None,
+            deployment_claims=DeploymentClaims(live_files=None, retained={}),
+        )
+        _orphan_preview = {
+            path for files in _orphan_decision.removed_files.values() for path in files
+        }
+        _kept = sorted(
+            {path for files in _orphan_decision.claimed_files.values() for path in files}
+        )
+        for _path in _kept:
+            logger.verbose_detail(f"Kept {_path}: still deployed by a remaining package")
         if _orphan_preview:
             logger.progress(
                 f"Files that would be removed (packages no longer in apm.yml): "
