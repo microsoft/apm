@@ -1956,6 +1956,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Prune stops reconciling deployment provenance through the state owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-receipt-collection",
+        rule_id="install-deployment-receipt-collection",
+        path="src/apm_cli/install/pipeline.py",
+        old="        collect_orphaned_receipts()\n",
+        new="        pass\n",
+        intent="apm install stops collecting receipts whose project root is gone.",
+    ),
+    MutationCase(
         guard_id="install-deployment-request-defaults",
         rule_id="install-deployment-request-defaults",
         path="src/apm_cli/install/request.py",

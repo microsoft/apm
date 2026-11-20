@@ -104,6 +104,10 @@ from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
 from scripts.architecture_linter.checks.install_portable_trust import (
     RULES as PORTABLE_TRUST_RULES,
 )
+from scripts.architecture_linter.checks.install_receipt_collection import (
+    GUARD_RECEIPT_COLLECTION,
+    check_receipt_collection,
+)
 from scripts.architecture_linter.checks.install_request_and_source import (
     _GUARD_INSTALL_SCOPE,
     _GUARD_OUTCOME,
@@ -165,6 +169,11 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        GUARD_RECEIPT_COLLECTION,
+        "Orphaned deployment receipts are collected only by the receipt owner.",
+        check_receipt_collection,
+    ),
     _rule(
         _GUARD_BUNDLE_STAGING,
         "Local bundle compile staging is lockfile-proven input, never a deployment claim.",
