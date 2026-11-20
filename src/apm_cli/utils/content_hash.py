@@ -3,6 +3,7 @@
 import hashlib
 import stat
 from collections.abc import Collection
+from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.install.cache_pin import MARKER_FILENAME as _APM_PIN_MARKER
@@ -25,27 +26,38 @@ _EXCLUDED_ROOT_FILES = {_APM_PIN_MARKER}
 _EMPTY_HASH = "sha256:" + hashlib.sha256(b"").hexdigest()
 
 
-def compute_package_hash(package_path: Path, *, exclude: Collection[str] = ()) -> str:
-    """Compute a deterministic SHA-256 hash of a package's file tree.
+@dataclass(frozen=True)
+class PackageDigests:
+    """One package tree hashed under both lockfile content-hash streams.
 
-    The hash is computed over sorted file paths and their contents,
-    making it independent of filesystem ordering and metadata (timestamps,
-    permissions).
+    ``legacy`` is the stream lockfiles at versions 1-3 record; ``framed`` is
+    the stream version 4 records. Both come from one read of the same bytes,
+    so a lockfile promotion never re-reads a tree it has not verified.
+    """
 
-    Note: this whole-tree hash intentionally hashes raw file bytes, unlike
-    the per-file :func:`compute_file_hash` which normalizes CRLF->LF for
-    text (apm#1952). For the raw hash to be platform-invariant, EVERY file
-    in the tree must therefore carry platform-canonical bytes:
-    git-materialized content already does (identical bytes at a pinned
-    commit on every OS), and every file APM itself writes into the tree
-    MUST be written LF-deterministically (``atomic_write_text`` /
-    ``write_text_lf`` / ``dump_yaml``). apm#2187/PR #2223 and apm#2619 are
-    the incidents where platform-native in-tree writers broke that
-    invariant and made lockfiles non-portable. Do not add an in-tree
-    writer that uses platform-native newlines, and do not normalize line
-    endings HERE instead: that would silently change the recorded hash of
-    every package whose upstream content legitimately contains CRLF,
-    invalidating existing correct lockfiles.
+    legacy: str
+    framed: str
+
+    def select(self, *, framed: bool) -> str:
+        """Return the digest for the stream a lockfile records."""
+        return self.framed if framed else self.legacy
+
+
+def compute_package_digests(package_path: Path, *, exclude: Collection[str] = ()) -> PackageDigests:
+    """Hash *package_path* once under both content-hash streams.
+
+    The legacy stream feeds each relative path and the file's raw bytes into
+    one SHA-256. The framed stream is the encoding the native plugin pin uses
+    (:func:`_frame_entry`): NUL-terminated relative path, then the file's own
+    SHA-256 digest. Both are platform-invariant only while every file carries
+    platform-canonical bytes: git-materialized content already does, and
+    every file APM itself writes into the tree MUST be written
+    LF-deterministically (``atomic_write_text`` / ``write_text_lf`` /
+    ``dump_yaml``). apm#2187/PR #2223 and apm#2619 are the incidents where
+    platform-native in-tree writers broke that invariant. Do not normalize
+    line endings HERE instead (unlike :func:`compute_file_hash`, apm#1952):
+    that would silently change the recorded hash of every package whose
+    upstream content legitimately contains CRLF.
 
     Args:
         package_path: Root directory of the installed package.
@@ -54,28 +66,36 @@ def compute_package_hash(package_path: Path, *, exclude: Collection[str] = ()) -
             :mod:`apm_cli.deps.carried_license`). Callers pass them from the
             download result or the lockfile record, never from disk, so the
             hash keeps describing the upstream payload.
+    """
+    if not package_path.is_dir():
+        return PackageDigests(_EMPTY_HASH, _EMPTY_HASH)
+    legacy = hashlib.sha256()
+    framed = hashlib.sha256()
+    for rel_path in _package_files(package_path):
+        if exclude and rel_path.as_posix() in exclude:
+            continue
+        payload = (package_path / rel_path).read_bytes()
+        legacy.update(rel_path.as_posix().encode("utf-8"))
+        legacy.update(payload)
+        framed.update(_frame_entry(rel_path, payload))
+    return PackageDigests(f"sha256:{legacy.hexdigest()}", f"sha256:{framed.hexdigest()}")
+
+
+def compute_package_hash(
+    package_path: Path, *, exclude: Collection[str] = (), framed: bool = True
+) -> str:
+    """Compute a deterministic SHA-256 hash of a package's file tree.
+
+    The hash covers sorted file paths and their contents, independent of
+    filesystem ordering and metadata (timestamps, permissions). *framed*
+    selects the stream: lockfile version 4 records the framed stream,
+    versions 1-3 the legacy stream (see :func:`compute_package_digests`).
+    Callers verifying a lock row pass the row's ``content_hash_framed``.
 
     Returns:
         Hash string in format ``"sha256:<hex_digest>"``.
     """
-    if not package_path.is_dir():
-        return _EMPTY_HASH
-
-    hasher = hashlib.sha256()
-    file_count = 0
-
-    for rel_path in _package_files(package_path):
-        if exclude and rel_path.as_posix() in exclude:
-            continue
-        # Hash the relative path then the file contents
-        hasher.update(rel_path.as_posix().encode("utf-8"))
-        hasher.update((package_path / rel_path).read_bytes())
-        file_count += 1
-
-    if file_count == 0:
-        return _EMPTY_HASH
-
-    return f"sha256:{hasher.hexdigest()}"
+    return compute_package_digests(package_path, exclude=exclude).select(framed=framed)
 
 
 def _package_files(
@@ -179,14 +199,22 @@ def unpinned_apm_copy(plugin_root: Path) -> str | None:
     return None
 
 
+def _frame_entry(relative: Path, payload: bytes, mode: bytes = b"") -> bytes:
+    """Frame one file: NUL-terminated relative path, optional mode, own digest.
+
+    The single framing encoding behind every APM tree fingerprint. The NUL
+    terminator and the fixed-length per-file digest keep entry boundaries
+    unambiguous, so distinct file layouts cannot share one byte stream.
+    """
+    return relative.as_posix().encode("utf-8") + b"\0" + mode + hashlib.sha256(payload).digest()
+
+
 def _hash_native_files(root: Path, files: list[Path], *, include_mode: bool = True) -> str:
     hasher = hashlib.sha256()
     for relative in files:
         path = root / relative
-        hasher.update(relative.as_posix().encode("utf-8") + b"\0")
-        if include_mode:
-            hasher.update(b"x" if path.stat().st_mode & stat.S_IXUSR else b"-")
-        hasher.update(hashlib.sha256(path.read_bytes()).digest())
+        mode = b"x" if path.stat().st_mode & stat.S_IXUSR else b"-"
+        hasher.update(_frame_entry(relative, path.read_bytes(), mode if include_mode else b""))
     return f"sha256:{hasher.hexdigest()}"
 
 
@@ -258,7 +286,11 @@ def compute_file_hash(file_path: Path) -> str:
 
 
 def verify_package_hash(
-    package_path: Path, expected_hash: str, *, exclude: Collection[str] = ()
+    package_path: Path,
+    expected_hash: str,
+    *,
+    exclude: Collection[str] = (),
+    framed: bool = True,
 ) -> bool:
     """Verify a package's content matches the expected hash.
 
@@ -266,9 +298,10 @@ def verify_package_hash(
         package_path: Root directory of the installed package.
         expected_hash: Expected hash string (e.g., ``"sha256:abc123..."``).
         exclude: Carried licence paths, as for :func:`compute_package_hash`.
+        framed: The stream *expected_hash* was recorded in; a lock row's
+            ``content_hash_framed``.
 
     Returns:
         True if hash matches, False if mismatch.
     """
-    actual = compute_package_hash(package_path, exclude=exclude)
-    return actual == expected_hash
+    return compute_package_hash(package_path, exclude=exclude, framed=framed) == expected_hash

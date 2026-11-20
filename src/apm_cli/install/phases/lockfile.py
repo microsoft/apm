@@ -24,7 +24,7 @@ from apm_cli.install.package_resolution import effective_dependency_selection
 from apm_cli.utils.content_hash import compute_file_hash
 
 if TYPE_CHECKING:
-    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.install.context import InstallContext
 
 
@@ -179,6 +179,8 @@ class LockfileBuilder:
             self._preserve_existing_mcp_state(lockfile)
             self._preserve_existing_lsp_state(lockfile)
             self._preserve_existing_revision_pin_tags(lockfile)
+            # After every carry-forward step, so promotion sees each final row.
+            self._promote_content_hashes(lockfile)
             # The carry-forward steps above set fields such as resolved_tag
             # and replacements directly, so re-derive the schema version
             # before the semantic comparison (#3433).
@@ -456,6 +458,62 @@ class LockfileBuilder:
         for dep_key, locked_dep in lockfile.dependencies.items():
             if dep_key in self.ctx.package_hashes:
                 locked_dep.content_hash = self.ctx.package_hashes[dep_key]
+
+    def _promote_content_hashes(self, lockfile: LockFile) -> None:
+        """Settle every package row on one content-hash stream.
+
+        A writable install moves a version 1-3 lockfile to the framed stream
+        (version 4) once, and only when every package row has a framed digest
+        of verified bytes: rows recorded this run carry one from the same read,
+        version 4 rows already are framed, and other carried-over rows are
+        re-hashed from ``apm_modules`` after their legacy hash verifies.
+        Otherwise, and always under ``--frozen``, the legacy stream stays.
+        """
+        from apm_cli.deps.lockfile import _SELF_KEY
+
+        existing = getattr(self.ctx, "existing_lockfile", None)
+        recorded_framed = existing is None or existing.framed_content_hashes
+        if getattr(self.ctx, "frozen", False) or getattr(self.ctx, "dry_run", False):
+            lockfile.set_content_hash_stream(framed=recorded_framed)
+            return
+        recorded = getattr(self.ctx, "package_hashes", {})
+        recorded_framed_digests = getattr(self.ctx, "package_framed_hashes", {})
+        promoted: dict[str, str] = {}
+        for dep_key, dep in lockfile.dependencies.items():
+            if dep_key == _SELF_KEY or not dep.content_hash:
+                continue
+            if recorded.get(dep_key) == dep.content_hash and dep_key in recorded_framed_digests:
+                framed = recorded_framed_digests[dep_key]
+            elif dep.content_hash_framed:
+                framed = dep.content_hash
+            else:
+                framed = self._rehash_verified_row(dep)
+            if framed is None:
+                if recorded_framed:  # this run's rows are framed: never mislabel them
+                    raise RuntimeError(f"Cannot verify the locked content of {dep_key}")
+                lockfile.set_content_hash_stream(framed=False)
+                return
+            promoted[dep_key] = framed
+        for dep_key, framed in promoted.items():
+            lockfile.dependencies[dep_key].content_hash = framed
+        lockfile.set_content_hash_stream(framed=True)
+
+    def _rehash_verified_row(self, dep: LockedDependency) -> str | None:
+        """Framed digest of a carried-over remote row whose legacy hash verifies."""
+        from apm_cli.deps.carried_license import carried_copies_intact, carried_license_paths
+        from apm_cli.utils.content_hash import compute_package_digests
+
+        if dep.source == "local" or self.ctx.apm_modules_dir is None:
+            return None
+        try:
+            path = dep.to_dependency_ref().get_install_path(self.ctx.apm_modules_dir)
+            records = tuple(dep.carried_licenses or ())
+            if not path.is_dir() or not carried_copies_intact(path, records):
+                return None
+            digests = compute_package_digests(path, exclude=carried_license_paths(records))
+        except (OSError, ValueError):
+            return None
+        return digests.framed if digests.legacy == dep.content_hash else None
 
     def _attach_declared_licenses(self, lockfile: LockFile) -> None:
         """Attach DECLARED-license provenance captured at acquire time (U6).

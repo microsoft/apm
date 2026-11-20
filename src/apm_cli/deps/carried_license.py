@@ -257,12 +257,20 @@ def carried_copies_intact(package_root: Path, records: Iterable[CarriedLicense])
 
 
 def verify_locked_package(
-    package_root: Path, expected_hash: str, records: Iterable[CarriedLicense]
+    package_root: Path,
+    expected_hash: str,
+    records: Iterable[CarriedLicense],
+    *,
+    framed: bool,
 ) -> bool:
-    """Verify a cached package against its locked hash and carried licence copies."""
+    """Verify a cached package against its locked hash and carried licence copies.
+
+    *framed* is the lock row's ``content_hash_framed``: the stream its
+    lockfile version records.
+    """
     records = tuple(records)
     return carried_copies_intact(package_root, records) and _content_hash.verify_package_hash(
-        package_root, expected_hash, exclude=carried_license_paths(records)
+        package_root, expected_hash, exclude=carried_license_paths(records), framed=framed
     )
 
 

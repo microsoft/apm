@@ -26,7 +26,7 @@ def test_native_hash_includes_publisher_cache_assets_without_changing_legacy(
     assert added != before
     asset.write_bytes(b"\x00second")
     assert compute_native_bundle_hash(tmp_path) != added
-    assert compute_package_hash(tmp_path) == legacy
+    assert compute_package_hash(tmp_path, framed=False) == legacy
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Git owner executable-bit observation requires POSIX")
@@ -36,13 +36,13 @@ def test_native_hash_observes_only_git_executable_mode(tmp_path: Path) -> None:
     payload.write_bytes(b"not executable code")
     payload.chmod(0o644)
     before = compute_native_bundle_hash(tmp_path)
-    legacy = compute_package_hash(tmp_path)
+    legacy = compute_package_hash(tmp_path, framed=False)
     payload.chmod(0o755)
     executable = compute_native_bundle_hash(tmp_path)
     assert executable != before
     payload.chmod(0o744)
     assert compute_native_bundle_hash(tmp_path) == executable
-    assert compute_package_hash(tmp_path) == legacy
+    assert compute_package_hash(tmp_path, framed=False) == legacy
 
 
 def test_native_hash_excludes_transport_but_not_nested_pin(tmp_path: Path) -> None:

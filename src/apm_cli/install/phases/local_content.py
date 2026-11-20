@@ -99,11 +99,12 @@ def _has_local_apm_content(project_root):
 # ---------------------------------------------------------------------------
 
 
-def compute_local_package_hash(source: Path) -> str:
+def compute_local_package_hash(source: Path, *, framed: bool = True) -> str:
     """Hash the validated local-copy image without changing installed content.
 
     Use the same directory copier or selected-file materializer as install
     before the existing package hash, rather than hashing transformed output.
+    *framed* is the lock row's stream (``content_hash_framed``).
     """
     from apm_cli.config import get_apm_temp_dir
     from apm_cli.utils.content_hash import compute_package_hash
@@ -122,7 +123,7 @@ def compute_local_package_hash(source: Path) -> str:
             materialize_virtual_file_package(
                 dependency, snapshot, admitted.path.name, admitted.content
             )
-        return compute_package_hash(snapshot)
+        return compute_package_hash(snapshot, framed=framed)
 
 
 class LocalPackageError(ValueError):

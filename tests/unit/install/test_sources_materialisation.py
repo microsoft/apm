@@ -287,6 +287,8 @@ class TestLocalDependencySourceAcquire:
         mock_pkg = MagicMock()
         mock_pkg.source = None
 
+        from apm_cli.utils.content_hash import PackageDigests
+
         with (
             patch(
                 "apm_cli.install.phases.local_content._copy_local_package",
@@ -301,8 +303,8 @@ class TestLocalDependencySourceAcquire:
                 return_value=(None, None),
             ),
             patch(
-                "apm_cli.utils.content_hash.compute_package_hash",
-                return_value="deadbeef",
+                "apm_cli.utils.content_hash.compute_package_digests",
+                return_value=PackageDigests("deadbeef", "deadbeef"),
             ) as hash_package,
         ):
             from apm_cli.install.sources import LocalDependencySource

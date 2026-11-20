@@ -49,7 +49,9 @@ logger = logging.getLogger(__name__)
 _SELF_KEY = "."
 _ALLOWED_HOST_TYPES = set(accepted_host_types())
 _ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
-SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2", "3"})
+SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2", "3", "4"})
+# Version 4 records package content hashes in the framed stream; 1-3 in the legacy one.
+FRAMED_CONTENT_HASH_VERSION = "4"
 _REPRODUCIBLE_EPOCH = "1970-01-01T00:00:00+00:00"
 
 
@@ -585,6 +587,9 @@ class LockedDependency:
     # only ownership evidence for native settings keys and deployed roots.
     native_plugin: NativePluginRecord | None = None
     replacement: ReplacementBinding | None = field(default=None, repr=False)
+    # Stream ``content_hash`` was recorded in; set from the owning lockfile's
+    # version, never serialized per row (see ``FRAMED_CONTENT_HASH_VERSION``).
+    content_hash_framed: bool = field(default=True, repr=False, compare=False)
     # Forward-compat carrier: keys we don't recognise are preserved
     # through a from_dict / to_dict round-trip so an older APM build
     # reading a lockfile written by a newer build doesn't silently drop
@@ -1254,6 +1259,14 @@ class LockFile:
     # intent without reading unused sources.  ``None`` means no replacement
     # state; ``[]`` means explicitly empty (cleared rules).
     replacements: list[dict] | None = field(default=None, repr=False)
+    # Whether package content hashes use the framed stream (lockfile version 4).
+    framed_content_hashes: bool = field(default=True, repr=False, compare=False)
+
+    def set_content_hash_stream(self, *, framed: bool) -> None:
+        """Record which stream every package ``content_hash`` row uses."""
+        self.framed_content_hashes = framed
+        for dep in self.dependencies.values():
+            dep.content_hash_framed = framed
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file.
@@ -1264,6 +1277,7 @@ class LockFile:
         would emit (design section 6.1; issue #1488).
         """
         dep.deployed_files = _dedupe_preserving_order(dep.deployed_files)
+        dep.content_hash_framed = self.framed_content_hashes
         self.dependencies[dep.get_unique_key()] = dep
         if dep.deployed_files or dep.deployed_file_hashes:
             from ..core.deployment_ledger import DeploymentLedgerCodec
@@ -1495,6 +1509,10 @@ class LockFile:
 
     def _required_lockfile_version(self) -> str:
         """Return the minimum schema version required by current lock state."""
+        if self.framed_content_hashes and any(
+            dep.content_hash for dep in self.dependencies.values()
+        ):
+            return FRAMED_CONTENT_HASH_VERSION
         if self._needs_v3():
             return "3"
         return "2" if self._needs_v2() else "1"
@@ -1647,6 +1665,7 @@ class LockFile:
             lockfile_version=data.get("lockfile_version", "1"),
             generated_at=data.get("generated_at"),
             apm_version=data.get("apm_version"),
+            framed_content_hashes=data.get("lockfile_version") == FRAMED_CONTENT_HASH_VERSION,
         )
         lock._apm_version_null = "apm_version" in data and data["apm_version"] is None
         for dep_data in data.get("dependencies", []):
@@ -1680,8 +1699,8 @@ class LockFile:
                 lock.replacements = raw_replacements
             else:
                 raise LockfileFormatError("'replacements' must be a list")
-        if lock._needs_v3() and data.get("lockfile_version", "1") != "3":
-            raise LockfileFormatError("Replacement evidence requires lockfile_version '3'")
+        if lock._needs_v3() and data.get("lockfile_version", "1") not in {"3", "4"}:
+            raise LockfileFormatError("Replacement evidence requires lockfile_version '3' or '4'")
         if lock.replacements is not None:
             lock._rekey_port_blind_parents()
         lock._validate_replacement_evidence()

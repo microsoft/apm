@@ -459,14 +459,67 @@ def test_lockfile_reader_tolerates_bare_hex_hash():
 
 
 @pytest.mark.req("req-lk-016")
-@pytest.mark.parametrize("hash_format", ["envelope", "bare64"])
+def test_lock_schema_0_1_68_adds_only_version_4_to_the_0_1_60_contract() -> None:
+    """The 0.1.68 resource adds version 4 and its envelope rule, nothing else."""
+    from jsonschema import Draft202012Validator
+
+    previous = load_schema("lockfile-v0.1.60.schema.json")
+    proposed = load_schema("lockfile-v0.1.68.schema.json")
+    Draft202012Validator.check_schema(proposed)
+    assert proposed["$id"] != previous["$id"]
+    assert proposed["properties"].pop("lockfile_version")["enum"] == ["1", "2", "4"]
+    previous["properties"].pop("lockfile_version")
+    proposed.pop("if"), proposed.pop("then")
+    proposed["$id"], proposed["title"] = previous["$id"], previous["title"]
+    assert proposed == previous
+
+
+@pytest.mark.req("req-lk-016")
+@pytest.mark.parametrize(
+    ("version", "content_hash", "valid"),
+    [
+        ("4", "sha256:" + "a" * 64, True),
+        ("4", "a" * 64, False),
+        ("1", "a" * 64, True),
+        ("3", "sha256:" + "a" * 64, False),
+    ],
+)
+def test_lock_schema_0_1_68_requires_the_envelope_in_version_4(version, content_hash, valid):
+    from jsonschema import Draft202012Validator
+
+    validator = Draft202012Validator(load_schema("lockfile-v0.1.68.schema.json"))
+    lock = {
+        "lockfile_version": version,
+        "dependencies": [{"repo_url": "owner/pkg", "content_hash": content_hash}],
+    }
+    assert (list(validator.iter_errors(lock)) == []) is valid
+
+
+@pytest.mark.req("req-lk-016")
+@pytest.mark.parametrize(
+    ("hash_format", "cache"),
+    [
+        ("version4", "cached"),
+        ("version4", "fresh"),
+        ("legacy-envelope", "cached"),
+        ("legacy-envelope", "fresh"),
+        ("legacy-bare64", "cached"),
+    ],
+)
 def test_frozen_consumer_accepts_equivalent_local_content_hash_encodings(
-    tmp_path: Path, hash_format: str
+    tmp_path: Path, hash_format: str, cache: str
 ) -> None:
-    """Consume both existing digest encodings without rewriting the frozen lock."""
+    """Frozen replay and audit verify each stream without promoting or rewriting.
+
+    A writable install records version 4. A lock carried at version 1 keeps
+    verifying with the legacy stream under --frozen (cached or fresh
+    ``apm_modules``) and ``apm audit``; only a writable install promotes it.
+    """
     import os
+    import shutil
     import sys
 
+    from apm_cli.install.phases.local_content import compute_local_package_hash
     from apm_cli.utils.yaml_io import dump_yaml, load_yaml
     from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
     from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -487,20 +540,39 @@ def test_frozen_consumer_accepts_equivalent_local_content_hash_encodings(
     lockfile = consumer.root / "apm.lock.yaml"
     locked = load_yaml(lockfile)
     (dependency,) = locked["dependencies"]
-    digest = dependency["content_hash"]
-    assert digest.startswith("sha256:") and len(digest.removeprefix("sha256:")) == 64
-    if hash_format == "bare64":
-        dependency["content_hash"] = digest.removeprefix("sha256:")
+    framed = compute_local_package_hash(provider.root)
+    assert locked["lockfile_version"] == "4"
+    assert dependency["content_hash"] == framed
+    if hash_format != "version4":
+        legacy = compute_local_package_hash(provider.root, framed=False)
+        assert legacy != framed
+        locked["lockfile_version"] = "1"
+        dependency["content_hash"] = (
+            legacy if hash_format == "legacy-envelope" else legacy.removeprefix("sha256:")
+        )
         dump_yaml(locked, lockfile)
     original_lock = lockfile.read_bytes()
     deployed = consumer.root / ".agents" / "skills" / "review" / "SKILL.md"
     assert deployed.read_bytes() == source.read_bytes()
+    if cache == "fresh":
+        shutil.rmtree(consumer.root / "apm_modules")
 
     frozen = runner.run(("install", "--frozen", "--no-policy"), cwd=consumer.root, env=environment)
 
     assert frozen.returncode == 0, frozen.stdout + frozen.stderr
     assert lockfile.read_bytes() == original_lock
     assert deployed.read_bytes() == source.read_bytes()
+
+    audited = runner.run(("audit", "--no-policy"), cwd=consumer.root, env=environment)
+    assert audited.returncode == 0, audited.stdout + audited.stderr
+    assert lockfile.read_bytes() == original_lock
+
+    if hash_format == "legacy-envelope":
+        promoted = runner.run(("install", "--no-policy"), cwd=consumer.root, env=environment)
+        assert promoted.returncode == 0, promoted.stdout + promoted.stderr
+        rewritten = load_yaml(lockfile)
+        assert rewritten["lockfile_version"] == "4"
+        assert rewritten["dependencies"][0]["content_hash"] == framed
 
 
 @pytest.mark.req("req-lk-017")

@@ -210,6 +210,8 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
     )
     # Replacement evidence has cross-field constraints tested separately.
     kwargs["replacement"] = None
+    # The row's hash stream is carried by lockfile_version, not by the row.
+    kwargs["content_hash_framed"] = True
     kwargs["_unknown_fields"] = draw(
         st.one_of(st.just({}), st.just({"future_consumer_field": {"enabled": True}}))
     )

@@ -257,6 +257,7 @@ def _resolve_download_strategy(
             install_path,
             _dep_locked_chk.content_hash,
             _dep_locked_chk.carried_licenses or carried_licenses_for(ctx, dep_key, _dep_locked_chk),
+            framed=_dep_locked_chk.content_hash_framed,
         ):
             _hash_msg = f"Content hash mismatch for {dep_ref.get_unique_key()} -- re-downloading"
             diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
