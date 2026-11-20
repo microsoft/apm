@@ -107,7 +107,9 @@ def locked_content_mismatch(
         source = package_info if package_info is not None else locked_dep
         exclude = carried_license_paths(getattr(source, "carried_licenses", None) or ())
     if fresh_hash is not None:
-        if fresh_hash == expected:
+        from apm_cli.utils.content_hash import same_package_digest
+
+        if same_package_digest(fresh_hash, expected):
             return False
     else:
         from apm_cli.utils.content_hash import verify_package_hash
