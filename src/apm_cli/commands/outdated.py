@@ -687,8 +687,7 @@ def outdated(global_, verbose, parallel_checks):
             logger.info(
                 "PROXY_REGISTRY_ONLY is set: git dependencies cannot be checked for "
                 "newer versions because APM does not list versions through the registry proxy. "
-                "Exact pins still install through the proxy; unset PROXY_REGISTRY_ONLY "
-                "to check against the source host."
+                "Exact pins still install through the proxy."
             )
     if any(row.status == "not-comparable" for row in rows):
         logger.progress("Local replacement sources are not remotely comparable")

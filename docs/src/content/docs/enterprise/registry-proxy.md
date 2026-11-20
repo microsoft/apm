@@ -59,7 +59,7 @@ a lockfile written without the proxy is refused before anything downloads:
 PROXY_REGISTRY_ONLY is set but the lockfile contains dependencies locked to direct VCS sources:
   - microsoft/apm-sample-package (host: github.com)
   - github/awesome-copilot/skills/review-and-refactor (host: github.com)
-Run 'apm update' to re-resolve through the registry, or unset PROXY_REGISTRY_ONLY.
+Run 'apm update' to re-resolve through the registry.
 [x] Install failed after 0.3s.
 ```
 

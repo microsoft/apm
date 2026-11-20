@@ -815,7 +815,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
                         _rich_error(f"  - {name} (host: {host})")
                     _rich_error(
                         f"Run '{lockfile_refresh_command(scope)}' to re-resolve "
-                        "through the registry, or unset PROXY_REGISTRY_ONLY."
+                        "through the registry."
                     )
                     raise InstallFailureAlreadyRendered(
                         "Proxy-only lockfile contains direct VCS dependencies"

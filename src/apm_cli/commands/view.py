@@ -617,8 +617,7 @@ def display_versions(
             f"Cannot list versions for '{package}' in registry-only mode: "
             "APM does not list versions through the registry proxy and "
             "PROXY_REGISTRY_ONLY blocks version enumeration against the source "
-            "host. To list versions, unset PROXY_REGISTRY_ONLY; to install, pin "
-            "an exact version tag in apm.yml."
+            "host. To install, pin an exact version tag in apm.yml."
         )
         sys.exit(1)
 

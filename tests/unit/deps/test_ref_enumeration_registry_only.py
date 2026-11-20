@@ -49,7 +49,7 @@ class TestViewVersionsRegistryOnly:
         message = logger.error.call_args.args[0]
         assert "registry-only mode" in message
         assert "exact version" in message
-        assert "unset PROXY_REGISTRY_ONLY" in message
+        assert "unset PROXY_REGISTRY_ONLY" not in message
 
     def test_without_the_flag_remote_refs_are_listed(self, tmp_path):
         with patch.dict(os.environ, _mode_off_env(), clear=True):
@@ -101,7 +101,11 @@ class TestOutdatedRegistryOnly:
         assert result.exit_code == 0, result.output
         git_module.cmd.Git.assert_not_called()
         assert "unknown" in result.output
-        assert "PROXY_REGISTRY_ONLY is set" in " ".join(result.output.split())
+        output = " ".join(result.output.split())
+        assert "PROXY_REGISTRY_ONLY is set" in output
+        assert "Exact pins still install through the proxy." in output
+        # The note never advises leaving registry-only mode.
+        assert "unset PROXY_REGISTRY_ONLY" not in output
 
     def test_without_the_flag_ls_remote_runs_and_no_hint(self, tmp_path, monkeypatch):
         monkeypatch.delenv("PROXY_REGISTRY_ONLY", raising=False)

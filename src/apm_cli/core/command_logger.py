@@ -340,6 +340,8 @@ class InstallLogger(CommandLogger):
         # ``apm update`` reuses this logger; ``command`` keeps hints true for it.
         super().__init__(command, verbose=verbose, dry_run=dry_run)
         self.partial = partial  # True when specific packages are passed to `apm install`
+        # Policy subjects of packages this command line adds (not yet in apm.yml).
+        self.requested_policy_subjects: frozenset[str] = frozenset()
         self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
         self._dry_run_apm_update_count = 0
         self._dry_run_incomplete = False
@@ -927,7 +929,7 @@ class InstallLogger(CommandLogger):
             _rich_warning(
                 f"Could not fetch org policy from {source} ({err_text}); "
                 "proceeding without policy enforcement. "
-                "Retry, check connectivity, or use --no-policy to bypass.",
+                "Retry, or check connectivity to the policy source.",
                 symbol="warning",
             )
             return
@@ -938,7 +940,7 @@ class InstallLogger(CommandLogger):
             _rich_warning(
                 f"Policy response from {source} is not valid YAML "
                 f"({err_text}); proceeding without policy enforcement. "
-                "Contact your org admin or use --no-policy.",
+                "Contact your org admin to fix the policy file.",
                 symbol="warning",
             )
             return
@@ -1032,6 +1034,7 @@ class InstallLogger(CommandLogger):
                         declared_by=declared_by,
                         rule=rule,
                         command=self.command,
+                        requested=dep_ref in self.requested_policy_subjects,
                     ),
                     color="dim",
                     err=True,
@@ -1076,23 +1079,15 @@ class InstallLogger(CommandLogger):
         )
 
     @staticmethod
-    def _policy_bypass_hint(command: str) -> str:
-        """One-off bypass the *command* actually accepts (#3994).
-
-        ``apm install`` has ``--no-policy``; other commands (``apm update``)
-        only honour a one-shot ``APM_POLICY_DISABLE=1`` prefix, which must
-        never be exported where it would disable policy for a whole CI job.
-        """
-        if command == "install":
-            return "use `--no-policy` for one-off bypass"
-        return f"bypass once with `APM_POLICY_DISABLE=1 apm {command}` (never export it in CI)"
-
-    @staticmethod
     def _policy_reason_unreachable(source: str, *, command: str = "install") -> str:
-        """Actionable reason for unreachable policy source."""
+        """Actionable reason for unreachable policy source.
+
+        Refusals name the fix for the cause, never a way around the policy.
+        """
+        del command
         return (
             f"Policy source {source} is unreachable "
-            f"-- retry, check VPN/firewall, or {InstallLogger._policy_bypass_hint(command)}"
+            "-- check VPN/firewall and network access to it, then retry"
         )
 
     @staticmethod
@@ -1109,15 +1104,22 @@ class InstallLogger(CommandLogger):
         declared_by: str | None = None,
         rule: str | None = None,
         command: str = "install",
+        requested: bool = False,
     ) -> str:
         """Actionable reason for a blocked dependency.
 
         Only :class:`~apm_cli.policy.models.PolicyRemedy` members render an
-        apm.yml edit; ``None`` or an unknown remedy renders none.
+        apm.yml edit; ``None`` or an unknown remedy renders none. A package
+        *requested* on this command line was never written to apm.yml, so
+        its remedy is to choose another package, not to remove it. Refusals
+        name the fix for the cause, never a way around the policy.
         """
         from apm_cli.policy.models import PolicyRemedy
 
-        if remedy == PolicyRemedy.ADD:
+        del command
+        if requested and remedy == PolicyRemedy.REMOVE:
+            edit = "choose a package the policy allows, or "
+        elif remedy == PolicyRemedy.ADD:
             edit = f"add `{dep_ref}` to apm.yml, "
         elif remedy == PolicyRemedy.PIN:
             edit = f"pin `{dep_ref}` to a semver range, tag, or SHA in apm.yml, "
@@ -1129,9 +1131,7 @@ class InstallLogger(CommandLogger):
             edit = ""
         rule_part = f" ({rule})" if rule and rule != dep_ref else ""
         return (
-            f"Blocked by org policy at {source}{rule_part} "
-            f"-- {edit}contact admin to update policy, "
-            f"or {InstallLogger._policy_bypass_hint(command)}"
+            f"Blocked by org policy at {source}{rule_part} -- {edit}contact admin to update policy"
         )
 
     # --- Install summary ---

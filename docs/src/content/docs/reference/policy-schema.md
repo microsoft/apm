@@ -140,9 +140,9 @@ Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
 
 ```text
 [x] Policy violation: acme/lib -- bare branch 'main' tracks a moving tip
-  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint) -- pin `acme/lib` to a semver range, tag, or SHA in apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint) -- pin `acme/lib` to a semver range, tag, or SHA in apm.yml, contact admin to update policy
 [x] Policy violation: acme/skills -- no ref; resolves to default branch
-  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint) -- pin `acme/skills` to a semver range, tag, or SHA in apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint) -- pin `acme/skills` to a semver range, tag, or SHA in apm.yml, contact admin to update policy
 ```
 
 `apm audit --ci` lists the same dependencies under `dependency-pinned-constraint details:`.

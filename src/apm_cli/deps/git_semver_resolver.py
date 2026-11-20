@@ -295,9 +295,7 @@ class GitSemverResolver:
                     " (e.g. 'v1.2.3' or '1.2.3'); it resolves without a listing"
                     " and replays from apm.lock.yaml. Or install from a registry"
                     " that implements the APM Registry HTTP API"
-                    " (GET /v1/packages/{owner}/{repo}/versions), or unset"
-                    " PROXY_REGISTRY_ONLY to resolve ranges from the upstream"
-                    " host. See"
+                    " (GET /v1/packages/{owner}/{repo}/versions). See"
                     " https://microsoft.github.io/apm/enterprise/registry-proxy/"
                     "#version-enumeration-and-semver-ranges"
                 ),

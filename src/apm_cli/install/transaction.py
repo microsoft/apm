@@ -138,8 +138,15 @@ class InstallTransaction:
         return self._resolution
 
     def record_validation(self, validation: _ValidationOutcome) -> None:
-        """Attach the validation outcome produced after transaction creation."""
+        """Attach the validation outcome produced after transaction creation.
+
+        Packages this command line adds are not in apm.yml until the install
+        commits, so a policy refusal names another remedy for them.
+        """
         self._validation = validation
+        self._logger.requested_policy_subjects = _policy_subjects(
+            name for name, _present in validation.new_packages
+        )
 
     def validation_result(self) -> InstallResult | None:
         """Return the terminal result for an all-invalid positional batch."""
@@ -387,3 +394,17 @@ def stage_existing_copy(ctx: Any, path: Path, locked: Any, *, skip: bool = False
         return
     if path.exists() or path.is_symlink():
         resolution_for_context(ctx).prepare_path(path)
+
+
+def _policy_subjects(names) -> frozenset[str]:
+    """The policy subject (host-qualified identity) of each package name."""
+    from apm_cli.models.dependency import DependencyReference
+    from apm_cli.policy.matcher import dependency_policy_subject
+
+    subjects: set[str] = set()
+    for name in names:
+        try:
+            subjects.add(dependency_policy_subject(DependencyReference.parse(str(name))))
+        except (ValueError, TypeError):
+            continue
+    return frozenset(subjects)

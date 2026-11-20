@@ -218,7 +218,8 @@ def test_view_versions_aborts_without_contacting_source_host(
 
     assert scenario.result.returncode == 1, scenario.output
     assert "registry-only mode" in scenario.output
-    assert "unset PROXY_REGISTRY_ONLY" in scenario.output
+    assert "pin an exact version tag in apm.yml" in scenario.output
+    assert "unset PROXY_REGISTRY_ONLY" not in scenario.output
     assert scenario.git_network_calls == []
     assert scenario.upstream_requests == []
 
@@ -245,7 +246,8 @@ def test_install_range_fails_with_remedy_without_contacting_source_host(
 
     assert scenario.result.returncode != 0, scenario.output
     assert "Cannot resolve the range '^1.0.0'" in scenario.output
-    assert "unset PROXY_REGISTRY_ONLY" in scenario.output
+    assert "Pin one exact version" in scenario.output
+    assert "unset PROXY_REGISTRY_ONLY" not in scenario.output
     assert scenario.git_network_calls == []
     assert scenario.upstream_requests == []
     assert not (scenario.project / "apm.lock.yaml").exists()

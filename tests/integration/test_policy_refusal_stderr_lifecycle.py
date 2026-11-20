@@ -57,19 +57,18 @@ def test_policy_refusals_and_approve_usage_error_write_stderr(
         # Upstream moves on, so `apm update` has a change to apply (#4166).
         (package.repository.worktree / "NEXT.md").write_text("next\n", encoding="utf-8")
         world.repositories.commit(package.repository, message="pkg-a next")
-        # Each refusal names a bypass that command accepts: install has
-        # --no-policy, update only the one-shot env prefix (#3994).
-        install_bypass = "--no-policy` for one-off bypass"
-        update_bypass = "`APM_POLICY_DISABLE=1 apm update` (never export it in CI)"
-        for step, args, bypass in (
-            ("2-install-blocked", ("install",), install_bypass),
-            ("3-frozen-blocked", ("install", "--frozen"), install_bypass),
-            ("4-update-blocked", ("update", "--yes"), update_bypass),
+        # Each refusal names the fix for its cause, never a policy bypass.
+        remedy = f"remove `github.com/{package.slug}` from apm.yml, contact admin to update policy"
+        for step, args in (
+            ("2-install-blocked", ("install",)),
+            ("3-frozen-blocked", ("install", "--frozen")),
+            ("4-update-blocked", ("update", "--yes")),
         ):
             result = run_step(runner, args, cwd=project, env=env, step=step, expected=1)
-            _assert_refusal_on_stderr(result, violation, "blocked by org policy", bypass)
-            if args[0] == "update":
-                assert "--no-policy" not in result.stdout + result.stderr, step
+            _assert_refusal_on_stderr(result, violation, "blocked by org policy", remedy)
+            output = result.stdout + result.stderr
+            for bypass in ("--no-policy", "APM_POLICY_DISABLE", "bypass"):
+                assert bypass not in output, (step, bypass)
 
         usage = run_step(runner, ("approve",), cwd=project, env=env, step="5-approve", expected=2)
         _assert_refusal_on_stderr(
