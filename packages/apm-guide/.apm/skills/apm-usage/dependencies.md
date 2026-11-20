@@ -376,6 +376,12 @@ ref; CLI marketplace suffixes do not accept ranges. Raw refs bypass tag resoluti
 placeholder. Semver selections also record the existing advisory `resolved_at`
 UTC timestamp; audit and replay do not use it to choose a version.
 Unknown keys in a marketplace entry are rejected.
+A committed install records each plugin version's catalog ref under
+`APM_HOME` (`cache/marketplace/version-pins.json`, keyed by the resolved
+version). If the catalog later points that version at another ref, install
+refuses (exit 1) and names both refs until the named entry is removed. A raw
+ref override (`version: main`) never checks or records a pin, and a failed or
+`--dry-run` install records nothing.
 On a `*.ghe.com` marketplace, a plugin source of any type (`github`,
 `git-subdir`, `gitlab`, `url`) with a bare cross-repo `owner/repo` is refused
 as a dependency-confusion risk (#1326)

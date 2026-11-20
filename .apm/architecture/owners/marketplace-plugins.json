@@ -238,6 +238,15 @@
         "src/apm_cli/bundle/credential_files.py"
       ],
       "guards": ["marketplace-integrations-pack-credential-files"]
+    },
+    {
+      "id": "marketplace-ref-pin-commit",
+      "decision": "Marketplace ref pins are trust on first use: resolution checks and stages, a contradicting ref is refused, and only a committed install records pins",
+      "owner": "marketplace/version_pins.py (enforce_ref_pin, RefPinStage.commit, RefPinStage.discard); install/transaction.py InstallTransaction.commit is the single recorder",
+      "selectors": [
+        "src/apm_cli/marketplace/version_pins.py"
+      ],
+      "guards": ["marketplace-integrations-ref-pin-commit"]
     }
   ]
 }
