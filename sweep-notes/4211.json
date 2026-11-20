@@ -1,0 +1,23 @@
+{
+  "changelog": "`apm install` names every destination folder on integration lines for three or more targets instead of printing 'N targets' (#4217)",
+  "ledger_row": {
+    "issue": 4211,
+    "fixed_in": "Unreleased",
+    "summary": "With three or more targets the per-primitive install line collapsed its destinations to 'N targets', hiding where files were written.",
+    "failure_modes": [
+      "outcome",
+      "observation"
+    ],
+    "properties": [
+      "outcome.status_matches_state",
+      "idempotency.byte_stable"
+    ],
+    "regression_tests": [
+      "tests/integration/test_install_summary_destinations_lifecycle.py::test_widened_install_names_every_destination_folder"
+    ]
+  },
+  "red": "APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_install_summary_destinations_lifecycle.py::test_widened_install_names_every_destination_folder -n 0 -p no:cacheprovider -q -> AssertionError: At index 0 diff: '  |-- 1 rule(s) integrated (2 adopted) -> 3 targets' != '  |-- 1 rule(s) integrated (2 adopted) -> .claude/rules/, .github/instructions/, .cursor/rules/'",
+  "green": "same command -> 1 passed",
+  "owner": "src/apm_cli/install/deployed_paths.py (format_target_collapse, new destination_tree_lines shared with the local bundle summary #4192)",
+  "notes": "Function name format_target_collapse kept so PR #4143's unchanged context line in services.py still applies. The per-kind site in integrate_package_primitives now calls destination_tree_lines; the skill site was left as-is to stay byte-identical with #4143. Updated unit/integration tests that pinned '3 targets'/'4 targets'. The lifecycle test sets COLUMNS=200 so Rich does not hard-wrap the longer line. Verbose mode keeps its one-folder-per-line expansion."
+}

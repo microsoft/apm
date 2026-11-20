@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
+from .deployed_paths import destination_tree_lines as _destination_tree_lines
 from .deployed_paths import format_target_collapse as _format_target_collapse
 from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
@@ -586,7 +587,6 @@ def integrate_package_primitives(  # noqa: PLR0913
         if _prim_name not in _per_kind:
             continue
         _info = _per_kind[_prim_name]
-        _suffix, _expansion = _format_target_collapse(_info["paths"], _verbose)
         # Build the verb + count phrase. When at least one file was
         # freshly integrated we lead with "N X integrated"; pure-adopt
         # runs (no fresh writes) lead with "N X adopted" so the line
@@ -600,12 +600,8 @@ def integrate_package_primitives(  # noqa: PLR0913
                 _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
         else:
             _verb_phrase = f"{_adopted} {_noun} adopted"
-        if _expansion:
-            _log_integration(f"  |-- {_verb_phrase}:")
-            for line in _expansion:
-                _log_integration(line)
-        else:
-            _log_integration(f"  |-- {_verb_phrase} -> {_suffix}")
+        for line in _destination_tree_lines(_verb_phrase, _info["paths"], _verbose):
+            _log_integration(line)
         # Emit per-hook-file action summaries for the hooks primitive.
         # display_payloads reflects post-path-rewrite data (what is
         # actually written to disk and executed), so this is faithful.

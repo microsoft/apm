@@ -11,17 +11,19 @@ from apm_cli.utils.paths import portable_relpath
 
 
 def format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
-    """Format one target path, two paths, or a collapsed multi-target count."""
+    """Name every destination folder: inline, or one line each when verbose (#4211)."""
     deduped = list(dict.fromkeys(paths))
     if verbose and len(deduped) >= 2:
         return "", [f"  |     -> {path}" for path in deduped]
-    if not deduped:
-        return "", []
-    if len(deduped) == 1:
-        return deduped[0], []
-    if len(deduped) == 2:
-        return f"{deduped[0]}, {deduped[1]}", []
-    return f"{len(deduped)} targets", []
+    return ", ".join(deduped), []
+
+
+def destination_tree_lines(phrase: str, paths: list[str], verbose: bool) -> list[str]:
+    """Return the ``|-- <phrase> -> <folders>`` install tree lines for *paths*."""
+    suffix, expansion = format_target_collapse(paths, verbose)
+    if expansion:
+        return [f"  |-- {phrase}:", *expansion]
+    return [f"  |-- {phrase} -> {suffix}"]
 
 
 def deployed_path_entry(

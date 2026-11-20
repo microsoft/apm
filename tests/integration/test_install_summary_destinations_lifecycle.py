@@ -59,7 +59,8 @@ def _assert_lock_matches_deployed(project: Path, snapshot: LifecycleStateSnapsho
 class _World:
     def __init__(self, tmp_path: Path, apm_binary_path: Path, targets: tuple[str, ...]) -> None:
         isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
-        self.env = isolated.subprocess_env()
+        # A wide terminal keeps Rich from hard-wrapping long summary lines.
+        self.env = {**isolated.subprocess_env(), "COLUMNS": "200"}
         self.runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
         self.packages = LocalPackageFactory(isolated.work_root)
         self.targets = targets
@@ -101,3 +102,31 @@ def test_skill_bundle_install_prints_one_skill_line(tmp_path: Path, apm_binary_p
 
     assert _integration_lines(replay) == expected, _evidence(replay)
     assert world.snap() == after, "I2: frozen replay of a converged install changed state"
+
+
+def test_widened_install_names_every_destination_folder(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4211: a third target is named by folder, never collapsed to 'N targets'."""
+    world = _World(tmp_path, apm_binary_path, ("claude", "copilot"))
+    rules = world.packages.create("rules")
+    world.packages.add_instruction(
+        rules, "style", "---\napplyTo: '**/*.py'\ndescription: style\n---\nUse four spaces.\n"
+    )
+    world.packages.add_relative_dependency(world.project, rules)
+    world.apm("install")
+
+    world.packages.set_targets(world.project, ("claude", "copilot", "cursor"))
+    world.targets = ("claude", "copilot", "cursor")
+    widened = world.apm("install")
+
+    destinations = (".claude/rules/", ".github/instructions/", ".cursor/rules/")
+    assert _integration_lines(widened) == [
+        f"  |-- 1 rule(s) integrated (2 adopted) -> {', '.join(destinations)}"
+    ], _evidence(widened)
+    for folder in destinations:
+        assert any((world.project.root / folder).iterdir()), folder
+    after = world.snap()
+    _assert_lock_matches_deployed(world.project.root, after)
+    assert world.apm("install").stdout.count(" targets") == 0
+    assert world.snap() == after, "I2: converged install changed state"
