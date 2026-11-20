@@ -180,9 +180,18 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
     check_resolution_replacement,
     check_uninstall_selection,
 )
+from scripts.architecture_linter.checks.install_uninstall_preflight import (
+    GUARD_UNINSTALL_PREFLIGHT,
+    check_uninstall_preflight,
+)
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        GUARD_UNINSTALL_PREFLIGHT,
+        "Uninstall validates recorded paths and survivor trust before its first write.",
+        check_uninstall_preflight,
+    ),
     _rule(
         GUARD_LOCKFILE_REQUIRED,
         "Frozen install and audit share one answer to whether a lockfile is required.",

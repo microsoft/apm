@@ -630,6 +630,16 @@
       ]
     },
     {
+      "issue": 4162,
+      "fixed_in": "0.37.0",
+      "summary": "apm uninstall exited 1 after removing the package files and rewriting the lockfile when a user file sat inside the package's deployed skill directory.",
+      "failure_modes": ["cleanup", "transaction"],
+      "properties": ["ownership.preserve_unowned", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_refusal_atomicity_lifecycle.py::test_uninstall_releases_a_skill_directory_holding_user_content"
+      ]
+    },
+    {
       "issue": 4166,
       "fixed_in": "Unreleased",
       "summary": "apm update compared the resolver's default-branch name with the absent ref the lockfile records for a dependency declared without a ref, so every update reported 1 updated and re-integrated an unchanged commit.",
@@ -654,6 +664,17 @@
       "regression_tests": [
         "tests/integration/test_deployment_receipt_gc_lifecycle.py::test_orphaned_receipt_is_collected_and_live_receipt_survives",
         "tests/unit/test_deployment_materialization_receipts.py::test_orphaned_receipt_collection_keeps_every_doubtful_receipt"
+      ]
+    },
+    {
+      "issue": 4185,
+      "fixed_in": "0.37.0",
+      "summary": "apm uninstall could exit 1 after it had already changed apm.yml, the lockfile and deployed files, when a check it needed (survivor trust, recorded-path validation) refused mid-command.",
+      "failure_modes": ["transaction", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_refusal_atomicity_lifecycle.py::test_policy_refusal_mid_uninstall_changes_nothing",
+        "tests/integration/test_uninstall_refusal_atomicity_lifecycle.py::test_uninstall_validates_every_recorded_path_before_changing_state"
       ]
     }
   ],
