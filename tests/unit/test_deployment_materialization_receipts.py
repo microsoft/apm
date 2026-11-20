@@ -1065,7 +1065,7 @@ def test_orphaned_receipt_collection_keeps_every_doubtful_receipt(tmp_path, monk
     corrupt = receipts / f"{'1' * 64}.json"
     corrupt.write_text("{not json")
 
-    assert deployment_ledger.collect_orphaned_receipts() == 1
+    assert deployment_ledger.retire_receipts_of_missing_projects() == 1
     assert not gone.exists()
     assert all(path.exists() for path in kept.values()), kept
     assert corrupt.exists()

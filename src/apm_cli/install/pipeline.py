@@ -123,7 +123,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     """Bound durable ownership reads to integration, before lockfile persistence."""
     from apm_cli.core.deployment_ledger import (
         DeploymentMaterializationSession,
-        collect_orphaned_receipts,
+        retire_receipts_of_missing_projects,
     )
     from apm_cli.integration.skill_adoption import locked_skill_sources
 
@@ -137,7 +137,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     locked = locked_skill_sources(ctx) if session is not None else None
     if session is not None:
         session.locked_sources = locked
-        collect_orphaned_receipts()
+        retire_receipts_of_missing_projects()
     try:
         with (
             contextlib.nullcontext()

@@ -1,7 +1,7 @@
 """Closed-world guard: deployment receipts are collected only by their owner (#4176).
 
 ``core/deployment_ledger.py`` owns ``$APM_HOME/deployment-receipts``. Orphan
-collection (``collect_orphaned_receipts``) keys every candidate from the root
+collection (``retire_receipts_of_missing_projects``) keys every candidate from the root
 it records and keeps any receipt in doubt; install and prune run it. No
 other product module names the receipts directory, so nothing else can
 delete or rewrite a project's receipt.
@@ -21,9 +21,13 @@ GUARD_RECEIPT_COLLECTION = "install-deployment-receipt-collection"
 _OWNER = "src/apm_cli/core/deployment_ledger.py"
 _RECEIPTS_DIR = "deployment-receipts"
 _ROUTES = (
-    (_OWNER, "collect_orphaned_receipts", "_receipt_key"),
-    ("src/apm_cli/install/pipeline.py", "_run_integration_phase", "collect_orphaned_receipts"),
-    ("src/apm_cli/commands/prune.py", "prune", "collect_orphaned_receipts"),
+    (_OWNER, "retire_receipts_of_missing_projects", "_receipt_key"),
+    (
+        "src/apm_cli/install/pipeline.py",
+        "_run_integration_phase",
+        "retire_receipts_of_missing_projects",
+    ),
+    ("src/apm_cli/commands/prune.py", "prune", "retire_receipts_of_missing_projects"),
 )
 
 
