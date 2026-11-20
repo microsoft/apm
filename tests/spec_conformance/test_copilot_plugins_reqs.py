@@ -65,6 +65,40 @@ from tests.utils.local_package import LocalPackageFactory
 _COPILOT_TARGET = SimpleNamespace(name="copilot")
 
 
+def _pipeline_preview(package: APMPackage, root: Path):
+    """Return the install pipeline's own dry-run plan (#4085)."""
+    from apm_cli.core.command_logger import InstallLogger
+    from apm_cli.deps.transport_selection import ProtocolPreference
+    from apm_cli.install.pipeline import run_install_pipeline
+    from apm_cli.install.pipeline_entry import pipeline_preview
+    from apm_cli.install.transaction import InstallTransaction
+
+    logger = InstallLogger(verbose=False, dry_run=True)
+    transaction = InstallTransaction(
+        manifest_path=root / "apm.yml",
+        apm_modules_dir=root / "apm_modules",
+        validation=None,
+        logger=logger,
+        acquire_lock=False,
+    )
+    preview = pipeline_preview(
+        lambda: run_install_pipeline(
+            package,
+            logger=logger,
+            no_policy=True,
+            install_mcp=False,
+            target="copilot",
+            protocol_pref=ProtocolPreference.NONE,
+            allow_protocol_fallback=False,
+            transaction=transaction,
+            dry_run=True,
+        ),
+        logger,
+    )
+    transaction.rollback()
+    return preview
+
+
 @pytest.mark.req("req-tg-011")
 def test_transitive_native_preview_preflight_preserves_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -95,14 +129,20 @@ def test_transitive_native_preview_preflight_preserves_state(
         logger=None,
     )
     monkeypatch.chdir(consumer.root)
-    before = ArtifactSnapshot.capture(tmp_path)
+    # --dry-run may fill the shared download cache (#4085); sources,
+    # project and user configuration stay untouched.
+    before = ArtifactSnapshot.capture(tmp_path / "sources")
     plan = ProspectiveInstallPlan.from_install_context(
-        package, ctx, should_install_apm=True, should_install_mcp=False
+        package,
+        ctx,
+        should_install_apm=True,
+        should_install_mcp=False,
+        preview=_pipeline_preview(package, consumer.root),
     )
     assert not plan.dependency_preview_errors
     assert len(plan.selected_apm_dependencies) == 2
     preflight_agent_plugin_dry_run(ctx, list(plan.selected_apm_dependencies), apm_package=package)
-    assert ArtifactSnapshot.capture(tmp_path) == before
+    assert ArtifactSnapshot.capture(tmp_path / "sources") == before
     assert not (home / ".apm" / "config.json").exists()
 
 
