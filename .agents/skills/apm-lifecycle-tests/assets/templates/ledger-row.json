@@ -1,0 +1,14 @@
+{
+  "issue": 1234,
+  "fixed_in": "0.37.0",
+  "summary": "One sentence stating the user-visible law that was broken, in neutral terms.",
+  "failure_modes": [
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_<promise>_lifecycle.py::test_<promise_sentence>"
+  ]
+}

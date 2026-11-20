@@ -1,0 +1,103 @@
+"""<Promise sentence, e.g. uninstall preserves an unmanaged file next to a deployed skill.>
+
+PROMISE: <id, e.g. ownership.preserve_unowned> (source: <path or issue>)
+CELLS: op=<install|uninstall|...>, scope=project, target=<claude>, source=local
+Template for today's harness. Copy to
+tests/integration/test_<promise>_lifecycle.py, rename the test, and keep
+the before/after snapshot plus the cross-cutting checks.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.lifecycle_state import LifecycleStateSnapshot
+from tests.utils.local_package import LocalPackageFactory
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+]
+
+_TARGET = "claude"
+_SKILL_DIR = ".claude/skills/alpha-skill"
+_USER_SKILL_FILE = ".claude/skills/my-own-skill/SKILL.md"
+
+
+def _evidence(result: CommandResult) -> str:
+    return (
+        f"command={result.command!r}\nexit={result.returncode}\n"
+        f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+    )
+
+
+def _assert_output_oracles(result: CommandResult) -> None:
+    """I6 ASCII and I9 no duplicate status lines ([+], [!], [x], ...) per stream."""
+    for stream in (result.stdout, result.stderr):
+        assert stream.isascii(), _evidence(result)
+        lines = [line.strip() for line in stream.splitlines() if line.lstrip().startswith("[")]
+        assert len(lines) == len(set(lines)), _evidence(result)
+
+
+def _assert_lock_matches_deployed(project: Path, snapshot: LifecycleStateSnapshot) -> None:
+    """I1: every deployment record points at a path that exists."""
+    for record in snapshot.deployment_records:
+        assert (project / record.locator.value).exists(), record
+
+
+def test_promise_name_here(tmp_path: Path, apm_binary_path: Path) -> None:
+    # World: hermetic HOME/APM_HOME, local packages, no network.
+    isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=60)
+    # One factory owns both packages so relative dependencies resolve.
+    packages = LocalPackageFactory(isolated.work_root)
+
+    alpha = packages.create("alpha")
+    packages.add_skill(alpha, "alpha-skill", "---\nname: alpha-skill\ndescription: d\n---\nBody\n")
+    project = packages.create("consumer", targets=(_TARGET,))
+    packages.add_relative_dependency(project, alpha)
+
+    def apm(*args: str) -> CommandResult:
+        result = runner.run(args, cwd=project.root, env=env)
+        _assert_output_oracles(result)
+        return result
+
+    def snap() -> LifecycleStateSnapshot:
+        return LifecycleStateSnapshot.capture(project.root, targets=(_TARGET,))
+
+    # GIVEN: converged installed state (no --no-policy unless it is the subject).
+    installed = apm("install")
+    assert installed.returncode == 0, _evidence(installed)
+    before = snap()
+    _assert_lock_matches_deployed(project.root, before)
+
+    # I2: repeating the converged command changes no bytes.
+    again = apm("install")
+    assert again.returncode == 0, _evidence(again)
+    assert snap() == before, "I2: converged install changed durable state"
+
+    # Arrange the cell under test, e.g. a user-owned skill next to the deployed one.
+    sibling = project.root / _USER_SKILL_FILE
+    sibling.parent.mkdir(parents=True)
+    sibling.write_text("user notes\n", encoding="ascii")
+
+    # WHEN: the mutating command under test.
+    result = apm("uninstall", "../alpha")  # local deps are selected by path
+    assert result.returncode == 0, _evidence(result)  # I8: documented exit code
+    after = snap()
+
+    # THEN: decisive state facts, not stdout substrings.
+    assert sibling.read_text(encoding="ascii") == "user notes\n"
+    assert not (project.root / _SKILL_DIR).exists()
+    _assert_lock_matches_deployed(project.root, after)
+
+    # I3: the audit verdict agrees with the durable state.
+    audit = apm("audit", "--ci")
+    assert audit.returncode == 0, _evidence(audit)
