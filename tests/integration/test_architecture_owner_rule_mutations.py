@@ -894,6 +894,12 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
         ),
         (
             "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "            _retire_per_file(project_root, targets, item)\n",
+            "",
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
             "src/apm_cli/commands/install.py",
             "    reconcile_scope_bundle_hooks(\n",
             "    (lambda *a, **k: None)(\n",

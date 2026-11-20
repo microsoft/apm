@@ -275,6 +275,7 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
     _HOOK_OWNERSHIP: (
         "def local_bundle_hook_source_marker(bundle_id: str, approval_key: str | None = None)",
         "def parse_local_bundle_hook_source(",
+        "def write_per_file_bundle_record(",
     ),
     _HOOK_INTEGRATOR: (
         "local_bundle_hook_source_marker(bundle_id, package_info.local_bundle_approval)",
@@ -285,13 +286,18 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         "is_package_approved(allow_map, key, EXEC_TYPE_HOOKS)",
         "if None in keys:",
         "HookIntegrator().retire_local_bundle_hooks(item.slug, project_root, hook_targets)",
+        "_retire_per_file(project_root, targets, item)",
+        "_drop_lock_rows(lock_dir, retired_files)",
     ),
     _INSTALL_COMMAND: ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/update.py": ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/prune.py": ("reconcile_scope_bundle_hooks(",),
-    _CI_CHECKS: ("unadmitted_bundle_hooks(deployment_root, targets, allow_provider)",),
+    _CI_CHECKS: (
+        "unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)",
+    ),
     "src/apm_cli/install/local_bundle_hooks.py": (
         "package_info.local_bundle_approval = approval_key",
+        "_record_per_file_approval(",
     ),
 }
 # The approval record is read and written only in hook_ownership.py.

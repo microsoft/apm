@@ -2,18 +2,21 @@
 
 A local bundle's hooks were admitted by one exact content-bound approval key,
 recorded with their ownership marker (see
-:func:`~apm_cli.integration.hook_ownership.local_bundle_hook_source_marker`).
-Every install, update, prune and ``apm audit --ci`` asks this module whether
-that key is still granted under the current project, user and org layers.
-Hooks whose key is no longer granted, or whose marker records no key, are not
-admitted: install retires their registration through the hook integrator's
-local-bundle retirement owner, and audit reports them first.
+:func:`~apm_cli.integration.hook_ownership.local_bundle_hook_source_marker`):
+in the merged-config sidecar for merged targets, and in the same sidecar
+name at the target root for per-file targets such as Copilot. Every install,
+update, prune and ``apm audit --ci`` asks this module whether that key is
+still granted under the current project, user and org layers. Hooks whose
+key is no longer granted, or that record no key, are not admitted: install
+retires them (merged entries through the hook integrator's local-bundle
+retirement owner; per-file hook files are removed with their lock rows), and
+audit reports them first.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Collection
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +30,13 @@ class UnadmittedBundleHooks:
 
     slug: str
     reason: str
+    hook_files: tuple[str, ...] = ()
+
+
+@dataclass
+class _BundleHookState:
+    keys: set[str | None] = field(default_factory=set)
+    hook_files: set[str] = field(default_factory=set)
 
 
 def _merged_hook_documents(project_root: Path, targets: Any):
@@ -51,14 +61,75 @@ def _merged_hook_documents(project_root: Path, targets: Any):
             yield None, None, config.event_container_key
 
 
-def deployed_bundle_hook_keys(project_root: Path, targets: Any) -> dict[str, set[str | None]]:
-    """Return each deployed local bundle slug and the approval keys its hooks record."""
+def _per_file_targets(targets: Any) -> list[Any]:
+    from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+
+    return [
+        target
+        for target in targets or ()
+        if getattr(target, "name", None) not in _MERGE_HOOK_TARGETS
+        and callable(getattr(target, "supports", None))
+        and target.supports("hooks")
+    ]
+
+
+def _record_value(path: Path, project_root: Path) -> str:
+    """Return the lockfile value for *path*: project-relative, else absolute."""
+    if path.is_relative_to(project_root):
+        return path.relative_to(project_root).as_posix()
+    return path.as_posix()
+
+
+def _collect_per_file(
+    project_root: Path,
+    targets: Any,
+    bundle_paths: Collection[str],
+    found: dict[str, _BundleHookState],
+) -> None:
+    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
+    from apm_cli.integration.hook_ownership import per_file_bundle_hook_keys
+
+    for target in _per_file_targets(targets):
+        target_root = Path(project_root) / target.root_dir
+        recorded: set[str] = set()
+        try:
+            records = per_file_bundle_hook_keys(target_root / _APM_HOOKS_SIDECAR)
+        except (OSError, ValueError, TypeError):
+            records = {}
+        for slug, (key, files) in records.items():
+            state = found.setdefault(slug, _BundleHookState())
+            state.keys.add(key)
+            state.hook_files.update(files)
+            recorded.update(files)
+        # A bundle hook file the lock records without an approval record is
+        # unapproved (written before the record existed, or the record is gone).
+        hooks_dir = target_root / "hooks"
+        for value in bundle_paths:
+            path = Path(value) if Path(value).is_absolute() else Path(project_root) / value
+            if path.suffix != ".json" or path.parent != hooks_dir or value in recorded:
+                continue
+            if _record_value(path, Path(project_root)) in recorded:
+                continue
+            slug = path.stem.removesuffix("-hooks")
+            state = found.setdefault(slug, _BundleHookState())
+            state.keys.add(None)
+            state.hook_files.add(value)
+
+
+def deployed_bundle_hook_keys(
+    project_root: Path, targets: Any, bundle_paths: Collection[str] = ()
+) -> dict[str, _BundleHookState]:
+    """Return each deployed local bundle slug with its recorded keys and hook files.
+
+    *bundle_paths* are the lockfile's local-bundle deployed paths; they name
+    per-file hook files whose approval record is missing.
+    """
     from apm_cli.integration.hook_ownership import (
         parse_local_bundle_hook_source,
         reinject_apm_source_from_sidecar,
     )
 
-    found: dict[str, set[str | None]] = {}
+    found: dict[str, _BundleHookState] = {}
     for data, sidecar, container in _merged_hook_documents(project_root, targets):
         if data is None:
             continue
@@ -75,7 +146,8 @@ def deployed_bundle_hook_keys(project_root: Path, targets: Any) -> dict[str, set
                     else None
                 )
                 if parsed is not None:
-                    found.setdefault(parsed[0], set()).add(parsed[1])
+                    found.setdefault(parsed[0], _BundleHookState()).keys.add(parsed[1])
+    _collect_per_file(project_root, targets, bundle_paths, found)
     return found
 
 
@@ -83,6 +155,7 @@ def unadmitted_bundle_hooks(
     project_root: Path,
     targets: Any,
     allow_executables: Callable[[], dict[str, dict[str, bool]] | None],
+    bundle_paths: Collection[str] = (),
 ) -> list[UnadmittedBundleHooks]:
     """Return deployed local-bundle hooks the current trust does not admit.
 
@@ -90,7 +163,7 @@ def unadmitted_bundle_hooks(
     only when a local bundle has deployed hooks; ``None`` means the
     executables gate is off, which admits every hook as installs do.
     """
-    deployed = deployed_bundle_hook_keys(project_root, targets)
+    deployed = deployed_bundle_hook_keys(project_root, targets, bundle_paths)
     if not deployed:
         return []
     allow_map = allow_executables()
@@ -99,12 +172,47 @@ def unadmitted_bundle_hooks(
     from apm_cli.security.executables import EXEC_TYPE_HOOKS, is_package_approved
 
     result: list[UnadmittedBundleHooks] = []
-    for slug, keys in sorted(deployed.items()):
+    for slug, state in sorted(deployed.items()):
+        keys = state.keys
+        files = tuple(sorted(state.hook_files))
         if None in keys:
-            result.append(UnadmittedBundleHooks(slug, REASON_UNRECORDED))
+            result.append(UnadmittedBundleHooks(slug, REASON_UNRECORDED, files))
         elif not all(is_package_approved(allow_map, key, EXEC_TYPE_HOOKS) for key in keys):
-            result.append(UnadmittedBundleHooks(slug, REASON_NOT_GRANTED))
+            result.append(UnadmittedBundleHooks(slug, REASON_NOT_GRANTED, files))
     return result
+
+
+def _retire_per_file(project_root: Path, targets: Any, item: UnadmittedBundleHooks) -> None:
+    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
+    from apm_cli.integration.hook_ownership import write_per_file_bundle_record
+
+    for value in item.hook_files:
+        path = Path(value) if Path(value).is_absolute() else Path(project_root) / value
+        if path.is_file() and not path.is_symlink():
+            path.unlink()
+    for target in _per_file_targets(targets):
+        sidecar = Path(project_root) / target.root_dir / _APM_HOOKS_SIDECAR
+        if sidecar.is_file():
+            write_per_file_bundle_record(sidecar, item.slug, None, [])
+
+
+def _drop_lock_rows(lock_dir: Path, paths: Collection[str]) -> None:
+    """Drop retired local-bundle hook files from the scope's lockfile."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+    lock_path = get_lockfile_path(lock_dir)
+    lockfile = LockFile.read(lock_path)
+    if lockfile is None or not set(paths) & set(lockfile.local_deployed_files):
+        return
+    remaining = [path for path in lockfile.local_deployed_files if path not in paths]
+    hashes = {
+        path: digest
+        for path, digest in lockfile.local_deployed_file_hashes.items()
+        if path not in paths
+    }
+    DeploymentLedgerCodec.replace_legacy_owner(lockfile, ".", remaining, hashes)
+    lockfile.write(lock_path)
 
 
 def retire_unadmitted_bundle_hooks(
@@ -112,26 +220,45 @@ def retire_unadmitted_bundle_hooks(
     targets: Any,
     allow_executables: Callable[[], dict[str, dict[str, bool]] | None],
     *,
+    lock_dir: Path | None = None,
     logger: Any = None,
     dry_run: bool = False,
 ) -> list[UnadmittedBundleHooks]:
-    """Retire the registration of every local-bundle hook trust no longer admits."""
-    unadmitted = unadmitted_bundle_hooks(project_root, targets, allow_executables)
+    """Retire every local-bundle hook trust no longer admits."""
+    bundle_paths = _lock_bundle_paths(lock_dir)
+    unadmitted = unadmitted_bundle_hooks(project_root, targets, allow_executables, bundle_paths)
     if not unadmitted:
         return []
     from apm_cli.integration.hook_integrator import HookIntegrator
 
     hook_targets = [target for target in targets if target.supports("hooks")]
+    retired_files: set[str] = set()
     for item in unadmitted:
         if not dry_run:
             HookIntegrator().retire_local_bundle_hooks(item.slug, project_root, hook_targets)
+            _retire_per_file(project_root, targets, item)
+            retired_files.update(item.hook_files)
         if logger is not None:
             verb = "Would retire" if dry_run else "Retired"
             logger.warning(
                 f"{verb} hooks from local bundle '{item.slug}' ({item.reason}). "
                 "To keep them, approve the bundle and rerun 'apm install <bundle>'."
             )
+    if retired_files and lock_dir is not None:
+        _drop_lock_rows(lock_dir, retired_files)
     return unadmitted
+
+
+def _lock_bundle_paths(lock_dir: Path | None) -> frozenset[str]:
+    if lock_dir is None:
+        return frozenset()
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+    lockfile = LockFile.read(get_lockfile_path(lock_dir))
+    if lockfile is None:
+        return frozenset()
+    return DeploymentLedgerCodec.local_bundle_values(DeploymentLedgerCodec.from_lockfile(lockfile))
 
 
 def scope_bundle_hook_inputs(scope: Any, apm_package: Any, *, no_policy: bool, logger: Any):
@@ -162,9 +289,11 @@ def reconcile_scope_bundle_hooks(
     dry_run: bool = False,
 ) -> list[UnadmittedBundleHooks]:
     """Re-check one scope's local-bundle hooks; install, update and prune call this."""
+    from apm_cli.core.scope import get_apm_dir
+
     root, targets, allow_provider = scope_bundle_hook_inputs(
         scope, apm_package, no_policy=no_policy, logger=logger
     )
     return retire_unadmitted_bundle_hooks(
-        root, targets, allow_provider, logger=logger, dry_run=dry_run
+        root, targets, allow_provider, lock_dir=get_apm_dir(scope), logger=logger, dry_run=dry_run
     )

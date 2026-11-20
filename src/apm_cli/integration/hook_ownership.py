@@ -548,3 +548,61 @@ def legacy_source_marker_is_unambiguous(
         if Path(relative_path).name == legacy_marker
     }
     return matching == {current}
+
+
+# Per-file hook targets (Copilot) keep no merged config, so a local bundle's
+# approval record lives in the same sidecar name at the target root, outside
+# the hooks directory the harness loads.
+PER_FILE_BUNDLE_RECORDS = "local-bundle-hooks"
+_RECORD_HOOK_FILES = "hook_files"
+
+
+def per_file_bundle_records(sidecar_path: Path) -> list[dict[str, Any]]:
+    """Return the local-bundle approval records a per-file hook sidecar holds."""
+    data = read_hook_object(sidecar_path)
+    records = data.get(PER_FILE_BUNDLE_RECORDS, [])
+    if not isinstance(records, list):
+        raise TypeError("local-bundle hook records must be a list")
+    return [record for record in records if isinstance(record, dict)]
+
+
+def per_file_bundle_hook_keys(sidecar_path: Path) -> dict[str, tuple[str | None, list[str]]]:
+    """Return ``slug -> (approval_key, hook_files)`` from a per-file hook sidecar."""
+    found: dict[str, tuple[str | None, list[str]]] = {}
+    for record in per_file_bundle_records(sidecar_path):
+        parsed = parse_local_bundle_hook_source(record.get("_apm_source"))
+        files = record.get(_RECORD_HOOK_FILES)
+        if parsed is not None:
+            found[parsed[0]] = (
+                parsed[1],
+                [str(item) for item in files] if isinstance(files, list) else [],
+            )
+    return found
+
+
+def write_per_file_bundle_record(
+    sidecar_path: Path, bundle_id: str, approval_key: str | None, hook_files: list[str]
+) -> None:
+    """Record (or, with no *hook_files*, drop) one bundle's per-file hook approval."""
+    kept = [
+        record
+        for record in (per_file_bundle_records(sidecar_path) if sidecar_path.exists() else [])
+        if record.get("_apm_source") not in LocalBundleMarkers(bundle_id)
+    ]
+    if hook_files:
+        kept.append(
+            {
+                "_apm_source": local_bundle_hook_source_marker(bundle_id, approval_key),
+                _RECORD_HOOK_FILES: sorted(hook_files),
+            }
+        )
+    data = read_hook_object(sidecar_path) if sidecar_path.exists() else {}
+    if kept:
+        data[PER_FILE_BUNDLE_RECORDS] = kept
+    else:
+        data.pop(PER_FILE_BUNDLE_RECORDS, None)
+    if data:
+        sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+        sidecar_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    elif sidecar_path.exists():
+        sidecar_path.unlink()

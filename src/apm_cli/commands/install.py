@@ -1831,6 +1831,15 @@ def _install_apm_packages(ctx, outcome):
     from apm_cli.install.phases.targets import reject_undeployable_manifest_targets
 
     reject_undeployable_manifest_targets(apm_package, logger)  # before the lockfile rename
+    from apm_cli.install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
+
+    reconcile_scope_bundle_hooks(
+        ctx.scope,
+        apm_package,
+        no_policy=ctx.no_policy,
+        logger=logger,
+        dry_run=bool(getattr(ctx, "dry_run", False)),
+    )
     migrate_lockfile_if_needed(ctx.apm_dir)
 
     # Preserve MCP fields across APM lockfile regeneration, even with --only=apm.
@@ -1850,15 +1859,6 @@ def _install_apm_packages(ctx, outcome):
         old_mcp_target_servers = builtins.dict(_existing_lock.mcp_target_servers)
         old_mcp_target_servers_present = _existing_lock._mcp_target_servers_present
 
-    from apm_cli.install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
-
-    reconcile_scope_bundle_hooks(
-        ctx.scope,
-        apm_package,
-        no_policy=ctx.no_policy,
-        logger=logger,
-        dry_run=bool(getattr(ctx, "dry_run", False)),
-    )
     # Enter the APM install path when there are deps, local .apm/ primitives
     # (#714), orphan deps to clean up, or replacement intent to persist.
     from apm_cli.core.scope import get_deploy_root as _get_deploy_root

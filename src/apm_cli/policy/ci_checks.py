@@ -1152,6 +1152,7 @@ def _check_drift(
 
 def _check_local_bundle_hooks(
     deployment_root: Path,
+    lock: LockFile,
     manifest: APMPackage,
     targets: Sequence[TargetProfile],
     *,
@@ -1159,6 +1160,7 @@ def _check_local_bundle_hooks(
     no_policy: bool,
 ) -> CheckResult:
     """Fail when a deployed local-bundle hook's approval no longer holds."""
+    from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..install.errors import PolicyViolationError
     from ..install.local_bundle_hook_trust import unadmitted_bundle_hooks
     from ..security.executables import resolve_project_exec_allow_map
@@ -1168,8 +1170,11 @@ def _check_local_bundle_hooks(
             deployment_root, manifest, user_scope=user_scope, no_policy=no_policy
         )
 
+    bundle_paths = DeploymentLedgerCodec.local_bundle_values(
+        DeploymentLedgerCodec.from_lockfile(lock)
+    )
     try:
-        unadmitted = unadmitted_bundle_hooks(deployment_root, targets, allow_provider)
+        unadmitted = unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)
     except PolicyViolationError as exc:
         return CheckResult(name="local-bundle-hooks", passed=False, message=str(exc))
     if not unadmitted:
@@ -1335,7 +1340,12 @@ def run_baseline_checks(
         _check_content_integrity(deployment_root, lock, resolved_targets, user_scope=user_scope)
     ) or _run(
         _check_local_bundle_hooks(
-            deployment_root, manifest, resolved_targets, user_scope=user_scope, no_policy=no_policy
+            deployment_root,
+            lock,
+            manifest,
+            resolved_targets,
+            user_scope=user_scope,
+            no_policy=no_policy,
         )
     ):
         return result

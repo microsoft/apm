@@ -411,17 +411,29 @@ def test_global_bundle_reads_user_scope_from_apm_home_outside_home(
     assert any(path.endswith("/x.sh") for path in lock.get("local_deployed_files") or []), lock
 
 
-def _bundle_hook_world(tmp_path: Path, apm_binary_path: Path, *, alias: str | None = None):
+_COPILOT_HOOK = ".github/hooks/hookpkg-hooks.json"
+
+
+def _target_hooks_deployed(project: Path, target: str) -> bool:
+    if target == "copilot":
+        return (project / _COPILOT_HOOK).is_file()
+    return _hooks_deployed(project)
+
+
+def _bundle_hook_world(
+    tmp_path: Path, apm_binary_path: Path, *, alias: str | None = None, target: str = "claude"
+):
     world = PolicyScopeWorld(tmp_path, dict(os.environ))
     runner = _runner(apm_binary_path)
     env = world.isolated.subprocess_env()
     bundle = _packed_hook_bundle(world, runner, env, tmp_path / "out")
-    project = world.consumer(targets=("claude",))
-    (project / ".claude").mkdir()
+    project = world.consumer(targets=(target,))
+    if target == "claude":
+        (project / ".claude").mkdir()
     _allow(project, _bundle_key(bundle))
     args = ("install", str(bundle), "--no-policy", *(("--as", alias) if alias else ()))
     result = run_step(runner, args, cwd=project, env=env, step="bundle-granted")
-    assert _hooks_deployed(project), output(result)
+    assert _target_hooks_deployed(project, target), output(result)
     return world, runner, env, bundle, project
 
 
@@ -431,6 +443,7 @@ def _revoke(project: Path) -> None:
     dump_yaml(manifest, project / "apm.yml")
 
 
+@pytest.mark.parametrize("target", ["claude", "copilot"])
 @pytest.mark.parametrize(
     "command",
     [
@@ -442,15 +455,36 @@ def _revoke(project: Path) -> None:
     ids=["install", "frozen", "update", "prune"],
 )
 def test_revoked_bundle_grant_retires_its_hooks(
-    tmp_path: Path, apm_binary_path: Path, command: tuple[str, ...]
+    tmp_path: Path, apm_binary_path: Path, command: tuple[str, ...], target: str
 ) -> None:
-    _world, runner, env, _bundle, project = _bundle_hook_world(tmp_path, apm_binary_path)
+    _world, runner, env, _bundle, project = _bundle_hook_world(
+        tmp_path, apm_binary_path, target=target
+    )
     _revoke(project)
 
     result = run_step(runner, command, cwd=project, env=env, step="after-revoke")
 
-    assert not _hooks_deployed(project), output(result)
+    assert not _target_hooks_deployed(project, target), output(result)
     assert "approval no longer granted" in output(result), output(result)
+    lock = load_yaml(project / "apm.lock.yaml")
+    if target == "copilot" and "--frozen" not in command:
+        assert _COPILOT_HOOK not in lock.get("local_deployed_files", []), lock
+    if "--frozen" not in command:
+        run_step(runner, ("audit", "--ci", "--no-policy"), cwd=project, env=env, step="audit")
+
+
+def test_copilot_bundle_hook_without_a_record_fails_closed(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    _world, runner, env, _bundle, project = _bundle_hook_world(
+        tmp_path, apm_binary_path, target="copilot"
+    )
+    (project / ".github" / "apm-hooks.json").unlink()
+
+    result = run_step(runner, ("install", "--no-policy"), cwd=project, env=env, step="no-record")
+
+    assert not _target_hooks_deployed(project, "copilot"), output(result)
+    assert "no approval record" in " ".join(output(result).split()), output(result)
 
 
 def test_audit_flags_a_revoked_bundle_hook_before_install_retires_it(
@@ -508,7 +542,10 @@ def test_bundle_hook_without_a_recorded_key_fails_closed(
     assert "apm install <bundle>" in text, text
 
 
-def test_org_deny_all_retires_deployed_bundle_hooks(tmp_path: Path, apm_binary_path: Path) -> None:
+@pytest.mark.parametrize("target", ["claude", "copilot"])
+def test_org_deny_all_retires_deployed_bundle_hooks(
+    tmp_path: Path, apm_binary_path: Path, target: str
+) -> None:
     world = PolicyScopeWorld(tmp_path, dict(os.environ))
     world.publish_policy(_POLICY)
     runner = _runner(apm_binary_path)
@@ -516,14 +553,45 @@ def test_org_deny_all_retires_deployed_bundle_hooks(tmp_path: Path, apm_binary_p
     with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
         env = fx.child_environment(world.git_env())
         bundle = _packed_hook_bundle(world, runner, env, tmp_path / "out")
-        project = world.consumer(targets=("claude",))
-        (project / ".claude").mkdir()
+        project = world.consumer(targets=(target,))
+        if target == "claude":
+            (project / ".claude").mkdir()
         _allow(project, _bundle_key(bundle))
         result = run_step(runner, ("install", str(bundle)), cwd=project, env=env, step="granted")
-        assert _hooks_deployed(project), output(result)
+        assert _target_hooks_deployed(project, target), output(result)
 
         world.publish_policy({**_POLICY, "executables": {"deny_all": True}})
         world.clear_policy_cache()
         result = run_step(runner, ("install",), cwd=project, env=env, step="deny-all")
 
-    assert not _hooks_deployed(project), output(result)
+    assert not _target_hooks_deployed(project, target), output(result)
+
+
+@pytest.mark.parametrize("target", ["claude", "copilot"])
+def test_reinstalling_an_approved_bundle_records_a_missing_key(
+    tmp_path: Path, apm_binary_path: Path, target: str
+) -> None:
+    """A project from before the approval record keeps its hooks on reinstall."""
+    _world, runner, env, bundle, project = _bundle_hook_world(
+        tmp_path, apm_binary_path, target=target
+    )
+    key = _bundle_key(bundle)
+    if target == "claude":
+        sidecar = project / ".claude" / "apm-hooks.json"
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        for entries in data.values():
+            for entry in entries:
+                entry["_apm_source"] = "local-bundle::hookpkg"
+        sidecar.write_text(json.dumps(data), encoding="utf-8")
+    else:
+        (project / ".github" / "apm-hooks.json").unlink()
+
+    result = run_step(
+        runner, ("install", str(bundle), "--no-policy"), cwd=project, env=env, step="reinstall"
+    )
+
+    assert _target_hooks_deployed(project, target), output(result)
+    record = project / (".claude" if target == "claude" else ".github") / "apm-hooks.json"
+    assert key in record.read_text(encoding="utf-8")
+    run_step(runner, ("install", "--no-policy"), cwd=project, env=env, step="kept")
+    assert _target_hooks_deployed(project, target)
