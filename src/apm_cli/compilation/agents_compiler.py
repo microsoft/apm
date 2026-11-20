@@ -1125,6 +1125,7 @@ class AgentsCompiler:
         stats["claude_empty_due_to_no_primitives"] = (
             would_emit_no_claude_md and not skip_instructions
         )
+        stats["claude_native_rules_only"] = would_emit_no_claude_md and skip_instructions
 
         if would_emit_no_claude_md:
             if protected_claude_paths:

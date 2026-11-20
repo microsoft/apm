@@ -107,3 +107,28 @@ def test_clean_gemini_leaves_no_dangling_import_or_contradictory_hint(
     assert "run 'apm compile --clean' to remove" not in cleaned.output
     assert "produced no output files" not in cleaned.output
     assert "No instructions to compile" in cleaned.output
+
+
+def test_claude_native_rules_compile_reports_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Native .claude/rules/ coverage is not a zero-output warning (#3994)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "apm.yml").write_text(
+        "name: native-rules\nversion: 1.0.0\ntargets:\n  - claude\n", encoding="utf-8"
+    )
+    instruction = tmp_path / ".apm" / "instructions" / "base.instructions.md"
+    instruction.parent.mkdir(parents=True)
+    instruction.write_text(
+        '---\ndescription: Base\napplyTo: "**"\n---\nKeep responses concise.\n',
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    assert runner.invoke(cli, ["install"]).exit_code == 0
+    assert (tmp_path / ".claude" / "rules").is_dir()
+
+    result = runner.invoke(cli, ["compile"])
+
+    assert result.exit_code == 0, result.output
+    assert "reads .claude/rules/ directly" in " ".join(result.output.split())
+    assert "produced no output files" not in result.output

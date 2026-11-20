@@ -1079,6 +1079,9 @@ def _run_compilation(
                 elif clean and result.stats.get("claude_empty_due_to_no_primitives"):
                     # The compiler already reported the expected cleanup outcome.
                     pass
+                elif result.stats.get("claude_native_rules_only"):
+                    # Claude reads .claude/rules/ directly; nothing to warn about (#3994).
+                    pass
                 elif result.stats.get("primitives_found") == 0:
                     # Nothing to compile is not a misconfigured target (#3994).
                     logger.progress("No instructions to compile -- nothing written.", symbol="info")
