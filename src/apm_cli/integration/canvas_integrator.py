@@ -419,6 +419,7 @@ class CanvasIntegrator(BaseIntegrator):
                 )
                 return "skipped"
             shutil.copyfile(src, dest)
+            self.note_rendered_write(dest)
             target_paths.append(dest)
         return "integrated"
 

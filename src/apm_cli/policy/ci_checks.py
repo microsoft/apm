@@ -339,25 +339,23 @@ def _check_no_orphans(
     Only DIRECT dependencies (``depth == 1`` / no ``resolved_by``) are
     candidates for orphan detection. Transitive deps belong to a
     sub-package's manifest, not the root manifest, so the root manifest
-    cannot make them go away by editing its dependency lists.
+    cannot make them go away by editing its dependency lists. This is the
+    orphan owner's direct-entry projection of the install decision.
     """
-    declared_lock_keys: set[str] = set()
-    marketplace_index = lock.marketplace_index()
-    for dep in manifest.get_all_apm_dependencies():
-        key = dep.get_unique_key()
-        declared_lock_keys.add(key)
-        if dep.is_marketplace or key.startswith("_marketplace/"):
-            locked_dep = lock.get_dependency(key, marketplace_index=marketplace_index)
-            if locked_dep is not None:
-                declared_lock_keys.add(locked_dep.get_unique_key())
+    from ..install.orphans import OrphanOperation, decide_orphan_removal
 
-    orphaned = [
-        dep_key
-        for dep_key, locked_dep in lock.dependencies.items()
-        if dep_key not in declared_lock_keys
-        and dep_key != _SELF_KEY
-        and locked_dep.resolved_by is None
-    ]
+    decision = decide_orphan_removal(
+        operation=OrphanOperation.AUDIT,
+        roots=(),
+        candidate_universe=lock,
+        installed_paths=None,
+        resolved_keys=None,
+        intended=manifest.get_all_apm_dependencies(),
+        materialized=None,
+        reachability=None,
+        deployment_claims=None,
+    )
+    orphaned = [dep_key for dep_key in lock.dependencies if dep_key in decision.removed_keys]
     if not orphaned:
         return CheckResult(
             name="no-orphaned-packages",

@@ -62,6 +62,9 @@ def test_skipped_integration_preserves_prior_files_and_lock_claims(
         skill_subset_from_cli=False,
         skill_subset=None,
         update_refs=True,
+        deps_to_install=[],
+        dependency_graph=None,
+        apm_modules_dir=None,
     )
     source = SimpleNamespace(
         ctx=ctx,
