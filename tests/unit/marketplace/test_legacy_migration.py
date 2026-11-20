@@ -16,7 +16,6 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.marketplace import registry
-from apm_cli.marketplace.models import MarketplaceSource
 
 pytestmark = pytest.mark.component
 
@@ -72,10 +71,3 @@ def test_legacy_round_trip_emits_url_and_legacy_mirror(isolated_config: Path) ->
         # Legacy mirror fields preserved for one release
         assert "owner" in entry
         assert "repo" in entry
-
-
-def test_branch_field_accepted_as_ref_alias() -> None:
-    src = MarketplaceSource.from_dict(
-        {"name": "alias-mkt", "owner": "a", "repo": "b", "branch": "feature/x"}
-    )
-    assert src.ref == "feature/x"

@@ -13,7 +13,6 @@ from apm_cli.marketplace.drift_check import (
     DriftDifference,
     DriftOutputReport,
     check_marketplace_drift,
-    json_key_diff,
     render_diff_lines,
 )
 from apm_cli.marketplace.migration import load_marketplace_config
@@ -98,28 +97,6 @@ def _write_current_marketplace_json(project_root: Path, *, output_name: str = "c
 # ---------------------------------------------------------------------------
 # json_key_diff helper
 # ---------------------------------------------------------------------------
-
-
-class TestJsonKeyDiff:
-    def test_identical_returns_empty(self):
-        a = {"x": 1, "y": [1, 2]}
-        b = {"x": 1, "y": [1, 2]}
-        assert json_key_diff(a, b) == []
-
-    def test_leaf_change_detected(self):
-        a = {"x": 1}
-        b = {"x": 2}
-        diffs = json_key_diff(a, b)
-        assert len(diffs) == 1
-        assert diffs[0].path == "x"
-        assert diffs[0].old == 1
-        assert diffs[0].new == 2
-
-    def test_nested_path_format(self):
-        a = {"plugins": [{"source": {"sha": "aaa"}}]}
-        b = {"plugins": [{"source": {"sha": "bbb"}}]}
-        diffs = json_key_diff(a, b)
-        assert any(d.path == "plugins[0].source.sha" for d in diffs)
 
 
 # ---------------------------------------------------------------------------

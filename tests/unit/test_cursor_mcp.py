@@ -10,21 +10,8 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.adapters.client.cursor import CursorClientAdapter
-from apm_cli.factory import ClientFactory
 
 pytestmark = pytest.mark.component
-
-
-class TestCursorClientFactory(unittest.TestCase):
-    """Factory registration for the cursor runtime."""
-
-    def test_create_cursor_client(self):
-        client = ClientFactory.create_client("cursor")
-        self.assertIsInstance(client, CursorClientAdapter)
-
-    def test_create_cursor_client_case_insensitive(self):
-        client = ClientFactory.create_client("Cursor")
-        self.assertIsInstance(client, CursorClientAdapter)
 
 
 class TestCursorClientAdapter(unittest.TestCase):

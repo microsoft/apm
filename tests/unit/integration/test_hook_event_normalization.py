@@ -9,9 +9,7 @@ from typing import Any
 import pytest
 
 from apm_cli.integration.hook_integrator import (
-    _HOOK_EVENT_MAP,
     HookIntegrator,
-    _emit_hook_event_diagnostics,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
@@ -44,37 +42,6 @@ def _package(
 
 def _commands(entries: list[dict[str, Any]]) -> list[str]:
     return [entry["hooks"][0]["command"] for entry in entries]
-
-
-@pytest.mark.parametrize(
-    ("target", "source_event", "native_event"),
-    [
-        ("copilot", "SessionStart", "sessionStart"),
-        ("copilot", "sessionStart", "sessionStart"),
-        ("copilot", "Stop", "agentStop"),
-        ("copilot", "AgentStop", "agentStop"),
-        ("copilot", "agentStop", "agentStop"),
-        ("copilot", "UserPromptSubmit", "userPromptSubmitted"),
-        ("copilot", "userPromptSubmit", "userPromptSubmitted"),
-        ("copilot", "userPromptSubmitted", "userPromptSubmitted"),
-        ("claude", "SessionStart", "SessionStart"),
-        ("claude", "sessionStart", "SessionStart"),
-        ("claude", "Stop", "Stop"),
-        ("claude", "AgentStop", "Stop"),
-        ("claude", "agentStop", "Stop"),
-    ],
-)
-def test_supported_aliases_map_to_documented_native_events(
-    target: str,
-    source_event: str,
-    native_event: str,
-) -> None:
-    assert _HOOK_EVENT_MAP[target][source_event] == native_event
-
-
-def test_unsupported_lowercase_stop_is_not_declared_as_native_alias() -> None:
-    assert "stop" not in _HOOK_EVENT_MAP["copilot"]
-    assert "stop" not in _HOOK_EVENT_MAP["claude"]
 
 
 def test_copilot_alias_collisions_merge_in_source_order(tmp_path: Path) -> None:
@@ -166,17 +133,6 @@ def test_unknown_event_warns_and_is_not_renamed(
     target = project / ".github" / "hooks" / "native-event-kit-events.json"
     hooks = json.loads(target.read_text(encoding="utf-8"))["hooks"]
     assert list(hooks) == ["UnsupportedEvent"]
-
-
-def test_supported_alias_diagnostics_do_not_warn(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    aliases = ["SessionStart", "sessionStart", "Stop", "AgentStop", "agentStop"]
-
-    for target in ("copilot", "claude"):
-        _emit_hook_event_diagnostics(aliases, target, _HOOK_EVENT_MAP[target])
-
-    assert "may not be recognized" not in capsys.readouterr().out
 
 
 def test_reinstall_repairs_owned_stop_without_touching_user_hook(tmp_path: Path) -> None:

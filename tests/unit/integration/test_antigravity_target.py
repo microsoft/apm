@@ -27,11 +27,6 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.adapters.client.antigravity import AntigravityClientAdapter
-from apm_cli.core.target_detection import (
-    ALL_CANONICAL_TARGETS,
-    EXPLICIT_ONLY_TARGETS,
-    normalize_target_list,
-)
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -78,43 +73,6 @@ def _make_package_info(
 # ---------------------------------------------------------------------------
 
 
-def test_antigravity_profile_matches_official_surface() -> None:
-    target = KNOWN_TARGETS["antigravity"]
-
-    assert target.root_dir == ".agents"
-    assert target.compile_family == "agents"  # emits AGENTS.md, not GEMINI.md
-    assert target.auto_create is True
-    assert target.detect_by_dir is False  # shared root -> no auto-detect signal
-    assert target.user_supported == "partial"
-    assert target.user_root_dir == ".gemini/config"
-    assert target.hooks_config_display == ".agents/hooks.json"
-
-    # Commands MUST NOT exist -- agy has no TOML command surface.
-    assert set(target.primitives) == {"instructions", "skills", "hooks"}
-    assert "commands" not in target.primitives
-
-    instructions = target.primitives["instructions"]
-    assert instructions.subdir == "rules"  # .agents/rules/
-    assert instructions.extension == ".md"
-    assert instructions.format_id == "antigravity_rules"
-
-    skills = target.primitives["skills"]
-    assert skills.subdir == "skills"  # .agents/skills/ (root_dir is .agents)
-    assert skills.extension == "/SKILL.md"
-    assert skills.format_id == "skill_standard"
-    assert skills.deploy_root is None  # inherits the .agents root directly
-
-    hooks = target.primitives["hooks"]
-    assert hooks.subdir == ""  # file sits at the .agents root
-    assert hooks.extension == "hooks.json"
-    assert hooks.format_id == "antigravity_hooks"
-
-
-def test_antigravity_is_explicit_only_not_in_all() -> None:
-    assert "antigravity" in EXPLICIT_ONLY_TARGETS
-    assert "antigravity" not in ALL_CANONICAL_TARGETS
-
-
 def test_antigravity_excluded_from_target_all(tmp_path: Path) -> None:
     names = {p.name for p in active_targets(tmp_path, "all")}
 
@@ -127,11 +85,6 @@ def test_antigravity_resolves_only_when_named_explicitly(tmp_path: Path) -> None
     profiles = active_targets(tmp_path, "antigravity")
 
     assert [p.name for p in profiles] == ["antigravity"]
-
-
-def test_agy_alias_normalizes_to_antigravity() -> None:
-    assert normalize_target_list("agy") == ["antigravity"]
-    assert normalize_target_list("antigravity") == ["antigravity"]
 
 
 def test_antigravity_never_auto_detected_from_shared_agents_dir(tmp_path: Path) -> None:

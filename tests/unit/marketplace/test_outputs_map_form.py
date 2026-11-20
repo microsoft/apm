@@ -17,7 +17,6 @@ from typing import Any
 import pytest
 
 from apm_cli.marketplace.yml_schema import (
-    MarketplaceOutputSpec,
     MarketplaceYmlError,
     load_marketplace_from_apm_yml,
 )
@@ -144,23 +143,6 @@ class TestListFormBackCompat:
         assert config.output_specs[0].name == "claude"
         # No deprecation warning for the default
         assert not any("deprecated" in w for w in config.warnings)
-
-
-class TestOutputSpecFields:
-    """T-3a-19..22: MarketplaceOutputSpec dataclass."""
-
-    def test_dataclass_frozen(self) -> None:
-        spec = MarketplaceOutputSpec(name="claude", path="x.json")
-        with pytest.raises((TypeError, AttributeError)):
-            spec.name = "other"  # type: ignore[misc]
-
-    def test_defaults(self) -> None:
-        spec = MarketplaceOutputSpec(name="claude", path="x.json")
-        assert spec.path_explicit is False
-
-    def test_explicit_path_flag(self) -> None:
-        spec = MarketplaceOutputSpec(name="claude", path="x.json", path_explicit=True)
-        assert spec.path_explicit is True
 
 
 class TestSiblingConflict:

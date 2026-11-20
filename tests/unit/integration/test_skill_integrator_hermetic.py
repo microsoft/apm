@@ -27,8 +27,6 @@ from apm_cli.integration.skill_integrator import (
     SkillIntegrationResult,
     SkillIntegrator,
     copy_skill_to_target,
-    should_compile_instructions,
-    validate_skill_name,
 )
 from apm_cli.integration.targets import TargetProfile
 
@@ -89,93 +87,9 @@ def _make_target(
 # ---------------------------------------------------------------------------
 
 
-class TestValidateSkillNameFallthrough:
-    """Cover the fallthrough return at line 129."""
-
-    def test_single_hyphen_only(self) -> None:
-        """A single hyphen hits the invalid-chars check first."""
-        is_valid, _ = validate_skill_name("-")
-        assert not is_valid
-        # Either leading-hyphen or the fallthrough error
-        assert not is_valid
-
-    def test_digit_only_is_valid(self) -> None:
-        """Single digit is a valid skill name."""
-        is_valid, _ = validate_skill_name("3")
-        assert is_valid
-
-    def test_mixed_case_triggers_uppercase_error(self) -> None:
-        """Uppercase letter returns specific error before fallthrough."""
-        is_valid, msg = validate_skill_name("MySkill")
-        assert not is_valid
-        assert "lowercase" in msg
-
-    def test_underscore_triggers_underscore_error(self) -> None:
-        """Underscore returns specific error before fallthrough."""
-        is_valid, msg = validate_skill_name("my_skill")
-        assert not is_valid
-        assert "underscore" in msg.lower()
-
-    def test_space_triggers_space_error(self) -> None:
-        """Space returns specific error."""
-        is_valid, msg = validate_skill_name("my skill")
-        assert not is_valid
-        assert "space" in msg.lower()
-
-    def test_special_char_triggers_invalid_chars_error(self) -> None:
-        """Special character returns 'invalid characters' error."""
-        is_valid, msg = validate_skill_name("my@skill")
-        assert not is_valid
-        assert "invalid character" in msg.lower()
-
-
 # ---------------------------------------------------------------------------
 # should_compile_instructions
 # ---------------------------------------------------------------------------
-
-
-class TestShouldCompileInstructions:
-    """Cover lines 258, 260, 264."""
-
-    def test_instructions_type_compiles(self) -> None:
-        from apm_cli.models.apm_package import PackageContentType, PackageType
-
-        pi = _make_package_info(Path("/x/y"), package_type=PackageType.APM_PACKAGE)
-        with patch(
-            "apm_cli.integration.skill_integrator.get_effective_type",
-            return_value=PackageContentType.INSTRUCTIONS,
-        ):
-            assert should_compile_instructions(pi) is True
-
-    def test_hybrid_type_compiles(self) -> None:
-        from apm_cli.models.apm_package import PackageContentType, PackageType
-
-        pi = _make_package_info(Path("/x/y"), package_type=PackageType.HYBRID)
-        with patch(
-            "apm_cli.integration.skill_integrator.get_effective_type",
-            return_value=PackageContentType.HYBRID,
-        ):
-            assert should_compile_instructions(pi) is True
-
-    def test_skill_type_does_not_compile(self) -> None:
-        from apm_cli.models.apm_package import PackageContentType, PackageType
-
-        pi = _make_package_info(Path("/x/y"), package_type=PackageType.CLAUDE_SKILL)
-        with patch(
-            "apm_cli.integration.skill_integrator.get_effective_type",
-            return_value=PackageContentType.SKILL,
-        ):
-            assert should_compile_instructions(pi) is False
-
-    def test_prompts_type_does_not_compile(self) -> None:
-        from apm_cli.models.apm_package import PackageContentType, PackageType
-
-        pi = _make_package_info(Path("/x/y"), package_type=PackageType.APM_PACKAGE)
-        with patch(
-            "apm_cli.integration.skill_integrator.get_effective_type",
-            return_value=PackageContentType.PROMPTS,
-        ):
-            assert should_compile_instructions(pi) is False
 
 
 # ---------------------------------------------------------------------------

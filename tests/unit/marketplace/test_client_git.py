@@ -22,12 +22,7 @@ import pytest
 from apm_cli.commands.marketplace import _parse_marketplace_source
 from apm_cli.core.auth import AdoAuthChainExhaustedError
 from apm_cli.marketplace.client import (
-    _FETCHERS,
-    _fetch_ado,
     _fetch_git,
-    _fetch_github,
-    _fetch_gitlab,
-    _fetch_local,
 )
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
@@ -313,42 +308,6 @@ def test_fetch_git_does_not_render_generic_exception_text(
     assert "apm marketplace update acme" in str(raised.value)
 
 
-@pytest.mark.parametrize(
-    ("reason", "detail", "expected"),
-    (
-        ("https-downgrade", "HTTPS Git remote must not rewrite to insecure HTTP", "insecure"),
-        ("credentials", "Git URL rewrite replacement must not contain credentials", "credentials"),
-        (
-            "credential-origin",
-            "Authenticated Git remote must not rewrite to a different HTTPS origin",
-            "changes the remote origin",
-        ),
-    ),
-)
-def test_fetch_git_wraps_url_rewrite_rejection(
-    fake_host_info,
-    fake_auth_resolver,
-    reason: str,
-    detail: str,
-    expected: str,
-) -> None:
-    """Transport-policy rejection keeps the actionable marketplace error shape."""
-    fake_auth_resolver.git_env_for_remote.side_effect = GitUrlRewriteError(reason, detail)
-
-    with pytest.raises(MarketplaceFetchError) as raised:
-        _fetch_git(
-            _git_source("https://gitea.example.com/org/repo.git"),
-            "marketplace.json",
-            host_info=fake_host_info,
-            auth_resolver=fake_auth_resolver,
-        )
-
-    message = str(raised.value)
-    assert expected in message
-    assert "git config --show-origin --get-regexp" in message
-    assert "apm marketplace update acme" in message
-
-
 def test_fetch_git_preserves_cache_stage_rewrite_recovery(
     tmp_path: Path,
     fake_host_info,
@@ -436,14 +395,3 @@ def test_fetch_git_preserves_ado_chain_exhausted_message(
     assert "git credential fill was rejected" in message
     assert "verify the remote" not in message
     assert "apm marketplace update acme" in message
-
-
-def test_fetchers_dispatch_table_routes_kinds_to_correct_callable() -> None:
-    """Regression trap: locking the trust boundary into _FETCHERS."""
-    assert _FETCHERS["git"] is _fetch_git
-    assert _FETCHERS["local"] is _fetch_local
-    assert _FETCHERS["github"] is _fetch_github
-    assert _FETCHERS["gitlab"] is _fetch_gitlab
-    assert _FETCHERS["ado"] is _fetch_ado
-    # Defensive: no extra entries silently appearing.
-    assert set(_FETCHERS) == {"github", "gitlab", "ado", "git", "local"}

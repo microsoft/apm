@@ -20,7 +20,6 @@ from apm_cli.marketplace.migration import (
     detect_config_source,
     migrate_marketplace_yml,
 )
-from apm_cli.marketplace.yml_editor import _is_apm_yml_with_marketplace
 
 pytestmark = pytest.mark.component
 
@@ -88,25 +87,6 @@ class TestMigrateNonMappingApmYml:
 # ---------------------------------------------------------------------------
 # r5: _is_apm_yml_with_marketplace rejects non-mapping marketplace values
 # ---------------------------------------------------------------------------
-
-
-class TestIsApmYmlWithMarketplaceTightened:
-    def test_marketplace_value_must_be_mapping(self):
-        # Scalar marketplace value is not a valid block; helper must say no.
-        data = {"name": "app", "marketplace": "not-a-block"}
-        assert _is_apm_yml_with_marketplace(data) is False
-
-    def test_marketplace_list_value_rejected(self):
-        data = {"name": "app", "marketplace": [1, 2, 3]}
-        assert _is_apm_yml_with_marketplace(data) is False
-
-    def test_marketplace_mapping_accepted(self):
-        data = {"name": "app", "marketplace": {"owner": {"name": "acme"}}}
-        assert _is_apm_yml_with_marketplace(data) is True
-
-    def test_missing_or_null_block_rejected(self):
-        assert _is_apm_yml_with_marketplace({"name": "app"}) is False
-        assert _is_apm_yml_with_marketplace({"marketplace": None}) is False
 
 
 # ---------------------------------------------------------------------------

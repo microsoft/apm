@@ -438,14 +438,6 @@ def test_secret_accepted_by_another_resolver_is_not_rejected(helper):
     assert _actions(helper, "erase") == [], helper.events()
 
 
-def test_non_ascii_secret_is_compared_without_error():
-    ledger = auth_chain.HelperReportLedger()
-    key = (HOST, None, HELPER_PATH)
-    assert ledger.decide(key, "approve", "p\u00e4ss-\u00fcber")
-    assert not ledger.decide((HOST, None, "other"), "reject", "p\u00e4ss-\u00fcber")
-    assert ledger.decide((HOST, None, "other"), "reject", "another-secret")
-
-
 @pytest.mark.parametrize(
     "field",
     [

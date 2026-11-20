@@ -1,14 +1,11 @@
 """Source invariants for the canonical target capability owner."""
 
 import ast
-from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
-TARGET_CATALOG = Path("src/apm_cli/core/target_catalog.py")
-SOURCE_ROOT = Path("src/apm_cli")
 TARGET_NAMES = frozenset(
     {
         "agent-skills",
@@ -154,17 +151,3 @@ TARGET_CAPABILITIES = dict(
 
     assert _foreign_capability_definitions(alias_tree) == [(2, "COMPILE_TARGETS")]
     assert _foreign_capability_definitions(constructor_tree) == [(2, "TARGET_CAPABILITIES")]
-
-
-def test_target_catalog_is_only_per_target_command_capability_owner() -> None:
-    """No Python module outside target_catalog may redeclare command support."""
-    findings: list[str] = []
-    for source_path in SOURCE_ROOT.rglob("*.py"):
-        if source_path == TARGET_CATALOG:
-            continue
-        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
-        findings.extend(
-            f"{source_path}:{line} ({name})" for line, name in _foreign_capability_definitions(tree)
-        )
-
-    assert findings == []

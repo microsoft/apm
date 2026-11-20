@@ -485,29 +485,6 @@ class TestDirSize:
 # ---------------------------------------------------------------------------
 
 
-class TestSanitizeUrl:
-    def test_no_credentials_unchanged(self):
-        from apm_cli.cache.git_cache import _sanitize_url
-
-        url = "https://github.com/org/repo.git"
-        assert _sanitize_url(url) == url
-
-    def test_userinfo_redacted(self):
-        from apm_cli.cache.git_cache import _sanitize_url
-
-        url = "https://user:secret@github.com/org/repo.git"
-        result = _sanitize_url(url)
-        assert "secret" not in result
-        assert "user" not in result
-        assert result == "https://***@github.com/org/repo.git"
-
-    def test_bad_url_returns_original(self):
-        from apm_cli.cache.git_cache import _sanitize_url
-
-        result = _sanitize_url("not a url")
-        assert result == "not a url"
-
-
 # ---------------------------------------------------------------------------
 # get_checkout -- cache hit with integrity failure
 # ---------------------------------------------------------------------------

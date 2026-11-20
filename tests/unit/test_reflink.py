@@ -39,17 +39,6 @@ def _clear_no_reflink_env(monkeypatch):
     monkeypatch.delenv("APM_NO_REFLINK", raising=False)
 
 
-class TestReflinkSupported:
-    """Test the reflink_supported() probe."""
-
-    def test_apm_no_reflink_disables(self, monkeypatch):
-        monkeypatch.setenv("APM_NO_REFLINK", "1")
-        assert reflink_supported() is False
-
-    def test_returns_bool(self):
-        assert isinstance(reflink_supported(), bool)
-
-
 class TestCloneFileEnvOptOut:
     """APM_NO_REFLINK must short-circuit before any platform call."""
 

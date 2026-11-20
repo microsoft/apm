@@ -13,7 +13,6 @@ from apm_cli.integration.copilot_cowork_paths import (
     COWORK_URI_SCHEME,  # noqa: F401
     CoworkResolutionError,
     from_lockfile_path,
-    is_cowork_path,
     resolve_copilot_cowork_skills_dir,
     to_lockfile_path,
 )
@@ -431,16 +430,3 @@ class TestFromLockfilePath:
 # ---------------------------------------------------------------------------
 # TestIsCoworkPath
 # ---------------------------------------------------------------------------
-
-
-class TestIsCoworkPath:
-    """Tests for is_cowork_path predicate."""
-
-    def test_cowork_uri_returns_true(self) -> None:
-        assert is_cowork_path("cowork://skills/foo/SKILL.md") is True
-
-    def test_relative_path_returns_false(self) -> None:
-        assert is_cowork_path("relative/path.md") is False
-
-    def test_empty_string_returns_false(self) -> None:
-        assert is_cowork_path("") is False

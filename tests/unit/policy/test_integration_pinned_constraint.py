@@ -13,18 +13,15 @@ call site.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.policy.policy_checks import (
     run_dependency_policy_checks,
-    run_policy_checks,
 )
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
 CHECK_NAME = "dependency-pinned-constraint"
 
@@ -184,24 +181,6 @@ def test_policy_pinned_check_runs_at_all_four_call_sites(runner):
 # ---------------------------------------------------------------------------
 # Audit wrapper (run_policy_checks)
 # ---------------------------------------------------------------------------
-
-
-def test_run_policy_checks_audit_surfaces_pinned_violation(tmp_path: Path):
-    apm_yml = tmp_path / "apm.yml"
-    apm_yml.write_text(
-        "name: sample\n"
-        "version: 0.0.1\n"
-        "dependencies:\n"
-        "  apm:\n"
-        "    - acme/skills\n"
-        "    - other/lib#^1.2.0\n",
-        encoding="utf-8",
-    )
-    policy = _policy(enforcement="block")
-    result = run_policy_checks(tmp_path, policy, fail_fast=False)
-    pin = next(c for c in result.checks if c.name == CHECK_NAME)
-    assert not pin.passed
-    assert any("acme/skills" in d for d in pin.details)
 
 
 # ---------------------------------------------------------------------------

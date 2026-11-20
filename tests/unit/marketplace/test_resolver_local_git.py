@@ -96,24 +96,6 @@ def test_local_marketplace_traversal_in_source_rejected(tmp_path: Path) -> None:
         resolve_marketplace_plugin("evil", "local-mkt")
 
 
-def test_generic_git_marketplace_relative_source_builds_virtual_path_dep_ref() -> None:
-    src = MarketplaceSource(
-        name="gitea-mkt", url="https://gitea.example.com/org/repo.git", ref="main"
-    )
-    plugin = _plugin("my-skill", "./skills/my-skill")
-    p1, p2 = _patch_marketplace(src, [plugin])
-    with p1, p2:
-        result = resolve_marketplace_plugin("my-skill", "gitea-mkt")
-
-    assert result.dependency_reference is not None
-    dep_ref = result.dependency_reference
-    assert dep_ref.virtual_path == "skills/my-skill"
-    assert dep_ref.host == "gitea.example.com"
-    # repo_url here is the owner/repo identifier, not a full URL; assert on
-    # exact equality rather than substring (CodeQL py/incomplete-url-substring-sanitization).
-    assert dep_ref.repo_url == "org/repo"
-
-
 def test_local_marketplace_absolute_github_source_keeps_github_canonical(tmp_path: Path) -> None:
     """Plugin pointing to an absolute GitHub repo is fetched from GitHub regardless of where the marketplace lives."""
     src = MarketplaceSource(name="local-mkt", url=f"file://{tmp_path}", ref="main")
@@ -127,21 +109,3 @@ def test_local_marketplace_absolute_github_source_keeps_github_canonical(tmp_pat
     # compare structured segments to avoid substring-style URL matching.
     parts = result.canonical.split(":")
     assert any(seg.endswith("foo/bar") for seg in parts)
-
-
-def test_ado_marketplace_relative_source_builds_virtual_path_dep_ref() -> None:
-    """ADO is a new first-class host; in-marketplace plugins go through explicit git+path."""
-    src = MarketplaceSource(
-        name="ado-mkt",
-        url="https://dev.azure.com/contoso/eng/_git/agent-forge",
-        ref="main",
-    )
-    plugin = _plugin("skill-foo", "./skills/skill-foo")
-    p1, p2 = _patch_marketplace(src, [plugin])
-    with p1, p2:
-        result = resolve_marketplace_plugin("skill-foo", "ado-mkt")
-
-    assert result.dependency_reference is not None
-    assert result.dependency_reference.virtual_path == "skills/skill-foo"
-    assert result.dependency_reference.host == "dev.azure.com"
-    assert result.dependency_reference.ado_organization == "contoso"

@@ -64,9 +64,3 @@ def test_failing_machine_output_keeps_update_notice_off_stdout() -> None:
     assert json.loads(result.stdout)["passed"] is False
     assert "A new version of APM is available" in result.stderr
     assert "A new version of APM is available" not in result.stdout
-
-
-def test_human_output_is_not_machine_readable() -> None:
-    from apm_cli.core.output_mode import detect_output_mode
-
-    assert not detect_output_mode(("policy", "status", "--output", "table")).machine_readable

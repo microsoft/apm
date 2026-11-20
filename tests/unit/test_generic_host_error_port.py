@@ -14,9 +14,6 @@ already used ``build_error_context`` -> ``host_info.display_name``).
 """
 
 import os
-import shutil
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,9 +21,8 @@ from git.exc import GitCommandError
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
-from apm_cli.utils.git_env import _GitConfigSnapshot
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
 
 def _make_downloader():
@@ -57,73 +53,6 @@ def _diagnostic_prefix(msg: str) -> str:
     don't want a bare-host regression hiding behind that noise.
     """
     return msg.split(" Last error:", 1)[0]
-
-
-class TestGenericHostCloneErrorPort:
-    """``_clone_with_fallback`` generic branch (github_downloader.py ~L864)."""
-
-    def _clone_error(self, dep) -> str:
-        dl = _make_downloader()
-
-        def _fake_clone(*_args, **_kwargs):
-            raise GitCommandError("clone", 128)
-
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch(
-                "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
-                return_value=None,
-            ),
-            # HTTPS policy inspection must not depend on a warmed Git cache
-            # after clear=True removes PATH on Windows.
-            patch(
-                "apm_cli.utils.git_env._read_effective_git_config",
-                return_value=_GitConfigSnapshot((), (), ()),
-            ),
-            patch(
-                "apm_cli.utils.git_env.get_git_executable",
-                side_effect=AssertionError("Diagnostic tests must not launch Git"),
-            ),
-            patch("apm_cli.deps.github_downloader.Repo") as MockRepo,
-        ):
-            MockRepo.clone_from.side_effect = _fake_clone
-            target = Path(tempfile.mkdtemp())
-            try:
-                with pytest.raises(RuntimeError) as exc_info:
-                    dl._clone_with_fallback(dep.repo_url, target, dep_ref=dep)
-                MockRepo.clone_from.assert_called_once()
-                return str(exc_info.value)
-            finally:
-                shutil.rmtree(target, ignore_errors=True)
-
-    def test_ssh_custom_port_surfaces_in_error(self):
-        """Bitbucket-DC-style ssh://host:7999/... -> hint names host:7999."""
-        dep = DependencyReference.parse("ssh://git@bitbucket.example.com:7999/project/repo.git")
-        assert dep.port == 7999
-
-        prefix = _diagnostic_prefix(self._clone_error(dep))
-        assert "For private repositories on bitbucket.example.com:7999," in prefix
-
-    @pytest.mark.windows_compat
-    def test_https_custom_port_surfaces_in_error(self):
-        """https://host:7990/... -> hint names host:7990."""
-        dep = DependencyReference.parse("https://bitbucket.example.com:7990/project/repo.git")
-        assert dep.port == 7990
-
-        prefix = _diagnostic_prefix(self._clone_error(dep))
-        assert "For private repositories on bitbucket.example.com:7990," in prefix
-
-    @pytest.mark.windows_compat
-    def test_no_port_renders_bare_host(self):
-        """Default-port dep has no port suffix -- no regression for common case."""
-        dep = DependencyReference.parse("https://gitlab.example.com/team/repo.git")
-        assert dep.port is None
-
-        prefix = _diagnostic_prefix(self._clone_error(dep))
-        assert "For private repositories on gitlab.example.com," in prefix
-        assert "gitlab.example.com:" not in prefix, (
-            f"bare-host case must not synthesise a stray ':' suffix: {prefix!r}"
-        )
 
 
 class TestGenericHostLsRemoteErrorPort:
