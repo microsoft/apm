@@ -124,6 +124,10 @@ class DriftFinding:
     kind: str
     package: str = ""
     inline_diff: str = ""
+    # The drift lies only in APM-owned entries of a config shared with the
+    # user (merged hooks): 'apm install' re-merges them, so it is never a
+    # local edit to a managed file (RA-028).
+    owned_entries_only: bool = False
 
 
 # Errors
@@ -1013,6 +1017,7 @@ def diff_scratch_against_project(
                     kind="unmanaged-conflict" if unmanaged else "modified",
                     package=tracked.get(rel, ""),
                     inline_diff=_inline_diff_for(scratch_path, project_path),
+                    owned_entries_only=not unmanaged and rel in merge_config_specs,
                 )
             )
         elif claims.unclaimed(rel):
@@ -1038,7 +1043,9 @@ def diff_scratch_against_project(
             project_root / rel, project_root / spec[0], spec[1]
         ):
             # Replay deploys no hooks here, yet APM-owned entries remain (#3924).
-            findings.append(DriftFinding(path=rel, kind="modified", package=""))
+            findings.append(
+                DriftFinding(path=rel, kind="modified", package="", owned_entries_only=True)
+            )
         # else: untracked governed file -- ignore (user authored).
 
     if local_bundle_paths:

@@ -213,8 +213,12 @@ def test_audit_and_update_honor_the_current_executables_decision(
     assert _hook_residue(project)
 
     apm("deny", "../hooky")
-    lingering = apm("audit", "--ci", "--no-policy", expect=1)
+    lingering = " ".join(apm("audit", "--ci", "--no-policy", expect=1).split())
     assert "Drift detected" in lingering, lingering
+    # RA-028: what the deny retired is not a local edit; 'apm install' fixes it.
+    for advice in ("local edit", "export-patch", "Delete the edited files"):
+        assert advice not in lingering, lingering
+    assert "Run 'apm install' to re-sync deployed files with the lockfile." in lingering
 
     lock_bytes, residue = (project / "apm.lock.yaml").read_bytes(), _hook_residue(project)
     preview = " ".join(apm("update", "--dry-run").split())
