@@ -186,11 +186,6 @@ def unpack_bundle(
                     if not dep_file_map[_k]:
                         del dep_file_map[_k]
 
-        # Executable content (hooks, hook scripts, MCP/LSP config, bin,
-        # canvas extensions) deploys only through ``apm install <bundle>``,
-        # which applies the executables gate, org policy and the lockfile.
-        _refuse_executable_content(unique_files, source_dir, bundle_path)
-
         # 3. Verify completeness. A plugin bundle (root plugin.json, the
         # default 'apm pack' output) is not a deployment layout (#3994).
         if (source_dir / "plugin.json").is_file():
@@ -199,6 +194,10 @@ def unpack_bundle(
                 "install it with 'apm install <bundle-path>'. 'apm unpack' reads only "
                 "bundles packed with '--format apm'."
             )
+        # Executable content (hooks, hook scripts, MCP/LSP config, bin,
+        # canvas extensions) deploys only through ``apm install <bundle>``,
+        # which applies the executables gate, org policy and the lockfile.
+        _refuse_executable_content(unique_files, source_dir, bundle_path)
         verified = True
         if not skip_verify:
             missing = [f for f in unique_files if not (source_dir / f).exists()]
