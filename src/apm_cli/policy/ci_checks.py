@@ -364,7 +364,7 @@ def _check_exec_status_current(
         passed=False,
         message=(
             f"{n} {noun} an executables decision the gate no longer makes -- "
-            "run 'apm install' without --frozen and commit apm.lock.yaml"
+            f"{remediation.FROZEN_EXEC_DECISIONS_STALE.clause()}"
         ),
         details=[decision.describe() for decision in stale],
     )

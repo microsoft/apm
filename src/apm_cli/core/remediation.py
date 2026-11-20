@@ -1128,6 +1128,30 @@ FROZEN_HOOK_PINS_STALE = _entry(
     "retire the hooks their approval no longer admits (without --frozen)",
     then="commit apm.yml and apm.lock.yaml",
 )
+FROZEN_KEPT_ADOPTED = _entry(
+    "frozen-kept-adopted",
+    "apm install --frozen",
+    "retry the frozen install",
+    before="delete or move it aside if it is not yours to keep",
+)
+FROZEN_KEPT_EDITED = _entry(
+    "frozen-kept-edited",
+    "apm install --frozen",
+    "retry the frozen install",
+    before="move it aside",
+)
+FROZEN_KEPT_UNREMOVABLE = _entry(
+    "frozen-kept-unremovable",
+    "apm install --frozen",
+    "retry the frozen install",
+    before="delete it",
+)
+FROZEN_EXEC_DECISIONS_STALE = _entry(
+    "frozen-exec-decisions-stale",
+    "apm install",
+    f"record the executables decisions the gate makes now ({_UNFROZEN})",
+    then="commit apm.lock.yaml",
+)
 # -- end W4 frozen-policy --
 # -- W4 drift-trust --
 # Advice printed by install/ drift replay, audit replay, cache pins, executable

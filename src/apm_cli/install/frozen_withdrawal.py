@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core import remediation
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
@@ -30,13 +32,11 @@ _DIRECTORY_DEPTH = 6
 
 _KEPT_REASONS = {
     "adopted": (
-        "already on disk before this install (not written by it); delete or move it "
-        "aside if it is not yours to keep, then rerun 'apm install --frozen'"
+        "already on disk before this install (not written by it); "
+        f"{remediation.FROZEN_KEPT_ADOPTED.clause()}"
     ),
-    "edited": (
-        "edited after this install wrote it; move it aside, then rerun 'apm install --frozen'"
-    ),
-    "failed": "could not be removed; delete it, then rerun 'apm install --frozen'",
+    "edited": f"edited after this install wrote it; {remediation.FROZEN_KEPT_EDITED.clause()}",
+    "failed": f"could not be removed; {remediation.FROZEN_KEPT_UNREMOVABLE.clause()}",
 }
 
 
@@ -229,9 +229,8 @@ def refusal_tip(kept: Mapping[str, str]) -> str:
     """The refusal's tip: what was withdrawn, and how to record the deployment."""
     removed = "the other unrecorded files were" if kept else "the unrecorded files were"
     return (
-        f"Tip: {removed} removed again and apm.lock.yaml is unchanged. Run "
-        "'apm install' without --frozen, retaining --root DIR or --global if "
-        "specified, then commit the deployed files and apm.lock.yaml."
+        f"Tip: {removed} removed again and apm.lock.yaml is unchanged. "
+        f"{remediation.FROZEN_LOCKFILE_WITHHELD.sentence()}"
     )
 
 
