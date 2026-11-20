@@ -441,9 +441,14 @@ def test_c6_036_copilot_kiro_mcp_project_converges_to_the_037_layout(
     for path, content in expected.items():
         if path != "apm.lock.yaml":
             assert after.get(path) == content, path
-    assert set(after) - set(expected) <= {_LEGACY_COPILOT_MCP}
-    if _LEGACY_COPILOT_MCP in after:
-        assert "notes" not in _mcp_servers(world.project / _LEGACY_COPILOT_MCP)
+    # APM created .github/mcp.json and the move empties it, so it is deleted
+    # and named in the move summary (#4524).
+    assert set(after) == set(expected)
+    assert not (world.project / _LEGACY_COPILOT_MCP).exists()
+    summary = " ".join((out + err).split())
+    assert (
+        f"Removed empty {_LEGACY_COPILOT_MCP} (APM created it and no longer writes it)" in summary
+    )
     assert _mcp_servers(world.project / ".mcp.json")["notes"] == {
         "type": "stdio",
         "command": "node",
