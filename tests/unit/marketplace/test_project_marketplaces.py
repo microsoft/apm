@@ -220,9 +220,11 @@ class TestMarketplaceAllowPolicy:
 
         check = self._check(allow, declared, marketplace_resolution_origins(lock))
 
-        assert [s.ref for s in check.subjects] == ["b@acme", "c@acme"]
+        assert [s.ref for s in check.subjects] == ["b@acme (owner/b)", "c@acme (owner/c)"]
         assert "github.com/evil/catalog" in check.subjects[0].reason
         assert "no recorded catalog origin" in check.subjects[1].reason
+        assert all("remove its entry from apm.yml" in s.reason for s in check.subjects)
+        assert not any("apm update" in s.reason for s in check.subjects)
         # Install: only deps being installed count, and a fresh resolution
         # through an allowed catalog replaces its lock row.
         fresh = {

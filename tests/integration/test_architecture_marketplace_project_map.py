@@ -49,6 +49,11 @@ def test_project_map_routes_through_owner() -> None:
             "        if True:\n",
         ),
         (
+            "policy/policy_checks.py",
+            "marketplace_resolution_origins(lock)",
+            "()",
+        ),
+        (
             "install/phases/policy_gate.py",
             "            marketplace_resolution_origins(\n",
             "            tuple(\n",

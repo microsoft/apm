@@ -50,7 +50,14 @@ def _skill_document(label: str) -> str:
     return f"---\nname: {_PLUGIN}\ndescription: Project map fixture\n---\n# {label}\n"
 
 
-def _publish_catalog(repositories: LocalGitRepositoryFactory, name: str, remote: str, label: str):
+def _publish_catalog(
+    repositories: LocalGitRepositoryFactory,
+    name: str,
+    remote: str,
+    label: str,
+    *,
+    plugin_url: str | None = None,
+):
     repository = repositories.create(name)
     packages = LocalPackageFactory(repository.worktree / "plugins")
     package = packages.create(_PLUGIN, targets=("codex",))
@@ -67,7 +74,7 @@ def _publish_catalog(repositories: LocalGitRepositoryFactory, name: str, remote:
                         "name": _PLUGIN,
                         "source": {
                             "source": "git-subdir",
-                            "url": remote,
+                            "url": plugin_url or remote,
                             "path": _SUBDIR,
                             "ref": "main",
                         },
@@ -277,6 +284,33 @@ def test_marketplace_allow_judges_locked_and_declared_origins(scenario, apm_bina
     checks = {check["name"]: check for check in json.loads(audit.stdout)["checks"]}
     assert checks["marketplace-allow"]["passed"] is False
     assert f"{_HOST}/team/catalog-a" in json.dumps(checks["marketplace-allow"])
+    assert "remove its entry from apm.yml" in install_output
+
+    # The remedy unblocks install: drop the entry (which prunes its lock row),
+    # then add the package back from an allowed catalog.
+    manifest = load_yaml(project / "apm.yml")
+    manifest["dependencies"]["apm"] = []
+    dump_yaml(manifest, project / "apm.yml")
+    runner.run_sequence(
+        (("install", *_FLAGS),),
+        expected_returncodes=(0,),
+        scenario_id="allow-remedy-drop",
+        cwd=project,
+        env=env,
+    )
+    assert not load_yaml(project / "apm.lock.yaml").get("dependencies")
+    _readd, _replay, passing_audit = runner.run_sequence(
+        (("install", f"{_PLUGIN}@approved", *_FLAGS), ("install", *_FLAGS), audit_args),
+        expected_returncodes=(0, 0, 0),
+        scenario_id="allow-remedy-readd",
+        cwd=project,
+        env=env,
+    )
+    readded = _locked_row(project)
+    assert readded["discovered_via"] == "approved"
+    assert readded["source_url"] == _REMOTE_B
+    checks = {check["name"]: check for check in json.loads(passing_audit.stdout)["checks"]}
+    assert checks["marketplace-allow"]["passed"] is True
 
     # A declared origin outside the list is refused as well.
     _set_marketplaces(project / "apm.yml", [{"name": "acme", "source": _REMOTE_A, "ref": "main"}])
@@ -290,3 +324,76 @@ def test_marketplace_allow_judges_locked_and_declared_origins(scenario, apm_bina
     declared_output = _output(declared)
     assert "marketplace 'acme'" in declared_output
     assert "marketplace.allow" in declared_output
+
+
+def test_enterprise_host_add_path_is_judged_by_marketplace_allow(tmp_path, apm_binary_path):
+    """On a GHE default host, ``apm install plugin@name`` provenance still meets the policy."""
+    ghe_host = "ghe.example.com"
+    plugin_url = f"https://{ghe_host}/team/catalog-ghe"
+    catalog_remote = f"https://{_HOST}/team/catalog-ghe"
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path.resolve() / "isolated", base_env=dict(os.environ)
+    )
+    repositories = LocalGitRepositoryFactory(
+        isolated.repository_root, env=isolated.subprocess_env()
+    )
+    catalog, _ = _publish_catalog(
+        repositories, "catalog-ghe", catalog_remote, "from GHE", plugin_url=plugin_url
+    )
+    env = repositories.url_rewrite_subprocess_env_many(
+        ((catalog, catalog_remote), (catalog, plugin_url))
+    )
+    env["GITHUB_HOST"] = ghe_host
+    project = (
+        LocalPackageFactory(isolated.work_root).create("ghe-consumer", targets=("codex",)).root
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+
+    runner.run_sequence(
+        (
+            ("marketplace", "add", catalog_remote, "--name", "ghecat", "--ref", "main"),
+            ("install", f"{_PLUGIN}@ghecat", *_NO_POLICY),
+        ),
+        expected_returncodes=(0, 0),
+        scenario_id="ghe-add-path-install",
+        cwd=project,
+        env=env,
+    )
+    locked = _locked_row(project)
+    assert locked["discovered_via"] == "ghecat"
+    assert locked["source_url"] == catalog_remote
+
+    _write_policy(project, env)
+    _warm, install, audit = runner.run_sequence(
+        (
+            (
+                "policy",
+                "status",
+                "--policy-source",
+                _POLICY_SOURCE,
+                "--json",
+                "--check",
+                "--no-cache",
+            ),
+            ("install", *_FLAGS),
+            (
+                "audit",
+                "--ci",
+                "--no-fail-fast",
+                "--no-drift",
+                "--format",
+                "json",
+                "--policy",
+                _POLICY_SOURCE,
+            ),
+        ),
+        expected_returncodes=(0, 1, 1),
+        scenario_id="ghe-add-path-refused",
+        cwd=project,
+        env=env,
+    )
+    install_output = _output(install)
+    assert _POLICY_DIAGNOSTIC in install_output, install_output
+    assert f"{_PLUGIN}@ghecat" in install_output
+    checks = {check["name"]: check for check in json.loads(audit.stdout)["checks"]}
+    assert checks["marketplace-allow"]["passed"] is False

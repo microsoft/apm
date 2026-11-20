@@ -1326,7 +1326,7 @@ def marketplace_resolution_origins(
 
     def _record(key: str, via: str | None, plugin: str | None, origin: str | None) -> None:
         if via and plugin and (wanted is None or key in wanted):
-            origins[key] = (f"{plugin}@{via}", origin or "")
+            origins[key] = (f"{plugin}@{via} ({key})", origin or "")
 
     for key, dep in getattr(lockfile, "dependencies", {}).items():
         _record(key, dep.discovered_via, dep.marketplace_plugin_name, dep.source_url)
@@ -1381,17 +1381,20 @@ def _check_marketplace_allow(origins: MarketplaceOrigins, policy: MarketplacePol
         subject = _disallowed(origin)
         if subject is None:
             continue
-        if subject:
-            reason = (
-                f"locked from catalog '{subject}', which is not in the org policy "
-                "marketplace.allow list; declare an allowed catalog under 'marketplaces:' "
-                "in apm.yml and run 'apm update', or ask your org admin to allow it"
-            )
-        else:
-            reason = (
-                "has no recorded catalog origin, so the org policy marketplace.allow list "
-                "cannot admit it; resolve it from an allowed remote catalog with 'apm update'"
-            )
+        # The lock carries a package's catalog provenance forward on every
+        # write, so only dropping its apm.yml entry (which prunes the row)
+        # and adding it back clears it; 'apm update' never does.
+        problem = (
+            f"resolved from catalog '{subject}', which is not in the org policy "
+            "marketplace.allow list"
+            if subject
+            else "has no recorded catalog origin, so the org policy marketplace.allow list "
+            "cannot admit it"
+        )
+        reason = (
+            f"{problem}; remove its entry from apm.yml and run 'apm install', then add it "
+            "back from an allowed catalog, or ask your org admin to allow the catalog"
+        )
         subjects.append(PolicySubject(label, reason, remedy=None))
     if subjects:
         return CheckResult(
