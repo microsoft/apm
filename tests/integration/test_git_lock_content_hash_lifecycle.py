@@ -28,7 +28,6 @@ from tests.integration.test_marketplace_tag_pattern_lifecycle import (
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
-    pytest.mark.promise("P-OWN-package-content-hash"),
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
     pytest.mark.promise("P-OWN-package-content-hash"),
