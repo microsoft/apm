@@ -49,12 +49,13 @@
   "step5 lane split: install pure helper classes -> test_install_resolve_refs.py (now unit), its GitLab persistence class -> test_install_context_and_resolution.py; deps pure helper classes -> test_deps_cli_helpers.py (now unit), its _resolve_scope_deps filesystem classes -> test_deps_cli_cli_surface.py",
   "step5 lane split: TestConstitutionInjector (on-disk injection) -> test_constitution.py; test_constitution_injector.py keeps the pure constitution_block helpers and is now unit",
   "step5 lane split: compile command CliRunner/filesystem classes -> test_compile_target_flag.py; pure compile helper, config and merge classes from test_compile_target_flag.py and test_compile_no_dedup_flag.py -> test_compile_cli_surface.py (now unit)",
-  "step5 lane split: TestEnterpriseBootstrapSelfUpdate (CliRunner + scratch dirs) -> new tests/unit/commands/test_self_update_enterprise_bootstrap.py marked component with promise P-OWN-self-update-release-resolution (owner commands/self_update.py); test_self_update_air_gapped.py keeps the pure installer-URL tests and is now unit"
+  "step5 lane split: TestEnterpriseBootstrapSelfUpdate (CliRunner + scratch dirs) -> new tests/unit/commands/test_self_update_enterprise_bootstrap.py marked component with promise P-OWN-self-update-release-resolution (owner commands/self_update.py); test_self_update_air_gapped.py keeps the pure installer-URL tests and is now unit",
+  "step5 lane split: link resolver filesystem classes -> test_link_resolver.py; test_link_resolver_resolution.py keeps the pure link-classification helpers with a resolver fixture rooted at a fixed path (the helpers never read base_dir) and is now unit"
  ],
  "counts_left": {
   "same_body_groups": 0,
   "unclassified_modules": 3,
   "placement_offenders": 0,
-  "weak_tests": 932
+  "weak_tests": 902
  }
 }
