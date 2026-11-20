@@ -41,6 +41,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
+from ..utils.credential_rendering import redact_url_userinfo
+
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency
 
@@ -151,7 +153,7 @@ class RegistryConfig:
         if token and parsed.scheme == "http" and not os.environ.get("PROXY_REGISTRY_ALLOW_HTTP"):
             warnings.warn(
                 f"PROXY_REGISTRY_TOKEN is set but PROXY_REGISTRY_URL uses http:// "
-                f"({url!r}); the bearer token will be transmitted in plaintext. "
+                f"({redact_url_userinfo(url)!r}); the bearer token will be transmitted in plaintext. "
                 f"Use https:// in production, or set PROXY_REGISTRY_ALLOW_HTTP=1 "
                 f"to silence this warning when targeting a trusted internal proxy.",
                 UserWarning,

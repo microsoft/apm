@@ -658,6 +658,15 @@ def get_registry_config(name: str) -> "dict | None":
     return entry if isinstance(entry, dict) else None
 
 
+def list_registry_configs() -> dict[str, dict]:
+    """Return every config.json registry entry keyed by name."""
+    return {
+        name: dict(body)
+        for name, body in _get_registries_section().items()
+        if isinstance(name, str) and isinstance(body, dict)
+    }
+
+
 def set_registry_url(name: str, url: str) -> None:
     """Write registry.<name>.url to config.json."""
     regs = dict(_get_registries_section())
