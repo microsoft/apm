@@ -427,7 +427,12 @@ def _grown_sink(node: ast.AST) -> tuple[str, list[ast.AST]] | None:
 
 
 def _bindings(node: ast.AST) -> list[tuple[ast.AST, ast.AST]]:
-    """Return ``(target, value)`` pairs a node binds, pairing tuple unpacking."""
+    """Return ``(target, value)`` pairs a node binds, pairing tuple unpacking.
+
+    Comprehension targets are scoped to their comprehension (Python 3), so
+    they never bind a function-wide name; ``_flows_from`` reads a
+    comprehension's iterables directly instead.
+    """
     pairs: list[tuple[ast.AST, ast.AST]] = []
     if isinstance(node, ast.Assign):
         for target in node.targets:
@@ -436,7 +441,7 @@ def _bindings(node: ast.AST) -> list[tuple[ast.AST, ast.AST]]:
         pairs.extend(_pair(node.target, node.value))
     elif isinstance(node, ast.NamedExpr):
         pairs.append((node.target, node.value))
-    elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+    elif isinstance(node, (ast.For, ast.AsyncFor)):
         pairs.extend(_pair(node.target, node.iter, unpack=False))
     return pairs
 
