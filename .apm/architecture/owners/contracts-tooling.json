@@ -149,6 +149,18 @@
         "scripts/architecture_linter/checks/contracts_strip_charset.py"
       ],
       "guards": ["contracts-tooling-strip-charset"]
+    },
+    {
+      "id": "ci-validation-topology",
+      "decision": "Windows unit-suite selection run by the PR Windows Compatibility Gate and the main-push and full-validation Windows jobs",
+      "owner": "scripts/ci_selections.py (SELECTIONS)",
+      "selectors": [
+        "scripts/ci_selections.py",
+        "scripts/architecture_linter/checks/contracts_ci_topology.py",
+        ".github/workflows/ci.yml",
+        ".github/workflows/build-release.yml"
+      ],
+      "guards": ["contracts-tooling-ci-validation-topology"]
     }
   ]
 }
