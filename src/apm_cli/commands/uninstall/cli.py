@@ -15,6 +15,7 @@ from apm_cli.core.remediation import (
     INTEGRATIONS_UNSYNCED,
     INTEGRATIONS_UNSYNCED_AFTER,
     LOCKFILE_STATE_UNRECONCILED,
+    LOCKFILE_UNMANAGED_PATHS,
     MCP_ENTRY_STALE,
     PROJECT_MANIFEST_MISSING,
 )
@@ -304,8 +305,8 @@ def _refuse_unvalidated_paths(
     for path in rejected:
         logger.error(f"  - {path}")
     logger.progress(
-        "Restore apm.lock.yaml from version control or run 'apm install' to repair it, "
-        "then retry; no APM writes were made."
+        "Restore apm.lock.yaml from version control or "
+        f"{LOCKFILE_UNMANAGED_PATHS.clause()}; no APM writes were made."
     )
     sys.exit(1)
 

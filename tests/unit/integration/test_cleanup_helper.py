@@ -709,3 +709,32 @@ def test_member_this_install_kept_is_retained_despite_evidence(
         evidence=evidence(()),
     )
     assert control.deleted == [member]
+
+
+def test_refusals_name_a_symlinked_member_of_a_claimed_directory(project_root):
+    """Cleanup keeps a directory holding a symlink, so uninstall refuses first (#4451).
+
+    A managed final symlink outside any claimed directory keeps its own
+    unlink rule and is not refused.
+    """
+    from apm_cli.integration.cleanup import SYMLINKED
+
+    skill = project_root / ".agents" / "skills" / "kit"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").symlink_to(project_root / "apm.yml")
+    final = project_root / ".github" / "agents" / "linked.agent.md"
+    final.parent.mkdir(parents=True)
+    final.symlink_to(project_root / "apm.yml")
+    (project_root / "apm.yml").write_text("name: p\n", encoding="utf-8")
+    evidence = receipted_evidence(project_root)
+
+    refused = evidence.refusals(
+        [
+            ".agents/skills/kit",
+            ".agents/skills/kit/SKILL.md",
+            ".github/agents/linked.agent.md",
+        ]
+    )
+
+    assert refused == [(".agents/skills/kit/SKILL.md", SYMLINKED)]
+    assert (skill / "SKILL.md").is_symlink() and final.is_symlink()

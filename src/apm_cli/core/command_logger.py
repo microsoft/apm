@@ -284,6 +284,10 @@ class CommandLogger:
         if self._diagnostics and self._diagnostics.has_diagnostics:
             self._diagnostics.render_summary()
 
+    def nothing_to_prune(self) -> None:
+        """Log the single no-op line of ``apm prune``, whatever apm_modules/ holds (#4460)."""
+        _rich_success("No orphaned packages found. Nothing to prune.", symbol="check")
+
 
 # --- Library output -----------------------------------------------------------
 # Library code below the command layer (MCP client adapters, the safe MCP

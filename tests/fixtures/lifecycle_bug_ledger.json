@@ -2201,6 +2201,16 @@
       ]
     },
     {
+      "issue": 4033,
+      "fixed_in": "Unreleased",
+      "summary": "apm install writes apm.lock.yaml when the project's own .apm content only merges hook entries into shared harness configs, including on an unchanged reinstall, so apm audit --ci replays those hooks and reports drift in them.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["filesystem.open_world_observation", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_audit_root_only_hooks_drift_e2e.py::test_root_only_hooks_without_dependencies_get_a_lockfile_audit_replays"
+      ]
+    },
+    {
       "issue": 4038,
       "summary": "Traps required-package identity under replace: (req-rpl-002); needs org policy over HTTPS proxy, fork hosts and audit check details.",
       "failure_modes": ["outcome", "reference"],
@@ -3428,6 +3438,16 @@
       ]
     },
     {
+      "issue": 4233,
+      "fixed_in": "Unreleased",
+      "summary": "A lockfile with an unsupported lockfile_version now fails install, install --frozen, lock and audit --ci with an [x] diagnostic that names both remedies: move the lockfile aside and regenerate it with 'apm lock', or upgrade APM with 'apm self-update' (req-lk-004).",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_unsupported_lockfile_version_lifecycle.py::test_unsupported_lockfile_version_names_both_remedies"
+      ]
+    },
+    {
       "issue": 4235,
       "fixed_in": "Unreleased",
       "summary": "Registry archive extraction applies one set of archive limits to every accepted format: entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries, with every entry validated before the first write.",
@@ -3840,6 +3860,20 @@
       ]
     },
     {
+      "issue": 4293,
+      "fixed_in": "0.37.0",
+      "summary": "A cold install --frozen of a tag-pinned git dependency printed the locked full commit as the ref ('#<SHA40> @<SHA8>') instead of the declared tag ('#v1.0.0 @<SHA8>').",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_frozen_replay_output_lifecycle.py::test_cold_frozen_replay_of_a_tag_names_the_tag_not_the_commit"
+      ]
+    },
+    {
       "issue": 4307,
       "fixed_in": "Unreleased",
       "summary": "install lists a policy violation reported by two phases once, and the warning count counts distinct violations.",
@@ -3913,6 +3947,21 @@
       "regression_tests": [
         "tests/integration/test_registry_install_ci_notice_lifecycle.py::test_registry_install_prints_no_bare_environment_notice",
         "tests/unit/install/test_mcp_optional_inputs.py::test_noninteractive_registry_defaults_print_no_bare_environment_notice"
+      ]
+    },
+    {
+      "issue": 4321,
+      "fixed_in": "Unreleased",
+      "summary": "apm audit --ci reported skill-subset-consistency as unverified for a local Claude plugin without apm.yml installed with --skill; the audit now synthesizes that plugin's manifest from the source as install does, never trusting the apm_modules copy, verifies the selection, and still fails a tampered one.",
+      "failure_modes": [
+        "outcome",
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_local_plugin_skill_subset_audit_lifecycle.py::test_audit_verifies_local_plugin_skill_subset"
       ]
     },
     {
@@ -4068,6 +4117,16 @@
       ]
     },
     {
+      "issue": 4397,
+      "fixed_in": "Unreleased",
+      "summary": "apm install from a deep project path on Windows runs the Git URL-rewrite safety probe for a staged clone instead of refusing with '$GIT_DIR' too big: the probe passes a short relative Git directory from its parent, so Git's explicit GIT_DIR length limit (PATH_MAX - 40) no longer applies to the staging path.",
+      "failure_modes": ["portability"],
+      "properties": ["portability.byte_deterministic"],
+      "regression_tests": [
+        "tests/integration/test_git_config_probe_path_limit.py::test_clone_config_probe_runs_for_a_git_dir_beyond_the_explicit_limit"
+      ]
+    },
+    {
       "issue": 4400,
       "fixed_in": "Unreleased",
       "summary": "A marketplace plugin version that resolves to a ref other than the one a committed install recorded is refused (exit 1, both refs named) at project scope and with -g, instead of being re-recorded after one warning; the recorded pin and project state stay unchanged.",
@@ -4101,6 +4160,36 @@
       ]
     },
     {
+      "issue": 4437,
+      "fixed_in": "Unreleased",
+      "summary": "apm approve accepts the content-bound local-bundle key the install diagnostic prints and writes the same executables.allow grant, so the rerun install registers the bundle's executables; a key with a wrong digest, or one printed before the bundle bytes changed, is refused (exit 1, an [x] line) with no state change.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state", "idempotency.byte_stable"],
+      "regression_tests": [
+        "tests/integration/test_local_bundle_hooks_lifecycle.py::test_approve_grants_the_printed_local_bundle_key"
+      ]
+    },
+    {
+      "issue": 4439,
+      "fixed_in": "Unreleased",
+      "summary": "A refused apm install --frozen that keeps an adopted file names a remedy (move it aside, then rerun apm install --frozen); following it now withdraws the rewritten file instead of keeping it as adopted again, because a deployment receipt only proves an earlier write while its file is still on disk.",
+      "failure_modes": ["transaction"],
+      "properties": ["transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_frozen_no_rewrite_e2e.py::test_frozen_install_kept_file_remedy_runs_to_a_clean_refusal"
+      ]
+    },
+    {
+      "issue": 4441,
+      "fixed_in": "Unreleased",
+      "summary": "apm update names each installed local bundle whose executables stay parked, with the parked types and the approval next step, instead of a silent success; its exit code and state are unchanged.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_local_bundle_hooks_lifecycle.py::test_update_names_a_bundle_whose_executables_are_parked"
+      ]
+    },
+    {
       "issue": 4449,
       "fixed_in": "Unreleased",
       "summary": "A user's own MCP entry equal to a self-defined declaration, on Codex including one switched off with enabled = false, is no conflict: install, --frozen replay and audit agree, leave it unowned and change no byte; a different command still fails closed.",
@@ -4110,6 +4199,27 @@
         "tests/integration/test_native_mcp_collision_lifecycle.py::test_user_disabled_matching_codex_connection_installs_and_replays_frozen",
         "tests/integration/test_native_mcp_collision_lifecycle.py::test_direct_collision_repeat_force_frozen_and_prune",
         "tests/integration/test_codex_native_plugin_lifecycle.py::test_git_pinned_install_and_missing_apm_cache_restore"
+      ]
+    },
+    {
+      "issue": 4451,
+      "fixed_in": "Unreleased",
+      "summary": "apm uninstall removed the package's apm_modules copy and then exited 1 when a deployed skill member had been replaced by a symlink, because cleanup keeps such a directory; the evidence preflight now refuses before any change.",
+      "failure_modes": ["transaction", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/lifecycle/security/test_integrity.py::test_integrity_row",
+        "tests/unit/integration/test_cleanup_helper.py::test_refusals_name_a_symlinked_member_of_a_claimed_directory"
+      ]
+    },
+    {
+      "issue": 4453,
+      "fixed_in": "Unreleased",
+      "summary": "apm audit --ci names, in one advisory, the locked git and registry entries that carry no content hash when policy does not require hashes, and points at security.integrity.require_hashes; the exit code is unchanged.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_frozen_and_audit_agree_on_a_git_row_without_content_hash_by_default"
       ]
     },
     {
@@ -4159,6 +4269,75 @@
       "regression_tests": [
         "tests/integration/test_update_policy_no_change.py::test_update_with_nothing_to_change_refuses_a_policy_denied_dependency",
         "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome"
+      ]
+    },
+    {
+      "issue": 4460,
+      "fixed_in": "Unreleased",
+      "summary": "A no-op apm prune printed one of two different messages depending on whether apm_modules/ existed; it now prints one message through CommandLogger.nothing_to_prune, with or without --dry-run.",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_prune_noop_message_lifecycle.py::test_noop_prune_prints_one_message"
+      ]
+    },
+    {
+      "issue": 4467,
+      "fixed_in": "Unreleased",
+      "summary": "apm uninstall removed the package's apm_modules copy and then exited 1 when an edited deployed target file had to be retained; the evidence preflight now refuses before any change.",
+      "failure_modes": ["transaction", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/lifecycle/security/test_integrity.py::test_integrity_row",
+        "tests/integration/test_cleanup_deployment_evidence_lifecycle.py::test_uninstall_refusal_changes_nothing_and_its_remedy_runs"
+      ]
+    },
+    {
+      "issue": 4476,
+      "fixed_in": "Unreleased",
+      "summary": "An org policy refresh that returned valid YAML failing policy validation was reported as malformed and no policy was applied, while an unreachable host or a garbage response kept the cached policy. A validation-failed refresh now uses the same stale-cache fallback, so install and audit --ci keep applying a cached policy within its stale window.",
+      "failure_modes": ["outcome", "cache"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_policy_invalid_refresh_lifecycle.py::test_invalid_refresh_keeps_the_cached_deny_for_install_and_audit"
+      ]
+    },
+    {
+      "issue": 4477,
+      "fixed_in": "Unreleased",
+      "summary": "apm audit --ci passed while install and install --frozen refused a user's MCP entry that shares a self-defined server's name but differs from its declaration; audit now reaches the same verdict, names the entry and changes no byte.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_native_mcp_collision_lifecycle.py::test_user_disabled_matching_codex_connection_installs_and_replays_frozen"
+      ]
+    },
+    {
+      "issue": 4480,
+      "fixed_in": "Unreleased",
+      "summary": "apm audit --ci named a changed package copy with two different messages depending on which owner detected it (the audit materialization check said the copies do not match apm.lock.yaml, native plugin and Codex checks said the cache differs). Every owner now prints one message, 'package cache differs from its locked content', from core/cache_drift.py.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_codex_native_plugin_lifecycle.py::test_installed_cli_registers_complete_codex_bundle_disabled",
+        "tests/integration/test_codex_native_plugin_lifecycle.py::test_git_pinned_install_and_missing_apm_cache_restore",
+        "tests/integration/test_native_plugin_cache_audit.py::test_native_cache_tamper_fails_installed_audit",
+        "tests/unit/test_codex_native_registrar.py::test_source_identity_refusal_precedes_native_access"
+      ]
+    },
+    {
+      "issue": 4492,
+      "fixed_in": "Unreleased",
+      "summary": "apm install <bundle> stages the parked-executables record and writes apm_modules/.local-bundle-pending.json only when the install commits, so a bundle install that fails (for example on an integrity check) leaves the project byte-identical while apm approve --pending still lists a successful install's parked executables.",
+      "failure_modes": ["transaction"],
+      "properties": ["transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_local_bundle_hooks_lifecycle.py::test_approve_pending_lists_parked_bundle_executables",
+        "tests/lifecycle/security/test_integrity.py::test_integrity_row"
       ]
     }
   ],

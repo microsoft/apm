@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core import remediation
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
@@ -30,13 +32,11 @@ _DIRECTORY_DEPTH = 6
 
 _KEPT_REASONS = {
     "adopted": (
-        "already on disk before this install (not written by it); delete or move it "
-        "aside if it is not yours to keep, then rerun 'apm install --frozen'"
+        "already on disk before this install (not written by it)",
+        remediation.FROZEN_KEPT_ADOPTED,
     ),
-    "edited": (
-        "edited after this install wrote it; move it aside, then rerun 'apm install --frozen'"
-    ),
-    "failed": "could not be removed; delete it, then rerun 'apm install --frozen'",
+    "edited": ("edited after this install wrote it", remediation.FROZEN_KEPT_EDITED),
+    "failed": ("could not be removed", remediation.FROZEN_KEPT_UNREMOVABLE),
 }
 
 
@@ -92,8 +92,15 @@ def take_write_journal(lockfile_path: Path) -> WriteJournal | None:
     if committed is None:
         return None
     deploy_root, user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
+    receipts = _receipts(deploy_root, lockfile_path.parent, user_scope=user_scope)
     return WriteJournal(
-        receipts=_receipts(deploy_root, lockfile_path.parent, user_scope=user_scope),
+        # A receipt proves an earlier write only while its file is still on disk;
+        # once the user moved it aside, rewriting it is this invocation's write.
+        receipts={
+            path: digest
+            for path, digest in receipts.items()
+            if Path(path).exists() or Path(path).is_symlink()
+        },
         directories=_directories(deploy_root, {target.root_dir for target in targets}),
     )
 
@@ -222,16 +229,18 @@ def _remove_created_directories(
 
 def kept_lines(kept: Mapping[str, str]) -> list[str]:
     """Name each kept file with its reason and the runnable next step."""
-    return [f"  - kept {path}: {_KEPT_REASONS[reason]}" for path, reason in sorted(kept.items())]
+    return [
+        f"  - {remediation.kept_file_message(path, *_KEPT_REASONS[reason])}"
+        for path, reason in sorted(kept.items())
+    ]
 
 
 def refusal_tip(kept: Mapping[str, str]) -> str:
     """The refusal's tip: what was withdrawn, and how to record the deployment."""
     removed = "the other unrecorded files were" if kept else "the unrecorded files were"
     return (
-        f"Tip: {removed} removed again and apm.lock.yaml is unchanged. Run "
-        "'apm install' without --frozen, retaining --root DIR or --global if "
-        "specified, then commit the deployed files and apm.lock.yaml."
+        f"Tip: {removed} removed again and apm.lock.yaml is unchanged. "
+        f"{remediation.FROZEN_LOCKFILE_WITHHELD.sentence()}"
     )
 
 

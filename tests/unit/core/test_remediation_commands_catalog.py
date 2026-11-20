@@ -77,6 +77,11 @@ COMPONENT_ONLY: dict[str, str] = {
     "local-dependency-unmapped": "needs a hand-edited lockfile local key",
     "local-dependency-unresolved": _FAULT,
     "lockfile-records-inconsistent": "needs duplicate or invalid lockfile rows",
+    "lockfile-version-unsupported": (
+        "executed end to end by "
+        "tests/integration/test_unsupported_lockfile_version_lifecycle.py (#4233)"
+    ),
+    "lockfile-version-upgrade-apm": _NETWORK,
     "lockfile-state-unreconciled": _FAULT,
     "marketplace-add-failed": _OUTSIDE,
     "marketplace-build-removed": _OUTSIDE,
@@ -111,6 +116,9 @@ COMPONENT_ONLY: dict[str, str] = {
     "reported the bundle",
     "legacy-bundle-unpack": _OUTSIDE,
     "registry-package-install": _NETWORK,
+    "update-undeclared-package": "covered by the update undeclared-package refusal lifecycle test, which asserts the printed next step",
+    "bundle-executables-allow": "printed by 'apm approve --pending' for a parked local bundle; full sentence asserted by test_remediation_gate9_call_sites",
+    "lockfile-unmanaged-paths": "needs a lockfile that records paths APM does not manage; test_uninstall_refusal_atomicity_lifecycle reaches the refusal",
 }
 
 

@@ -56,6 +56,7 @@ COMPONENT_ONLY: dict[str, str] = {
     "llm-tls-bootstrap-missing": "runs a real runtime installer against the network",
     "mcp-container-option-unresolved": _REGISTRY,
     "mcp-env-vars-unresolved": _REGISTRY,
+    "claude-native-plugin-drift": "needs a real Claude native plugin registration whose recorded fingerprint drifted",
 }
 
 

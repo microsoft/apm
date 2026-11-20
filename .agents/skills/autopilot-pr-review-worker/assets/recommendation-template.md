@@ -19,6 +19,10 @@ RENDERING RULES (the orchestrator follows these literally):
 - The per-persona table renders ONLY active panelists.
 - The recommended follow-ups list is CAPPED at 5 items; the CEO is
   asked to curate. If the CEO returns more, take the first 5.
+- Each follow-up is phrased as a fix to fold into this PR (or a
+  successor PR in the same lane if this PR already merged), never as
+  "file an issue". Only design or scope decisions explicitly made by a
+  maintainer (a human) may be tracked as issues.
 - Architecture diagrams render ONLY when python_architect.extras.diagrams
   supplies them. NEVER invent diagrams; NEVER render a placeholder.
 - Principle alignment renders ONLY when ceo.principle_alignment has at

@@ -306,8 +306,27 @@ def local_bundle_update_next_step(names, file_count: int, scope) -> str:
         subject = f"{noun} {', '.join(names)}"
     else:
         subject = f"Local bundle content ({file_count} file(s))"
-    flag = "-g " if is_user_scope(scope) else ""
+    from apm_cli.core.remediation import LOCAL_BUNDLE_UPDATE
+
+    step = LOCAL_BUNDLE_UPDATE
+    if is_user_scope(scope):
+        step = step.with_command("apm install -g <newer-bundle-file>")
+    return f"{subject} not updated: 'apm update' refreshes apm.yml dependencies only. {step.sentence()}"
+
+
+def local_bundle_parked_next_step(slug: str, exec_types, scope) -> str:
+    """Name a local bundle whose executables stay parked and how to approve them (#4441).
+
+    Same remedy as ``apm approve --pending``: approve the exact key under
+    ``executables.allow``, then reinstall the bundle.
+    """
+    from apm_cli.core.remediation import LOCAL_BUNDLE_EXECUTABLES_PARKED
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.security.trust import approve_command
+
+    pending = approve_command("--pending", user_scope=is_user_scope(scope))
+    remedy = LOCAL_BUNDLE_EXECUTABLES_PARKED.with_command(pending)
     return (
-        f"{subject} not updated: 'apm update' refreshes apm.yml dependencies only. "
-        f"To update a bundle, run 'apm install {flag}<newer-bundle-file>'."
+        f"Local bundle '{slug}': {', '.join(exec_types)} parked, awaiting approval. "
+        f"{remedy.sentence()}"
     )

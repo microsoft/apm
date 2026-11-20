@@ -45,7 +45,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.core.remediation import COWORK_SKILLS_DIR_UNDETECTED
+from apm_cli.core.remediation import (
+    COWORK_SKILLS_DIR_UNDETECTED,
+    UNINSTALL_EVIDENCE_REINSTALL,
+    UNINSTALL_EVIDENCE_REMOVE,
+)
 from apm_cli.security.gate import is_python_bytecode_cache_path
 from apm_cli.utils.paths import SpellingAliasIndex
 
@@ -58,6 +62,8 @@ AUTHORIZED = "authorized"
 EDITED = "edited"
 UNPROVEN = "unproven"
 UNREADABLE = "unreadable"
+# A member of a claimed directory replaced by a symlink: cleanup keeps the directory (#4451).
+SYMLINKED = "symlinked"
 
 
 class DeploymentEvidence:
@@ -225,10 +231,26 @@ class DeploymentEvidence:
         delete has no deployment evidence (#3701). Missing files, directories
         and final symlinks are skipped; their own rules apply.
         """
+        claims = list(dict.fromkeys(claims))
+        directories = [
+            claim.rstrip("/")
+            for claim in claims
+            if (physical := self._physical(claim)) is not None
+            and not physical.is_symlink()
+            and physical.is_dir()
+        ]
         refused: list[tuple[str, str]] = []
-        for claim in dict.fromkeys(claims):
+        for claim in claims:
             physical = self._physical(claim)
-            if physical is None or physical.is_symlink() or not physical.is_file():
+            if physical is None:
+                continue
+            if physical.is_symlink():
+                # Only a member of a claimed directory: managed final symlinks
+                # elsewhere keep their own unlink rule (#4451).
+                if any(claim.startswith(f"{directory}/") for directory in directories):
+                    refused.append((claim, SYMLINKED))
+                continue
+            if not physical.is_file():
                 continue
             verdict = self.verdict(claim, physical)
             if verdict != AUTHORIZED:
@@ -689,6 +711,7 @@ _REFUSAL_REASONS = {
     UNPROVEN: "no local deployment receipt or render of the locked package version",
     EDITED: "edited since APM deployed it",
     UNREADABLE: "its content could not be read to verify it",
+    SYMLINKED: "replaced by a symbolic link, so its directory cannot be removed",
 }
 
 
@@ -700,13 +723,12 @@ def refusal_reason(verdict: str) -> str:
 def uninstall_evidence_remedies(*, user_scope: bool) -> tuple[str, str]:
     """Return the two runnable remedies when uninstall lacks deletion evidence."""
     flag = " -g" if user_scope else ""
-    return (
-        "Move aside any listed file that holds your edits, then run "
-        f"'apm install{flag}' once with access to the package source, which "
-        f"re-establishes deployment evidence, then rerun 'apm uninstall{flag}'.",
-        "If the source is unreachable, move each listed file aside or delete it, "
-        f"then rerun 'apm uninstall{flag}'.",
-    )
+    reinstall = UNINSTALL_EVIDENCE_REINSTALL.bind(flag=flag)
+    remove = UNINSTALL_EVIDENCE_REMOVE
+    if user_scope:
+        reinstall = reinstall.with_command("apm install -g")
+        remove = remove.with_command("apm uninstall -g")
+    return reinstall.sentence(), remove.sentence()
 
 
 def _keep_without_evidence(

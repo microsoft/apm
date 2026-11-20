@@ -130,12 +130,7 @@ def test_installed_cli_startup_stays_within_import_budget(
 @pytest.mark.parametrize(
     "args",
     [
-        pytest.param(
-            ("--version",),
-            marks=pytest.mark.xfail(
-                strict=True, reason="I5: fixed by H3 experimental-flag pure read"
-            ),
-        ),
+        ("--version",),
         ("--help",),
     ],
     ids=lambda a: " ".join(a),

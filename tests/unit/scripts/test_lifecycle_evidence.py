@@ -1292,6 +1292,20 @@ def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, c
         check_cli_output(args, _cli(args, stdout, stderr, code))
 
 
+@pytest.mark.parametrize("width", [78, 79, 80, 81])
+def test_a_verbose_phase_line_never_joins_a_full_width_banner(width: int) -> None:
+    """A repeated banner of any width still compares equal when Phase: lines follow it."""
+    head = "[!] Policy: org:acme/"
+    banner = head + "x" * (width - len(head) - 1) + "k"
+    assert len(banner) == width
+    stdout = f"{banner}\nPhase: apm\n[+] p\n{banner}\nPhase: mcp\n"
+    args = ("install", "--verbose")
+    with pytest.raises(
+        OutputOracleError, match=r"I9: stdout repeats a diagnostic: '\[!\] Policy: org:acme/"
+    ):
+        check_cli_output(args, _cli(args, stdout), known_cells=())
+
+
 _LOG_TWICE = (
     "DEBUG apm_cli.core.token_manager gh auth token failed for github.com: x\n"
     "DEBUG apm_cli.core.token_manager gh auth token failed for github.com: x\n"

@@ -455,6 +455,11 @@ def _ascii_violations(stream: str, text: str, echoed: str = "") -> list[OutputVi
     return [OutputViolation("I6", f"{stream} has characters outside printable ASCII {bad[:5]}")]
 
 
+# Plain verbose diagnostics that always start their own line; a full-width line
+# before one is never wrapped into it.
+_VERBOSE_LABELS = ("Phase:",)
+
+
 def _logical_lines(text: str) -> list[str]:
     """Non-blank lines with terminal wraps undone.
 
@@ -486,7 +491,7 @@ def _logical_lines(text: str) -> list[str]:
             lines
             and (broke_at_space or filled)
             and not line[:1].isspace()
-            and not line.startswith(_LINE_OPENERS)
+            and not line.startswith(_LINE_OPENERS + _VERBOSE_LABELS)
             and (broke_at_space or lines[-1].strip().startswith(_LINE_OPENERS))
         ):
             lines[-1] = f"{lines[-1]} {line}"

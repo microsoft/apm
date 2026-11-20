@@ -17,6 +17,7 @@ in ``$HOME/.codex/.stand-in-curated-sync`` instead of reaching the network.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -146,9 +147,17 @@ for line in sys.stdin:
 
 
 def write_codex_stand_in(bin_dir: Path) -> Path:
-    """Write an executable ``codex`` into *bin_dir* and return its path."""
+    """Write an executable ``codex`` into *bin_dir* and return its path.
+
+    Windows cannot run the shebang script, so a ``codex.cmd`` shim beside it
+    runs the script with the current interpreter; PATH lookup finds the shim.
+    """
     bin_dir.mkdir(parents=True, exist_ok=True)
     codex = bin_dir / "codex"
     codex.write_text(f"#!{sys.executable}\n{_SCRIPT}", encoding="ascii")
     codex.chmod(0o755)
+    if os.name == "nt":
+        shim = bin_dir / "codex.cmd"
+        shim.write_text(f'@"{sys.executable}" "{codex}" %*\r\n', encoding="ascii")
+        return shim
     return codex

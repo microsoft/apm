@@ -32,7 +32,11 @@ _PACKAGE = "./pkgs/hooky"
 _COMMAND = "echo hi-hooky"
 _OPEN_POLICY = "name: p\nversion: 1.0.0\nenforcement: block\n"
 _DENY_ALL_POLICY = _OPEN_POLICY + "executables:\n  deny_all: true\n"
-_REPAIR = "run 'apm install' without --frozen"
+_REPAIR = (
+    "Tip: Run 'apm install' to record the executables decisions the gate makes now "
+    "(without --frozen, keeping --root DIR or --global if specified), then commit "
+    "apm.lock.yaml."
+)
 
 
 def _chain(tmp_path: Path, binary: Path, target: str) -> Chain:

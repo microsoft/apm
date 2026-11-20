@@ -103,6 +103,37 @@ _active_writer: ContextVar[_Writer | None] = ContextVar("apm_lockfile_writer", d
 _provisional: ContextVar[bool] = ContextVar("apm_lockfile_provisional", default=False)
 
 
+@dataclass
+class LockfileWriterObservation:
+    """Read-only record of which writers commands declared and which opened a scope."""
+
+    declared: list[LockfileWriter] = field(default_factory=list)
+    opened: list[LockfileWriter] = field(default_factory=list)
+
+    def clear(self) -> None:
+        self.declared.clear()
+        self.opened.clear()
+
+
+_observers: list[LockfileWriterObservation] = []
+
+
+@contextmanager
+def observe_lockfile_writers() -> Iterator[LockfileWriterObservation]:
+    """Observe the single-writer contract without changing it.
+
+    Each outermost :func:`lockfile_write_scope` appends its writer to
+    ``declared``; each write scope it opens (its first staged write) appends
+    to ``opened``. Nothing about staging or committing changes.
+    """
+    observation = LockfileWriterObservation()
+    _observers.append(observation)
+    try:
+        yield observation
+    finally:
+        _observers.remove(observation)
+
+
 def _key(path: Path) -> Path:
     # Absolute, not resolved: a symlinked lockfile must stay a symlink so the
     # writer can refuse it, and a cwd change later in the command must not
@@ -116,6 +147,8 @@ def _scope(*, open_: bool = False) -> _WriteScope | None:
         return None
     if active.scope is None and open_:
         active.scope = _WriteScope(active.writer)
+        for observation in _observers:
+            observation.opened.append(active.writer)
     if open_ and not _provisional.get():
         active.scope.changed_state = True
     return active.scope
@@ -168,6 +201,8 @@ def lockfile_write_scope(writer: LockfileWriter) -> Iterator[None]:
     if _active_writer.get() is not None:
         yield
         return
+    for observation in _observers:
+        observation.declared.append(writer)
     active = _Writer(writer)
     token = _active_writer.set(active)
     try:

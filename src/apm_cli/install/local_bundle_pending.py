@@ -1,11 +1,11 @@
-"""Parked local-bundle executables, for ``apm approve --pending`` (#4221).
+"""Installed local-bundle executables, for ``apm approve`` (#4221, #4437).
 
 A local bundle is not a dependency under ``apm_modules/``, so the approval
-commands cannot scan it. When ``apm install <bundle>`` parks executable types
-(hooks, MCP, LSP) because the exact bundle key is not approved, this module
-records the slug, the key the install printed, and the parked types in the
-scope's ``apm_modules/``. Readers re-check every entry against current trust,
-so an approved key never shows as pending.
+commands cannot scan it. ``apm install <bundle>`` records, in the scope's
+``apm_modules/``, the slug, the exact-content approval key the install printed,
+and the executable types (hooks, MCP, LSP) the bundle ships. ``--pending``
+re-checks every entry against current trust, so an approved key never shows as
+pending; ``apm approve <key>`` grants only a key the last install recorded.
 """
 
 from __future__ import annotations
@@ -41,12 +41,12 @@ def _read(scope_dir: Path) -> dict[str, dict]:
     return bundles if isinstance(bundles, dict) else {}
 
 
-def record_parked_executables(
-    scope_dir: Path, slug: str, approval_key: str | None, parked: Iterable[str]
+def record_bundle_executables(
+    scope_dir: Path, slug: str, approval_key: str | None, exec_types: Iterable[str]
 ) -> None:
-    """Record (or, with nothing *parked*, clear) one bundle's parked executable types."""
+    """Record (or, with no *exec_types*, clear) one installed bundle's key and types."""
     bundles = _read(scope_dir)
-    types = sorted(set(parked))
+    types = sorted(set(exec_types))
     if types and approval_key:
         bundles[slug] = {"approval_key": approval_key, "exec_types": types}
     elif slug in bundles:
@@ -61,10 +61,28 @@ def record_parked_executables(
     path.write_text(json.dumps({"bundles": bundles}, indent=2, sort_keys=True) + "\n", "utf-8")
 
 
-def pending_bundles(
-    scope_dir: Path, is_approved: Callable[[str, str], bool]
-) -> list[PendingBundle]:
-    """Return recorded bundles with a parked type *is_approved(key, type)* still refuses."""
+@dataclass
+class BundleRecordStage:
+    """One install's bundle executables entry, persisted only on commit (#4492).
+
+    A failed install never calls :meth:`commit`, so it leaves the record as it was.
+    """
+
+    scope_dir: Path
+    slug: str
+    approval_key: str | None
+    exec_types: tuple[str, ...]
+    committed: bool = False
+
+    def commit(self) -> None:
+        """Persist the staged entry once; later calls are no-ops."""
+        if self.committed:
+            return
+        self.committed = True
+        record_bundle_executables(self.scope_dir, self.slug, self.approval_key, self.exec_types)
+
+
+def _recorded(scope_dir: Path) -> list[PendingBundle]:
     found: list[PendingBundle] = []
     for slug, entry in sorted(_read(scope_dir).items()):
         if not isinstance(entry, dict):
@@ -73,7 +91,29 @@ def pending_bundles(
         types = entry.get("exec_types")
         if not isinstance(key, str) or not isinstance(types, list):
             continue
-        still = tuple(str(t) for t in types if not is_approved(key, str(t)))
-        if still:
-            found.append(PendingBundle(str(slug), key, still))
+        found.append(PendingBundle(str(slug), key, tuple(str(t) for t in types)))
     return found
+
+
+def pending_bundles(
+    scope_dir: Path, is_approved: Callable[[str, str], bool]
+) -> list[PendingBundle]:
+    """Return recorded bundles with a parked type *is_approved(key, type)* still refuses."""
+    found: list[PendingBundle] = []
+    for bundle in _recorded(scope_dir):
+        still = tuple(t for t in bundle.exec_types if not is_approved(bundle.approval_key, t))
+        if still:
+            found.append(PendingBundle(bundle.slug, bundle.approval_key, still))
+    return found
+
+
+def recorded_bundle(scope_dir: Path, approval_key: str) -> PendingBundle | None:
+    """Return the installed bundle whose last install printed exactly *approval_key* (#4437).
+
+    The key binds the bundle's content digest, so a key with a wrong digest,
+    or one a later install of changed bundle bytes replaced, matches nothing.
+    """
+    for bundle in _recorded(scope_dir):
+        if bundle.approval_key == approval_key:
+            return bundle
+    return None

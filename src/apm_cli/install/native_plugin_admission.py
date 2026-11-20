@@ -193,7 +193,10 @@ def verify_native_plugin_cache(
     if not candidate.is_dir() or not verify_locked_package(
         candidate, expected_hash, carried, framed=lock_dep.content_hash_framed
     ):
+        from apm_cli.core.cache_drift import package_cache_drift
+
         raise AgentPluginDeploymentBoundaryError(
-            f"Native Agent Plugin cache differs from its replay baseline: {candidate}; "
-            f"{NATIVE_PLUGIN_CACHE_DIFFERS.clause()}"
+            package_cache_drift(
+                f"Native Agent Plugin {candidate}", NATIVE_PLUGIN_CACHE_DIFFERS.clause()
+            )
         )

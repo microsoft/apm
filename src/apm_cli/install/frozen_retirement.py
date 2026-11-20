@@ -12,6 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core import remediation
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
@@ -125,10 +127,7 @@ def _stale_decisions_error(stale: Sequence[Any]) -> Exception:
     return FrozenInstallError(
         "--frozen: apm.lock.yaml records an executables decision the gate no longer makes.",
         reasons=[f"  - {decision.describe()}" for decision in stale],
-        tip=(
-            "Tip: run 'apm install' without --frozen, retaining --root DIR "
-            "or --global if specified, then commit apm.lock.yaml."
-        ),
+        tip=f"Tip: {remediation.FROZEN_EXEC_DECISIONS_STALE.sentence()}",
     )
 
 

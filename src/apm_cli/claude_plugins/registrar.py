@@ -17,7 +17,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from apm_cli.core.remediation import CLAUDE_PLUGIN_BINDING_MOVED, CLAUDE_PLUGIN_SOURCE_STALE
+from apm_cli.core.remediation import (
+    CLAUDE_NATIVE_PLUGIN_DRIFT,
+    CLAUDE_PLUGIN_BINDING_MOVED,
+    CLAUDE_PLUGIN_SOURCE_STALE,
+)
 from apm_cli.core.scope import InstallScope, get_deploy_root, is_user_scope
 from apm_cli.native_plugins.layout import (
     NativeLayoutError,
@@ -383,7 +387,7 @@ def native_deployed_drift(deploy_root: Path, lockfile: Any) -> list[Any]:
                     owner=key,
                     path=f"native plugin '{record.name}' ({record.root})",
                     expected=record.fingerprint,
-                    actual=f"{observed}; run 'apm install --global' to restore it",
+                    actual=f"{observed}; {CLAUDE_NATIVE_PLUGIN_DRIFT.clause()}",
                 )
             )
     return found
