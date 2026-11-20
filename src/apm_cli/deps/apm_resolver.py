@@ -702,14 +702,17 @@ class APMDependencyResolver:
         require_locked_catalog_origin(
             dep_ref.marketplace_name, dep_ref.marketplace_plugin_name, self._existing_lockfile
         )
+        update_selected = self._update_keys is None or dep_ref.get_unique_key() in self._update_keys
         resolution = resolve_marketplace_plugin(
             dep_ref.marketplace_plugin_name,
             dep_ref.marketplace_name,
             version_spec=dep_ref.marketplace_version_spec,
             auth_resolver=self._auth_resolver,
             warning_handler=_logger.warning,
-            accept_ref_change=bool(self._update_refs)
-            and (self._update_keys is None or dep_ref.get_unique_key() in self._update_keys),
+            # An update accepts a changed ref for the plugins it selects; an
+            # unselected plugin keeps its locked ref, so its pin is left alone.
+            enforce_ref_pins=not (self._update_refs and not update_selected),
+            accept_ref_change=bool(self._update_refs) and update_selected,
         )
         admit_marketplace_resolution(resolution)
         resolved = (
