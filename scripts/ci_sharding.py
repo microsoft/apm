@@ -36,6 +36,7 @@ Four modes:
 from __future__ import annotations
 
 import argparse
+import ast
 import fnmatch
 import json
 import math
@@ -375,27 +376,103 @@ def module_units(sources: Mapping[str, str]) -> list[tuple[str, ...]]:
     return sorted(tuple(members) for members in units.values())
 
 
-def module_weights(modules: Sequence[str], durations: Mapping[str, float]) -> dict[str, float]:
-    """Sum every duration entry of a module; unknown modules weigh the mean."""
+def _entry_of(node: str) -> tuple[str, str | None]:
+    """Split a duration key into its module and top-level test (class or function)."""
+    module, _, rest = node.partition("::")
+    if not rest:
+        return module, None
+    return module, re.split(r"::|\[|@", rest, maxsplit=1)[0]
+
+
+def entry_weights(durations: Mapping[str, float]) -> dict[str, float]:
+    """Sum every duration under each module and under each module's top-level test."""
     totals: dict[str, float] = defaultdict(float)
     for node, seconds in durations.items():
-        totals[node.split("::", 1)[0]] += seconds
+        module, test = _entry_of(node)
+        totals[module] += seconds
+        if test is not None:
+            totals[f"{module}::{test}"] += seconds
+    return totals
+
+
+def module_weights(modules: Sequence[str], durations: Mapping[str, float]) -> dict[str, float]:
+    """Sum every duration entry of a module; unknown modules weigh the mean."""
+    totals = entry_weights(durations)
     known = [totals[module] for module in modules if module in totals]
     default = sum(known) / len(known) if known else 1.0
     return {module: totals.get(module, default) for module in modules}
 
 
+def top_level_tests(text: str) -> tuple[str, ...]:
+    """Top-level test functions and classes, or none when splitting is unsafe.
+
+    A module that imports test names, names an xdist group or does not parse
+    is never split, so every test it holds stays reachable from its file.
+    """
+    if _GROUP_NAME.search(text):
+        return ()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return ()
+    names: list[str] = []
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
+            alias.asname is None and alias.name.split(".")[-1].startswith(("test", "Test"))
+            or (alias.asname or "").startswith(("test", "Test"))
+            for alias in node.names
+        ):
+            return ()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(
+            "test"
+        ):
+            names.append(node.name)
+        elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+            names.append(node.name)
+    return tuple(dict.fromkeys(names))
+
+
+def _split_heavy_units(
+    units: list[tuple[str, ...]],
+    sources: Mapping[str, str],
+    weights: dict[str, float],
+    totals: Mapping[str, float],
+    limit: float,
+) -> list[tuple[str, ...]]:
+    """Run a module heavier than limit as one node ID per top-level test."""
+    result: list[tuple[str, ...]] = []
+    for unit in units:
+        module = unit[0]
+        tests = top_level_tests(sources[module]) if len(unit) == 1 else ()
+        if weights[module] <= limit or len(tests) < 2:
+            result.append(unit)
+            continue
+        entries = [f"{module}::{test}" for test in tests]
+        measured = sum(totals.get(entry, 0.0) for entry in entries)
+        residual = max(weights[module] - measured, 0.0) / len(entries)
+        for entry in entries:
+            weights[entry] = totals.get(entry, 0.0) + residual
+            result.append((entry,))
+    return result
+
+
 def partition_modules(
     sources: Mapping[str, str], shard_count: int, durations: Mapping[str, float]
 ) -> FilePartition:
-    """Split whole modules into shard_count disjoint, nonempty, balanced shards."""
+    """Split modules into shard_count disjoint, nonempty, balanced shards.
+
+    Modules stay whole unless one outweighs half a shard's share; such a
+    module runs as one pytest node ID per top-level test instead.
+    """
+    weights = module_weights(list(sources), durations)
     units = module_units(sources)
     if shard_count < 1 or len(units) < shard_count:
         raise pytest.UsageError(
             f"Cannot split {len(units)} module units into {shard_count} nonempty shards."
         )
-    weights = module_weights(list(sources), durations)
-    unit_seconds = {unit: sum(weights[module] for module in unit) for unit in units}
+    limit = sum(weights.values()) / (shard_count * 2)
+    units = _split_heavy_units(units, sources, weights, entry_weights(durations), limit)
+    unit_seconds = {unit: sum(weights[entry] for entry in unit) for unit in units}
     shards: list[list[str]] = [[] for _ in range(shard_count)]
     loads = [0.0] * shard_count
     for unit in sorted(units, key=lambda unit: (-unit_seconds[unit], unit)):
