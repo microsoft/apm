@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The registries reference documents the enterprise publish, install and cold-CI `--frozen` workflow, now verified end to end against the Registry HTTP API on every PR. (#4015)
+
 ### Changed
 
 - OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
