@@ -212,9 +212,13 @@
     {
       "id": "executable-item-admission",
       "decision": "Admission of one dependency-declared executable item (MCP server or hook file): org/user/project deny ladder AND manifest approval AND definition fingerprint match, for install, update, install --frozen, apm audit --ci, apm approve and the install prompt; the lockfile is evidence, never consent (#3902)",
-      "owner": "security/trust.py (admit, McpAdmission, hook_file_filter, pinned_exec_status, record_pins); integration/mcp_config_view.py derive(admission=...) and InstallService._frozen_mcp_reasons consume it",
+      "owner": "security/trust.py (admit, McpAdmission, hook_file_filter, pinned_exec_status, record_pins, recorded_hook_pin_mismatches); integration/mcp_config_view.py derive(admission=...) and InstallService._frozen_mcp_reasons consume it; install --frozen (InstallService.enforce_frozen_hook_pins) and audit --ci (hook-approval-pins) verify locked hook pins through install/exec_gate.py locked_hook_pin_mismatches (#4188)",
       "selectors": ["src/apm_cli/security/trust.py"],
-      "guards": ["install-deployment-executable-item-admission", "install-deployment-mcp-admission"]
+      "guards": [
+        "install-deployment-executable-item-admission",
+        "install-deployment-hook-pin-frozen-audit-parity",
+        "install-deployment-mcp-admission"
+      ]
     },
     {
       "id": "executable-trust-fingerprint",
