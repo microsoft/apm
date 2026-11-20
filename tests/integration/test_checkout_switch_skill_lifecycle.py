@@ -410,7 +410,17 @@ def test_branch_switch_then_source_edit_never_deletes_skill_members(
     assert kept == {path[len(_X) + 1 :]: data for path, data in before.items()}
 
 
-@pytest.mark.parametrize("discard", ["checkout", "stash"])
+def _discard(world: _World, how: str, root: Path | None = None) -> None:
+    """Revert every tracked change the way a user would: checkout, stash or reset."""
+    if how == "checkout":
+        world.git("checkout", "--", ".", cwd=root)
+    elif how == "stash":
+        world.git("stash", "-q", cwd=root)
+    else:
+        world.git("reset", "-q", "--hard", cwd=root)
+
+
+@pytest.mark.parametrize("discard", ["checkout", "stash", "reset"])
 def test_discarded_deploy_then_source_edit_installs(
     tmp_path: Path, apm_binary_path: Path, discard: str
 ) -> None:
@@ -423,10 +433,7 @@ def test_discarded_deploy_then_source_edit_installs(
     _committed_local_project(world)
     _write(world.project / ".apm/skills/x/references/a.md", "reference a v2\n")
     assert world.apm("install").returncode == 0
-    if discard == "checkout":
-        world.git("checkout", "--", ".")
-    else:
-        world.git("stash", "-q")
+    _discard(world, discard)
     assert world.git("status", "--porcelain") == ""
     edited = _LOCAL_SKILL + "source edit\n"
     _write(world.project / ".apm/skills/x/SKILL.md", edited)
@@ -605,4 +612,34 @@ def test_user_edit_variants_never_lose_bytes(
     expected_a = "reference a v2\n" if case in ("R1", "R4") else "reference a, version A\n"
     assert (world.project / _X / "references/a.md").read_text(encoding="ascii") == expected_a
     missing = sorted(p for p in _locked_files(world.project) if not (world.project / p).exists())
+    assert not missing, missing
+
+
+@pytest.mark.parametrize("discard", ["checkout", "stash", "reset"])
+def test_user_scope_discarded_deploy_then_source_edit_installs(
+    tmp_path: Path, apm_binary_path: Path, discard: str
+) -> None:
+    """-g revert variant of #4230: install, revert deployed files, edit a source, install."""
+    world, package = _user_world(tmp_path, apm_binary_path)
+    home = world.isolated.home
+    lock = Path(world.env["APM_HOME"]) / "apm.lock.yaml"
+    _write(package / ".apm/skills/x/references/a.md", "reference a v2\n")
+    assert world.apm("install", "-g", cwd=home).returncode == 0
+    _discard(world, discard, home)
+    assert world.git("status", "--porcelain", cwd=home) == ""
+    edited = _LOCAL_SKILL + "source edit\n"
+    _write(package / ".apm/skills/x/SKILL.md", edited)
+    before = _tree(home, _X)
+
+    result = world.apm("install", "-g", cwd=home)
+    output = _output(result)
+    _assert_nothing_deleted(before, home)
+    assert result.returncode == 0, output
+    assert _REFUSAL not in output and _MODIFIED not in output, output
+    assert "Cleaned" not in output, output
+    assert (home / _X / "SKILL.md").read_text(encoding="ascii") == edited
+    assert (home / _X / "references/a.md").read_text(encoding="ascii") == (
+        "reference a, version A\n"
+    )
+    missing = sorted(p for p in _locked_files_at(lock) if not (home / p).exists())
     assert not missing, missing
