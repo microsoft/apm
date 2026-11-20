@@ -20,6 +20,7 @@ from tests.utils.hermetic_packaged_sample import (
     HermeticPackagedSample,
     create_hermetic_packaged_sample,
 )
+from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [
     pytest.mark.e2e,
@@ -150,33 +151,47 @@ def test_locked_content_hash_is_recomputed_and_names_both_envelopes(
 # --- req-lk-018: frozen by default under CI ------------------------------------
 
 
-def _install_with_ci(tmp_path: Path, apm_binary_path: Path, ci: str | None, *args: str):
-    sample = create_hermetic_packaged_sample(
-        tmp_path, apm_binary_path=apm_binary_path, project_name="consumer"
-    )
+def _install_with_ci(sample: HermeticPackagedSample, ci: str | None, *args: str):
     env = {key: value for key, value in sample.environment.items() if key != "CI"}
     if ci is not None:
         env["CI"] = ci
-    project = sample.project.root
-    result = sample.runner.run(
-        ("install", *args), scenario_id="lk-018-ci-default", cwd=project, env=env
+    return sample.runner.run(
+        ("install", *args), scenario_id="lk-018-ci-default", cwd=sample.project.root, env=env
     )
-    return project, result
+
+
+def _locked_then_drifted(tmp_path: Path, apm_binary_path: Path) -> HermeticPackagedSample:
+    """A committed lockfile, then a new local dependency apm.yml declares but the lock lacks."""
+    sample = _installed(tmp_path, apm_binary_path)
+    packages = LocalPackageFactory(sample.project.root.parent)
+    extra = packages.create("extra", targets=("copilot",))
+    packages.add_instruction(
+        extra, "extra", "---\napplyTo: '**'\ndescription: Extra\n---\n# Extra\n"
+    )
+    manifest_path = sample.project.root / "apm.yml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["dependencies"]["apm"].append({"path": "../extra"})
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    return sample
 
 
 @pytest.mark.req("req-lk-018")
 @pytest.mark.parametrize("ci", ["true", "1", "TRUE"])
-def test_install_under_ci_defaults_to_frozen(
+def test_install_under_ci_with_lockfile_defaults_to_frozen(
     tmp_path: Path, apm_binary_path: Path, ci: str
 ) -> None:
-    project, result = _install_with_ci(tmp_path, apm_binary_path, ci)
+    sample = _locked_then_drifted(tmp_path, apm_binary_path)
+    lock_path = sample.project.root / "apm.lock.yaml"
+    lock_before = lock_path.read_bytes()
+
+    result = _install_with_ci(sample, ci)
 
     output = _text(result)
     assert result.returncode == 1, output
-    assert "--frozen requires apm.lock.yaml" in output
+    assert "installing as --frozen" in output
     assert "--no-frozen" in output
-    assert not (project / "apm.lock.yaml").exists()
-    assert not (project / "apm_modules").exists()
+    assert lock_path.read_bytes() == lock_before
+    assert b"extra" not in lock_before
 
 
 @pytest.mark.req("req-lk-018")
@@ -190,12 +205,30 @@ def test_install_under_ci_defaults_to_frozen(
         pytest.param("true", ("--no-frozen",), id="explicit-no-frozen"),
     ],
 )
-def test_install_without_truthy_ci_or_with_no_frozen_resolves(
+def test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves(
     tmp_path: Path, apm_binary_path: Path, ci: str | None, args: tuple[str, ...]
 ) -> None:
-    project, result = _install_with_ci(tmp_path, apm_binary_path, ci, *args)
+    sample = _locked_then_drifted(tmp_path, apm_binary_path)
+
+    result = _install_with_ci(sample, ci, *args)
 
     output = _text(result)
     assert result.returncode == 0, output
     assert "installing as --frozen" not in output
-    assert (project / "apm.lock.yaml").exists()
+    assert "extra" in (sample.project.root / "apm.lock.yaml").read_text(encoding="utf-8")
+
+
+@pytest.mark.req("req-lk-018")
+def test_install_under_ci_without_lockfile_resolves_and_writes_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    sample = create_hermetic_packaged_sample(
+        tmp_path, apm_binary_path=apm_binary_path, project_name="consumer"
+    )
+
+    result = _install_with_ci(sample, "true")
+
+    output = _text(result)
+    assert result.returncode == 0, output
+    assert "installing as --frozen" not in output
+    assert (sample.project.root / "apm.lock.yaml").is_file()

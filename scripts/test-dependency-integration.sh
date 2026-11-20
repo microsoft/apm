@@ -75,7 +75,7 @@ EOF
     
     # Test apm install (should download real dependency)
     log_info "Testing 'apm install' with real GitHub dependency"
-    if ! "$apm_binary" install --no-frozen; then
+    if ! "$apm_binary" install; then
         log_error "Failed to install real dependency"
         return 1
     fi
@@ -166,6 +166,7 @@ EOF
     
     # Install multiple dependencies
     log_info "Installing multiple real dependencies"
+    # The previous test left apm.lock.yaml here; under CI it would replay frozen.
     if ! "$apm_binary" install --no-frozen; then
         log_error "Failed to install multiple dependencies"
         return 1

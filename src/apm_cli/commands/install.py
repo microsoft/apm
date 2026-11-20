@@ -875,7 +875,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     help=(
         "Refuse to install when apm.lock.yaml is missing or out of sync with apm.yml (Git source, ref, "
         "host provider, transport, MCP config), or when deployed files do not match the hashes it records. "
-        "Default when CI is truthy. Mutually exclusive with --update, --mcp, and positional packages."
+        "Default when CI is truthy and apm.lock.yaml exists. Mutually exclusive with --update, --mcp, and packages."
     ),
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed installation information")
@@ -1187,9 +1187,9 @@ def install(  # noqa: PLR0913
     logger = dry_run_manifest_tmp = None
     command_result: InstallResult | None = None
     transaction: InstallTransaction | None = None
-    from ..install.service import InstallService
+    from ..install.service import InstallService, resolve_frozen
 
-    frozen = InstallService.resolve_frozen(frozen, update or refresh or packages or mcp_name)
+    frozen = resolve_frozen(frozen, update or refresh or packages or mcp_name, global_, root)
     ctx.with_resource(InstallService.frozen_writes(frozen))
     ctx.with_resource(
         InstallService.catalog_freshness(update_refs=update, refresh=refresh, frozen=frozen)

@@ -250,7 +250,7 @@ run_install() {
     dir="$(setup_test_dir "$package")"
     tmpout="$(mktemp "$WORK_DIR/output-XXXXXX")"
     set +e
-    (cd "$dir" && "$APM_BINARY" install --no-frozen "$@") < /dev/null 2>&1 | tee "$tmpout"
+    (cd "$dir" && "$APM_BINARY" install "$@") < /dev/null 2>&1 | tee "$tmpout"
     APM_EXIT="${PIPESTATUS[0]}"
     set +e  # keep errexit off (script uses -u, not -e)
     APM_OUTPUT="$(cat "$tmpout")"
@@ -261,7 +261,7 @@ run_install_manifest() {
     local tmpout
     tmpout="$(mktemp "$WORK_DIR/output-XXXXXX")"
     set +e
-    (cd "$dir" && "$APM_BINARY" install --no-frozen "$@") < /dev/null 2>&1 | tee "$tmpout"
+    (cd "$dir" && "$APM_BINARY" install "$@") < /dev/null 2>&1 | tee "$tmpout"
     APM_EXIT="${PIPESTATUS[0]}"
     set +e  # keep errexit off (script uses -u, not -e)
     APM_OUTPUT="$(cat "$tmpout")"

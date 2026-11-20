@@ -78,6 +78,43 @@ def ci_selects_frozen(environ: Mapping[str, str] | None = None) -> bool:
     return value is not None and value.lower() not in {"", "0", "false"}
 
 
+def resolve_frozen(
+    frozen: bool | None,
+    resolve_intent: Any,
+    global_: bool,
+    root: str | None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> bool:
+    """The single decision whether ``apm install`` runs frozen (req-lk-006, req-lk-018).
+
+    An explicit ``--frozen``/``--no-frozen`` wins. An invocation that asks to
+    resolve (``--update``, ``--refresh``, positional packages, ``--mcp``) stays
+    non-frozen. Otherwise a truthy ``CI`` selects frozen when the scope's
+    ``apm.lock.yaml`` exists; without one, install resolves and writes it.
+    """
+    if frozen is not None:
+        return frozen
+    if resolve_intent or not ci_selects_frozen(environ):
+        return False
+    from apm_cli.core.scope import InstallScope, get_lockfile_dir
+
+    if root is not None and not global_:
+        lockfile_dir = Path(root)
+    else:
+        lockfile_dir = get_lockfile_dir(InstallScope.USER if global_ else InstallScope.PROJECT)
+    if not (lockfile_dir / "apm.lock.yaml").is_file():
+        return False
+    from apm_cli.utils.console import _rich_info
+
+    _rich_info(
+        "CI is set and apm.lock.yaml exists: installing as --frozen. "
+        "Pass --no-frozen to resolve and update it.",
+        symbol="info",
+    )
+    return True
+
+
 def frozen_unrecorded_reason(service: str, name: str, target: str) -> str:
     """One ``--frozen`` refusal line for an unrecorded service claim."""
     return f"  - {service} server {name!a} target {target!a} ownership is not recorded in apm.lock.yaml"
@@ -106,29 +143,6 @@ class InstallService:
     extension point for collaborator injection (downloader, scanner,
     integrator factory) when programmatic callers need to swap them.
     """
-
-    @staticmethod
-    def resolve_frozen(
-        frozen: bool | None, resolve_intent: Any, *, environ: Mapping[str, str] | None = None
-    ) -> bool:
-        """The single decision whether ``apm install`` runs frozen (req-lk-006, req-lk-018).
-
-        An explicit ``--frozen``/``--no-frozen`` wins. Otherwise an invocation that
-        asks to resolve (``--update``, ``--refresh``, positional packages, ``--mcp``)
-        stays non-frozen, and a truthy ``CI`` selects frozen.
-        """
-        if frozen is not None:
-            return frozen
-        if resolve_intent or not ci_selects_frozen(environ):
-            return False
-        from apm_cli.utils.console import _rich_info
-
-        _rich_info(
-            "CI is set: installing as --frozen. Pass --no-frozen to resolve and "
-            "update apm.lock.yaml.",
-            symbol="info",
-        )
-        return True
 
     @staticmethod
     def frozen_disposition(source: Any) -> FrozenDisposition:

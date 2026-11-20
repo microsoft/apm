@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes and upgrade notes
 
-- **BREAKING:** `apm install` runs as `--frozen` when `CI` is truthy (req-lk-018); pass `--no-frozen` or commit `apm.lock.yaml` to resolve in CI. (#4509)
+- In CI, `apm install` with a committed lockfile now verifies it like `--frozen`; pass `--no-frozen` to opt out. (#4509)
 
 ### Changed
 
