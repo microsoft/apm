@@ -12,6 +12,9 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _python_paths,
     _summary,
 )
+from scripts.architecture_linter.checks.install_exec_provenance import (
+    check_allow_map_provenance,
+)
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import violation
 from scripts.architecture_linter.models import Violation
@@ -64,6 +67,8 @@ _TRUST_OWNER_CALLERS = frozenset(
         (_EXEC_GATE, "_trust_ctx"),
         (_EXEC_GATE, "_resolve"),
         (_EXECUTABLES, "effective_exec_map_for_project"),
+        # The offline dry-run preview reads the same layers, policy-free (#4018).
+        ("src/apm_cli/install/dry_run_plan.py", "with_allowed_lsp_dependencies"),
         # ``apm install <bundle>`` reads grants from the scope manifest, never
         # the working directory's apm.yml under -g (#3989 M2).
         (_LOCAL_BUNDLE, "effective_bundle_allow_map"),
@@ -207,6 +212,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
         )
     )
     findings.extend(_trust_owner_closed_world(provider))
+    findings.extend(check_allow_map_provenance(provider, GUARD_EXECUTABLE_TRUST))
     findings.extend(_bundle_trust_scope_findings(provider))
     # A second locked-row trust derivation beside the owner is a split authority.
     facts, failures = _facts_for(provider, _APPROVE_COMMAND, GUARD_EXECUTABLE_TRUST)

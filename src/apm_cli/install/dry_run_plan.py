@@ -18,10 +18,7 @@ from apm_cli.install.package_selection import (
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
-from apm_cli.security.executables import (
-    declared_project_exec_map,
-    filter_lsp_by_allow_executables,
-)
+from apm_cli.security.executables import filter_lsp_by_allow_executables
 
 if TYPE_CHECKING:
     from apm_cli.install.command_context import InstallContext
@@ -141,7 +138,7 @@ class ProspectiveInstallPlan:
             should_install_mcp=should_install_mcp,
             only_packages=ctx.only_packages,
             updated_packages=updated_packages,
-        ).with_allowed_lsp_dependencies(apm_package, ctx.logger)
+        ).with_allowed_lsp_dependencies(ctx, apm_package)
         plan = plan.with_mcp_target_runtimes(apm_package, ctx)
         return plan.with_resolved_dependencies(
             apm_package,
@@ -244,18 +241,34 @@ class ProspectiveInstallPlan:
             return self
         return replace(self, mcp_target_runtimes=tuple(runtimes or ()))
 
-    def with_allowed_lsp_dependencies(
-        self, apm_package: Any, logger: Any
-    ) -> ProspectiveInstallPlan:
-        """Apply executable trust filtering to selected LSP dependencies."""
+    def with_allowed_lsp_dependencies(self, ctx: Any, apm_package: Any) -> ProspectiveInstallPlan:
+        """Apply executable trust filtering to selected LSP dependencies.
+
+        The allow-map comes from the executable-trust-context owner over the
+        scope's manifest and user layer, read-only and offline (no policy
+        fetch, no legacy migration, no warnings) as a preview must be.
+        """
         if not self.should_install_mcp:
             return self
-        filtered_lsp = tuple(
-            filter_lsp_by_allow_executables(
-                list(self.lsp_dependencies),
-                declared_project_exec_map(getattr(apm_package, "allow_executables", None)),
-                logger,
+        from apm_cli.core.scope import is_user_scope, manifest_root
+        from apm_cli.security.executables import (
+            exec_trust_context_for_project,
+            materialize_exec_map,
+            project_manifest_path,
+        )
+
+        allow_map = materialize_exec_map(
+            exec_trust_context_for_project(
+                project_manifest_path(
+                    manifest_root(ctx.project_root, user_scope=is_user_scope(ctx.scope))
+                ),
+                policy=None,
+                fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+                migrate_user_legacy=False,
             )
+        )
+        filtered_lsp = tuple(
+            filter_lsp_by_allow_executables(list(self.lsp_dependencies), allow_map, ctx.logger)
         )
         return replace(self, lsp_dependencies=filtered_lsp)
 
