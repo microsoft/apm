@@ -52,6 +52,23 @@ def preserve_normalized_marketplace_plugin_type(
     return detected_type
 
 
+def legacy_plugin_row_rehashable(
+    lockfile: LockFile | None, locked_dependency: LockedDependency | None
+) -> bool:
+    """Return whether ``apm update`` may re-lock a same-commit 0.28 plugin row.
+
+    APM 0.28 hashed its own normalization of a marketplace plugin, so that
+    row's content hash is not comparable with a fresh materialization of the
+    same commit; an explicit update re-records it (#4027).
+    """
+    return bool(
+        lockfile is not None
+        and lockfile.apm_version == _LEGACY_PLUGIN_APM_VERSION
+        and locked_dependency is not None
+        and locked_dependency.package_type == PackageType.MARKETPLACE_PLUGIN.value
+    )
+
+
 def matches_fresh_legacy_plugin_hash(
     package_path: Path,
     dep_key: str,

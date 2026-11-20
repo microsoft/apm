@@ -247,8 +247,14 @@ def update_accepts_new_content(ctx: Any, locked_dep: Any, resolved_commit: str |
     """Return whether this run may lock new content without the hash check.
 
     Only ``apm update`` may, and only for a commit that moved: an unchanged
-    commit must still hold its locked content (#4027).
+    commit must still hold its locked content (#4027). The one exception is
+    a lock row APM 0.28 wrote for a marketplace plugin, which hashed another
+    materialization of the same commit (see ``legacy_plugin_compat``).
     """
+    if ctx.update_refs and locked_commit_unchanged(locked_dep, resolved_commit):
+        from apm_cli.install.legacy_plugin_compat import legacy_plugin_row_rehashable
+
+        return legacy_plugin_row_rehashable(getattr(ctx, "existing_lockfile", None), locked_dep)
     return bool(ctx.update_refs and not locked_commit_unchanged(locked_dep, resolved_commit))
 
 

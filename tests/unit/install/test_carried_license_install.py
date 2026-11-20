@@ -196,6 +196,25 @@ def test_locked_commit_unchanged_truth_table(locked, commit, unchanged) -> None:
     assert update_accepts_new_content(install, row, commit) is False
 
 
+@pytest.mark.parametrize(
+    ("apm_version", "package_type", "accepted"),
+    [
+        ("0.28.0", "marketplace_plugin", True),
+        ("0.28.0", "apm_package", False),
+        ("0.37.0", "marketplace_plugin", False),
+    ],
+)
+def test_update_re_locks_an_unchanged_commit_only_for_a_0_28_plugin_row(
+    apm_version: str, package_type: str, accepted: bool
+) -> None:
+    row = SimpleNamespace(resolved_commit=_SHA_A, package_type=package_type)
+    lockfile = SimpleNamespace(apm_version=apm_version)
+    ctx = SimpleNamespace(update_refs=True, existing_lockfile=lockfile)
+    assert update_accepts_new_content(ctx, row, _SHA_A) is accepted
+    install = SimpleNamespace(update_refs=False, existing_lockfile=lockfile)
+    assert update_accepts_new_content(install, row, _SHA_A) is False
+
+
 def test_update_accepts_new_carried_licences_for_a_moved_commit(tmp_path: Path) -> None:
     package, _legacy_hash, records = _package(tmp_path)
     forged = (CarriedLicense("LICENSE", "LICENSE", "sha256:" + "0" * 64),)
