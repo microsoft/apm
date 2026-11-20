@@ -557,6 +557,193 @@
         "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_manifest_targets_still_win_over_the_recorded_target",
         "tests/integration/test_uninstall_lsp_recorded_targets_lifecycle.py::test_lock_without_recorded_targets_keeps_the_fallback"
       ]
+    },
+    {
+      "issue": 4191,
+      "fixed_in": "0.37.0",
+      "summary": "Plain apm audit printed an [x] Drift detected error line for advisory drift while exiting 0, so the line severity contradicted the documented exit contract.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_audit_drift_exit_contract_lifecycle.py::test_plain_audit_drift_line_severity_matches_exit_code",
+        "tests/unit/install/test_drift.py::test_render_text_advisory_drift_never_prints_error_header"
+      ]
+    },
+    {
+      "issue": 4194,
+      "fixed_in": "0.37.0",
+      "summary": "A marketplace install that failed and reported no committed transaction changes still wrote the plugin ref pin to APM_HOME cache/marketplace/version-pins.json, because the resolver recorded pins before the install committed.",
+      "failure_modes": [
+        "transaction"
+      ],
+      "properties": [
+        "transaction.failed_command_preserves_state",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_failed_marketplace_install_writes_no_ref_pin",
+        "tests/unit/install/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
+      ]
+    },
+    {
+      "issue": 4201,
+      "fixed_in": "0.37.0",
+      "summary": "apm marketplace outdated ran git ls-remote for a local source: ./ entry, printed a [x] ls-remote failure row and then reported that all packages were up to date, while apm marketplace check treated the entry as OK.",
+      "failure_modes": [
+        "routing",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_marketplace_authoring_lifecycle.py::test_outdated_skips_local_source_entry_without_ls_remote"
+      ]
+    },
+    {
+      "issue": 4203,
+      "fixed_in": "0.37.0",
+      "summary": "apm pack --json dropped the missing-license authoring warning: the report carried an empty warnings array and stderr did not show it.",
+      "failure_modes": [
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_pack_deprecation_warning_lifecycle.py::test_pack_json_keeps_the_missing_license_warning"
+      ]
+    },
+    {
+      "issue": 4204,
+      "fixed_in": "0.37.0",
+      "summary": "apm prune announced merged hook reconciliation for packages that deployed no hooks, so the output described a hook change that never happened.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_prune_deployment_ledger_e2e.py::test_prune_reports_hook_reconciliation_only_when_hooks_change"
+      ]
+    },
+    {
+      "issue": 4205,
+      "fixed_in": "0.37.0",
+      "summary": "apm run with an unknown script listed the scripts but ended with a placeholder 'apm install <owner>/<repo>/...' line instead of a runnable next step.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_failure_next_step_lifecycle.py::test_run_unknown_script_lists_scripts_and_prints_runnable_next_step"
+      ]
+    },
+    {
+      "issue": 4206,
+      "fixed_in": "0.37.0",
+      "summary": "install --skill with no matching skill listed the available skills but printed free-text advice instead of a runnable apm install command.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_failure_next_step_lifecycle.py::test_install_skill_miss_lists_skills_and_prints_runnable_next_step",
+        "tests/integration/test_architecture_outcome_guards.py::test_requested_component_miss_names_one_runnable_install"
+      ]
+    },
+    {
+      "issue": 4207,
+      "fixed_in": "0.37.0",
+      "summary": "A skills/ bundle install reported the same promoted skill twice, as 'Skill integrated' and '1 skill(s) integrated', on install and install --frozen.",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "idempotency.byte_stable"
+      ],
+      "regression_tests": [
+        "tests/integration/test_install_summary_destinations_lifecycle.py::test_skill_bundle_install_prints_one_skill_line"
+      ]
+    },
+    {
+      "issue": 4209,
+      "fixed_in": "0.37.0",
+      "summary": "apm compile warned that compilation produced no output files and to check target directories after it had intentionally skipped AGENTS.md because .github/instructions/ already covered Copilot.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_install_compile_copilot_dedup_e2e.py::test_compile_after_full_dedup_does_not_warn_about_zero_output"
+      ]
+    },
+    {
+      "issue": 4210,
+      "fixed_in": "0.37.0",
+      "summary": "apm targets reported a blank or folder-signal source for targets declared in apm.yml although resolution took them from the manifest.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_init_reinit_targets_lifecycle.py::test_targets_reports_apm_yml_as_source_of_declared_targets"
+      ]
+    },
+    {
+      "issue": 4211,
+      "fixed_in": "0.37.0",
+      "summary": "With three or more targets the per-primitive install line collapsed its destinations to 'N targets', hiding where files were written.",
+      "failure_modes": [
+        "outcome",
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "idempotency.byte_stable"
+      ],
+      "regression_tests": [
+        "tests/integration/test_install_summary_destinations_lifecycle.py::test_widened_install_names_every_destination_folder"
+      ]
+    },
+    {
+      "issue": 4212,
+      "fixed_in": "0.37.0",
+      "summary": "The marketplace resolver recorded the plugin ref in APM_HOME cache/marketplace/version-pins.json on every resolution, so install --dry-run (and read-only apm view) wrote user-scope state.",
+      "failure_modes": [
+        "transaction",
+        "cache"
+      ],
+      "properties": [
+        "transaction.failed_command_preserves_state",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_install_dry_run_of_marketplace_plugin_writes_no_ref_pin",
+        "tests/unit/install/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
+      ]
     }
   ],
   "lifecycle_contracts": [

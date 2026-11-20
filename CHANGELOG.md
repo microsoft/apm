@@ -18,6 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
 - `apm uninstall` (including `-g`) removes a package's LSP servers from target configs and the lockfile when no MCP servers are installed, instead of exiting 1. (closes #4045, #3768, #4057)
 - `apm uninstall` cleans LSP servers on the targets `apm.lock.yaml` recorded, no longer failing with "No harness detected" or moving survivors to the saved target. (closes #4059, #4068)
+- Plain `apm audit` renders advisory drift as `[!] Drift detected` and prints `[x]` only when drift fails the run via `fail_on_drift` (#4217)
+- A failed `apm install plugin@marketplace` no longer leaves a marketplace version pin under APM_HOME (#4217)
+- `apm marketplace outdated` lists local-path entries such as `source: ./` as skipped instead of failing a git ls-remote (#4217)
+- `apm pack --json` now reports the missing `license:` warning in the JSON `warnings` array instead of dropping it. (#4217)
+- `apm prune` no longer prints `Reconciled merged hook ownership` when the pruned packages left merged hook configuration unchanged (#4217)
+- `apm run` with an unknown script now ends with one runnable next step, `Run 'apm list'`, instead of a placeholder install command. (#4217)
+- `apm install --skill` with no matching skill now ends with one runnable `apm install <package> --skill <available>` command. (#4217)
+- `apm install` of a `skills/` bundle, including `--frozen` replays, prints one skill integration line instead of two (#4217)
+- `apm compile` no longer warns that compilation produced no output after it already explained that AGENTS.md was skipped because deployed rules cover the target. (#4217)
+- `apm targets` now shows `apm.yml` in the SOURCE column (and JSON `source`) for targets declared in apm.yml. (#4217)
+- `apm install` names every destination folder on integration lines for three or more targets instead of printing 'N targets' (#4217)
+- `apm install --dry-run plugin@marketplace` no longer writes the marketplace ref-pin file under APM_HOME (#4217)
 
 ## [0.37.0] - 2026-11-20
 
