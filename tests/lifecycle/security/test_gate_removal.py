@@ -102,7 +102,10 @@ _PROJECT_HOME_ALLOWED = (
     ".apm/cache/marketplace",
 )
 # Commands after which nothing the model forbids may stay deployed (I4).
-_GATE_REMOVING = frozenset({"install", "update", "uninstall", "prune"})
+# ``unpack`` never deploys an executable, so it refuses instead of removing.
+_GATE_REMOVING = frozenset({"install", "update", "uninstall", "prune", "unpack"})
+# Step token resolved to a world package spec: ``WORLD:<package key>``.
+_WORLD_TOKEN = "WORLD:"
 _RECONCILING = frozenset({"install", "update"})
 _SCRIPT_LOG = "script-runs.log"
 # policy-dep-deny: the world policy variant that denies the package of a kind,
@@ -111,7 +114,7 @@ _DEP_DENY = {"lsp": "deny-lsp", "native": "deny-native"}
 _DENIED: Mapping[str, frozenset[str]] = {
     "deny-pkg": frozenset({DENIED_PACKAGE}),
     "deny-lsp": frozenset({"p-lsp"}),
-    "deny-native": frozenset({"p-native-claude", "p-native-codex", "p-native-claude-bin"}),
+    "deny-native": frozenset({"p-native-claude", "p-native-codex"}),
 }
 
 
@@ -313,6 +316,9 @@ class GateReplay(RowReplay):
             ref = self.world.packages[arg] if arg in self.kinds else None
             if arg == "MARKETPLACE_URL":
                 args.append(self.world.services.marketplace_url)
+            elif arg.startswith(_WORLD_TOKEN):
+                # A world package outside the row's packages (for example a bundle).
+                args.append(self.world.packages[arg[len(_WORLD_TOKEN) :]].spec)
             elif ref is None:
                 args.append(arg)
             elif raw[0] == "approve" and ref.source == "marketplace":
@@ -366,7 +372,9 @@ class GateReplay(RowReplay):
         converged = self.model.converged and requested == self.model
         model = _RowModel(requested, self.kinds, converged, cells, self.expected_seen)
         before = self.observe()
-        result = driver.run(self.world, args, scope=self.scope)
+        # Marketplace registration has no user-scope form; it serves both scopes.
+        step_scope = "project" if args[0] == "marketplace" else self.scope
+        result = driver.run(self.world, args, scope=step_scope)
         after = self.observe()
         assert result.returncode in allowed_exit, (
             f"R: {line!r} exited {result.returncode}, model expects {sorted(allowed_exit)}\n"
@@ -508,8 +516,12 @@ def build_row(gate_slice: GateSlice, gate_row: GateRow) -> tuple[Row, str, str]:
     """The replay row of one G obligation, its scope and its announcement regex."""
     path, change, kind = gate_row.parts
     spec, how = PATHS[path], CHANGES[change]
-    key = gate_slice.package + spec.key_suffix
-    witness = [] if kind not in GATED_KINDS else [f"{key}/{kind}/{gate_slice.target}"]
+    key = (gate_row.package or gate_slice.package) + spec.key_suffix
+    target = gate_row.target or gate_slice.target
+    # A kind with no surface on this scope and target never deploys there: the row
+    # pins its absence through the row's snapshot facts instead of a witness.
+    observable = kind in GATED_KINDS and (spec.scope, kind, target) in _SURFACES
+    witness = [f"{key}/{kind}/{target}"] if observable else []
     arrange = spec.arrange(key)
     given: list[Step] = []
     if how.gate_off_first:
@@ -536,7 +548,7 @@ def build_row(gate_slice: GateSlice, gate_row: GateRow) -> tuple[Row, str, str]:
         id=gate_row.id,
         promises=PROMISES,
         packages=(key, "p-skill") if spec.sibling else (key,),
-        targets=(gate_slice.target,),
+        targets=(target,),
         scope="project",
         given=tuple(given),
         when=tuple(when),
