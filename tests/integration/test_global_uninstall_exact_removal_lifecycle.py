@@ -32,13 +32,21 @@ _SKILL = "---\nname: model-skill\ndescription: model skill\n---\n# model skill\n
 
 
 def _tree(roots: dict[str, Path]) -> dict[str, bytes]:
-    return {
-        f"{label}:{path.relative_to(root).as_posix()}": path.read_bytes()
-        for label, root in roots.items()
-        if root.exists()
-        for path in sorted(root.rglob("*"))
-        if path.is_file() and not path.is_symlink()
-    }
+    """Every file and symlink (dangling ones included) under each root, without following links."""
+    tree: dict[str, bytes] = {}
+    for label, root in roots.items():
+        if not root.exists():
+            continue
+        for directory, dirnames, filenames in os.walk(root, followlinks=False):
+            base = Path(directory)
+            for name in (*dirnames, *filenames):
+                path = base / name
+                key = f"{label}:{path.relative_to(root).as_posix()}"
+                if path.is_symlink():
+                    tree[key] = b"symlink -> " + os.fsencode(os.readlink(path))
+                elif path.is_file():
+                    tree[key] = path.read_bytes()
+    return tree
 
 
 @pytest.mark.parametrize("layout", ["default", "claude-config-dir-outside-home"])
@@ -100,6 +108,7 @@ def test_global_uninstall_removes_exactly_the_installed_files(
     assert deployed, sorted(set(installed) - set(before))
     lock = load_yaml(isolated.config_root / "apm.lock.yaml")
     assert [row["repo_url"] for row in lock["dependencies"]] == ["acme/model-skill"]
+    assert lock["deployments"], lock
 
     apm("uninstall", "--global", _REMOTE, step="2-uninstall-global")
     after = _tree(roots)
@@ -116,14 +125,11 @@ def test_global_uninstall_removes_exactly_the_installed_files(
         == "---\nname: my-own-skill\ndescription: mine\n---\n# mine\n"
     )
     assert sibling.read_text(encoding="utf-8") == '{"keep": true}\n'
-    leftover = {
-        key
-        for key in set(after) - set(before)
-        if not key.startswith(("apm_home:apm.lock.yaml", "apm_home:apm.yml"))
-        and ":apm_modules/" not in key
-        and not key.startswith("apm_home:cache")
-    }
-    assert not {key for key in leftover if key.startswith("claude:")}, sorted(leftover)
+    # Outside APM's own state (APM_HOME, ~/.apm-local) uninstall leaves nothing new in any root.
+    apm_state = ("apm_home:", "home:.apm/", "home:.apm-local/")
+    leftover = sorted(key for key in set(after) - set(before) if not key.startswith(apm_state))
+    assert leftover == [], leftover
     lock_path = isolated.config_root / "apm.lock.yaml"
     lock_after = (load_yaml(lock_path) or {}) if lock_path.exists() else {}
     assert not (lock_after.get("dependencies") or []), lock_after
+    assert not (lock_after.get("deployments") or []), lock_after
