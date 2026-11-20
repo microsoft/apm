@@ -137,10 +137,11 @@ def lock_holds_untranslated_mcp_claims(
 
 def _selected_without(destination: RetiredMcpDestination, project_root: Path) -> bool:
     """Whether ``destination.runtime`` stays selected once its retired file is gone."""
+    from apm_cli.core.scope import manifest_file
     from apm_cli.core.target_detection import detect_signals
     from apm_cli.models.manifest_targets import read_manifest_target_declaration
 
-    declaration = read_manifest_target_declaration(project_root / "apm.yml", lenient=True)
+    declaration = read_manifest_target_declaration(manifest_file(project_root), lenient=True)
     from apm_cli.core.errors import TargetResolutionError
 
     try:
@@ -197,13 +198,16 @@ def heal_retired_project_mcp_destinations(
     stored_configs: Mapping[str, dict],
     native_hashes: Mapping[str, Mapping[str, str]],
     project_root: Path,
-    frozen: bool = False,
+    keep_signal_files: bool,
 ) -> RetiredMcpHeal:
     """Remove APM-written entries from retired project MCP files (never user entries).
 
     A retired file left with nothing but scaffolding is deleted when APM
     created it: this heal removed every server it held, or it holds none and
     the lock claims names there (an earlier ``--frozen`` heal emptied it).
+    ``keep_signal_files`` keeps such a file when it is also a target
+    detection signal; ``run_mcp_integration`` sets it for a ``--frozen``
+    replay from ``InstallService.frozen_disposition``.
     """
     from apm_cli.utils.atomic_io import atomic_write_text
 
@@ -242,7 +246,7 @@ def heal_retired_project_mcp_destinations(
             and not servers
             and removed_here == total
             and scaffolding_only
-            and not (destination.detection_signal and frozen)
+            and not (destination.detection_signal and keep_signal_files)
             and (not destination.detection_signal or _selected_without(destination, project_root))
         ):
             path.unlink()

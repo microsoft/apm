@@ -260,6 +260,7 @@ def run_owned_mcp_integration(
             stored_configs=lockfile.mcp_configs,
             native_hashes=retired.hashes,
             project_root=project_root,
+            keep_signal_files=False,
         )
     restore_pending_retired_claims(
         retired,
@@ -529,7 +530,7 @@ def run_mcp_integration(  # noqa: PLR0913
             stored_configs=old_mcp_configs,
             native_hashes=retired_owned.hashes,
             project_root=project_root,
-            frozen=frozen,
+            keep_signal_files=frozen,
         )
         report_retired_mcp_heal(heal, logger)
         return healable
