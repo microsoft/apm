@@ -74,6 +74,8 @@ from apm_cli.install.drift_render import (
 from apm_cli.install.drift_render import (
     render_drift_text as render_drift_text,
 )
+from apm_cli.install.errors import DirectDependencyError
+from apm_cli.install.source_helpers import locked_content_failure, locked_content_mismatch
 from apm_cli.utils.console import STATUS_SYMBOLS
 from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
@@ -209,7 +211,9 @@ def _copy_install_tree(source: Path, target: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _verify_remote_cache_candidate(lock_dep: LockedDependency, candidate: Path) -> None:
+def _verify_remote_cache_candidate(
+    lock_dep: LockedDependency, candidate: Path, lockfile: LockFile | None = None
+) -> None:
     """Fail closed when a cached remote dependency is absent or unverifiable."""
     if (
         getattr(lock_dep, "source", None) not in {"local", "registry"}
@@ -235,6 +239,11 @@ def _verify_remote_cache_candidate(lock_dep: LockedDependency, candidate: Path) 
                 f"{candidate} does not hold the locked commit {lock_dep.resolved_commit}; "
                 "run 'apm install' to refresh apm_modules cache"
             )
+    if locked_content_mismatch(lock_dep.get_unique_key(), lock_dep, candidate, lockfile=lockfile):
+        raise CacheMissError(
+            f"{candidate} does not hold the locked content of {lock_dep.get_unique_key()}; "
+            "run 'apm install' to refresh apm_modules cache"
+        )
 
 
 def _materialize_install_path(
@@ -318,7 +327,7 @@ def _materialize_install_path(
     live_candidate = dep_ref.get_install_path(live_root)
     if live_candidate.exists():
         try:
-            _verify_remote_cache_candidate(lock_dep, live_candidate)
+            _verify_remote_cache_candidate(lock_dep, live_candidate, lockfile)
         except CacheMissError:
             if cache_only:
                 raise
@@ -327,7 +336,7 @@ def _materialize_install_path(
                 _copy_install_tree(live_candidate, candidate)
             return candidate
     if cache_only:
-        _verify_remote_cache_candidate(lock_dep, live_candidate)
+        _verify_remote_cache_candidate(lock_dep, live_candidate, lockfile)
 
     if lock_dep.source == "registry":
         if registry_resolver is None:
@@ -381,6 +390,11 @@ def _materialize_install_path(
             f"scratch replay resolved {lock_dep.repo_url} to "
             f"{resolved_reference.resolved_commit}, expected {lock_dep.resolved_commit}"
         )
+    dep_key = lock_dep.get_unique_key()
+    if locked_content_mismatch(
+        dep_key, lock_dep, candidate, lockfile=lockfile, package_info=package_info
+    ):
+        raise DirectDependencyError(locked_content_failure(dep_key, project_root))
     return candidate
 
 

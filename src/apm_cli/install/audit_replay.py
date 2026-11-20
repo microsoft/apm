@@ -26,6 +26,7 @@ from apm_cli.install.drift import (
     run_replay,
 )
 from apm_cli.install.plan import lockfile_satisfies_manifest, lockfile_satisfies_replacements
+from apm_cli.install.source_helpers import locked_content_mismatch
 from apm_cli.integration.targets import TargetProfile, resolve_audit_targets
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
@@ -154,7 +155,11 @@ def prepare_ci_audit_replay(
 
 
 def _live_copies_stale(modules_dir: Path, lockfile_path: Path) -> bool:
-    """Whether any live ``apm_modules`` copy contradicts its lock row (#3964)."""
+    """Whether any live ``apm_modules`` copy contradicts its lock row (#3964).
+
+    A copy is stale when the copy-validity owner says so or when its bytes fail
+    install's locked content-hash verdict (#4187).
+    """
     from apm_cli.drift import locked_copy_is_stale
 
     try:
@@ -171,6 +176,8 @@ def _live_copies_stale(modules_dir: Path, lockfile_path: Path) -> bool:
         except (ValueError, OSError):
             continue
         if locked_copy_is_stale(dep, path):
+            return True
+        if path.is_dir() and locked_content_mismatch(key, dep, path, lockfile=lockfile):
             return True
     return False
 

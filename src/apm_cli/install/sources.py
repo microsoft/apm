@@ -42,6 +42,7 @@ from apm_cli.install.registry_wiring import (
 from apm_cli.install.source_helpers import (
     content_hash_mismatch_hint,
     ensure_carried_licenses_match,
+    locked_content_mismatch,
     locked_parent_identity,
     materialized_manifest_snapshot,
     record_carried_package_hash,
@@ -880,25 +881,22 @@ class FreshDependencySource(DependencySource):
                 and dep_key in ctx.package_hashes
             ):
                 _fresh_hash = ctx.package_hashes[dep_key]
-                if _fresh_hash != dep_locked_chk.content_hash:
-                    from apm_cli.install.legacy_plugin_compat import (
-                        matches_fresh_legacy_plugin_hash,
+                if locked_content_mismatch(
+                    dep_key,
+                    dep_locked_chk,
+                    install_path,
+                    lockfile=ctx.existing_lockfile,
+                    package_info=package_info,
+                    exclude=_carried_paths,
+                    fresh_hash=_fresh_hash,
+                ):
+                    safe_rmtree(install_path, ctx.apm_modules_dir)
+                    raise DirectDependencyError(
+                        f"Content hash mismatch for {dep_key}: "
+                        f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
+                        "The downloaded content differs from the lockfile record. "
+                        + content_hash_mismatch_hint(ctx, dep_key)
                     )
-
-                    if not matches_fresh_legacy_plugin_hash(
-                        install_path,
-                        dep_key,
-                        lockfile=ctx.existing_lockfile,
-                        package_type=getattr(package_info, "package_type", None),
-                        exclude=_carried_paths,
-                    ):
-                        safe_rmtree(install_path, ctx.apm_modules_dir)
-                        raise DirectDependencyError(
-                            f"Content hash mismatch for {dep_key}: "
-                            f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
-                            "The downloaded content differs from the lockfile record. "
-                            + content_hash_mismatch_hint(ctx, dep_key)
-                        )
             ensure_carried_licenses_match(
                 ctx, dep_key, install_path, dep_locked_chk, resolved_commit
             )
