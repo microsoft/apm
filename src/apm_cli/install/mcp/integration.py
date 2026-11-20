@@ -681,6 +681,7 @@ def run_mcp_integration(  # noqa: PLR0913
                 stored_configs=old_mcp_configs,
                 native_hashes=old_native_hashes,
             )
+            logger.record_mcp_removed(retired_names)
 
         # Remove stale MCP servers that are no longer needed
         stale_servers = old_mcp_servers - new_mcp_servers
@@ -715,6 +716,7 @@ def run_mcp_integration(  # noqa: PLR0913
                     stored_configs=old_mcp_configs,
                     native_hashes=old_native_hashes,
                 )
+                logger.record_mcp_removed(scoped_stale)
 
         _keep_unhealed(healed)
         # Persist the new MCP server set, configs, and transitive provenance.
@@ -760,6 +762,7 @@ def run_mcp_integration(  # noqa: PLR0913
                     stored_configs=old_mcp_configs,
                     native_hashes=old_native_hashes,
                 )
+                logger.record_mcp_removed(scoped_stale)
             MCPIntegrator.update_lockfile(
                 builtins.set(),
                 lock_path,

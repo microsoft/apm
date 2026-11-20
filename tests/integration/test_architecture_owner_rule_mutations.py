@@ -4895,3 +4895,26 @@ def test_catalog_metadata_guard_keeps_the_lock_pin(path: str, old: str, new: str
     assert any(
         violation.rule_id == rule_id and violation.path == path for violation in report.violations
     )
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        pytest.param(
+            "        drifted, _unresolved = verify_deployed_file_hashes(project_root, lockfile, targets)\n",
+            "        drifted, _unresolved = [], []\n",
+            id="plain-audit-skips-bundle-hashes",
+        ),
+    ],
+)
+def test_drift_reads_bundle_hashes_through_the_deployed_hash_verifier(old: str, new: str) -> None:
+    """#3989 P11: plain audit and --ci judge bundle files through one verifier."""
+    path = "src/apm_cli/install/drift.py"
+    rule_id = "install-deployment-frozen-mutation-eligibility"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
