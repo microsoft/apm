@@ -12,7 +12,6 @@ from scripts.architecture_linter.runner import run_selected_rules
 
 pytestmark = [
     pytest.mark.component,
-    pytest.mark.xdist_group(name="architecture_install_compound_mutations"),
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -621,7 +620,7 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         "audit-replay-subset-keyword",
         AUDIT_RULE,
         "src/apm_cli/install/drift.py",
-        _replace("skill_subset=(", "subset=("),
+        _replace("skill_subset=selection.skill_subset,", "subset=selection.skill_subset,"),
     ),
     CompoundMutation(
         "audit-replay-project-package-factory",
@@ -655,8 +654,8 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         AUDIT_RULE,
         "src/apm_cli/install/drift.py",
         _replace(
-            "package_info.dependency_ref.skill_subset",
-            "package_info.dependency_ref.skills",
+            "effective_dependency_selection(package_info.dependency_ref)",
+            "effective_dependency_selection(None)",
         ),
     ),
     CompoundMutation(
@@ -669,20 +668,69 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         "audit-replay-command-delegation",
         AUDIT_RULE,
         "src/apm_cli/commands/audit.py",
-        (
-            (
-                "prepared_replay = prepare_ci_audit_replay(",
-                "prepared_replay = prepare_ci_audit_replay_disabled(",
-            ),
+        _replace(
+            "materialization = resolve_ci_audit_materialization(",
+            "materialization = resolve_ci_audit_materialization_disabled(",
         ),
     ),
     CompoundMutation(
         "audit-replay-workspace-identity",
         AUDIT_RULE,
+        "src/apm_cli/install/audit_replay.py",
+        _replace(
+            "get_workspace_deploy_root(project_root) != project_root.resolve()",
+            "get_workspace_deploy_root(project_root) != project_root",
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-user-scope-package-predicate",
+        AUDIT_RULE,
+        "src/apm_cli/install/audit_replay.py",
+        _replace(
+            "if lockfile is not None and not lockfile.records_modules_content():",
+            "if lockfile is not None and not lockfile.get_package_dependencies():",
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-modules-content-staging",
+        AUDIT_RULE,
+        "src/apm_cli/deps/lockfile.py",
+        _replace(
+            "return bool(self.get_package_dependencies() or self.local_staging_slugs())",
+            "return bool(self.get_package_dependencies())",
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-command-modules-constant-probe",
+        AUDIT_RULE,
         "src/apm_cli/commands/audit.py",
         _replace(
-            "get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve()",
-            "get_workspace_deploy_root(cfg.project_root) != cfg.project_root",
+            "    prepared_replay = materialization.prepared_replay\n",
+            "    prepared_replay = materialization.prepared_replay\n"
+            "    if not (cfg.project_root / APM_MODULES_DIR).exists():\n"
+            "        prepared_replay = None\n",
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-command-modules-probe",
+        AUDIT_RULE,
+        "src/apm_cli/commands/audit.py",
+        _replace(
+            "    prepared_replay = materialization.prepared_replay\n",
+            "    prepared_replay = materialization.prepared_replay\n"
+            '    if not (cfg.project_root / "apm_modules").exists():\n'
+            "        prepared_replay = None\n",
+        ),
+    ),
+    CompoundMutation(
+        "audit-replay-command-owned-refusal",
+        AUDIT_RULE,
+        "src/apm_cli/commands/audit.py",
+        _replace(
+            "    prepared_replay_error = materialization.error\n",
+            "    prepared_replay_error = materialization.error or (\n"
+            '        "installed package materialization is missing"\n'
+            "    )\n",
         ),
     ),
     CompoundMutation(
@@ -690,9 +738,8 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         AUDIT_RULE,
         "src/apm_cli/commands/audit.py",
         _replace(
-            "                    prepared_replay = prepare_ci_audit_replay(",
-            "                    run_replay(None, None)\n"
-            "                    prepared_replay = prepare_ci_audit_replay(",
+            "    materialization = resolve_ci_audit_materialization(",
+            "    run_replay(None, None)\n    materialization = resolve_ci_audit_materialization(",
         ),
     ),
     CompoundMutation(
@@ -709,14 +756,8 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         AUDIT_RULE,
         "src/apm_cli/policy/ci_checks.py",
         _replace(
-            "        prepared_replay.modules_root\n"
-            "        if prepared_replay is not None\n"
-            "        else project_root / APM_MODULES_DIR,\n"
-            "        trust_transitive_self_defined=True,\n",
-            "        prepared_replay.project_root\n"
-            "        if prepared_replay is not None\n"
-            "        else project_root / APM_MODULES_DIR,\n"
-            "        trust_transitive_self_defined=True,\n",
+            "        modules_root=prepared_replay.modules_root if prepared_replay is not None else None,\n",
+            "        modules_root=prepared_replay.project_root if prepared_replay is not None else None,\n",
         ),
     ),
     CompoundMutation(
@@ -733,8 +774,8 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         AUDIT_RULE,
         "src/apm_cli/policy/ci_checks.py",
         _replace(
-            "        else project_root / APM_MODULES_DIR,\n",
-            '        else project_root / "apm_modules",\n',
+            "modules_root if modules_root is not None else project_root / APM_MODULES_DIR,\n",
+            'modules_root if modules_root is not None else project_root / "apm_modules",\n',
         ),
     ),
     CompoundMutation(
@@ -785,6 +826,42 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         ),
     ),
     CompoundMutation(
+        "uninstall-object-form-selection-owner",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "    declared_selections = _select_marketplace_declarations(mkt_refs_set, current_deps)",
+            "    declared_selections = {}",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-object-form-removal-target",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "                dep_ref = _parse_dependency_entry(_removal_target(package, lockfile))",
+            "                dep_ref = _parse_dependency_entry(package)",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-object-form-shared-coordinate",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "    packages_not_found.extend(\n        _refuse_unsafe_marketplace_removals(",
+            "    packages_not_found.extend(\n        list(",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-object-form-lock-key",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        _replace(
+            "                key = _removed_lock_key(pkg, lockfile)",
+            "                key = _parse_dependency_entry(pkg).get_unique_key()",
+        ),
+    ),
+    CompoundMutation(
         "uninstall-duplicate-owner",
         UNINSTALL_RULE,
         "src/apm_cli/commands/uninstall/cli.py",
@@ -812,6 +889,72 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         _replace(
             "    packages_to_remove = []",
             "    current_deps.get_identity()\n    packages_to_remove = []",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-declarations-owner",
+        UNINSTALL_RULE,
+        "src/apm_cli/models/dependency/selection.py",
+        _replace("def manifest_declarations_of(", "def manifest_declarations_of_disabled("),
+    ),
+    CompoundMutation(
+        "uninstall-manifest-edit-delegation",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        _replace(
+            "manifest_declarations_of(declarations, packages_to_remove)",
+            "[package for package in packages_to_remove if package in declarations]",
+        ),
+    ),
+    CompoundMutation(
+        "install-cross-section-delegation",
+        UNINSTALL_RULE,
+        "src/apm_cli/install/package_resolution.py",
+        _replace(
+            "declared = manifest_declarations_of(other_deps, [package])",
+            "declared = [item for item in other_deps if item == package]",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-manifest-edit-single-section",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        append="\n\ndef _first_section(package, dev_deps):\n    return package in dev_deps\n",
+    ),
+    CompoundMutation(
+        "audit-package-selection-route",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/audit.py",
+        _replace(
+            "        selection = select_installed_lock_key(package, manifest, lockfile)",
+            "        selection = None",
+        ),
+    ),
+    CompoundMutation(
+        "audit-package-second-selector",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/audit.py",
+        append=(
+            "\n\ndef _lock_key_for(package):\n"
+            "    return parse_dependency_entry(package).get_unique_key()\n"
+        ),
+    ),
+    CompoundMutation(
+        "read-only-selection-uninstall-route",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "    selected, _refused = _validate_uninstall_packages(",
+            "    selected, _refused = _validate_uninstall_packages_disabled(",
+        ),
+    ),
+    CompoundMutation(
+        "read-only-selection-shared-candidates",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        _replace(
+            "    return had_dev_section, prod_deps, dev_deps, manifest_dependency_entries(data)",
+            "    return had_dev_section, prod_deps, dev_deps, [*prod_deps, *dev_deps]",
         ),
     ),
     *(

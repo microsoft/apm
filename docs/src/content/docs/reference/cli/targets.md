@@ -68,12 +68,12 @@ Sample output in a project with `CLAUDE.md` and `.cursor/`:
 ```
   TARGET       STATUS     SOURCE                                   DEPLOY DIR
   ------------ ---------- ---------------------------------------- ----------
-  copilot      inactive   needs .github/copilot-instructions.md    .github/
   claude       active     CLAUDE.md                                .claude/
-  grok-build   inactive   needs .grok/                             .grok/
+  copilot      inactive   needs .github/copilot-instructions.md    .github/
   cursor       active     .cursor/                                 .cursor/
   codex        inactive   needs .codex/                            .codex/
   gemini       inactive   needs GEMINI.md                          .gemini/
+  grok-build   inactive   needs .grok/                             .grok/
   opencode     inactive   needs .opencode/                         .opencode/
   windsurf     inactive   needs .windsurf/                         .windsurf/
   kiro         inactive   needs .kiro/                             .kiro/
@@ -93,7 +93,7 @@ match per target is enough to activate it.
 
 | Target | Signal(s) APM looks for | Deploy directory |
 |--------|-------------------------|------------------|
-| `copilot` | `.github/copilot-instructions.md` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory | `.github/` |
+| `copilot` | `.github/copilot-instructions.md` or `.github/mcp.json` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory | `.github/` |
 | `claude` | `.claude/` directory, or `CLAUDE.md` file | `.claude/` |
 | `grok-build` | `.grok/` directory | `.grok/` |
 | `cursor` | `.cursor/` directory, or `.cursorrules` file (legacy) | `.cursor/` |
@@ -102,7 +102,7 @@ match per target is enough to activate it.
 | `opencode` | `.opencode/` directory | `.opencode/` |
 | `windsurf` | `.windsurf/` directory | `.windsurf/` |
 | `kiro` | `.kiro/` directory | `.kiro/` |
-| `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm install` / `apm deps update` (compile is a no-op for this target). | `.agents/` |
+| `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm install` / `apm update` (compile is a no-op for this target). | `.agents/` |
 
 Notes:
 
@@ -110,6 +110,10 @@ Notes:
   decide whether a marker is "real".
 - A `CLAUDE.md` written as documentation will still activate the
   `claude` target. Pin `targets:` in `apm.yml` to override.
+- A root `.mcp.json` is not a signal: Claude Code and Copilot both read it.
+- `vscode` is a deprecated alias of `copilot` and has no row of its own.
+  `intellij` is an IDE, not a target: APM never records it in `targets:`;
+  use `copilot` for GitHub Copilot in JetBrains IDEs.
 - If no signals are found and `apm.yml` declares no `targets:`,
   `apm targets` prints the full table with every row inactive and an
   info hint to create a harness config or declare `targets:`
@@ -126,4 +130,4 @@ Notes:
 - [`apm install`](../install/) -- uses the same target resolution to decide which harness configs to wire.
 - [`apm compile`](../compile/) -- compiles primitives for the targets shown here.
 - [Targets matrix](../../targets-matrix/) -- per-target output layout and feature support.
-- [Concepts: primitives and targets](../../../concepts/primitives-and-targets/)
+- [Concepts: primitives and targets](../../targets-matrix/)

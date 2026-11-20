@@ -38,7 +38,7 @@ def test_secret_references_survive_reinstall_across_targets(
     chain = Chain(
         tmp_path / "secrets",
         apm_binary_path,
-        dirs=(".claude", ".vscode", ".cursor", ".github", ".codex", ".opencode"),
+        dirs=(".claude", ".cursor", ".github", ".codex", ".opencode"),
     )
     chain.write_manifest(
         [
@@ -52,13 +52,11 @@ def test_secret_references_survive_reinstall_across_targets(
             ),
         ]
     )
-    targets = "claude,vscode,cursor,copilot,codex,opencode"
+    targets = "claude,cursor,copilot,codex,opencode"
     first = chain.ok("install", "--no-policy", "--target", targets)
     preserving = (
         ".mcp.json",
-        ".vscode/mcp.json",
         ".cursor/mcp.json",
-        ".github/mcp.json",
         "opencode.json",
         ".codex/config.toml",
         "apm.lock.yaml",
@@ -81,7 +79,7 @@ def test_user_servers_survive_reinstall_removal_and_frozen(
     chain = Chain(
         tmp_path / "user-servers",
         apm_binary_path,
-        dirs=(".claude", ".vscode", ".cursor", ".github", ".codex", ".opencode"),
+        dirs=(".claude", ".cursor", ".github", ".codex", ".opencode"),
     )
     (chain.project / "opencode.json").write_text(
         json.dumps({"$schema": "https://opencode.ai/config.json", "theme": "dark"}), "utf-8"
@@ -89,17 +87,16 @@ def test_user_servers_survive_reinstall_removal_and_frozen(
     chain.write_manifest(
         [stdio_server("owned-a", "a"), http_server("owned-b", "https://b.example.invalid")]
     )
-    targets = "claude,vscode,cursor,copilot,codex,opencode"
+    targets = "claude,cursor,copilot,codex,opencode"
     chain.ok("install", "--no-policy", "--target", targets)
     for target in JSON_CONFIGS:
         assert set(chain.servers(target)) == {"owned-a", "owned-b"}, target
     assert chain.lock()["mcp_servers"] == ["owned-a", "owned-b"]
 
+    # Claude's entry is also Copilot's: both read the project .mcp.json.
     user_entries = {
         "claude": {"command": "mine"},
-        "vscode": {"type": "stdio", "command": "mine"},
         "cursor": {"command": "mine"},
-        "copilot": {"type": "local", "command": "mine", "tools": ["*"]},
         "opencode": {"type": "local", "command": ["mine"]},
     }
     for target, entry in user_entries.items():
@@ -136,22 +133,22 @@ def test_policy_denied_mcp_fails_closed_through_every_entry_point(
 
     ``apm mcp install`` exits exactly like ``apm install --mcp`` (#3666).
     """
-    chain = Chain(tmp_path / entry, apm_binary_path, dirs=(".claude", ".vscode"))
+    chain = Chain(tmp_path / entry, apm_binary_path, dirs=(".claude", ".cursor"))
     chain.seed_org_policy(
         "name: acme\nversion: 1.0.0\nenforcement: block\n"
         "mcp:\n  deny: ['evil-*']\n  transport:\n    allow: [stdio]\n  self_defined: allow\n"
     )
     chain.write_manifest([stdio_server("good-a", "good")])
-    chain.ok("install", "--target", "claude,vscode")
+    chain.ok("install", "--target", "claude,cursor")
     manifest = (chain.project / "apm.yml").read_bytes()
     lock = (chain.project / "apm.lock.yaml").read_bytes()
     prefix = ("mcp", "install") if entry == "mcp-install" else ("install", "--mcp")
 
     usage = chain.run(*prefix, "bad", "--transport", "bogus", "--", "npx", "bad")
     assert usage.returncode == 2, usage.stdout + usage.stderr
-    denied_name = chain.run(*prefix, "evil-y", "--target", "claude,vscode", "--", "npx", "evil")
+    denied_name = chain.run(*prefix, "evil-y", "--target", "claude,cursor", "--", "npx", "evil")
     denied_transport = chain.run(
-        *prefix, "http-z", "--target", "claude,vscode", "--url", "https://z.example.invalid/mcp"
+        *prefix, "http-z", "--target", "claude,cursor", "--url", "https://z.example.invalid/mcp"
     )
     for result in (denied_name, denied_transport):
         output = result.stdout + result.stderr
@@ -160,7 +157,7 @@ def test_policy_denied_mcp_fails_closed_through_every_entry_point(
         assert (chain.project / "apm.yml").read_bytes() == manifest
         assert (chain.project / "apm.lock.yaml").read_bytes() == lock
         assert set(chain.servers("claude")) == {"good-a"}
-        assert set(chain.servers("vscode")) == {"good-a"}
+        assert set(chain.servers("cursor")) == {"good-a"}
     chain.ok("audit", "--ci")
 
 
@@ -211,11 +208,11 @@ def test_mcp_install_alias_writes_the_same_files_as_install_mcp(
     """#3633: forwarded options produce byte-identical project and user configs."""
     trees: list[dict[str, bytes]] = []
     for entry in ("mcp-install", "install-mcp"):
-        chain = Chain(tmp_path / entry, apm_binary_path, dirs=(".claude", ".vscode", ".cursor"))
+        chain = Chain(tmp_path / entry, apm_binary_path, dirs=(".claude", ".github", ".cursor"))
         (chain.isolated.home / ".copilot").mkdir(parents=True, exist_ok=True)
         chain.write_manifest([])
         prefix = ("install", "--mcp")
-        targets = ("--target", "claude,vscode,cursor", "--no-policy")
+        targets = ("--target", "claude,copilot,cursor", "--no-policy")
         manifest = (chain.project / "apm.yml").read_bytes()
         chain.ok(*prefix, "srv-dry", *targets, "--dry-run", "--", "npx", "dry")
         assert (chain.project / "apm.yml").read_bytes() == manifest
@@ -246,7 +243,7 @@ def test_mcp_install_alias_writes_the_same_files_as_install_mcp(
         chain.ok(*prefix, "srv-env", *targets, "--force", "--env", "LEVEL=changed", "--", "npx")
         tree = {
             relative: (chain.project / relative).read_bytes()
-            for relative in ("apm.yml", "apm.lock.yaml", ".mcp.json", ".vscode/mcp.json")
+            for relative in ("apm.yml", "apm.lock.yaml", ".mcp.json", ".cursor/mcp.json")
         }
         tree["copilot-user"] = (chain.isolated.home / ".copilot" / "mcp-config.json").read_bytes()
         for relative, content in tree.items():

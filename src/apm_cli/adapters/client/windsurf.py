@@ -11,6 +11,7 @@ Ref: https://docs.windsurf.com/windsurf/cascade/mcp
 
 from pathlib import Path
 
+from ._remote_shapes import remote_shape_row
 from .copilot import CopilotClientAdapter
 
 
@@ -23,7 +24,10 @@ class WindsurfClientAdapter(CopilotClientAdapter):
     the user-facing label differ.
     """
 
+    remote_shape = remote_shape_row("windsurf")
+
     supports_user_scope: bool = True
+    user_wide_config_display: str = "~/.codeium/windsurf/mcp_config.json"
     _client_label: str = "Windsurf"
     target_name: str = "windsurf"
     mcp_servers_key: str = "mcpServers"

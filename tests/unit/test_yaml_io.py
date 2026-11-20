@@ -169,6 +169,23 @@ class TestYamlToStr:
         result = yaml_to_str({"key": "value"})
         assert isinstance(result, str)
 
+    def test_repeated_objects_are_written_without_anchors(self, tmp_path):
+        """apm.yml refuses anchors (req-mf-020(b)), so no writer may emit them (#3858)."""
+        from apm_cli.models.manifest_io import load_manifest, load_manifest_roundtrip
+        from apm_cli.utils.yaml_io import load_yaml_roundtrip_str, yaml_roundtrip_to_str
+
+        shared = ["copilot", "claude"]
+        manifest = tmp_path / "apm.yml"
+        dump_yaml({"name": "demo", "targets": shared, "x-copy": shared}, manifest)
+        assert "&" not in manifest.read_text(encoding="utf-8")
+        assert load_manifest(manifest)["x-copy"] == shared
+
+        document = load_yaml_roundtrip_str("name: demo\ntargets: [copilot]\n")
+        document["x-copy"] = document["targets"]
+        manifest.write_text(yaml_roundtrip_to_str(document), encoding="utf-8")
+        assert "&" not in manifest.read_text(encoding="utf-8")
+        assert load_manifest_roundtrip(manifest)["x-copy"] == ["copilot"]
+
 
 class TestCrossPlatformSafety:
     """Simulate the Windows cp1252 mismatch scenario."""

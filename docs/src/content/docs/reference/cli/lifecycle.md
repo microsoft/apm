@@ -14,7 +14,7 @@ Project-source scripts (`apm.yml` `lifecycle:`) are **skipped by default** until
 explicitly trusted, preventing arbitrary command execution on clone.
 
 For the full conceptual guide, schema reference, and security model, see
-[Lifecycle Scripts](../../../enterprise/lifecycle-scripts/).
+[Lifecycle Scripts](../../../enterprise/control-executables/#lifecycle-scripts).
 
 ## Synopsis
 
@@ -74,7 +74,7 @@ Checks across all three discovery sources (policy, user, project). Reports:
 - Missing `scripts` object (admin JSON only)
 - Unknown lifecycle event names
 - Unknown script types
-- Missing `bash`/`command` for command scripts
+- Missing `bash`/`command`/`run` for command scripts
 - Missing or non-HTTPS `url` for HTTP scripts
 - Embedded credentials in URLs
 
@@ -84,7 +84,9 @@ Exits `1` if any errors are found.
 
 Fire a synthetic lifecycle event through all discovered scripts. Dry-run by
 default: shows which scripts would run without executing them. Pass `--execute`
-to actually run them.
+to actually run them. `--execute` goes through the same gate as install:
+`APM_NO_SCRIPTS`, org `executables.deny_all` and project script trust, so run
+`apm lifecycle trust` first for project scripts.
 
 ```bash
 apm lifecycle test                        # dry-run post-install (default event)
@@ -155,5 +157,5 @@ apm lifecycle untrust
 - Credential-pattern environment variables (TOKEN, SECRET, PAT, KEY, etc.) are
   blocked from HTTP header expansion unless listed in `allowedEnvVars`.
 
-See [Lifecycle Scripts - Security](../../../enterprise/lifecycle-scripts/#security-considerations)
+See [Lifecycle Scripts - Security](../../../enterprise/control-executables/#lifecycle-scripts)
 and [Security model](../../../enterprise/security/) for the full security model.

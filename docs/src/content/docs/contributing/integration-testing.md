@@ -38,12 +38,12 @@ APM uses a tiered approach to integration testing:
 - **Purpose**: Promote a stable, hermetic slice of Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so regressions in install, lock, deployment ownership, compile, pack, prune, uninstall, audit, and repair fail the PR.
 - **Scope**: the family contains a static authority guard plus content-hash, policy, hook, virtual-package, audit, auth, and installed-console rows. Real subprocess cases use the uv-installed `apm` command and local Git. This is not frozen PyInstaller coverage.
 - **Prerequisites**: the pytest step sets `APM_E2E_TESTS=1` so subprocess rows execute. `APM_RUN_INTEGRATION_TESTS` remains unset, the socket guard denies network sockets, and the job binds no credentials.
-- **Duration**: two shards each retain a hard 10-minute timeout, including setup and cleanup, with four `loadgroup` workers. Hosted job results are authoritative; a printed pytest summary does not override a job timeout.
-- **Trigger**: every pull request and merge queue run. The required `Lifecycle Smoke (Linux)` aggregate checks both shard results independently and fails if either is missing, skipped, cancelled, or failed.
+- **Duration**: three shards each retain a hard 10-minute timeout, including setup and cleanup, with four `loadgroup` workers. Hosted job results are authoritative; a printed pytest summary does not override a job timeout.
+- **Trigger**: every pull request and merge queue run. The required `Lifecycle Smoke (Linux)` aggregate checks every shard result independently and fails if any is missing, skipped, cancelled, or failed.
 - **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. No central count or membership list is maintained.
-- **Sharding**: `scripts.lifecycle_smoke_sharding` delegates balancing to pytest-split while keeping each composite `xdist_group` intact. Member counts are scheduling weights, not measured durations. The two shards are disjoint and their union is the unchanged required selection.
+- **Sharding**: `scripts.ci_sharding` balances the shards by the measured durations in `.github/ci-durations/linux-x86_64.json` while keeping each module and composite `xdist_group` intact. The shards are disjoint and their union is the unchanged required selection.
 - **Full-coverage path**: merge-group workflow `ci-integration.yml`, job `integration-tests-shard`, step `Run integration tests (sharded + parallelized)`, calls `uv run ./scripts/test-integration.sh`; that script runs unfiltered `pytest tests/integration/`, so the complete lifecycle family remains exercised.
-- **Drift guard**: `tests/quality/test_ci_topology.py` independently collects the full, merge-group-only, required, and two sharded selections. It verifies their set relationships, both shards' timeout and worker bounds, the aggregate's failure behavior, the full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
+- **Drift guard**: `tests/quality/test_ci_topology.py` independently collects the full, merge-group-only, required, and every sharded selection. It verifies their set relationships, each shard's timeout and worker bounds, the aggregate's failure behavior, the full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
 - **Fixture controls**: lifecycle helpers set `APM_TEST_LOOPBACK_PORTS` for a port-scoped local registry and `APM_TEST_FAIL_LOCK_REPLACE=1` for atomic-write fault injection. These are internal test controls, not user-facing APM settings.
 - **Source and ownership fixtures**: downloader stubs must return real `PackageInfo` and `ResolvedReference` values and materialize each package at the requested path, including staging directories. Native MCP cleanup tests must generate managed baselines through the real writer, then prove both authorized removal and unchanged bytes on unverifiable or foreign entries. Keep successful transitive-service, frozen replay, and exact-byte assertions; a mock-error exit is not success.
 - **Learning ledger**: `tests/fixtures/lifecycle_bug_ledger.json` maps representative escaped defects to generalized laws, oracle tiers, phases, and executable regression node IDs, including coverage of already-correct behavior. Use same-workspace transitions to prove survivor ownership and scoped cleanup. It is not a bug-count census; `tests/quality/test_lifecycle_bug_ledger.py` validates its taxonomy and links.
@@ -51,10 +51,11 @@ APM uses a tiered approach to integration testing:
 - **Frozen under-recording**: the required smoke scenario and the generated model's mandatory project replay add a local skill without refreshing the lockfile, require frozen refusal with unchanged lockfile bytes, repair with ordinary install, and verify two byte-stable frozen replays. The scenario uses `ApmLifecycleRunner` in an isolated environment. It does not promise filesystem rollback: the new skill is deployed before refusal.
 - **Frozen local dependencies**: `test_frozen_local_path_lifecycle.py` uses the selected installed CLI to check direct and transitive source changes before deployment, including portable identities for packages inside the consumer project. It covers a fresh consumer with a separate empty cache, unchanged lock and managed bytes on refusal, preserved unrelated cache content, and recovery by restoring the source or explicitly accepting it with a normal install. This is separate from the root project's under-recording scenario above.
 - **Known gap**: a late lockfile replacement failure can leave target files on the newly declared target while retaining the prior lockfile. The required lifecycle suite bounds that blast radius and proves the next install converges; expanding the install transaction is a separate design decision recorded in the ledger.
-- **Run it locally** (repeat with shard `2` to cover the full required selection):
+- **Run it locally** (repeat with shards `2` and `3` to cover the full required selection):
   ```bash
   APM_E2E_TESTS=1 uv run --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
-    -p scripts.lifecycle_smoke_sharding --lifecycle-shard 1 \
+    -p scripts.ci_sharding --shard-count 3 --shard-index 1 \
+    --shard-durations .github/ci-durations/linux-x86_64.json \
     -n 4 --dist loadgroup --durations=20 \
     -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
   ```
@@ -511,24 +512,59 @@ Its `lifecycle_smoke and not lifecycle_merge_group` selection is not all
 lifecycle coverage: also run affected generated state machines, deployment
 ledger, and failure/retry contracts when changing those behaviors.
 
-**On pushed version tag releases:**
-1. Unit tests + Smoke tests
-2. Build binaries (cross-platform)
-3. **E2E golden scenario tests** (using built binaries). Linux and macOS Apple Silicon retain the full non-live integration corpus; macOS Intel runs the marker-bounded `lifecycle_smoke and not live` subset plus native startup and isolated release validation.
-4. Create GitHub Release
-5. Publish to PyPI 
+**Releasing:** push a `v*` tag, as before. `scripts/release_plan.py` picks how
+much the run validates:
+- **push** (push to `main`): unit tests and Linux/Windows binaries. The Windows
+  installer runs alongside two duration-balanced unit shards. All three must
+  succeed before the Windows binary is built or uploaded.
+- **full** (nightly schedule or `repository_dispatch`): every lane. A green
+  full run is promotion evidence for its SHA.
+- **promoted** (tag whose SHA already has a green full run on `main`): builds,
+  binary smoke tests and release validation only, then publishes (about 5 min).
+- **tag without evidence**: full validation in the tag run, then publishes.
 
-The Linux x64 and macOS Apple Silicon full integration steps have 120-minute
-limits and keep `not live` selection with `-n 4 --dist loadgroup` for HOME-mutating
-test grouping. Previous 60-minute limits stopped progressing workers at 78% and
-77%, respectively; the budgets allow setup and tail headroom without excluding
-tests. Linux ARM keeps 60 minutes and Windows 20. The focused Intel step has
-60 minutes: its prior 30-minute limit stopped passing workers at 91%.
-The rough `30 / 0.91` projection is 33 minutes; 60 adds setup/tail headroom,
-not a completion guarantee.
-Its `lifecycle_smoke and not live` selection and four `loadgroup` workers are
-unchanged. Failures and timeouts still block release publication; a larger
-budget is not evidence that a failed assertion is fixed.
+For the fast path, dispatch `manual-build-release` on the `main` commit, wait
+for it to finish green, then tag that commit. Nothing publishes without a
+green full validation of the exact SHA.
+
+If a published stable release never reached PyPI, re-publish it from its tag
+without re-running validation:
+
+```bash
+gh api repos/microsoft/apm/dispatches -f event_type=publish-existing-tag \
+  -F 'client_payload[tag]=vX.Y.Z'
+```
+
+The run refuses a tag that is not a published stable GitHub release, or whose
+version is already on PyPI.
+
+On qualifying PRs and merge groups, `Spec conformance gate` requires three
+serial pytest shards on isolated runners plus the statement check. Only the
+statement job's full collection is used to regenerate `CONFORMANCE.{json,md}`.
+On every PR, `Windows Compatibility Gate` requires three serial shards on
+parallel Windows runners; `Lifecycle Smoke (Linux)` and the two
+`Build & Test` shards are split the same way. The seeds in
+`.github/ci-durations/` (`windows-unit`, `windows-compat`, `linux-unit`,
+`spec-conformance`, and `linux-x86_64` for lifecycle smoke) weight the current
+pytest collection; they are not lists of tests to run.
+
+**Full-run lanes:**
+- **Linux x86_64 and arm64**: hermetic integration (`not live and not
+  requires_github_token and not requires_network_integration`) split across
+  runners by `scripts/ci_sharding.py`. Shards are balanced by measured
+  durations and keep xdist groups and heavy modules whole. The nightly run
+  publishes durations; `.github/ci-durations/` holds the fallback seeds.
+  Architecture-linter contracts (`architecture_contract`) run on x86_64 only.
+- **Network lane** (Linux x86_64): `requires_github_token or
+  requires_network_integration`, re-running only failed tests up to twice.
+- **Windows**: `scripts/windows/test-integration.ps1`.
+- **macOS**: still one job per architecture. Apple Silicon runs the unit suite
+  plus `lifecycle_smoke or windows_compat or platform_sensitive`; Intel runs
+  `windows_compat or platform_sensitive`. Mark OS-, filesystem- or
+  shell-sensitive integration tests `platform_sensitive`.
+
+`create-release` requires a pushed tag and every release-bound lane. Only a
+promoted tag may skip integration.
 
 The existing unprivileged `PR Binary Smoke (Linux)` job also runs
 `tests/integration/test_audit_workspace_identity_lifecycle.py` against its built
@@ -539,7 +575,6 @@ release qualification or change required checks.
 
 **Daily scheduled release smoke:**
 - Runs the same promotion validation path once per day.
-- If a build matrix leg fails, downstream Linux/Windows integration and release-validation jobs still run for any platform artifact that was produced.
 - Failing scheduled runs update one `ci/daily-smoke` tracking issue; a later recovered run closes it.
 - This signal is advisory and is not a required PR check.
 
@@ -578,11 +613,12 @@ Runtime setup prefers `GITHUB_TOKEN` for GitHub Models and falls back to `GITHUB
 
 The workflow ensures quality gates at each step:
 
-1. **build-and-test** jobs - Unit tests plus binary builds
-2. **integration-tests** job - Comprehensive non-live runtime scenarios
-3. **release-validation** job - Final shipped-binary validation
-4. **create-release** job - GitHub release creation
-5. **publish-pypi** job - PyPI package publication
+1. **release-plan** job - Chooses push, full or promoted mode
+2. **build-linux-x86**, **build-linux-arm**, **build-windows** jobs - Unit tests plus binary builds
+3. **integration-tests** job (`Integration Tests Summary`) - Requires every sharded integration lane
+4. **release-validation** jobs - Final shipped-binary validation
+5. **create-release** job - GitHub release creation
+6. **publish-pypi** job - PyPI package publication
 
 Each publication stage must succeed before proceeding to the next. Live
 third-party credential acceptance remains a failing gate in the opt-in Auth
@@ -595,8 +631,8 @@ The [`microsoft/homebrew-apm`](https://github.com/microsoft/homebrew-apm) tap up
 Promotion integration tests run on:
 - **Linux**: ubuntu-24.04 (x86_64), ubuntu-24.04-arm (arm64)
 - **Windows**: windows-latest (x86_64)
-- **macOS Intel**: macos-15-intel (x86_64), with marker-bounded `lifecycle_smoke and not live` integration coverage, native binary startup, and isolated release validation
-- **macOS Apple Silicon**: macos-latest (arm64), with the full non-live integration corpus
+- **macOS Intel**: macos-15-intel (x86_64), with the `windows_compat or platform_sensitive` subset, native binary startup, and isolated release validation
+- **macOS Apple Silicon**: macos-latest (arm64), with unit tests and the `lifecycle_smoke or windows_compat or platform_sensitive` subset
 
 **Python Version**: 3.12 (standardized across all environments)
 **Package Manager**: uv (for fast dependency management and virtual environments)
@@ -637,12 +673,12 @@ Promotion integration tests run on:
 ## Benefits
 
 ### **Speed vs Confidence Balance**
-- **Smoke tests**: Fast feedback (2-3 min) on every change
-- **E2E tests**: High confidence (15 min) only when shipping
+- **Smoke tests**: Fast feedback (2-3 min) in the merge queue and on runtime changes
+- **E2E tests**: High confidence (15 min) in the merge queue and promotion runs
 
 ### **Cost Efficiency**
 - Smoke tests use no API credits
-- E2E tests only run on releases (minimizing API usage)
+- E2E tests run in the merge queue and promotion runs, not on every PR push (minimizing API usage)
 - Manual workflow dispatch for test builds without publishing
 
 ### **Platform Coverage**

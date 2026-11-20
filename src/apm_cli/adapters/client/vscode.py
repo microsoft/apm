@@ -9,11 +9,14 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from typing import ClassVar
 
 from ...core.docker_args import DockerArgsProcessor
+from ...mcp_transport import canonical_remote_transport
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
+from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
 from .base import (
     _ENV_VAR_RE,
     _INPUT_VAR_RE,
@@ -36,8 +39,13 @@ class VSCodeClientAdapter(MCPClientAdapter):
     in the VSCode documentation.
     """
 
+    remote_shape = remote_shape_row("vscode")
+
     target_name: str = "vscode"
     mcp_servers_key: str = "servers"
+    # VS Code resolves ${workspaceFolder} in .vscode/mcp.json (predefined
+    # variables, code.visualstudio.com/docs/copilot/reference/mcp-configuration).
+    plugin_root_project_reference: ClassVar[str | None] = "${workspaceFolder}"
 
     def __init__(
         self,
@@ -60,6 +68,15 @@ class VSCodeClientAdapter(MCPClientAdapter):
         super().__init__(project_root=project_root, user_scope=user_scope)
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
+
+    @staticmethod
+    def determine_config_key(
+        server_url: str,
+        server_name: str | None,
+        server_info: dict | None = None,
+    ) -> str:
+        """VS Code keys every entry by its full declared reference, never a short name."""
+        return server_name or server_url
 
     def get_config_path(self, logger=None):
         """Get the path to the VSCode MCP configuration file in the repository.
@@ -93,15 +110,15 @@ class VSCodeClientAdapter(MCPClientAdapter):
             new_config (dict): Complete configuration object to write.
 
         Returns:
-            bool: True if successful, False otherwise.
+            bool: True if successful, False otherwise. ``False`` without
+            writing when the existing file cannot be rewritten safely.
         """
         config_path = self.get_config_path(logger=logger)
+        if self._parse_json_config_for_update(Path(config_path)) is None:
+            return False
 
         try:
-            # Write the updated config
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(new_config, f, indent=2)
-
+            self._write_json_config(Path(config_path), new_config, shared=True)
             return True
         except Exception as e:
             if logger:
@@ -183,11 +200,15 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 )
 
             # Use provided server name or fallback to server_url
-            config_key = server_name or server_url
+            config_key = self.determine_config_key(server_url, server_name, server_info)
 
             # Get current config before formatting so optional registry fields
             # that the user already edited can be preserved on reinstall.
-            current_config = self.get_current_config(logger=logger)
+            current_config = self._parse_json_config_for_update(
+                Path(self.get_config_path(logger=logger))
+            )
+            if current_config is None:
+                return False
             existing_servers = current_config.get("servers")
             if not isinstance(existing_servers, dict):
                 existing_servers = {}
@@ -246,6 +267,36 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 print(f"Error configuring MCP server: {e}")
             return False
 
+    def render_server_config(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> dict:
+        """Render the entry ``configure_mcp_server`` would write now.
+
+        Like the write path, keep optional registry fields the existing entry
+        already carries, so an unchanged entry never compares as different.
+        """
+        servers = self.get_current_config().get("servers")
+        existing = (
+            servers.get(self.determine_config_key(server_info.get("name", ""), None))
+            if isinstance(servers, dict)
+            else None
+        )
+        rendered = self._format_server_config(
+            server_info,
+            runtime_vars=runtime_vars or {},
+            env_overrides=env_overrides or {},
+            existing_server_config=existing,
+        )
+        if isinstance(rendered, tuple):
+            rendered = rendered[0]
+        if not isinstance(rendered, dict):
+            raise ValueError("Adapter did not produce a native MCP server mapping")
+        return rendered
+
     def _format_server_config(
         self,
         server_info,
@@ -271,7 +322,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
         input_vars = []
 
         # Self-defined stdio deps carry raw command/args  -- use directly
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             server_config = {
                 "type": "stdio",
@@ -464,17 +515,13 @@ class VSCodeClientAdapter(MCPClientAdapter):
             elif server_info.get("remotes"):
                 remote = self._select_remote_with_url(server_info["remotes"])
                 if remote:
-                    transport = (remote.get("transport_type") or "").strip()
-                    # Default to "http" when transport_type is missing/empty,
-                    # matching the Copilot adapter behavior (copilot.py:190-192).
-                    if not transport:
-                        transport = "http"
-                    elif transport not in ("sse", "http", "streamable-http"):
-                        raise ValueError(
-                            f"Unsupported remote transport '{transport}' for VS Code. "
-                            f"Server: {server_info.get('name', 'unknown')}. "
-                            f"Supported transports: http, sse, streamable-http."
-                        )
+                    server_name = server_info.get("name", "unknown")
+                    transport = canonical_remote_transport(
+                        remote, runtime_label="VS Code", server_name=server_name
+                    )
+                    shape = active_remote_shape(self)
+                    if not shape.supports(transport):
+                        return skip_unsupported_remote(self, server_name, transport), input_vars
                     headers = remote.get("headers", {})
                     # Normalize header list format to dict
                     if isinstance(headers, list):
@@ -489,8 +536,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
                     )
                     headers = self._translate_env_vars_for_vscode(headers)
                     server_config = {
-                        "type": transport,
-                        "url": remote["url"].strip(),
+                        **shape.render(transport, remote["url"].strip()),
                         "headers": headers,
                     }
                     input_vars.extend(

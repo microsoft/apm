@@ -2,19 +2,27 @@
 
 import builtins
 import contextlib
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from ...bundle.local_bundle import looks_like_local_bundle
 from ...constants import APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
 from ...deps.lockfile import LockFile, lockfile_parent_identity
+from ...install.orphans import build_children_index as _build_children_index  # noqa: F401
+from ...install.orphans import collect_orphan_candidates as _collect_orphan_candidates
+from ...integration.mcp_config_view import BUNDLE_MCP_OWNER_PREFIX
 from ...integration.mcp_integrator import MCPIntegrator
 from ...models.apm_package import DependencyReference
 from ...models.dependency.selection import (
+    DependencySelection,
     DependencySelectionStatus,
+    manifest_declarations_of,
     select_manifest_dependency,
+    select_marketplace_declaration,
 )
 from ...models.dependency.selection import (
     parse_dependency_entry as _parse_dependency_entry,
@@ -43,38 +51,109 @@ def _is_marketplace_ref(package: str) -> bool:
     return parse_marketplace_ref(package) is not None
 
 
-def _build_children_index(lockfile):
-    """Index every recorded original parent in one pass over the locked edges."""
-    children = {}
-    for dep in lockfile.get_package_dependencies():
-        for parent in dep.parent_keys:
-            if parent is not None:
-                children.setdefault(parent, []).append(dep)
-    return children
+def _removal_target(dep_entry: object, lockfile: LockFile | None) -> object:
+    """Return what removing a manifest declaration acts on: lock row, checkout, edges.
+
+    An object-form ``{name, marketplace}`` declaration is identified as
+    ``_marketplace/<alias>/<plugin>``; its lock row, ``apm_modules`` checkout
+    and transitive edges belong to the one locked row recorded for that
+    alias/plugin pair, matched case-insensitively like the selection (#3928).
+    With no such row the entry is returned unchanged (nothing was locked); an
+    ambiguous pair is refused earlier by
+    :func:`_refuse_unsafe_marketplace_removals`.
+    """
+    rows = _locked_marketplace_rows(dep_entry, lockfile)
+    return rows[0].to_dependency_ref() if len(rows) == 1 else dep_entry
 
 
-def _collect_orphan_candidates(
-    lockfile: LockFile, packages_to_remove: list[object]
-) -> tuple[set[str], set[str]]:
-    """Share the backward edge scan without changing preview's cold-cache behavior."""
-    removed_parents: set[str] = set()
-    for package in packages_to_remove:
-        try:
-            reference = _parse_dependency_entry(package)
-            removed_parents.add(lockfile_parent_identity(reference, lockfile.replacements))
-        except (ValueError, TypeError, AttributeError, KeyError):
-            removed_parents.add(str(package))
-    children = _build_children_index(lockfile)
-    candidates: set[str] = set()
-    queue = list(removed_parents)
-    while queue:
-        for dependency in children.get(queue.pop(), ()):
-            key = dependency.get_unique_key()
-            if key in candidates:
-                continue
-            candidates.add(key)
-            queue.append(lockfile_parent_identity(dependency, lockfile.replacements))
-    return candidates, removed_parents
+def _locked_marketplace_rows(dep_entry: object, lockfile: LockFile | None) -> list:
+    """Return the lock rows an object-form declaration's alias/plugin pair records."""
+    if lockfile is None:
+        return []
+    try:
+        dependency = _parse_dependency_entry(dep_entry)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return []
+    if not dependency.is_marketplace:
+        return []
+    return lockfile.marketplace_rows(
+        dependency.marketplace_name or "", dependency.marketplace_plugin_name or ""
+    )
+
+
+def _removal_targets(packages: list, lockfile: LockFile | None) -> list:
+    """Map removed manifest declarations to their lock and disk targets."""
+    return [_removal_target(package, lockfile) for package in packages]
+
+
+def _marketplace_declaration_label(dep_entry: object) -> str | None:
+    try:
+        dependency = _parse_dependency_entry(dep_entry)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return None
+    if not dependency.is_marketplace:
+        return None
+    return f"{dependency.marketplace_plugin_name}@{dependency.marketplace_name}"
+
+
+def _refuse_unsafe_marketplace_removals(
+    packages_to_remove: list, current_deps: list, lockfile: LockFile | None, logger
+) -> list[str]:
+    """Refuse marketplace removals that would leave package state behind (#3928).
+
+    An object-form ``{name, marketplace}`` entry whose alias/plugin pair is
+    recorded on several lock rows cannot be mapped to one package, so removing
+    it would drop the declaration but keep its lock row and files. And an
+    object-form entry plus another declaration (for example the same package's
+    Git URL) can own one locked coordinate; removing only one would delete the
+    checkout, files and lock row the survivor still needs. Both fail closed.
+    """
+    if lockfile is None or not packages_to_remove:
+        return []
+    removed = manifest_declarations_of(current_deps, packages_to_remove)
+    refused: list[str] = []
+    for entry in removed:
+        rows = _locked_marketplace_rows(entry, lockfile)
+        if len(rows) > 1:
+            label = _marketplace_declaration_label(entry)
+            logger.error(
+                f"apm.lock.yaml records {len(rows)} packages for {label}, so uninstall "
+                "cannot tell which one to remove. Nothing was changed. Run 'apm install' "
+                "to refresh apm.lock.yaml, then retry."
+            )
+            refused.append(label)
+    if refused:
+        return refused
+    removed_ids = {id(entry) for entry in removed}
+    removed_by_key = {_removed_lock_key(entry, lockfile): entry for entry in removed}
+    for survivor in current_deps:
+        if id(survivor) in removed_ids:
+            continue
+        removed_entry = removed_by_key.get(_removed_lock_key(survivor, lockfile))
+        if removed_entry is None:
+            continue
+        removed_label = _marketplace_declaration_label(removed_entry)
+        survivor_label = _marketplace_declaration_label(survivor)
+        if removed_label is None and survivor_label is None:
+            continue
+        removed_label = removed_label or _dependency_public_label(removed_entry)
+        survivor_label = survivor_label or _dependency_public_label(survivor)
+        logger.error(
+            f"{removed_label} and {survivor_label} are the same installed package, and "
+            f"{survivor_label} would stay declared in apm.yml. Remove both together: "
+            f"apm uninstall {shlex.quote(removed_label)} {shlex.quote(survivor_label)}"
+        )
+        refused.append(removed_label)
+    return refused
+
+
+def _removed_lock_key(dep_entry: object, lockfile: LockFile | None) -> str:
+    """Return the lock key a removed manifest declaration owns."""
+    target = _removal_target(dep_entry, lockfile)
+    try:
+        return _parse_dependency_entry(target).get_unique_key()
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return target if isinstance(target, str) else str(target)
 
 
 def _dependency_public_label(dep_entry: object) -> str:
@@ -477,6 +556,24 @@ def _compute_actual_orphans(
     return candidate_orphans - reachability.reachable, repairs
 
 
+def _select_marketplace_declarations(
+    marketplace_refs: set[str], current_deps: list
+) -> dict[str, DependencySelection]:
+    """Map each ``plugin@marketplace`` ref that names an object-form declaration."""
+    from ...marketplace.resolver import parse_marketplace_ref
+
+    selections: dict[str, DependencySelection] = {}
+    for package in marketplace_refs:
+        parsed = parse_marketplace_ref(package)
+        if parsed is None:
+            continue
+        plugin_name, marketplace_name, _ref = parsed
+        selection = select_marketplace_declaration(plugin_name, marketplace_name, current_deps)
+        if selection.status is not DependencySelectionStatus.NOT_FOUND:
+            selections[package] = selection
+    return selections
+
+
 def _resolve_marketplace_packages(
     packages: list[str],
     lockfile: "LockFile | None",
@@ -526,6 +623,8 @@ def _resolve_marketplace_packages(
     # the first entry whose provenance differs from the requested marketplace.
     exact_index: dict[tuple[str, str], str] = {}
     plugin_index: dict[str, list[tuple[str, str]]] = {}
+    # Case-insensitive rows for the origin check, matched like marketplace_rows.
+    origin_rows: dict[tuple[str, str], list] = {}
     if lockfile is not None:
         for dep in lockfile.dependencies.values():
             mp = dep.marketplace_plugin_name
@@ -536,6 +635,7 @@ def _resolve_marketplace_packages(
             exact_key = (via, mp)
             exact_index.setdefault(exact_key, canonical_key)
             plugin_index.setdefault(mp, []).append((via, canonical_key))
+            origin_rows.setdefault((via.casefold(), mp.casefold()), []).append(dep)
 
     for package in packages:
         parsed = parse_marketplace_ref(package)
@@ -575,6 +675,13 @@ def _resolve_marketplace_packages(
                     symbol="search",
                 )
                 try:
+                    from ...marketplace.catalog_origin import require_locked_row_origin
+
+                    # #3959: a rebound alias fails closed before any catalog I/O.
+                    for locked in origin_rows.get(
+                        (marketplace_name.casefold(), plugin_name.casefold()), ()
+                    ):
+                        require_locked_row_origin(locked, marketplace_name=marketplace_name)
                     resolution = resolve_marketplace_plugin(
                         plugin_name, marketplace_name, auth_resolver=auth_resolver
                     )
@@ -622,6 +729,33 @@ def _resolve_marketplace_packages(
     return resolved
 
 
+def _mcp_server_hint(name: str, lockfile: "LockFile | None") -> str | None:
+    """Route an MCP server name to the command that removes it (#3994).
+
+    ``apm uninstall`` selects packages; an MCP server leaves with its
+    declaration: the root manifest, the package that brings it in, or the
+    local bundle that installed it.
+    """
+    if lockfile is None or name not in lockfile.mcp_servers:
+        return None
+    owner = lockfile.mcp_config_provenance.get(name)
+    if isinstance(owner, str) and owner.startswith(BUNDLE_MCP_OWNER_PREFIX):
+        return (
+            f"'{name}' is an MCP server from a local bundle; "
+            "'apm uninstall' cannot remove local-bundle content yet (tracked in #3887)."
+        )
+    if isinstance(owner, str) and owner:
+        return (
+            f"'{name}' is an MCP server brought in by package '{owner}'. "
+            "Uninstall that package to remove it."
+        )
+    return (
+        f"'{name}' is an MCP server, not a package. Remove '{name}' under "
+        "dependencies.mcp in apm.yml, then run 'apm install' to remove it "
+        "from your harnesses."
+    )
+
+
 def _validate_uninstall_packages(
     packages: list[str],
     current_deps: list,
@@ -654,12 +788,15 @@ def _validate_uninstall_packages(
         *packages_to_remove* contains matched dep entries and
         *packages_not_found* contains unresolved or unmatched package strings.
     """
-    # Pre-resolve any marketplace refs before the main validation loop
+    # Pre-resolve any marketplace refs before the main validation loop. A ref
+    # that names an object-form ``{name, marketplace}`` declaration is selected
+    # from apm.yml directly, with no lock or registry lookup (#3928).
     mkt_refs_set = {p for p in packages if _is_marketplace_ref(p)}
+    declared_selections = _select_marketplace_declarations(mkt_refs_set, current_deps)
     mkt_resolved: dict[str, str | None] = {}
-    if mkt_refs_set:
+    if unresolved := mkt_refs_set - declared_selections.keys():
         mkt_resolved = _resolve_marketplace_packages(
-            list(mkt_refs_set),
+            sorted(unresolved),
             lockfile,
             logger,
             auth_resolver=auth_resolver,
@@ -682,7 +819,10 @@ def _validate_uninstall_packages(
         # so paths fall through to DependencyReference parsing on
         # every platform.
         is_local = DependencyReference.is_local_path(package)
-        if "/" not in package and not is_local:
+        selection: DependencySelection | None = declared_selections.get(package)
+        if selection is not None:
+            canonical_for_match = display_label = package
+        elif "/" not in package and not is_local:
             if package in mkt_refs_set:
                 canonical = mkt_resolved.get(package)
                 if canonical is None:
@@ -694,7 +834,8 @@ def _validate_uninstall_packages(
                 display_label = package
             else:
                 logger.error(
-                    f"Invalid package format: {package}. "
+                    _mcp_server_hint(package, lockfile)
+                    or f"Invalid package format: {package}. "
                     "Use 'owner/repo', 'plugin-name@marketplace', a local path, "
                     "or a key copied from 'apm deps list'."
                 )
@@ -704,7 +845,8 @@ def _validate_uninstall_packages(
             canonical_for_match = package
             display_label = package
 
-        selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)
+        if selection is None:
+            selection = select_manifest_dependency(canonical_for_match, current_deps, lockfile)
         if selection.status is DependencySelectionStatus.MATCHED:
             matched_dep = selection.manifest_entry
             # Selection returns the original manifest object, including unhashable mappings.
@@ -747,6 +889,13 @@ def _validate_uninstall_packages(
                     "Run 'apm install' to regenerate apm.lock.yaml, or use one exact "
                     "path from apm.yml."
                 )
+            elif is_local and looks_like_local_bundle(Path(package)):
+                logger.error(
+                    f"'{Path(package).name}' is a local bundle. Bundles "
+                    "installed with 'apm install <bundle>' are not recorded in apm.yml, "
+                    "and 'apm uninstall' cannot remove local-bundle content yet "
+                    "(tracked in #3887)."
+                )
             elif is_local:
                 logger.error(
                     "The requested local path was not found in apm.yml. "
@@ -764,7 +913,98 @@ def _validate_uninstall_packages(
                     "Run 'apm deps list' and retry with an installed package identifier."
                 )
 
+    packages_not_found.extend(
+        _refuse_unsafe_marketplace_removals(packages_to_remove, current_deps, lockfile, logger)
+    )
     return packages_to_remove, packages_not_found
+
+
+class _DiscardSelectionLogger:
+    """Drop uninstall-worded selection diagnostics; read-only callers word their own."""
+
+    verbose = False
+
+    def error(self, *_args, **_kwargs) -> None:
+        return None
+
+    def warning(self, *_args, **_kwargs) -> None:
+        return None
+
+    def progress(self, *_args, **_kwargs) -> None:
+        return None
+
+    def verbose_detail(self, *_args, **_kwargs) -> None:
+        return None
+
+
+def manifest_dependency_entries(manifest: object) -> list:
+    """Return every ``dependencies.apm`` then ``devDependencies.apm`` entry of *manifest*.
+
+    The one candidate list both ``apm uninstall`` and read-only selection hand
+    to :func:`_validate_uninstall_packages`, so they always agree (#3953).
+    """
+    entries: list = []
+    if not isinstance(manifest, dict):
+        return entries
+    for section in ("dependencies", "devDependencies"):
+        block = manifest.get(section)
+        apm_entries = block.get("apm") if isinstance(block, dict) else None
+        if isinstance(apm_entries, list):
+            entries.extend(apm_entries)
+    return entries
+
+
+@dataclass(frozen=True)
+class InstalledLockSelection:
+    """The lock row a read-only identifier selects.
+
+    ``installed_via`` names the marketplace the row was installed from when a
+    ``plugin@marketplace`` identifier matched it through uninstall's
+    provenance-mismatch fallback, so the caller can say so instead of
+    auditing a different marketplace's plugin silently.
+    """
+
+    key: str
+    installed_via: str | None = None
+
+
+def select_installed_lock_key(
+    package: str, manifest: object, lockfile: "LockFile | None"
+) -> InstalledLockSelection | None:
+    """Select the ``apm.lock.yaml`` row the installed package *package* names (#3953).
+
+    Read-only commands such as ``apm audit PACKAGE`` select through the uninstall
+    selector, so every identifier ``apm uninstall`` accepts (``owner/repo``, a
+    URL, ``plugin@marketplace``, the ``_local/<name>`` key ``apm deps list``
+    prints, a declared local path) maps to the lock row a removal would act on.
+    Selection is offline: the marketplace registry is never consulted. A lock
+    key, or an identifier that normalizes to one, also selects a locked
+    transitive package apm.yml does not declare. Callers enter the manifest's
+    ``default_host`` scope first. Returns ``None`` when nothing installed matches.
+    """
+    from ...marketplace.resolver import parse_marketplace_ref
+
+    installed = lockfile.dependencies if lockfile is not None else {}
+    if package in installed:
+        return InstalledLockSelection(key=package)
+    selected, _refused = _validate_uninstall_packages(
+        [package],
+        manifest_dependency_entries(manifest),
+        _DiscardSelectionLogger(),
+        lockfile,
+        dry_run=True,
+        log_matches=False,
+    )
+    for candidate in [*selected, package]:
+        key = _removed_lock_key(candidate, lockfile)
+        if key not in installed:
+            continue
+        parsed = parse_marketplace_ref(package)
+        via = installed[key].discovered_via
+        if parsed is not None and via and via.casefold() != parsed[1].casefold():
+            return InstalledLockSelection(key=key, installed_via=via)
+        return InstalledLockSelection(key=key)
+    return None
 
 
 def _dry_run_uninstall(
@@ -774,6 +1014,7 @@ def _dry_run_uninstall(
     apm_yml_path=None,
     *,
     surviving_dependencies=None,
+    lockfile=None,
 ):
     """Show what would be removed without making changes.
 
@@ -785,12 +1026,16 @@ def _dry_run_uninstall(
     reachability rescue (see ``_compute_actual_orphans``) is exercised
     for every real ``--dry-run`` invocation.
     """
+    if lockfile is None:
+        from ...deps.lockfile import get_lockfile_path
+
+        lockfile = LockFile.read(get_lockfile_path(Path(".")))
     logger.progress(f"Dry run: Would remove {len(packages_to_remove)} package(s):")
     for pkg in packages_to_remove:
         package_label = _dependency_public_label(pkg)
         logger.progress(f"  - {package_label} from apm.yml")
         try:
-            dep_ref = _parse_dependency_entry(pkg)
+            dep_ref = _parse_dependency_entry(_removal_target(pkg, lockfile))
             package_path = dep_ref.get_install_path(apm_modules_dir)
         except (ValueError, TypeError, AttributeError, KeyError):
             pkg_str = pkg if isinstance(pkg, str) else str(pkg)
@@ -809,12 +1054,10 @@ def _dry_run_uninstall(
             else:
                 logger.progress(f"  - {package_label} from apm_modules/")
 
-    from ...deps.lockfile import LockFile, get_lockfile_path
-
-    lockfile_path = get_lockfile_path(Path("."))
-    lockfile = LockFile.read(lockfile_path)
     if lockfile:
-        candidates, removed_parents = _collect_orphan_candidates(lockfile, packages_to_remove)
+        candidates, removed_parents = _collect_orphan_candidates(
+            lockfile, _removal_targets(packages_to_remove, lockfile)
+        )
         actual_orphans, _resolved_by_repairs = _compute_actual_orphans(
             lockfile,
             candidates,
@@ -842,6 +1085,7 @@ def _remove_packages_from_disk(
     *,
     staged_refreshes=None,
     refreshed_survivor_keys=None,
+    lockfile=None,
 ):
     """Remove direct packages, stopping on failure before ownership is released."""
     removed = 0
@@ -856,7 +1100,7 @@ def _remove_packages_from_disk(
         for package in packages_to_remove:
             package_label = _dependency_public_label(package)
             try:
-                dep_ref = _parse_dependency_entry(package)
+                dep_ref = _parse_dependency_entry(_removal_target(package, lockfile))
                 package_path = dep_ref.get_install_path(apm_modules_dir)
             except PathTraversalError as e:
                 logger.error(f"Refusing to remove {package_label}: {e}")
@@ -984,6 +1228,55 @@ def _cleanup_transitive_orphans(
     return removed, actual_orphans
 
 
+def _shrink_surviving_selections(
+    lockfile, packages_to_remove, apm_modules_dir, apm_yml_path, logger
+) -> builtins.set[str]:
+    """Narrow survivors' locked selections to what surviving edges still declare.
+
+    A node's ``skill_subset``/``target_subset`` is the merge over every edge
+    that declares it (#3735). Once a parent is uninstalled its contribution
+    must leave the union. The merge is recomputed from the surviving
+    manifests through the canonical owner; an incomplete walk keeps the
+    locked union, because missing evidence is not proof a selection is unused.
+
+    Returns the lock keys whose selection changed; their deployed files must
+    be removed and re-integrated with the new selection.
+    """
+    if not lockfile or apm_yml_path is None or not apm_modules_dir.exists():
+        return builtins.set()
+    from ...deps.reachability import declared_node_selections
+
+    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
+    declared = declared_node_selections(
+        lockfile, apm_yml_path.parent, apm_modules_dir, direct_refs, dev_refs=dev_refs
+    )
+    if not declared.complete:
+        logger.verbose_detail(
+            "    Kept recorded skill and target selections: "
+            f"{len(declared.unverifiable)} package manifest(s) could not be verified"
+        )
+        return builtins.set()
+    changed = builtins.set()
+    for key, selection in declared.selections.items():
+        locked = lockfile.get_dependency(key)
+        if locked is None:
+            continue
+        try:
+            unchanged = locked.selection() == selection.lock_selection()
+        except ValueError:
+            unchanged = False  # invalid recorded pairing: rewrite it from the survivors
+        if unchanged:
+            continue
+        locked.skill_subset = list(selection.skill_subset or ())
+        locked.target_subset = list(selection.target_subset or ())
+        exact = selection.subset_pairings
+        locked.subset_pairings = exact.to_lock_records() if exact is not None else None
+        changed.add(key)
+        label = "local dependency" if _is_private_local_identity(key) else key
+        logger.verbose_detail(f"    Updated selection of {label} to its surviving declarations")
+    return changed
+
+
 def _project_transitive_orphans(
     lockfile,
     packages_to_remove,
@@ -997,7 +1290,9 @@ def _project_transitive_orphans(
     if not lockfile or not apm_modules_dir.exists():
         return builtins.frozenset(), {}
 
-    orphans, removed_repo_urls = _collect_orphan_candidates(lockfile, packages_to_remove)
+    orphans, removed_repo_urls = _collect_orphan_candidates(
+        lockfile, _removal_targets(packages_to_remove, lockfile)
+    )
     if not orphans:
         return builtins.frozenset(), {}
 
@@ -1136,6 +1431,7 @@ def _sync_integrations_after_uninstall(
     packages just removed from the selected profile only.
     """
     from ...core.deployment_ledger import DeploymentMaterializationSession
+    from ...install.package_resolution import effective_dependency_selection
     from ...install.services import (
         IntegratorBundle,
         integrate_package_primitives,
@@ -1144,15 +1440,26 @@ def _sync_integrations_after_uninstall(
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.dispatch import get_dispatch_table
     from ...integration.hook_reintegration import preflight_survivor_hooks
-    from ...integration.targets import resolve_targets
+    from ...integration.skill_layout import (
+        recorded_deployed_paths,
+        resolve_reintegration_targets,
+        resolve_skill_layout,
+        with_every_skill_layout,
+    )
     from ...primitives.discovery import clear_discovery_cache
 
     installed_modules_dir = modules_dir or Path(APM_MODULES_DIR)
     config_target = list(apm_package.canonical_targets)
     _explicit = config_target or None
-    _resolved_targets = resolve_targets(
+    # Survivors are rebuilt in the skill layout they recorded; cleanup of the
+    # removed packages' paths recognises both layouts.
+    _base_targets = resolve_reintegration_targets(
         project_root, user_scope=user_scope, explicit_target=_explicit
     )
+    _resolved_targets = resolve_skill_layout(
+        _base_targets, recorded_paths=recorded_deployed_paths(lockfile)
+    )
+    _skill_cleanup_targets = with_every_skill_layout(_base_targets)
     require_valid_survivors = bool(all_deployed_files) or _native_hook_state_exists(
         project_root,
         _resolved_targets,
@@ -1195,7 +1502,7 @@ def _sync_integrations_after_uninstall(
             continue
         target_selection = resolve_effective_package_targets(
             _resolved_targets,
-            dep_ref.target_subset,
+            effective_dependency_selection(dep_ref).target_subset,
             pkg_info,
             None,
             dep_ref.get_identity(),
@@ -1207,7 +1514,14 @@ def _sync_integrations_after_uninstall(
 
     # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
     # their known-good merged settings (#3226).
-    _allow_executables = getattr(apm_package, "allow_executables", None)
+    from ...security.executables import resolve_project_exec_allow_map
+
+    # Trust is resolved only when survivors are rebuilt; nothing else consumes it.
+    _allow_executables = None
+    if target_survivor_plan:
+        _allow_executables = resolve_project_exec_allow_map(
+            project_root, apm_package, user_scope=user_scope, logger=logger
+        )
     preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 
     # An empty lockfile inventory still authorizes no file removal. Only
@@ -1215,13 +1529,12 @@ def _sync_integrations_after_uninstall(
     sync_managed = all_deployed_files if lockfile is not None or all_deployed_files else None
     if sync_managed is not None:
         # Partition against default KNOWN_TARGETS for legacy/project-scope
-        # paths, then merge with resolved targets for user-scope paths.
-        # This ensures both .github/ (legacy) and .copilot/ (resolved)
-        # prefixes are recognized during uninstall cleanup.
+        # paths, then merge with resolved targets in both skill layouts for
+        # user-scope paths and --legacy-skill-paths roots (.github/skills/).
         _buckets = BaseIntegrator.partition_managed_files(sync_managed)
-        if user_scope and _resolved_targets:
+        if _resolved_targets:
             _scope_buckets = BaseIntegrator.partition_managed_files(
-                sync_managed, targets=_resolved_targets
+                sync_managed, targets=_skill_cleanup_targets
             )
             for _bname, _bpaths in _scope_buckets.items():
                 _existing = _buckets.get(_bname)
@@ -1265,7 +1578,7 @@ def _sync_integrations_after_uninstall(
     # Skills (multi-target, handled by SkillIntegrator)
     # Check the target's effective skills root (deploy_root + skills subdir)
     _skill_dirs_exist = False
-    for t in _resolved_targets:
+    for t in _skill_cleanup_targets:
         if t.supports("skills"):
             if (project_root / t.skills_rel_root).exists():
                 _skill_dirs_exist = True
@@ -1301,7 +1614,7 @@ def _sync_integrations_after_uninstall(
         # set).  Using _resolved_targets alone would yield only the local
         # prefix (.copilot/skills/) and cowork:// paths would be silently
         # skipped by the startswith() guard inside sync_integration.
-        _sync_targets = None if _has_cowork_skills else _resolved_targets
+        _sync_targets = None if _has_cowork_skills else _skill_cleanup_targets
         removed_skill_paths: list[Path] = []
         try:
             result = _integrators["skills"].sync_integration(
@@ -1412,6 +1725,8 @@ def _sync_integrations_after_uninstall(
         for dep_ref, pkg_info, authorized_targets in target_survivor_plan:
             dep_key = dep_ref.get_unique_key()
             deployed_files = package_deployed_files.setdefault(dep_key, [])
+            # Survivors redeploy exactly the selection install deployed (#3760).
+            selection = effective_dependency_selection(dep_ref)
 
             try:
                 integration_result = integrate_package_primitives(
@@ -1425,6 +1740,8 @@ def _sync_integrations_after_uninstall(
                     package_name=dep_ref.get_identity(),
                     logger=logger,
                     scope=_rebuild_scope,
+                    skill_subset=selection.skill_subset,
+                    skill_pairing=selection.skill_pairing,
                     allow_executables=_allow_executables,
                     trust_bin=False,
                     bin_skip_reason_override="not_retrusted_on_uninstall",
@@ -1511,6 +1828,7 @@ def _cleanup_stale_mcp(
     user_scope: bool = False,
     scope=None,
     persist: bool = True,
+    logger=None,
 ):
     """Remove MCP servers that are no longer needed after uninstall."""
     managed_servers = set(old_mcp_servers or ())
@@ -1526,15 +1844,20 @@ def _cleanup_stale_mcp(
     if not managed_servers:
         return
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.security.trust import McpAdmission
 
     apm_modules_path = modules_dir if modules_dir is not None else Path.cwd() / APM_MODULES_DIR
     view = CurrentMcpConfigView.derive(
         apm_package,
         lockfile,
         apm_modules_path,
-        trust_transitive_self_defined=True,
+        admission=McpAdmission.admit_all(),
     )
-    new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies)
+    # Uninstall never admits a server: only previously managed servers survive.
+    # Local-bundle servers stay with their bundle, not the uninstalled package.
+    new_mcp_servers = (
+        MCPIntegrator.get_server_names(view.dependencies) | view.bundle_owned
+    ) & managed_servers
     stale_servers = managed_servers - new_mcp_servers
     from ...install.mcp.ownership import resolve_mcp_target_servers
 
@@ -1549,6 +1872,28 @@ def _cleanup_stale_mcp(
         project_root=project_root,
         user_scope=user_scope,
     )
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    from ...install.mcp.retired_destinations import (
+        heal_retired_project_mcp_destinations,
+        report_retired_mcp_heal,
+        restore_pending_retired_claims,
+        split_mcp_claims,
+    )
+
+    # Claims that name the retired Copilot MCP files are never live .mcp.json
+    # ownership: a stale one is healed by proof, the rest are carried forward.
+    deploy_root = Path(project_root) if project_root is not None else Path.cwd()
+    native_hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+    retired = split_mcp_claims(
+        target_servers,
+        native_hashes,
+        apm_version=lockfile.apm_version,
+        project_root=deploy_root,
+        user_scope=user_scope,
+        stored_configs=lockfile.mcp_configs,
+    )
+    stale_retired = {runtime: names & stale_servers for runtime, names in retired.names.items()}
     retained_unowned: set[str] = set()
     if stale_servers:
         _remove_stale_mcp_from_recorded_targets(
@@ -1559,30 +1904,62 @@ def _cleanup_stale_mcp(
             scope=scope,
             target_servers=target_servers,
         )
-        owned_servers = {server for servers in target_servers.values() for server in servers}
+        # Report the heal like install does (C5d, #3967): removed servers,
+        # kept user-edited ones, and deleted files.
+        report_retired_mcp_heal(
+            heal_retired_project_mcp_destinations(
+                stale_retired,
+                stored_configs=lockfile.mcp_configs,
+                native_hashes=retired.hashes,
+                project_root=deploy_root,
+            ),
+            logger,
+        )
+        owned_servers = {
+            server
+            for claims in (*target_servers.values(), *retired.names.values())
+            for server in claims
+        }
         retained_unowned = stale_servers - owned_servers
-    contracted_target_servers = {
-        runtime: sorted(servers.intersection(new_mcp_servers))
+    contracted_claims = {
+        runtime: servers.intersection(new_mcp_servers)
         for runtime, servers in target_servers.items()
-        if servers.intersection(new_mcp_servers)
     }
+    restore_pending_retired_claims(
+        retired,
+        stale_retired,
+        target_servers=contracted_claims,
+        native_hashes=native_hashes,
+        project_root=deploy_root,
+        stored_configs=lockfile.mcp_configs,
+    )
+    contracted_target_servers = {
+        runtime: sorted(servers) for runtime, servers in contracted_claims.items() if servers
+    }
+    contracted_hashes = native_hashes if retired.names else None
     surviving_mcp_servers = new_mcp_servers | retained_unowned
+    surviving_configs = {
+        name: config for name, config in view.configs.items() if name in surviving_mcp_servers
+    }
+    surviving_provenance = {
+        name: source for name, source in view.provenance.items() if name in surviving_mcp_servers
+    }
     if persist:
         MCPIntegrator.update_lockfile(
             surviving_mcp_servers,
             lockfile_path,
-            mcp_configs=dict(view.configs),
-            mcp_config_provenance=dict(view.provenance),
+            mcp_configs=surviving_configs,
+            mcp_config_provenance=surviving_provenance,
             mcp_target_servers=contracted_target_servers,
+            native_hashes=contracted_hashes,
         )
         return
 
     lockfile.mcp_servers = sorted(surviving_mcp_servers)
-    lockfile.mcp_configs = dict(view.configs)
-    lockfile.mcp_config_provenance = dict(view.provenance)
-    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-
+    lockfile.mcp_configs = surviving_configs
+    lockfile.mcp_config_provenance = surviving_provenance
     DeploymentLedgerCodec.replace_mcp_target_servers(
         lockfile,
         contracted_target_servers,
+        native_hashes=contracted_hashes,
     )

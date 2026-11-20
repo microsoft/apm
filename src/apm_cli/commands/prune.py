@@ -13,12 +13,13 @@ from ..core.deployment_state import LocatorKind
 from ..core.scope import InstallScope
 
 # APM Dependencies
-from ..deps.lockfile import LockFile, get_lockfile_path
+from ..deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
 from ..deps.reachability import retained_lock_keys
 from ..install.locking import serialized_lifecycle_unless
+from ..install.phases.finalize import hint_compile_after_removal, snapshot_compile_inputs
 from ..integration.base_integrator import BaseIntegrator
 from ..integration.cleanup import remove_stale_deployed_files
-from ..models.apm_package import APMPackage
+from ..models.apm_package import APMPackage, package_target_selection
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..utils.path_security import safe_rmtree
 from ._helpers import (
@@ -101,6 +102,9 @@ def prune(ctx, dry_run):
         apm prune           # Remove orphaned packages
         apm prune --dry-run # Show what would be removed
     """
+    from ..deps.lockfile_generator import require_current_cli
+
+    require_current_cli(Path.cwd(), command="apm prune")
     apm_modules_dir = Path(APM_MODULES_DIR)
     logger = CommandLogger("prune", dry_run=dry_run)
     registration_token = _publish_native_registration(Path.cwd())
@@ -113,6 +117,11 @@ def prune(ctx, dry_run):
 
         try:
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+            from ..install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
+
+            reconcile_scope_bundle_hooks(
+                InstallScope.PROJECT, apm_package, logger=logger, dry_run=dry_run
+            )
             declared_deps = apm_package.get_all_apm_dependencies()
             project_root = Path.cwd()
             lockfile_path = get_lockfile_path(project_root)
@@ -120,7 +129,7 @@ def prune(ctx, dry_run):
             expected_installed = _build_expected_install_paths(
                 declared_deps, lockfile, apm_modules_dir, preserve_installed_case=True
             )
-        except MaterializationPathCollisionError as e:
+        except (MaterializationPathCollisionError, LockfileFormatError) as e:
             logger.error(str(e))
             sys.exit(1)
         except Exception as e:
@@ -166,7 +175,18 @@ def prune(ctx, dry_run):
             else ()
         )
 
-        if not orphaned_packages and not missing_orphaned_keys and not owner_violations:
+        # Staging records whose root is already gone must not keep authorizing
+        # compile if the directory is recreated (#3705).
+        absent_staging = (
+            lockfile.absent_staging_slugs(apm_modules_dir) if lockfile is not None else []
+        )
+
+        if (
+            not orphaned_packages
+            and not missing_orphaned_keys
+            and not owner_violations
+            and not absent_staging
+        ):
             if not apm_modules_dir.exists():
                 logger.progress("No apm_modules/ directory found. Nothing to prune.")
             else:
@@ -209,11 +229,20 @@ def prune(ctx, dry_run):
                 f"Found {len(missing_orphaned_keys)} stale lockfile dependency "
                 "record(s) without removable package content."
             )
+        if absent_staging:
+            logger.progress(
+                f"Found {len(absent_staging)} stale local bundle staging record(s) "
+                f"without a staging directory: {', '.join(absent_staging)}."
+            )
 
         if dry_run:
             if missing_orphaned_keys:
                 logger.dry_run_notice(
                     f"remove {len(missing_orphaned_keys)} stale lockfile dependency record(s)"
+                )
+            if absent_staging:
+                logger.dry_run_notice(
+                    f"forget {len(absent_staging)} stale local bundle staging record(s)"
                 )
             planned_owner_repairs = (
                 DeploymentLedgerCodec.owner_reference_violations(
@@ -232,10 +261,13 @@ def prune(ctx, dry_run):
                     removed_owners = set(violation.invalid_owners)
                     if violation.invalid_active_owner is not None:
                         removed_owners.add(violation.invalid_active_owner)
+                    locator = violation.locator
+                    # Name the path and target; the composite ledger key is internal (#3994).
                     logger.dry_run_notice(
-                        f"repair {violation.locator.key} "
-                        f"(remove owner(s): {', '.join(sorted(removed_owners))})"
+                        f"repair {locator.value} ({locator.target}): "
+                        f"remove owner(s) {', '.join(sorted(removed_owners))}"
                     )
+                    logger.verbose_detail(f"    ledger key: {locator.key}")
             logger.success("Dry run complete - no changes made")
             return
 
@@ -245,6 +277,9 @@ def prune(ctx, dry_run):
         pruned_keys = list(missing_orphaned_keys)
         pruned_key_set = set(pruned_keys)
         deleted_pkg_paths: list[Path] = []
+        compile_inputs = snapshot_compile_inputs(
+            project_root, package_target_selection(apm_package), apm_modules_dir
+        )
         for org_repo_name in orphaned_packages:
             path_parts = org_repo_name.split("/")
             pkg_path = apm_modules_dir.joinpath(*path_parts)
@@ -329,6 +364,7 @@ def prune(ctx, dry_run):
 
             for dep_key in pruned_keys:
                 lockfile.dependencies.pop(dep_key, None)
+            lockfile.retire_local_staging([*removed_packages, *absent_staging])
             DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
             if pruned_keys and (lockfile.mcp_servers or lockfile.mcp_target_servers):
                 from .uninstall.engine import _cleanup_stale_mcp
@@ -397,6 +433,8 @@ def prune(ctx, dry_run):
                     f"Hook reconciliation failed: {e}. Some hook entries may be "
                     "stale -- run 'apm install' to rebuild hook configuration."
                 )
+
+        hint_compile_after_removal(compile_inputs, apm_modules_dir, logger)
 
         if failed_count:
             logger.error(

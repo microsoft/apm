@@ -1,7 +1,7 @@
 """Bootstrap the machine-readable requirements manifest from Appendix C.
 
 One-time bootstrap. After this lands, the manifest at
-docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml is
+docs/public/specs/manifests/openapm-v0.1.requirements.yml is
 maintained by the spec drafter on every edit and the orphan_check.py
 gate enforces consistency against the spec body anchors.
 

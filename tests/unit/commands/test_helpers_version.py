@@ -51,12 +51,12 @@ def _isolate_config(tmp_path, monkeypatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _reset_helpers_console(monkeypatch) -> None:
-    """Reset the cached Rich console in _helpers so it is recreated fresh
+    """Reset the cached Rich console so it is recreated fresh
     inside each CliRunner invocation (pointing at the captured stdout).
     """
-    import apm_cli.commands._helpers as _h
+    import apm_cli.utils.themed_console as _tc
 
-    monkeypatch.setattr(_h, "_console", None)
+    monkeypatch.setattr(_tc, "_console", None)
 
 
 # ---------------------------------------------------------------------------

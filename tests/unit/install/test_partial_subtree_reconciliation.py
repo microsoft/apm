@@ -25,11 +25,16 @@ def _lock(*entries: LockedDependency) -> LockFile:
 
 
 def _chain_lock() -> LockFile:
-    """Parent ``Acme/Parent`` -> ``acme/b`` -> ``acme/c``, recorded with declared casing."""
-    return _lock(
-        LockedDependency(repo_url="Acme/Parent"),
-        LockedDependency(repo_url="acme/b", depth=2, resolved_by="Acme/Parent"),
-        LockedDependency(repo_url="acme/c", depth=3, resolved_by="acme/b"),
+    """Parent ``Acme/Parent`` -> ``acme/b`` -> ``acme/c``, recorded with declared casing.
+
+    Read back from YAML like an on-disk lock written before #3698.
+    """
+    return LockFile.from_yaml(
+        _lock(
+            LockedDependency(repo_url="Acme/Parent"),
+            LockedDependency(repo_url="acme/b", depth=2, resolved_by="Acme/Parent"),
+            LockedDependency(repo_url="acme/c", depth=3, resolved_by="acme/b"),
+        ).to_yaml()
     )
 
 

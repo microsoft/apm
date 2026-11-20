@@ -673,7 +673,10 @@ class TestMarketplaceUpdateCommand:
             ),
         ):
             result = runner.invoke(marketplace, ["update", "--verbose"])
-        assert result.exit_code == 0
+        # A failed revalidation fails closed and names the marketplace (#3910).
+        assert result.exit_code == 1
+        assert "failed: failing-market" in result.output
+        assert "Traceback" in result.output
 
 
 # ---------------------------------------------------------------------------

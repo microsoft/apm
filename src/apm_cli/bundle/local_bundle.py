@@ -163,7 +163,10 @@ def _reject_metadata_collisions(bundle_dir: Path) -> None:
 
 
 def _read_bundle_lockfile(bundle_dir: Path) -> dict[str, Any] | None:
-    """Parse ``apm.lock.yaml`` at *bundle_dir*; return ``None`` if missing."""
+    """Parse ``apm.lock.yaml`` at *bundle_dir*; return ``None`` if missing.
+
+    Warns (never refuses) when a newer APM than this one wrote it.
+    """
     lf_path = bundle_dir / "apm.lock.yaml"
     if not lf_path.is_file():
         return None
@@ -173,9 +176,11 @@ def _read_bundle_lockfile(bundle_dir: Path) -> dict[str, Any] | None:
         return None
     if not isinstance(data, dict):
         return None
-    from ..deps.lockfile import require_supported_lockfile_version
+    from ..deps.lockfile import recorded_generator, require_supported_lockfile_version
+    from ..deps.lockfile_generator import warn_if_newer
 
-    require_supported_lockfile_version(data)
+    data["lockfile_version"] = require_supported_lockfile_version(data)
+    warn_if_newer(lf_path, recorded_generator(data), bundle=True)
     return data
 
 
@@ -190,7 +195,7 @@ def _extract_pack_targets(lockfile: dict[str, Any] | None) -> list[str]:
     if not lockfile:
         return []
     pack = lockfile.get("pack") or {}
-    target = pack.get("target")
+    target = pack.get("target")  # architecture-authority-exempt: bundle-pack-metadata
     if target is None:
         return []
     if isinstance(target, list):
@@ -329,6 +334,15 @@ def _extract_zip_bundle(path: Path) -> LocalBundleInfo | None:
     except Exception:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
+
+
+def looks_like_local_bundle(path: Path) -> bool:
+    """Cheap shape check for a local bundle path, without extracting archives."""
+    path = Path(path)
+    if path.is_dir():
+        return (path / "plugin.json").is_file()
+    name = path.name.lower()
+    return path.is_file() and name.endswith((".zip", ".tar.gz", ".tgz"))
 
 
 def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
@@ -506,14 +520,20 @@ def check_target_mismatch(
     """
     if not bundle_targets:
         return None
-    bundle_set = {t.strip() for t in bundle_targets if t and t.strip()}
-    # Issue #1207: ``"all"`` (or empty after stripping) means target-agnostic.
-    # Such bundles cover any install target, so no mismatch warning is
-    # appropriate.
-    if "all" in bundle_set:
+    from ..core.target_catalog import accepted_target_values
+    from ..core.target_detection import normalize_target_name
+
+    # ``pack.target`` is informational metadata: ignore names this CLI does
+    # not know (e.g. ``"minimal"``, which older ``apm pack`` recorded for a
+    # project with no target folder, or a target from a newer APM) instead
+    # of failing the install.
+    known = accepted_target_values()
+    bundle_set = {t.strip() for t in bundle_targets if t and t.strip() in known}
+    # Issue #1207: ``"all"`` (or nothing known) means target-agnostic. Such
+    # bundles cover any install target, so no mismatch warning is appropriate.
+    if not bundle_set or "all" in bundle_set:
         return None
     install_set = {t.strip() for t in install_targets if t and t.strip()}
-    from ..core.target_detection import normalize_target_name
 
     normalized_install = {normalize_target_name(target) for target in install_set}
     missing = sorted(

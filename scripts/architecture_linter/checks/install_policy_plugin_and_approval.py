@@ -34,6 +34,7 @@ RULE_APPROVAL_OUTCOME = "install-deployment-approval-outcome-routing"
 
 
 RULE_AUDIT_POLICY_DISCOVERY = "install-deployment-audit-policy-discovery"
+RULE_POLICY_DISABLE_SWITCH = "install-deployment-policy-disable-switch-owner"
 
 
 RULE_MANIFEST_INHERITANCE = "install-deployment-manifest-inheritance-includes"
@@ -198,20 +199,40 @@ _AUDIT_ADAPTER = "src/apm_cli/commands/audit.py"
 
 
 _DISCOVER_POLICY_CALL = re.compile(r"discover_policy\(")
+_CHAIN_DISCOVERY_CALL = re.compile(r"\bdiscover_policy_with_chain\(")
+_AUDIT_CI_GATE_DEF = re.compile(r"^def _audit_ci_gate\(")
+_TOP_LEVEL_DEF = re.compile(r"^def ")
 
 
 def check_audit_policy_discovery(provider: FactsProvider) -> tuple[Violation, ...]:
     """Audit policy sources must use chain-aware discovery, not discover_policy()."""
-    return tuple(
-        _banned(
-            provider,
-            rule_id=RULE_AUDIT_POLICY_DISCOVERY,
-            paths=(_AUDIT_ADAPTER,),
-            pattern=_DISCOVER_POLICY_CALL,
-            message="Audit policy sources must use chain-aware discovery, not discover_policy(",
-            respect_exempt=True,
-        )
+    rule_id = RULE_AUDIT_POLICY_DISCOVERY
+    adapter, failures = _configured(provider, _AUDIT_ADAPTER, rule_id)
+    if failures:
+        return failures
+    findings = _banned(
+        provider,
+        rule_id=rule_id,
+        paths=(_AUDIT_ADAPTER,),
+        pattern=_DISCOVER_POLICY_CALL,
+        message="Audit policy sources must use chain-aware discovery, not discover_policy(",
+        respect_exempt=True,
     )
+    gate_body: list[tuple[int, str]] = []
+    for number, text in adapter:
+        if gate_body and _TOP_LEVEL_DEF.search(text):
+            break
+        if gate_body or _AUDIT_CI_GATE_DEF.search(text):
+            gate_body.append((number, text))
+    if not _has_re(gate_body, _CHAIN_DISCOVERY_CALL):
+        findings.append(
+            _report(
+                rule_id,
+                _AUDIT_ADAPTER,
+                "_audit_ci_gate must discover policy through discover_policy_with_chain(",
+            )
+        )
+    return tuple(findings)
 
 
 _POLICY_INHERITANCE = "src/apm_cli/policy/inheritance.py"
@@ -267,4 +288,53 @@ def check_incomplete_chain_routing(provider: FactsProvider) -> tuple[Violation, 
                     f"handling; missing: {_INCOMPLETE_CHAIN}",
                 )
             )
+    return tuple(findings)
+
+
+_SOURCE_TREE = "src/apm_cli/"
+_POLICY_DISABLE_HELPER_DEF = re.compile(r"^def policy_disabled_by_env\(")
+_POLICY_DISABLE_ENV_READ = re.compile(
+    r"""(?:environ(?:\.get)?\s*[\(\[]|getenv\s*\()\s*["']APM_POLICY_DISABLE["']"""
+)
+
+
+def check_policy_disable_switch_owner(provider: FactsProvider) -> tuple[Violation, ...]:
+    """APM_POLICY_DISABLE has one reader: policy/discovery.py::policy_disabled_by_env.
+
+    Every command that honours the switch must call the helper so the accepted
+    values cannot drift between install, discovery, and audit.
+    """
+    rule_id = RULE_POLICY_DISABLE_SWITCH
+    owner, owner_fail = _configured(provider, _POLICY_DISCOVERY, rule_id)
+    if owner_fail:
+        return tuple(owner_fail)
+    findings: list[Violation] = []
+    if _count_re(owner, _POLICY_DISABLE_HELPER_DEF) != 1:
+        findings.append(
+            _report(
+                rule_id,
+                _POLICY_DISCOVERY,
+                "policy/discovery.py must define policy_disabled_by_env exactly once",
+            )
+        )
+    if _count_re(owner, _POLICY_DISABLE_ENV_READ) != 1:
+        findings.append(
+            _report(
+                rule_id,
+                _POLICY_DISCOVERY,
+                "policy/discovery.py must read APM_POLICY_DISABLE exactly once, "
+                "inside policy_disabled_by_env",
+            )
+        )
+    findings.extend(
+        _banned(
+            provider,
+            rule_id=rule_id,
+            paths=_tree_python_paths(provider, _SOURCE_TREE, excluded=(_POLICY_DISCOVERY,)),
+            pattern=_POLICY_DISABLE_ENV_READ,
+            message="Read APM_POLICY_DISABLE only via policy/discovery.py::policy_disabled_by_env",
+            configured=False,
+            respect_exempt=False,
+        )
+    )
     return tuple(findings)

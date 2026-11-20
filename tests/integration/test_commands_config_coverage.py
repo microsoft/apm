@@ -451,7 +451,8 @@ class TestConfigGet:
         with patch("apm_cli.core.experimental.is_enabled", return_value=False):
             result = runner.invoke(cli, ["config", "get"])
         assert result.exit_code == 0
-        assert "auto-integrate:" in result.output
+        assert "temp-dir:" in result.output
+        assert "auto-integrate" not in result.output
 
     def test_get_registry_url_requires_flag(self, runner: CliRunner, isolated_config: Path) -> None:
         """apm config get registry.<name>.url exits non-zero when flag is off."""
@@ -1093,11 +1094,11 @@ class TestPublishCommand:
 class TestConfigModuleHelpers:
     """Additional unit tests for uncovered paths in ``apm_cli.config``."""
 
-    def test_get_default_client_returns_vscode(self, isolated_config: Path) -> None:
-        """get_default_client() returns 'vscode' from default config."""
+    def test_get_default_client_returns_copilot(self, isolated_config: Path) -> None:
+        """get_default_client() returns 'copilot' (vscode is its deprecated alias)."""
         import apm_cli.config as _conf
 
-        assert _conf.get_default_client() == "vscode"
+        assert _conf.get_default_client() == "copilot"
 
     def test_set_default_client(self, isolated_config: Path) -> None:
         """set_default_client() persists to disk."""

@@ -12,6 +12,7 @@ from scripts.architecture_linter.checks.transport_platform_shared import (
     _src_python,
 )
 from scripts.architecture_linter.facts import FactsProvider
+from scripts.architecture_linter.groups.common import checked_facts, violation
 from scripts.architecture_linter.models import Rule, Violation
 
 _RULE_ID = "transport-platform-revision-pin-outcome"
@@ -116,6 +117,49 @@ def _check_revision_pin_outcome(provider: FactsProvider) -> tuple[Violation, ...
     return tuple(findings)
 
 
+_LOCK_RULE_ID = "transport-platform-revision-pin-lock-consistency"
+_DRIFT_OWNER = "src/apm_cli/drift.py"
+_LOCK_ROUTES = (
+    (_DRIFT_OWNER, "detect_ref_change"),
+    (_DRIFT_OWNER, "marketplace_ref_mismatch"),
+    ("src/apm_cli/install/plan.py", "lockfile_satisfies_manifest"),
+    ("src/apm_cli/policy/ci_checks.py", "_check_ref_consistency"),
+)
+_INLINE_PIN_COMPARISON = re.compile(r"manifest commit '")
+
+
+def _check_revision_pin_lock_consistency(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Require install drift, frozen and audit to share one full-SHA pin check."""
+    findings: list[Violation] = []
+    for path, scope in _LOCK_ROUTES:
+        facts, failures = checked_facts(provider, path, _LOCK_RULE_ID, require_python=True)
+        findings.extend(failures)
+        if failures:
+            continue
+        if not any(
+            call.qualname == "revision_pin_mismatch" and call.scope == scope for call in facts.calls
+        ):
+            findings.append(
+                violation(
+                    _LOCK_RULE_ID,
+                    path,
+                    f"{scope} must check full-SHA pins through drift.revision_pin_mismatch",
+                )
+            )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            frozenset(provider.inventory),
+            _LOCK_RULE_ID,
+            _src_python(provider, exclude={_DRIFT_OWNER}),
+            _INLINE_PIN_COMPARISON,
+            "Full-SHA pin versus locked commit comparison must stay in drift.py",
+            exempt=True,
+        )
+    )
+    return tuple(findings)
+
+
 RULES: tuple[Rule, ...] = (
     Rule(
         id=_RULE_ID,
@@ -123,6 +167,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(_RULE_ID,),
         description="Revision-pin updates and retained SHAs share one typed outcome owner.",
         check=_check_revision_pin_outcome,
+    ),
+    Rule(
+        id=_LOCK_RULE_ID,
+        group=GROUP,
+        guard_ids=(_LOCK_RULE_ID,),
+        description="A full-SHA manifest pin is checked against the locked commit by one owner.",
+        check=_check_revision_pin_lock_consistency,
     ),
 )
 

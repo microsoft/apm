@@ -4,10 +4,11 @@ from pathlib import Path
 
 try:
     from rich import box
-    from rich.console import Console
     from rich.panel import Panel
     from rich.table import Table
     from rich.text import Text
+
+    from apm_cli.utils.console import new_console
 
     RICH_AVAILABLE = True
 except ImportError:
@@ -26,7 +27,7 @@ class CompilationFormatter:
             use_color: Whether to use colors and rich formatting.
         """
         self.use_color = use_color and RICH_AVAILABLE
-        self.console = Console() if self.use_color else None
+        self.console = new_console() if self.use_color else None
         self._target_name = "AGENTS.md"  # Default, updated per format call
 
     def format_default(self, results: CompilationResults) -> str:

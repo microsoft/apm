@@ -67,12 +67,13 @@ from apm_cli.core.errors import (
     NoHarnessError,
     UnknownTargetError,
 )
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.core.target_detection import (
     detect_signals,
     expand_all_targets,
-    manifest_targets_from_target_option,
     resolve_targets,
 )
+from apm_cli.models.manifest_targets import option_target_names
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -211,16 +212,16 @@ def test_resolution_autodetect_multi_signals_error(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_manifest_targets_from_target_option_none_preserves_autodetect():
-    assert manifest_targets_from_target_option(None) is None
+def test_option_target_names_none_preserves_autodetect():
+    assert option_target_names(None) is None
 
 
-def test_manifest_targets_from_target_option_aliases_to_manifest_names():
-    assert manifest_targets_from_target_option(["claude", "vscode"]) == ["claude", "copilot"]
+def test_option_target_names_aliases_to_manifest_names():
+    assert option_target_names(["claude", "vscode"]) == ["claude", "copilot"]
 
 
-def test_manifest_targets_from_target_option_all_expands_to_manifest_names():
-    targets = manifest_targets_from_target_option("all")
+def test_option_target_names_all_expands_to_manifest_names():
+    targets = option_target_names("all")
     assert targets is not None
     assert "all" not in targets
     assert "vscode" not in targets
@@ -228,14 +229,30 @@ def test_manifest_targets_from_target_option_all_expands_to_manifest_names():
     assert parse_targets_field({"targets": targets}) == targets
 
 
-def test_manifest_targets_from_target_option_keeps_stable_hermes_only():
-    assert manifest_targets_from_target_option(["openclaw", "hermes", "grok-cloud", "agy"]) == [
-        "hermes"
+def test_option_target_names_drops_experimental_targets():
+    assert option_target_names(["openclaw", "hermes", "grok-cloud", "agy"]) == [
+        "antigravity",
+        "hermes",
     ]
 
 
-def test_manifest_targets_from_target_option_preserves_grok_build():
-    assert manifest_targets_from_target_option(["grok-build"]) == ["grok-build"]
+@pytest.mark.parametrize(
+    ("alias", "canonical"),
+    sorted(
+        (alias, capability.name)
+        for capability in TARGET_CAPABILITIES.values()
+        for alias in capability.aliases
+    ),
+)
+def test_option_target_names_canonicalizes_every_alias(alias, canonical):
+    """Every catalog alias persists exactly like its canonical spelling (#3842)."""
+    persisted = option_target_names(alias)
+    assert persisted == option_target_names(canonical)
+    assert persisted is None or alias not in persisted
+
+
+def test_option_target_names_preserves_grok_build():
+    assert option_target_names(["grok-build"]) == ["grok-build"]
     assert parse_targets_field({"targets": ["grok-build"]}) == ["grok-build"]
 
 
@@ -379,10 +396,13 @@ def test_targets_with_all_still_validates_siblings(capsys):
     assert "deprecated" in (out.out + out.err)
 
 
-def test_target_singular_with_yaml_list_preserves_duplicates():
-    """Duplicates are preserved (parser does not dedup)."""
-    out = parse_targets_field({"target": ["copilot", "copilot"]})
-    assert out == ["copilot", "copilot"]
+def test_target_singular_with_yaml_list_deduplicates():
+    """Duplicates collapse, including a deprecated alias of a listed target."""
+    assert parse_targets_field({"target": ["copilot", "copilot"]}) == ["copilot"]
+    assert parse_targets_field({"targets": ["vscode", "claude", "copilot"]}) == [
+        "copilot",
+        "claude",
+    ]
 
 
 # ---------------------------------------------------------------------------

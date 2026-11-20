@@ -8,7 +8,26 @@ import click
 from click.core import ParameterSource
 
 from ..core.command_logger import CommandLogger
+from ..mcp_transport import (
+    TRANSPORT_SSE,
+    TRANSPORT_STREAMABLE_HTTP,
+    canonical_remote_transport,
+)
 from ._helpers import _get_console
+
+_REMOTE_DEPLOYMENT_LABELS = {
+    TRANSPORT_STREAMABLE_HTTP: " Remote Streamable HTTP Endpoint",
+    TRANSPORT_SSE: " Remote SSE Endpoint",
+}
+
+
+def _remote_transport_label(remote) -> str:
+    """Canonical transport of a registry remote, or ``unknown`` when unrecognized."""
+    try:
+        return canonical_remote_transport(remote)
+    except (ValueError, AttributeError):
+        return "unknown"
+
 
 # Restore builtin since a subcommand is named ``list``
 list = builtins.list
@@ -442,11 +461,10 @@ def show(ctx, server_name, verbose):
         packages = server_info.get("packages", [])
 
         deployment_info = []
-        if remotes:
-            for remote in remotes:
-                transport_type = remote.get("transport_type", "unknown")
-                if transport_type == "sse":
-                    deployment_info.append(" Remote SSE Endpoint")
+        for remote in remotes:
+            label = _REMOTE_DEPLOYMENT_LABELS.get(_remote_transport_label(remote))
+            if label and label not in deployment_info:
+                deployment_info.append(label)
         if packages:
             deployment_info.append(" Local Package")
 
@@ -463,12 +481,12 @@ def show(ctx, server_name, verbose):
                 header_style="bold cyan",
                 border_style="cyan",
             )
-            remote_table.add_column("Type", style="yellow", width=10)
+            remote_table.add_column("Type", style="yellow", width=16)
             remote_table.add_column("URL", style="white", min_width=40)
             remote_table.add_column("Features", style="cyan", min_width=20)
 
             for remote in remotes:
-                transport_type = remote.get("transport_type", "unknown")
+                transport_type = _remote_transport_label(remote)
                 url = remote.get("url", "unknown")
 
                 # Describe features/limitations of remote endpoints
@@ -498,10 +516,9 @@ def show(ctx, server_name, verbose):
                 pkg_name = pkg.get("name", "unknown")
                 runtime_hint = pkg.get("runtime_hint", " --")
 
-                # Describe features of local packages
+                # Describe features of local packages. Registry names such as
+                # io.github.<owner>/... say nothing about GitHub toolsets (#3994).
                 features = "Full configuration control"
-                if "github" in name.lower():
-                    features = "Supports GITHUB_TOOLSETS"
 
                 # Truncate long package names intelligently
                 if len(pkg_name) > 25:
@@ -530,9 +547,9 @@ def show(ctx, server_name, verbose):
         )
         install_table.add_row("2", "Install dependencies", "[bold cyan]apm install[/bold cyan]")
         install_table.add_row(
-            "3",
-            "Direct install (coming soon)",
-            f"[bold cyan]apm install {install_name}[/bold cyan]",
+            "",
+            "Or add and install in one step",
+            f"[bold cyan]apm install --mcp {install_name}[/bold cyan]",
         )
 
         console.print(install_table)

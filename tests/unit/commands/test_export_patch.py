@@ -120,6 +120,13 @@ def test_patch_filenames_stable_without_collisions():
     assert names == {"testorg/testpkg": "testorg__testpkg@main.patch"}
 
 
+def test_patch_filenames_disambiguates_case_only_collisions():
+    # macOS and Windows fold 'skills/PDF' and 'skills/pdf' patch names into
+    # one file, so the second write would silently replace the first.
+    names = patch_filenames({"org/mono/skills/PDF": "main", "org/mono/skills/pdf": "main"})
+    assert len({name.casefold() for name in names.values()}) == 2
+
+
 def test_patch_ref_prefers_registry_version_then_git_ref_then_commit():
     registry = LockedDependency(repo_url="org/pkg", source="registry", version="2.0.0")
     tagged = LockedDependency(repo_url="org/pkg", resolved_ref="v1.4.0", resolved_commit=_COMMIT)
@@ -705,6 +712,22 @@ def test_cli_unexpected_replay_error_exits_1_with_message(tmp_path, monkeypatch)
     result = CliRunner().invoke(export_patch, [], catch_exceptions=False)
     assert result.exit_code == 1
     assert "Error exporting patches: boom" in result.output
+
+
+def test_cli_policy_blocked_replay_exits_1_with_reason(tmp_path, monkeypatch):
+    from apm_cli.install.errors import PolicyViolationError
+
+    _make_cli_project(tmp_path, monkeypatch)
+
+    def _blocked(*args, **kwargs):
+        raise PolicyViolationError("no enforceable org policy (fetch_failure_default=block)")
+
+    monkeypatch.setattr("apm_cli.install.drift.run_replay", _blocked)
+    result = CliRunner().invoke(export_patch, [], catch_exceptions=False)
+    assert result.exit_code == 1
+    text = " ".join(result.output.split())
+    assert "Drift replay failed: no enforceable org policy" in text
+    assert "Error exporting patches" not in text
 
 
 def test_cli_rejects_out_dir_inside_apm_modules(tmp_path, monkeypatch):

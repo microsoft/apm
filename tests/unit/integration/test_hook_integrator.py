@@ -1520,11 +1520,12 @@ class TestCursorIntegration:
 
         pkg_info = self._setup_hookify_package(temp_project)
         integrator = HookIntegrator()
-        # hook_source_selection=None means the up-front
-        # preflight_hooks_for_targets() gate is a no-op for this plan, so
-        # the unconditional check inside _integrate_merged_hooks is the
-        # ONLY preflight that runs for this single invocation.
-        source_plan = DeployableSourcePlan(source_root=temp_project, paths=frozenset())
+        # Only _integrate_merged_hooks runs here, so its unconditional check
+        # is the ONLY preflight for this single invocation.
+        selection = integrator.select_hook_sources_for_target(pkg_info, "cursor")
+        source_plan = DeployableSourcePlan(
+            source_root=temp_project, paths=frozenset(), hook_source_selection=selection
+        )
         expected_retiring = frozenset({"claude"})
 
         with patch("apm_cli.integration.hook_integrator.preflight_cursor_hooks") as mock_preflight:
@@ -2888,6 +2889,31 @@ class TestEndToEnd:
         assert not (
             temp_project / ".github" / "hooks" / "learning-output-style-hooks.json"
         ).exists()
+
+    @pytest.mark.windows_compat
+    def test_cleanup_matches_native_separator_hash_keys(self, temp_project):
+        """Windows-style managed paths and hash keys still prove and remove hook files."""
+        integrator = HookIntegrator()
+        pkg_dir = temp_project / "apm_modules" / "anthropics" / "ralph-loop"
+        (pkg_dir / "hooks").mkdir(parents=True)
+        (pkg_dir / "hooks" / "hooks.json").write_text(json.dumps(RALPH_LOOP_HOOKS_JSON))
+        (pkg_dir / "hooks" / "stop-hook.sh").write_text("#!/bin/bash")
+        result = integrator.integrate_package_hooks(
+            _make_package_info(pkg_dir, "ralph-loop"), temp_project
+        )
+        posix = {p.relative_to(temp_project).as_posix() for p in result.target_paths}
+        hashes = compute_deployed_hashes(posix, temp_project)
+        native = {path.replace("/", "\\") for path in posix}
+
+        stats = integrator.sync_integration(
+            None,
+            temp_project,
+            managed_files=native,
+            managed_file_hashes={path.replace("/", "\\"): hashes[path] for path in hashes},
+        )
+
+        assert stats["files_removed"] == len(posix) >= 2
+        assert not any((temp_project / path).exists() for path in posix)
 
 
 # ─── Deep copy safety test ───────────────────────────────────────────────────
@@ -5043,3 +5069,22 @@ class TestHookScriptAdopt:
         for script in ["posttooluse.py", "stop.py", "userpromptsubmit.py"]:
             assert (scripts_dir_target / script) in result.target_paths
         assert (scripts_dir_target / "pretooluse.py") not in result.target_paths
+
+
+@pytest.mark.parametrize("spec", ["local-bundle/x", "gitlab.com/local-bundle/x"])
+def test_dependency_named_local_bundle_stays_dependency_owned(spec: str) -> None:
+    """A dependency cannot claim the local-bundle hook marker namespace (#3700)."""
+    from apm_cli.integration.hook_ownership import (
+        dependency_hook_source_marker,
+        drop_dependency_owned_entries,
+        is_local_bundle_hook_source,
+        local_bundle_hook_source_marker,
+    )
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    marker = dependency_hook_source_marker(DependencyReference.parse(spec))
+    bundle_marker = local_bundle_hook_source_marker("x")
+    assert not is_local_bundle_hook_source(marker)
+    hooks = {"PreToolUse": [{"_apm_source": marker}, {"_apm_source": bundle_marker}]}
+    assert drop_dependency_owned_entries(hooks)
+    assert hooks == {"PreToolUse": [{"_apm_source": bundle_marker}]}

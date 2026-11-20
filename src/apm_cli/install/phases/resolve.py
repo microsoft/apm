@@ -170,7 +170,7 @@ def _activate_validated_candidate(
     """Publish one accepted candidate, then expose its download metadata."""
     from apm_cli.utils.content_hash import compute_package_hash
 
-    content_hash = compute_package_hash(candidate_path)
+    content_hash = compute_package_hash(candidate_path, framed=True)
     live_path = staging_session.publish_replacement(candidate_path)
     with callback_lock:
         pending = pending_downloads.pop(candidate_path, None)
@@ -342,11 +342,11 @@ def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
     raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
 
 
-def _attach_resolver_marketplace_provenance(
-    ctx: InstallContext,
-    resolver,
-) -> None:
-    """Carry manifest-resolved marketplace identity into lockfile assembly."""
+def _attach_resolver_marketplace_provenance(ctx: InstallContext, resolver) -> None:
+    """Carry manifest-resolved marketplace identity into selection and lockfile assembly."""
+    if ctx.only_packages and resolver.selected_marketplace_keys:
+        # Selecting ``plugin@marketplace`` selects the package it resolved to.
+        ctx.only_packages = [*ctx.only_packages, *resolver.selected_marketplace_keys]
     if not resolver.marketplace_provenance:
         return
     if ctx.marketplace_provenance is None:
@@ -363,6 +363,8 @@ def _build_dependency_graph(ctx: InstallContext, resolver):
     )
     ctx.dependency_graph = dependency_graph
     _attach_resolver_marketplace_provenance(ctx, resolver)
+    for warning in dependency_graph.dependency_tree.resolution_warnings if ctx.logger else ():
+        ctx.logger.warning(warning)
     return dependency_graph
 
 
@@ -436,9 +438,7 @@ def _resolve_dependencies(
     # which may restructure the whole graph).
     update_refs = _requires_remote_ref_resolution(ctx)
     update_keys = (
-        selected_dependency_keys(ctx.only_packages, ctx.all_apm_deps)
-        if update_refs and ctx.only_packages
-        else None
+        selected_dependency_keys(ctx.only_packages, ctx.all_apm_deps) if ctx.only_packages else None
     )
     if ctx.refresh and ctx.logger:
         ctx.logger.verbose_detail("[*] --refresh: bypassing cached package content")
@@ -579,8 +579,6 @@ def _resolve_dependencies(
                     # At user scope, relative local paths have no meaningful
                     # root (cwd is arbitrary, $HOME is not a project).  Only
                     # absolute paths are unambiguous; reject relative refs.
-                    # Note: callback_failures is a set (see line ~105),
-                    # so use .add() rather than dict-style assignment.
                     with callback_lock:
                         callback_failures.add(dep_ref.get_unique_key())
                     _tui = getattr(ctx, "tui", None)
@@ -617,6 +615,8 @@ def _resolve_dependencies(
                             None,
                         )
                     return replacement_path
+                with callback_lock:  # not a package: the barrier stops (#3874)
+                    callback_failures.add(dep_ref.get_unique_key())
                 _tui = getattr(ctx, "tui", None)
                 if _tui is not None:
                     _tui.task_failed(dep_ref.get_unique_key())

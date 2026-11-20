@@ -14,7 +14,6 @@ Targets uncovered branches in:
 - _fetch_from_repo (stale fallback on error, garbage result)
 - _fetch_github_contents (403, redirect, non-200, timeout, connection error)
 - _is_github_host (*.ghe.com, GITHUB_HOST env)
-- _get_token_for_host (token manager exception, fallback)
 - _detect_garbage (YAML error with cache_entry)
 - _read_cache_entry (expected_hash checks)
 - _write_cache (tmp_meta OSError + unlink)
@@ -40,7 +39,6 @@ from apm_cli.policy.discovery import (
     _fetch_from_repo,
     _fetch_from_url,
     _fetch_github_contents,
-    _get_token_for_host,
     _is_github_host,
     _parse_remote_url,
     _read_cache_entry,
@@ -389,24 +387,28 @@ class TestFetchFromUrl:
         mock_resp.status_code = 301
         mock_resp.headers = {"Location": "https://other.com/p.yml"}
 
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             result = _fetch_from_url("https://example.com/p.yml", tmp_path, no_cache=True)
         assert result.error is not None or result.fetch_error is not None
 
     def test_timeout_returns_error(self, tmp_path: Path) -> None:
-        with patch("requests.get", side_effect=requests.exceptions.Timeout()):
+        with patch(
+            "apm_cli.policy.discovery.policy_get", side_effect=requests.exceptions.Timeout()
+        ):
             result = _fetch_from_url("https://example.com/p.yml", tmp_path, no_cache=True)
         assert result.error is not None or result.fetch_error is not None
 
     def test_connection_error_returns_error(self, tmp_path: Path) -> None:
-        with patch("requests.get", side_effect=requests.exceptions.ConnectionError()):
+        with patch(
+            "apm_cli.policy.discovery.policy_get", side_effect=requests.exceptions.ConnectionError()
+        ):
             result = _fetch_from_url("https://example.com/p.yml", tmp_path, no_cache=True)
         assert result.error is not None or result.fetch_error is not None
 
     def test_404_returns_absent(self, tmp_path: Path) -> None:
         mock_resp = MagicMock()
         mock_resp.status_code = 404
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             result = _fetch_from_url("https://example.com/p.yml", tmp_path, no_cache=True)
         assert result.outcome == "absent"
 
@@ -415,7 +417,7 @@ class TestFetchFromUrl:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = "<html>captive portal</html>"
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             result = _fetch_from_url("https://example.com/p.yml", tmp_path, no_cache=True)
         assert result.outcome in ("garbage_response", "cached_stale", "malformed")
 
@@ -424,7 +426,7 @@ class TestFetchFromUrl:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = VALID_POLICY_YAML
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             result = _fetch_from_url(
                 "https://example.com/p.yml",
                 tmp_path,
@@ -436,7 +438,7 @@ class TestFetchFromUrl:
     def test_non_200_error(self, tmp_path: Path) -> None:
         mock_resp = MagicMock()
         mock_resp.status_code = 500
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             result = _fetch_from_url("https://example.com/p.yml", tmp_path, no_cache=True)
         assert result.error is not None or result.fetch_error is not None
 
@@ -489,7 +491,7 @@ class TestFetchGitHubContents:
     def test_403_returns_error(self) -> None:
         mock_resp = MagicMock()
         mock_resp.status_code = 403
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             content, error = _fetch_github_contents("owner/.github", "apm-policy.yml")
         assert content is None
         assert "403" in error
@@ -498,7 +500,7 @@ class TestFetchGitHubContents:
         mock_resp = MagicMock()
         mock_resp.status_code = 302
         mock_resp.headers = {"Location": "https://evil.example.com/p"}
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             content, error = _fetch_github_contents("owner/.github", "apm-policy.yml")
         assert content is None
         assert "redirect" in error.lower() or "302" in error
@@ -506,19 +508,23 @@ class TestFetchGitHubContents:
     def test_non_200_returns_error(self) -> None:
         mock_resp = MagicMock()
         mock_resp.status_code = 500
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             content, error = _fetch_github_contents("owner/.github", "apm-policy.yml")
         assert content is None
         assert "500" in error or "HTTP" in error
 
     def test_timeout_returns_error(self) -> None:
-        with patch("requests.get", side_effect=requests.exceptions.Timeout()):
+        with patch(
+            "apm_cli.policy.discovery.policy_get", side_effect=requests.exceptions.Timeout()
+        ):
             content, error = _fetch_github_contents("owner/.github", "apm-policy.yml")
         assert content is None
         assert "timeout" in error.lower()
 
     def test_connection_error_returns_error(self) -> None:
-        with patch("requests.get", side_effect=requests.exceptions.ConnectionError()):
+        with patch(
+            "apm_cli.policy.discovery.policy_get", side_effect=requests.exceptions.ConnectionError()
+        ):
             content, error = _fetch_github_contents("owner/.github", "apm-policy.yml")
         assert content is None
         assert "connection" in error.lower()
@@ -528,7 +534,7 @@ class TestFetchGitHubContents:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"encoding": "base64", "content": encoded}
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             content, error = _fetch_github_contents("owner/.github", "apm-policy.yml")
         assert error is None
         assert content == VALID_POLICY_YAML
@@ -537,7 +543,7 @@ class TestFetchGitHubContents:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {}
-        with patch("requests.get", return_value=mock_resp):
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp):
             content, error = _fetch_github_contents("owner/.github", "apm-policy.yml")
         assert content is None
         assert "Unexpected" in error or error
@@ -546,7 +552,7 @@ class TestFetchGitHubContents:
         """Host/owner/repo format builds GHE API URL."""
         mock_resp = MagicMock()
         mock_resp.status_code = 404
-        with patch("requests.get", return_value=mock_resp) as mock_get:
+        with patch("apm_cli.policy.discovery.policy_get", return_value=mock_resp) as mock_get:
             _fetch_github_contents("myghe.com/owner/.github", "apm-policy.yml")
         url_used = mock_get.call_args[0][0]
         assert "myghe.com/api/v3" in url_used
@@ -581,46 +587,6 @@ class TestIsGithubHost:
         """Empty GITHUB_HOST env var doesn't match arbitrary hosts."""
         with patch.dict(os.environ, {"GITHUB_HOST": ""}):
             assert _is_github_host("random.host.com") is False
-
-
-# ---------------------------------------------------------------------------
-# _get_token_for_host
-# ---------------------------------------------------------------------------
-
-
-class TestGetTokenForHost:
-    def test_returns_github_token_env_for_github_host(self) -> None:
-        with (
-            patch(
-                "apm_cli.core.auth.AuthResolver.resolve",
-                side_effect=Exception("unavailable"),
-            ),
-            patch.dict(os.environ, {"GITHUB_TOKEN": "mytoken"}, clear=True),
-        ):
-            token = _get_token_for_host("github.com")
-        assert token == "mytoken"
-
-    def test_returns_none_for_non_github_host_on_failure(self) -> None:
-        with (
-            patch(
-                "apm_cli.core.auth.AuthResolver.resolve",
-                side_effect=Exception("unavailable"),
-            ),
-            patch.dict(os.environ, {}, clear=True),
-        ):
-            token = _get_token_for_host("dev.azure.com")
-        assert token is None
-
-    def test_prefers_github_apm_pat(self) -> None:
-        with (
-            patch(
-                "apm_cli.core.auth.AuthResolver.resolve",
-                side_effect=Exception("unavailable"),
-            ),
-            patch.dict(os.environ, {"GITHUB_APM_PAT": "apmtoken"}, clear=True),
-        ):
-            token = _get_token_for_host("github.com")
-        assert token == "apmtoken"
 
 
 # ---------------------------------------------------------------------------

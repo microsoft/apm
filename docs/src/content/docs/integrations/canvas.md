@@ -161,7 +161,7 @@ experimental flag, so a previously-installed canvas can always be removed.
   (`deny_all`, `deny`, `require`, `recommend`); a canvas-only policy knob is not
   planned for this experimental release.
 
-See the [primitives and targets](/apm/concepts/primitives-and-targets/) matrix
+See the [primitives and targets](../../reference/targets-matrix/) matrix
 for where the canvas primitive sits.
 
 ## Autopilot maintainer canvas

@@ -272,9 +272,10 @@ class GitSemverResolver:
         RegistryOnlySemverError
             When registry-only mode (``PROXY_REGISTRY_ONLY``) is active
             and ``constraint`` is a range. A range needs a version
-            listing, and the proxy exposes no enumeration surface, so
-            resolving one would require querying the upstream host the
-            mode exists to avoid. Exact versions never reach this method
+            listing; APM fetches only exact versions through a proxy and
+            does not call vendor listing APIs, so resolving one would
+            require querying the upstream host the mode exists to avoid.
+            Exact versions never reach this method
             in registry-only mode: ``maybe_resolve_git_semver`` declines
             the semver route for them so they resolve as a literal ref
             through the proxy.
@@ -288,13 +289,17 @@ class GitSemverResolver:
                     f" '{owner_repo}' in registry-only mode."
                 ),
                 hint=(
-                    "PROXY_REGISTRY_ONLY is set, so the upstream host cannot be"
-                    " queried for the tag listing a range needs, and the proxy"
-                    " exposes no version enumeration surface. Pin one exact"
-                    " version, written as the upstream tag name (e.g. 'v1.2.3'"
-                    " or '1.2.3'), which resolves through the proxy without a"
-                    " listing, or unset PROXY_REGISTRY_ONLY to resolve ranges"
-                    " from the upstream host."
+                    "PROXY_REGISTRY_ONLY is set: APM fetches exact versions"
+                    " through the proxy and does not list the tags a range"
+                    " needs. Pin one exact version as the upstream tag name"
+                    " (e.g. 'v1.2.3' or '1.2.3'); it resolves without a listing"
+                    " and replays from apm.lock.yaml. Or install from a registry"
+                    " that implements the APM Registry HTTP API"
+                    " (GET /v1/packages/{owner}/{repo}/versions), or unset"
+                    " PROXY_REGISTRY_ONLY to resolve ranges from the upstream"
+                    " host. See"
+                    " https://microsoft.github.io/apm/enterprise/registry-proxy/"
+                    "#version-enumeration-and-semver-ranges"
                 ),
             )
         if remote_url is None:

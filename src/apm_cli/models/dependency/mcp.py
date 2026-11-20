@@ -2,13 +2,16 @@
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 from urllib.parse import urlparse
 
 from apm_cli.utils.console import _rich_warning
+from apm_cli.utils.github_host import has_parser_dependent_url_chars
 from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
+
+from .subsets import parse_target_subset
 
 # Keys recognised by from_dict (including legacy alias 'type' -> 'transport').
 _KNOWN_DICT_KEYS = frozenset(
@@ -35,6 +38,9 @@ _KNOWN_DICT_KEYS = frozenset(
         # the serialized config. Only current-source derivation may set it.
         # Keeps the "never leaks into mcp_configs" invariant airtight (#2081).
         "resolved_by",
+        "approval_keys",
+        # Selects which install targets receive the server; never rendered (#2606).
+        "targets",
     }
 )
 
@@ -55,16 +61,21 @@ _RESERVED_EXTRA_KEYS = _KNOWN_DICT_KEYS - {"extra"}
 # ``bearer_token_env_var`` or ``env_http_headers`` rather than ``http_headers``;
 # all three alias that one modeled field, so a transitive dependency must not
 # reach an Authorization header through passthrough that ``headers`` modeling
-# never sees. The literal below is pinned verbatim by the architecture guard
-# ``mutation_writes.mcp_passthrough_denylist``: keep it comment-free and sorted.
+# never sees. ``httpUrl`` (Gemini) and ``serverUrl`` (Antigravity) are harness
+# names of the modeled ``url``; passthrough must not add a second endpoint
+# beside the one APM renders. The literal below is pinned verbatim by the
+# architecture guard ``mutation_writes.mcp_passthrough_denylist``: keep it
+# comment-free and sorted.
 _HARNESS_EXTRA_ALIASES = frozenset(
     {
         "bearer_token_env_var",
         "enabled",
         "env_http_headers",
         "environment",
+        "httpUrl",
         "http_headers",
         "id",
+        "serverUrl",
     }
 )
 _EXTRA_DENYLIST = _RESERVED_EXTRA_KEYS | _HARNESS_EXTRA_ALIASES
@@ -144,6 +155,8 @@ class MCPDependency:
     # OpenCode-only value forwarded unchanged; other target adapters ignore it.
     enabled: Any = _ENABLED_UNSET
     extra: dict[str, Any] | None = None  # Harness-specific passthrough keys (e.g. oauth)
+    # Canonical install targets that receive this server; None = every active target.
+    targets: list[str] | None = None
     # Install-time provenance: the declaring package identity when this server
     # was contributed transitively (via a sub-package's apm.yml), else None for
     # servers declared directly in the root manifest. Set by
@@ -151,6 +164,19 @@ class MCPDependency:
     # ``to_dict`` so it never leaks into the lockfile ``mcp_configs`` values or
     # the config-drift comparison (#2081).
     resolved_by: str | None = None
+    # Executable-approval keys of the declaring locked package; empty for
+    # root-declared servers. Never serialized and not part of equality.
+    approval_keys: tuple[str, ...] = field(default=(), compare=False)
+    # Materialized root of the declaring package, used only to render an
+    # authored ``${CLAUDE_PLUGIN_ROOT}`` for a target. Never serialized and
+    # not part of equality, so recorded state stays location-independent.
+    plugin_root: str | None = field(default=None, compare=False)
+    # Another clone's root a pre-#3825 lock recorded, set only by a --frozen
+    # replay so an unchanged native entry is kept; never rendered or written.
+    recorded_plugin_root: str | None = field(default=None, compare=False)
+    # Runtimes that load this server natively from its declaring plugin, so
+    # APM never writes it there. Never serialized and not part of equality.
+    native_runtimes: frozenset[str] = field(default=frozenset(), compare=False)
 
     @classmethod
     def from_string(cls, s: str) -> "MCPDependency":
@@ -205,6 +231,8 @@ class MCPDependency:
             )
 
         transport = d.get("transport") or d.get("type")  # legacy 'type' -> 'transport'
+        targets_raw = d.get("targets")  # architecture-authority-exempt: dependency-target-subset
+        targets = parse_target_subset(targets_raw) if targets_raw is not None else None
 
         instance = cls(
             name=d["name"],
@@ -221,6 +249,7 @@ class MCPDependency:
             cwd=d.get("cwd"),
             enabled=d.get("enabled", _ENABLED_UNSET),
             extra=extra,
+            targets=targets,
         )
 
         if instance.registry is False:
@@ -239,6 +268,21 @@ class MCPDependency:
     def is_self_defined(self) -> bool:
         """True when the dependency is self-defined (registry: false)."""
         return self.registry is False
+
+    @property
+    def requires_transitive_trust(self) -> bool:
+        """True when a transitive declaration is more than a registry reference.
+
+        A transitive package may name a server from the consumer's configured
+        registry. A self-defined server, a per-dependency ``registry`` URL,
+        or any value overlay (``env``, ``headers``, ``args``, ``url``,
+        ``command``, ``cwd``, ``extra``) supplies configuration the consumer's
+        registry did not provide, so it needs the same explicit trust.
+        """
+        if self.is_self_defined or isinstance(self.registry, str):
+            return True
+        overlays = (self.env, self.headers, self.args, self.url, self.command, self.cwd, self.extra)
+        return any(value not in (None, "", {}, []) for value in overlays)
 
     @property
     def has_enabled(self) -> bool:
@@ -276,6 +320,8 @@ class MCPDependency:
                 result[field_name] = value
         if self.has_enabled:
             result["enabled"] = self.enabled
+        if self.targets is not None:
+            result["targets"] = list(self.targets)
         if self.extra:
             for k, v in self.extra.items():
                 if k not in result and k not in _EXTRA_DENYLIST:
@@ -354,6 +400,12 @@ class MCPDependency:
                 f"Example: 'io.github.acme/cool-server' or 'my-server'."
             )
         if self.url is not None:
+            if has_parser_dependent_url_chars(self.url):
+                raise ValueError(
+                    f"Invalid MCP url {self.url!r}: backslashes, whitespace and "
+                    f"control characters are not allowed. Use a plain "
+                    f"http:// or https:// URL."
+                )
             scheme = urlparse(self.url).scheme.lower()
             if scheme not in _ALLOWED_URL_SCHEMES:
                 raise ValueError(
@@ -458,7 +510,7 @@ class MCPDependency:
                             f"  Got:  command={first!r} ({len(rest_tokens)} additional args)",
                             f"  Fix:  command: {first}",
                             f"        args: {suggested_args}",
-                            f"  See:  https://microsoft.github.io/apm/guides/mcp-servers/",  # noqa: F541
+                            f"  See:  https://microsoft.github.io/apm/consumer/install-mcp-servers/",  # noqa: F541
                         ]
                     )
                 )

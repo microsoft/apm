@@ -16,9 +16,6 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from ..core.apm_yml import parse_targets_field
-from ..core.target_catalog import normalize_target_name
-from ..core.target_detection import parse_target_field
 from .dependency import (
     DependencyReference,
     GitReferenceType,
@@ -27,6 +24,12 @@ from .dependency import (
     RemoteRef,
     ResolvedReference,
     parse_git_reference,
+)
+from .manifest_targets import (
+    _LEGACY_ALL_TARGET,
+    _MANIFEST_TARGET_KEYS,
+    ManifestTargetDeclaration,
+    canonical_target_names,
 )
 from .validation import (
     InvalidVirtualPackageExtensionError,
@@ -484,6 +487,9 @@ class APMPackage:
     registries: dict[str, str] | None = None
     # Value of ``registries.default:`` -- routes unscoped deps to this registry.
     default_registry: str | None = None
+    # Value of ``default_host:`` -- the host shorthand dependencies in this
+    # manifest resolve against (OpenAPM req-mf-019). None when omitted.
+    default_host: str | None = None
     manifest_contract: str = "working-draft"
 
     # Top-level ``allowExecutables:`` block -- per-package approval for
@@ -505,8 +511,22 @@ class APMPackage:
     # ``None`` means the key was absent; ``[]`` means it was present but empty.
     replace_rules: "list[ReplacementRule] | None" = None
 
+    target_declaration: ManifestTargetDeclaration | None = field(
+        default=None, repr=False, compare=False
+    )
+    """Owner of the authored ``target:`` / ``targets:`` declaration."""
+
     def __post_init__(self) -> None:
-        """Derive the canonical target projection for compatibility callers."""
+        """Derive the target declaration and canonical projection for direct constructions."""
+        if self.target_declaration is None:
+            self.target_declaration = ManifestTargetDeclaration(
+                tuple(
+                    (key, value)
+                    for key, value in (("target", self.target), ("targets", self.targets))
+                    if value is not None
+                ),
+                self.source_path,
+            )
         if self.canonical_targets:
             return
         raw_targets: list[str] = []
@@ -516,9 +536,7 @@ class APMPackage:
             raw_targets.extend(self.target)
         elif isinstance(self.target, str):
             raw_targets.append(self.target)
-        self.canonical_targets = tuple(
-            name if name == "all" else normalize_target_name(name) for name in raw_targets
-        )
+        self.canonical_targets = canonical_target_names(raw_targets)
 
     @classmethod
     def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:
@@ -578,77 +596,8 @@ class APMPackage:
         return parsed
 
     @classmethod
-    def from_mapping(
-        cls,
-        manifest_data: Mapping[str, Any],
-        *,
-        package_path: Path,
-        source_path: Path | None = None,
-        manifest_path: Path | None = None,
-        create_config: bool = True,
-        warning_handler: Callable[[list[str], Path], None] | None = _warn_unknown_manifest_keys,
-    ) -> "APMPackage":
-        """Construct a package from already interpreted manifest data.
-
-        This is the public construction owner for manifest semantics. File
-        loaders and compatibility adapters must interpret their source format,
-        then delegate here rather than rebuilding dependency, registry, target,
-        executable, and content-type parsing independently.
-
-        Args:
-            manifest_data: Interpreted manifest mapping.
-            package_path: Directory containing the package content.
-            source_path: Optional absolute directory used to anchor relative
-                ``local_path`` dependencies.
-            manifest_path: Source manifest path used in diagnostics. Defaults
-                to ``package_path / "apm.yml"``.
-            create_config: When false, missing user config is read as defaults
-                without creating ``~/.apm/config.json``.
-            warning_handler: Receives unknown keys and their manifest path.
-                Defaults to a terminal warning. Use ``None`` for a prospective
-                parse whose source manifest is diagnosed separately.
-
-        Returns:
-            A package with all compatibility projections populated.
-
-        Raises:
-            ValueError: If interpreted manifest fields are invalid.
-        """
-        data = dict(manifest_data)
-        from apm_cli.deps.plugin_parser import resolve_plugin_root_placeholders
-
-        for dependency_key in ("dependencies", "devDependencies"):
-            if dependency_key in data:
-                data[dependency_key] = resolve_plugin_root_placeholders(
-                    data[dependency_key],
-                    package_path,
-                )
-        source_manifest = manifest_path or package_path / "apm.yml"
-        resolved_source = source_path.resolve() if source_path is not None else None
-
-        from .manifest_contract import negotiate_manifest_contract
-
-        manifest_contract = negotiate_manifest_contract(data)
-
-        # Required fields
-        if "name" not in data:
-            raise ValueError("Missing required field 'name' in apm.yml")
-        if "version" not in data:
-            raise ValueError("Missing required field 'version' in apm.yml")
-        if not isinstance(data["name"], str) or not data["name"].strip():
-            raise ValueError("Invalid apm.yml identity: 'name' must be a non-empty string")
-        if not isinstance(data["version"], str) or not data["version"].strip():
-            raise ValueError("Invalid apm.yml identity: 'version' must be a non-empty string")
-
-        # Top-level ``registries:`` block per design §3.1.
-        registries, default_registry = _parse_registries_block(
-            data,
-            source_manifest,
-            manifest_contract,
-            create_config=create_config,
-        )
-
-        # Parse dependencies
+    def _parse_dependency_sections(cls, data: dict, source_manifest: Path) -> tuple:
+        """Parse ``dependencies`` and ``devDependencies`` from manifest data."""
         dependencies = None
         raw_deps = data.get("dependencies")
         if raw_deps is not None:
@@ -677,6 +626,104 @@ class APMPackage:
                     "      - owner/repo"
                 )
             dev_dependencies = cls._parse_dependency_dict(raw_dev_deps, label="dev ")
+        return dependencies, dev_dependencies
+
+    @classmethod
+    def from_mapping(
+        cls,
+        manifest_data: Mapping[str, Any],
+        *,
+        package_path: Path,
+        source_path: Path | None = None,
+        manifest_path: Path | None = None,
+        create_config: bool = True,
+        warning_handler: Callable[[list[str], Path], None] | None = _warn_unknown_manifest_keys,
+        warn_deprecated: bool = True,
+    ) -> "APMPackage":
+        """Construct a package from already interpreted manifest data.
+
+        This is the public construction owner for manifest semantics. File
+        loaders and compatibility adapters must interpret their source format,
+        then delegate here rather than rebuilding dependency, registry, target,
+        executable, and content-type parsing independently.
+
+        Args:
+            manifest_data: Interpreted manifest mapping.
+            package_path: Directory containing the package content.
+            source_path: Optional absolute directory used to anchor relative
+                ``local_path`` dependencies.
+            manifest_path: Source manifest path used in diagnostics. Defaults
+                to ``package_path / "apm.yml"``.
+            create_config: When false, missing user config is read as defaults
+                without creating ``~/.apm/config.json``.
+            warning_handler: Receives unknown keys and their manifest path.
+                Defaults to a terminal warning. Use ``None`` for a prospective
+                parse whose source manifest is diagnosed separately.
+            warn_deprecated: Warn once per process when *manifest_path* is
+                the consumer manifest and uses a deprecated key.
+
+        Returns:
+            A package with all compatibility projections populated.
+
+        Raises:
+            ValueError: If interpreted manifest fields are invalid.
+        """
+        data = dict(manifest_data)
+        from apm_cli.deps.plugin_parser import resolve_plugin_root_placeholders
+
+        # MCP and LSP declarations keep the authored ${CLAUDE_PLUGIN_ROOT}: it is
+        # bound below and rendered per target, so recorded state is portable.
+        for dependency_key in ("dependencies", "devDependencies"):
+            group = data.get(dependency_key)
+            if isinstance(group, dict):
+                data[dependency_key] = {
+                    kind: (
+                        entries
+                        if kind in ("mcp", "lsp")
+                        else resolve_plugin_root_placeholders(entries, package_path)
+                    )
+                    for kind, entries in group.items()
+                }
+            elif group is not None:
+                data[dependency_key] = resolve_plugin_root_placeholders(group, package_path)
+        source_manifest = manifest_path or package_path / "apm.yml"
+        resolved_source = source_path.resolve() if source_path is not None else None
+
+        from .manifest_contract import negotiate_manifest_contract
+
+        manifest_contract = negotiate_manifest_contract(data)
+
+        # Required fields
+        if "name" not in data:
+            raise ValueError("Missing required field 'name' in apm.yml")
+        if "version" not in data:
+            raise ValueError("Missing required field 'version' in apm.yml")
+        if not isinstance(data["name"], str) or not data["name"].strip():
+            raise ValueError("Invalid apm.yml identity: 'name' must be a non-empty string")
+        if not isinstance(data["version"], str) or not data["version"].strip():
+            raise ValueError("Invalid apm.yml identity: 'version' must be a non-empty string")
+
+        # Top-level ``registries:`` block per design §3.1.
+        registries, default_registry = _parse_registries_block(
+            data,
+            source_manifest,
+            manifest_contract,
+            create_config=create_config,
+        )
+
+        # ``default_host:`` (OpenAPM req-mf-019): shorthand dependencies in
+        # this manifest resolve against it instead of the implementation
+        # default (GITHUB_HOST or github.com).
+        from .dependency.manifest_host import manifest_host_scope_for
+
+        with manifest_host_scope_for(data) as manifest_default_host:
+            dependencies, dev_dependencies = cls._parse_dependency_sections(data, source_manifest)
+
+        from ..deps.plugin_root_render import bind_plugin_roots
+
+        for parsed_group in (dependencies, dev_dependencies):
+            for kind in ("mcp", "lsp"):
+                bind_plugin_roots((parsed_group or {}).get(kind), package_path)
 
         # Merge user/policy registry URLs and config.json default routing.
         from ..deps.registry.config_loader import resolve_effective_registries
@@ -732,35 +779,16 @@ class APMPackage:
             else:
                 raise ValueError("'includes' must be 'auto' or a list of strings")
 
-        # Parse target field through the same validator as --target so a CSV
-        # string like ``target: "claude,copilot"`` resolves identically to
-        # ``--target claude,copilot`` and unknown tokens fail at parse time
-        # (see apm_cli.core.target_detection.parse_target_field).
-        target_value = None
-        targets_value: list[str] | None = None
-        if "targets" in data and "target" in data:
-            parse_targets_field(data)
-            raise AssertionError("unreachable: conflicting target keys were accepted")
-        elif "targets" in data:
-            parsed_targets = parse_targets_field(data)
-            targets_value = parsed_targets or None
-            canonical_targets = tuple(parsed_targets)
-        else:
-            target_value = parse_target_field(
-                data.get("target"),
-                source_path=source_manifest,
-            )
-            parsed_target_values = (
-                target_value
-                if isinstance(target_value, list)
-                else [target_value]
-                if isinstance(target_value, str)
-                else []
-            )
-            canonical_targets = tuple(
-                name if name == "all" else normalize_target_name(name)
-                for name in parsed_target_values
-            )
+        # The declaration owner validates ``target:`` with the --target
+        # vocabulary and ``targets:`` with the manifest vocabulary, and rejects
+        # a manifest that declares both.
+        target_declaration = ManifestTargetDeclaration.from_manifest(
+            data, source_manifest, warn_deprecated=warn_deprecated
+        )
+        selection = target_declaration.selection
+        target_value = selection if target_declaration.spelling == "target" else None
+        targets_value = selection if target_declaration.spelling == "targets" else None
+        canonical_targets = target_declaration.canonical
 
         extensions = _collect_manifest_extensions(data, source_manifest, warning_handler)
 
@@ -816,10 +844,12 @@ class APMPackage:
             target=target_value,
             targets=targets_value,
             canonical_targets=canonical_targets,
+            target_declaration=target_declaration,
             type=pkg_type,
             includes=includes,
             registries=registries,
             default_registry=default_registry,
+            default_host=manifest_default_host,
             manifest_contract=manifest_contract.value,
             allow_executables=allow_executables,
             extensions=extensions,
@@ -860,10 +890,12 @@ class APMPackage:
         # lock.
         generation_snapshot = _apm_yml_cache_generation
 
-        try:
-            from ..utils.yaml_io import load_yaml
+        from .manifest_io import load_manifest
 
-            data = load_yaml(apm_yml_path)
+        # A DuplicateManifestKeyError (ValueError) propagates as-is: its
+        # message already names the file, key and lines.
+        try:
+            data = load_manifest(apm_yml_path)
         except yaml.YAMLError as e:
             raise ValueError(f"Invalid YAML format in {apm_yml_path}: {e}")  # noqa: B904
 
@@ -949,24 +981,32 @@ class APMPackage:
 
 
 def canonical_package_targets(package: object) -> tuple[str, ...]:
-    """Return canonical targets for packages and compatibility stand-ins."""
+    """Return canonical targets for packages and compatibility stand-ins.
+
+    A package declaring both ``target`` and ``targets`` raises
+    ConflictingTargetsError instead of degrading to either key.
+    """
+    declaration = package_target_declaration(package)
+    if len(declaration.fields) > 1:
+        _ = declaration.selection
     canonical = getattr(package, "canonical_targets", ())
     if isinstance(canonical, (tuple, list)) and canonical:
         return tuple(canonical)
     plural = getattr(package, "targets", None)
     if isinstance(plural, list) and plural:
-        return tuple(name if name == "all" else normalize_target_name(name) for name in plural)
+        return canonical_target_names(plural)
     singular = getattr(package, "target", None)
     values = singular if isinstance(singular, list) else [singular]
-    return tuple(
-        name if name == "all" else normalize_target_name(name)
-        for name in values
-        if isinstance(name, str) and name
-    )
+    return canonical_target_names(name for name in values if isinstance(name, str) and name)
 
 
 def canonical_package_target_config(package: object) -> dict[str, object]:
     """Project canonical targets into the compatibility config shape.
+
+    The projection is canonical and lossy: ``vscode`` becomes ``copilot``.
+    MCP destination fidelity (``.vscode/mcp.json``) comes from the
+    spelling-preserving ``selection`` that builds the effective target
+    decision, which MCP and LSP installs consult before this config.
 
     Conflicting singular and plural fields remain present so the canonical
     parser can reject the authoring error before any MCP write.
@@ -979,6 +1019,10 @@ def canonical_package_target_config(package: object) -> dict[str, object]:
     if not canonical:
         return {}
     if isinstance(package, APMPackage):
+        if package_target_declaration(package).selection == _LEGACY_ALL_TARGET:
+            # Singular ``all`` leaves MCP/LSP runtime selection unrestricted;
+            # projecting it as ``targets: [all]`` would claim it was omitted.
+            return {}
         return {"targets": list(canonical)}
     if isinstance(plural, list):
         return {"targets": list(canonical)}
@@ -987,13 +1031,38 @@ def canonical_package_target_config(package: object) -> dict[str, object]:
     return {"targets": list(canonical)}
 
 
-def package_target_selection(package: APMPackage) -> str | list[str] | None:
-    """Return pack-compatible selection from the canonical package owner."""
-    if package.targets is not None:
-        return list(package.canonical_targets)
-    if package.target is not None:
-        return package.target
-    return list(package.canonical_targets) or None
+def _declared_package_field(package: object, name: str) -> Any:
+    """Read a stand-in package field without treating MagicMock attrs as set."""
+    try:
+        attrs = vars(package)
+    except TypeError:
+        attrs = {}
+    if name in attrs:
+        return attrs[name]
+    value = getattr(package, name, None)
+    if type(value).__module__ == "unittest.mock":
+        return None
+    return value
+
+
+def package_target_declaration(package: object) -> ManifestTargetDeclaration:
+    """Return the target declaration of a parsed package or a stand-in."""
+    if package is None:
+        return ManifestTargetDeclaration()
+    if isinstance(package, APMPackage) and package.target_declaration is not None:
+        return package.target_declaration
+    return ManifestTargetDeclaration(
+        tuple(
+            (key, value)
+            for key in _MANIFEST_TARGET_KEYS
+            if (value := _declared_package_field(package, key)) is not None
+        )
+    )
+
+
+def package_target_selection(package: object) -> str | list[str] | None:
+    """Return the declared target selection handed to target decisions."""
+    return package_target_declaration(package).selection
 
 
 @dataclass
@@ -1009,7 +1078,13 @@ class PackageInfo:
     )
     package_type: PackageType | None = None  # APM_PACKAGE, CLAUDE_SKILL, or HYBRID
     root_local_project_root: Path | None = None
-    deployment_package_root: Path | None = None  # Source root in the deployment output frame
+    # Source root in the deployment output frame: live for replayed dependencies
+    # (paired with deployment_frame), scratch for the replayed self-entry.
+    deployment_package_root: Path | None = None
+    # (replay output root, live deploy root): audit replay renders links live (#3901)
+    deployment_frame: tuple[Path, Path] | None = None
+    local_bundle_id: str | None = None  # Set only for a local bundle's hook view (#3700)
+    local_bundle_approval: str | None = None  # The key that admitted those hooks (#4027)
     # Verbatim licence copies APM added after materialization (#3556); see
     # apm_cli.deps.carried_license. Empty when nothing was carried.
     carried_licenses: tuple[Any, ...] = ()

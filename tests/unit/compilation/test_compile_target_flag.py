@@ -1297,7 +1297,8 @@ Use type hints in Python code.
         result = runner.invoke(cli, ["compile", "--target", "definitely-bogus"])
 
         assert result.exit_code == 2
-        assert "[x] Unknown target 'definitely-bogus'" in result.output
+        assert "Error: Unknown target 'definitely-bogus'" in result.output
+        assert "[x]" not in result.output
         assert "Valid targets:" in result.output
         assert "Fix with one of:" in result.output
 

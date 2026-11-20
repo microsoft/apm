@@ -10,9 +10,15 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 
-from .models import CheckResult, CIAuditResult
+from .models import (
+    CheckResult,
+    CIAuditResult,
+    PolicyRemedy,
+    PolicySubject,
+)
 
 _logger = logging.getLogger(__name__)
 FAIL_CLOSED_POLICY_CHECKS = frozenset({"dependency-content-hashes"})
@@ -71,6 +77,61 @@ def _load_raw_apm_yml(project_root: Path) -> dict | None:
 # -- Individual policy checks --------------------------------------
 
 
+def _subjects_result(
+    name: str,
+    message: str,
+    subjects: Sequence[PolicySubject],
+    *,
+    passed: bool = False,
+) -> CheckResult:
+    """Build a check result whose ``details`` mirror its structured subjects.
+
+    ``details`` keeps the ``"{ref}: {reason}"`` report contract that
+    ``apm audit`` renders; ``subjects`` carries the same violations for the
+    install gate.
+    """
+    return CheckResult(
+        name=name,
+        passed=passed,
+        message=message,
+        details=[f"{s.ref}: {s.reason}" for s in subjects],
+        subjects=tuple(subjects),
+    )
+
+
+def _with_mcp_declarers(
+    checks: list[CheckResult],
+    mcp_deps: list,
+    brought_in_by: Mapping[str, str] | None,
+) -> list[CheckResult]:
+    """Point each transitive MCP server's removal hint at an apm.yml entry.
+
+    A transitive server is not in apm.yml, so the hint names the direct
+    dependency that brings it in (*brought_in_by*, keyed by server name).
+    ``resolved_by`` is only the declaring package's display name, never an
+    apm.yml entry, so without a known direct dependency no apm.yml edit is
+    suggested.
+    """
+    root_declared = {m.name for m in mcp_deps if not getattr(m, "resolved_by", None)}
+    transitive = {m.name for m in mcp_deps if getattr(m, "resolved_by", None)} - root_declared
+    if not transitive:
+        return checks
+    brought_in_by = brought_in_by or {}
+
+    def _hint(subject: PolicySubject) -> PolicySubject:
+        if subject.ref not in transitive or subject.remedy != PolicyRemedy.REMOVE:
+            return subject
+        declarer = brought_in_by.get(subject.ref)
+        if declarer:
+            return replace(subject, declared_by=declarer)
+        return replace(subject, remedy=None)
+
+    return [
+        replace(check, subjects=tuple(_hint(subject) for subject in check.subjects))
+        for check in checks
+    ]
+
+
 def _required_policy_index(
     deps: list[DependencyReference],
     dep_names: set[str] | DependencyPolicyIndex | None,
@@ -99,24 +160,22 @@ def _check_dependency_allowlist(
             message="No dependency allow list configured",
         )
 
-    violations: list[str] = []
+    subjects: list[PolicySubject] = []
     for dep in deps:
-        ref = dependency_policy_subject(dep)
         allowed, reason = check_dependency_allowed(dep, policy)
         if not allowed and "not in allowed" in reason:
-            violations.append(f"{ref}: {reason}")
+            subjects.append(PolicySubject(dependency_policy_subject(dep), reason))
 
-    if not violations:
+    if not subjects:
         return CheckResult(
             name="dependency-allowlist",
             passed=True,
             message="All dependencies match allow list",
         )
-    return CheckResult(
-        name="dependency-allowlist",
-        passed=False,
-        message=f"{len(violations)} dependency(ies) not in allow list",
-        details=violations,
+    return _subjects_result(
+        "dependency-allowlist",
+        f"{len(subjects)} dependency(ies) not in allow list",
+        subjects,
     )
 
 
@@ -134,24 +193,22 @@ def _check_dependency_denylist(
             message="No dependency deny list configured",
         )
 
-    violations: list[str] = []
+    subjects: list[PolicySubject] = []
     for dep in deps:
-        ref = dependency_policy_subject(dep)
         allowed, reason = check_dependency_allowed(dep, policy)
         if not allowed and "denied by pattern" in reason:
-            violations.append(f"{ref}: {reason}")
+            subjects.append(PolicySubject(dependency_policy_subject(dep), reason))
 
-    if not violations:
+    if not subjects:
         return CheckResult(
             name="dependency-denylist",
             passed=True,
             message="No dependencies match deny list",
         )
-    return CheckResult(
-        name="dependency-denylist",
-        passed=False,
-        message=f"{len(violations)} dependency(ies) match deny list",
-        details=violations,
+    return _subjects_result(
+        "dependency-denylist",
+        f"{len(subjects)} dependency(ies) match deny list",
+        subjects,
     )
 
 
@@ -170,13 +227,13 @@ def _check_required_packages(
         )
 
     index = _required_policy_index(deps, dep_names)
-    missing: list[str] = []
+    subjects: list[PolicySubject] = []
     for req in policy.effective_require:
         pkg_name = req.split("#", 1)[0]
         if index.find_name(pkg_name) is None:
-            missing.append(pkg_name)
+            subjects.append(_unresolved_required_subject(index, pkg_name))
 
-    if not missing:
+    if not subjects:
         return CheckResult(
             name="required-packages",
             passed=True,
@@ -185,9 +242,51 @@ def _check_required_packages(
     return CheckResult(
         name="required-packages",
         passed=False,
-        message=f"{len(missing)} required package(s) missing from manifest",
-        details=missing,
+        message=f"{len(subjects)} required package(s) missing from manifest."
+        + _wrong_host_hint(index, subjects),
+        details=[subject.ref for subject in subjects],
+        subjects=tuple(subjects),
     )
+
+
+def _unresolved_required_subject(index: DependencyPolicyIndex, pkg_name: str) -> PolicySubject:
+    """Explain a ``require`` entry that identifies no declared dependency.
+
+    When the same package is declared on another host, name both fixes;
+    otherwise the package must be added to apm.yml.
+    """
+    fix = _wrong_host_fix(index, pkg_name)
+    if fix is not None:
+        return PolicySubject(pkg_name, f"required by org policy, but {fix}", remedy=None)
+    return PolicySubject(pkg_name, "required by org policy but not declared", PolicyRemedy.ADD)
+
+
+def _wrong_host_fix(index: DependencyPolicyIndex, pkg_name: str) -> str | None:
+    """Describe a same-path package declared on another host, manifest fix first.
+
+    The declared host is not trusted by default: it may be a typosquat, so the
+    policy rewrite is offered only for a host the reader trusts.
+    """
+    mismatch = index.host_mismatch(pkg_name)
+    if mismatch is None:
+        return None
+    wanted, declared = mismatch
+    where = declared.host or "a local path"
+    return (
+        f"'{pkg_name}' is declared on {where}, not {wanted} -- declare it on {wanted}, "
+        f"or, if {where} is trusted, change the policy require entry to "
+        f"'{declared.require_entry}'"
+    )
+
+
+def _wrong_host_hint(index: DependencyPolicyIndex, subjects: Iterable[PolicySubject]) -> str:
+    """Append the wrong-host fixes to a check message.
+
+    ``apm audit --ci`` prints the message and details, not subject reasons, so
+    the fix must be in the message to reach the user.
+    """
+    fixes = [fix for subject in subjects if (fix := _wrong_host_fix(index, subject.ref))]
+    return f" {'; '.join(fixes)}." if fixes else ""
 
 
 def _check_required_packages_deployed(
@@ -215,33 +314,49 @@ def _check_required_packages_deployed(
         )
 
     index = _required_policy_index(deps, dep_names)
-    lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
-    not_present: list[str] = []
+    unresolved: list[PolicySubject] = []
+    absent: list[PolicySubject] = []
     for req in policy.effective_require:
         pkg_name = req.split("#", 1)[0]
-        lock_name = index.find_name(pkg_name)
-        if lock_name is None:
-            continue  # not in manifest -- check 3 handles this
+        match = index.find(pkg_name)
+        if match is None:
+            # Never skip: the entry cannot locate its lock row by identity.
+            unresolved.append(_unresolved_required_subject(index, pkg_name))
+        elif match.locked_in(lock) is None:
+            # PRESENCE, not deployment: the package must appear in the lockfile.
+            absent.append(
+                PolicySubject(
+                    pkg_name,
+                    "required package absent from the lockfile -- run "
+                    "`apm install --no-policy` to repair it, then reinstall normally",
+                    remedy=None,
+                )
+            )
 
-        # PRESENCE, not deployment: the package must appear in the lockfile.
-        if lock_by_name.get(lock_name) is None:
-            not_present.append(pkg_name)
-
-    if not not_present:
+    if not unresolved and not absent:
         return CheckResult(
             name="required-packages-deployed",
             passed=True,
             message="All required packages present in lockfile",
         )
+    messages: list[str] = []
+    if absent:
+        messages.append(
+            f"{len(absent)} required package(s) absent from the lockfile. Hint: run "
+            "`apm install --no-policy` to repair the lockfile, then reinstall normally."
+        )
+    if unresolved:
+        messages.append(
+            f"{len(unresolved)} require entry(ies) match no declared package."
+            + _wrong_host_hint(index, unresolved)
+        )
+    subjects = absent + unresolved
     return CheckResult(
         name="required-packages-deployed",
         passed=False,
-        message=(
-            f"{len(not_present)} required package(s) absent from the lockfile. "
-            "Hint: run `apm install --no-policy` to repair the lockfile, "
-            "then reinstall normally."
-        ),
-        details=not_present,
+        message=" ".join(messages),
+        details=[subject.ref for subject in subjects],
+        subjects=tuple(subjects),
     )
 
 
@@ -271,14 +386,16 @@ def _check_required_executable_untrusted(
     from ..security.executables import TRUST_DEPLOYED
 
     index = _required_policy_index(deps, dep_names)
-    lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
     untrusted: list[str] = []
+    misnamed: list[PolicySubject] = []
     for req in required:
         pkg_name = req.split("#", 1)[0]
-        lock_name = index.find_name(pkg_name)
-        if lock_name is None:
-            continue  # presence is audited by required-packages / -deployed
-        locked = lock_by_name.get(lock_name)
+        match = index.find(pkg_name)
+        if match is None:
+            if index.host_mismatch(pkg_name) is not None:
+                misnamed.append(_unresolved_required_subject(index, pkg_name))
+            continue  # undeclared: presence is audited by required-packages / -deployed
+        locked = match.locked_in(lock)
         # Trusted when exec_status is absent (no executables declared) or when
         # the executable gate recorded a deployed state. Gated or denied
         # required executables are untrusted.
@@ -287,22 +404,40 @@ def _check_required_executable_untrusted(
         ):
             untrusted.append(pkg_name)
 
-    if not untrusted:
+    if not untrusted and not misnamed:
         return CheckResult(
             name="required-executable-untrusted",
             passed=True,
             message="All required executables are trusted",
         )
-    recommend = set(exec_policy.recommend or ())
-    bulk_eligible = [pkg for pkg in untrusted if pkg in recommend]
-    remedy = "Trust them to deploy: `apm approve <package>` per package."
-    if bulk_eligible:
-        remedy += " Org-recommended packages can be bulk-trusted with `apm approve --recommended`."
+    messages: list[str] = []
+    if untrusted:
+        recommend = set(exec_policy.recommend or ())
+        remedy = "Trust them to deploy: `apm approve <package>` per package."
+        if any(pkg in recommend for pkg in untrusted):
+            remedy += (
+                " Org-recommended packages can be bulk-trusted with `apm approve --recommended`."
+            )
+        messages.append(f"{len(untrusted)} required executable(s) present but untrusted. {remedy}")
+    if misnamed:
+        messages.append(
+            f"{len(misnamed)} required executable(s) name another host."
+            + _wrong_host_hint(index, misnamed)
+        )
+    subjects = [
+        PolicySubject(
+            pkg,
+            f"required executable present but untrusted -- trust it with `apm approve {pkg}`",
+            remedy=None,
+        )
+        for pkg in untrusted
+    ] + misnamed
     return CheckResult(
         name="required-executable-untrusted",
         passed=False,
-        message=(f"{len(untrusted)} required executable(s) present but untrusted. {remedy}"),
-        details=untrusted,
+        message=" ".join(messages),
+        details=[subject.ref for subject in subjects],
+        subjects=tuple(subjects),
     )
 
 
@@ -323,43 +458,45 @@ def _check_required_package_version(
         )
 
     resolution = policy.require_resolution
-    violations: list[str] = []
-    warnings: list[str] = []
+    violations: list[PolicySubject] = []
+    warnings: list[PolicySubject] = []
 
     index = _required_policy_index(deps, dep_names)
-    lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
 
     for _req, parts in pinned:
         pkg_name, expected_ref = parts[0], parts[1]
 
-        match = index.find_name(pkg_name)
         # Without a manifest dependency there is no host/source authority from
-        # which to derive casing. Preserve the legacy raw lock lookup; check 3
-        # reports the required package as absent.
-        lock_name = match if match is not None else pkg_name
-        locked = lock_by_name.get(lock_name)
+        # which to derive casing: an undeclared name keeps the legacy raw lock
+        # lookup (checks 3 and 4 report it unmatched). A same-path package
+        # declared on another host is never compared; check 3 names the fix.
+        match = index.find_or_undeclared(pkg_name)
+        locked = match.locked_in(lock) if match is not None else None
         if locked is not None:
             actual_ref = locked.resolved_ref or ""
             if actual_ref != expected_ref:
-                detail = f"{pkg_name}: expected ref '{expected_ref}', got '{actual_ref}'"
+                detail = PolicySubject(
+                    pkg_name,
+                    f"expected ref '{expected_ref}', got '{actual_ref}'",
+                    remedy=None,
+                )
                 if resolution == "block" or resolution == "policy-wins":  # noqa: PLR1714
                     violations.append(detail)
                 else:  # project-wins
                     warnings.append(detail)
 
     if not violations:
-        return CheckResult(
-            name="required-package-version",
-            passed=True,
-            message="Required package versions match"
+        return _subjects_result(
+            "required-package-version",
+            "Required package versions match"
             + (f" (warnings: {len(warnings)})" if warnings else ""),
-            details=warnings,
+            warnings,
+            passed=True,
         )
-    return CheckResult(
-        name="required-package-version",
-        passed=False,
-        message=f"{len(violations)} version mismatch(es)",
-        details=violations,
+    return _subjects_result(
+        "required-package-version",
+        f"{len(violations)} version mismatch(es)",
+        violations,
     )
 
 
@@ -377,10 +514,11 @@ def _check_transitive_depth(
             else "No lockfile to check",
         )
 
-    violations: list[str] = []
-    for key, dep in lock.dependencies.items():
-        if dep.depth > policy.max_depth:
-            violations.append(f"{key}: depth {dep.depth} exceeds limit {policy.max_depth}")
+    violations = [
+        PolicySubject(key, f"depth {dep.depth} exceeds limit {policy.max_depth}", remedy=None)
+        for key, dep in lock.dependencies.items()
+        if dep.depth > policy.max_depth
+    ]
 
     if not violations:
         return CheckResult(
@@ -388,11 +526,10 @@ def _check_transitive_depth(
             passed=True,
             message=f"All dependencies within depth limit ({policy.max_depth})",
         )
-    return CheckResult(
-        name="transitive-depth",
-        passed=False,
-        message=f"{len(violations)} dependency(ies) exceed max depth {policy.max_depth}",
-        details=violations,
+    return _subjects_result(
+        "transitive-depth",
+        f"{len(violations)} dependency(ies) exceed max depth {policy.max_depth}",
+        violations,
     )
 
 
@@ -410,11 +547,11 @@ def _check_mcp_allowlist(
             message="No MCP allow list configured",
         )
 
-    violations: list[str] = []
+    violations: list[PolicySubject] = []
     for mcp in mcp_deps:
         allowed, reason = check_mcp_allowed(mcp.name, policy)
         if not allowed and "not in allowed" in reason:
-            violations.append(f"{mcp.name}: {reason}")
+            violations.append(PolicySubject(mcp.name, reason))
 
     if not violations:
         return CheckResult(
@@ -422,11 +559,10 @@ def _check_mcp_allowlist(
             passed=True,
             message="All MCP servers match allow list",
         )
-    return CheckResult(
-        name="mcp-allowlist",
-        passed=False,
-        message=f"{len(violations)} MCP server(s) not in allow list",
-        details=violations,
+    return _subjects_result(
+        "mcp-allowlist",
+        f"{len(violations)} MCP server(s) not in allow list",
+        violations,
     )
 
 
@@ -444,11 +580,11 @@ def _check_mcp_denylist(
             message="No MCP deny list configured",
         )
 
-    violations: list[str] = []
+    violations: list[PolicySubject] = []
     for mcp in mcp_deps:
         allowed, reason = check_mcp_allowed(mcp.name, policy)
         if not allowed and "denied by pattern" in reason:
-            violations.append(f"{mcp.name}: {reason}")
+            violations.append(PolicySubject(mcp.name, reason))
 
     if not violations:
         return CheckResult(
@@ -456,19 +592,42 @@ def _check_mcp_denylist(
             passed=True,
             message="No MCP servers match deny list",
         )
-    return CheckResult(
-        name="mcp-denylist",
-        passed=False,
-        message=f"{len(violations)} MCP server(s) match deny list",
-        details=violations,
+    return _subjects_result(
+        "mcp-denylist",
+        f"{len(violations)} MCP server(s) match deny list",
+        violations,
     )
 
 
-def _check_mcp_transport(
+def _effective_mcp_transports(
     mcp_deps: list,
     policy: McpPolicy,
+) -> Mapping[str, EffectiveTransport]:
+    """Resolve each server's effective canonical transports for check 9.
+
+    Resolution queries the MCP registry for every registry server, with or
+    without a declared ``transport:`` (install writes what the registry
+    serves), so it runs only when ``mcp.transport.allow`` is configured.
+    """
+    if policy.transport.allow is None or not mcp_deps:
+        return {}
+    from ..integration.mcp_transport_resolution import resolve_effective_mcp_transports
+
+    return resolve_effective_mcp_transports(mcp_deps)
+
+
+def _check_mcp_transport(
+    effective_transports: Mapping[str, EffectiveTransport],
+    policy: McpPolicy,
 ) -> CheckResult:
-    """Check 9: MCP transport values match policy allow list."""
+    """Check 9: effective MCP transports match the policy allow list.
+
+    *effective_transports* maps each server name to the canonical
+    transports APM may write for it, or an ``UnresolvedTransport`` reason.
+    ``policy.transport.allow`` is canonical from the parser.
+    """
+    from ..mcp_transport import UnresolvedTransport
+
     allowed_transports = policy.transport.allow
     if allowed_transports is None:
         return CheckResult(
@@ -477,12 +636,29 @@ def _check_mcp_transport(
             message="No MCP transport restrictions configured",
         )
 
-    violations: list[str] = []
-    for mcp in mcp_deps:
-        if mcp.transport and mcp.transport not in allowed_transports:
+    allowed_label = f"[{', '.join(allowed_transports)}]"
+    violations: list[PolicySubject] = []
+    for name, transports in effective_transports.items():
+        if isinstance(transports, UnresolvedTransport):
             violations.append(
-                f"{mcp.name}: transport '{mcp.transport}' not in allowed {allowed_transports}"
+                PolicySubject(
+                    name,
+                    f"effective transport unknown ({transports.reason}); "
+                    f"cannot check it against allowed {allowed_label}. Check the server "
+                    "name and registry URL, or make the MCP registry reachable, then "
+                    "retry. A declared 'transport:' cannot stand in: install writes the "
+                    "transport the registry serves",
+                )
             )
+            continue
+        violations.extend(
+            PolicySubject(
+                name,
+                f"transport '{transport}' not in allowed {allowed_label}",
+            )
+            for transport in sorted(transports)
+            if transport not in allowed_transports
+        )
 
     if not violations:
         return CheckResult(
@@ -490,11 +666,10 @@ def _check_mcp_transport(
             passed=True,
             message="All MCP transports comply with policy",
         )
-    return CheckResult(
-        name="mcp-transport",
-        passed=False,
-        message=f"{len(violations)} MCP transport violation(s)",
-        details=violations,
+    return _subjects_result(
+        "mcp-transport",
+        f"{len(violations)} MCP transport violation(s)",
+        violations,
     )
 
 
@@ -519,30 +694,72 @@ def _check_mcp_self_defined(
             message="No self-defined MCP servers found",
         )
 
-    details = [f"{m.name}: self-defined server" for m in self_defined]
+    subjects = [PolicySubject(m.name, "self-defined server") for m in self_defined]
     if self_defined_policy == "deny":
-        return CheckResult(
-            name="mcp-self-defined",
-            passed=False,
-            message=f"{len(self_defined)} self-defined MCP server(s) denied by policy",
-            details=details,
+        return _subjects_result(
+            "mcp-self-defined",
+            f"{len(self_defined)} self-defined MCP server(s) denied by policy",
+            subjects,
         )
     # warn -- pass but with details
-    return CheckResult(
-        name="mcp-self-defined",
+    return _subjects_result(
+        "mcp-self-defined",
+        f"{len(self_defined)} self-defined MCP server(s) (warn)",
+        subjects,
         passed=True,
-        message=f"{len(self_defined)} self-defined MCP server(s) (warn)",
-        details=details,
+    )
+
+
+def mcp_policy_checks(mcp_list: list, policy: ApmPolicy) -> list[CheckResult]:
+    """Run org MCP checks 7-10 (allow, deny, transport, self-defined) on *mcp_list*.
+
+    The one composition of the MCP checks: the install gate and the native
+    Claude plugin route (which vets the servers a plugin declares) both use it.
+    """
+    return [
+        _check_mcp_allowlist(mcp_list, policy.mcp),
+        _check_mcp_denylist(mcp_list, policy.mcp),
+        _check_mcp_transport(_effective_mcp_transports(mcp_list, policy.mcp), policy.mcp),
+        _check_mcp_self_defined(mcp_list, policy.mcp),
+    ]
+
+
+def mcp_policy_restricts(policy: ApmPolicy) -> bool:
+    """Whether checks 7-10 can reject some self-defined server.
+
+    A server APM cannot read can only be shown to comply with a policy that
+    restricts nothing; any allow, deny, transport or self-defined rule makes
+    it fail closed.
+    """
+    mcp = policy.mcp
+    return bool(
+        mcp.allow is not None
+        or mcp.deny
+        or mcp.transport.allow is not None
+        or mcp.self_defined == "deny"
     )
 
 
 def _check_compilation_target(
-    raw_yml: dict | None,
+    targets: tuple[str, ...] | None,
     policy: CompilationPolicy,
+    *,
+    source: str = "apm.yml",
 ) -> CheckResult:
-    """Check 11: compilation target matches policy."""
-    enforce = policy.target.enforce
-    allow = policy.target.allow
+    """Check 11: the selected target profiles match compilation-target policy.
+
+    *targets* must be an :attr:`EffectiveTargetDecision.canonical_targets`
+    projection: aliases resolved, ``all`` expanded, MCP-only targets mapped to
+    their primitive profile. ``None`` or empty means nothing is selected.
+    """
+    from ..core.target_detection import (
+        EffectiveTargetDecision,
+        canonical_policy_target_name,
+        canonical_policy_target_names,
+    )
+
+    enforce = canonical_policy_target_name(policy.target.enforce)
+    allow = canonical_policy_target_names(policy.target.allow)
 
     if not enforce and allow is None:
         return CheckResult(
@@ -551,34 +768,36 @@ def _check_compilation_target(
             message="No compilation target restrictions configured",
         )
 
-    target = (raw_yml or {}).get("target")
-    if not target:
+    if not targets:
         return CheckResult(
             name="compilation-target",
             passed=True,
             message="No compilation target set in manifest",
         )
 
-    # Normalize target to a list for uniform checking
-    target_list = target if isinstance(target, list) else [target]
-
+    target_list = list(targets)
     if enforce:
-        if enforce not in target_list:
+        required = (
+            EffectiveTargetDecision("all", "policy").canonical_targets or ()
+            if enforce == "all"
+            else (enforce,)
+        )
+        missing = [name for name in required if name not in target_list]
+        if missing:
             return CheckResult(
                 name="compilation-target",
                 passed=False,
                 message=f"Enforced target '{enforce}' not present in {target_list}",
-                details=[f"target: {target}, enforced: {enforce}"],
+                details=[f"targets: {target_list} (source: {source}), enforced: {enforce}"],
             )
     elif allow is not None:
-        allow_set = set(allow) if isinstance(allow, (list, tuple)) else {allow}
-        disallowed = [t for t in target_list if t not in allow_set]
+        disallowed = [name for name in target_list if name not in allow]
         if disallowed:
             return CheckResult(
                 name="compilation-target",
                 passed=False,
-                message=f"Target(s) {disallowed} not in allowed list {sorted(allow_set)}",
-                details=[f"target: {target}, allowed: {sorted(allow_set)}"],
+                message=f"Target(s) {disallowed} not in allowed list {sorted(allow)}",
+                details=[f"targets: {target_list} (source: {source}), allowed: {sorted(allow)}"],
             )
 
     return CheckResult(
@@ -1018,12 +1237,13 @@ def _check_registry_source(
         return CheckResult(name=check_name, passed=True, message="No registry source policy")
 
     violations: list[str] = []
+    subjects: list[PolicySubject] = []
 
     # Fail-closed: required registry names must be configured.
     for req_name in policy.require:
         if not registries_map or req_name not in registries_map:
             violations.append(
-                f"required registry '{req_name}' is not configured — "
+                f"required registry '{req_name}' is not configured -- "
                 "add it to the 'registries:' block or via 'apm config set registry."
                 f"{req_name}.url <url>'"
             )
@@ -1033,24 +1253,27 @@ def _check_registry_source(
         is_registry = getattr(dep, "source", None) == "registry"
         registry_name = getattr(dep, "registry_name", None)
 
+        reason = None
         if not policy.allow_non_registry and not is_registry:
-            violations.append(
-                f"{key}: non-registry source not permitted (policy requires registry sources only)"
-            )
-            continue
-
-        if policy.require and is_registry and registry_name not in policy.require:
-            violations.append(
-                f"{key}: sourced from registry '{registry_name}' "
+            reason = "non-registry source not permitted (policy requires registry sources only)"
+        elif policy.require and is_registry and registry_name not in policy.require:
+            reason = (
+                f"sourced from registry '{registry_name}' "
                 f"but policy requires one of {sorted(policy.require)}"
             )
+        if reason is not None:
+            violations.append(f"{key}: {reason}")
+            subjects.append(PolicySubject(key, reason, remedy=None))
 
     if violations:
+        # A missing registry is a configuration gap with no dependency to
+        # name: leave ``subjects`` empty so the whole check is reported.
         return CheckResult(
             name=check_name,
             passed=False,
             message=f"{len(violations)} registry source violation(s)",
             details=violations,
+            subjects=tuple(subjects) if len(subjects) == len(violations) else (),
         )
     return CheckResult(
         name=check_name,
@@ -1103,7 +1326,7 @@ def _check_pinned_constraints(
             message="Pinned-constraint requirement disabled",
         )
 
-    violations: list[str] = []
+    violations: list[PolicySubject] = []
     for dep in deps:
         unique_key = dep.get_unique_key()
         if direct_dep_keys is not None and unique_key not in direct_dep_keys:
@@ -1113,8 +1336,13 @@ def _check_pinned_constraints(
             reason = classify_unbounded_reason(judged)
             if reason is None:
                 continue
-            key = judged.get_canonical_dependency_string()
-            violations.append(f"{key}: {humanize_reason(reason, judged)}")
+            violations.append(
+                PolicySubject(
+                    judged.get_canonical_dependency_string(),
+                    humanize_reason(reason, judged),
+                    remedy=PolicyRemedy.PIN,
+                )
+            )
     violations = list(dict.fromkeys(violations))
 
     if not violations:
@@ -1124,14 +1352,11 @@ def _check_pinned_constraints(
             message="All dependencies use pinned constraints",
         )
 
-    return CheckResult(
-        name=check_name,
-        passed=False,
-        message=(
-            f"{len(violations)} dependency(ies) use unbounded constraints "
-            "(hint: pin to a semver range, literal tag, or SHA)"
-        ),
-        details=violations,
+    return _subjects_result(
+        check_name,
+        f"{len(violations)} dependency(ies) use unbounded constraints "
+        "(hint: pin to a semver range, literal tag, or SHA)",
+        violations,
     )
 
 
@@ -1197,7 +1422,9 @@ def run_dependency_policy_checks(
     lockfile=None,
     policy: ApmPolicy,
     mcp_deps=None,
-    effective_target: str | list[str] | None = None,
+    mcp_brought_in_by: Mapping[str, str] | None = None,
+    effective_target: tuple[str, ...] | None = None,
+    effective_target_source: str = "effective target",
     fetch_outcome: str | None = None,
     fail_fast: bool = True,
     manifest_includes=_INCLUDES_NOT_PROVIDED,
@@ -1227,10 +1454,19 @@ def run_dependency_policy_checks(
         Iterable of ``MCPDependency`` objects, or ``None``.  When the
         resolved set includes MCP entries they are checked against
         ``policy.mcp``.
+    mcp_brought_in_by:
+        Transitive MCP server name -> key of the direct apm.yml dependency
+        that brings it in (``CurrentMcpConfigView.brought_in_by``). Removal
+        hints for transitive servers name that entry; servers absent from
+        the map get no apm.yml edit hint.
     effective_target:
-        The post-targets-phase compilation target string, or ``None``.
-        When ``None`` target/compilation checks are **skipped** (they
-        belong to the separate W2-target-aware call).
+        The ``EffectiveTargetDecision.canonical_targets`` projection of the
+        resolved target selection, or ``None``. When ``None``
+        target/compilation checks are **skipped** (they belong to the
+        separate W2-target-aware call).
+    effective_target_source:
+        Where the target selection came from (``apm.yml``, ``--target flag``,
+        ...), named in compilation-target violation details.
     fetch_outcome:
         Human-readable label for diagnostic context (e.g.
         ``"cached"``, ``"fetched"``).  Currently informational only.
@@ -1343,16 +1579,17 @@ def run_dependency_policy_checks(
     # When mcp_deps is an empty list (provided but no MCP deps), still
     # run MCP checks so they report "no X configured" for completeness.
     if mcp_deps is not None:
-        remaining_checks += [
-            _check_mcp_allowlist(mcp_list, policy.mcp),
-            _check_mcp_denylist(mcp_list, policy.mcp),
-            _check_mcp_transport(mcp_list, policy.mcp),
-            _check_mcp_self_defined(mcp_list, policy.mcp),
-        ]
+        mcp_checks = mcp_policy_checks(mcp_list, policy)
+        remaining_checks += _with_mcp_declarers(mcp_checks, mcp_list, mcp_brought_in_by)
     # Target / compilation + manifest tail checks.
     if effective_target is not None:
-        synthetic_yml = {"target": effective_target}
-        remaining_checks.append(_check_compilation_target(synthetic_yml, policy.compilation))
+        remaining_checks.append(
+            _check_compilation_target(
+                effective_target,
+                policy.compilation,
+                source=effective_target_source,
+            )
+        )
     if manifest_includes is not _INCLUDES_NOT_PROVIDED:
         remaining_checks.append(_check_includes_explicit(manifest_includes, policy.manifest))
     for check in remaining_checks:
@@ -1398,6 +1635,8 @@ def run_policy_checks(
     policy: ApmPolicy,
     *,
     fail_fast: bool = True,
+    modules_root: Path | None = None,
+    no_policy: bool = False,
 ) -> CIAuditResult:
     """Run the full set of policy checks against a project on disk.
 
@@ -1407,12 +1646,16 @@ def run_policy_checks(
     checks (compilation, manifest, unmanaged files) that require the raw
     ``apm.yml``.
 
+    *modules_root* and *no_policy* select the same MCP view the baseline
+    config-consistency check reads (the CI scratch replay, when prepared).
+
     These checks are ADDED to baseline checks -- caller runs both.
     When *fail_fast* is ``True`` (default), stops after the first
     failing check.
     Returns :class:`CIAuditResult` with individual check results.
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..models.dependency.replacement import project_manifest_dependencies
     from ._shared import _parse_apm_yml_safe
 
     result = CIAuditResult()
@@ -1433,18 +1676,26 @@ def run_policy_checks(
     # Load raw YAML for field-level checks
     raw_yml = _load_raw_apm_yml(project_root)
 
-    # Get dependencies from manifest (disk view)
-    apm_deps = manifest.get_apm_dependencies()
-    mcp_deps = manifest.get_mcp_dependencies()
+    # Every MCP server the lock keeps as baseline deploys (root, transitive and
+    # recorded local-bundle servers), so policy judges the audit view's set,
+    # as the install preflight judges the merged set.
+    mcp_brought_in_by = None
+    if lock is None:
+        mcp_deps = manifest.get_all_mcp_dependencies()
+    else:
+        from .ci_checks import audit_mcp_view
 
-    # Read effective target from raw manifest for the full-project path
-    # NOTE: the wrapper does NOT pass effective_target to the dep seam.
-    # Target checks run as disk-level checks below (reading raw_yml),
-    # because the wrapper has the on-disk manifest.  The install pipeline
-    # will pass effective_target directly (W2-target-aware).
+        view, _admission = audit_mcp_view(
+            manifest, lock, modules_root=modules_root, no_policy=no_policy
+        )
+        mcp_deps = list(view.kept_dependencies())
+        mcp_brought_in_by = view.brought_in_by
 
     try:
         source_deps = _audit_source_dependencies(manifest, lock)
+        # Production declarations through ``replace:``, as the install gate
+        # judges them: required-package matching follows source replacement.
+        apm_deps = project_manifest_dependencies(manifest, include_dev=False)
     except ValueError as exc:
         result.checks.append(
             CheckResult(
@@ -1463,7 +1714,8 @@ def run_policy_checks(
         lockfile=lock,
         policy=policy,
         mcp_deps=mcp_deps,
-        # effective_target=None: target checks handled below from raw_yml
+        mcp_brought_in_by=mcp_brought_in_by,
+        # effective_target=None: the manifest target check runs below.
         fail_fast=fail_fast,
         manifest_includes=manifest.includes,
         registries=getattr(manifest, "registries", None),
@@ -1492,8 +1744,19 @@ def run_policy_checks(
 
     # -- Disk-level checks that only apply to full-project audits --
 
-    # Compilation checks (11-13) -- all run from raw_yml in wrapper
-    if _run(_check_compilation_target(raw_yml, policy.compilation)):
+    # Compilation checks (11-13). Audit judges the targets the manifest
+    # declares, through the same projection the install gate uses.
+    from ..core.target_detection import EffectiveTargetDecision
+    from ..models.apm_package import package_target_selection
+
+    manifest_decision = EffectiveTargetDecision(package_target_selection(manifest), "apm.yml")
+    if _run(
+        _check_compilation_target(
+            manifest_decision.canonical_targets,
+            policy.compilation,
+            source=manifest_decision.source,
+        )
+    ):
         return result
     if _run(_check_compilation_strategy(raw_yml, policy.compilation)):
         return result

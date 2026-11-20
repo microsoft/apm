@@ -79,6 +79,21 @@ class TestMarketplaceAdd:
         assert "apm install <plugin>@addy-agent-skills" in result.output
 
     @patch("apm_cli.marketplace.registry.add_marketplace")
+    @patch("apm_cli.marketplace.registration.probe_registration")
+    def test_failed_first_add_never_suggests_update(self, mock_probe, mock_add, runner):
+        """Nothing is registered, so the retry is the add itself (#3994)."""
+        from apm_cli.commands.marketplace import marketplace
+        from apm_cli.marketplace.errors import MarketplaceFetchError
+
+        mock_probe.side_effect = MarketplaceFetchError("catalog", "HTTP 503")
+        result = runner.invoke(marketplace, ["add", "acme/catalog", "--name", "team"])
+        assert result.exit_code == 1
+        flat = " ".join(result.output.split())
+        assert "rerun this 'apm marketplace add' command" in flat
+        assert "marketplace update" not in flat
+        mock_add.assert_not_called()
+
+    @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_cli_name_overrides_manifest(self, mock_detect, mock_fetch, mock_add, runner):
@@ -360,7 +375,7 @@ class TestMarketplaceAdd:
         requests_seen: list[str] = []
 
         class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
+            def request(self, method, url, headers=None, timeout=None, stream=False, **_kwargs):
                 assert stream is True
                 requests_seen.append(url)
                 return Response()
@@ -417,7 +432,7 @@ class TestMarketplaceAdd:
                 return None
 
         class Session:
-            def get(self, url, headers=None, timeout=None, stream=False):
+            def request(self, method, url, headers=None, timeout=None, stream=False, **_kwargs):
                 assert stream is True
                 return Response()
 
@@ -872,6 +887,15 @@ class TestSearch:
         result = runner.invoke(search, ["security"])
         assert result.exit_code != 0
         assert "QUERY@MARKETPLACE" in result.output
+
+    @pytest.mark.parametrize("expression", ["security", "@skills"])
+    def test_search_format_hint_names_real_command(self, runner, expression):
+        from apm_cli.commands.marketplace import search
+
+        result = runner.invoke(search, [expression])
+        output = " ".join(result.output.split())
+        assert "apm search security@skills" in output
+        assert "apm marketplace search" not in output
 
     def test_search_empty_query(self, runner):
         from apm_cli.commands.marketplace import search

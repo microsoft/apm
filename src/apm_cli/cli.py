@@ -5,10 +5,12 @@ Thin wiring layer  -- all command logic lives in ``apm_cli.commands.*`` modules.
 
 # ruff: noqa: E402
 
+import contextlib
 import ctypes
 import importlib
 import logging
 import os
+import signal
 import sys
 import warnings
 
@@ -72,8 +74,7 @@ _CLI_EPILOG = (
     "  apm outdated                   See what's drifted from upstream\n"
     "  apm update                     Refresh refs and rewrite the lockfile\n"
     "  apm audit --ci                 Validate lockfile integrity for CI gates\n"
-    "  apm doctor                     Diagnose environment problems\n"
-    "  apm run <script>               Execute a script from apm.yml"
+    "  apm doctor                     Diagnose environment problems"
 )
 
 
@@ -151,7 +152,7 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
         "unpack",
         "apm_cli.commands.pack",
         "unpack_cmd",
-        "[Deprecated] Extract an APM bundle into the current project. Use 'apm install <bundle-path>' instead -- this command will be removed in a future release.",
+        "[Deprecated] Extract an APM bundle into the current project. Reads only '--format apm' bundles; install plugin bundles (the default) with 'apm install <bundle-path>'. This command will be removed in a future release.",
     ),
     (
         "update",
@@ -501,10 +502,26 @@ def _configure_encoding() -> None:
             _warn_encoding_issue(current_cp)
 
 
+def _interrupt_on_sigterm(signum: int, frame: object) -> None:
+    """Treat SIGTERM like Ctrl+C so rollback, residue reporting and reaping run.
+
+    Default handling is restored first, so a second SIGTERM terminates.
+    """
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    raise KeyboardInterrupt
+
+
+def _route_sigterm_to_interrupt() -> None:
+    """Install :func:`_interrupt_on_sigterm` for this process (main thread)."""
+    with contextlib.suppress(ValueError, OSError, AttributeError):
+        signal.signal(signal.SIGTERM, _interrupt_on_sigterm)
+
+
 def main():
     """Main entry point for the CLI."""
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
+    _route_sigterm_to_interrupt()
     try:
         cli(obj={})
     except Exception as e:

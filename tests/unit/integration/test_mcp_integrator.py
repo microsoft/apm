@@ -359,7 +359,7 @@ class TestBuildSelfDefinedInfo:
         info = MCPIntegrator._build_self_defined_info(dep)
         assert "remotes" in info
         assert info["remotes"][0]["url"] == "https://example.com/mcp"
-        assert info["remotes"][0]["transport_type"] == "http"
+        assert info["remotes"][0]["transport"] == "streamable-http"
         assert "packages" not in info
 
     def test_sse_transport_builds_remote(self):
@@ -372,7 +372,7 @@ class TestBuildSelfDefinedInfo:
             "stream-svc", transport="streamable-http", url="https://example.com/mcp"
         )
         info = MCPIntegrator._build_self_defined_info(dep)
-        assert info["remotes"][0]["transport_type"] == "streamable-http"
+        assert info["remotes"][0]["transport"] == "streamable-http"
         assert info["remotes"][0]["url"] == "https://example.com/mcp"
         assert "packages" not in info
 
@@ -1130,7 +1130,7 @@ class TestGateProjectScopedRuntimes:
             apm_config={},
             explicit_target="copilot",
         )
-        assert result == ["copilot", "vscode"]
+        assert result == ["copilot"]
 
     def test_user_scope_explicit_target_overrides_config(self, tmp_path):
         result = self._gate(
@@ -1140,7 +1140,7 @@ class TestGateProjectScopedRuntimes:
             apm_config={"targets": ["claude"]},
             explicit_target="copilot",
         )
-        assert result == ["copilot", "vscode"]
+        assert result == ["copilot"]
 
     def test_user_scope_apm_config_none_passes_all_runtimes(self, tmp_path):
         result = self._gate(
@@ -1205,8 +1205,8 @@ class TestGateProjectScopedRuntimes:
         assert result == ["claude"]
 
     def test_targets_multiple_values_keeps_all_listed(self, tmp_path):
-        # `vscode` runtime canonicalizes to `copilot`, so when copilot is
-        # in active targets both `copilot` and `vscode` runtime writes pass.
+        # `vscode` is no longer an MCP runtime (#3866): copilot owns the
+        # project destination, so a stray `vscode` runtime never passes.
         result = self._gate(
             ["claude", "copilot", "vscode", "codex", "cursor"],
             user_scope=False,
@@ -1214,7 +1214,7 @@ class TestGateProjectScopedRuntimes:
             apm_config={"targets": ["claude", "copilot"]},
             explicit_target=None,
         )
-        assert result == ["claude", "copilot", "vscode"]
+        assert result == ["claude", "copilot"]
 
     # -- no targets field: directory-detection acts as the whitelist ------
 
@@ -1229,7 +1229,7 @@ class TestGateProjectScopedRuntimes:
             apm_config={},
             explicit_target=None,
         )
-        assert result == ["copilot", "vscode"]
+        assert result == ["copilot"]
 
     def test_no_targets_with_ambiguous_signals_fails_closed(self, tmp_path):
         # >=2 signals + no flag + no targets: -> AmbiguousHarnessError.
@@ -1248,8 +1248,8 @@ class TestGateProjectScopedRuntimes:
     # -- explicit_target CLI flag overrides config -------------------------
 
     def test_explicit_target_overrides_config(self, tmp_path):
-        # vscode runtime -> copilot canonical; gate keeps both vscode AND
-        # copilot when the flag resolves to copilot.
+        # The deprecated vscode flag selects copilot; only the copilot
+        # runtime writes (#3866).
         result = self._gate(
             ["claude", "copilot", "vscode", "codex"],
             user_scope=False,
@@ -1257,7 +1257,7 @@ class TestGateProjectScopedRuntimes:
             apm_config={"targets": ["claude", "copilot"]},
             explicit_target="vscode",
         )
-        assert result == ["copilot", "vscode"]
+        assert result == ["copilot"]
 
     def test_explicit_target_without_config(self, tmp_path):
         result = self._gate(
@@ -1447,3 +1447,26 @@ class TestGateProjectScopedRuntimes:
         # contributor collapsing to a single space would silently break
         # provenance-line parity with the install phase.
         assert re.search(r"Skipped MCP config for [^(]+  \(active targets:", out)
+
+
+class TestExcludeReadsLikeTarget:
+    """``--exclude`` folds case, honours the vscode alias and never ignores silently (C4)."""
+
+    def test_case_and_alias_select_copilot(self, capsys) -> None:
+        from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
+
+        for value in ("COPILOT", "VSCode", "vscode"):
+            assert "copilot" not in filter_excluded_mcp_runtimes(["copilot", "claude"], value)
+
+    def test_unknown_value_warns(self, capsys, monkeypatch) -> None:
+        from apm_cli.integration import mcp_user_scope_runtimes
+        from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
+
+        monkeypatch.setattr(mcp_user_scope_runtimes, "_unknown_exclusions_warned", set())
+        assert filter_excluded_mcp_runtimes(["claude"], "bogus") == ["claude"]
+        captured = capsys.readouterr()
+        assert "names no target or MCP runtime" in (captured.out + captured.err).replace("\n", " ")
+        # Frozen install resolves runtimes twice; the warning stays single.
+        assert filter_excluded_mcp_runtimes(["claude"], "bogus") == ["claude"]
+        captured = capsys.readouterr()
+        assert "names no target" not in captured.out + captured.err

@@ -38,11 +38,13 @@ For a read-only install that pins to whatever is already in `apm.lock.yaml` -- t
 
 On a fresh clone or CI runner without local deployment receipts (for example a scheduled update), `apm update --yes` replaces committed skill files that match what the currently locked version renders, fetched from its locked commit. Lockfile hashes are never that proof. If any of those files was edited locally, the update exits nonzero before writing any deployed file or `apm.lock.yaml`; move the file aside and retry.
 
+`apm update` accepts new package content only for a dependency whose resolved commit moved (or that records no commit, such as a registry dependency). It reports how many dependencies got new locked content; `--verbose` lists each new `content_hash`. A dependency whose commit did not change must still match its locked `content_hash`; a mismatch fails closed and leaves `apm.lock.yaml` untouched. Run `apm cache clean` and retry first. To re-pin deliberately, remove that dependency's entry from `apm.lock.yaml` (`$APM_HOME/apm.lock.yaml` with `-g`) and run `apm install` (`apm install -g`).
+
 ## Arguments
 
 | Argument | Description |
 | --- | --- |
-| `PACKAGES...` | Optional. One or more dependency names to refresh (short name like `compliance-rules` or canonical `owner/repo`). Omit to refresh everything. Unknown names exit non-zero with the available list. |
+| `PACKAGES...` | Optional. One or more dependency names to refresh (short name like `compliance-rules`, canonical `owner/repo`, or `plugin@marketplace`). Omit to refresh everything. Unknown names exit non-zero with the available list. |
 
 ## Options
 
@@ -54,7 +56,9 @@ On a fresh clone or CI runner without local deployment receipts (for example a s
 | `--global`, `-g` | off | Refresh user-scope dependencies under `$APM_HOME` (default `~/.apm`) instead of the current project (mirrors `apm install -g`). |
 | `--force` | off | Overwrite locally-authored files and deploy despite critical security findings. It does not change ref freshness: update still requires current upstream refs. Use only after independent verification. |
 | `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
+| `--trust-transitive-mcp` | off | Deploy unapproved transitive MCP servers for this run only, as with [`apm install`](../install/). Neither `apm.yml` nor `apm.lock.yaml` carries this consent; to keep a server, run [`apm approve`](../approve/) on its package. |
 | `--target TARGET`, `-t TARGET` | resolution chain | Agent harness(es) to update for. Accepts the same target values and comma-separated lists as [`apm install --target`](../install/#target-selection). Resolution is `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. |
+| `--legacy-skill-paths` | off | Keep refreshed skills in per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Pass it when the project was installed with `apm install --legacy-skill-paths`. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
 ## Examples
 
@@ -107,6 +111,9 @@ apm update
   restoration is also denied, preserve the reported backups and follow
   [recovery guidance](../../../troubleshooting/install-failures/#windows-file-locks-and-incomplete-recovery)
   before rerunning `apm update`; the prior package may not be active.
+- **Marketplace catalogs are revalidated.** Each catalog behind a `name` + `marketplace` dependency is fetched once per run instead of trusting the cached copy. If it cannot be verified, the update fails with no changes. `plugin@marketplace` selects that dependency. If a marketplace name now points at a different origin than `apm.lock.yaml` recorded (`source_url`), the update fails naming both origins and changes nothing.
+- **Newer lockfiles are refused.** If `apm.lock.yaml` was written by a newer APM, `apm update` exits 1 before changing anything, naming both versions and how to upgrade; see [Lockfile written by a newer APM](../../../troubleshooting/install-failures/#lockfile-written-by-a-newer-apm).
+- **Registry-only proxies.** Under `PROXY_REGISTRY_ONLY=1`, `apm update` re-resolves dependencies locked to direct VCS sources through the registry; a targeted update still requires the entries it keeps to be registry-routed.
 - **Mutable refs require upstream freshness.** APM resolves mutable Git refs through the authenticated upstream. If upstream resolution fails, the update fails instead of silently substituting a ref from the local bare Git cache. Content already cached for the freshly resolved SHA may still be reused.
 - **Registry deps.** Updates stay within the manifest constraint and use the configured registry. An exact `1.7.0` or `=1.7.0` pin remains **unchanged** even when `apm outdated` reports `Latest` as `1.8.0`. To take an outside-constraint release, [select it explicitly](../outdated/#registry-reporting). Unlike read-only `outdated`, `update` can write the manifest, lockfile, modules, and deployed files.
 - **Structured plan.** Output is grouped into four sections:
@@ -117,7 +124,7 @@ apm update
 - **Consent gate.** The prompt defaults to **No**. Without `--yes`, declining (or running in a non-interactive context) aborts with a clean exit; the manifest, lockfile, and workspace are untouched.
 - **No partial consent.** A single prompt covers both revision-pin manifest rewrites and the normal update plan; declining leaves everything unchanged.
 - **`--dry-run` skips the prompt.** It computes and prints the plan, including revision-pin SHA/tag rewrites, but never writes and never asks.
-- **Target contraction is reconciled.** A successful update removes unchanged dependencies' deployed files, lockfile ownership, and merge-hook config/sidecar entries for targets no longer declared in `apm.yml`, even when no dependency ref changes -- same contract as [`apm install`'s target-contraction note](../install/#notes); see [Hooks and commands](../../../producer/author-primitives/hooks-and-commands/#hooks) for what the merge-hook config/sidecar files are.
+- **Target contraction is reconciled.** A successful update removes unchanged dependencies' deployed files, lockfile ownership, and merge-hook config/sidecar entries for targets no longer declared in `apm.yml`, even when no dependency ref changes -- same contract as [`apm install`'s target-contraction note](../install/#notes); see [Hooks and commands](../../../producer/write-primitives/#hooks-and-commands) for what the merge-hook config/sidecar files are.
 - **One target decision covers services.** The effective target used for package deployment is reused for MCP and LSP reconciliation. Saved config targets are not re-detected or dropped after package updates. Required native config failures exit non-zero.
 - **No-op and service-only repair.** An accepted update with no dependency ref changes still reconciles missing MCP/LSP config. A manifest with only MCP/LSP dependencies also uses `apm update` as a configuration repair pass; `--dry-run` previews this without writing.
 - **Empty caches are restored.** If the lockfile expects dependencies but `apm_modules/` has no materialized packages, an otherwise unchanged update restores the cache from the same refs and reports `Restored dependency cache without changing refs.` No confirmation is required because dependency refs do not move.
@@ -140,5 +147,5 @@ For one release after the rename, running `apm update` from a directory **withou
 - [`apm install --frozen`](../install/) -- read-only install pinned to `apm.lock.yaml`; fails on drift. Use this in CI.
 - [CLI upgrades](../../../consumer/update-and-refresh/#update-the-apm-cli-binary) -- package-manager and standalone update paths.
 - [`apm outdated`](../outdated/) -- report dependencies with newer refs available, without changing anything.
-- [Manage dependencies (consumer guide)](../../../consumer/manage-dependencies/) -- task-oriented walkthrough.
+- [Manage dependencies (consumer guide)](../../../consumer/install-packages/) -- task-oriented walkthrough.
 - [Update and refresh](../../../consumer/update-and-refresh/) -- when to use `update`, `install --frozen`, and `self-update`.

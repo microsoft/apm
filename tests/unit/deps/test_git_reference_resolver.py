@@ -92,11 +92,9 @@ def _ctx(
     auth_resolver._build_git_env.return_value = {
         "GIT_HTTP_EXTRAHEADER": "Authorization: Bearer jwt"
     }
-    # Default: pass through primary op result (no bearer fallback).
-    auth_resolver.execute_with_bearer_fallback.side_effect = (
-        lambda dep_ref, primary, bearer, is_fail: types.SimpleNamespace(
-            outcome=primary(), bearer_attempted=False
-        )
+    # Default: one chain attempt with the caller's environment.
+    auth_resolver.try_with_fallback.side_effect = lambda _host, operation, **kwargs: operation(
+        None, dict(kwargs.get("base_env") or {})
     )
 
     host = MagicMock()
@@ -342,25 +340,24 @@ class TestListRemoteRefs:
         host.auth_resolver.build_error_context.assert_not_called()
         assert host.auth_resolver.try_with_fallback.call_args.kwargs["host_type"] == "gitlab"
 
-    def test_ado_basic_with_token_uses_bearer_fallback(self):
+    def test_ado_ls_remote_routes_through_resolver_chain(self):
         host = _ctx(token="ado_pat", auth_scheme="basic")
-        # Wire bearer fallback to be invoked: primary fails with auth signal,
-        # bearer succeeds.
-        bearer_outcome = ("ok", self.SAMPLE)
+        calls: list[dict] = []
 
-        def _fallback(dep_ref, primary, bearer, is_fail):
-            primary()  # call but ignore -- simulate auth failure
-            return types.SimpleNamespace(outcome=bearer_outcome, bearer_attempted=True)
+        def _chain(_host, operation, **kwargs):
+            calls.append(kwargs)
+            return operation("chain-credential", {"GIT_CONFIG_COUNT": "0"})
 
-        host.auth_resolver.execute_with_bearer_fallback.side_effect = _fallback
+        host.auth_resolver.try_with_fallback.side_effect = _chain
 
         with patch("apm_cli.deps.github_downloader.git.cmd.Git") as MockGit:
             MockGit.return_value.ls_remote.return_value = self.SAMPLE
             resolver = GitReferenceResolver(host)
             refs = resolver.list_remote_refs(_dep(ado=True))
-        # Bearer path returned the parsed sample.
         assert len(refs) == 2
-        host.auth_resolver.execute_with_bearer_fallback.assert_called_once()
+        assert len(calls) == 1
+        assert calls[0]["remote_url"].startswith("https://")
+        assert calls[0]["path"]
 
     def test_tokenless_ado_ref_resolution_never_invokes_native_helper(
         self,
@@ -459,7 +456,7 @@ class TestListRemoteRefs:
             auth_scheme="basic",
         )
         host._build_noninteractive_git_env.assert_called_once()
-        host.auth_resolver.execute_with_bearer_fallback.assert_not_called()
+        host.auth_resolver.try_with_fallback.assert_not_called()
         git_env = MockGit.return_value.ls_remote.call_args.kwargs["env"]
         assert "GIT_TOKEN" not in git_env
         assert "GIT_HTTP_EXTRAHEADER" not in git_env

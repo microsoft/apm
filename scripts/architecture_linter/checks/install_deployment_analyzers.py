@@ -13,13 +13,25 @@ check function's definition order) stays visible and auditable in one place.
 
 from __future__ import annotations
 
+from scripts.architecture_linter.checks.install_agent_render_adopt import (
+    GUARD_AGENT_RENDER_ADOPT,
+    check_agent_render_then_adopt,
+)
 from scripts.architecture_linter.checks.install_base_integrator_and_contraction import (
     _GUARD_BASE_INTEGRATOR,
+    _GUARD_CLEANUP_RELEASE,
     _GUARD_PROVENANCE,
     _GUARD_TARGET_CONTRACTION,
     check_base_integrator,
+    check_cleanup_ownership_release,
     check_provenance_state,
     check_target_file_contraction,
+)
+from scripts.architecture_linter.checks.install_bundle_compile_staging import (
+    GUARD as _GUARD_BUNDLE_STAGING,
+)
+from scripts.architecture_linter.checks.install_bundle_compile_staging import (
+    check_bundle_compile_staging,
 )
 from scripts.architecture_linter.checks.install_codex_agent_links import (
     GUARD_CODEX_AGENT_LINKS,
@@ -29,6 +41,10 @@ from scripts.architecture_linter.checks.install_deployment_shared import _rule
 from scripts.architecture_linter.checks.install_dry_run_plan import (
     _GUARD_DRY_RUN_PLAN,
     check_prospective_dry_run_plan,
+)
+from scripts.architecture_linter.checks.install_effective_selection import (
+    GUARD_EFFECTIVE_SELECTION,
+    check_effective_selection,
 )
 from scripts.architecture_linter.checks.install_frozen_and_audit import (
     _GUARD_AUDIT_REPLAY,
@@ -46,10 +62,22 @@ from scripts.architecture_linter.checks.install_lock_parent_placement import (
     GUARD_LOCK_PARENT_PLACEMENT,
     check_lock_parent_placement,
 )
+from scripts.architecture_linter.checks.install_locked_copy_validity import (
+    GUARD as _GUARD_LOCKED_COPY_VALIDITY,
+)
+from scripts.architecture_linter.checks.install_locked_copy_validity import (
+    check_locked_copy_validity,
+)
+from scripts.architecture_linter.checks.install_lsp_capability_gate import (
+    GUARD_LSP_CAPABILITY_GATE,
+    check_lsp_capability_gate,
+)
 from scripts.architecture_linter.checks.install_lsp_plugin import (
+    GUARD_CONSUMER_MANIFEST_REWRITE,
     GUARD_EXECUTABLE_TRUST,
     GUARD_LSP_LIFECYCLE,
     GUARD_LSP_TARGET_CONTRACT,
+    check_consumer_manifest_rewrite,
     check_executable_trust_context,
     check_lsp_lifecycle,
     check_lsp_target_contract,
@@ -58,11 +86,20 @@ from scripts.architecture_linter.checks.install_manifest_snapshot import (
     GUARD_MANIFEST_SNAPSHOT,
     check_manifest_snapshot,
 )
+from scripts.architecture_linter.checks.install_package_content_hash import (
+    GUARD as _GUARD_PACKAGE_CONTENT_HASH,
+)
+from scripts.architecture_linter.checks.install_package_content_hash import (
+    check_package_content_hash,
+)
 from scripts.architecture_linter.checks.install_package_target_authorization import (
     _GUARD_PACKAGE_TARGET,
     check_package_target_authorization,
 )
 from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
+from scripts.architecture_linter.checks.install_portable_trust import (
+    RULES as PORTABLE_TRUST_RULES,
+)
 from scripts.architecture_linter.checks.install_request_and_source import (
     _GUARD_INSTALL_SCOPE,
     _GUARD_OUTCOME,
@@ -75,11 +112,23 @@ from scripts.architecture_linter.checks.install_request_and_source import (
     check_request_defaults,
     check_source_plan,
 )
+from scripts.architecture_linter.checks.install_selection_merge import (
+    GUARD_SELECTION_MERGE,
+    check_selection_merge,
+)
 from scripts.architecture_linter.checks.install_single_file import (
     GUARD as _GUARD_SINGLE_FILE,
 )
 from scripts.architecture_linter.checks.install_single_file import (
     check_single_file_materialization,
+)
+from scripts.architecture_linter.checks.install_skill_adoption_baseline import (
+    GUARD_SKILL_ADOPTION_BASELINE,
+    check_skill_adoption_baseline,
+)
+from scripts.architecture_linter.checks.install_skill_layout import (
+    GUARD_SKILL_LAYOUT,
+    check_skill_layout,
 )
 from scripts.architecture_linter.checks.install_skill_preflight import (
     GUARD_SKILL_PREFLIGHT,
@@ -88,6 +137,18 @@ from scripts.architecture_linter.checks.install_skill_preflight import (
 from scripts.architecture_linter.checks.install_skills_root_derivation import (
     _GUARD_SKILLS_ROOT,
     check_skills_root_derivation,
+)
+from scripts.architecture_linter.checks.install_trust_integrity import (
+    GUARD_BUNDLE_USER_SCOPE_ROOT,
+    GUARD_LOCAL_BUNDLE_HOOK_TRUST,
+    GUARD_TRUST_POLICY_OUTCOME,
+    GUARD_UNPACK_EXECUTABLES,
+    GUARD_UPDATE_CONTENT_INTEGRITY,
+    check_bundle_user_scope_root,
+    check_local_bundle_hook_trust,
+    check_trust_policy_outcome,
+    check_unpack_executable_refusal,
+    check_update_content_integrity,
 )
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
     _GUARD_IMMUTABLE_REQUIREMENTS,
@@ -102,6 +163,46 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        _GUARD_BUNDLE_STAGING,
+        "Local bundle compile staging is lockfile-proven input, never a deployment claim.",
+        check_bundle_compile_staging,
+    ),
+    _rule(
+        _GUARD_LOCKED_COPY_VALIDITY,
+        "apm_modules copy validity against the lock is owned by drift.locked_copy_proof.",
+        check_locked_copy_validity,
+    ),
+    _rule(
+        _GUARD_PACKAGE_CONTENT_HASH,
+        "Package content hashing, its lockfile stream and promotion stay owned by utils/content_hash.py.",
+        check_package_content_hash,
+    ),
+    _rule(
+        GUARD_TRUST_POLICY_OUTCOME,
+        "Executables-trust readers route policy outcomes through resolve_trust_policy.",
+        check_trust_policy_outcome,
+    ),
+    _rule(
+        GUARD_UPDATE_CONTENT_INTEGRITY,
+        "apm update keeps the content-hash check for an unchanged commit.",
+        check_update_content_integrity,
+    ),
+    _rule(
+        GUARD_BUNDLE_USER_SCOPE_ROOT,
+        "apm install -g <bundle> keeps its lock and grants under APM_HOME.",
+        check_bundle_user_scope_root,
+    ),
+    _rule(
+        GUARD_LOCAL_BUNDLE_HOOK_TRUST,
+        "Local-bundle hooks are re-checked against their recorded approval on every command.",
+        check_local_bundle_hook_trust,
+    ),
+    _rule(
+        GUARD_UNPACK_EXECUTABLES,
+        "apm unpack refuses executable content before any write.",
+        check_unpack_executable_refusal,
+    ),
     _rule(
         _GUARD_SINGLE_FILE,
         "Local and remote single-file dependencies share package materialization and admission.",
@@ -168,9 +269,24 @@ RULES: tuple[Rule, ...] = (
         check_source_plan,
     ),
     _rule(
+        GUARD_EFFECTIVE_SELECTION,
+        "Every package deployment takes its skill and target selection from one owner.",
+        check_effective_selection,
+    ),
+    _rule(
         GUARD_SKILL_PREFLIGHT,
         "The complete selected skill plan is checked before native deployment.",
         check_skill_preflight,
+    ),
+    _rule(
+        GUARD_SKILL_ADOPTION_BASELINE,
+        "Receipt-less skill adoption compares with the locked render when the commit changes.",
+        check_skill_adoption_baseline,
+    ),
+    _rule(
+        GUARD_SELECTION_MERGE,
+        "Every resolver edge reaches the single dependency selection-merge owner.",
+        check_selection_merge,
     ),
     _rule(
         _GUARD_PRIMITIVE_CLASSIFICATION,
@@ -193,9 +309,24 @@ RULES: tuple[Rule, ...] = (
         check_base_integrator,
     ),
     _rule(
+        _GUARD_CLEANUP_RELEASE,
+        "Stale cleanup releases skill directories that hold only user content.",
+        check_cleanup_ownership_release,
+    ),
+    _rule(
         GUARD_CODEX_AGENT_LINKS,
         "Codex agent bodies are rewritten by BaseIntegrator.resolve_links before serialization.",
         check_codex_agent_link_resolution,
+    ),
+    _rule(
+        GUARD_AGENT_RENDER_ADOPT,
+        "Agent writers render first and adopt only via _check_adopt_or_skip on that text.",
+        check_agent_render_then_adopt,
+    ),
+    _rule(
+        GUARD_CONSUMER_MANIFEST_REWRITE,
+        "Consumer apm.yml rewrites route through the round-trip YAML pair.",
+        check_consumer_manifest_rewrite,
     ),
     _rule(
         GUARD_EXECUTABLE_TRUST,
@@ -211,6 +342,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_LSP_LIFECYCLE,
         "LSP collection and reconciliation route through install/lsp/integration.py.",
         check_lsp_lifecycle,
+    ),
+    _rule(
+        GUARD_LSP_CAPABILITY_GATE,
+        "Declared LSP without a capable target fails before any target write.",
+        check_lsp_capability_gate,
     ),
     _rule(
         _GUARD_UNINSTALL_REACHABILITY,
@@ -242,7 +378,13 @@ RULES: tuple[Rule, ...] = (
         "Skills roots come from TargetProfile.skills_rel_root, not open-coded <root>/skills.",
         check_skills_root_derivation,
     ),
+    _rule(
+        GUARD_SKILL_LAYOUT,
+        "Skill layout routes through resolve_skill_layout; rebuilds recover the recorded layout.",
+        check_skill_layout,
+    ),
     *EXTRA_RULES,
+    *PORTABLE_TRUST_RULES,
 )
 
 

@@ -22,6 +22,7 @@ from apm_cli.install.exec_gate import (
 )
 from apm_cli.install.phases.integrate import _run_executable_approval_prompt
 from apm_cli.install.phases.lockfile import LockfileBuilder
+from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.security.executables import (
     ALL_EXEC_TYPES,
     ENFORCED_EXEC_TYPES,
@@ -194,8 +195,14 @@ class TestNonInteractiveExecutablePromptIntegration:
         logger.info.assert_called_once()
         remedy = logger.info.call_args.args[0]
         assert "apm policy explain owner/repo" in remedy
-        # M4 (#1873): non-interactive remedy leads with the bulk one-liner.
-        assert "apm approve --recommended" in remedy
+        # The bulk one-liner appears only with an org recommend set (#3994).
+        assert "apm approve --recommended" not in remedy
+
+        logger.reset_mock()
+        policy = SimpleNamespace(executables=SimpleNamespace(recommend=("owner/repo",)))
+        ctx.policy_fetch = SimpleNamespace(policy=policy)
+        _run_executable_approval_prompt(ctx)
+        assert "apm approve --recommended" in logger.info.call_args.args[0]
 
     def test_interactive_decline_surfaces_parked_remedy(self, monkeypatch) -> None:
         # M3 (#1873): declining at the interactive prompt must still print a
@@ -428,11 +435,9 @@ class TestCheckExecutableApprovalIntegration:
 
     def test_dep_ref_key_takes_priority(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
-        dep_ref = MagicMock()
-        dep_ref.canonical_string.return_value = "github:owner/repo#v1.0"
-        pkg_info.dependency_ref = dep_ref
+        pkg_info.dependency_ref = DependencyReference.parse("owner/repo#v1.0")
 
-        allow = {"github:owner/repo#v1.0": {"hooks": True, "bin": True}}
+        allow = {"owner/repo#v1.0": {"hooks": True, "bin": True}}
         hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
             "pkg", pkg_info, allow
         )
@@ -444,9 +449,7 @@ class TestCheckExecutableApprovalIntegration:
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "hook.json").write_text("{}", encoding="utf-8")
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
-        dep_ref = MagicMock()
-        dep_ref.canonical_string.return_value = "./packages/local-ref"
-        pkg_info.dependency_ref = dep_ref
+        pkg_info.dependency_ref = DependencyReference.parse("./packages/local-ref")
         ctx = MagicMock()
         ctx.blocked_executables = []
 
@@ -474,6 +477,84 @@ class TestCheckExecutableApprovalIntegration:
         assert len(ctx.blocked_executables) == 1
         assert ctx.blocked_executables[0].package_name == "risky"
 
+    @pytest.mark.parametrize(
+        ("denied_type", "denied"),
+        [
+            (EXEC_TYPE_HOOKS, frozenset({EXEC_TYPE_HOOKS})),
+            (EXEC_TYPE_BIN, frozenset({EXEC_TYPE_BIN})),
+        ],
+        ids=["hooks-denied-bin-approvable", "bin-denied-hooks-approvable"],
+    )
+    def test_hard_denied_types_do_not_hide_approvable_ones(
+        self, tmp_path: Path, denied_type: str, denied: frozenset
+    ) -> None:
+        """A one-type deny keeps the package parked for its approvable type (#3924)."""
+        from apm_cli.security.executables import ExecTrustContext
+
+        (tmp_path / ".apm" / "hooks").mkdir(parents=True)
+        (tmp_path / ".apm" / "hooks" / "hook.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "bin").mkdir()
+        (tmp_path / "bin" / "tool").write_text("#!/bin/sh\n", encoding="utf-8")
+        pkg_info = self._make_pkg_info(tmp_path, "risky", "1.0")
+        trust = ExecTrustContext(
+            gate_enabled=True,
+            org_deny_all=False,
+            org_deny=frozenset(),
+            org_require=frozenset(),
+            org_recommend=frozenset(),
+            org_enforce=frozenset(),
+            org_bin_deny_all=False,
+            org_bin_deny=frozenset(),
+            project_allow={},
+            project_deny={"risky#1.0": {denied_type: True}},
+            user_allow={},
+            user_deny={},
+        )
+        ctx = SimpleNamespace(
+            blocked_executables=[],
+            exec_trust_ctx=trust,
+            package_exec_status={},
+            package_denied_exec_types={},
+        )
+
+        check_executable_approval("risky", pkg_info, {}, ctx=ctx)
+
+        assert [d.package_name for d in ctx.blocked_executables] == ["risky"]
+        assert ctx.package_denied_exec_types == {"risky": denied}
+
+    def test_only_hard_denied_types_are_not_parked(self, tmp_path: Path) -> None:
+        """Approving cannot lift a deny, so an all-denied package is not parked (#3924)."""
+        from apm_cli.security.executables import ExecTrustContext
+
+        (tmp_path / ".apm" / "hooks").mkdir(parents=True)
+        (tmp_path / ".apm" / "hooks" / "hook.json").write_text("{}", encoding="utf-8")
+        pkg_info = self._make_pkg_info(tmp_path, "risky", "1.0")
+        trust = ExecTrustContext(
+            gate_enabled=True,
+            org_deny_all=False,
+            org_deny=frozenset(),
+            org_require=frozenset(),
+            org_recommend=frozenset(),
+            org_enforce=frozenset(),
+            org_bin_deny_all=False,
+            org_bin_deny=frozenset(),
+            project_allow={},
+            project_deny={"risky#1.0": {EXEC_TYPE_HOOKS: True}},
+            user_allow={},
+            user_deny={},
+        )
+        ctx = SimpleNamespace(
+            blocked_executables=[],
+            exec_trust_ctx=trust,
+            package_exec_status={},
+            package_denied_exec_types={},
+        )
+
+        check_executable_approval("risky", pkg_info, {}, ctx=ctx)
+
+        assert ctx.blocked_executables == []
+        assert ctx.package_denied_exec_types == {"risky": frozenset({EXEC_TYPE_HOOKS})}
+
 
 # -------------------------------------------------------------------
 # resolve_package_key integration
@@ -483,22 +564,25 @@ class TestCheckExecutableApprovalIntegration:
 class TestResolvePackageKeyIntegration:
     """Integration: key resolution with different package_info shapes."""
 
-    def test_dep_ref_canonical_string(self) -> None:
-        pkg_info = MagicMock()
-        dep_ref = MagicMock()
-        dep_ref.canonical_string.return_value = "github:owner/repo@main"
-        pkg_info.dependency_ref = dep_ref
+    @pytest.mark.parametrize(
+        ("spelling", "expected"),
+        [
+            ("owner/repo#main", "owner/repo#main"),
+            ("https://github.com/owner/repo.git#main", "owner/repo#main"),
+            ("github.com/owner/repo", "owner/repo"),
+            ("gitlab.com/owner/repo#v1", "gitlab.com/owner/repo#v1"),
+            ("./local/path", "./local/path"),
+        ],
+    )
+    def test_dep_ref_uses_locked_identity_domain(self, spelling: str, expected: str) -> None:
+        dep_ref = DependencyReference.parse(spelling)
+        pkg_info = SimpleNamespace(dependency_ref=dep_ref)
 
-        assert resolve_package_key(pkg_info, "fallback") == "github:owner/repo@main"
+        key = resolve_package_key(pkg_info, "fallback")
 
-    def test_dep_ref_str_fallback(self) -> None:
-        pkg_info = MagicMock()
-        dep_ref = MagicMock()
-        dep_ref.canonical_string.return_value = ""
-        dep_ref.__str__ = lambda self: "./local/path"
-        pkg_info.dependency_ref = dep_ref
-
-        assert resolve_package_key(pkg_info, "fallback") == "./local/path"
+        assert key == expected
+        # ``apm approve`` keys grants by the locked identity; the gate must agree.
+        assert key.split("#", 1)[0] == dep_ref.get_unique_key()
 
     def test_package_metadata_fallback(self) -> None:
         pkg_info = MagicMock()
@@ -792,7 +876,9 @@ class TestApproveDenyCommandsIntegration:
 
         data = load_yaml(project / "apm.yml")
         assert "executables" in data
-        assert "risky-pkg#2.0.0" in data["executables"]["allow"]
+        # Pins bind content, so the stored key is version-blind (#3902).
+        grant = data["executables"]["allow"]["risky-pkg"]
+        assert all(pin.startswith("sha256:") for pin in grant["hooks"].values())
 
     def test_approve_all(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner
@@ -812,8 +898,8 @@ class TestApproveDenyCommandsIntegration:
 
         data = load_yaml(project / "apm.yml")
         allow = data["executables"]["allow"]
-        assert "risky-pkg#2.0.0" in allow
-        assert "tool-pkg#1.0.0" in allow
+        assert "risky-pkg" in allow
+        assert allow["tool-pkg"] == {"bin": True}
 
     def test_approve_nonexistent_package(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner

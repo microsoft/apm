@@ -12,6 +12,8 @@ A dependency is "pinned" when its declared constraint is bounded:
 * Package-qualified literal tags in the layouts the git-semver resolver
   selects from (``pkg-a-v1.2.3``, ``pkg-a--v1.2.3``), when ``pkg-a`` is
   the dependency's own package name.
+* Exact package release tags (``name@1.2.3``, ``@scope/name@1.2.3``) for
+  any name, as npm workspaces and Changesets monorepos publish them.
 * Full 40-char SHA refs.
 
 A dependency is "unbounded" when any of the following hold:
@@ -62,8 +64,13 @@ class UnboundedReason(str, Enum):
 # Full 40-char hex SHA (git object id).
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
-# Literal version tag: ``v1.2.3`` / ``v1.2.3-rc.1`` / ``v1.2.3+meta``.
-_LITERAL_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+([-+][0-9A-Za-z.\-+]+)?$")
+# Package release tag (npm / Changesets style): ``<name>@<version>`` or
+# ``@<scope>/<name>@<version>``. At most one scope segment, so
+# ``feature/x@1.2.3`` and ``a/b/c@1.2.3`` do not match. The version part is
+# validated as exact semver by ``parse_semver`` (optional leading ``v``).
+_PACKAGE_AT_TAG_RE = re.compile(
+    r"^(?:@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*@v?(?P<version>[^@/\s]+)$"
+)
 
 # Placeholder the git-dependency tag layouts use for the package name.
 _NAME_PLACEHOLDER = "{name}"
@@ -129,6 +136,17 @@ def _classify_range(spec: str) -> UnboundedReason | None:
     return None
 
 
+def _is_literal_version_tag(spec: str) -> bool:
+    """True for a ``v``-prefixed exact release tag (``v1.2.3``, ``v1.0.0-rc.1``).
+
+    The version after ``v`` must be exact SemVer 2.0.0 per ``parse_semver``,
+    so ``v01.2.3`` or ``v1.2.3-01`` is not a release tag.
+    """
+    from apm_cli.marketplace.semver import parse_semver
+
+    return spec.startswith("v") and parse_semver(spec[1:]) is not None
+
+
 def _is_package_literal_tag(spec: str, dep: DependencyReference) -> bool:
     """True when *spec* is a literal tag in a ``{name}`` layout for *dep*'s own name.
 
@@ -155,6 +173,23 @@ def _is_package_literal_tag(spec: str, dep: DependencyReference) -> bool:
         if match and parse_semver(match.group("version")) is not None:
             return True
     return False
+
+
+def _is_package_at_release_tag(spec: str) -> bool:
+    """True when *spec* is an exact ``name@X.Y.Z`` / ``@scope/name@X.Y.Z`` release tag.
+
+    Monorepos released with npm workspaces or Changesets tag each package
+    this way (``shadcn@4.12.0``, ``@upstash/context7-mcp@4.4.4``). The tag
+    declares one exact release, as ``v1.2.3`` does; the name is not bound to
+    the dependency because monorepo tags often name the published package,
+    not the directory APM derives its name from. Ranges (``name@^1.2.0``),
+    partial versions (``name@1.x``) and dist-tags (``name@next``) are not
+    exact semver and stay unbounded.
+    """
+    from apm_cli.marketplace.semver import parse_semver
+
+    match = _PACKAGE_AT_TAG_RE.match(spec)
+    return bool(match) and parse_semver(match.group("version")) is not None
 
 
 def collect_declared_refs(
@@ -202,8 +237,9 @@ def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | Non
     2. Registry dep + semver range -> range-shape check.
     3. Empty / missing ref         -> ``NO_REF``.
     4. 40-char hex SHA             -> ``None``.
-    5. Literal ``v\\d+\\.\\d+\\.\\d+`` tag -> ``None``.
+    5. Literal ``v`` + exact SemVer tag (``v1.2.3``) -> ``None``.
     5a. ``{name}-v...`` / ``{name}--v...`` tag for this dep's own name -> ``None``.
+    5b. Exact ``name@X.Y.Z`` / ``@scope/name@X.Y.Z`` release tag -> ``None``.
     6. Parses as semver range      -> range-shape check.
     7. Else                        -> ``BARE_BRANCH``.
     """
@@ -238,8 +274,8 @@ def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | Non
     if _SHA_RE.match(spec):
         return None
 
-    # 5. Literal v-prefixed tag -> pinned.
-    if _LITERAL_TAG_RE.match(spec):
+    # 5. Literal v-prefixed exact release tag -> pinned.
+    if _is_literal_version_tag(spec):
         return None
 
     # 5a. Package-qualified literal tag for this dependency's own name
@@ -250,7 +286,13 @@ def classify_unbounded_reason(dep: DependencyReference) -> UnboundedReason | Non
     if _is_package_literal_tag(spec, dep):
         return None
 
-    # 5b. Bare wildcard tokens ('*', 'x', 'X') -- handled before the
+    # 5b. Exact package release tag (``shadcn@4.12.0``,
+    #     ``@upstash/context7-mcp@4.4.4``) -> pinned. Judges declared
+    #     release intent; the lockfile pins the commit.
+    if _is_package_at_release_tag(spec):
+        return None
+
+    # 5c. Bare wildcard tokens ('*', 'x', 'X') -- handled before the
     # semver-range probe because the registry grammar rejects them as
     # standalone components, but they unambiguously express "any
     # version" and deserve a wildcard hint rather than a bare-branch one.

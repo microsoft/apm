@@ -1623,6 +1623,16 @@ def _execute_command(
         _append_to_script_log(event.event, "command", cmd, stderr=str(exc), status="error")
         if verbose and logger:
             logger.verbose_detail(f"[i] Lifecycle command script failed: {cmd}")
+    except BaseException:
+        # Ctrl+C reaches only the foreground group, never this script's own
+        # session: reap the group so it cannot outlive the interrupted command
+        # and its lifecycle lock.
+        _signal_kill_group(proc)
+        if proc is not None:
+            with contextlib.suppress(subprocess.TimeoutExpired, OSError):
+                proc.wait(timeout=5)
+        _append_to_script_log(event.event, "command", cmd, status="interrupted")
+        raise
 
 
 def _signal_kill_group(proc: subprocess.Popen | None) -> None:

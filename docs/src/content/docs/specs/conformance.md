@@ -11,7 +11,7 @@ This page is the entry point to the conformance statement APM publishes for [Ope
 
 Two artifacts ship at the repository root and update when the conformance inputs change:
 
-- [`CONFORMANCE.md`](https://github.com/microsoft/apm/blob/main/CONFORMANCE.md) -- human-readable per-requirement table (pass / skip / fail), with a link to the pytest source for each row. Read this first.
+- [`CONFORMANCE.md`](https://github.com/microsoft/apm/blob/main/CONFORMANCE.md) -- human-readable per-requirement table: each requirement links to its spec anchor and lists its status (`active`, `skipped`, or `xfail`), bound test count and oracle. Read this first.
 - [`CONFORMANCE.json`](https://github.com/microsoft/apm/blob/main/CONFORMANCE.json) -- machine-readable equivalent for tooling and downstream conformance aggregators. The fields are stable across patch versions of the spec.
 
 The CI workflow that emits both is [`.github/workflows/spec-conformance.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/spec-conformance.yml). The gate fails the build if the generated statement drifts from the committed copy, so the version of `CONFORMANCE.md` you see on `main` is exactly what CI produced from the matching spec commit.
@@ -28,10 +28,10 @@ uv run --extra dev python -m tests.spec_conformance.gen_statement
 git diff -- CONFORMANCE.md CONFORMANCE.json  # compare to the in-repo copies
 ```
 
-The first command runs every requirement-bound test and reports per-requirement results. The second regenerates the statement from those results; the final command shows whether the generated artifacts still match the checked-in copies.
+The first command runs every requirement-bound test and reports per-requirement results. The second regenerates the statement from the requirement markers that run collected; the final command shows whether the generated artifacts still match the checked-in copies.
 
 ## What conformance does NOT cover
 
-Per req-cf-001, a conformance statement covers the normative statements declared in the spec; it does not certify implementation quality, performance, or operational fitness. The statement currently records `req-mf-016` as skipped, with rationale in the statement itself -- an explicit, audited decision rather than silent drift.
+A conformance statement covers the normative statements declared in the spec; it does not certify implementation quality, performance, or operational fitness. The statement currently records `req-mf-016` and the native plugin activation profile (`req-na-001`-`007`; no APM route natively activates plugins yet) as skipped, with rationale in the statement itself -- an explicit, audited decision rather than silent drift.
 
 For the broader drift-detection story (how the spec authors prevent the spec from rotting relative to the only implementation), see [`CONTRIBUTING.md` -- Spec amendment workflow](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#spec-amendment-workflow).

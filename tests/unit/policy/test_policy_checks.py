@@ -234,13 +234,14 @@ class TestRequiredPackagesDeployed:
         assert "org/pkg" in result.details[0]
         assert "--no-policy" in result.message
 
-    def test_skip_if_not_in_manifest(self):
-        """Required package not in manifest -- check 3 handles that."""
+    def test_fail_if_not_in_manifest(self):
+        """An entry naming no declared package is not skipped (#3993)."""
         deps = _make_dep_refs(["other/pkg"])
         lock = _make_lockfile([{"repo_url": "other/pkg", "deployed_files": ["x.md"]}])
         policy = DependencyPolicy(require=["org/missing"])
         result = _check_required_packages_deployed(deps, lock, policy)
-        assert result.passed
+        assert not result.passed
+        assert result.details == ["org/missing"]
 
 
 # -- Check 4b: required-executable-untrusted ------------------------
@@ -432,30 +433,43 @@ class TestMcpDenylist:
 
 
 class TestMcpTransport:
+    """Check 9 judges canonical effective transports supplied by the owner."""
+
     def test_pass_no_restrictions(self):
-        mcp = _make_mcp_deps([{"name": "srv", "transport": "sse"}])
-        policy = McpPolicy()
-        result = _check_mcp_transport(mcp, policy)
+        result = _check_mcp_transport({"srv": frozenset({"sse"})}, McpPolicy())
         assert result.passed
 
     def test_pass_allowed_transport(self):
-        mcp = _make_mcp_deps([{"name": "srv", "transport": "stdio"}])
-        policy = McpPolicy(transport=McpTransportPolicy(allow=["stdio", "sse"]))
-        result = _check_mcp_transport(mcp, policy)
+        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio", "sse")))
+        result = _check_mcp_transport({"srv": frozenset({"stdio"})}, policy)
         assert result.passed
 
     def test_fail_disallowed_transport(self):
-        mcp = _make_mcp_deps([{"name": "srv", "transport": "http"}])
-        policy = McpPolicy(transport=McpTransportPolicy(allow=["stdio"]))
-        result = _check_mcp_transport(mcp, policy)
+        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
+        result = _check_mcp_transport({"srv": frozenset({"streamable-http"})}, policy)
         assert not result.passed
-        assert "http" in result.details[0]
+        assert result.details == ["srv: transport 'streamable-http' not in allowed [stdio]"]
 
-    def test_skip_no_transport_set(self):
-        mcp = _make_mcp_deps(["plain-server"])
-        policy = McpPolicy(transport=McpTransportPolicy(allow=["stdio"]))
-        result = _check_mcp_transport(mcp, policy)
-        assert result.passed
+    def test_package_and_remote_both_checked(self):
+        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio", "streamable-http")))
+        result = _check_mcp_transport({"srv": frozenset({"stdio", "sse"})}, policy)
+        assert not result.passed
+        assert result.details == ["srv: transport 'sse' not in allowed [stdio, streamable-http]"]
+
+    def test_unresolved_transport_fails_with_remedy(self):
+        from apm_cli.mcp_transport import UnresolvedTransport
+
+        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
+        result = _check_mcp_transport(
+            {"srv": UnresolvedTransport("MCP registry https://r.example is unreachable")},
+            policy,
+        )
+        assert not result.passed
+        detail = result.details[0]
+        assert detail.startswith("srv: effective transport unknown (MCP registry")
+        assert "unreachable" in detail
+        assert "make the MCP registry reachable, then retry" in detail
+        assert "A declared 'transport:' cannot stand in" in detail
 
 
 # -- Check 10: mcp-self-defined -------------------------------------
@@ -497,78 +511,194 @@ class TestMcpSelfDefined:
 # -- Check 11: compilation-target -----------------------------------
 
 
+def _decision_targets(value):
+    """Project a target selection the way every caller of the check must."""
+    from apm_cli.core.target_detection import EffectiveTargetDecision
+
+    return EffectiveTargetDecision(value, "apm.yml").canonical_targets
+
+
+def _target_policy(*, allow=None, enforce=None) -> CompilationPolicy:
+    return CompilationPolicy(target=CompilationTargetPolicy(allow=allow, enforce=enforce))
+
+
 class TestCompilationTarget:
     def test_pass_no_restrictions(self):
-        result = _check_compilation_target({"target": "vscode"}, CompilationPolicy())
+        result = _check_compilation_target(_decision_targets("vscode"), CompilationPolicy())
         assert result.passed
 
     def test_pass_enforce_match(self):
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({"target": "vscode"}, policy)
+        policy = _target_policy(enforce="vscode")
+        result = _check_compilation_target(_decision_targets("vscode"), policy)
         assert result.passed
 
     def test_fail_enforce_mismatch(self):
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({"target": "claude"}, policy)
+        policy = _target_policy(enforce="vscode")
+        result = _check_compilation_target(_decision_targets("claude"), policy)
         assert not result.passed
         assert "enforced" in result.details[0]
 
     def test_pass_in_allow_list(self):
-        policy = CompilationPolicy(target=CompilationTargetPolicy(allow=["vscode", "claude"]))
-        result = _check_compilation_target({"target": "claude"}, policy)
+        policy = _target_policy(allow=["vscode", "claude"])
+        result = _check_compilation_target(_decision_targets("claude"), policy)
         assert result.passed
 
     def test_fail_not_in_allow_list(self):
-        policy = CompilationPolicy(target=CompilationTargetPolicy(allow=["vscode"]))
-        result = _check_compilation_target({"target": "claude"}, policy)
+        policy = _target_policy(allow=["vscode"])
+        result = _check_compilation_target(_decision_targets("claude"), policy)
         assert not result.passed
 
     def test_pass_no_target_in_manifest(self):
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({}, policy)
+        policy = _target_policy(enforce="vscode")
+        result = _check_compilation_target(None, policy)
         assert result.passed
 
     # -- Multi-target (list) tests ----------------------------------
 
     def test_target_list_enforce_present(self):
         """List target containing the enforced value passes."""
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="claude"))
-        result = _check_compilation_target({"target": ["claude", "copilot"]}, policy)
+        policy = _target_policy(enforce="claude")
+        result = _check_compilation_target(_decision_targets(["claude", "copilot"]), policy)
         assert result.passed
 
     def test_target_list_enforce_missing(self):
         """List target missing the enforced value fails."""
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="claude"))
-        result = _check_compilation_target({"target": ["cursor", "copilot"]}, policy)
+        policy = _target_policy(enforce="claude")
+        result = _check_compilation_target(_decision_targets(["cursor", "copilot"]), policy)
         assert not result.passed
         assert "enforced" in result.details[0]
 
     def test_target_list_allow_all_in(self):
         """All items in list target within allow set passes."""
-        policy = CompilationPolicy(
-            target=CompilationTargetPolicy(allow=["claude", "copilot", "cursor"])
-        )
-        result = _check_compilation_target({"target": ["claude", "copilot"]}, policy)
+        policy = _target_policy(allow=["claude", "copilot", "cursor"])
+        result = _check_compilation_target(_decision_targets(["claude", "copilot"]), policy)
         assert result.passed
 
     def test_target_list_allow_some_disallowed(self):
         """List target with items outside allow set fails."""
-        policy = CompilationPolicy(target=CompilationTargetPolicy(allow=["claude"]))
-        result = _check_compilation_target({"target": ["claude", "copilot"]}, policy)
+        policy = _target_policy(allow=["claude"])
+        result = _check_compilation_target(_decision_targets(["claude", "copilot"]), policy)
         assert not result.passed
         assert "copilot" in result.message
 
-    def test_target_string_still_works(self):
-        """Backward compat: single string target with enforce."""
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="copilot"))
-        result = _check_compilation_target({"target": "copilot"}, policy)
-        assert result.passed
-
     def test_target_list_single_item(self):
         """Single-element list target with matching enforce passes."""
-        policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="copilot"))
-        result = _check_compilation_target({"target": ["copilot"]}, policy)
+        policy = _target_policy(enforce="copilot")
+        result = _check_compilation_target(_decision_targets(["copilot"]), policy)
         assert result.passed
+
+    # -- Canonical comparison (#3732) -------------------------------
+
+    @pytest.mark.parametrize("spelling", ["vscode", "agents", "copilot", ["vscode"]])
+    def test_alias_matches_canonical_allow(self, spelling):
+        """Aliases compare as the profile they deploy, on the manifest side."""
+        policy = _target_policy(allow=["claude", "copilot"])
+        assert _check_compilation_target(_decision_targets(spelling), policy).passed
+
+    def test_policy_alias_matches_canonical_target(self):
+        """Aliases also compare as profiles on the policy side."""
+        policy = _target_policy(allow=["vscode"], enforce=None)
+        assert _check_compilation_target(_decision_targets("copilot"), policy).passed
+        policy = _target_policy(enforce="vscode")
+        assert _check_compilation_target(_decision_targets(["claude", "copilot"]), policy).passed
+
+    def test_mcp_only_target_judged_as_its_profile(self):
+        """intellij configures Copilot, so policy judges it as copilot."""
+        policy = _target_policy(allow=["copilot"])
+        assert _check_compilation_target(_decision_targets("intellij"), policy).passed
+
+    def test_all_in_allow_is_unrestricted(self):
+        """``allow: [all]`` permits every target."""
+        policy = _target_policy(allow=["all"])
+        assert _check_compilation_target(_decision_targets(["claude", "cursor"]), policy).passed
+
+    def test_singular_all_judges_the_install_expansion(self):
+        """``target: all`` deploys everywhere, so a narrow allow list fails."""
+        policy = _target_policy(allow=["claude", "copilot"])
+        result = _check_compilation_target(_decision_targets("all"), policy)
+        assert not result.passed
+        assert "'all'" not in result.message
+        assert "cursor" in result.message
+
+    def test_enforce_all_requires_the_full_expansion(self):
+        policy = _target_policy(enforce="all")
+        assert _check_compilation_target(_decision_targets("all"), policy).passed
+        assert not _check_compilation_target(_decision_targets("claude"), policy).passed
+
+    def test_violation_names_the_selection_source(self):
+        policy = _target_policy(allow=["claude"])
+        result = _check_compilation_target(
+            _decision_targets(["claude", "cursor"]), policy, source="--target flag"
+        )
+        assert "--target flag" in result.details[0]
+
+
+class TestAuditCompilationTargetFromManifest:
+    """``apm audit`` judges the targets apm.yml declares (#3732).
+
+    The plural ``targets:`` cases are ported from #3739 by @MohammedAlkindi.
+    """
+
+    @staticmethod
+    def _audit(tmp_path: Path, manifest_targets: dict, policy: CompilationPolicy) -> CheckResult:
+        _write_apm_yml(tmp_path, {"name": "test", "version": "1.0.0", **manifest_targets})
+        result = run_policy_checks(tmp_path, ApmPolicy(compilation=policy), fail_fast=False)
+        return next(check for check in result.checks if check.name == "compilation-target")
+
+    def test_targets_plural_enforce_match(self, tmp_path):
+        """Plural targets list containing the enforced value passes."""
+        check = self._audit(
+            tmp_path, {"targets": ["claude", "copilot"]}, _target_policy(enforce="claude")
+        )
+        assert check.passed
+
+    def test_targets_plural_enforce_mismatch(self, tmp_path):
+        """Plural targets list missing the enforced value fails."""
+        check = self._audit(
+            tmp_path, {"targets": ["cursor", "copilot"]}, _target_policy(enforce="claude")
+        )
+        assert not check.passed
+        assert "enforced" in check.details[0]
+
+    def test_targets_plural_allow_match(self, tmp_path):
+        """Plural targets list with all items allowed passes."""
+        check = self._audit(
+            tmp_path,
+            {"targets": ["claude", "copilot"]},
+            _target_policy(allow=["claude", "copilot", "cursor"]),
+        )
+        assert check.passed
+
+    def test_targets_plural_allow_disallowed(self, tmp_path):
+        """Plural targets list with disallowed target fails (the #3732 bypass)."""
+        check = self._audit(
+            tmp_path, {"targets": ["claude", "cursor"]}, _target_policy(allow=["claude", "copilot"])
+        )
+        assert not check.passed
+        assert "cursor" in check.message
+        assert "apm.yml" in check.details[0]
+
+    def test_no_targets_declared_passes(self, tmp_path):
+        """A manifest without a target declaration has nothing to judge."""
+        check = self._audit(tmp_path, {}, _target_policy(enforce="vscode"))
+        assert check.passed
+
+    def test_csv_target_is_split(self, tmp_path):
+        """A compliant CSV value no longer fails as one literal token."""
+        check = self._audit(
+            tmp_path, {"target": "claude,copilot"}, _target_policy(allow=["claude", "copilot"])
+        )
+        assert check.passed
+
+    @pytest.mark.parametrize("declaration", [{"target": "vscode"}, {"targets": ["vscode"]}])
+    def test_vscode_alias_is_compliant(self, tmp_path, declaration):
+        check = self._audit(tmp_path, declaration, _target_policy(allow=["claude", "copilot"]))
+        assert check.passed
+
+    def test_plural_legacy_all_stays_compliant(self, tmp_path):
+        """``targets: [all]`` folds to omitted, so it must not fail as literal 'all'."""
+        check = self._audit(tmp_path, {"targets": ["all"]}, _target_policy(allow=["claude"]))
+        assert check.passed
 
 
 # -- Check 12: compilation-strategy ---------------------------------

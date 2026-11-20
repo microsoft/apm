@@ -213,7 +213,7 @@ class TestRefConsistency:
         result = _check_ref_consistency(manifest, lock)
 
         assert not result.passed
-        assert "run 'apm install --update'" in result.message
+        assert "run 'apm update'" in result.message
         assert result.details == [
             "owner/repo: manifest commit "
             f"'{manifest_commit}' != lockfile resolved_commit '{'b' * 40}'"
@@ -350,7 +350,7 @@ class TestRefConsistency:
         lock = LockFile.read(get_lockfile_path(tmp_path))
         result = _check_ref_consistency(manifest, lock)
         assert not result.passed
-        assert "run 'apm install --update'" in result.message
+        assert "run 'apm update'" in result.message
         assert any("^2.0.0" in d for d in result.details)
 
     def test_pass_marketplace_dependency_with_literal_branch_ref(self, tmp_path):
@@ -460,7 +460,7 @@ class TestRefConsistency:
         lock = LockFile.read(get_lockfile_path(tmp_path))
         result = _check_ref_consistency(manifest, lock)
         assert not result.passed
-        assert "run 'apm install --update'" in result.message
+        assert "run 'apm update'" in result.message
         assert any(
             "manifest ref 'feature-branch' != lockfile ref 'main'" in d for d in result.details
         )
@@ -1308,7 +1308,7 @@ class TestContentIntegrity:
         result = _check_content_integrity(tmp_path, lock)
         assert result.passed, result.details
 
-    def test_hash_skips_symlink(self, tmp_path):
+    def test_hash_flags_locked_file_replaced_by_symlink(self, tmp_path):
         import os
 
         from apm_cli.utils.content_hash import compute_file_hash  # noqa: F401
@@ -1321,8 +1321,8 @@ class TestContentIntegrity:
         link_path.parent.mkdir(parents=True, exist_ok=True)
         os.symlink(target, link_path)
 
-        # Record an obviously wrong hash -- symlinks must be skipped, not
-        # flagged.
+        # A locked file replaced by a symlink is never followed: it fails as
+        # an unresolved path whatever hash is recorded (#3994).
         _write_lockfile(
             tmp_path,
             textwrap.dedent("""\
@@ -1340,7 +1340,8 @@ class TestContentIntegrity:
 
         lock = LockFile.read(get_lockfile_path(tmp_path))
         result = _check_content_integrity(tmp_path, lock)
-        assert result.passed, result.details
+        assert not result.passed
+        assert "unsafe or unresolved deployed path" in result.message
 
     def test_hash_covers_self_entry_local_files(self, tmp_path):
         # Local content lives in lock.local_deployed_files / hashes; the
@@ -1399,7 +1400,7 @@ class TestRunBaselineChecks:
         )
         result = run_baseline_checks(tmp_path)
         assert result.passed
-        assert len(result.checks) == 9
+        assert len(result.checks) == 10
 
     def test_mixed_pass_fail(self, tmp_path):
         # Ref mismatch (fail) + missing file (fail) + clean otherwise
@@ -1485,7 +1486,7 @@ class TestExternalBeforeInternalCheckOrdering:
     Regression guard for the #2292 -> source-identity failure: a
     source-identity lockfile tamper (attacker rewrites a dependency's
     host/repo_url) trips BOTH checks, but their remedies diverge --
-    ref-consistency says ``apm install --update`` (re-resolve from the
+    ref-consistency says ``apm update`` (re-resolve from the
     trusted manifest, restoring the legitimate source) while
     deployment-ledger-owners says ``apm prune`` (reconcile ownership
     toward the CURRENT/tampered lockfile, which would entrench the
@@ -1534,11 +1535,11 @@ class TestExternalBeforeInternalCheckOrdering:
         result = run_baseline_checks(tmp_path, fail_fast=True)
         assert not result.passed
         # Fail-fast must report the external-boundary cause with the safe
-        # ``apm install --update`` remedy, never the ledger-owner cause
+        # ``apm update`` remedy, never the ledger-owner cause
         # (whose ``apm prune`` remedy would entrench the attacker source).
         assert len(result.failed_checks) == 1
         assert result.failed_checks[0].name == "ref-consistency"
-        assert "apm install --update" in result.failed_checks[0].message
+        assert "apm update" in result.failed_checks[0].message
 
     def test_ref_consistency_precedes_deployment_ledger_owners(self, tmp_path):
         self._write_source_identity_tamper(tmp_path)
@@ -2265,12 +2266,14 @@ class TestManifestMissingWarning:
         assert check.passed is False
         assert not result.passed
 
-    def test_no_artifacts_ci_mode_still_passes(self, tmp_path: Path) -> None:
-        """Clean project with no APM artifacts passes even in CI mode."""
+    def test_no_manifest_ci_mode_fails_with_root_guidance(self, tmp_path: Path) -> None:
+        """In CI mode, no apm.yml fails instead of passing an empty audit (#3688)."""
         result = run_baseline_checks(tmp_path, ci_mode=True)
-        names = [c.name for c in result.checks]
-        assert "manifest-missing" not in names
-        assert result.passed
+        check = next(c for c in result.checks if c.name == "manifest-missing")
+        assert check.passed is False
+        assert not result.passed
+        assert "nothing was audited" in check.message
+        assert "project root that contains apm.yml" in check.message
 
 
 def test_mcp_config_consistency_uses_current_view(tmp_path: Path, monkeypatch) -> None:
@@ -2292,15 +2295,16 @@ def test_mcp_config_consistency_uses_current_view(tmp_path: Path, monkeypatch) -
         derived_lock,
         modules_root,
         *,
-        trust_transitive_self_defined,
+        admission,
         diagnostics=None,
+        **_options,
     ):
         calls.append(
             (
                 derived_root,
                 derived_lock,
                 modules_root,
-                trust_transitive_self_defined,
+                admission.one_off,
                 diagnostics,
             )
         )
@@ -2316,7 +2320,8 @@ def test_mcp_config_consistency_uses_current_view(tmp_path: Path, monkeypatch) -
     result = _check_config_consistency(manifest, lock)
 
     assert result.passed
-    assert calls == [(manifest, lock, tmp_path / "apm_modules", True, None)]
+    # Audit re-evaluates consent: it never grants the one-off transitive trust.
+    assert calls == [(manifest, lock, tmp_path / "apm_modules", False, None)]
 
 
 def test_mcp_config_consistency_has_no_package_manifest_traversal() -> None:

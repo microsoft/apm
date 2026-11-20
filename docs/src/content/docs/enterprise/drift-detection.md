@@ -1,225 +1,167 @@
 ---
-title: Drift Detection
-description: How an admin spots packages installed off-policy, lockfiles diverging from registered marketplaces, and security findings landing in dependencies across many repos.
-sidebar:
-  order: 5
+title: Inventory and drift
+description: Trace every agent file to the package and commit it came from, catch files that changed outside APM, and export an SBOM inventory from the lockfile.
 ---
 
-Drift is what you find between two `apm install` runs that should have
-been identical. This page is the operator's checklist: the categories
-APM detects today, the command surface for each, and patterns for
-sweeping the signal across an estate of repos.
+This page is for the platform or security team that must answer three questions about
+any repository: what do our coding agents load, where did each file come from, and has
+anything changed since it was installed? APM answers from the lockfile, `apm.lock.yaml`,
+which every repository commits.
 
-## What "drift" means in APM
+## Read provenance from the lockfile
 
-Four concrete categories. Each has a different signal and a different fix.
+Provenance here means which package and commit a file came from. APM records it; it is
+not cryptographically attested. Each locked package carries:
 
-| Category | What it is | Detected by |
-|---|---|---|
-| Lockfile drift | `apm.yml` and `apm.lock.yaml` disagree, or deployed files do not match the lockfile | `apm audit --ci` (8 baseline checks) |
-| Cache drift | A cached checkout's `HEAD` no longer matches `resolved_commit` in the lockfile | Built into every `apm install` cache hit |
-| Ref drift (stale floats) | A locked branch tip or tag has moved upstream since the last install | `apm outdated` |
-| Security-finding drift | A primitive in `apm_modules/` now contains hidden Unicode that was clean before | `apm audit` |
-
-Marketplace-shadow drift -- the same plugin name appearing under more than
-one registered marketplace -- is reported inline by `apm install` when it
-happens; see [security model](../security/).
-
-## The local commands
-
-### `apm audit --ci`
-
-The lockfile-consistency gate. Runs nine baseline checks in order and
-exits non-zero on the first failure (or on any failure with
-`--no-fail-fast`):
-
-```
-lockfile-exists -> ref-consistency -> deployment-ledger-owners
--> deployed-files-present -> no-orphaned-packages
--> skill-subset-consistency -> config-consistency
--> content-integrity -> includes-consent
+```yaml title="apm.lock.yaml"
+- repo_url: microsoft/apm-sample-package
+  host: github.com
+  resolved_commit: fb2851683be0e0e7711421d518bd8dba23b0b1f6
+  resolved_ref: v1.0.0
+  version: 1.0.0
+  ...
+  deployed_file_hashes:
+    .agents/skills/style-checker/SKILL.md: sha256:1142700284d253c15e561434362ae6203db08e41ef07e7082386df3651738829
+    ...
+  content_hash: sha256:744cca54cc8ff7ca90aa1dd621c2f98c6291cd793815afe8518001cc94b8aba9
 ```
 
-After the baseline passes, it replays the install in a scratch directory
-and diffs against the working tree to surface `unintegrated`, `modified`,
-`orphaned`, `unrecorded`, and `unmanaged-conflict` files. An unmanaged skill
-conflict is not managed drift: ordinary reinstall now refuses that selected
-plan before deployment. Rename the local skill or choose a valid existing
-skill/target selection first; audit does not adopt, overwrite, or delete it.
-Root-local primitives use the same
-source discovery scope as a normal install; the scratch directory is
-only the deployment destination. `unrecorded` means replay produced the
-same normalized bytes as the project but no exact or directory
-`deployed_files` claim covers the path; shared merge-hook targets are exempt
-from `unrecorded`. For their drift comparison, only APM-owned hook entries are
-considered; user-owned hooks do not create drift. The APM-owned sidecar is
-compared as JSON: object-key order and formatting are ignored, but all fields
-and list order remain significant. Changed content, malformed JSON, duplicate
-keys, and non-JSON constants (`NaN`, `Infinity`, `-Infinity`) report `modified`.
-Pass `--no-drift` to skip the replay.
-In bare `apm audit`, the replay remains cache-only and a fresh checkout
-without a warm cache yields an informational skip. In `apm audit --ci`, a
-cold cache instead triggers the lock-pinned scratch self-hydration owned by
-`install/audit_replay.py`; if it cannot be materialized, audit fails closed.
-With `--policy
-<source>` it also evaluates the discovered policy against the lockfile.
-Source: `src/apm_cli/commands/audit.py`, `src/apm_cli/policy/ci_checks.py`.
+`resolved_commit` is the exact commit installed. `deployed_file_hashes` lists every file
+APM wrote and its SHA-256. `content_hash` covers the whole package. Packages installed
+from a marketplace also record `discovered_via` (the marketplace name), the `constraint`
+you declared and the `resolved_tag`. Field reference:
+[Lockfile specification](../../reference/lockfile-spec/).
 
-### `apm audit` (default)
+Because the lockfile is in git, `git log -p apm.lock.yaml` is the history of what every
+agent in the repository could load, and who changed it.
 
-Scans every deployed primitive for hidden Unicode (zero-width characters,
-bidi overrides, tag characters) and runs the drift replay as advisory
-output. Drift alone is advisory by default; content findings and configured
-drift failures can return nonzero. See [exit codes](../../reference/cli/audit/#exit-codes).
-Add `--strip` to remove hidden
-characters in place; add `--file <path>` to scan a single file outside
-the lockfile.
+## Trace a file to its package
 
-### `apm outdated`
-
-Compares each locked dependency against its remote tip. Tag-pinned
-dependencies use semver comparison; branch-pinned dependencies compare
-commit SHAs. Marketplace-sourced dependencies are compared against the
-marketplace entry's current ref. Source: `src/apm_cli/commands/outdated.py`.
-
-```bash
-apm outdated              # project lockfile
-apm outdated --global     # ~/.apm/ user-scope lockfile
-apm outdated -j 8         # 8 parallel remote checks
+```bash frame="terminal"
+apm find --source .claude/skills/style-checker/SKILL.md
 ```
 
-`apm outdated` is read-only. It reports moved refs and newer registry releases,
-even for exact pins. Registry rows distinguish Current, constraint-bound Wanted,
-and published Latest. `apm update` still respects the declared constraint;
-[select an outside-constraint release explicitly](../../reference/cli/outdated/#registry-reporting).
-
-### `apm view <package>`
-
-Prints the lockfile entry for a single package (`resolved_ref`,
-`resolved_commit`, deployed files). Use it to confirm what a repo
-actually has after a drift report names a dependency. Note that
-`apm list` lists scripts, not packages.
-
-## Cache integrity
-
-`apm install` verifies cache integrity on every cache hit before reusing
-a checkout. It reads `.git/HEAD` directly (not via `git rev-parse`, so a
-poisoned `.git/config` cannot subvert the check) and compares the
-resolved 40-character SHA against the `resolved_commit` recorded in
-`apm.lock.yaml`. On mismatch, the cache entry is evicted and a fresh
-fetch runs. Source: `src/apm_cli/cache/integrity.py`.
-
-This means a stale CI runner, a teammate who manually `git checkout`-ed
-inside `apm_modules/`, or a bumped pin without a re-install all surface
-as either eviction-and-refetch (silent self-heal) or a hard failure
-when the cache cannot be repopulated -- never as wrong content under
-the right name.
-
-## Install before audit and tamper detection
-
-Running `apm install` before `apm audit --ci` is the correct pattern when
-the goal is detecting a developer who forgot to run `apm install` after
-editing `apm.yml`. The install step regenerates deployed files so the
-subsequent audit can compare them against the lockfile.
-
-That sequence has a blind spot: `apm install` can restore managed output
-before the audit runs. For example, a hand-edit to `.github/instructions/`
-can be replaced with the original bytes, so `content-integrity` sees a
-matching hash rather than the pre-install change. Edited managed skill
-members behave differently: ordinary reinstall preserves their bytes and
-original deployment hashes; restoration requires explicit `--force`
-consent.
-
-For repos that commit their deployed files, use `setup-only: true` on the
-action so it only provides the CLI without running `apm install`, then run
-the full CI gate:
-
-```yaml
-- uses: microsoft/apm-action@v1
-  with:
-    setup-only: true
-- run: apm audit --ci
+```text frame="none"
+microsoft/apm-sample-package  microsoft/apm-sample-package@v1.0.0
 ```
 
-In setup-only CI, `apm audit --ci` now self-hydrates a lock-pinned scratch
-install when `apm_modules/` is absent, so drift and `config-consistency`
-still run without rewriting the checkout. The `content-integrity` check still
-verifies SHA-256 hashes of every deployed file against `deployed_file_hashes`
-in `apm.lock.yaml`. Repos that gitignore deployed outputs still need those
-files present on disk for `deployed-files-present`, so keep the full-install
-CI pattern for that case.
+`--path` prints the dependency chain instead, to show which declaration pulled a
+transitive package in. A file APM did not write exits 1:
 
-See [Enforce in CI](../enforce-in-ci/#audit-only-ci-pattern) for the full
-recipe and a comparison table of the two patterns.
+```text frame="none"
+[x] 'nothing.md' is not tracked by any installed package in apm.lock.yaml.
+```
 
-## Org-wide sweeps
+## Detect drift
 
-APM runs per repository. There is no built-in fleet console. The
-operational pattern is to run the same audit in every repo and centralize
-the output.
+Drift means the files on disk, or the declarations in `apm.yml`, differ from what the
+lockfile records. `apm audit` replays the lockfile into a scratch folder and compares
+the result with your working tree. After someone edits a deployed skill by hand:
 
-Two shapes work today:
+```bash frame="terminal"
+apm audit --ci
+```
 
-**Scheduled CI sweep.** Add a workflow that runs nightly in every repo
-and uploads the SARIF or JSON output as an artifact (or to GitHub code
-scanning). The dashboard is whatever ingests the artifact.
+```text frame="none"
+...
+| [x]      | content-integrity        | 1 file(s) with hash drift -- run 'apm install' after       |
+|          |                          | deleting the drifted files (plain install keeps local      |
+|          |                          | edits)                                                     |
+| [x]      | drift                    | drift detected: 1 file(s):                                 |
+|          |                          | .claude/skills/style-checker/SKILL.md                      |
+...
+[x] 2 of 9 check(s) failed
 
-```yaml
-# .github/workflows/apm-drift.yml -- nightly per repo
-name: apm drift
+[x] Drift detected: 1 file(s)
+
+  modified (1):
+    - .claude/skills/style-checker/SKILL.md  [microsoft/apm-sample-package]
+
+  [i] 1 local edit(s) to managed files; run 'apm export-patch' to export them as upstream patches before the next install overwrites them
+  [i] To restore the locked content, delete the modified files and rerun 'apm install', then commit the result ('apm install --force' also restores them, but overwrites every local edit and deploys despite critical security findings).
+```
+
+Plain `apm install` keeps a hand-edited file and warns, so restore it the way the hint says. For files a local bundle deployed, delete them and reinstall that bundle with `apm install <bundle-path>`. `apm audit --ci` exits 1 on drift. Plain `apm audit` reports the same drift and exits 0,
+unless the org policy sets `security.audit.fail_on_drift: true`. `apm install --frozen`
+also fails, before writing anything, when a deployed file differs from its locked hash.
+
+What the replay reports:
+
+| Finding | Meaning |
+|---|---|
+| `modified` | A deployed file differs from what the lockfile would produce |
+| `unintegrated` | The replay produces a file that is missing from disk |
+| `orphaned` | A file the lockfile tracks is on disk, but the replay no longer produces it |
+| `unrecorded` | A file matches the replay but no lockfile entry claims it |
+| `unmanaged-conflict` | A file no lockfile entry claims sits where the replay writes; install skipped it as user-authored |
+
+What it does not see: files APM never deployed (set `unmanaged_files` in the
+[policy schema](../../reference/policy-schema/#unmanaged_files) to flag files in agent
+folders that no package claims), and changes between runs. Run the check on every pull
+request ([Gate pull requests](../enforce-in-ci/)) and on a schedule against the default
+branch:
+
+```yaml title=".github/workflows/apm-drift.yml"
 on:
-  schedule: [{ cron: '0 6 * * *' }]
-  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
 jobs:
-  audit:
+  drift:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: curl -fsSL https://aka.ms/apm/install | bash
-      - run: apm install
-      - run: apm audit --ci --format sarif --output apm-audit.sarif
-        continue-on-error: true
-      - uses: github/codeql-action/upload-sarif@v3
-        with: { sarif_file: apm-audit.sarif }
-      - run: apm outdated > apm-outdated.txt
-        if: always()
-      - uses: actions/upload-artifact@v4
-        with: { name: apm-drift, path: 'apm-*' }
+      - uses: microsoft/apm-action@v1
+        with:
+          setup-only: true
+      - run: apm audit --ci --no-fail-fast
 ```
 
-**Central audit harness.** Run a single job that iterates over a list of
-repos (from a GitHub org listing or a static manifest), clones each one,
-and runs `apm audit --ci --format sarif` plus `apm outdated`. Aggregate
-the outputs into one dashboard.
+`apm outdated` covers the other kind of drift: upstream tags that moved past what you
+locked.
 
-Either pattern depends only on documented `apm` flags. APM does not
-phone home; the harness is yours.
+## Send local edits upstream
 
-## Reporting formats
+When a team has improved an installed skill in place, save the edit before
+`apm install --force` restores the locked file:
 
-`apm audit --ci` accepts `--format text|json|sarif` and `--output`;
-non-CI `apm audit` also accepts `markdown`.
+```bash frame="terminal"
+apm export-patch
+```
 
-| Format | Use |
-|---|---|
-| `text` (default) | Terminal review, pull-request logs |
-| `json` | Custom dashboards, ticketing integrations |
-| `sarif` | GitHub code scanning, Defender for Cloud, any SARIF-aware viewer |
-| `markdown` | Pull-request comments, weekly status digests (non-CI `apm audit` only) |
+```text frame="none"
+[i] .claude/skills/style-checker/SKILL.md -> microsoft/apm-sample-package:.apm/skills/style-checker/SKILL.md
+[i] wrote <repo>/patches/microsoft__apm-sample-package@v1.0.0.patch
+[*] Exported 1 edit(s) into 1 patch file(s) under <repo>/patches. Apply each with 'git apply' from the package repository root at the base noted in the patch header.
+```
 
-`--format json|sarif|markdown` cannot be combined with `--strip` or
-`--dry-run`; those modes are interactive by design.
+Send the patch to the package owner, then run `apm install --force` to restore the locked file.
 
-## Remediation
+## Export an inventory
 
-Once drift is detected, remediation routes back to two pages:
+```bash frame="terminal"
+apm lock export --format cyclonedx -o sbom.json
+```
 
-- [Enforce in CI](../enforce-in-ci/) -- wire `apm audit --ci` into branch
-  protection so future drift cannot land. The same command that detects
-  drift here is the one that gates merges.
-- [Security model](../security/) -- scope
-  tokens, lock the registry proxy, and tighten `apm-policy.yml` so the
-  drift you cleaned up cannot reappear from a new source.
+```text frame="none"
+[+] SBOM written to sbom.json (format=cyclonedx)
+```
 
-For the consumer-side view of what these checks protect against on a
-single workstation, see [drift and secure by default](../../consumer/drift-and-secure-by-default/).
+`--format spdx` writes SPDX 2.3 instead of CycloneDX 1.5. The inventory lists one
+component per locked package, with its name, version, the commit it resolved to and the
+license its `apm.yml` declares. Each component carries a package URL
+(`pkg:github/<owner>/<repo>@<commit>` for GitHub, typed for GitLab and Bitbucket,
+`pkg:generic` for other hosts, with `#<subpath>` for a package inside a repository) and the
+lockfile's SHA-256 content hash (CycloneDX `hashes`, SPDX `checksums`), labelled
+`apm-package-tree-sha256`: APM's package tree hash, not an archive digest. The export reads `apm.lock.yaml` and nothing else: no
+network, no re-hashing. Pass `--timestamp` or set `SOURCE_DATE_EPOCH` for byte-identical output in
+release pipelines.
+
+An inventory is a record of what the lockfile says, not an attestation: it does not
+show that the files on disk match, so run `apm audit --ci` in the same pipeline. Attach the
+SBOM to each release, or collect one per repository for an organization-wide view.
+
+## Related
+
+- [`apm audit`](../../reference/cli/audit/): flags and output formats.
+- [`apm lock export`](../../reference/cli/lock/): SBOM options.
+- [Agent supply chain security model](../security/): where drift and inventory fit.

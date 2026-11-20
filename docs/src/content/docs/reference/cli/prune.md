@@ -171,7 +171,7 @@ Notes:
 | Code | Meaning                                                                       |
 |------|--------------------------------------------------------------------------------|
 | 0    | Prune completed with no orphan deletion failures (including "nothing to prune"). |
-| 1    | An orphan deletion failed, `apm.yml` is missing, parsing or lockfile writing failed, or an unhandled error occurred. |
+| 1    | An orphan deletion failed, `apm.yml` is missing, `apm.lock.yaml` was written by a newer APM (refused before any change), parsing or lockfile writing failed, or an unhandled error occurred. |
 
 Orphan deletion failures are logged without stopping the remaining packages.
 The final error reports how many packages were removed and how many failed.
@@ -188,6 +188,6 @@ confirm the resulting state.
 
 - [`apm install`](../install/) -- install declared dependencies
 - [`apm uninstall`](../uninstall/) -- remove a declared dependency (shares this command's hook-reconciliation owner)
-- [`apm list`](../list/) -- inspect what is installed
+- [`apm deps list`](../deps/#apm-deps-list) -- inspect what is installed
 - [Lockfile spec](../../lockfile-spec/) -- `deployed_files` schema
-- [Package anatomy](../../../concepts/package-anatomy/) -- what gets deployed where
+- [Package anatomy](../../../producer/create-a-package/) -- what gets deployed where

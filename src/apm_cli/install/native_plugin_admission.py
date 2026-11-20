@@ -42,59 +42,10 @@ def agent_plugin_exec_types(package_info: Any) -> tuple[str, ...]:
 
 
 def plugin_root_exec_types(install_path: Any) -> tuple[str, ...]:
-    """Return exec trust types implied by NATIVE-layout components at the root.
+    """Exec trust types of NATIVE-layout root components (see the trust owner)."""
+    from apm_cli.security.trust import native_root_exec_types
 
-    ``scan_package_executables`` only understands APM's own ``.apm/`` layout
-    (``.apm/hooks/*.json``, ``bin/``, ``apm.yml`` mcp/lsp declarations,
-    ``.apm/extensions/<n>/extension.mjs``). An Agent Plugins v1 package is
-    materialized in the NATIVE root layout instead, so the very components
-    :data:`~apm_cli.agent_plugins.loader._IGNORED_PORTABLE_COMPONENT_PATHS`
-    records as present-but-unmodelled live at the plugin ROOT, where that
-    scanner never looks. Under this module's PRESENCE IS DEPLOYMENT premise --
-    Copilot loads the whole directory live -- an unapproved root
-    ``extensions/``, ``lsp.json`` or ``hooks/`` would otherwise execute with no
-    exec approval at all.
-
-    The mapping is driven off the loader's own constant so the two can never
-    drift: any unmapped ignored component still yields a trust type, so a new
-    entry there fails closed here rather than silently widening admission.
-    """
-    from pathlib import Path
-
-    from apm_cli.agent_plugins.loader import _IGNORED_PORTABLE_COMPONENT_PATHS
-    from apm_cli.security.executables import (
-        EXEC_TYPE_CANVAS,
-        EXEC_TYPE_HOOKS,
-        EXEC_TYPE_LSP,
-    )
-
-    if install_path is None:
-        return ()
-    root = Path(install_path)
-    mapping = {
-        "extensions": EXEC_TYPE_CANVAS,
-        "lsp.json": EXEC_TYPE_LSP,
-        "hooks": EXEC_TYPE_HOOKS,
-        # agents/commands/instructions carry prompt payloads Copilot loads
-        # live; they are not shell-executable, but an unapproved hook payload
-        # can hide beside them, so they map to the hooks gate rather than
-        # silently to nothing.
-        "agents": EXEC_TYPE_HOOKS,
-        "commands": EXEC_TYPE_HOOKS,
-        "instructions": EXEC_TYPE_HOOKS,
-    }
-    present: list[str] = []
-    for name in _IGNORED_PORTABLE_COMPONENT_PATHS:
-        try:
-            if not (root / name).exists():
-                continue
-        except OSError:
-            continue
-        present.append(mapping.get(name, EXEC_TYPE_HOOKS))
-    seen: dict[str, None] = {}
-    for exec_type in present:
-        seen.setdefault(exec_type, None)
-    return tuple(seen)
+    return native_root_exec_types(install_path)
 
 
 def record_native_exec_status(
@@ -109,16 +60,23 @@ def record_native_exec_status(
     trust_ctx = getattr(ctx, "exec_trust_ctx", None)
     if trust_ctx is None:
         return
+    from pathlib import Path
+
     from apm_cli.install.exec_gate import resolve_package_key
-    from apm_cli.security.executables import (
-        exec_status_for_declaration,
-        more_severe_exec_status,
-    )
+    from apm_cli.security.executables import more_severe_exec_status
+    from apm_cli.security.trust import package_exec_status
 
     candidate_keys = [resolve_package_key(package_info, package_name)]
     if package_name and package_name not in candidate_keys:
         candidate_keys.append(package_name)
-    status = exec_status_for_declaration(trust_ctx, candidate_keys, exec_types)
+    install_path = getattr(package_info, "install_path", None)
+    status = package_exec_status(
+        trust_ctx,
+        tuple(candidate_keys),
+        Path(install_path) if install_path is not None else None,
+        exec_types,
+        native=True,
+    )
     if status is not None:
         # FOLD, never assign: the exec gate already recorded the worst-case
         # status over ALL exec types found on disk (hooks, canvas, lsp, ...),
@@ -234,7 +192,7 @@ def verify_native_plugin_cache(
     ensure_path_within(candidate, live_modules)
     if lock_dep.is_local_source:
         ensure_path_within(replay_path, scratch_root)
-        expected_hash = compute_package_hash(replay_path)
+        expected_hash = compute_package_hash(replay_path, framed=lock_dep.content_hash_framed)
     else:
         expected_hash = lock_dep.content_hash
         # Cold-cache CI has already materialized the pinned unit in scratch.
@@ -246,7 +204,9 @@ def verify_native_plugin_cache(
                 "run 'apm install' to regenerate its integrity baseline"
             )
     carried = () if lock_dep.is_local_source else lock_dep.carried_licenses
-    if not candidate.is_dir() or not verify_locked_package(candidate, expected_hash, carried):
+    if not candidate.is_dir() or not verify_locked_package(
+        candidate, expected_hash, carried, framed=lock_dep.content_hash_framed
+    ):
         raise AgentPluginDeploymentBoundaryError(
             f"Native Agent Plugin cache differs from its replay baseline: {candidate}; "
             "run 'apm install' to restore the package"

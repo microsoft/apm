@@ -17,10 +17,11 @@ Dispatches over a ``_FETCHERS`` table keyed by ``source.kind``:
 
 When ``PROXY_REGISTRY_URL`` is set, GitHub/GHES fetches go through the
 Artifactory Archive Entry Download proxy first. Cache lives at
-``~/.apm/cache/marketplace/`` with a 1-hour TTL.
+``~/.apm/cache/marketplace/`` with a 1-hour TTL. Explicit freshness
+(``require_fresh`` / :func:`catalog_freshness_scope`) revalidates instead of
+trusting that TTL and never falls back to stale data (#3279).
 """
 
-import base64
 import contextlib
 import hashlib
 import json
@@ -28,19 +29,33 @@ import logging
 import os
 import re
 import subprocess
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 import requests
 
-from .errors import MarketplaceError, MarketplaceFetchError
+from ..utils.http_credentials import (
+    CredentialScopedSession,
+    RedirectRefusedError,
+    origin_bounded_request,
+    origin_root,
+)
+from .errors import (
+    MarketplaceEgressRefusedError,
+    MarketplaceError,
+    MarketplaceFetchError,
+    MarketplaceFreshnessError,
+    MarketplaceNotCachedError,
+)
 from .models import (
     MarketplaceManifest,
     MarketplacePlugin,
     MarketplaceSource,
+    catalog_digest,
     parse_marketplace_json,
 )
 from .registry import get_registered_marketplaces
@@ -59,11 +74,11 @@ class FetchResult:
 
 
 _CACHE_TTL_SECONDS = 3600  # 1 hour
+_SIDECAR_KINDS = frozenset({"github", "gitlab", "ado", "url"})
 _MAX_MARKETPLACE_JSON_BYTES = 10 * 1024 * 1024
 _HTTP_CHUNK_BYTES = 1024 * 1024
 _CACHE_DIR_NAME = os.path.join("cache", "marketplace")
-_HTTP_SESSION = requests.Session()
-_HTTP_SESSION.max_redirects = 5
+_HTTP_SESSION = CredentialScopedSession()
 
 # Candidate locations for marketplace.json in a repository (priority order)
 _MARKETPLACE_PATHS = [
@@ -226,12 +241,33 @@ def _read_stale_meta(name: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
-def _http_get(url: str, **kwargs: object):
-    """Issue HTTP GET through a shared session without persisting cookies."""
+def _http_get(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    follow_cross_origin_without_credentials: bool = True,
+    **kwargs: object,
+):
+    """Issue HTTP GET through a shared session without persisting cookies.
+
+    Redirects follow the shared origin-bounded owner: credentials are re-sent
+    only within the request's origin, and by default a hop to another HTTPS
+    origin is followed without any credential header. Callers whose redirects
+    carry an auth signal (Azure DevOps sign-in) pass
+    ``follow_cross_origin_without_credentials=False`` to get the refusal.
+    """
     cookies = getattr(_HTTP_SESSION, "cookies", None)
     if cookies is not None:
         cookies.clear()
-    response = _HTTP_SESSION.get(url, **kwargs)
+    response = origin_bounded_request(
+        _HTTP_SESSION,
+        "GET",
+        url,
+        base_url=origin_root(url),
+        headers=headers,
+        follow_cross_origin_without_credentials=follow_cross_origin_without_credentials,
+        **kwargs,
+    )
     if cookies is not None:
         cookies.clear()
     return response
@@ -311,10 +347,6 @@ def _fetch_url_direct(
         raise MarketplaceFetchError(url, str(exc)) from exc
 
     try:
-        final_url = getattr(resp, "url", url)
-        if isinstance(final_url, str) and urlsplit(final_url).scheme.lower() != "https":
-            raise MarketplaceFetchError(url, "redirect to non-HTTPS URL rejected")
-
         if resp.status_code == 304:
             return None
         if resp.status_code == 404:
@@ -454,8 +486,9 @@ def _gitlab_file_raw_url(source: MarketplaceSource, file_path: str, host_info) -
 
 def _github_headers(token: str | None) -> dict[str, str]:
     headers = {"Accept": "application/vnd.github.v3.raw", "User-Agent": "apm-cli"}
-    if token:
-        headers["Authorization"] = f"token {token}"
+    from ..core.auth import AuthResolver
+
+    headers.update(AuthResolver.github_rest_headers(token))
     return headers
 
 
@@ -721,42 +754,6 @@ class _AdoItemNotFound(Exception):
     """
 
 
-def _ado_auth_header(token: str | None, git_env: dict | None) -> dict[str, str]:
-    """Build the Azure DevOps ``Authorization`` header for a resolved token.
-
-    ``AuthResolver.try_with_fallback`` hands the operation a ``(token, git_env)``
-    pair but not the auth scheme. Bearer contexts carry the full
-    ``Authorization: Bearer <jwt>`` header in a ``GIT_CONFIG_VALUE_<i>`` slot
-    (see ``AuthResolver._build_git_env``); detect that and emit the Bearer
-    scheme. The slot index is not fixed -- since #2368 the header is appended
-    after any retained non-auth entries -- so the whole indexed set is scanned.
-
-    Only indices below ``GIT_CONFIG_COUNT`` are read, because that is all git
-    itself reads. A slot above the count is either a leftover from an env this
-    process did not build or an injected one, and honouring it would send an
-    ADO PAT under the Bearer scheme, which the server rejects.
-
-    Otherwise treat the token as an ADO PAT and use HTTP Basic with
-    ``base64(":" + PAT)`` per ADO's convention (empty username, PAT as
-    password). Returns an empty dict for an anonymous request.
-
-    The returned dict carries the credential -- callers MUST NOT log it.
-    """
-    if not token:
-        return {}
-    env = git_env or {}
-    try:
-        count = max(0, int(env.get("GIT_CONFIG_COUNT", "0") or "0"))
-    except (TypeError, ValueError):
-        count = 0
-    for index in range(count):
-        value = str(env.get(f"GIT_CONFIG_VALUE_{index}", ""))
-        if value.strip().lower().startswith("authorization: bearer "):
-            return {"Authorization": f"Bearer {token}"}
-    encoded = base64.b64encode(f":{token}".encode()).decode("ascii")
-    return {"Authorization": f"Basic {encoded}"}
-
-
 def _fetch_ado_rest(
     source: MarketplaceSource,
     file_path: str,
@@ -789,30 +786,48 @@ def _fetch_ado_rest(
         port,
     )
 
+    from ..core.auth_chain import authorization_headers
+    from ..core.auth_outcome import raise_for_auth_outcome
+
     def _do_fetch(token, git_env):
-        headers = {"User-Agent": "apm-cli"}
-        headers.update(_ado_auth_header(token, git_env))
-        resp = _http_get(url, headers=headers, timeout=30, stream=True)
+        # Only the chain-selected credential is sent; ambient netrc never
+        # replaces it. A sign-in redirect is the auth signal: it is refused,
+        # not followed, and the classifier escalates on the refused 3xx.
+        refused: RedirectRefusedError | None = None
         try:
+            resp = _http_get(
+                url,
+                headers={"User-Agent": "apm-cli", **authorization_headers(git_env)},
+                ambient_credentials=False,
+                follow_cross_origin_without_credentials=False,
+                timeout=30,
+                stream=True,
+            )
+        except RedirectRefusedError as exc:
+            if exc.response is None:
+                raise
+            refused, resp = exc, exc.response
+        try:
+            if refused is not None:
+                # Sign-in redirects classify as auth failures; any other
+                # refused hop is a plain transport failure.
+                raise_for_auth_outcome(
+                    resp,
+                    host_kind="ado",
+                    credential_presented=bool(token),
+                )
+                raise refused
             if resp.status_code == 404:
-                # No message: this sentinel flows through ``try_with_fallback`` ->
-                # ``is_ado_auth_failure_signal(str(exc))``; an empty string never
-                # trips an auth-failure keyword, so a 404 never wastes a bearer
-                # retry.
+                # Not an auth outcome: the classifier never escalates on it.
                 raise _AdoItemNotFound
-            # ADO answers an unauthenticated/under-scoped request with HTTP 200 +
-            # an HTML sign-in page rather than a 401 (#1671). Treat that as an auth
-            # failure so try_with_fallback can attempt the AAD bearer before we
-            # give up and clone. The word "unauthorized" is load-bearing: it makes
-            # ``is_ado_auth_failure_signal(str(exc))`` match, which is the gate the
-            # PAT->bearer fallback checks (see AuthResolver._try_ado_bearer_fallback).
-            if resp.status_code == 200:
-                content_type = resp.headers.get("Content-Type", "").lower()
-                if "text/html" in content_type:
-                    raise MarketplaceFetchError(
-                        source.name,
-                        "Azure DevOps returned a sign-in page (unauthorized: authentication required)",
-                    )
+            # 401/403, a sign-in redirect, and a 200/203 HTML sign-in page all
+            # classify as auth failures so the chain escalates to the next
+            # credential before we give up and clone.
+            raise_for_auth_outcome(
+                resp,
+                host_kind="ado",
+                credential_presented=bool(token),
+            )
             resp.raise_for_status()
             return _read_capped_json(resp, source.name)
         finally:
@@ -822,7 +837,7 @@ def _fetch_ado_rest(
 
     fallback_kwargs = {
         "org": org,
-        "path": f"{org}/{project}/{repo}",
+        "path": f"{org}/{project}/_git/{repo}",
         "unauth_first": False,
     }
     if port is not None:
@@ -1087,13 +1102,18 @@ def fetch_raw(
     if proxy_bytes is not None:
         return proxy_bytes
 
-    from ..deps.registry_proxy import RegistryConfig
+    from ..deps.registry_proxy import RegistryConfig, is_enforce_only
 
     cfg = RegistryConfig.from_env()
-    if cfg is not None and cfg.enforce_only:
+    if (cfg is not None and cfg.enforce_only) or is_enforce_only():
         raise MarketplaceError(
             f"cannot verify {owner}/{repo}/{file_path}@{ref}: "
-            "PROXY_REGISTRY_ONLY blocks the GitHub fallback after a proxy miss"
+            "PROXY_REGISTRY_ONLY blocks the direct GitHub fetch"
+            + (
+                " after a proxy miss"
+                if cfg is not None
+                else "; set PROXY_REGISTRY_URL or unset PROXY_REGISTRY_ONLY"
+            )
         )
 
     from ..core.auth import AuthResolver
@@ -1132,6 +1152,28 @@ def fetch_raw(
         raise MarketplaceError(f"fetching {owner}/{repo}/{file_path}@{ref}: {exc}") from exc
 
 
+def _refuse_direct_egress(source_name: str, what: str) -> None:
+    """Refuse a direct catalog fetch when ``PROXY_REGISTRY_ONLY`` is set.
+
+    Registry-only mode sanctions no direct egress. Only github/gitlab
+    catalogs route through ``PROXY_REGISTRY_URL``; every other remote kind,
+    and any kind without a configured proxy, would go direct.
+    """
+    from ..deps.registry_proxy import is_enforce_only
+
+    if is_enforce_only():
+        # Drop any query string: a signed catalog URL must not reach CI logs.
+        what = re.sub(r"\?\S*", "", what)
+        raise MarketplaceEgressRefusedError(
+            source_name,
+            f"PROXY_REGISTRY_ONLY is set: refusing direct fetch of {what}",
+            retry_hint=(
+                "Register a GitHub or GitLab marketplace and set PROXY_REGISTRY_URL "
+                "to route it through your proxy, or unset PROXY_REGISTRY_ONLY."
+            ),
+        )
+
+
 def _fetch_file(
     source: MarketplaceSource,
     file_path: str,
@@ -1162,6 +1204,7 @@ def _fetch_file(
 
         cfg = RegistryConfig.from_env()
         if cfg is not None and cfg.enforce_only:
+            # The proxy answered for this path: a miss is "not found".
             logger.debug(
                 "PROXY_REGISTRY_ONLY blocks direct fetch for %s/%s %s",
                 source.owner,
@@ -1169,6 +1212,9 @@ def _fetch_file(
                 file_path,
             )
             return None
+    if kind != "local":
+        # No proxy route: git, ado and url kinds, or no PROXY_REGISTRY_URL.
+        _refuse_direct_egress(source.name, f"{file_path} from {source.display_source}")
 
     host_info = None
     if kind in ("github", "gitlab"):
@@ -1229,6 +1275,7 @@ def fetch_marketplace(
     source: MarketplaceSource,
     *,
     force_refresh: bool = False,
+    require_fresh: bool = False,
     auth_resolver: object | None = None,
     discovery_payload: dict | None = None,
     offline: bool = False,
@@ -1241,7 +1288,14 @@ def fetch_marketplace(
 
     Args:
         source: Marketplace source to fetch.
-        force_refresh: Skip cache and re-fetch from network.
+        force_refresh: Skip the fresh cache and re-fetch from network. On a
+            network error the last cached copy is still served (browse/view
+            availability).
+        require_fresh: Explicit freshness (#3279). Revalidate the catalog
+            (conditional request where supported) and never serve cached
+            data that could not be revalidated. Failure raises
+            :class:`MarketplaceFreshnessError` and leaves the last valid
+            cache untouched.
         auth_resolver: Optional ``AuthResolver`` instance (created if None).
         discovery_payload: Optional catalog JSON already fetched during
             path discovery in the same invocation (microsoft/apm#3283).
@@ -1257,6 +1311,8 @@ def fetch_marketplace(
 
     Raises:
         MarketplaceFetchError: If fetch fails and no cache is available.
+        MarketplaceFreshnessError: If *require_fresh* and the catalog could
+            not be revalidated.
     """
     if is_local_authoring_source(source):
         from .authoring_source import load_authoring_catalog
@@ -1269,24 +1325,21 @@ def fetch_marketplace(
             retry_hint="Omit --offline to use the existing JSON or repository workflow.",
         )
     cache_name = _cache_key(source)
-    use_sidecar_cache = source.kind in ("github", "gitlab", "ado", "url")
+    use_sidecar_cache = source.kind in _SIDECAR_KINDS
+    # Local catalogs stay ordinary local reads even under explicit refresh.
+    strict = require_fresh and source.kind != "local"
 
     # Try fresh cache first (API kinds only)
-    if use_sidecar_cache and not force_refresh:
-        cached = _read_cache(cache_name)
+    if use_sidecar_cache and not (force_refresh or require_fresh):
+        cached = _manifest_from_cache(source, cache_name, stale=False)
         if cached is not None:
             logger.debug("Using cached marketplace data for '%s'", source.name)
-            meta = _read_stale_meta(cache_name) or {}
-            return parse_marketplace_json(
-                cached,
-                source.name,
-                source_url=source.url if source.kind == "url" else "",
-                source_digest=meta.get("index_digest", "") if source.kind == "url" else "",
-            )
+            return cached
 
     # Fetch from source
     try:
         if source.kind == "url":
+            _refuse_direct_egress(source.name, source.display_source)
             stale_meta = _read_stale_meta(cache_name) or {}
             result = _fetch_url_direct(
                 source.url,
@@ -1299,6 +1352,13 @@ def fetch_marketplace(
                     raise MarketplaceFetchError(
                         source.name, "got 304 Not Modified but no cached data is available"
                     )
+                manifest = _parse_catalog(
+                    stale,
+                    source,
+                    strict=strict,
+                    source_url=source.url,
+                    source_digest=stale_meta.get("index_digest", ""),
+                )
                 _write_cache(
                     cache_name,
                     stale,
@@ -1306,12 +1366,14 @@ def fetch_marketplace(
                     etag=stale_meta.get("etag", ""),
                     last_modified=stale_meta.get("last_modified", ""),
                 )
-                return parse_marketplace_json(
-                    stale,
-                    source.name,
-                    source_url=source.url,
-                    source_digest=stale_meta.get("index_digest", ""),
-                )
+                return manifest
+            manifest = _parse_catalog(
+                result.data,
+                source,
+                source_url=source.url,
+                source_digest=result.digest,
+                strict=strict,
+            )
             _write_cache(
                 cache_name,
                 result.data,
@@ -1319,12 +1381,7 @@ def fetch_marketplace(
                 etag=result.etag,
                 last_modified=result.last_modified,
             )
-            return parse_marketplace_json(
-                result.data,
-                source.name,
-                source_url=source.url,
-                source_digest=result.digest,
-            )
+            return manifest
 
         if discovery_payload is not None:
             # Reuse the catalog response already fetched by path discovery
@@ -1340,32 +1397,178 @@ def fetch_marketplace(
                 source.name,
                 f"marketplace.json not found at '{source.path}' in {source.display_source}",
             )
+        manifest = _parse_catalog(data, source, strict=strict)
+        # Only a validated catalog replaces the last valid cache.
         if use_sidecar_cache:
             _write_cache(cache_name, data)
-        return parse_marketplace_json(data, source.name)
-    except MarketplaceFetchError:
+        return manifest
+    except MarketplaceFetchError as exc:
+        if isinstance(exc, MarketplaceEgressRefusedError):
+            raise
+        if strict:
+            raise MarketplaceFreshnessError(source.name, exc.reason or str(exc)) from exc
         # Stale-while-revalidate (API kinds only): serve expired cache on network error
         if use_sidecar_cache:
-            stale = _read_stale_cache(cache_name)
+            stale = _manifest_from_cache(source, cache_name, stale=True)
             if stale is not None:
                 logger.warning("Network error fetching '%s'; using stale cache", source.name)
-                meta = _read_stale_meta(cache_name) or {}
-                return parse_marketplace_json(
-                    stale,
-                    source.name,
-                    source_url=source.url if source.kind == "url" else "",
-                    source_digest=meta.get("index_digest", "") if source.kind == "url" else "",
-                )
+                return stale
         raise
+
+
+def _parse_catalog(
+    data: object,
+    source: MarketplaceSource,
+    *,
+    source_url: str = "",
+    source_digest: str = "",
+    strict: bool = False,
+) -> MarketplaceManifest:
+    """Parse fetched catalog JSON, rejecting a non-object root.
+
+    Runs before any cache write so an invalid response never replaces the
+    last valid cached catalog. Ordinary reads tolerate entry-level problems
+    (the model parser records them as structural diagnostics). A *strict*
+    (explicit-refresh) read rejects them, so a malformed catalog cannot pass
+    as a successful refresh that silently drops entries.
+    """
+    if not isinstance(data, dict):
+        raise MarketplaceFetchError(source.name, "marketplace.json root must be an object")
+    if source.kind != "url" and not source_digest:
+        # Git-hosted catalogs arrive parsed, so their lock digest is the
+        # canonical-JSON one. Hosted URLs only ever use the raw-bytes digest.
+        source_digest = catalog_digest(data)
+    manifest = parse_marketplace_json(
+        data, source.name, source_url=source_url, source_digest=source_digest
+    )
+    if strict and manifest.structural_errors:
+        raise MarketplaceFetchError(
+            source.name, "invalid catalog: " + "; ".join(manifest.structural_errors[:3])
+        )
+    return manifest
+
+
+@dataclass
+class _CatalogInvocation:
+    """Catalog answers shared by every resolution in one command invocation."""
+
+    require_fresh: bool
+    results: dict[str, MarketplaceManifest | MarketplaceFetchError]
+
+
+_INVOCATION_LOCK = threading.RLock()
+_invocation: _CatalogInvocation | None = None
+
+
+@contextlib.contextmanager
+def catalog_freshness_scope(*, require_fresh: bool) -> Iterator[None]:
+    """Bind one catalog answer per source to a single command invocation.
+
+    The command owner (``apm install``, ``apm update``) opens this scope
+    once. Inside it, :func:`fetch_or_cache` fetches each catalog at most
+    once and reuses that answer -- success or failure -- for every plugin
+    selected from the same source. With *require_fresh* (``--refresh`` /
+    update intent) the first read revalidates the catalog and never falls
+    back to cached data (#3279); otherwise ordinary cached reads apply.
+    """
+    global _invocation
+    with _INVOCATION_LOCK:
+        previous = _invocation
+        _invocation = _CatalogInvocation(require_fresh=require_fresh, results={})
+    try:
+        yield
+    finally:
+        with _INVOCATION_LOCK:
+            _invocation = previous
+
+
+def _manifest_from_cache(
+    source: MarketplaceSource, cache_name: str, *, stale: bool
+) -> MarketplaceManifest | None:
+    """Return the cached catalog (within TTL, or any age when *stale*), else ``None``.
+
+    Single owner of cache-to-manifest projection: metadata lookup, url-kind
+    provenance (source_url / index digest) and root validation. A cached
+    payload that is not a catalog object counts as no cache.
+    """
+    data = _read_stale_cache(cache_name) if stale else _read_cache(cache_name)
+    if data is None:
+        return None
+    meta = _read_stale_meta(cache_name) or {}
+    source_url = source.url if source.kind == "url" else ""
+    try:
+        return _parse_catalog(
+            data,
+            source,
+            source_url=source_url,
+            source_digest=meta.get("index_digest", "") if source_url else "",
+        )
+    except MarketplaceFetchError:
+        return None
+
+
+def _cached_catalog(source: MarketplaceSource) -> MarketplaceManifest:
+    """Return the last cached catalog for *source* without any network request.
+
+    Raises :class:`MarketplaceNotCachedError` for generic-git sources (no
+    sidecar cache) and for sources never cached: during an explicit refresh an
+    advisory reader then checks fewer catalogs rather than spending requests.
+    """
+    if source.kind == "local":
+        return fetch_marketplace(source)
+    cached = (
+        _manifest_from_cache(source, _cache_key(source), stale=True)
+        if source.kind in _SIDECAR_KINDS
+        else None
+    )
+    if cached is None:
+        raise MarketplaceNotCachedError(source.name)
+    return cached
 
 
 def fetch_or_cache(
     source: MarketplaceSource,
     *,
     auth_resolver: object | None = None,
+    advisory: bool = False,
 ) -> MarketplaceManifest:
-    """Convenience wrapper -- same as ``fetch_marketplace`` with defaults."""
-    return fetch_marketplace(source, auth_resolver=auth_resolver)
+    """Return the catalog used to resolve marketplace selections.
+
+    Outside :func:`catalog_freshness_scope` this is an ordinary cached read.
+    Inside it, each source is read once per invocation and, when the scope
+    requires freshness, revalidated without stale fallback. *advisory* reads
+    (shadow detection) reuse an answer already obtained in the scope but
+    never trigger a required revalidation of an unrelated catalog.
+    """
+    invocation = _invocation
+    if invocation is None:
+        return fetch_marketplace(source, auth_resolver=auth_resolver)
+    key = f"{source.kind}:{_cache_key(source)}"
+    known = invocation.results.get(key)
+    if known is None and advisory:
+        if invocation.require_fresh:
+            # Never spend a request on an unrelated catalog during an
+            # explicit refresh; advisory readers fall back to what is cached.
+            return _cached_catalog(source)
+        return fetch_marketplace(source, auth_resolver=auth_resolver)
+    if known is None:
+        # Serialize first reads so concurrent selections from one source
+        # share a single request and a single answer.
+        with _INVOCATION_LOCK:
+            known = invocation.results.get(key)
+            if known is None:
+                try:
+                    known = fetch_marketplace(
+                        source,
+                        require_fresh=invocation.require_fresh,
+                        auth_resolver=auth_resolver,
+                    )
+                except MarketplaceFetchError as exc:
+                    known = exc
+                invocation.results[key] = known
+    if isinstance(known, MarketplaceFetchError):
+        raise known
+    return known
 
 
 def search_marketplace(

@@ -1,173 +1,151 @@
 ---
-title: Update and refresh
-description: Refresh project dependencies, lock down installs for CI, and update the apm CLI binary. One verb per job.
+title: Update dependencies
+description: See what is outdated, move dependencies forward on purpose, review the lockfile diff, and let Dependabot or Renovate open the pull requests.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+Use this page to take new versions of your agent packages without surprises.
+A plain `apm install` never moves a version: it replays `apm.lock.yaml`.
+Versions change when you run `apm update`, edit `apm.yml`, or merge a
+pull request that does one of those.
 
-<Aside type="tip" title="Coming from npm? You already know this.">
-`apm update` refreshes your project's package dependencies, just like
-`npm update`. CLI upgrades depend on how you installed APM:
-[use your package manager or the standalone updater](#update-the-apm-cli-binary).
-</Aside>
+## See what is outdated
 
-Two things drift out of date in an APM project:
-
-1. The package versions pinned in `apm.lock.yaml`.
-2. The `apm` CLI binary on your machine.
-
-They are managed by separate commands. Pick the right one.
-
-## Refresh project dependencies
-
-```bash
-apm update
-```
-
-Re-resolves every dependency in `apm.yml` to its latest matching version or ref,
-prints the planned changes, and prompts for consent before applying ref changes
-and redeploying primitives. If refs are unchanged but the locked
-`apm_modules/` cache is empty, APM [restores it without
-prompting](../../reference/cli/update/). Pass one or more package names
-(`apm update org/pkg-a org/pkg-b`) to refresh only those.
-
-Mutable Git refs are established from the authenticated upstream. If APM cannot
-reach that source, update exits non-zero instead of silently substituting a
-stale ref from the local bare Git cache. Once the fresh SHA is known, cached
-content for that SHA may still be reused.
-
-Useful flags:
-
-- `--dry-run` -- show the resolution plan and exit; never writes.
-- `--yes` -- skip the consent prompt (for scripts and CI).
-- `-v, --verbose` -- show per-dependency resolution detail.
-- `-g, --global` -- refresh user-scope dependencies under `~/.apm/`
-  instead of the current project (pairs with `apm outdated -g`).
-- `--force` -- overwrite locally-authored files and deploy despite critical
-  security findings. It does not weaken the upstream freshness check. Use only
-  after independent verification.
-- `--parallel-downloads N` -- cap concurrent downloads (default 4;
-  `0` disables parallelism).
-
-This is the command that actually changes versions in your project. It
-is a strict superset of the deprecated `apm deps update`.
-
-## Inspect first
-
-```bash
+```bash frame="terminal"
 apm outdated
 ```
 
-Compares each entry in `apm.lock.yaml` against its remote source and
-reports which dependencies have new commits or new tags available.
-Read-only. An unavailable remote reports `unknown`; cached bare refs are not
-reported as current upstream state.
+`apm outdated` compares each locked dependency with its upstream and changes
+nothing. Add `-v` to list the newer tags. An unreachable source shows as
+`unknown`.
 
-Useful flags:
+## Update on purpose
 
-- `-v, --verbose` -- show available tags for outdated tag-pinned deps.
-- `-g, --global` -- check user-scope dependencies under `~/.apm/`
-  instead of the current project.
-- `-j, --parallel-checks N` -- cap concurrent remote checks (default 4;
-  `0` for sequential).
+Preview, then apply:
 
-Run `apm outdated` before `apm update` to know what you are about to
-bump.
+```bash frame="terminal"
+apm update --dry-run
+apm update
+```
 
-## Plain `apm install` is a sync
+`apm update` prints a plan (added, updated, removed, unchanged) and asks
+before changing anything; the default answer is No. Name packages to limit
+the update to them (`apm update contoso/review-skills`). In scripts and CI, pass
+`--yes`. `apm update` also revalidates any marketplace behind a dependency and fails
+rather than use stale data.
 
-```bash
+"Latest" means the newest version your `apm.yml` allows:
+
+| Entry in `apm.yml` | What `apm update` does |
+|---|---|
+| `#^1.1.0` (range) | Moves to the highest matching tag |
+| `#main` (branch) | Moves to the branch tip |
+| `#<40-char SHA>` (commit) | Moves to the commit of the newest annotated release tag and adds the tag as a comment |
+| `#v1.1.0` (exact tag) | Stays on that tag; edit it to move |
+
+To jump to a release outside your range, edit `apm.yml` and run `apm install`.
+
+## Review the lockfile diff
+
+The lockfile diff is the change your reviewers approve. When Ben releases
+`contoso/review-skills` 1.2.0, Ana's update pull request shows:
+
+```diff title="apm.lock.yaml"
+ - repo_url: contoso/review-skills
+-  resolved_ref: v1.1.0
+-  resolved_commit: 3f2a9c1...
++  resolved_ref: v1.2.0
++  resolved_commit: b71e04d...
+   deployed_files:
+     - .agents/skills/security-review/SKILL.md
++    - .agents/skills/security-review/references/owasp.md
+```
+
+Read it for:
+
+- **New packages**: a new `repo_url` is a new transitive dependency.
+- **New files**, especially hooks, MCP servers and scripts. If your project
+  uses the approval gate, they stay parked until someone runs
+  [`apm approve`](../approve-executables/).
+- **Changed sources**: a different host or repository for the same name.
+
+`apm update` also re-checks executables against current approvals. If your
+organization turns the approval gate on, packages installed before it go through the
+gate on the next update. If you remove the approval for one type, such as hooks, from a
+package, the update retires that type. The lockfile lists the approved types in
+`exec_allowed_types`.
+
+## After a lock bump, run `apm install`
+
+A pull request that changes `apm.lock.yaml` does not change the files on
+anyone's machine. After you pull it, run:
+
+```bash frame="terminal"
 apm install
 ```
 
-With no flags, `apm install` reproduces exactly the versions pinned in
-`apm.lock.yaml`. New entries you have added to `apm.yml` get resolved
-and locked; entries whose ref was changed in `apm.yml` are re-resolved
-to the new pin; entries whose spec is unchanged stay on their locked SHAs.
+CI rebuilds from the lockfile with `apm install --frozen`; see
+[Run in CI](../run-in-ci/).
 
-When the lockfile is already satisfied, install prints:
+## Dependabot
 
-```text
-[i] Run 'apm update' to check for newer versions.
+Dependabot opens pull requests for git dependencies in `apm.yml` and
+regenerates `apm.lock.yaml` when one exists:
+
+```yaml title=".github/dependabot.yml"
+version: 2
+updates:
+  - package-ecosystem: "apm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
 ```
 
-That is the nudge: install never silently bumps versions. Use
-`apm update` when you want to.
+- Tag pins move to the newest semver tag, including package-scoped tags such
+  as `review-v1.4.0`.
+- SHA pins move to the newest annotated, non-prerelease release tag, with the
+  tag added as a comment.
+- Branch pins change the lockfile, not `apm.yml`.
+- It runs `apm lock`, which writes the lockfile without deploying files.
 
-Use `apm install --refresh` when you need both current upstream refs and a
-content re-download. It re-resolves mutable refs and bypasses cached package
-content; `apm update` may reuse content already cached at the fresh SHA.
+It skips object-form entries (`git:`, `path:`), entries without a ref, local
+paths, Azure DevOps and `http://` sources, and `mcp:` entries. Reference:
+[Dependabot supported ecosystems](https://docs.github.com/code-security/reference/supply-chain-security/supported-ecosystems-and-repositories#apm).
 
-Use `apm lock --update` when you need the same upstream ref refresh but want to
-rewrite only `apm.lock.yaml`, without deploying or deleting harness files.
+## Renovate
 
-See [Promise 1: Portable by manifest](../../concepts/the-three-promises/)
-for why this matters in CI and for new contributors.
+Renovate's `apm` manager reads every `apm.yml` and updates entries pinned with
+an exact `#ref`:
 
-## Lock down for CI
-
-```bash
-apm install --frozen
+```json title="renovate.json"
+{
+  "extends": ["config:recommended"]
+}
 ```
 
-Lockfile-only install. Refuses to resolve anything new and exits with
-status 1 if `apm.yml` and `apm.lock.yaml` have drifted. Mirrors
-`npm ci`. Use this in CI to catch a manifest change that was not
-followed by an `apm update`.
+With `pinDigests` (part of `config:best-practices`), it keeps a SHA pin and its
+tag comment current. When `apm.lock.yaml` exists, Renovate refreshes it by
+running `apm install`, so the `apm` CLI must be available to Renovate (for
+example `binarySource=global` on a self-hosted runner). Reference:
+[Renovate apm manager](https://docs.renovatebot.com/modules/manager/apm/).
 
-`--frozen` is mutually exclusive with `--update`: one trusts the
-lockfile, the other rewrites it.
+## Verify
 
-`apm install --force` does not refresh remote refs. It overwrites local
-collisions and may deploy despite critical built-in scan findings; the scan
-still runs. If you want new commit SHAs, run `apm update`.
-
-## Update the apm CLI binary
-
-Use the tool that installed APM. For **Homebrew**:
-
-```bash
-brew upgrade apm
+```bash frame="terminal"
+apm outdated
 ```
 
-Homebrew core disables `apm self-update` and startup update notices; see the
-[self-update reference](../../reference/cli/self-update/#description).
-For **pip**, run `pip install --upgrade apm-cli`; for **Scoop**, run `scoop update apm`.
-
-For **standalone installs only**, check for a release, then update through the
-official installer:
-
-```bash
-apm self-update --check
-apm self-update
+```text frame="none"
+[*] All dependencies are up-to-date
 ```
 
-CLI upgrades do not refresh project dependencies or change the lockfile.
+## Update the APM CLI binary
 
-<Aside type="note" title="Back-compat shim">
-If you run the legacy `apm update --check`, the CLI prints a
-deprecation notice and forwards to `apm self-update --check`. Use that command
-directly only for standalone installs.
-</Aside>
+Updating APM itself is separate from updating packages: see
+[Install APM](../../getting-started/installation/).
 
-## When to use which
-
-| You want to... | Run |
-|---|---|
-| See which deps have new versions | `apm outdated` |
-| Preview a dep refresh | `apm update --dry-run` |
-| Bump deps and rewrite the lockfile | `apm update` |
-| Refresh only the lockfile from upstream refs | `apm lock --update` |
-| Reproduce the locked versions exactly | `apm install` |
-| Fail CI on lockfile drift | `apm install --frozen` |
-| Update a Homebrew-installed CLI | `brew upgrade apm` |
-| Update a standalone CLI | `apm self-update` |
-| Check for a standalone CLI update | `apm self-update --check` |
-
-## Next steps
-
-- Add, remove, or change versions in `apm.yml`:
-  [Manage dependencies](../manage-dependencies/).
-- Re-scan refreshed packages for hidden Unicode and other issues:
-  [Drift and secure by default](../drift-and-secure-by-default/).
-- Full flag reference: [CLI commands](../../reference/cli/install/).
+:::tip[Other options]
+`apm lock --update` refreshes refs in the lockfile without deploying.
+`apm install --refresh` re-resolves refs and downloads again, bypassing the
+cache. Every flag: [`apm update`](../../reference/cli/update/) and
+[`apm outdated`](../../reference/cli/outdated/).
+:::

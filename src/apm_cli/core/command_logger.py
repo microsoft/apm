@@ -7,8 +7,10 @@ from apm_cli.utils.console — no new output primitives.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING
 
 from apm_cli.models.results import InstallDisposition
@@ -23,6 +25,7 @@ from apm_cli.utils.console import (
 if TYPE_CHECKING:
     from apm_cli.deps.revision_pins import RevisionPinSkip
     from apm_cli.install.failure_residue import FailedInstallResidue
+    from apm_cli.policy.models import PolicyRemedy
 
 
 def _strip_source_prefix(source: str) -> str:
@@ -143,6 +146,10 @@ class CommandLogger:
         """Log an error."""
         _rich_error(message, symbol=symbol)
 
+    def refusal(self, message: str) -> None:
+        """Render a refusal on stderr, where click reports errors (#3992)."""
+        _rich_error(message, symbol="error", err=True)
+
     def error_detail(self, message: str):
         """Log supporting error context that must remain visible by default."""
         _rich_echo(message)
@@ -183,6 +190,10 @@ class CommandLogger:
     def blank_line(self):
         """Log a blank line through the shared console output path."""
         _rich_echo("")
+
+    def preformatted(self, text: str):
+        """Render preformatted text (a diff or snippet) without a status symbol."""
+        _rich_echo(text.rstrip("\n"), soft_wrap=True)
 
     def package_inline_warning(self, message: str):
         """Log an inline warning under a package block (verbose only).
@@ -244,13 +255,23 @@ class InstallLogger(CommandLogger):
     full install (all deps from apm.yml). Adjusts messages accordingly.
     """
 
-    def __init__(self, verbose: bool = False, dry_run: bool = False, partial: bool = False):
-        super().__init__("install", verbose=verbose, dry_run=dry_run)
+    def __init__(
+        self,
+        verbose: bool = False,
+        dry_run: bool = False,
+        partial: bool = False,
+        *,
+        command: str = "install",
+    ):
+        # ``apm update`` reuses this logger; ``command`` keeps hints true for it.
+        super().__init__(command, verbose=verbose, dry_run=dry_run)
         self.partial = partial  # True when specific packages are passed to `apm install`
         self._stale_cleaned_total = 0  # Accumulated by stale_cleanup / orphan_cleanup
         self._dry_run_apm_update_count = 0
         self._dry_run_incomplete = False
         self._lockfile_written = False
+        # MCP servers this run removed from native config; a change on their own.
+        self._mcp_removed: set[str] = set()
         self._failed_install_residue_note = ""
 
     def failed_install_residue(self, residue: FailedInstallResidue) -> None:
@@ -407,6 +428,10 @@ class InstallLogger(CommandLogger):
         """Keep metadata-only persistence out of the unchanged summary."""
         self._lockfile_written = True
 
+    def record_mcp_removed(self, names) -> None:
+        """Record MCP servers this install removed, so the summary counts them."""
+        self._mcp_removed.update(str(name) for name in names)
+
     def nothing_to_install(
         self,
         lockfile_present: bool = False,
@@ -477,6 +502,9 @@ class InstallLogger(CommandLogger):
             cached: Whether this was a cache hit.
             ref_suffix: DEPRECATED — legacy callers still pass this.
         """
+        if ref and dep_name.endswith(f"#{ref}"):
+            # The header appends the ref itself; never print it twice.
+            dep_name = dep_name[: -len(ref) - 1]
         msg = f"  [+] {dep_name}"
         if ref_suffix:
             # Legacy path — pass-through until all callers are migrated
@@ -490,7 +518,28 @@ class InstallLogger(CommandLogger):
                 msg += f" @{sha}"
             if cached:
                 msg += " (cached)"
-        _rich_echo(msg, color="green")
+        self._emit_or_hold(partial(_rich_echo, msg, color="green"))
+
+    @contextmanager
+    def held_package_header(self) -> Iterator[list[Callable[[], None]]]:
+        """Hold one package's header lines until its integration output starts.
+
+        Install acquires every package before deploying any, so a header
+        printed at acquisition would stack above another package's tree.
+        """
+        held: list[Callable[[], None]] = []
+        self._held_header = held
+        try:
+            yield held
+        finally:
+            self._held_header = None
+
+    def _emit_or_hold(self, emit: Callable[[], None]) -> None:
+        held = getattr(self, "_held_header", None)
+        if held is None:
+            emit()
+        else:
+            held.append(emit)
 
     def download_failed(self, dep_name: str, error: str):
         """Log a download failure."""
@@ -516,13 +565,13 @@ class InstallLogger(CommandLogger):
         if not self.verbose:
             return
         type_str = f" ({token_type})" if token_type else ""
-        _rich_echo(f"    Auth: {source}{type_str}", color="dim")
+        self._emit_or_hold(partial(_rich_echo, f"    Auth: {source}{type_str}", color="dim"))
 
     def package_type_info(self, type_label: str):
         """Log detected package type (verbose only). 4-space indent."""
         if not self.verbose:
             return
-        _rich_echo(f"    Package type: {type_label}", color="dim")
+        self._emit_or_hold(partial(_rich_echo, f"    Package type: {type_label}", color="dim"))
 
     # --- Performance diagnostics (perf #1433) ---
 
@@ -715,6 +764,7 @@ class InstallLogger(CommandLogger):
         source: str = "",
         error: str | None = None,
         host_org: str | None = None,
+        hint: str | None = None,
     ):
         """Log a policy-discovery non-success outcome.
 
@@ -732,6 +782,8 @@ class InstallLogger(CommandLogger):
                 cache_miss_fetch_fail, garbage_response, cached_stale).
             host_org: Optional org slug for ``absent`` outcome (verbose
                 hint).  Auto-derived from ``source`` when not provided.
+            hint: Optional discovery diagnostic (``PolicyFetchResult.
+                discovery_hint``), shown with ``absent`` in verbose mode only.
         """
         err_text = error or "unknown"
 
@@ -742,6 +794,8 @@ class InstallLogger(CommandLogger):
                 return
             org = host_org or _strip_source_prefix(source) or "this project"
             _rich_info(f"No org policy found for {org}", symbol="info")
+            if hint:
+                _rich_info(hint, symbol="info")
             return
 
         if outcome == "no_git_remote":
@@ -830,6 +884,10 @@ class InstallLogger(CommandLogger):
         reason: str,
         severity: str,
         source: str | None = None,
+        *,
+        remedy: PolicyRemedy | None = None,
+        declared_by: str | None = None,
+        rule: str | None = None,
     ):
         """Record a policy violation for a dependency.
 
@@ -846,6 +904,14 @@ class InstallLogger(CommandLogger):
             source: Optional policy source (used for block-mode next-step
                 hint).  When provided, a dim secondary line with
                 remediation guidance is rendered under the inline error.
+            remedy: apm.yml edit the hint suggests, a
+                :class:`~apm_cli.policy.models.PolicyRemedy` member. ``None``
+                (the default) or any other value suggests no apm.yml edit.
+            declared_by: Direct apm.yml dependency (lock key) that brings
+                in a transitive MCP server; the hint names it instead of
+                *dep_ref*.
+            rule: Policy check (category) that fired, named in the hint
+                so the user can find the policy field.
         """
 
         # F9 dedupe: some callers pass reason with a "{dep_ref}: " prefix
@@ -862,11 +928,20 @@ class InstallLogger(CommandLogger):
         )
 
         if severity == "block":
-            _rich_error(f"Policy violation: {dep_ref} -- {reason}", symbol="error")
+            self.refusal(f"Policy violation: {dep_ref} -- {reason}")
             if source:
                 _rich_echo(
-                    f"  {self._policy_reason_blocked(dep_ref, source)}",
+                    "  "
+                    + self._policy_reason_blocked(
+                        dep_ref,
+                        source,
+                        remedy=remedy,
+                        declared_by=declared_by,
+                        rule=rule,
+                        command=self.command,
+                    ),
                     color="dim",
+                    err=True,
                 )
 
     def policy_disabled(self, reason: str):
@@ -894,11 +969,23 @@ class InstallLogger(CommandLogger):
         )
 
     @staticmethod
-    def _policy_reason_unreachable(source: str) -> str:
+    def _policy_bypass_hint(command: str) -> str:
+        """One-off bypass the *command* actually accepts (#3994).
+
+        ``apm install`` has ``--no-policy``; other commands (``apm update``)
+        only honour a one-shot ``APM_POLICY_DISABLE=1`` prefix, which must
+        never be exported where it would disable policy for a whole CI job.
+        """
+        if command == "install":
+            return "use `--no-policy` for one-off bypass"
+        return f"bypass once with `APM_POLICY_DISABLE=1 apm {command}` (never export it in CI)"
+
+    @staticmethod
+    def _policy_reason_unreachable(source: str, *, command: str = "install") -> str:
         """Actionable reason for unreachable policy source."""
         return (
             f"Policy source {source} is unreachable "
-            "-- retry, check VPN/firewall, or use `--no-policy` to bypass"
+            f"-- retry, check VPN/firewall, or {InstallLogger._policy_bypass_hint(command)}"
         )
 
     @staticmethod
@@ -907,12 +994,37 @@ class InstallLogger(CommandLogger):
         return f"Policy at {source} is malformed -- contact your org admin to fix the policy file"
 
     @staticmethod
-    def _policy_reason_blocked(dep_ref: str, source: str) -> str:
-        """Actionable reason for a blocked dependency."""
+    def _policy_reason_blocked(
+        dep_ref: str,
+        source: str,
+        *,
+        remedy: PolicyRemedy | None = None,
+        declared_by: str | None = None,
+        rule: str | None = None,
+        command: str = "install",
+    ) -> str:
+        """Actionable reason for a blocked dependency.
+
+        Only :class:`~apm_cli.policy.models.PolicyRemedy` members render an
+        apm.yml edit; ``None`` or an unknown remedy renders none.
+        """
+        from apm_cli.policy.models import PolicyRemedy
+
+        if remedy == PolicyRemedy.ADD:
+            edit = f"add `{dep_ref}` to apm.yml, "
+        elif remedy == PolicyRemedy.PIN:
+            edit = f"pin `{dep_ref}` to a semver range, tag, or SHA in apm.yml, "
+        elif remedy == PolicyRemedy.REMOVE and declared_by:
+            edit = f"remove `{declared_by}` (it brings in `{dep_ref}`) from apm.yml, "
+        elif remedy == PolicyRemedy.REMOVE:
+            edit = f"remove `{dep_ref}` from apm.yml, "
+        else:
+            edit = ""
+        rule_part = f" ({rule})" if rule and rule != dep_ref else ""
         return (
-            f"Blocked by org policy at {source} "
-            f"-- remove `{dep_ref}` from apm.yml, contact admin to update policy, "
-            "or use `--no-policy` for one-off bypass"
+            f"Blocked by org policy at {source}{rule_part} "
+            f"-- {edit}contact admin to update policy, "
+            f"or {InstallLogger._policy_bypass_hint(command)}"
         )
 
     # --- Install summary ---
@@ -1043,6 +1155,13 @@ class InstallLogger(CommandLogger):
             file_noun = "file" if stale_cleaned == 1 else "files"
             _rich_success(
                 f"Cleaned {stale_cleaned} stale {file_noun}{timing_suffix}.",
+                symbol="sparkles",
+            )
+        elif self._mcp_removed:
+            count = len(self._mcp_removed)
+            noun = "server" if count == 1 else "servers"
+            _rich_success(
+                f"Removed {count} stale MCP {noun}{timing_suffix}.",
                 symbol="sparkles",
             )
         elif self._lockfile_written:

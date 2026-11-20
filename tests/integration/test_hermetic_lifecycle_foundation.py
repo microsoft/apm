@@ -411,26 +411,60 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         negative_args = ("audit", "--ci", "--no-policy", "--format", "json")
 
     recovery_args = ["install", "--target", "copilot"]
-    if mutation in {"content-hash", "resolved-commit", "source-identity"}:
+    if mutation in {"resolved-commit", "source-identity"}:
         recovery_args.append("--update")
-    result, recovery, clean_audit = runner.run_sequence(
-        (
-            negative_args,
-            tuple(recovery_args),
-            ("audit", "--ci", "--no-policy", "--format", "json"),
-        ),
-        expected_returncodes=(1, 0, 0),
-        scenario_id=f"{scenario_id}-tamper-repair",
-        cwd=project_root,
-        env=environment,
-    )
+    if mutation == "content-hash":
+        # An unchanged commit never re-pins new content through an update
+        # (#4027): the deliberate repair drops the entry and installs again.
+        (result,) = runner.run_sequence(
+            (negative_args,),
+            expected_returncodes=(1,),
+            scenario_id=f"{scenario_id}-tamper",
+            cwd=project_root,
+            env=environment,
+        )
+        refused = runner.run_sequence(
+            (("install", "--target", "copilot", "--update"),),
+            expected_returncodes=(1,),
+            scenario_id=f"{scenario_id}-tamper-update",
+            cwd=project_root,
+            env=environment,
+        )[0]
+        assert "Content hash mismatch" in " ".join(refused.stdout.split())
+        assert load_yaml(lock_path)["dependencies"][0]["content_hash"] == f"sha256:{'0' * 64}"
+        tampered = load_yaml(lock_path)
+        tampered["dependencies"] = []
+        dump_yaml(tampered, lock_path)
+        recovery, clean_audit = runner.run_sequence(
+            (tuple(recovery_args), ("audit", "--ci", "--no-policy", "--format", "json")),
+            expected_returncodes=(0, 0),
+            scenario_id=f"{scenario_id}-tamper-repair",
+            cwd=project_root,
+            env=environment,
+        )
+    else:
+        result, recovery, clean_audit = runner.run_sequence(
+            (
+                negative_args,
+                tuple(recovery_args),
+                ("audit", "--ci", "--no-policy", "--format", "json"),
+            ),
+            expected_returncodes=(1, 0, 0),
+            scenario_id=f"{scenario_id}-tamper-repair",
+            cwd=project_root,
+            env=environment,
+        )
 
     if mutation == "content-hash":
         normalized_stdout = " ".join(result.stdout.split())
         assert "Content hash mismatch" in normalized_stdout
         assert f"expected sha256:{'0' * 64}" in normalized_stdout
         assert "This may indicate a supply-chain attack." in normalized_stdout
-        assert "Use 'apm install --update' to accept new content" in normalized_stdout
+        dep_key = normalized_stdout.split("Content hash mismatch for ", 1)[1].split(":", 1)[0]
+        # The hint names the resolved lockfile path, which Rich may wrap.
+        compact = "".join(result.stdout.split())
+        assert f"removethe'{dep_key}'entryfrom" in compact, result.stdout
+        assert "apm.lock.yamlandrun'apminstall'" in compact, result.stdout
         assert result.stderr == ""
     else:
         payload = json.loads(result.stdout)
@@ -442,7 +476,7 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             assert set(failed_checks) == {"content-integrity", "drift"}
             assert instruction_path in failed_checks["content-integrity"]["details"][0]
             assert (
-                "'apm install' to restore drifted files"
+                "'apm install' after deleting the drifted files"
                 in (failed_checks["content-integrity"]["message"])
             )
         elif mutation == "resolved-ref":
@@ -455,7 +489,7 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             ]
         elif mutation == "resolved-commit":
             assert set(failed_checks) == {"ref-consistency"}
-            assert "run 'apm install --update'" in (failed_checks["ref-consistency"]["message"])
+            assert "run 'apm update'" in (failed_checks["ref-consistency"]["message"])
             assert failed_checks["ref-consistency"]["details"] == [
                 f"gitlab.example.invalid/group/fixture-{scenario_id}: "
                 f"manifest commit '{receipt.commit_sha}' != "
@@ -471,7 +505,7 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
                     "inline_diff": "",
                 }
             ]
-            assert "run 'apm install --update'" in (failed_checks["ref-consistency"]["message"])
+            assert "run 'apm update'" in (failed_checks["ref-consistency"]["message"])
             assert failed_checks["ref-consistency"]["details"] == [
                 f"gitlab.example.invalid/group/fixture-{scenario_id}: not found in lockfile"
             ]

@@ -367,3 +367,38 @@ class TestMixedRegistryDepsGroupedCorrectly:
         # The registry group only sees registry-server
         validate_call = ops_mock.validate_servers_exist.call_args
         assert validate_call[0][0] == ["registry-server"]
+
+
+class TestRegistryDepsNarrowedByTargets:
+    """#2606: a registry group receives only the runtimes its deps' ``targets:`` select."""
+
+    def test_same_registry_deps_with_different_targets_split_by_runtimes(self):
+        dep_claude = _make_dep("srv-claude", targets=["claude"])
+        dep_cursor = _make_dep("srv-cursor", targets=["cursor"])
+        dep_all = _make_dep("srv-all")
+        dep_none = _make_dep("srv-none", targets=["codex"])
+        module = "apm_cli.integration.mcp_integrator_install"
+
+        with (
+            patch(_OPS_PATH, return_value=_make_operations_mock([])),
+            patch(f"{module}._resolve_target_runtimes", return_value=["claude", "cursor"]),
+            patch(f"{module}._validate_target_configs"),
+            patch(f"{module}._resolve_frozen_deferred_pairs"),
+            patch(f"{module}._install_registry_group", return_value=0) as install_group,
+        ):
+            from apm_cli.integration.mcp_integrator_install import run_mcp_install
+
+            run_mcp_install(
+                mcp_deps=[dep_claude, dep_cursor, dep_all, dep_none],
+                logger=MagicMock(),
+            )
+
+        groups = sorted(
+            (tuple(c.kwargs["target_runtimes"]), tuple(c.kwargs["group_dep_names"]))
+            for c in install_group.call_args_list
+        )
+        assert groups == [
+            (("claude",), ("srv-claude",)),
+            (("claude", "cursor"), ("srv-all",)),
+            (("cursor",), ("srv-cursor",)),
+        ]

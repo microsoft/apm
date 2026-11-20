@@ -1,5 +1,12 @@
 """Marketplace-specific error hierarchy."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .resolver import CrossRepoMisconfigRisk
+
 
 class MarketplaceError(Exception):
     """Base class for marketplace errors."""
@@ -48,6 +55,64 @@ class PluginNotFoundError(MarketplaceError):
         )
 
 
+class DependencyConfusionError(MarketplaceError, ValueError):
+    """A marketplace entry resolved to an ambiguous bare cross-repo source (#1326).
+
+    Raised only by
+    :func:`~apm_cli.marketplace.dependency_confusion.admit_marketplace_resolution`.
+    ``ValueError`` stays a base so resolution-error handlers keep recording it.
+    """
+
+    def __init__(self, risk: CrossRepoMisconfigRisk) -> None:
+        self.risk = risk
+        super().__init__(
+            "\n".join(
+                [
+                    f"refused (dependency-confusion risk #1326): bare"
+                    f" `{risk.locator_field}: {risk.bare_repo_field}` on enterprise"
+                    f" marketplace '{risk.marketplace_host}' is ambiguous."
+                    f" Host-qualify the plugin `{risk.locator_field}` field in"
+                    f" marketplace.json to one of:",
+                    f"  - '{risk.suggested_qualified_repo}' (enterprise dep on this marketplace)",
+                    f"  - 'github.com/{risk.bare_repo_field}' (declared cross-host dep on public github.com)",
+                ]
+            )
+        )
+
+
+class MarketplaceOriginConflictError(MarketplaceError):
+    """Raised when an alias now names a different marketplace than the lock recorded."""
+
+    def __init__(self, marketplace_name: str, plugin_name: str, locked: str, current: str):
+        import shlex
+
+        from .source_identity import parse_marketplace_source
+
+        self.marketplace_name = marketplace_name
+        self.plugin_name = plugin_name
+        self.locked_origin = locked
+        self.current_origin = current
+        try:
+            parse_marketplace_source(locked)
+        except ValueError:
+            restore = (
+                "To keep the locked marketplace, register its origin again with "
+                f"'apm marketplace add' under the name {marketplace_name!r}."
+            )
+        else:
+            restore = (
+                "To keep the locked marketplace, run: apm marketplace add "
+                f"{shlex.quote(locked)} --name {shlex.quote(marketplace_name)} "
+                "(add --ref or --path if the original registration used them)."
+            )
+        super().__init__(
+            f"marketplace {marketplace_name!r} now points at {current}, but apm.lock.yaml "
+            f"recorded {plugin_name!r} from {locked}. Nothing was changed. {restore} "
+            f"To switch marketplaces on purpose, remove {plugin_name!r} from apm.yml, run "
+            "'apm install', then add it back and run 'apm install' again."
+        )
+
+
 class MarketplaceYmlError(MarketplaceError):
     """Raised when marketplace.yml validation or parsing fails."""
 
@@ -69,6 +134,47 @@ class MarketplaceFetchError(MarketplaceError):
             else f"Run 'apm marketplace update {name}' to retry."
         )
         super().__init__(f"Failed to fetch marketplace '{name}'{detail}. {retry}")
+
+
+class MarketplaceEgressRefusedError(MarketplaceFetchError):
+    """Raised when ``PROXY_REGISTRY_ONLY`` refuses a direct catalog fetch.
+
+    A policy refusal, not a network failure: callers must not fall back to a
+    cached catalog or report it as unreachable.
+    """
+
+
+class MarketplaceFreshnessError(MarketplaceFetchError):
+    """Raised when an explicit refresh cannot revalidate a marketplace catalog.
+
+    Explicit freshness (``apm install --refresh``, ``apm update``,
+    ``apm marketplace update``) never falls back to cached catalog data, so
+    a failure here means no catalog answer was used, not that a plugin is
+    missing.
+    """
+
+    RETRY_HINT = (
+        "The cached marketplace was kept and nothing was changed. Retry when the "
+        "marketplace is reachable; a plain 'apm install' still uses the cached copy."
+    )
+
+    def __init__(self, name: str, reason: str = ""):
+        super().__init__(name, reason, retry_hint=self.RETRY_HINT)
+        detail = f": {reason}" if reason else ""
+        self.args = (
+            f"Could not verify that marketplace '{name}' is current{detail}. {self.RETRY_HINT}",
+        )
+
+
+class MarketplaceNotCachedError(MarketplaceFetchError):
+    """An advisory read during an explicit refresh found no cached catalog."""
+
+    def __init__(self, name: str):
+        super().__init__(
+            name,
+            "no cached marketplace for an advisory read during an explicit refresh",
+            retry_hint="",
+        )
 
 
 # ---------------------------------------------------------------------------

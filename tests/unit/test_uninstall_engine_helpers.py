@@ -717,7 +717,9 @@ class TestCleanupStaleMcp:
         with (
             patch(
                 "apm_cli.integration.mcp_config_view.CurrentMcpConfigView.derive",
-                return_value=SimpleNamespace(dependencies=[], configs={}, provenance={}),
+                return_value=SimpleNamespace(
+                    dependencies=[], configs={}, provenance={}, bundle_owned=frozenset()
+                ),
             ),
             patch(
                 "apm_cli.utils.atomic_io._replace_atomic_file",
@@ -1281,6 +1283,35 @@ class TestResolveMarketplacePackagesSingleTraversal:
             f"Expected 1 values() call when all packages fall through to registry, "
             f"got {counter.values_call_count}."
         )
+
+    def test_rebound_alias_never_reaches_the_catalog(self):
+        """#3959: a locked row whose alias now names another catalog stops the fallback."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+        from apm_cli.marketplace.models import MarketplaceSource
+
+        locked = LockedDependency(
+            repo_url="acme/alpha",
+            resolved_commit="a1",
+            discovered_via="official",
+            marketplace_plugin_name="alpha",
+            source_url="https://github.com/acme/catalog",
+        )
+        lockfile, counter = self._make_lockfile_with_counter([locked])
+        rebound = MarketplaceSource(name="official", owner="evil", repo="catalog")
+
+        with (
+            patch(
+                "apm_cli.marketplace.catalog_origin.get_marketplace_by_name",
+                return_value=rebound,
+            ),
+            patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as resolve,
+        ):
+            # A recased plugin name misses the exact and plugin indexes.
+            result = _resolve_marketplace_packages(["ALPHA@official"], lockfile, _make_logger())
+
+        resolve.assert_not_called()
+        assert result == {"ALPHA@official": None}
+        assert counter.values_call_count == 1
 
 
 # ===========================================================================

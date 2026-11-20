@@ -69,6 +69,7 @@ def _install(
     return integrate_package_primitives(
         package_info,
         project,
+        skill_subset=None,
         targets=[_hook_only_target(name) for name in targets],
         integrators=IntegratorBundle(
             prompt=None,

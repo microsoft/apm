@@ -5,7 +5,9 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
@@ -308,6 +310,44 @@ class TestCommandExecutor:
         with patcher:
             _execute_command(script, _make_event(), project_root="/my/project")
         assert fake.init_kwargs.get("cwd") == "/my/project"
+
+    @pytest.mark.skipif(not hasattr(os, "killpg"), reason="POSIX process groups")
+    def test_interrupt_reaps_script_group_before_propagating(self, tmp_path: Path) -> None:
+        """Ctrl+C never reaches the script's own session, so APM must reap it."""
+        pid_file = tmp_path / "grandchild.pid"
+        script = ScriptEntry(
+            script_type="command",
+            event="pre-compile",
+            bash=f"sleep 60 & echo $! > '{pid_file}'; wait",
+            timeout_sec=60,
+        )
+
+        def _interrupt_once_running(proc, stdin_text, timeout, cap=None):
+            deadline = time.monotonic() + 10
+            while not (pid_file.exists() and pid_file.read_text(encoding="ascii").strip()):
+                assert time.monotonic() < deadline, "script never started"
+                time.sleep(0.02)
+            raise KeyboardInterrupt
+
+        with (
+            patch(
+                "apm_cli.core.script_executors._capture_bounded",
+                side_effect=_interrupt_once_running,
+            ),
+            pytest.raises(KeyboardInterrupt),
+        ):
+            _execute_command(script, _make_event("pre-compile"), project_root=str(tmp_path))
+
+        grandchild = int(pid_file.read_text(encoding="ascii"))
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.kill(grandchild, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.05)
+        os.kill(grandchild, signal.SIGKILL)
+        pytest.fail("interrupted lifecycle script outlived the APM command")
 
 
 # -- _expand_env_vars ------------------------------------------------------

@@ -229,7 +229,7 @@ class SecurityGate:
                 package=package,
                 detail=force_detail
                 or (
-                    f"{verdict.critical_count} critical finding(s) — "
+                    f"{verdict.critical_count} critical finding(s) -- "
                     "run 'apm audit --strip' to clean up"
                 ),
                 severity="critical",
@@ -237,7 +237,7 @@ class SecurityGate:
         elif verdict.has_critical and verdict.should_block:
             diagnostics.security(
                 message=(
-                    "Blocked — critical hidden characters in source. Use --force to override."
+                    "Blocked -- critical hidden characters in source. Use --force to override."
                 ),
                 package=package,
                 detail=f"at least {verdict.critical_count} critical, "
@@ -251,7 +251,7 @@ class SecurityGate:
                 package=package,
                 detail=(
                     f"{verdict.critical_count} critical, "
-                    f"{verdict.warning_count} warning(s) — "
+                    f"{verdict.warning_count} warning(s) -- "
                     "run 'apm audit' to inspect"
                 ),
                 severity="critical",
@@ -261,7 +261,7 @@ class SecurityGate:
                 message="Hidden characters in source files",
                 package=package,
                 detail=(
-                    f"{verdict.warning_count} warning(s) — run 'apm audit --strip' after install"
+                    f"{verdict.warning_count} warning(s) -- run 'apm audit --strip' after install"
                 ),
                 severity="warning",
             )

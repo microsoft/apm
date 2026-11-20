@@ -179,7 +179,7 @@ def _check_package_projection(provider: FactsProvider) -> tuple[Violation, ...]:
                 "native_detection = route_agent_plugin_package(install_path)",
                 "agent_plugin_detection=native_detection,\n            read_only=True",
                 "with native_registration_scope(targets):",
-                'if result.get("native_plugin"):',
+                'if result.get("native_plugin") and not result.get("native_claude_plugin"):',
                 "from apm_cli.install.native_plugin_admission import verify_native_plugin_cache",
                 "verify_native_plugin_cache(\n                            lock_dep,",
             ),
@@ -193,8 +193,8 @@ def _check_package_projection(provider: FactsProvider) -> tuple[Violation, ...]:
             _RID_PROJECTION,
             "src/apm_cli/install/native_plugin_admission.py",
             (
-                "expected_hash = compute_package_hash(replay_path)",
-                "verify_locked_package(candidate, expected_hash, carried)",
+                "expected_hash = compute_package_hash(replay_path, framed=lock_dep.content_hash_framed)",
+                "candidate, expected_hash, carried, framed=lock_dep.content_hash_framed",
             ),
             "Native cache verification must hash the canonical replay image",
         )
@@ -335,6 +335,7 @@ def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...
                 "PLUGIN_LAYOUT.get(head)",
                 "for primitive_kind in spec.primitive_kinds:",
                 "_retarget_basename(parts[-1], mapping, spec.apm_basename_fn)",
+                '_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command", "codex_agent"})',
             ),
             "local bundle deployment must route through PLUGIN_LAYOUT and TargetProfile.primitives",
         )
@@ -449,10 +450,189 @@ def _check_copilot_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             provider,
             inv,
             _RID_COPILOT,
-            tuple(p for p in _src_python(provider) if not p.startswith(_COPILOT_PLUGINS_PREFIX)),
+            tuple(
+                p
+                for p in _src_python(provider)
+                if not p.startswith(_COPILOT_PLUGINS_PREFIX)
+                and p != "src/apm_cli/native_plugins/settings.py"
+            ),
             _SETTINGS_KEYS,
-            "Copilot marketplace/settings ownership keys must live only in copilot_plugins/",
+            "Native settings keys must live only in copilot_plugins/ or the shared "
+            "native_plugins/settings.py writer",
             exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
+_RID_CLAUDE = "marketplace-integrations-claude-ownership"
+_CLAUDE_OWNER = "src/apm_cli/claude_plugins/registrar.py"
+
+
+def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    for path, symbol in (
+        (_CLAUDE_OWNER, "reconcile_claude_plugins"),
+        (_CLAUDE_OWNER, "verify_claude_native_cache"),
+        ("src/apm_cli/claude_plugins/admission.py", "plan_native_claude_plugin"),
+    ):
+        count = _count_across(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            _src_python(provider),
+            re.compile(rf"^def {symbol}\("),
+        )
+        if count != 1:
+            findings.append(
+                violation(
+                    _RID_CLAUDE,
+                    path,
+                    f"{symbol} must have exactly one owner, found {count}",
+                )
+            )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            _CLAUDE_OWNER,
+            (
+                "None if previous is None else frozenset(prior_names),",
+                "following = native_ownership(lockfile) if lockfile is not None else {}",
+                "if fingerprint_native_claude_source(source) != own.record.fingerprint:",
+                "and prior.pin == own.pin",
+                "name not in prior_names\n            and existing.exists()",
+                "write_declaration(",
+            ),
+            "Claude declarations must derive ownership from the lockfile and verify approved bytes",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            "src/apm_cli/native_plugins/settings.py",
+            (
+                "if enabled.get(key) is True:",
+                "if current is not None and current != declaration.marketplace_value:",
+                "for plugin in sorted((owned or frozenset()) - declaration.plugins):",
+            ),
+            "Native settings writes must keep explicit user false and unowned marketplaces",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            "src/apm_cli/install/phases/claude_plugins.py",
+            ("previous.write(lock_path)",),
+            "A failed Claude declaration must restore the previous lock (one rollback unit)",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            tuple(
+                p
+                for p in _src_python(provider)
+                if p.startswith(("src/apm_cli/claude_plugins/", "src/apm_cli/native_plugins/"))
+            ),
+            re.compile(r"^\s*(import subprocess|from subprocess import)|shutil\.which\("),
+            "Native Claude declaration never runs a vendor CLI",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            "src/apm_cli/claude_plugins/admission.py",
+            ("return compute_native_plugin_hash(root)",),
+            "Claude fingerprinting must consume the canonical complete native hash",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            "src/apm_cli/install/drift.py",
+            (
+                'if result.get("native_plugin") and not result.get("native_claude_plugin"):',
+                'if result.get("native_claude_plugin"):',
+                "verify_claude_native_cache(",
+                'local_modules_dir=scratch_root / "apm_modules",',
+            ),
+            "Claude replay must verify owned fingerprints without normalizing into the live cache",
+        )
+    )
+    findings.extend(
+        _forbid_scan(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            tuple(
+                p for p in _src_python(provider) if not p.startswith("src/apm_cli/claude_plugins/")
+            ),
+            re.compile(r'["\']apm-claude["\']|^class ClaudePluginCLI'),
+            "Claude native marketplace and CLI ownership must stay in claude_plugins/",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            "src/apm_cli/install/deployment_plan.py",
+            (
+                "plan_native_claude_plugin(",
+                "if codex_native is not None\n        else plan_native_claude_plugin(",
+                "native_plugin_root=native_plugin.source_root if native_plugin else None,",
+                "return [target for target in targets if target.name not in native_target_names]",
+                "claude_native=native_claude_plugin",
+            ),
+            "Native Claude admission and projection must share the batch deployment plan",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            "src/apm_cli/integration/mcp_config_view.py",
+            (
+                "elif _is_local_claude_plugin_source(dependency, package_dir):",
+                'if not package_dir.is_dir() or (package_dir / "apm.yml").exists():',
+            ),
+            "Local Claude MCP inspection must read the install-synthesized manifest, "
+            "never the writable source",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_CLAUDE,
+            "src/apm_cli/install/services.py",
+            (
+                "native_claude_plugin = deployment_plan.claude_native",
+                "projection_targets = deployment_plan.projection_targets",
+                'result["native_claude_plugin"] = True',
+                "if _target not in projection_targets:",
+                "targets=projection_targets,",
+                "_check_native_claude_transition(\n            reconcile_package_targets,",
+                "dry_run=True,",
+                'if reconcile_stats.get("errors") or reconcile_stats.get("files_removed"):',
+            ),
+            "Native Claude routing must use shared admission/source scan and suppress loose projection",
         )
     )
     return tuple(findings)
@@ -650,6 +830,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(_RID_COPILOT,),
         description="APM-owned Copilot marketplace catalog and settings stay in copilot_plugins/.",
         check=_check_copilot_ownership,
+    ),
+    Rule(
+        id=_RID_CLAUDE,
+        group=GROUP,
+        guard_ids=(_RID_CLAUDE,),
+        description="Native Claude registration has one owner and never auto-enables plugins.",
+        check=_check_claude_ownership,
     ),
 )
 

@@ -152,17 +152,18 @@ def patch_filename(dep_key: str, ref: str) -> str:
 def patch_filenames(refs_by_key: dict[str, str]) -> dict[str, str]:
     """Assign a unique ``<pkg>@<ref>.patch`` filename to every dependency key.
 
-    The sanitizer is many-to-one, so colliding keys get a short digest
-    suffix on the ``<pkg>`` segment; without this, one package's patch
-    would silently overwrite another's.
+    The sanitizer is many-to-one, and case-insensitive filesystems (macOS,
+    Windows) fold names differing only by case, so keys whose names collide
+    case-insensitively get a short digest suffix on the ``<pkg>`` segment;
+    without this, one package's patch would silently overwrite another's.
     """
     by_name: dict[str, list[str]] = {}
     for key, ref in refs_by_key.items():
-        by_name.setdefault(patch_filename(key, ref), []).append(key)
+        by_name.setdefault(patch_filename(key, ref).casefold(), []).append(key)
     result: dict[str, str] = {}
-    for name, keys in by_name.items():
+    for keys in by_name.values():
         if len(keys) == 1:
-            result[keys[0]] = name
+            result[keys[0]] = patch_filename(keys[0], refs_by_key[keys[0]])
             continue
         for key in keys:
             pkg, safe_ref = _patch_stem_parts(key, refs_by_key[key])
@@ -572,17 +573,24 @@ def _export_one(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_diff_targets(project_root: Path) -> list[TargetProfile]:
+def _resolve_diff_targets(
+    project_root: Path, lockfile: LockFile | None = None
+) -> list[TargetProfile]:
     """Resolve targets for the diff phase, honoring apm.yml ``target:``.
 
     Must match how the replay resolves targets (drift.py, #1924):
     auto-detection alone would skip declared targets whose root
-    directory does not exist, silently hiding their findings.
+    directory does not exist, silently hiding their findings. Skills
+    keep the layout recorded in *lockfile*, as in the replay (#3773).
     """
     from ..core.target_detection import read_manifest_target
-    from ..integration.targets import resolve_targets
+    from ..integration.skill_layout import recorded_deployed_paths, resolve_reintegration_targets
 
-    return resolve_targets(project_root, explicit_target=read_manifest_target(project_root))
+    return resolve_reintegration_targets(
+        project_root,
+        explicit_target=read_manifest_target(project_root),
+        recorded_paths=recorded_deployed_paths(lockfile),
+    )
 
 
 @click.command(
@@ -696,6 +704,7 @@ def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbos
         diff_scratch_against_project,
         run_replay,
     )
+    from ..install.errors import PolicyViolationError
 
     config = ReplayConfig(project_root=project_root, lockfile_path=lockfile_path)
     check_logger = CheckLogger(verbose=verbose)
@@ -704,11 +713,11 @@ def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbos
     except CacheMissError as exc:
         logger.error(f"Cannot replay the locked install: {exc}")
         sys.exit(1)
-    except (LocalResolutionError, NotImplementedError) as exc:
+    except (LocalResolutionError, NotImplementedError, PolicyViolationError) as exc:
         logger.error(f"Drift replay failed: {exc}")
         sys.exit(1)
 
-    targets = _resolve_diff_targets(project_root)
+    targets = _resolve_diff_targets(project_root, lockfile)
     findings = diff_scratch_against_project(scratch, project_root, lockfile, targets)
 
     export = build_patch_export(project_root, scratch, lockfile, findings)

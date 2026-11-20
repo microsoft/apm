@@ -32,6 +32,7 @@ from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from apm_cli.models.manifest_targets import ManifestTargetDeclaration
 from apm_cli.utils.diagnostics import (
     CATEGORY_AGENT_LOSSY_COMPILATION,
     CATEGORY_ERROR,
@@ -88,7 +89,8 @@ def test_manifest_version_is_semver_2_0_0():
 def test_manifest_target_enum_is_pinned():
     """req-mf-005 says producer MUST reject unknown target values."""
     assert_spec_contains(
-        "copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, all"
+        "copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, "
+        "hermes, grok-bot, all"
     )
     assert_spec_contains("x-[a-z][a-z0-9-]*-[a-z][a-z0-9-]*")
 
@@ -226,6 +228,43 @@ def test_consumer_supports_default_host_field():
     assert doc.get("default_host"), "fixture must exercise default_host"
 
 
+@pytest.mark.req("req-mf-019")
+def test_consumer_resolves_shorthand_against_manifest_default_host(tmp_path, monkeypatch):
+    """Shorthand resolves against ``default_host:``; other hosts keep their FQDN."""
+    from apm_cli.models.dependency.reference import DependencyReference
+    from apm_cli.utils.github_host import manifest_default_host_scope
+
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+    package = APMPackage.from_mapping(
+        {
+            "name": "p",
+            "version": "1.0.0",
+            "default_host": "gitlab.com",
+            "dependencies": {"apm": ["acme/x", "github.com/acme/y"]},
+        },
+        package_path=tmp_path,
+    )
+    shorthand, qualified = package.get_apm_dependencies()
+    assert (shorthand.host, shorthand.repo_url) == ("gitlab.com", "acme/x")
+    assert (qualified.host, qualified.repo_url) == ("github.com", "acme/y")
+
+    # Omitted: the declared implementation default (GITHUB_HOST, else github.com).
+    default = APMPackage.from_mapping(
+        {"name": "p", "version": "1.0.0", "dependencies": {"apm": ["acme/x"]}},
+        package_path=tmp_path,
+    )
+    assert default.get_apm_dependencies()[0].host == "github.com"
+
+    # req-mf-009 writer side: only the selected default host is stripped.
+    with manifest_default_host_scope("gitlab.com"):
+        assert DependencyReference.parse("git@gitlab.com:acme/x.git").to_apm_yml_entry() == (
+            "acme/x"
+        )
+        assert DependencyReference.parse("https://github.com/acme/y").to_apm_yml_entry() == (
+            "github.com/acme/y"
+        )
+
+
 @pytest.mark.req("req-mf-020")
 def test_consumer_enforces_yaml_safe_subset():
     """Anchors / aliases MUST be rejected by a conforming consumer.
@@ -237,6 +276,25 @@ def test_consumer_enforces_yaml_safe_subset():
     authoring panel cannot silently delete the requirement.
     """
     assert_spec_contains("YAML safe", "&anchor", "MUST be rejected", "YAML 1.1 octal")
+
+
+@pytest.mark.req("req-mf-020")
+@pytest.mark.parametrize(
+    "text",
+    [
+        "name: demo\nversion: 1.0.0\nx-shared: &deps [owner/one]\n",
+        "name: demo\nversion: 1.0.0\ndependencies:\n  apm: *deps\n",
+    ],
+    ids=["anchor", "alias"],
+)
+def test_consumer_rejects_manifest_anchor_and_alias(tmp_path: Path, text: str) -> None:
+    """req-mf-020(b): the consumer manifest loader rejects anchors and aliases."""
+    from apm_cli.models.manifest_io import ManifestAnchorError
+
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text(text, encoding="utf-8")
+    with pytest.raises(ManifestAnchorError, match=r"on line [34]\. apm\.yml must not use"):
+        APMPackage.from_apm_yml(manifest)
 
 
 @pytest.mark.req("req-mf-023")
@@ -978,6 +1036,94 @@ def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp
 
 
 @pytest.mark.req("req-tg-008")
+@pytest.mark.parametrize(
+    ("declaration", "selection"),
+    [
+        ({"targets": ["vscode"]}, ["copilot"]),
+        ({"targets": ["vscode", "copilot", "claude"]}, ["copilot", "claude"]),
+        ({"target": "vscode"}, "copilot"),
+    ],
+)
+def test_vscode_is_a_deprecated_alias_of_copilot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    declaration: dict,
+    selection: object,
+) -> None:
+    """0.1.61: `vscode` selects exactly `copilot` (warning text is implementation-specific; see tests/unit)."""
+    from apm_cli.core.errors import TargetResolutionError
+    from apm_cli.models.manifest_targets import reset_manifest_deprecation_warnings
+
+    reset_manifest_deprecation_warnings()
+    monkeypatch.chdir(tmp_path)
+    package = APMPackage.from_mapping(
+        {"name": "app", "version": "1.0.0", **declaration},
+        package_path=tmp_path,
+        manifest_path=tmp_path / "apm.yml",
+        create_config=False,
+    )
+
+    assert package.target_declaration.selection == selection
+    assert "copilot" in package.target_declaration.canonical
+    assert "vscode" not in package.target_declaration.canonical
+
+    with pytest.raises(TargetResolutionError, match="agents"):
+        _ = ManifestTargetDeclaration.from_mapping({"targets": ["agents"]}).selection
+
+    assert_spec_contains(
+        "The legacy alias `vscode` is deprecated",
+        "a conforming consumer MUST treat it exactly as `copilot`",
+    )
+
+
+@pytest.mark.req("req-tg-008")
+def test_dependency_vscode_narrows_like_copilot_without_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dependency declaring `targets: [vscode]` deploys to the copilot profile."""
+    from apm_cli.models.manifest_targets import reset_manifest_deprecation_warnings
+
+    reset_manifest_deprecation_warnings()
+    project = tmp_path / "project"
+    dependency = project / "apm_modules" / "owner" / "vscode-pkg"
+    dependency.mkdir(parents=True)
+    monkeypatch.chdir(project)
+    package = APMPackage.from_mapping(
+        {"name": "vscode-pkg", "version": "1.0.0", "targets": ["vscode"]},
+        package_path=dependency,
+        manifest_path=dependency / "apm.yml",
+        create_config=False,
+    )
+
+    effective = resolve_effective_package_targets(
+        [KNOWN_TARGETS["copilot"], KNOWN_TARGETS["claude"]],
+        None,
+        package,
+        DiagnosticCollector(),
+        "owner/vscode-pkg",
+    )
+
+    assert tuple(target.name for target in effective.targets) == ("copilot",)
+
+
+@pytest.mark.req("req-tg-008")
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        ({"target": "vscode"}, ("copilot",)),
+        ({"targets": ["vscode", "copilot", "claude"]}, ("copilot", "claude")),
+        ({"target": ["agents", "claude", "vscode"]}, ("copilot", "claude")),
+    ],
+)
+def test_rewrite_normalises_vscode_to_copilot_keeping_first(fields: dict, expected: tuple) -> None:
+    """0.1.61: a rewrite replaces `vscode` (and `agents`) in place and drops duplicates."""
+    from apm_cli.models.manifest_targets import rewrite_target_names
+
+    assert rewrite_target_names(ManifestTargetDeclaration.from_mapping(fields)) == expected
+    assert_spec_contains("keeping the first occurrence")
+
+
+@pytest.mark.req("req-tg-008")
 def test_dependency_package_targets_are_restriction_only() -> None:
     """Package intent can narrow, but never expand, consumer authorization."""
     active = [KNOWN_TARGETS["claude"], KNOWN_TARGETS["cursor"]]
@@ -1070,8 +1216,11 @@ def test_user_scoped_mcp_target_selection_ignores_project_signals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """User-scope MCP discovery cannot inherit project-only target signals."""
-    from apm_cli.core.target_detection import resolve_manifest_target_decision
-    from apm_cli.integration.mcp_integrator_install import partition_user_scope_runtimes
+    from apm_cli.core.target_detection import (
+        EffectiveTargetDecision,
+        resolve_manifest_target_decision,
+    )
+    from apm_cli.integration.mcp_user_scope_runtimes import partition_user_scope_runtimes
 
     project = tmp_path / "project"
     project.mkdir()
@@ -1112,7 +1261,9 @@ def test_user_scoped_mcp_target_selection_ignores_project_signals(
         "name: user-scope\nversion: 0.1.0\n",
         encoding="ascii",
     )
-    monkeypatch.setattr("apm_cli.config.get_install_target", lambda *, create_config=True: "vscode")
+    monkeypatch.setattr(
+        "apm_cli.config.get_install_target", lambda *, create_config=True: "copilot"
+    )
     configured = resolve_manifest_target_decision(
         project,
         manifest_path=configured_path,
@@ -1123,8 +1274,11 @@ def test_user_scoped_mcp_target_selection_ignores_project_signals(
     assert (discovery.value, discovery.source) == (None, "auto-detect")
     assert (explicit.value, explicit.source) == ("codex", "--target flag")
     assert (manifest.value, manifest.source) == (["claude"], "apm.yml")
-    assert (configured.value, configured.source) == ("vscode", "apm config target")
-    assert partition_user_scope_runtimes(["vscode", "claude"]) == (["claude"], ["vscode"])
+    assert (configured.value, configured.source) == ("copilot", "apm config target")
+    # The deprecated `vscode` alias selects the user-capable `copilot` runtime.
+    alias = EffectiveTargetDecision(["vscode", "claude"], "apm.yml")
+    assert alias.runtime_targets_for_scope(user_scope=True) == ("copilot", "claude")
+    assert partition_user_scope_runtimes(["copilot", "claude"]) == (["copilot", "claude"], [])
     assert_spec_contains(
         "User-scoped MCP target selection",
         "Once a source selects one or more\ntargets, the consumer MUST NOT consult",
@@ -1140,7 +1294,7 @@ def test_declared_user_mcp_targets_install_without_project_signals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Bind declared user capabilities to real global CLI configuration writes."""
-    from apm_cli.integration.mcp_integrator_install import partition_user_scope_runtimes
+    from apm_cli.integration.mcp_user_scope_runtimes import partition_user_scope_runtimes
     from tests.integration.test_global_cursor_opencode_mcp import (
         test_global_package_install_and_uninstall_preserve_foreign_servers as _run_user_scope_contract,
     )
@@ -1170,7 +1324,7 @@ def test_kiro_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> None
         PackageInfo,
         ResolvedReference,
     )
-    from apm_cli.utils.diagnostics import CATEGORY_ERROR, DiagnosticCollector
+    from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
 
     project_root = tmp_path
     (project_root / ".kiro").mkdir()
@@ -1221,9 +1375,9 @@ def test_kiro_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> None
     assert result.files_integrated == 0
     assert result.files_adopted == 0
     assert target_path not in result.target_paths
-    errors = [d for d in diagnostics._diagnostics if d.category == CATEGORY_ERROR]
-    assert errors, "Expected an error diagnostic for incompatible tools"
-    assert "execute_arbitrary_code" in errors[0].message
+    warnings = [d for d in diagnostics._diagnostics if d.category == CATEGORY_WARNING]
+    assert warnings, "Expected an actionable diagnostic for incompatible tools"
+    assert "execute_arbitrary_code" in warnings[0].message
 
     assert_spec_contains(
         "MUST fail closed: if any source-declared tool falls",
@@ -1787,4 +1941,96 @@ def test_authorized_source_plan_requirement_covers_reintegration_and_symlinks() 
         "files and MUST NOT traverse symlinked directories.",
         "MUST materialize primitive files only from that\nsame set; each primitive-integrator "
         "materialization path MUST consume the\ncanonical set rather than derive a second classifier.",
+    )
+
+
+@pytest.mark.req("req-tg-009")
+def test_kiro_agent_tools_gate_skips_one_agent_and_locks_siblings(tmp_path: Path) -> None:
+    """req-tg-009: one non-conformant agent MUST NOT block a conformant sibling.
+
+    The rejected agent writes zero bytes and is named in a diagnostic; the
+    conformant siblings from the same dependency deploy and are recorded in
+    the lockfile, and the install completes successfully. On reinstall, an
+    agent whose tools became unsupported is removed and dropped from the
+    lockfile while its siblings are untouched.
+    """
+    import os
+    import sys
+
+    from apm_cli.deps.lockfile import LockFile
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+    from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
+    environment = isolated.subprocess_env()
+    environment["APM_NON_INTERACTIVE"] = "1"
+
+    package = isolated.package_root / "kiro-agents"
+    agents = package / ".apm" / "agents"
+    agents.mkdir(parents=True)
+    (package / "apm.yml").write_text("name: kiro-agents\nversion: 1.0.0\n", encoding="utf-8")
+    (agents / "rejected.agent.md").write_text(
+        "---\ndescription: Rejected\ntools:\n- read\n- execute_arbitrary_code\n---\n\n# Rejected\n",
+        encoding="utf-8",
+    )
+    (agents / "conformant.agent.md").write_text(
+        "---\ndescription: Conformant\ntools:\n- read\n- web_fetch\n- '@git'\n---\n\n# Ok\n",
+        encoding="utf-8",
+    )
+    (agents / "steady.agent.md").write_text(
+        "---\ndescription: Steady\ntools:\n- read\n---\n\n# Steady\n",
+        encoding="utf-8",
+    )
+
+    project = isolated.work_root
+    (project / ".kiro").mkdir(parents=True, exist_ok=True)
+    (project / "apm.yml").write_text(
+        "name: consumer\nversion: 1.0.0\ntargets: [kiro]\n", encoding="utf-8"
+    )
+
+    runner = ApmLifecycleRunner((sys.executable, "-m", "apm_cli.cli"))
+    result = runner.run(
+        ("install", str(package), "--no-policy"),
+        cwd=project,
+        env=environment,
+    )
+    output = " ".join((result.stdout + result.stderr).split())
+
+    assert result.returncode == 0, output
+    assert "execute_arbitrary_code" in output
+    assert not (project / ".kiro" / "agents" / "rejected.md").exists()
+    assert (project / ".kiro" / "agents" / "conformant.md").is_file()
+
+    def deployed_paths() -> set[str]:
+        lockfile = LockFile.read(project / "apm.lock.yaml")
+        assert lockfile is not None
+        return {path for dep in lockfile.dependencies.values() for path in dep.deployed_files}
+
+    deployed = deployed_paths()
+    assert ".kiro/agents/conformant.md" in deployed
+    assert ".kiro/agents/steady.md" in deployed
+    assert ".kiro/agents/rejected.md" not in deployed
+
+    # A deployed agent whose tools become unsupported is removed and unrecorded
+    # on reinstall, and MUST NOT be retained; its siblings stay deployed.
+    steady = project / ".kiro" / "agents" / "steady.md"
+    steady_before = steady.read_bytes()
+    (agents / "conformant.agent.md").write_text(
+        "---\ndescription: Conformant\ntools:\n- read\n- EVIL_TOOL\n---\n\n# Ok\n",
+        encoding="utf-8",
+    )
+    reinstall = runner.run(("install", "--no-policy"), cwd=project, env=environment)
+    reinstall_output = " ".join((reinstall.stdout + reinstall.stderr).split())
+
+    assert reinstall.returncode == 0, reinstall_output
+    assert "EVIL_TOOL" in reinstall_output
+    assert not (project / ".kiro" / "agents" / "conformant.md").exists()
+    deployed = deployed_paths()
+    assert ".kiro/agents/conformant.md" not in deployed
+    assert ".kiro/agents/steady.md" in deployed
+    assert steady.read_bytes() == steady_before
+
+    assert_spec_contains(
+        "failure for one agent MUST NOT prevent\ndeployment of other, vocabulary-conformant "
+        "agent primitives from the same\ndependency or install operation",
     )

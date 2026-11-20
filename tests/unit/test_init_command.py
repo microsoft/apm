@@ -365,7 +365,9 @@ class TestInitCommand:
                 assert result.exit_code == 0
                 # Consumer next-steps surface (Wave 3 v3 noun-verb teach)
                 assert "apm install" in result.output
-                assert "apm run" in result.output
+                # No experimental step, and ASCII-only chrome (#3994).
+                assert "apm run" not in result.output
+                assert result.output.isascii()
                 assert "apm plugin init" in result.output
                 assert "apm marketplace init" in result.output
                 assert "https://microsoft.github.io/apm" in result.output
@@ -736,6 +738,18 @@ class TestInitTargetPrompt:
             assert "claude" in data["targets"]
             assert "cursor" in data["targets"]
 
+    def test_init_target_flag_persists_canonical_alias(self):
+        """--target agy persists the canonical antigravity name (#3842)."""
+        with self.runner.isolated_filesystem():
+            result = self.runner.invoke(
+                cli,
+                ["init", "--yes", "--target", "agy"],
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            data = yaml.safe_load(Path("apm.yml").read_text(encoding="utf-8"))
+            assert data["targets"] == ["antigravity"]
+
     def test_init_target_flag_invalid(self):
         """S5b: --target invalid, exit code non-zero, error message."""
         with self.runner.isolated_filesystem():
@@ -1006,10 +1020,10 @@ class TestInitAgentrcSuggestion:
             assert agentrc_pos > install_pos
 
     def test_agentrc_suppressed_in_plugin_mode(self):
-        """When invoked via 'apm init --plugin', no agentrc mention."""
+        """When invoked via 'apm plugin init', no agentrc mention."""
         with self.runner.isolated_filesystem():
             with patch("apm_cli.commands.init.shutil.which", return_value="/usr/bin/agentrc"):
-                result = self.runner.invoke(cli, ["init", "--plugin", "--yes", "my-plugin"])
+                result = self.runner.invoke(cli, ["plugin", "init", "--yes", "my-plugin"])
             assert result.exit_code == 0
             assert "agentrc" not in result.output
 
@@ -1214,7 +1228,7 @@ class TestInitMetadataFlags:
             os.chdir(tmp_dir)
             try:
                 result = self.runner.invoke(
-                    cli, ["init", "my-plugin", "--plugin", "--yes", "--version", "2.0.0"]
+                    cli, ["plugin", "init", "my-plugin", "--yes", "--version", "2.0.0"]
                 )
 
                 assert result.exit_code == 0
@@ -1354,6 +1368,20 @@ class TestInitMetadataFlags:
 
                 assert result.exit_code == 0, result.output
                 assert self._read_yaml()["author"] == ""
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_apply_implies_discover(self):
+        """`init --apply` runs discovery instead of demanding --discover (#3994)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.chdir(tmp_dir)
+            try:
+                with patch("apm_cli.commands.init.run_discover") as run_discover:
+                    result = self.runner.invoke(cli, ["init", "--apply", "--yes"])
+
+                assert result.exit_code == 0, result.output
+                assert run_discover.call_args.kwargs["write"] is True
+                assert not Path("apm.yml").exists()
             finally:
                 os.chdir(self.original_dir)
 

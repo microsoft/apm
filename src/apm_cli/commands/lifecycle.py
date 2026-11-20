@@ -119,18 +119,16 @@ def lifecycle_test(event: str, verbose: bool, execute: bool) -> None:
     """Preview (or, with --execute, fire) a synthetic event through scripts."""
     from apm_cli.core.lifecycle_scripts import (
         LifecycleEvent,
-        LifecycleScriptRunner,
         PackageInfo,
         _get_project_apm_yml,
+        build_runner_from_context,
         discover_scripts,
     )
     from apm_cli.core.script_trust import is_project_scripts_trusted
 
     project_root = str(Path.cwd())
-    all_scripts = discover_scripts(project_root=project_root)
-    runner = LifecycleScriptRunner(scripts=all_scripts, verbose=verbose, project_root=project_root)
-
-    matching = runner.scripts_for_event(event)
+    # The preview lists every discovered script, untrusted ones included.
+    matching = [s for s in discover_scripts(project_root=project_root) if s.event == event]
     if not matching:
         _rich_warning(
             f"No scripts registered for '{event}'. Create one with: apm lifecycle init",
@@ -155,8 +153,23 @@ def lifecycle_test(event: str, verbose: bool, execute: bool) -> None:
         _rich_info("Re-run with --execute to actually run these scripts.", symbol="info")
         return
 
+    # Firing goes through the same gate as every lifecycle command:
+    # APM_NO_SCRIPTS, org executables.deny_all, and project script trust.
+    runner = build_runner_from_context(verbose=verbose, project_root=project_root, events=(event,))
+    gated = runner.scripts_for_event(event)
+    skipped = len(matching) - len(gated)
+    if skipped:
+        _rich_warning(
+            f"Skipped {skipped} script(s) the script gate withholds "
+            "(APM_NO_SCRIPTS, org executables.deny_all, or untrusted project scripts: "
+            "run 'apm lifecycle trust').",
+            symbol="warning",
+        )
+    if not gated:
+        return
+
     _rich_info(
-        f"Firing synthetic '{event}' event ({len(matching)} script(s))...",
+        f"Firing synthetic '{event}' event ({len(gated)} script(s))...",
         symbol="gear",
     )
 

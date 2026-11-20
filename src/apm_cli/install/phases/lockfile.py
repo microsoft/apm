@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import is_user_scope
-from apm_cli.install.package_resolution import effective_deploy_skill_subset
+from apm_cli.install.package_resolution import effective_dependency_selection
 from apm_cli.utils.content_hash import compute_file_hash
 
 if TYPE_CHECKING:
@@ -132,10 +132,18 @@ class LockfileBuilder:
             return
         try:
             from apm_cli.deps.lockfile import LockFile as _LF
-            from apm_cli.deps.lockfile import get_lockfile_path
+            from apm_cli.deps.lockfile import get_lockfile_path, records_framed_content_hashes
+            from apm_cli.install.phases.content_hash_stream import (
+                PROMOTED_MESSAGE,
+                promote_content_hashes,
+            )
 
             lockfile = _LF.from_installed_packages(
                 self.ctx.installed_packages, self.ctx.dependency_graph
+            )
+            # Rows carry the stream this run records in until promotion settles it.
+            lockfile.set_content_hash_stream(
+                framed=records_framed_content_hashes(self.ctx.existing_lockfile)
             )
             # Attach deployed_files and package_type to each LockedDependency
             self._attach_deployed_files(lockfile)
@@ -146,6 +154,9 @@ class LockfileBuilder:
             self._attach_skill_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
             self._attach_content_hashes(lockfile)
+            # Intact native plugins deployed for their dependency (#3191); after
+            # content hashes, which decide whether an existing record carries over.
+            self._attach_native_plugins(lockfile)
             # Attach declared-license provenance captured at acquire time (U6)
             self._attach_declared_licenses(lockfile)
             # Attach verbatim licence copies carried at materialization (#3556)
@@ -176,6 +187,8 @@ class LockfileBuilder:
             self._preserve_existing_mcp_state(lockfile)
             self._preserve_existing_lsp_state(lockfile)
             self._preserve_existing_revision_pin_tags(lockfile)
+            # After every carry-forward step, so promotion sees each final row.
+            promoted = promote_content_hashes(self.ctx, lockfile)
             # The carry-forward steps above set fields such as resolved_tag
             # and replacements directly, so re-derive the schema version
             # before the semantic comparison (#3433).
@@ -184,6 +197,9 @@ class LockfileBuilder:
             # Only write when the semantic content has actually changed
             # (avoids generated_at churn in version control).
             self._write_if_changed(lockfile, lockfile_path, _LF)
+            if promoted and self.ctx.logger:
+                self.ctx.logger.info(PROMOTED_MESSAGE)
+            self._report_new_content(lockfile)
             # Target-scoped deployed-file contraction physically deletes the
             # dropped target's instruction files (via the cleanup chokepoint).
             # Guard it by `lockfile_only` for the same reason the merge-hook
@@ -377,9 +393,42 @@ class LockfileBuilder:
         statuses = getattr(self.ctx, "package_exec_status", None)
         if not statuses:
             return
+        allowed = getattr(self.ctx, "package_exec_allowed_types", None) or {}
         for dep_key, status in statuses.items():
             if dep_key in lockfile.dependencies and status:
                 lockfile.dependencies[dep_key].exec_status = status
+                lockfile.dependencies[dep_key].exec_allowed_types = allowed.get(dep_key, ())
+
+    def _attach_native_plugins(self, lockfile: LockFile) -> None:
+        """Record each admitted native Claude plugin as its dependency's ownership.
+
+        A run whose targets exclude Claude did not evaluate Claude admission, so
+        an existing record is carried forward instead of retiring the plugin.
+        """
+        from apm_cli.claude_plugins.registrar import marketplace_binding
+        from apm_cli.native_plugins.record import NativePluginRecord
+
+        plugins = getattr(self.ctx, "claude_native_plugins", None) or {}
+        if plugins:
+            name, path = marketplace_binding(self.ctx.apm_modules_dir.parent, self.ctx.project_root)
+        for dep_key, plugin in plugins.items():
+            if dep_key in lockfile.dependencies:
+                lockfile.dependencies[dep_key].native_plugin = NativePluginRecord(
+                    plugin.name, plugin.bundle_hash, name, path
+                )
+        existing = getattr(self.ctx, "existing_lockfile", None)
+        if existing is None or any(t.name == "claude" for t in self.ctx.targets or ()):
+            return
+        for dep_key, locked in lockfile.dependencies.items():
+            prior = existing.dependencies.get(dep_key)
+            if (
+                locked.native_plugin is None
+                and prior is not None
+                and prior.native_plugin is not None
+                and (prior.resolved_commit, prior.content_hash)
+                == (locked.resolved_commit, locked.content_hash)
+            ):
+                locked.native_plugin = prior.native_plugin
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
         """Union the CLI ``--skill`` values into lockfile skill_bundle entries.
@@ -398,20 +447,59 @@ class LockfileBuilder:
             return  # bare install or --skill '*'; manifest value already flows through
         for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
             if locked_dep.package_type == "skill_bundle":
-                merged = effective_deploy_skill_subset(
-                    skill_subset_from_cli=self.ctx.skill_subset_from_cli,
-                    cli_subset=self.ctx.skill_subset,
-                    persisted_subset=locked_dep.skill_subset,
-                )
+                # Record what was deployed: the same owner the deploy used (#3760).
+                merged = effective_dependency_selection(locked_dep, self.ctx).skill_subset
+                try:
+                    pairing = locked_dep.selection()
+                except ValueError:
+                    pairing = None
                 # merged is never None here: the guard above returns for
                 # --skill '*' (empty ctx.skill_subset), so a real named
                 # subset always survives the union.
                 locked_dep.skill_subset = list(merged) if merged else []
+                if pairing is not None and not pairing.is_product:
+                    # The CLI overlay is one more edge over the entry's targets
+                    # (req-rs-018), as effective_dependency_selection deploys it.
+                    pairing = pairing.with_edge(self.ctx.skill_subset, locked_dep.target_subset)
+                    locked_dep.subset_pairings = pairing.to_lock_records()
+                else:
+                    locked_dep.subset_pairings = None  # the widened flat product is exact
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
         for dep_key, locked_dep in lockfile.dependencies.items():
             if dep_key in self.ctx.package_hashes:
                 locked_dep.content_hash = self.ctx.package_hashes[dep_key]
+
+    def _report_new_content(self, lockfile: LockFile) -> None:
+        """Name the dependencies whose locked content changed this run.
+
+        Only a moved commit (or a row without one) may change content (#4027).
+        Runs after promotion and the write, so it reports the stored hashes.
+        """
+        from apm_cli.install.source_helpers import locked_commit_unchanged
+
+        previous = getattr(self.ctx, "existing_lockfile", None)
+        logger = getattr(self.ctx, "logger", None)
+        if previous is None or logger is None:
+            return
+        changed = []
+        for dep_key, locked_dep in lockfile.dependencies.items():
+            old = previous.dependencies.get(dep_key)
+            if (
+                old is not None
+                and old.content_hash
+                and locked_dep.content_hash
+                and old.content_hash != locked_dep.content_hash
+                and not locked_commit_unchanged(old, locked_dep.resolved_commit)
+            ):
+                changed.append((dep_key, locked_dep))
+        if not changed:
+            return
+        noun = "dependency" if len(changed) == 1 else "dependencies"
+        logger.info(f"New locked content for {len(changed)} {noun} (see apm.lock.yaml)")
+        for dep_key, locked_dep in changed:
+            commit = (locked_dep.resolved_commit or "no commit")[:12]
+            logger.verbose_detail(f"  {dep_key}: {locked_dep.content_hash} ({commit})")
 
     def _attach_declared_licenses(self, lockfile: LockFile) -> None:
         """Attach DECLARED-license provenance captured at acquire time (U6).
@@ -617,6 +705,16 @@ class LockfileBuilder:
                 self.ctx.existing_lockfile.mcp_config_provenance
             )
             target_servers = self.ctx.existing_lockfile.mcp_target_servers
+            from apm_cli.install.mcp.retired_destinations import (
+                lock_holds_untranslated_mcp_claims,
+            )
+
+            # Until the MCP phase translates them, these claims mean what the
+            # recorded version meant; restamping would make the heal skip them.
+            if lock_holds_untranslated_mcp_claims(
+                self.ctx.existing_lockfile.apm_version, target_servers
+            ):
+                lockfile.apm_version = self.ctx.existing_lockfile.apm_version
             # The codec rebuild is linear in deployment rows and also marks the
             # compatibility view present, so skip it when there is no target
             # state to preserve.
@@ -682,6 +780,7 @@ class LockfileBuilder:
                 provenance=DeploymentLedgerCodec.from_lockfile(self.ctx.existing_lockfile),
                 current_targets=self.ctx.targets or (),
             )
+            lockfile.carry_local_staging_from(self.ctx.existing_lockfile)
             if "." in self.ctx.existing_lockfile.dependencies:
                 lockfile.dependencies["."] = copy.deepcopy(
                     self.ctx.existing_lockfile.dependencies["."]

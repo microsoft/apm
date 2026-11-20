@@ -72,6 +72,11 @@ version: 1.0.0
 description: agent plugin fixture
 dependencies:
   apm: []
+  mcp:
+    - name: safe
+      registry: false
+      transport: stdio
+      command: tool
 """,
     )
     _write_minimal_lockfile(root)
@@ -467,6 +472,59 @@ marketplace:
 
         assert result.exit_code == 1
         assert "Nothing to pack" in result.output
+
+    def test_pack_codex_target_writes_codex_plugin_json(self, runner, tmp_path, monkeypatch):
+        """targets: [codex] packs the Codex manifest; dry-run and --force are honored (#3077)."""
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: demo\nversion: 1.2.3\ndescription: d\nauthor: Jane\ntargets: [codex]\n",
+        )
+        (tmp_path / "skills" / "hello").mkdir(parents=True)
+        (tmp_path / "skills" / "hello" / "SKILL.md").write_text("---\nname: hello\n---\n")
+        (tmp_path / ".mcp.json").write_text('{"mcpServers": {"srv": {"command": "node"}}}')
+        manifest = tmp_path / ".codex-plugin" / "plugin.json"
+
+        def tree() -> dict:
+            return {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+        before = tree()
+        dry = runner.invoke(pack_cmd, ["--dry-run"])
+        assert dry.exit_code == 0, dry.output
+        assert tree() == before
+        assert not (tmp_path / ".codex-plugin").exists()
+
+        result = runner.invoke(pack_cmd, [])
+        assert result.exit_code == 0, result.output
+        assert json.loads(manifest.read_text()) == {
+            "name": "demo",
+            "version": "1.2.3",
+            "description": "d",
+            "author": {"name": "Jane"},
+            "skills": "./skills/",
+            "mcpServers": "./.mcp.json",
+        }
+
+        _write_apm_yml(
+            tmp_path,
+            "name: demo\nversion: 2.0.0\ndescription: d\nauthor: Jane\ntargets: [codex]\n",
+        )
+        kept = runner.invoke(pack_cmd, [])
+        assert kept.exit_code == 0, kept.output
+        assert json.loads(manifest.read_text())["version"] == "1.2.3"
+
+        forced = runner.invoke(pack_cmd, ["--force"])
+        assert forced.exit_code == 0, forced.output
+        assert json.loads(manifest.read_text())["version"] == "2.0.0"
+
+    def test_pack_codex_target_warns_on_incomplete_identity(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(tmp_path, "name: demo\ntargets: [codex]\n")
+
+        result = runner.invoke(pack_cmd, [])
+
+        assert result.exit_code == 0, result.output
+        assert "Codex expects version, description, author" in " ".join(result.output.split())
 
     def test_pack_marketplace_output_override(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

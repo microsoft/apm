@@ -12,7 +12,9 @@ from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.dependency.materialization import (
     CachedMaterializationPathReader,
     MaterializationPathCollisionError,
+    MaterializationSlots,
     find_case_equivalent_materialization_path,
+    nested_materialization_pairs,
     prepare_materialization_path,
 )
 from apm_cli.models.dependency.reference import DependencyReference
@@ -275,6 +277,38 @@ def test_case_variant_lookup_fails_closed_on_distinct_collisions(tmp_path: Path)
         )
 
 
+class _RecordingStaging:
+    def __init__(self) -> None:
+        self.relocations: list[tuple[str, str]] = []
+
+    def relocate_path(self, source: Path, destination: Path) -> None:
+        self.relocations.append((source.name, destination.parent.name + "/" + destination.name))
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("declared", "relocations"),
+    (
+        ("Test/C", []),
+        ("test/c", [("C", "test/c")]),
+    ),
+)
+def test_case_variant_owner_holding_another_package_is_not_a_collision(
+    tmp_path: Path, declared: str, relocations: list[tuple[str, str]]
+) -> None:
+    """Case-sensitive FS: ``Test/C`` beside ``test/e`` re-installs under either casing."""
+    modules = tmp_path / "apm_modules"
+    reader = CaseSensitiveMaterializationReader(modules, ("Test/C", "test/e"))
+    staging = _RecordingStaging()
+
+    selected = prepare_materialization_path(
+        DependencyReference.parse(declared), modules, staging, reader=reader
+    )
+
+    assert selected == modules.joinpath(*declared.split("/"))
+    assert staging.relocations == relocations
+
+
 def test_virtual_subpath_casing_remains_identity_significant(tmp_path: Path) -> None:
     """Casefolding stops at the repository boundary for nested packages."""
     modules = tmp_path / "apm_modules"
@@ -352,3 +386,42 @@ def test_installed_package_path_keeps_canonical_path_without_a_case_variant(
     assert installed_package_path(
         dependency, modules, reader=reader
     ) == dependency.get_install_path(modules)
+
+
+def test_repository_and_its_own_subdirectory_package_nest(tmp_path: Path) -> None:
+    """#3699: a whole repo and its subdirectory package cannot share apm_modules."""
+    repo = DependencyReference.parse("Acme/Mono")
+    child = DependencyReference.parse("acme/mono/packages/x")
+    sibling = DependencyReference.parse("acme/mono/packages/y")
+    other = DependencyReference.parse("acme/other")
+
+    pairs = nested_materialization_pairs([repo, child, sibling, other], tmp_path / "apm_modules")
+
+    assert pairs == [(repo, child), (repo, sibling)]
+    assert nested_materialization_pairs([child, sibling, other], tmp_path / "apm_modules") == []
+
+
+def test_distinct_packages_cannot_claim_one_directory(tmp_path: Path) -> None:
+    """#3696: one owner/repo from two hosts, or one alias twice, is rejected."""
+    slots = MaterializationSlots(tmp_path / "apm_modules")
+    mid = DependencyReference.parse("acme/mid")
+
+    assert slots.claim(DependencyReference.parse("acme/tool")) is None
+    assert slots.claim(DependencyReference.parse("Acme/Tool#v2")) is None
+    assert slots.claim(DependencyReference.parse("gitlab.example.com/acme/tool"), mid) == (
+        "github.com/acme/tool and gitlab.example.com/acme/tool (required by acme/mid) are "
+        "different packages that would both install to apm_modules/acme/tool. Remove one "
+        "of them, or set 'alias:' on one so it installs to its own directory."
+    )
+    first = DependencyReference.parse_from_dict({"git": "acme/one", "alias": "shared"})
+    second = DependencyReference.parse_from_dict({"git": "acme/two", "alias": "shared"})
+    assert slots.claim(first) is None
+    assert "would both install to apm_modules/shared" in (slots.claim(second) or "")
+
+
+def test_local_sources_keep_sharing_their_slot(tmp_path: Path) -> None:
+    """#3401: local sources sharing a ``_local/<name>`` slot are not a collision."""
+    slots = MaterializationSlots(tmp_path / "apm_modules")
+
+    assert slots.claim(DependencyReference.parse("./a/pkg")) is None
+    assert slots.claim(DependencyReference.parse("./b/pkg")) is None

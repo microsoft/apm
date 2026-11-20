@@ -1,0 +1,108 @@
+lockfile_version: '1'
+apm_version: 0.36.0
+dependencies:
+- repo_url: _local/pkg
+  name: pkg
+  version: 1.0.0
+  package_type: apm_package
+  deployed_files:
+  - .agents/skills/pkg-skill
+  - .agents/skills/pkg-skill/SKILL.md
+  - .claude/rules/style.md
+  - .claude/skills/pkg-skill
+  - .claude/skills/pkg-skill/SKILL.md
+  - .github/instructions/style.instructions.md
+  deployed_file_hashes:
+    .agents/skills/pkg-skill/SKILL.md: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+    .claude/rules/style.md: sha256:0fa8090de3dbfd7b59584c07e4547d31011d16fa5c45faa87d711d151db6a8e3
+    .claude/skills/pkg-skill/SKILL.md: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+    .github/instructions/style.instructions.md: sha256:e388864267de5c4443e44143d7861ec9cd89f9aba645c13422e1beb51e26ce51
+  source: local
+  local_path: ../pkg
+  content_hash: sha256:4bd06327422aecf0af60576e08fd0a2b47c74ca3db45dcb21fec87af8f9f3057
+deployments:
+- kind: project-relative
+  target: claude
+  value: .claude/rules/style.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:0fa8090de3dbfd7b59584c07e4547d31011d16fa5c45faa87d711d151db6a8e3
+- kind: project-relative
+  target: claude
+  value: .claude/skills/pkg-skill
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/pkg-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pkg-skill
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/pkg-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:dbf58e8482c10313e6443f3e0274751d3b744d7bdb94cae67f5f99adc1062540
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/style.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:e388864267de5c4443e44143d7861ec9cd89f9aba645c13422e1beb51e26ce51
+- kind: uri
+  target: mcp
+  value: srv
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:b15877ca760ef4e16189f361d050a593a0ebe784862d018bd6985f422d00cedf
+- kind: uri
+  target: mcp
+  value: srv
+  runtime: copilot
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:4ad5a2774e6499cf3d891b3237ea94314ed45ea323aca09a25628186e0d607de
+mcp_servers:
+- srv
+mcp_configs:
+  srv:
+    name: srv
+    transport: http
+    registry: false
+    url: https://mcp.example.com/mcp
+mcp_target_servers:
+  claude:
+  - srv
+  copilot:
+  - srv

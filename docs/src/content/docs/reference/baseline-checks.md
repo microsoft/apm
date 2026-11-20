@@ -31,6 +31,7 @@ first failure to skip expensive I/O.
 | ID | Severity | Source | Always on? |
 |---|---|---|---|
 | `manifest-parse` | block | `ci_checks.py` | only when `apm.yml` cannot be parsed |
+| `manifest-missing` | block in `--ci`, advisory otherwise | `ci_checks.py` | only when `apm.yml` is absent |
 | `lockfile-exists` | block | `ci_checks.py` | yes |
 | `ref-consistency` | block | `ci_checks.py` | yes |
 | `deployment-ledger-owners` | block | `ci_checks.py` | yes |
@@ -58,6 +59,12 @@ the [policy schema](../policy-schema/).
 - **Effect.** Skips every other check and exits `1`. This is the only check that runs before the lockfile gate.
 - **Remediation.** Fix the YAML syntax error reported in the message and re-run.
 
+### `manifest-missing`
+
+- **What it verifies.** That the current directory holds the `apm.yml` to audit. APM does not search parent directories.
+- **Fails when.** In `--ci` mode, `apm.yml` is absent: from a subdirectory or a wrong checkout path the gate would otherwise pass without auditing anything. Without `--ci` it is an advisory warning, shown only when `.apm/`, `apm.lock.yaml` or `apm.lock` suggests a deleted manifest.
+- **Remediation.** Run `apm audit --ci` from the project root that contains `apm.yml`, or restore the deleted manifest.
+
 ### `lockfile-exists`
 
 - **What it verifies.** That `apm.lock.yaml` is present whenever the project has APM or MCP dependencies (including `devDependencies`), or whenever an existing lockfile records local content under the synthesized self-entry.
@@ -78,7 +85,7 @@ the [policy schema](../policy-schema/).
   Audit reads this evidence without fetching today's catalog or changing the
   manifest, lockfile, or deployment. An unavailable catalog does not invalidate
   an otherwise valid installed dependency.
-- **Remediation.** Run the command the check message names: `apm install --update`
+- **Remediation.** Run the command the check message names: `apm update`
   when the lockfile already holds a resolution that must be refreshed or re-keyed
   (the source-identity rewrite and commit-pin mismatch cases), or plain `apm install`
   for a first resolution -- so the lockfile re-resolves to the manifest, then commit
@@ -87,7 +94,7 @@ the [policy schema](../policy-schema/).
   identity check is evaluated ahead of the internal ledger-owner check on purpose.
   A source-identity tamper (a rewritten dependency `host`/`repo_url` in the lockfile)
   trips both, but only `ref-consistency` points at the safe fix -- re-resolving from
-  the trusted manifest via `apm install --update`. The ledger-owner remedy (`apm prune`)
+  the trusted manifest via `apm update`. The ledger-owner remedy (`apm prune`)
   reconciles ownership toward the *current* lockfile, so it must never be the surfaced
   cause when the manifest and lockfile disagree about a dependency's identity.
 
@@ -130,25 +137,26 @@ the [policy schema](../policy-schema/).
 
 ### `skill-subset-consistency`
 
-- **What it verifies.** That each `skills:` selection in `apm.yml` matches the `skill_subset` recorded in the lockfile, and that every recorded skill path exists in the resolved package tree. When CI audit has prepared a lock-pinned scratch replay, this check uses its dependency tree instead of checkout-local `apm_modules/`; no checkout install is required.
-- **Fails when.** The sorted manifest skill list differs from the sorted lockfile `skill_subset`, or a recorded subset path does not map to a deployable skill in the dependency tree being checked.
+- **What it verifies.** That each locked dependency's `skill_subset`, `target_subset` and `subset_pairings` equal the merge of every `skills:`/`targets:` declaration in `apm.yml` and the installed dependency manifests, and that every recorded skill path exists in the resolved package tree. When CI audit has prepared a lock-pinned scratch replay, this check uses its dependency tree instead of checkout-local `apm_modules/`; no checkout install is required.
+- **Fails when.** The merged declarations differ from the recorded selection, `subset_pairings` is malformed or disagrees with the flat fields, a declaring manifest cannot be read, or a recorded subset path does not map to a deployable skill in the dependency tree being checked.
 - **Remediation.** Run `apm install` to regenerate the lockfile against the current selection.
 
 ### `config-consistency`
 
 - **What it verifies.** That MCP server configs derived from the root `dependencies.mcp` and `devDependencies.mcp`, plus `dependencies.mcp` from every current local or installed-remote package manifest bounded by the lockfile, match the `mcp_configs` baseline. Dependency-package `devDependencies.mcp` is author-only and is excluded from the consumer baseline.
 - **Fails when.** A server's resolved config differs from the lockfile, a server exists on only one side, or a locked package manifest is unreadable. In `apm audit --ci`, when `apm_modules/` is absent but the lockfile is present, APM first self-hydrates a lock-pinned scratch install and derives the current MCP truth from that isolated modules tree; if the scratch replay itself fails, `config-consistency` fails closed with the replay error. A missing manifest also fails unless the lockfile records a skill bundle, or records a remote Claude skill at a repository root or subdirectory. Before remote materialization the locked type is authoritative; once materialized, the on-disk shape and lock metadata must both identify a Claude skill. Present local paths use the same shape-and-lock check, while a missing local path still fails. `mcp_config_provenance` identifies the package in lock-only diagnostics but never exempts a removed declaration.
-- **Intentional omissions.** Install records dependency MCP omitted by `--only apm` or by the default refusal of transitive self-defined MCP. Audit excludes only the exact dependency and authored declaration covered by that evidence; expanding `${CLAUDE_PLUGIN_ROOT}` at a different materialization path does not change it. This applies to project and global installs, including `agent-skills`. After direct MCP admission, obsolete omission evidence no longer affects that server: its admitted configuration participates in normal drift checks. Root declarations and previously admitted MCP configurations remain checked; a later skills-only install preserves their baseline.
-- **Frozen skills-only replay.** `apm install --only apm --frozen` preserves the admitted MCP baseline and exact lockfile and native-configuration bytes. Existing frozen source and consent checks still apply: a baseline that already admitted transitive MCP requires the same explicit `--trust-transitive-mcp`. `--only apm` still prevents native MCP integration; omission evidence never grants consent.
-- **Remediation.** Repeat the intended install selection or restore an unreadable package source. For skills-only use `apm install --only apm`, or `apm install --global --target agent-skills --only apm` for the global skills-only case. Older lockfiles, empty MCP fields, and missing, damaged or stale omission evidence do not establish intent: audit reports unknown selection rather than assuming success. Do not enable MCP or add `--trust-transitive-mcp` merely to clear the finding. Audit itself does not reconcile or write configuration.
+- **Consent.** Audit re-evaluates [admission](../cli/approve/#pinned-approvals) from `apm.yml` and org policy, never from the lockfile or the personal `--user` store. A server the lockfile admitted that `apm.yml` does not approve, for example after a one-off `--trust-transitive-mcp` run or a hand edit, fails with `admitted in apm.lock.yaml but not approved in apm.yml (<reason>); run 'apm approve <pkg>' and re-run 'apm install'`. A denied server fails with `admitted in apm.lock.yaml but the executables gate now parks it (denied)`, pointing at `apm policy explain <pkg>`. A passing check names servers parked because their definition changed since approval (`Review: apm approve --pending`).
+- **Intentional omissions.** Install and update record dependency MCP omitted by `--only apm`, by the default refusal of unapproved transitive MCP (including retiring one a previous run trusted with `--trust-transitive-mcp`), or by the executables gate while the declaring package is not approved, is denied, or no longer matches its pin. Audit excludes only the exact dependency and authored declaration covered by that evidence; expanding `${CLAUDE_PLUGIN_ROOT}` at a different materialization path does not change it. This applies to project and global installs, including `agent-skills`. After direct MCP admission, obsolete omission evidence no longer affects that server: its admitted configuration participates in normal drift checks. Root declarations and previously admitted MCP configurations remain checked; a later skills-only install preserves their baseline. If removing a server fails, the previous baseline is kept and no omission is recorded.
+- **Frozen skills-only replay.** `apm install --only apm --frozen` preserves the admitted MCP baseline and exact lockfile and native-configuration bytes. Existing frozen source and consent checks still apply: a baseline that already admitted transitive MCP requires an approval in `apm.yml` or the same explicit `--trust-transitive-mcp`. `--only apm` still prevents native MCP integration; omission evidence never grants consent.
+- **Remediation.** Repeat the intended install selection or restore an unreadable package source. For skills-only use `apm install --only apm`, or `apm install --global --target agent-skills --only apm` for the global skills-only case. Older lockfiles, empty MCP fields, and missing, damaged or stale omission evidence do not establish intent: audit reports unknown selection rather than assuming success. Do not enable MCP or add `--trust-transitive-mcp` merely to clear the finding; for a consent failure, approve the package. Audit itself does not reconcile or write configuration.
 
 ### `content-integrity`
 
 - **What it verifies.** Two independent signals, including local `.apm/` deployments recorded through the synthesized self-entry:
   1. Critical hidden Unicode in recognized prompt documents and decoded native prompt fields. Discovery uses each resolved target's filenames and primitive patterns, including untracked files and shared hook settings. Recorded paths use the same applicability rules: tracking a command or script does not turn it into prompt text. Hook definitions remain visible even when their command-only content is not applicable to Unicode prompt checks. Session transcripts, history, caches, command strings and referenced executables are not scanned. See [Discovery and prompt coverage](../cli/audit/#discovery-and-prompt-coverage) for the format boundaries.
-  2. SHA-256 drift between the on-disk content and the hash recorded in `deployed_file_hashes` at install time. Necessarily lockfile-scoped: an unrecorded file has no baseline to compare against.
+  2. SHA-256 drift between the on-disk content and the hash recorded in `deployed_file_hashes` at install time. Necessarily lockfile-scoped: an unrecorded file has no baseline to compare against. Local bundle instructions staged for `apm compile` are checked the same way against `local_staged_file_hashes`; staged paths without a recorded hash (older lockfiles) are skipped.
 - **Fails when.** An applicable prompt contains critical Unicode, recognized content is unreadable or unsupported (incomplete coverage), a recorded hash differs, or a legacy hash lacks canonical ownership metadata. Missing files are reported by `deployed-files-present`; unrecorded files have no hash baseline. Existing path and symlink protections still apply.
-- **Remediation.** Review the reported format or access error for incomplete coverage. Use `apm audit --strip` only for supported regular prompt documents; structured/shared settings and external-root findings require manual review. Run `apm install` to restore hash-drifted files. Discovery does not grant ownership or permission to rewrite user configuration.
+- **Remediation.** Review the reported format or access error for incomplete coverage. Use `apm audit --strip` only for supported regular prompt documents; structured/shared settings and external-root findings require manual review. Run `apm install` to restore hash-drifted files; for drifted staged bundle files, reinstall the bundle with `apm install <bundle> --force`. Discovery does not grant ownership or permission to rewrite user configuration.
 
 ### `includes-consent`
 

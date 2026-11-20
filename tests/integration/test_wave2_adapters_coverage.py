@@ -786,16 +786,17 @@ class TestClaudeClientAdapter:
         result = ClaudeClientAdapter._normalize_mcp_entry_for_claude_code("not-a-dict")
         assert result == "not-a-dict"
 
-    def test_rewrite_self_defined_skill_command_converged(self) -> None:
+    def test_rewrite_self_defined_skill_command_converged(self, tmp_path: Path) -> None:
         """Converged skill prefix is rewritten to Claude-specific path."""
-        result = ClaudeClientAdapter._rewrite_self_defined_skill_command(
-            ".agents/skills/my-skill/run.sh"
-        )
+        (tmp_path / ".claude" / "skills" / "my-skill").mkdir(parents=True)
+        adapter = ClaudeClientAdapter(project_root=tmp_path)
+        result = adapter._rewrite_self_defined_skill_command(".agents/skills/my-skill/run.sh")
         assert result == ".claude/skills/my-skill/run.sh"
 
-    def test_rewrite_self_defined_skill_command_other(self) -> None:
+    def test_rewrite_self_defined_skill_command_other(self, tmp_path: Path) -> None:
         """Non-converged commands pass through unchanged."""
-        result = ClaudeClientAdapter._rewrite_self_defined_skill_command("npx")
+        adapter = ClaudeClientAdapter(project_root=tmp_path)
+        result = adapter._rewrite_self_defined_skill_command("npx")
         assert result == "npx"
 
     def test_merge_mcp_server_dicts_shallow_merge(self) -> None:
@@ -2212,15 +2213,15 @@ class TestClaudeAdapterEdgeCases:
         assert "new" in data["mcpServers"]
 
     def test_update_config_handles_corrupted_json(self, tmp_path: Path) -> None:
-        """update_config recovers from corrupted .mcp.json."""
+        """update_config keeps an unparsable .mcp.json and reports the write failed."""
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         mcp_json = tmp_path / ".mcp.json"
         mcp_json.write_text("NOT JSON!!!")
         adapter = ClaudeClientAdapter(project_root=tmp_path)
         result = adapter.update_config({"server": {"command": "npx"}})
-        # Should still succeed by starting fresh
-        assert result is True
+        assert result is False
+        assert mcp_json.read_text() == "NOT JSON!!!"
 
     def test_get_current_config_handles_invalid_json(self, tmp_path: Path) -> None:
         """get_current_config returns empty mcpServers for corrupted JSON."""

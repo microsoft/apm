@@ -541,7 +541,7 @@ class TestAuditContentScanPackage:
                 strip=False,
                 dry_run=False,
             )
-        assert exc.value.code == 0
+        assert exc.value.code == 1
 
     def test_no_deployed_files_in_lockfile(self, tmp_path):
         from apm_cli.commands.audit import _audit_content_scan

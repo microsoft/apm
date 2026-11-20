@@ -11,11 +11,15 @@ Owner guard (executed exactly once)     Legacy shell provenance
 registry-delegation-runtime-descriptors AC1 "Runtime names must come from
                                         runtime/registry.py"
 registry-delegation-target-vocabulary   AC1 "Manifest target consumers must
-                                        use canonical_targets"
+                                        use canonical_targets", widened to
+                                        deny-by-default over src/apm_cli
 registry-delegation-install-target-     AC1 "Package, MCP, and LSP phases
 selection                               must share EffectiveTargetDecision"
+registry-delegation-policy-target-      Compilation-target policy judges
+projection                              EffectiveTargetDecision.canonical_targets
 registry-delegation-output-diagnostics  AC12 doctor-status STATUS_SYMBOLS
-                                        owner check
+                                        owner check; #3754 policy discovery
+                                        returns diagnostics as data
 registry-delegation-compiled-output-    AC2 "Compiled output writes must use
 writes                                  CompiledOutputWriter"
 registry-delegation-build-id-verification Build IDs are verified in their
@@ -24,6 +28,8 @@ registry-delegation-bootstrap-project-  AC18 ``lint-bootstrap-project-name``
 name                                    (ported semantically)
 registry-delegation-apm-home-resolution APM-owned user metadata must route
                                         through core/scope.py
+registry-delegation-harness-user-root-  Harness user-root variables must
+resolution                              route through integration/targets.py
 ======================================  ==================================
 
 Every rule check consumes only :class:`FactsProvider` inventory and cached
@@ -79,14 +85,34 @@ _RUNTIME_NAME_PATTERN = (
 )
 
 
-_TARGET_VOCAB_CONSUMERS: tuple[str, ...] = (
-    "src/apm_cli/bundle/packer.py",
-    "src/apm_cli/install/mcp/integration.py",
-    "src/apm_cli/commands/uninstall/engine.py",
+_TARGET_DECLARATION_OWNERS: frozenset[str] = frozenset(
+    {
+        "src/apm_cli/models/manifest_targets.py",
+        "src/apm_cli/models/apm_package.py",
+        "src/apm_cli/core/apm_yml.py",
+        "src/apm_cli/core/target_detection.py",
+    }
 )
-
-
-_TARGET_VOCAB_PATTERN = r"(package|apm_package)\.(target|targets)\b"
+# The user default (``apm config target``) is parsed with the --target rules.
+_TARGET_FIELD_PARSER_USERS: frozenset[str] = frozenset({"src/apm_cli/config.py"})
+_TARGET_FIELD_PARSERS: frozenset[str] = frozenset({"parse_targets_field", "parse_target_field"})
+_TARGET_KEYS: frozenset[str] = frozenset({"target", "targets"})
+_PACKAGE_RECEIVERS: frozenset[str] = frozenset(
+    {"package", "apm_package", "pkg", "apm_pkg", "manifest", "root_package"}
+)
+# Reads of a ``target``/``targets`` key that are a different decision than the
+# package-level manifest declaration. Each must say which one it is.
+_TARGET_EXEMPT_CONCEPTS: frozenset[str] = frozenset(
+    {
+        "dependency-target-subset",
+        "policy-schema",
+        "bundle-pack-metadata",
+        "ledger-row",
+        "display-row",
+        "bootstrap-writer",
+        "compilation-target-field",
+    }
+)
 
 
 _EFFECTIVE_TARGET_OWNER = "src/apm_cli/core/target_detection.py"
@@ -99,6 +125,7 @@ _INSTALL_PIPELINE = "src/apm_cli/install/pipeline.py"
 
 
 _INSTALL_SERVICE = "src/apm_cli/install/service_integration.py"
+_LOCAL_BUNDLE_HANDLER = "src/apm_cli/install/local_bundle_handler.py"
 
 
 _UPDATE_CMD = "src/apm_cli/commands/update.py"
@@ -115,11 +142,30 @@ _DOCTOR_RAW_SYMBOLS: frozenset[str] = frozenset({"[!]", "[x]", "[i]", "[+]"})
 
 _DOCTOR_OWNER_NAME = "STATUS_SYMBOLS"
 
+# #3754: policy discovery returns diagnostics as PolicyFetchResult data; only
+# CommandLogger may render them. A stdlib ``logger.<level>`` call here reaches
+# the root handler on every install and bypasses verbose gating.
+_POLICY_DISCOVERY_FILE = "src/apm_cli/policy/discovery.py"
+# Target-resolution messages are plain text; the CLI output owner adds the
+# one status symbol (#3871).
+_TARGET_ERROR_MESSAGE_FILES: tuple[str, ...] = (
+    "src/apm_cli/core/errors.py",
+    "src/apm_cli/core/apm_yml.py",
+)
+_STATUS_PREFIX_LITERAL = re.compile(r"""(?:^|[\s(=,])[rbuf]{0,2}["']\[[x!i+*>]\] """)
+_STATUS_PREFIX_STRIP = re.compile(r"""(?:removeprefix|replace|lstrip)\(\s*["']\[[x!i+*>]\] ["']""")
+_USER_FACING_LOG_LEVELS: frozenset[str] = frozenset(
+    {"info", "warning", "warn", "error", "exception", "critical"}
+)
+
 
 _COMPILATION_PREFIX = "src/apm_cli/compilation/"
 
 
 # -- Version rendering / entrypoint delegation --
+
+_CLI_ENTRY = "src/apm_cli/cli.py"
+
 
 _VERSION_RENDERER = "src/apm_cli/version_output.py"
 
@@ -215,6 +261,28 @@ _APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
 }
 
 
+_USER_ROOT_OWNER = "src/apm_cli/integration/targets.py"
+
+
+_USER_ROOT_ENV_NAMES = frozenset({"CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "HERMES_HOME"})
+
+
+_USER_ROOT_CONSUMER_NEEDLES: dict[str, str] = {
+    "src/apm_cli/adapters/client/claude.py": 'config_dir = configured_user_root("claude")',
+    "src/apm_cli/adapters/client/codex.py": 'return resolve_user_root("codex")',
+    "src/apm_cli/adapters/client/copilot.py": (
+        'return str(resolve_user_root("copilot") / "mcp-config.json")'
+    ),
+    "src/apm_cli/adapters/client/hermes.py": 'resolve_user_root("hermes")',
+    "src/apm_cli/copilot_plugins/settings.py": 'return resolve_user_root("copilot")',
+    "src/apm_cli/integration/canvas_integrator.py": 'user_root_is_default("copilot")',
+    "src/apm_cli/integration/lsp_integrator.py": "return resolve_user_root(self.runtime)",
+    "src/apm_cli/integration/mcp_integrator.py": (
+        'unresolved_cfg = resolve_user_root("hermes") / "config.yaml"'
+    ),
+}
+
+
 def _count_fixed_lines(facts: FileFacts, needle: str) -> int:
     """Count lexical lines containing `needle` (mirrors ``grep -Fc``)."""
     return sum(1 for line in facts.lines if needle in line)
@@ -272,22 +340,523 @@ def _check_runtime_descriptors(provider: FactsProvider) -> Iterable[Violation]:
     )
 
 
-def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
-    """Manifest target consumers must route through ``canonical_targets``.
+def _is_package_receiver(node: ast.AST) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id in _PACKAGE_RECEIVERS
+    return isinstance(node, ast.Attribute) and node.attr in _PACKAGE_RECEIVERS
 
-    Ports the AC1 ``check_pattern`` forbidding raw ``package.target`` /
-    ``apm_package.targets`` attribute reads in the three manifest-target
-    consumer modules.
+
+def _is_target_key(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and node.value in _TARGET_KEYS
+
+
+def _raw_target_read(node: ast.AST, path: str) -> str | None:
+    """Describe a raw package-target read outside the declaration owner."""
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, ast.Load)
+        and node.attr in _TARGET_KEYS
+        and _is_package_receiver(node.value)
+    ):
+        return f"raw package .{node.attr} read"
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
+        if _is_target_key(node.slice):
+            return f"raw [{node.slice.value!r}] read"
+        return None
+    if isinstance(node, ast.Compare):
+        if _is_target_key(node.left) and any(
+            isinstance(op, (ast.In, ast.NotIn)) for op in node.ops
+        ):
+            return f"raw {node.left.value!r} key test"
+        return None
+    if not isinstance(node, ast.Call):
+        return None
+    name = _call_name(node)
+    if name in _TARGET_FIELD_PARSERS and path not in _TARGET_FIELD_PARSER_USERS:
+        return f"{name} outside the declaration owner"
+    if name == "_package_field":
+        return "_package_field stand-in read"
+    if name in {"get", "pop", "setdefault"} and node.args and _is_target_key(node.args[0]):
+        return f"raw .{name}({node.args[0].value!r}) read"
+    if (
+        name == "getattr"
+        and len(node.args) >= 2
+        and _is_target_key(node.args[1])
+        and _is_package_receiver(node.args[0])
+    ):
+        return f"raw getattr(..., {node.args[1].value!r}) read"
+    return None
+
+
+def _target_exemption(index: TreeIndex, node: ast.AST, lines: tuple[str, ...]) -> str | None:
+    """Return the exemption concept declared for *node*, if any.
+
+    The marker must sit on a line of the innermost statement holding *node*
+    (only its header, for a compound statement) or alone on the line directly
+    above that statement. It never covers a sibling or nested statement.
+    """
+    statement: ast.AST | None = node
+    while statement is not None and not isinstance(statement, ast.stmt):
+        statement = index.parent(statement)
+    anchor = statement if statement is not None else node
+    first = anchor.lineno
+    last = getattr(anchor, "end_lineno", None) or first
+    body = getattr(anchor, "body", None)
+    if isinstance(anchor, ast.Match) and anchor.cases:
+        body = [anchor.cases[0].pattern]
+    if isinstance(anchor, ast.stmt) and isinstance(body, list) and body:
+        last = max(first, body[0].lineno - 1)
+        # Comments between a header and its body belong to the body.
+        while last > first and lines[last - 1].lstrip()[:1] in {"", "#"}:
+            last -= 1
+    candidates = list(range(first, last + 1))
+    if 1 < first <= len(lines) + 1 and lines[first - 2].lstrip().startswith("#"):
+        candidates.append(first - 1)
+    for line in candidates:
+        if 0 < line <= len(lines):
+            marker = lines[line - 1].partition(EXEMPT_MARKER)[2].strip()
+            if marker:
+                return marker.split()[0]
+    return None
+
+
+# The deprecated singular ``target:`` key (#3762, #3868): one warning emitter
+# in the declaration owner, and one target rewrite mapping
+# (``rewrite_target_names``) that the warning's suggestion
+# (``targets_replacement``) and the ``apm init`` re-init both use; every
+# rewritten manifest is verified before it is written. Install never rewrites
+# the manifest.
+_TARGET_DEPRECATION_OWNER = "src/apm_cli/models/manifest_targets.py"
+_TARGET_DEPRECATION_FUNCTION = "_warn_deprecated_manifest_keys"
+_TARGET_DEPRECATION_PHRASE = "uses the deprecated 'target:' key"
+_TARGET_REWRITE_OWNER = _TARGET_DEPRECATION_OWNER
+_TARGET_REWRITE_FUNCTIONS = frozenset(
+    {
+        "rewrite_target_names",
+        "bootstrap_target_names",
+        "verify_rewritten_manifest",
+        "targets_replacement",
+    }
+)
+# Each rewrite path must call the owner. The scaffold writer used by init and
+# every bootstrap verifies what it renders, and the user-manifest bootstrap
+# spells its targets through the owner (#3870).
+_TARGET_REWRITE_CALLS: dict[str, tuple[str, ...]] = {
+    _TARGET_REWRITE_OWNER: (
+        "def rewrite_target_names(",
+        "def bootstrap_target_names(",
+        "def option_target_names(",
+        "def verify_rewritten_manifest(",
+        "    _refuse_ide_targets(selected)",
+        "    _refuse_ide_targets([target] if isinstance(target, str) else target)",
+        "return rewrite_target_names(self) or ()",
+        "declaration.targets_replacement(user_scope=user_scope)",
+    ),
+    "src/apm_cli/commands/init.py": (
+        "rewrite_target_names(ManifestTargetDeclaration.from_mapping(data, apm_yml_path))",
+        "targets = option_target_names(target_flag)",
+    ),
+    "src/apm_cli/install/manifest_helpers.py": (
+        "return option_target_names(target)",
+        "return bootstrap_manifest_targets(target, manifest_display)",
+    ),
+    "src/apm_cli/install/mcp/command.py": (
+        'config["targets"] = list(bootstrap_target_names(supported_runtimes))',
+    ),
+    "src/apm_cli/commands/install.py": (
+        "manifest_targets = preflight_bootstrap_targets(",
+        "from ..install.mcp.command import user_manifest_bootstrap_config as _bootstrap",
+        "initial_manifest_config = _bootstrap(mcp_manifest_path, supported_runtimes,",
+    ),
+    "src/apm_cli/models/manifest_bootstrap.py": (
+        "    verify_rewritten_manifest(out_file, content)",
+    ),
+}
+# Authored (unvalidated) names feed only the rewrite mapping.
+_TARGET_AUTHORED_NAMES_CALL = ".authored_names("
+# The former second authority for --target -> manifest tokens (#3878).
+_RETIRED_TARGET_OPTION_MAPPERS = frozenset({"manifest_targets_from_target_option"})
+
+
+def _has_rewrite_call(line: str, required: str) -> bool:
+    # An indented token pins the statement to that nesting level.
+    if required[:1].isspace():
+        return line.rstrip() == required
+    return required in line
+
+
+def _target_deprecation_findings(
+    rule_id: str, path: str, facts: FileFacts, emitters: set[str], importers: set[str]
+) -> list[Violation]:
+    findings: list[Violation] = []
+    if any(
+        definition.name == _TARGET_DEPRECATION_FUNCTION and definition.kind == "function"
+        for definition in facts.definitions
+    ):
+        emitters.add(path)
+    if path != _TARGET_DEPRECATION_OWNER:
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "the deprecated 'target:' warning must be emitted only by "
+                f"{_TARGET_DEPRECATION_OWNER}::{_TARGET_DEPRECATION_FUNCTION}",
+                line=literal.line,
+                column=literal.column + 1,
+            )
+            for literal in facts.literals
+            if _TARGET_DEPRECATION_PHRASE in literal.value_repr
+        )
+    findings.extend(
+        violation(
+            rule_id,
+            path,
+            f"{definition.name} decides manifest target tokens outside the owner; "
+            f"use {_TARGET_REWRITE_OWNER}::option_target_names",
+            line=definition.line,
+        )
+        for definition in facts.definitions
+        if definition.name in _RETIRED_TARGET_OPTION_MAPPERS
+    )
+    findings.extend(
+        violation(
+            rule_id,
+            path,
+            f"apm.yml target rewrites must call the rewrite owner: {required_call}",
+        )
+        for required_call in _TARGET_REWRITE_CALLS.get(path, ())
+        if not any(_has_rewrite_call(line, required_call) for line in facts.lines)
+    )
+    if path != _TARGET_REWRITE_OWNER:
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "authored target names feed only the apm.yml target rewrite mapping; "
+                f"use {_TARGET_REWRITE_OWNER}::rewrite_target_names",
+                line=number,
+            )
+            for number, line in enumerate(facts.lines, start=1)
+            if _TARGET_AUTHORED_NAMES_CALL in line
+        )
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                f"the target rewrite mapping is owned by {_TARGET_REWRITE_OWNER}; "
+                f"do not define another {definition.name}",
+                line=definition.line,
+            )
+            for definition in facts.definitions
+            if definition.name in _TARGET_REWRITE_FUNCTIONS
+        )
+    return findings
+
+
+def _target_deprecation_wiring(
+    rule_id: str, emitters: set[str], importers: set[str]
+) -> list[Violation]:
+    findings: list[Violation] = []
+    if emitters != {_TARGET_DEPRECATION_OWNER}:
+        findings.append(
+            violation(
+                rule_id,
+                _TARGET_DEPRECATION_OWNER,
+                f"{_TARGET_DEPRECATION_FUNCTION} must be defined exactly once, "
+                f"in {_TARGET_DEPRECATION_OWNER}",
+            )
+        )
+    return findings
+
+
+# Raw apm.yml readers pass the manifest path so the deprecated-key warnings fire
+# (#3965). Only callers parsing a config an APMPackage reader already loaded
+# (and so already warned for) may omit it.
+_PATHLESS_RESTRICTION_READERS = frozenset(
+    {
+        "src/apm_cli/integration/mcp_integrator_install.py",
+        "src/apm_cli/integration/mcp_integrator.py",
+    }
+)
+
+
+def _pathless_restriction_reads(rule_id: str, path: str, index) -> list[Violation]:
+    if path in _PATHLESS_RESTRICTION_READERS:
+        return []
+    return [
+        violation(
+            rule_id,
+            path,
+            "manifest_target_restriction needs the manifest path so deprecated "
+            "target keys warn (#3965)",
+            line=node.lineno,
+        )
+        for node in index.nodes
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", getattr(node.func, "attr", None))
+        == "manifest_target_restriction"
+        and len(node.args) + len(node.keywords) < 2
+    ]
+
+
+def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
+    """Package manifest targets are read only through the declaration owner.
+
+    Deny-by-default over ``src/apm_cli``: outside ``models/apm_package.py``
+    (``ManifestTargetDeclaration``) and its parsers, no module may read a
+    package's ``target``/``targets`` attributes or keys, or call the target
+    field parsers. Reads of a different decision carry
+    ``# architecture-authority-exempt: <concept>`` naming it.
+
+    The deprecated ``target:`` key has one warning emitter in the declaration
+    owner, and the warning and ``apm init`` re-init share one rewrite mapping.
     """
     rule_id = "registry_delegation.target_vocabulary"
-    return line_pattern_violations(
-        provider,
-        rule_id=rule_id,
-        paths=_TARGET_VOCAB_CONSUMERS,
-        pattern=_TARGET_VOCAB_PATTERN,
-        message="manifest target consumers must use canonical_targets",
-        exempt_marker=EXEMPT_MARKER,
-    )
+    findings: list[Violation] = []
+    emitters: set[str] = set()
+    importers: set[str] = set()
+    for path in _python_paths(provider, under=_SRC):
+        facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
+        if read_failures:
+            findings.extend(read_failures)
+            continue
+        findings.extend(_target_deprecation_findings(rule_id, path, facts, emitters, importers))
+        if path in _TARGET_DECLARATION_OWNERS:
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        findings.extend(_pathless_restriction_reads(rule_id, path, index))
+        for node in index.nodes:
+            reason = _raw_target_read(node, path)
+            if reason is None:
+                continue
+            line = getattr(node, "lineno", 1)
+            concept = _target_exemption(index, node, facts.lines)
+            if concept in _TARGET_EXEMPT_CONCEPTS:
+                continue
+            message = (
+                f"{reason}: route package targets through ManifestTargetDeclaration"
+                if concept is None
+                else f"{reason}: unknown exemption concept {concept!r}"
+            )
+            findings.append(
+                violation(
+                    rule_id,
+                    path,
+                    message,
+                    line=line,
+                    column=getattr(node, "col_offset", 0) + 1,
+                )
+            )
+    findings.extend(_target_deprecation_wiring(rule_id, emitters, importers))
+    return findings
+
+
+_POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
+    {"run_dependency_policy_checks", "run_policy_preflight"}
+)
+_POLICY_TARGET_CHECK = "_check_compilation_target"
+_POLICY_TARGET_SEAM_PARAMETER = "effective_target"
+
+
+def _call_name(node: ast.Call) -> str | None:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _is_canonical_targets(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == "canonical_targets"
+
+
+def _check_policy_target_projection(provider: FactsProvider) -> Iterable[Violation]:
+    """Compilation-target policy judges only the canonical decision projection.
+
+    Every target selection handed to the policy seams must be an
+    ``EffectiveTargetDecision.canonical_targets`` expression, the check itself
+    must never read the raw manifest, and no sibling normalizer may exist.
+    """
+    rule_id = "registry_delegation.policy_target_projection"
+    findings: list[Violation] = []
+    for path in _python_paths(provider, under=_SRC):
+        _facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
+        if read_failures:
+            findings.extend(read_failures)
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        for node in index.nodes:
+            line = getattr(node, "lineno", 1)
+            if isinstance(node, FUNCTION_NODES) and node.name == "normalize_policy_targets":
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "policy target normalization belongs to "
+                        "EffectiveTargetDecision.canonical_targets",
+                        line=line,
+                    )
+                )
+            elif isinstance(node, FUNCTION_NODES) and node.name == _POLICY_TARGET_CHECK:
+                first = node.args.args[0].arg if node.args.args else None
+                if first != "targets":
+                    findings.append(
+                        violation(
+                            rule_id,
+                            path,
+                            f"{_POLICY_TARGET_CHECK} must take canonical targets, not {first}",
+                            line=line,
+                        )
+                    )
+            if not isinstance(node, ast.Call):
+                continue
+            name = _call_name(node)
+            anchor = index.definition_anchor(node)
+            # A seam may forward its own already-projected parameter.
+            passthrough = isinstance(anchor, FUNCTION_NODES) and anchor.name in _POLICY_TARGET_SEAMS
+            if name in _POLICY_TARGET_SEAMS:
+                for keyword in node.keywords:
+                    if keyword.arg != _POLICY_TARGET_SEAM_PARAMETER:
+                        continue
+                    value = keyword.value
+                    if isinstance(value, ast.Constant) and value.value is None:
+                        continue
+                    if passthrough and _is_name(value, _POLICY_TARGET_SEAM_PARAMETER):
+                        continue
+                    if not _is_canonical_targets(value):
+                        findings.append(
+                            violation(
+                                rule_id,
+                                path,
+                                f"{name} effective_target must be an "
+                                "EffectiveTargetDecision.canonical_targets projection",
+                                line=line,
+                            )
+                        )
+            elif name == _POLICY_TARGET_CHECK:
+                first_arg = node.args[0] if node.args else None
+                if not (
+                    _is_canonical_targets(first_arg)
+                    or (passthrough and _is_name(first_arg, _POLICY_TARGET_SEAM_PARAMETER))
+                ):
+                    findings.append(
+                        violation(
+                            rule_id,
+                            path,
+                            f"{_POLICY_TARGET_CHECK} must receive "
+                            "EffectiveTargetDecision.canonical_targets",
+                            line=line,
+                        )
+                    )
+    return findings
+
+
+_POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
+    {"run_dependency_policy_checks", "run_policy_preflight"}
+)
+_POLICY_TARGET_CHECK = "_check_compilation_target"
+_POLICY_TARGET_SEAM_PARAMETER = "effective_target"
+
+
+def _call_name(node: ast.Call) -> str | None:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _is_canonical_targets(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == "canonical_targets"
+
+
+def _check_policy_target_projection(provider: FactsProvider) -> Iterable[Violation]:
+    """Compilation-target policy judges only the canonical decision projection.
+
+    Every target selection handed to the policy seams must be an
+    ``EffectiveTargetDecision.canonical_targets`` expression, the check itself
+    must never read the raw manifest, and no sibling normalizer may exist.
+    """
+    rule_id = "registry_delegation.policy_target_projection"
+    findings: list[Violation] = []
+    for path in _python_paths(provider, under=_SRC):
+        _facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
+        if read_failures:
+            findings.extend(read_failures)
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        for node in index.nodes:
+            line = getattr(node, "lineno", 1)
+            if isinstance(node, FUNCTION_NODES) and node.name == "normalize_policy_targets":
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "policy target normalization belongs to "
+                        "EffectiveTargetDecision.canonical_targets",
+                        line=line,
+                    )
+                )
+            elif isinstance(node, FUNCTION_NODES) and node.name == _POLICY_TARGET_CHECK:
+                first = node.args.args[0].arg if node.args.args else None
+                if first != "targets":
+                    findings.append(
+                        violation(
+                            rule_id,
+                            path,
+                            f"{_POLICY_TARGET_CHECK} must take canonical targets, not {first}",
+                            line=line,
+                        )
+                    )
+            if not isinstance(node, ast.Call):
+                continue
+            name = _call_name(node)
+            anchor = index.definition_anchor(node)
+            # A seam may forward its own already-projected parameter.
+            passthrough = isinstance(anchor, FUNCTION_NODES) and anchor.name in _POLICY_TARGET_SEAMS
+            if name in _POLICY_TARGET_SEAMS:
+                for keyword in node.keywords:
+                    if keyword.arg != _POLICY_TARGET_SEAM_PARAMETER:
+                        continue
+                    value = keyword.value
+                    if isinstance(value, ast.Constant) and value.value is None:
+                        continue
+                    if passthrough and _is_name(value, _POLICY_TARGET_SEAM_PARAMETER):
+                        continue
+                    if not _is_canonical_targets(value):
+                        findings.append(
+                            violation(
+                                rule_id,
+                                path,
+                                f"{name} effective_target must be an "
+                                "EffectiveTargetDecision.canonical_targets projection",
+                                line=line,
+                            )
+                        )
+            elif name == _POLICY_TARGET_CHECK:
+                first_arg = node.args[0] if node.args else None
+                if not (
+                    _is_canonical_targets(first_arg)
+                    or (passthrough and _is_name(first_arg, _POLICY_TARGET_SEAM_PARAMETER))
+                ):
+                    findings.append(
+                        violation(
+                            rule_id,
+                            path,
+                            f"{_POLICY_TARGET_CHECK} must receive "
+                            "EffectiveTargetDecision.canonical_targets",
+                            line=line,
+                        )
+                    )
+    return findings
 
 
 def _check_audit_target_selection(provider: FactsProvider) -> Iterable[Violation]:
@@ -318,7 +887,7 @@ def _check_audit_target_selection(provider: FactsProvider) -> Iterable[Violation
             "resolve_audit_targets": (
                 "resolve_audit_target_decision",
                 "DeploymentLedgerCodec.recorded_target_names",
-                "resolve_targets",
+                "resolve_reintegration_targets",
             )
         },
     }
@@ -362,6 +931,7 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
         _INSTALL_PIPELINE,
         _INSTALL_SERVICE,
         _UPDATE_CMD,
+        _LOCAL_BUNDLE_HANDLER,
     )
     facts_by_path, failures = _read_required(provider, rule_id, paths)
     if failures:
@@ -373,6 +943,7 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
     pipeline = facts_by_path[_INSTALL_PIPELINE]
     service = facts_by_path[_INSTALL_SERVICE]
     update = facts_by_path[_UPDATE_CMD]
+    local_bundle = facts_by_path[_LOCAL_BUNDLE_HANDLER]
 
     if _count_regex_lines(owner, r"^def resolve_effective_target_decision\(") != 1:
         findings.append(
@@ -415,6 +986,14 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
                 "service integration must forward target_decision to package and MCP phases",
             )
         )
+    if not _has_fixed(local_bundle, "explicit = resolve_manifest_target_decision("):
+        findings.append(
+            violation(
+                rule_id,
+                _LOCAL_BUNDLE_HANDLER,
+                "local bundle install must resolve targets through the manifest target decision",
+            )
+        )
     if not _has_fixed(update, 'target_decision = getattr(result, "target_decision", None)'):
         findings.append(
             violation(
@@ -450,29 +1029,134 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
 
 
 def _check_output_diagnostics(provider: FactsProvider) -> Iterable[Violation]:
+    """User-facing output must route through the CommandLogger / console owner.
+
+    Combines the AC12 doctor-status guard with the #3754 policy-discovery
+    guard; both report under ``registry_delegation.output_diagnostics``.
+    """
+    rule_id = "registry_delegation.output_diagnostics"
+    return (
+        *_doctor_status_findings(provider, rule_id),
+        *_target_error_status_findings(provider, rule_id),
+        *_policy_discovery_output_findings(provider, rule_id),
+        *_rich_console_construction_findings(provider, rule_id),
+    )
+
+
+_CONSOLE_OWNER = "src/apm_cli/utils/console.py"
+_RICH_CONSOLE_IMPORT = re.compile(r"^\s*from\s+rich\.console\s+import\b.*\bConsole\b")
+_RICH_CONSOLE_CALL = re.compile(r"(?<![\w.])(?:rich\.console\.)?Console\(")
+
+
+def _rich_console_construction_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Rich consoles come from utils/console.py so tables and panels stay ASCII (#3994)."""
+    findings: list[Violation] = []
+    for path in _python_paths(provider, under=_SRC):
+        if path == _CONSOLE_OWNER:
+            continue
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "build Rich consoles with apm_cli.utils.console.new_console() or "
+                "_get_console(); a direct rich Console renders Unicode boxes",
+                line=number,
+            )
+            for number, line in enumerate(facts.lines, start=1)
+            if _RICH_CONSOLE_IMPORT.search(line) or _RICH_CONSOLE_CALL.search(line)
+        )
+    return findings
+
+
+def _target_error_status_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Target error messages carry no status symbol, and nobody strips one (#3871)."""
+    findings: list[Violation] = []
+    for path in _TARGET_ERROR_MESSAGE_FILES:
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "target error messages must be plain text; CommandLogger or Click adds "
+                "the status symbol",
+                line=number,
+            )
+            for number, line in enumerate(facts.lines, start=1)
+            if _STATUS_PREFIX_LITERAL.search(line)
+        )
+    for path in _python_paths(provider, under=_SRC):
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "do not strip a status symbol from a message; keep messages plain and let "
+                "the CLI output owner add it",
+                line=number,
+            )
+            for number, line in enumerate(facts.lines, start=1)
+            if _STATUS_PREFIX_STRIP.search(line)
+        )
+    return findings
+
+
+def _policy_discovery_output_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Policy discovery must not emit user-facing stdlib ``logger`` output."""
+    _facts, failures = checked_facts(provider, _POLICY_DISCOVERY_FILE, rule_id, require_python=True)
+    if failures:
+        return list(failures)
+    index = provider.tree_index(_POLICY_DISCOVERY_FILE)
+    return [
+        violation(
+            rule_id,
+            _POLICY_DISCOVERY_FILE,
+            f"policy discovery must return diagnostics as PolicyFetchResult data for "
+            f"CommandLogger, not logger.{node.func.attr}()",
+            line=node.lineno,
+            column=node.col_offset + 1,
+        )
+        for node in (() if index is None else index.nodes)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _USER_FACING_LOG_LEVELS
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "logger"
+    ]
+
+
+def _doctor_status_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
     """Doctor status symbols must come from ``utils/console.py::STATUS_SYMBOLS``.
 
     Ports the AC12 doctor-status guard: within ``_doctor_status_icon`` no raw
     status glyph may appear as a string constant, the name must come from the
     console owner, and each actual return expression must consume that owner.
     """
-    rule_id = "registry_delegation.output_diagnostics"
     _facts, failures = checked_facts(provider, _DOCTOR_FILE, rule_id, require_python=True)
     if failures:
-        return failures
+        return list(failures)
 
     index = provider.tree_index(_DOCTOR_FILE)
     definitions = (
         () if index is None else direct_definitions(index, _DOCTOR_FUNCTION, kinds=FUNCTION_NODES)
     )
     if not definitions:
-        return (
+        return [
             violation(
                 rule_id,
                 _DOCTOR_FILE,
                 "doctor status owner function _doctor_status_icon is missing",
-            ),
-        )
+            )
+        ]
 
     findings: list[Violation] = []
     function = definitions[-1]
@@ -885,6 +1569,81 @@ def _check_apm_home_resolution(provider: FactsProvider) -> Iterable[Violation]:
     return findings
 
 
+def _check_harness_user_root_resolution(provider: FactsProvider) -> Iterable[Violation]:
+    """Harness user-root variables must be read only by the targets.py owner."""
+    rule_id = "registry_delegation.harness_user_root_resolution"
+    required_paths = (_USER_ROOT_OWNER, *_USER_ROOT_CONSUMER_NEEDLES)
+    facts_by_path, failures = _read_required(provider, rule_id, required_paths)
+    if failures:
+        return failures
+
+    findings: list[Violation] = []
+    for name in ("configured_user_root", "resolve_user_root"):
+        definers, def_failures = _defining_files(provider, rule_id, name, kinds=("function",))
+        findings.extend(def_failures)
+        if definers != frozenset({_USER_ROOT_OWNER}):
+            findings.append(
+                violation(
+                    rule_id,
+                    _USER_ROOT_OWNER,
+                    f"{name} must be defined only by integration/targets.py",
+                )
+            )
+
+    owner = facts_by_path[_USER_ROOT_OWNER]
+    if _count_fixed_lines(owner, "os.environ.get(variable.env_var") != 1:
+        findings.append(
+            violation(
+                rule_id,
+                _USER_ROOT_OWNER,
+                "the user-root environment lookup must exist exactly once in its owner",
+            )
+        )
+
+    for path, needle in _USER_ROOT_CONSUMER_NEEDLES.items():
+        if not _has_fixed(facts_by_path[path], needle):
+            findings.append(
+                violation(
+                    rule_id,
+                    path,
+                    "harness user-root path must route through integration/targets.py",
+                )
+            )
+
+    for path in _python_paths(provider, under=_SRC):
+        _facts, read_failures = checked_facts(provider, path, rule_id, require_python=True)
+        if read_failures:
+            findings.extend(read_failures)
+            continue
+        index = provider.tree_index(path)
+        if index is None:
+            continue
+        seen: dict[str, int] = {}
+        for node in index.nodes:
+            if not (isinstance(node, ast.Constant) and node.value in _USER_ROOT_ENV_NAMES):
+                continue
+            seen[node.value] = seen.get(node.value, 0) + 1
+            if path != _USER_ROOT_OWNER or seen[node.value] > 1:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        f"{node.value} must be named only in the USER_ROOT_VARIABLES owner table",
+                        line=getattr(node, "lineno", 1),
+                        column=getattr(node, "col_offset", 0) + 1,
+                    )
+                )
+        if path == _USER_ROOT_OWNER and set(seen) != _USER_ROOT_ENV_NAMES:
+            findings.append(
+                violation(
+                    rule_id,
+                    path,
+                    "USER_ROOT_VARIABLES must declare every harness user-root variable",
+                )
+            )
+    return findings
+
+
 def _is_name(node: ast.AST | None, name: str) -> bool:
     return isinstance(node, ast.Name) and node.id == name
 
@@ -949,6 +1708,124 @@ def _has_named_assignment(
         and _is_name(node.value, value_name)
         for node in index.nodes
     )
+
+
+def _check_process_interrupt_signals(provider: FactsProvider) -> Iterable[Violation]:
+    """SIGTERM handling must route through the CLI entry owner in ``cli.py``.
+
+    ``main`` installs ``_route_sigterm_to_interrupt`` so SIGTERM takes the
+    Ctrl+C rollback path; no other module installs a SIGTERM handler.
+    """
+    rule_id = "registry_delegation.process_interrupt_signals"
+    facts_by_path, failures = _read_required(provider, rule_id, (_CLI_ENTRY,))
+    if failures:
+        return failures
+    cli = facts_by_path[_CLI_ENTRY]
+    findings: list[Violation] = []
+    if _count_regex_lines(cli, r"^def _route_sigterm_to_interrupt\(") != 1:
+        findings.append(
+            violation(rule_id, _CLI_ENTRY, "_route_sigterm_to_interrupt must be defined once")
+        )
+    if _count_regex_lines(cli, r"^\s+_route_sigterm_to_interrupt\(\)") != 1:
+        findings.append(
+            violation(rule_id, _CLI_ENTRY, "main must call _route_sigterm_to_interrupt once")
+        )
+    findings.extend(
+        line_pattern_violations(
+            provider,
+            rule_id=rule_id,
+            paths=tuple(p for p in _python_paths(provider, under=_SRC) if p != _CLI_ENTRY),
+            pattern=r"signal\.signal\(\s*signal\.SIGTERM",
+            message="SIGTERM handlers must be installed only by cli.py (_route_sigterm_to_interrupt)",
+            exempt_marker=EXEMPT_MARKER,
+        )
+    )
+    return tuple(findings)
+
+
+_MANIFEST_BOOTSTRAP_OWNER = "src/apm_cli/models/manifest_bootstrap.py"
+_MANIFEST_BOOTSTRAP_FUNCTIONS = ("bootstrap_config", "write_minimal_manifest")
+# Historical names kept only as re-exports of the owner; a definition means a
+# second writer has come back.
+_RETIRED_BOOTSTRAP_WRITERS = ("_create_minimal_apm_yml", "_get_bootstrap_config")
+_INSTALL_LAYER = "src/apm_cli/install/"
+_COMMANDS_PACKAGE = "apm_cli.commands"
+
+
+def _absolute_import_module(path: str, module: str | None, level: int) -> str:
+    """Resolve an import statement's target module for a file under ``src/``."""
+    if level == 0:
+        return module or ""
+    package = path.removeprefix("src/").removesuffix(".py").split("/")[:-1]
+    base = package[: len(package) - (level - 1)] if level > 1 else package
+    return ".".join([*base, *([module] if module else [])])
+
+
+def _imports_commands(path: str, fact: object) -> bool:
+    target = _absolute_import_module(path, getattr(fact, "module", None), fact.level)
+    if target == _COMMANDS_PACKAGE or target.startswith(_COMMANDS_PACKAGE + "."):
+        return True
+    names = getattr(fact, "names", ())
+    if target == "apm_cli" and "commands" in names:
+        return True
+    # ``import apm_cli.commands.x`` carries the dotted module in ``names``.
+    return fact.level == 0 and any(
+        name == _COMMANDS_PACKAGE or name.startswith(_COMMANDS_PACKAGE + ".") for name in names
+    )
+
+
+def _check_install_layering(provider: FactsProvider) -> Iterable[Violation]:
+    """The install layer never imports the commands layer (#3879).
+
+    The minimal apm.yml bootstrap writer is owned by
+    ``models/manifest_bootstrap.py`` (defined nowhere else), so ``apm init``,
+    the install auto-bootstrap and the ``install --mcp`` user-manifest
+    bootstrap share it without ``install/`` importing ``commands/``. Any
+    import from ``src/apm_cli/install/**`` into ``apm_cli.commands``
+    (absolute, relative or ``TYPE_CHECKING``-only) is refused.
+    """
+    rule_id = "registry_delegation.install_layering"
+    findings: list[Violation] = []
+    for name in _MANIFEST_BOOTSTRAP_FUNCTIONS:
+        definers, failures = _defining_files(provider, rule_id, name, kinds=("function",))
+        findings.extend(failures)
+        if not failures and definers != frozenset({_MANIFEST_BOOTSTRAP_OWNER}):
+            findings.append(
+                violation(
+                    rule_id,
+                    _MANIFEST_BOOTSTRAP_OWNER,
+                    f"{name} must be defined only by {_MANIFEST_BOOTSTRAP_OWNER}",
+                )
+            )
+    for name in _RETIRED_BOOTSTRAP_WRITERS:
+        definers, failures = _defining_files(provider, rule_id, name, kinds=("function",))
+        findings.extend(failures)
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                f"{name} is a re-export of {_MANIFEST_BOOTSTRAP_OWNER}; do not redefine it",
+            )
+            for path in sorted(definers)
+        )
+    for path in _python_paths(provider, under=_INSTALL_LAYER):
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "the install layer must not import the commands layer; move the shared "
+                "helper below both (see models/manifest_bootstrap.py, install/orphans.py)",
+                line=fact.line,
+                column=fact.column + 1,
+            )
+            for fact in facts.imports
+            if _imports_commands(path, fact)
+        )
+    return findings
 
 
 def _check_version_rendering(provider: FactsProvider) -> Iterable[Violation]:
@@ -1074,9 +1951,21 @@ RULES: tuple[Rule, ...] = (
     Rule(
         id="registry_delegation.target_vocabulary",
         group=GROUP,
-        guard_ids=("registry-delegation-target-vocabulary",),
-        description="Manifest target consumers must use core/target_catalog canonical targets.",
+        guard_ids=(
+            "registry-delegation-target-vocabulary",
+            "registry-delegation-manifest-target-declaration",
+        ),
+        description=("Package manifest targets are read only through ManifestTargetDeclaration."),
         check=_check_target_vocabulary,
+    ),
+    Rule(
+        id="registry_delegation.policy_target_projection",
+        group=GROUP,
+        guard_ids=("registry-delegation-policy-target-projection",),
+        description=(
+            "Compilation-target policy judges EffectiveTargetDecision.canonical_targets only."
+        ),
+        check=_check_policy_target_projection,
     ),
     Rule(
         id="registry_delegation.install_target_selection",
@@ -1089,7 +1978,10 @@ RULES: tuple[Rule, ...] = (
         id="registry_delegation.output_diagnostics",
         group=GROUP,
         guard_ids=("registry-delegation-output-diagnostics",),
-        description="User-facing status symbols must come from utils/console.py STATUS_SYMBOLS.",
+        description=(
+            "User-facing status symbols must come from utils/console.py STATUS_SYMBOLS; "
+            "policy discovery returns diagnostics as data, not logger output."
+        ),
         check=_check_output_diagnostics,
     ),
     Rule(
@@ -1124,6 +2016,16 @@ RULES: tuple[Rule, ...] = (
         check=_check_user_invocable_resolution,
     ),
     Rule(
+        id="registry_delegation.install_layering",
+        group=GROUP,
+        guard_ids=("registry-delegation-install-layering",),
+        description=(
+            "The install layer never imports the commands layer; the minimal apm.yml "
+            "bootstrap writer lives in models/manifest_bootstrap.py."
+        ),
+        check=_check_install_layering,
+    ),
+    Rule(
         id="registry_delegation.version_rendering",
         group=GROUP,
         guard_ids=("registry-delegation-version-rendering",),
@@ -1136,6 +2038,23 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("registry-delegation-apm-home-resolution",),
         description="APM-owned user metadata paths must share core/scope.py::get_apm_home.",
         check=_check_apm_home_resolution,
+    ),
+    Rule(
+        id="registry_delegation.harness_user_root_resolution",
+        group=GROUP,
+        guard_ids=("registry-delegation-harness-user-root-resolution",),
+        description=(
+            "Harness user-root variables (COPILOT_HOME, CODEX_HOME, CLAUDE_CONFIG_DIR, "
+            "HERMES_HOME) must be read only through integration/targets.py."
+        ),
+        check=_check_harness_user_root_resolution,
+    ),
+    Rule(
+        id="registry_delegation.process_interrupt_signals",
+        group=GROUP,
+        guard_ids=("registry-delegation-process-interrupt-signals",),
+        description="SIGTERM handling must route through the CLI entry owner in cli.py.",
+        check=_check_process_interrupt_signals,
     ),
 )
 

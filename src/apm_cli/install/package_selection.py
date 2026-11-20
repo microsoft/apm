@@ -112,8 +112,8 @@ def previous_selected_subtree_keys(
     dropped when the graph omits a retained entry, which may still need a
     candidate.
     """
-    from apm_cli.commands.uninstall.engine import _collect_orphan_candidates
     from apm_cli.deps.lockfile import _SELF_KEY
+    from apm_cli.install.orphans import collect_orphan_candidates as _collect_orphan_candidates
 
     # Children record their parent's spelling at lock time; scan from both the
     # interpreted declaration and the selected package's own lock entry so a

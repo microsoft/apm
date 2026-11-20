@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.marketplace.semver import SemVer, parse_semver, satisfies_range  # noqa: F401
 
@@ -76,6 +76,32 @@ class TestParseSemver:
         sv = parse_semver("1.0.0-alpha-beta")
         assert sv is not None
         assert sv.prerelease == "alpha-beta"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "01.2.3",
+            "1.02.3",
+            "1.2.03",
+            "00.0.0",
+            "1.2.3-01",
+            "1.2.3-rc.01",
+            "\u0661.2.3",
+            "1.\uff12.3",
+            "1.2.\u0663",
+        ],
+    )
+    def test_invalid_outside_semver_grammar(self, text: str) -> None:
+        # SemVer 2.0.0: numeric identifiers are 0|[1-9][0-9]* in ASCII (#3795).
+        assert parse_semver(text) is None
+
+    @pytest.mark.parametrize(
+        "text",
+        ["10.20.30", "1.2.3-0", "1.2.3-rc.0", "1.2.3-0a", "1.2.3-00a", "1.2.3+001"],
+    )
+    def test_valid_zero_forms(self, text: str) -> None:
+        # Alphanumeric prerelease ids and build metadata may start with 0.
+        assert parse_semver(text) is not None
 
 
 # ---------------------------------------------------------------------------

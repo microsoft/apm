@@ -19,6 +19,7 @@ import yaml
 from ..deps.lockfile import (
     LockedDependency,
     LockFile,
+    installed_apm_version,
     resolve_lockfile_path_for_read,
 )
 from ..models.apm_package import APMPackage, DependencyReference
@@ -427,11 +428,11 @@ def _collect_hooks_from_root(
     return hooks
 
 
-def _collect_mcp(package_root: Path) -> dict:
+def _collect_mcp(package_root: Path, *, exclude_apm_managed: bool = True) -> dict:
     """Return ``mcpServers`` dict from ``.mcp.json``."""
     from ..core.plugin_manifest import collect_mcp_servers
 
-    return collect_mcp_servers(package_root)
+    return collect_mcp_servers(package_root, exclude_apm_managed=exclude_apm_managed)
 
 
 # ---------------------------------------------------------------------------
@@ -881,7 +882,8 @@ def _cache_would_contribute_hooks_or_mcp(install_path: Path) -> bool:
     """
     if not install_path.is_dir():
         return False
-    if _collect_mcp(install_path):
+    # A dependency's own .mcp.json is authored by that package, not rendered by APM.
+    if _collect_mcp(install_path, exclude_apm_managed=False):
         return True
     if _collect_hooks_from_apm(install_path / ".apm"):
         return True
@@ -935,7 +937,7 @@ def export_plugin_bundle(
     for dep_ref in package.get_apm_dependencies():
         if dep_ref.is_local:
             raise ValueError(
-                f"Cannot pack — apm.yml contains local path dependency: "
+                f"Cannot pack -- apm.yml contains local path dependency: "
                 f"{dep_ref.local_path}\n"
                 f"Local dependencies are for development only. Replace them with "
                 f"remote references (e.g., 'owner/repo') before packing."
@@ -1168,31 +1170,35 @@ def export_plugin_bundle(
     # Walk the bundle and hash every file (excluding the lockfile itself,
     # which we are about to write) so install-time integrity verification can
     # detect tampering without needing the original deployed_files map.
-    if lockfile is not None:
-        from .lockfile_enrichment import enrich_lockfile_for_pack
+    # A project without apm.lock.yaml (e.g. ``dependencies: {}`` with only
+    # local primitives) still gets an integrity manifest: synthesize an empty
+    # lockfile so ``pack.bundle_files`` is always recorded (issue #3846).
+    if lockfile is None:
+        lockfile = LockFile(apm_version=installed_apm_version())
+    from .lockfile_enrichment import enrich_lockfile_for_pack
 
-        bundle_files: dict[str, str] = {}
-        for fp in bundle_dir.rglob("*"):
-            if not fp.is_file() or fp.is_symlink():
-                continue
-            rel = fp.relative_to(bundle_dir).as_posix()
-            if rel == "apm.lock.yaml":
-                continue
-            bundle_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
-        # Issue #1207 D1: do NOT silently substitute ``"copilot"`` when
-        # ``target`` is missing.  Bundles are target-agnostic at install
-        # time; ``pack.target`` is recorded as informational metadata only.
-        # Falling back to ``"all"`` preserves the lockfile-filter shape
-        # (which uses target prefixes to narrow each dep's deployed_files
-        # list to the union of supported targets) without locking the
-        # bundle to a single client.
-        enriched_yaml = enrich_lockfile_for_pack(
-            lockfile,
-            "plugin",
-            target or "all",
-            bundle_files=bundle_files,
-        )
-        write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
+    bundle_files: dict[str, str] = {}
+    for fp in bundle_dir.rglob("*"):
+        if not fp.is_file() or fp.is_symlink():
+            continue
+        rel = fp.relative_to(bundle_dir).as_posix()
+        if rel == "apm.lock.yaml":
+            continue
+        bundle_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
+    # Issue #1207 D1: do NOT silently substitute ``"copilot"`` when
+    # ``target`` is missing.  Bundles are target-agnostic at install
+    # time; ``pack.target`` is recorded as informational metadata only.
+    # Falling back to ``"all"`` preserves the lockfile-filter shape
+    # (which uses target prefixes to narrow each dep's deployed_files
+    # list to the union of supported targets) without locking the
+    # bundle to a single client.
+    enriched_yaml = enrich_lockfile_for_pack(
+        lockfile,
+        "plugin",
+        target or "all",
+        bundle_files=bundle_files,
+    )
+    write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
 
     result = PackResult(bundle_path=bundle_dir, files=output_files)
 
@@ -1233,7 +1239,7 @@ def _merge_file_map(
         if output_rel in file_map:
             existing_owner = file_map[output_rel][1]
             collisions.append(
-                f"{output_rel} — collision between '{existing_owner}' and "
+                f"{output_rel} -- collision between '{existing_owner}' and "
                 f"'{owner}' ({'last writer wins' if force else 'first writer wins'})"
             )
             if force:

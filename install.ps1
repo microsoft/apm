@@ -472,6 +472,25 @@ function Invoke-StagedBinaryTest {
     return [pscustomobject]@{ Output = "$output"; Failure = $null }
 }
 
+function Expand-ReleaseArchive {
+    # Returns the directory the archive was extracted into. Expand-Archive
+    # fails when Windows PowerShell inherits a PowerShell 7 PSModulePath and
+    # loads its .NET Core Archive module (#3926). Fall back to the 2-argument
+    # ZipFile overload that .NET Framework has, in a fresh directory so any
+    # partial Expand-Archive output cannot collide with the retry.
+    param([string]$ZipPath, [string]$DestinationPath)
+    try {
+        Expand-Archive -Path $ZipPath -DestinationPath $DestinationPath -Force -ErrorAction Stop
+        return $DestinationPath
+    } catch {
+        Write-WarningText "Expand-Archive failed ($_); retrying with System.IO.Compression.ZipFile."
+    }
+    $fallbackDir = Join-Path $DestinationPath ("extract-" + [System.Guid]::NewGuid().ToString("N"))
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipPath, $fallbackDir)
+    return $fallbackDir
+}
+
 function Write-AppControlGuidance {
     param(
         [string]$Path,
@@ -887,9 +906,9 @@ try {
     # ------------------------------------------------------------------
 
     Write-Info "Extracting package..."
-    Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
+    $extractRoot = Expand-ReleaseArchive -ZipPath $zipPath -DestinationPath $tempDir
 
-    $packageDir = Join-Path $tempDir "apm-windows-x86_64"
+    $packageDir = Join-Path $extractRoot "apm-windows-x86_64"
     if (-not (Test-Path $packageDir)) {
         Write-ErrorText "Extracted package is missing the apm-windows-x86_64 directory."
         Write-Info "Attempting automatic fallback to pip..."

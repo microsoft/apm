@@ -39,8 +39,17 @@ def test_user_edit_equal_to_old_version_remains_protected(
     proof = receipt.read_bytes()
     scenario.deployed_skill.write_bytes(old)
     result = scenario.install(*(["--frozen"] if frozen else []))
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "modified since deployment" in result.stdout
+    output = " ".join(result.stdout.split())
+    if frozen:
+        # --frozen fails closed on any deployed-hash mismatch (#3654) before
+        # deploying, so the user's edit stays in place (#3994).
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "nothing was deployed" in output
+        assert "deployed files do not match the hashes recorded in apm.lock.yaml" in output
+        assert "- .claude/skills/demo/SKILL.md: expected sha256:" in output
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "modified since deployment" in result.stdout
     assert scenario.deployed_skill.read_bytes() == old
     assert receipt.read_bytes() == proof
 

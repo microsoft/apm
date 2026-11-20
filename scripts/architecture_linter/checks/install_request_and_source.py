@@ -262,7 +262,7 @@ def check_install_scope_selection(provider: FactsProvider) -> tuple[Violation, .
     exclusion_calls = _named_calls(handler_nodes, "filter_excluded_mcp_runtimes")
     dry_run_validation_calls = _named_calls(handler_nodes, "_validate_mcp_dry_run_entry")
     registry_validation_calls = _attribute_calls(command_nodes, "prevalidate_registry_dependencies")
-    bootstrap_calls = _named_calls(command_nodes, "_create_minimal_apm_yml")
+    bootstrap_calls = _named_calls(command_nodes, "write_minimal_manifest")
     manifest_write_calls = _named_calls(command_nodes, "add_mcp_to_apm_yml")
     manifest_calls = _named_calls(handler_nodes, "get_manifest_path")
     apm_dir_calls = _named_calls(handler_nodes, "get_apm_dir")
@@ -571,6 +571,23 @@ def check_outcome(provider: FactsProvider) -> tuple[Violation, ...]:
                         column=column + 1,
                     )
                 )
+    # Apply barrier (#3874): a failed direct dependency stops the install before
+    # integration, so a failed run never deploys untracked files.
+    pipeline_lines = _lines(provider.file_facts("src/apm_cli/install/pipeline.py"))
+    barrier = [
+        n for n, line in enumerate(pipeline_lines) if "if direct_dependency_failed(ctx):" in line
+    ]
+    integrate = [
+        n for n, line in enumerate(pipeline_lines) if "_run_integration_phase(ctx)" in line
+    ]
+    if len(barrier) != 1 or not integrate or barrier[0] > min(integrate):
+        findings.append(
+            _summary(
+                rule_id,
+                "src/apm_cli/install/pipeline.py",
+                "run_install_pipeline must stop on direct_dependency_failed before integrating (#3874)",
+            )
+        )
     if not (
         _present(owner, "def result_from_install_context(")
         and _present(owner, "def finalize_install_result(")

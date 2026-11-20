@@ -22,7 +22,7 @@ def _build_lockfile(deps: list[LockedDependency]) -> LockFile:
     lock = LockFile(
         lockfile_version="1",
         generated_at="2025-01-01T00:00:00+00:00",
-        apm_version="0.0.0-test",
+        apm_version="0.0.0",
     )
     for dep in deps:
         lock.add_dependency(dep)

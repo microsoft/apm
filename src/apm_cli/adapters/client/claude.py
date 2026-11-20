@@ -28,8 +28,9 @@ from pathlib import Path
 from typing import ClassVar
 
 from ...utils.atomic_io import atomic_write_text
-from ...utils.console import _rich_error, _rich_success, _rich_warning
+from ...utils.console import _rich_error, _rich_warning
 from ...utils.path_security import PathTraversalError, validate_path_segments
+from ._remote_shapes import remote_shape_row
 from .base import _ENV_VAR_RE, _translate_env_placeholder
 from .copilot import CopilotClientAdapter
 
@@ -37,6 +38,11 @@ _log = logging.getLogger(__name__)
 
 # Claude Code's reference syntax: ${VAR} or ${VAR:-default}.
 _CLAUDE_REFERENCE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}")
+
+# Literal text a conflict hint may print verbatim around the project-root
+# reference: plain ASCII path and flag characters, so no query string,
+# credential or JSON escape leaks.
+_PRINTABLE_PACKAGE_TEXT_RE = re.compile(r"[A-Za-z0-9._/=-]*")
 
 
 def _string_leaves(value: object) -> Iterator[str]:
@@ -68,6 +74,13 @@ def _expanded_leaves(old: object, new: object) -> Iterator[tuple[str, str]]:
     for path, old_text, new_text in _paired_leaves(old, new):
         if old_text != new_text and "${" not in old_text and _CLAUDE_REFERENCE_RE.search(new_text):
             yield path, new_text
+
+
+def _holds(fields: list[str]) -> str:
+    """Name the conflicting *fields* as the subject of a guidance sentence."""
+    if len(fields) == 1:
+        return f"Field {fields[0]} holds a value"
+    return f"Fields {', '.join(fields)} hold values"
 
 
 def _expand_like_install_time(text: str, environ: Mapping[str, str]) -> str:
@@ -123,13 +136,24 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     from :class:`MCPClientAdapter` -- not by post-construction monkey-patching.
     """
 
+    remote_shape = remote_shape_row("claude")
+
     supports_user_scope: bool = True
     _client_label: str = "Claude Code"
     target_name: str = "claude"
     mcp_servers_key: str = "mcpServers"
+    json_config_trailing_newline: bool = True
+    refreshes_environment_renders: bool = True
 
     _runtime_config_label: ClassVar[str] = "the project .mcp.json"
     _runtime_launch_command: ClassVar[str] = "claude"
+
+    # code.claude.com/docs/en/mcp: CLAUDE_PROJECT_DIR is set only in the
+    # server's environment, so a project .mcp.json reference needs a default.
+    # Copilot CLI shares this file through CopilotProjectClientAdapter and
+    # expands the same form (verified with Claude Code 2.1.126 and Copilot
+    # CLI 1.0.110 starting stdio servers from the project root).
+    plugin_root_project_reference: ClassVar[str | None] = "${CLAUDE_PROJECT_DIR:-.}"
 
     # Own post-install aggregation buckets: the parent's mutable ClassVars
     # are shared by reference, so without these Claude's diagnostics would
@@ -182,11 +206,24 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     _REMOTE_TRANSPORT_KEYS = frozenset({"type", "url", "headers"})
     _STDIO_TRANSPORT_KEYS = frozenset({"type", "command", "args", "env", "cwd"})
 
-    @classmethod
-    def _rewrite_self_defined_skill_command(cls, command: str) -> str:
-        if isinstance(command, str) and command.startswith(cls._CONVERGED_SKILL_PREFIX):
-            return cls._CLAUDE_SKILL_PREFIX + command[len(cls._CONVERGED_SKILL_PREFIX) :]
-        return command
+    def _rewrite_self_defined_skill_command(self, command: str) -> str:
+        """Point a converged skill launcher at Claude's ``.claude/skills/`` copy.
+
+        At project scope the copy must exist; otherwise the converged path is
+        kept. Copilot renders through this same rule, so the two targets write
+        one identical entry in the shared ``.mcp.json``.
+        """
+        if not isinstance(command, str) or not command.startswith(self._CONVERGED_SKILL_PREFIX):
+            return command
+        rest = command[len(self._CONVERGED_SKILL_PREFIX) :]
+        if not self._is_user_scope():
+            skill = rest.split("/", 1)[0]
+            if (
+                not skill
+                or not (Path(self.project_root) / self._CLAUDE_SKILL_PREFIX / skill).is_dir()
+            ):
+                return command
+        return self._CLAUDE_SKILL_PREFIX + rest
 
     def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
         config = super()._format_server_config(server_info, env_overrides, runtime_vars)
@@ -325,7 +362,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         return _legacy_equivalent(self.managed_server_config(native), expected, os.environ)
 
     def native_conflict_guidance(self, name: str, expected: dict) -> str | None:
-        """Explain a preserved entry that holds values where apm.yml has references."""
+        """Explain a preserved entry where apm.yml has references or APM writes a path."""
         if self._is_user_scope():
             return None
         servers = self.get_current_config().get(self.mcp_servers_key) or {}
@@ -335,25 +372,44 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         expanded = sorted(_expanded_leaves(native, expected))
         if not expanded:
             return None
-        fields = [path for path, _text in expanded]
-        where = (
-            f"Field {fields[0]} holds a value"
-            if len(fields) == 1
-            else f"Fields {', '.join(fields)} hold values"
-        )
-        # Names only: show which reference belongs where, never a value or default.
-        mapping = "; ".join(
-            f"{path}: "
-            + ", ".join(
-                dict.fromkeys("${" + m.group(1) + "}" for m in _CLAUDE_REFERENCE_RE.finditer(text))
+        # APM's own project-root reference renders a package path (#3927): it
+        # is neither an apm.yml environment reference nor a credential, and is
+        # named verbatim so its ``:-.`` default survives.
+        root = self._plugin_root_reference()
+        names = {
+            path: list(
+                dict.fromkeys(
+                    "${" + m.group(1) + "}"
+                    for m in _CLAUDE_REFERENCE_RE.finditer(text)
+                    if m.group(0) != root
+                )
             )
             for path, text in expanded
+        }
+        paths = [(path, text) for path, text in expanded if root and root in text]
+        restore = "; ".join(
+            f"{path}: {text}"
+            if not names[path] and _PRINTABLE_PACKAGE_TEXT_RE.fullmatch(text.replace(root, ""))
+            else f"{path}: a package path under {root}"
+            for path, text in paths
         )
+        env_fields = [path for path, _text in expanded if names[path]]
+        if not env_fields:
+            return (
+                f"{_holds([path for path, _text in paths])} where APM writes a package "
+                f"path, and APM cannot confirm it wrote {'it' if len(paths) == 1 else 'them'}. "
+                f"Restore the package path APM writes ({restore}) or rename or remove the "
+                "connection yourself, then retry."
+            )
+        # Names only: show which reference belongs where, never a value or an
+        # environment default.
+        mapping = "; ".join(f"{path}: {', '.join(names[path])}" for path in env_fields)
+        restore_paths = f" and the package paths APM writes ({restore})" if paths else ""
         return (
-            f"{where} where apm.yml declares environment references, and APM cannot "
-            "confirm it wrote them. Put the references declared in apm.yml back "
-            f"yourself ({mapping}), then retry. If .mcp.json was committed, rotate "
-            "those credentials: editing the file does not erase them in Git history."
+            f"{_holds(env_fields)} where apm.yml declares environment references, and APM "
+            "cannot confirm it wrote them. Put the references declared in apm.yml back "
+            f"yourself ({mapping}){restore_paths}, then retry. If .mcp.json was committed, "
+            "rotate those credentials: editing the file does not erase them in Git history."
         )
 
     @classmethod
@@ -473,16 +529,10 @@ class ClaudeClientAdapter(CopilotClientAdapter):
 
         Used for symlink pre-checks before canonical resolution.
         """
-        config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
-        if config_dir:
-            config_path = Path(config_dir).expanduser()
-            if not config_path.is_absolute():
-                raise PathTraversalError(
-                    "CLAUDE_CONFIG_DIR must be an absolute path for user-scope MCP "
-                    "config; set an absolute path or unset it to use ~/.claude.json."
-                )
-            return config_path / ".claude.json"
-        return Path.home() / ".claude.json"
+        from ...integration.targets import configured_user_root
+
+        config_dir = configured_user_root("claude")
+        return (config_dir if config_dir is not None else Path.home()) / ".claude.json"
 
     @classmethod
     def resolve_user_claude_json_path(cls, unresolved_path: Path | None = None) -> Path:
@@ -529,18 +579,11 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             return False
         path = self._project_mcp_path()
         try:
-            if path.is_file():
-                try:
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                except json.JSONDecodeError:
-                    _rich_warning(f"Existing {path} is not valid JSON; rewriting from scratch")
-                    data = {}
-                if not isinstance(data, dict):
-                    data = {}
-            else:
-                data = {}
+            data = self._parse_json_config_for_update(path)
+            if data is None:
+                return False
             self._merge_and_normalize_updates(data, config_updates, managed_fields)
-            path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            self._write_json_config(path, data, shared=True)
             return True
         except OSError:
             return False
@@ -548,16 +591,9 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     def _merge_user_mcp(self, config_updates, *, managed_fields: set[str] | None = None) -> bool:
         path = self._user_claude_json_path()
         try:
-            if path.is_file():
-                try:
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                except json.JSONDecodeError:
-                    _rich_warning(f"Existing {path} is not valid JSON; rewriting from scratch")
-                    data = {}
-                if not isinstance(data, dict):
-                    data = {}
-            else:
-                data = {}
+            data = self._parse_json_config_for_update(path)
+            if data is None:
+                return False
             self._merge_and_normalize_updates(data, config_updates, managed_fields)
             payload = json.dumps(data, indent=2) + "\n"
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -608,12 +644,14 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             )
             ok = self.update_config({config_key: server_config}, managed_fields=managed_fields)
             if not ok:
-                _rich_error(f"Failed to write MCP config for '{config_key}' to Claude Code")
+                _rich_error(
+                    f"Failed to write MCP config for '{config_key}' to {self._client_label}"
+                )
                 return False
             self.written_mcp_hashes[server_url] = fingerprint
             self._record_env_diagnostics(config_key, server_config, previously_baked)
 
-            _rich_success(f"Successfully configured MCP server '{config_key}' for Claude Code")
+            # The integrator's install tree reports success once (#3994).
             return True
 
         except Exception:

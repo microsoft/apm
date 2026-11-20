@@ -42,6 +42,7 @@ from typing import Any
 from ...models.dependency.mcp import _EXTRA_DENYLIST, opencode_enabled_value
 from ...models.dependency.mcp import opencode_enabled_matches as _enabled_matches
 from ...utils.console import _rich_warning
+from ._remote_shapes import remote_shape_row
 from .copilot import CopilotClientAdapter
 
 _ENV_REF_TEMPLATE = "{env:%s}"
@@ -58,6 +59,8 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
     Converts the standard Copilot config format into OpenCode's schema
     and writes to the project or user-scope ``opencode.json``.
     """
+
+    remote_shape = remote_shape_row("opencode")
 
     supports_user_scope: bool = True
     target_name: str = "opencode"
@@ -87,7 +90,7 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         config = super()._format_server_config(server_info, env_overrides, runtime_vars)
         overlay = server_info.get("_apm_env_overlay")
         env = config.get("env")
-        if server_info.get("_raw_stdio") or not overlay or not isinstance(env, dict):
+        if self._self_defined_stdio(server_info) or not overlay or not isinstance(env, dict):
             return config
 
         # Only declared/emitted keys participate, as on the legacy registry path.
@@ -242,13 +245,21 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
         except (OSError, json.JSONDecodeError):
             return {}
 
-    def render_server_config(self, server_info: dict) -> dict:
+    def render_server_config(
+        self,
+        server_info: dict,
+        *,
+        env_overrides: dict | None = None,
+        runtime_vars: dict | None = None,
+    ) -> dict:
         """Render the entry APM writes, for exact baseline comparisons.
 
         The layout is re-read from the file on each call so the comparison
         always matches what ``update_config`` would write now.
         """
-        copilot_entry = super().render_server_config(server_info)
+        copilot_entry = super().render_server_config(
+            server_info, env_overrides=env_overrides, runtime_vars=runtime_vars
+        )
         enabled = opencode_enabled_value(server_info)
         if self.uses_native_v2(self._read_config_file()):
             return self._to_opencode_v2_format(copilot_entry, enabled=enabled)
@@ -288,11 +299,8 @@ class OpenCodeClientAdapter(CopilotClientAdapter):
                 {config_key: server_config},
                 enabled=opencode_enabled_value(server_info, enabled),
             )
-            if written is False:
-                return False
-
-            print(f"Successfully configured MCP server '{config_key}' for OpenCode")
-            return True
+            # The integrator's install tree reports success once (#3994).
+            return written is not False
 
         except Exception as e:
             print(f"Error configuring MCP server: {e}")

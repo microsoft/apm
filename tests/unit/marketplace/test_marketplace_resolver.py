@@ -8,6 +8,7 @@ import pytest
 
 from apm_cli.cache.url_normalize import normalize_repo_url
 from apm_cli.install.package_resolution import dependency_reference_to_yaml_entry
+from apm_cli.marketplace.errors import DependencyConfusionError
 from apm_cli.marketplace.models import (
     MarketplaceManifest,
     MarketplacePlugin,
@@ -1892,43 +1893,224 @@ class TestCrossRepoMisconfigRisk:
         result = resolve_marketplace_plugin("ssh", "my-marketplace")
         assert result.cross_repo_misconfig_risk is None
 
+    @pytest.mark.parametrize(
+        "plugin_source",
+        [
+            {"type": "git-subdir", "repo": "platform-team/shared-tool", "subdir": "plugins/x"},
+            {"repo": "platform-team/shared-tool", "subdir": "plugins/x"},
+            {"type": "git-subdir", "url": "platform-team/shared-tool", "subdir": "plugins/x"},
+            {"type": "gitlab", "repo": "platform-team/shared-tool", "path": "plugins/x"},
+            {"type": "url", "url": "platform-team/shared-tool"},
+            {"type": "github", "repository": "platform-team/shared-tool"},
+        ],
+        ids=["git-subdir", "inferred-git-subdir", "git-subdir-url", "gitlab", "url", "repository"],
+    )
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_cross_repo_gitlab_type_no_risk(self, mock_get, mock_fetch, ghe_marketplace_source):
-        """``type: gitlab`` cross-repo hits the same routing bug but the
-        "host-qualify with marketplace host" remediation does not match the
-        operator's intent (they meant gitlab.com, not corp.ghe.com)."""
-        plugin = MarketplacePlugin(
-            name="gl",
-            source={
-                "type": "gitlab",
-                "repo": "platform-team/shared-tool",
-                "path": "plugins/gl",
-            },
-        )
+    def test_cross_repo_bare_non_github_type_attaches_risk(
+        self, mock_get, mock_fetch, ghe_marketplace_source, plugin_source
+    ):
+        """#3937: every dict type with a bare locator falls back to ``github.com``."""
+        plugin = MarketplacePlugin(name="x", source=plugin_source)
         mock_get.return_value = ghe_marketplace_source
         mock_fetch.return_value = self._manifest_with_plugin(plugin)
 
-        result = resolve_marketplace_plugin("gl", "my-marketplace")
-        assert result.cross_repo_misconfig_risk is None
+        risk = resolve_marketplace_plugin("x", "my-marketplace").cross_repo_misconfig_risk
+        assert risk is not None
+        assert risk.bare_repo_field == "platform-team/shared-tool"
+        assert risk.suggested_qualified_repo == "corp.ghe.com/platform-team/shared-tool"
+        # The remediation names the field the locator was read from.
+        assert plugin_source[risk.locator_field] == "platform-team/shared-tool"
+        assert f"`{risk.locator_field}: platform-team/shared-tool`" in str(
+            DependencyConfusionError(risk)
+        )
 
+    @pytest.mark.parametrize(
+        "plugin_source",
+        [
+            {"type": "git-subdir", "repo": "github.com/platform-team/x", "subdir": "plugins/x"},
+            {"type": "git-subdir", "repo": "corp.ghe.com/platform-team/x", "subdir": "plugins/x"},
+            {"type": "git-subdir", "repo": "myorg/my-marketplace", "subdir": "plugins/x"},
+            {"type": "url", "url": "https://github.com/platform-team/x"},
+            {"type": "git-subdir", "url": "https://corp.ghe.com/corp/other", "subdir": "x"},
+            {"type": "git-subdir", "url": "https://github.com/platform-team/x", "subdir": "x"},
+            {"type": "git-subdir", "url": "git@corp.ghe.com:corp/other.git", "subdir": "x"},
+            {"type": "url", "url": "git@github.com:platform-team/x.git"},
+            {"type": "url", "url": "deploy@github.com:platform-team/x.git"},
+        ],
+        ids=[
+            "cross-host",
+            "same-host",
+            "in-marketplace",
+            "url-with-host",
+            "packed-git-subdir-https-same-host",
+            "packed-git-subdir-https-cross-host",
+            "packed-git-subdir-scp",
+            "url-scp",
+            "url-scp-non-git-user",
+        ],
+    )
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_cross_repo_git_subdir_type_no_risk(self, mock_get, mock_fetch, ghe_marketplace_source):
-        """``type: git-subdir`` cross-repo: same wording mismatch as gitlab."""
-        plugin = MarketplacePlugin(
-            name="gs",
-            source={
-                "type": "git-subdir",
-                "repo": "platform-team/shared-tool",
-                "subdir": "plugins/gs",
-            },
-        )
+    def test_cross_repo_qualified_or_in_marketplace_non_github_type_no_risk(
+        self, mock_get, mock_fetch, ghe_marketplace_source, plugin_source
+    ):
+        """Host-qualified locators and in-marketplace sources stay admitted."""
+        plugin = MarketplacePlugin(name="x", source=plugin_source)
         mock_get.return_value = ghe_marketplace_source
         mock_fetch.return_value = self._manifest_with_plugin(plugin)
 
-        result = resolve_marketplace_plugin("gs", "my-marketplace")
+        result = resolve_marketplace_plugin("x", "my-marketplace")
         assert result.cross_repo_misconfig_risk is None
+
+    @pytest.mark.parametrize(
+        ("plugin_source", "expected"),
+        [
+            (
+                {"type": "github", "repository": "myorg/my-marketplace", "path": "plugins/x"},
+                "corp.ghe.com/myorg/my-marketplace/plugins/x",
+            ),
+            (
+                {"type": "git-subdir", "url": "myorg/my-marketplace", "subdir": "plugins/x"},
+                "corp.ghe.com/myorg/my-marketplace/plugins/x",
+            ),
+            ({"type": "url", "url": "myorg/my-marketplace"}, "corp.ghe.com/myorg/my-marketplace"),
+            (
+                {"type": "url", "url": "myorg/my-marketplace", "ref": "v1.2.0"},
+                "corp.ghe.com/myorg/my-marketplace#v1.2.0",
+            ),
+            (
+                {"type": "url", "url": "myorg/my-marketplace/plugins/x", "ref": "v1.2.0"},
+                "corp.ghe.com/myorg/my-marketplace/plugins/x#v1.2.0",
+            ),
+        ],
+        ids=["github-repository", "git-subdir-url", "url", "url-ref", "url-path-ref"],
+    )
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_in_marketplace_locator_synonyms_are_backfilled(
+        self, mock_get, mock_fetch, ghe_marketplace_source, plugin_source, expected
+    ):
+        """#3945: ``repository:`` / ``url:`` naming the catalog count as in-marketplace."""
+        plugin = MarketplacePlugin(name="x", source=plugin_source)
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("x", "my-marketplace")
+        assert result.cross_repo_misconfig_risk is None
+        assert result.canonical == expected
+        assert DependencyReference.parse(result.canonical).host == "corp.ghe.com"
+
+    @pytest.mark.parametrize(
+        "plugin_source",
+        [
+            {"type": "url", "url": "myorg/my-marketplace-evil/plugins/x"},
+            {"type": "github", "repo": "myorg/my-marketplace-evil", "path": "plugins/x"},
+            {"type": "github", "repository": "myorg/my-marketplace-evil"},
+            {"type": "git-subdir", "url": "myorg/my-marketplace-evil", "subdir": "plugins/x"},
+            {"type": "git-subdir", "repo": "otherorg/my-marketplace", "subdir": "plugins/x"},
+            {"type": "url", "url": "myorg/my-marketplace.evil/plugins/x"},
+        ],
+        ids=[
+            "url-slug-prefix",
+            "repo-lookalike",
+            "repository-lookalike",
+            "git-subdir-url-lookalike",
+            "other-owner-same-name",
+            "url-dotted-suffix",
+        ],
+    )
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_lookalike_or_other_cross_repo_locator_is_still_refused(
+        self, mock_get, mock_fetch, ghe_marketplace_source, monkeypatch, plugin_source
+    ):
+        """#3945 refusal preservation: a locator that does not name the catalog repo
+        itself is not in-marketplace, so admission refuses it before any request.
+        The ``url:`` path-prefix match needs a ``/`` boundary after the catalog slug."""
+        from apm_cli.marketplace.dependency_confusion import admit_marketplace_resolution
+
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        plugin = MarketplacePlugin(name="x", source=plugin_source)
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        resolution = resolve_marketplace_plugin("x", "my-marketplace")
+        assert resolution.cross_repo_misconfig_risk is not None
+        with pytest.raises(DependencyConfusionError):
+            admit_marketplace_resolution(resolution)
+
+    @pytest.mark.parametrize(
+        "plugin_source",
+        [
+            {"type": "github", "repo": "platform-team/shared-tool", "path": "plugins/x"},
+            {"type": "git-subdir", "repo": "platform-team/shared-tool", "subdir": "plugins/x"},
+            {"type": "url", "url": "platform-team/shared-tool"},
+            {"type": "url", "url": "platform-team/shared-tool", "ref": "v1.2.0"},
+            {"type": "git-subdir", "url": "platform-team/shared-tool", "subdir": "x", "ref": "v1"},
+        ],
+        ids=["github", "git-subdir", "url", "url-ref", "git-subdir-url-ref"],
+    )
+    @pytest.mark.parametrize(
+        ("github_host", "admitted"),
+        [("corp.ghe.com", True), ("CORP.GHE.COM", True), ("other.ghe.com", False), (None, False)],
+        ids=["marketplace-host", "marketplace-host-upper", "other-host", "unset"],
+    )
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_bare_cross_repo_admitted_only_when_github_host_is_marketplace_host(
+        self,
+        mock_get,
+        mock_fetch,
+        ghe_marketplace_source,
+        monkeypatch,
+        plugin_source,
+        github_host,
+        admitted,
+    ):
+        """#3945: bare shorthand that resolves to the marketplace host is admitted
+        and host-qualified; any other effective host is still refused."""
+        if github_host is None:
+            monkeypatch.delenv("GITHUB_HOST", raising=False)
+        else:
+            monkeypatch.setenv("GITHUB_HOST", github_host)
+        plugin = MarketplacePlugin(name="x", source=plugin_source)
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("x", "my-marketplace")
+        if not admitted:
+            assert result.cross_repo_misconfig_risk is not None
+            return
+        assert result.cross_repo_misconfig_risk is None
+        selected = result.dependency_reference
+        monkeypatch.delenv("GITHUB_HOST")
+        # Host-qualified: the structured ref, or later parsing of the canonical,
+        # routes to the marketplace host regardless of env.
+        if selected is None:
+            selected = DependencyReference.parse(result.canonical)
+        assert (selected.host, selected.repo_url) == ("corp.ghe.com", "platform-team/shared-tool")
+        # The declared pin and path survive.
+        assert selected.reference == plugin_source.get("ref")
+        assert selected.virtual_path == (plugin_source.get("subdir") or plugin_source.get("path"))
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_manifest_default_host_alone_does_not_admit(
+        self, mock_get, mock_fetch, ghe_marketplace_source, monkeypatch
+    ):
+        """#3945 compares GITHUB_HOST only: install-time marketplace resolution runs
+        outside any manifest ``default_host:`` scope, so the scope must not decide."""
+        from apm_cli.utils.github_host import manifest_default_host_scope
+
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        plugin = MarketplacePlugin(name="x", source={"type": "github", "repo": "team/tool"})
+        mock_get.return_value = ghe_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        with manifest_default_host_scope("corp.ghe.com"):
+            result = resolve_marketplace_plugin("x", "my-marketplace")
+        assert result.cross_repo_misconfig_risk is not None
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
@@ -2053,7 +2235,7 @@ class TestCrossRepoMisconfigRisk:
             # for these inputs; the test is intentionally probing the
             # explicit-host guard in isolation).
             canonical = "platform-team/shared-tool/plugins/cross"
-            risk = _compute_cross_repo_misconfig_risk(plugin, source, canonical, None)
+            risk = _compute_cross_repo_misconfig_risk(plugin, source, canonical)
             assert risk is None, (
                 f"explicit-host guard must recognise {repo_value!r} as "
                 "host-qualified even when upstream filters do not catch it"
@@ -2085,7 +2267,7 @@ class TestCrossRepoMisconfigRisk:
         # Hand-build a plausible (if malformed) canonical the way
         # ``_resolve_github_source`` would have if its guard were removed.
         canonical = "no-slash/plugins/bad"
-        risk = _compute_cross_repo_misconfig_risk(plugin, source, canonical, None)
+        risk = _compute_cross_repo_misconfig_risk(plugin, source, canonical)
         assert risk is None
 
 

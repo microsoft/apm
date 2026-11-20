@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
+from ...utils.github_host import default_host
 from ...utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from .object_fields import parse_alias_override
 
@@ -186,6 +187,94 @@ def build_materialization_path(
     return result
 
 
+def nested_materialization_pairs(
+    dependencies: Iterable[DependencyReference],
+    apm_modules_dir: Path,
+) -> list[tuple[DependencyReference, DependencyReference]]:
+    """Return ``(outer, inner)`` pairs whose package directories nest.
+
+    A package materialized inside another package's directory (a repository
+    and its own subdirectory package) is deleted with it and hidden from the
+    installed-package scan, so such declarations cannot coexist. Comparison is
+    case-folded because the directories nest on case-insensitive filesystems.
+    """
+    located: list[tuple[PurePosixPath, DependencyReference]] = []
+    for dependency in dependencies:
+        try:
+            path = build_materialization_path(dependency, apm_modules_dir)
+        except (ValueError, PathTraversalError):
+            continue
+        located.append((PurePosixPath(path.as_posix().casefold()), dependency))
+    # Quadratic over root declarations only (direct + dev); n stays small.
+    return [
+        (outer, inner)
+        for outer_path, outer in located
+        for inner_path, inner in located
+        if outer_path in inner_path.parents
+    ]
+
+
+class MaterializationSlots:
+    """Claim ``apm_modules`` directories so distinct packages never share one.
+
+    The layout is host-blind, so ``owner/repo`` from two hosts (or two
+    dependencies with the same ``alias:``) map to one directory. Resolution
+    claims each package's directory before fetching it; a second, distinct
+    identity on a claimed directory is a manifest error, not a race (#3696).
+    Local sources keep sharing their slots (#3401): two local claimants are
+    never a collision. Comparison is case-folded like the nesting check.
+    """
+
+    def __init__(self, apm_modules_dir: Path) -> None:
+        self._modules_dir = apm_modules_dir
+        self._claims: dict[str, list[tuple[DependencyReference, DependencyReference | None]]] = {}
+
+    def claim(
+        self,
+        dependency: DependencyReference,
+        parent: DependencyReference | None = None,
+    ) -> str | None:
+        """Claim *dependency*'s directory; describe a distinct package already on it.
+
+        *parent* is the declaring package, or ``None`` for a root declaration.
+        """
+        try:
+            path = build_materialization_path(dependency, self._modules_dir)
+        except (ValueError, PathTraversalError):
+            return None
+        claimants = self._claims.setdefault(path.as_posix().casefold(), [])
+        identity = dependency.get_unique_key()
+        is_local = dependency.ownership_reference.is_local
+        for other, other_parent in claimants:
+            if other.get_unique_key() == identity:
+                return None
+            if not (is_local and other.ownership_reference.is_local):
+                relative = PurePosixPath(
+                    "apm_modules", *_relative_parts(path, self._modules_dir)
+                ).as_posix()
+                return (
+                    f"{_declaration_label(other, other_parent)} and "
+                    f"{_declaration_label(dependency, parent)} are different packages "
+                    f"that would both install to {relative}. Remove one of them, or set "
+                    "'alias:' on one so it installs to its own directory."
+                )
+        claimants.append((dependency, parent))
+        return None
+
+
+def _declaration_label(dependency: DependencyReference, parent: DependencyReference | None) -> str:
+    """Return a host-qualified declaration label with its declaring parent."""
+    dependency = dependency.ownership_reference
+    label = dependency.get_identity()
+    if not dependency.is_local:
+        host = (dependency.host or default_host()).lower()
+        if not label.lower().startswith((f"{host}/", f"{host}:")):
+            label = f"{host}/{label}"
+    if parent is not None:
+        label = f"{label} (required by {parent.ownership_reference.get_identity()})"
+    return label
+
+
 def _relative_parts(desired: Path, apm_modules_dir: Path) -> tuple[str, ...]:
     """Validate and return *desired* components below ``apm_modules``."""
     ensure_path_within(desired, apm_modules_dir)
@@ -275,9 +364,10 @@ def find_case_equivalent_materialization_path(
 ) -> Path | None:
     """Find a case-equivalent path; optionally allow ambiguous parent prefixes.
 
-    Read-only consumers can match complete paths without treating distinct
-    repositories under case-variant owners as collisions. Relocation callers
-    retain strict prefix collision checks by default.
+    With ``match_complete_path`` only complete package paths count, so
+    distinct repositories under case-variant owners are not collisions
+    (install relocation and read-only consumers use this). The default
+    prefix walk fails on any case-variant prefix.
     """
     desired_parts = _relative_parts(desired, apm_modules_dir)
     policy = _case_policy(dependency)
@@ -363,24 +453,36 @@ def _relocate_case_components(
     staging_session: ResolutionStagingSession,
     reader: MaterializationPathReader,
 ) -> None:
-    """Rename case-different components top-down through the transaction."""
+    """Rename case-different components top-down through the transaction.
+
+    On a case-sensitive file system a case-variant parent may already exist
+    as a distinct directory holding other packages (``test/e`` beside a stale
+    ``Test/C``). The package then moves into that parent; only a distinct
+    directory at the package path itself is a collision.
+    """
     existing_parts = _relative_parts(existing, apm_modules_dir)
     desired_parts = _relative_parts(desired, apm_modules_dir)
-    current_parent = apm_modules_dir
-    for existing_part, desired_part in zip(existing_parts, desired_parts, strict=True):
-        source = current_parent / existing_part
-        target = current_parent / desired_part
-        if existing_part != desired_part:
-            if reader.exists(target):
-                if not reader.samefile(source, target):
+    source_parent = apm_modules_dir
+    target_parent = apm_modules_dir
+    leaf = len(desired_parts) - 1
+    for index, (existing_part, desired_part) in enumerate(
+        zip(existing_parts, desired_parts, strict=True)
+    ):
+        source = source_parent / existing_part
+        target = target_parent / desired_part
+        if source.parts != target.parts:
+            if reader.exists(target) and not reader.samefile(source, target):
+                if index == leaf:
                     raise MaterializationPathCollisionError(
                         "Package directory casing collides between "
                         f"{source} and {target}. Inspect both directories, "
                         "keep the intended package, and run 'apm install' again."
                     )
+                source_parent, target_parent = source, target
+                continue
             staging_session.relocate_path(source, target)
-            reader.invalidate(current_parent)
-        current_parent = target
+            reader.invalidate(source_parent, target_parent)
+        source_parent = target_parent = target
 
 
 def prepare_materialization_path(
@@ -397,11 +499,14 @@ def prepare_materialization_path(
     if dependency.alias is not None or not dependency.has_case_insensitive_repo_identity:
         return desired
 
+    # Distinct packages under case-variant owner directories are not a
+    # collision; only two physical paths for this package are.
     existing = find_case_equivalent_materialization_path(
         desired,
         apm_modules_dir,
         dependency=dependency,
         reader=reader,
+        match_complete_path=True,
     )
     if existing is None or existing.parts == desired.parts:
         return desired

@@ -101,7 +101,7 @@ def test_unknown_target_error_sanitizes_garbled_value():
     text = render_unknown_target_error("['copilot'", ["claude", "copilot"])
     headline = text.splitlines()[0]
     # Bracket and quote noise is stripped from the headline value.
-    assert headline == "[x] Unknown target 'copilot'"
+    assert headline == "Unknown target 'copilot'"
 
 
 def test_unknown_target_error_falls_back_when_strip_empties_value():
@@ -111,7 +111,7 @@ def test_unknown_target_error_falls_back_when_strip_empties_value():
     headline = text.splitlines()[0]
     # Must not render `Unknown target ''`. We accept either the raw
     # (un-stripped) value or a `<empty>` placeholder.
-    assert headline != "[x] Unknown target ''"
+    assert headline != "Unknown target ''"
     assert "Unknown target '" in headline
 
 
@@ -170,3 +170,30 @@ def test_error_output_ascii_only(renderer):
         text = renderer.__wrapped__(Path(".")) if hasattr(renderer, "__wrapped__") else ""
     bad = [(i, ch) for i, ch in enumerate(text) if ord(ch) > 0x7E]
     assert not bad, f"Non-ASCII chars in error output: {bad[:5]!r}"
+
+
+def test_renderers_leave_status_symbols_to_the_cli_output_owner():
+    """#3871: messages are plain text; Click or CommandLogger adds the one prefix."""
+    from apm_cli.core.apm_yml import _EMPTY_TARGETS_MESSAGE
+
+    messages = [
+        render_no_harness_error(None),
+        render_ambiguous_error(None, ["claude", "copilot"]),
+        render_unknown_target_error("bogus", ["claude"]),
+        render_unknown_target_error("bogus", ["claude"], command="compile"),
+        render_conflicting_schema_error(),
+        _EMPTY_TARGETS_MESSAGE,
+    ]
+    for message in messages:
+        assert not re.match(r"\s*\[[x!i+*>]\]", message), message
+
+
+def test_no_harness_error_lists_every_detection_signal() -> None:
+    """The scanned-markers list is derived from SIGNAL_WHITELIST, never hand-kept (C5d)."""
+    from apm_cli.core.errors import render_no_harness_error
+    from apm_cli.core.target_detection import SIGNAL_WHITELIST
+
+    rendered = render_no_harness_error()
+    for _target, _kind, path in SIGNAL_WHITELIST:
+        assert path in rendered
+    assert ".github/mcp.json" in rendered and ".grok/" in rendered

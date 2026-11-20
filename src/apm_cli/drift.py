@@ -49,6 +49,7 @@ Scope / non-goals
 from __future__ import annotations
 
 import builtins
+from dataclasses import dataclass
 from dataclasses import replace as _dataclass_replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -93,6 +94,30 @@ def _optional_string_attr(dep: Any, name: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def revision_pin_mismatch(reference: str | None, locked_dep: LockedDependency) -> str | None:
+    """Return why a full-SHA manifest pin disagrees with the locked commit.
+
+    A manifest ref that is a full commit SHA is immutable: the locked
+    ``resolved_commit`` must name that same commit, whatever ``resolved_ref``
+    the row records. Returns ``None`` when *reference* is not a full SHA or
+    the commits agree.
+    """
+    from apm_cli.deps.revision_pins import is_full_revision_pin
+
+    if not is_full_revision_pin(reference):
+        return None
+    locked_commit = locked_dep.resolved_commit
+    if (
+        isinstance(locked_commit, str)
+        and locked_commit.strip().lower() == reference.strip().lower()
+    ):
+        return None
+    return (
+        f"manifest commit '{reference}' != "
+        f"lockfile resolved_commit '{locked_commit or '(missing)'}'"
+    )
+
+
 def marketplace_ref_mismatch(
     dep_ref: DependencyReference,
     locked_dep: LockedDependency,
@@ -108,11 +133,7 @@ def marketplace_ref_mismatch(
     if not spec:
         return None
     if is_full_revision_pin(spec):
-        if locked_dep.resolved_commit.lower() != spec.lower():
-            return (
-                f"manifest commit '{spec}' != "
-                f"lockfile resolved_commit '{locked_dep.resolved_commit}'"
-            )
+        return revision_pin_mismatch(spec, locked_dep)
     elif is_version_constraint(spec):
         # Git semver locks already distinguish selected versions from package
         # inventory using constraint + resolved_tag. Never infer tag patterns
@@ -130,6 +151,156 @@ def marketplace_ref_mismatch(
     elif spec != locked_dep.resolved_ref:
         return f"manifest ref '{spec}' != lockfile ref '{locked_dep.resolved_ref or '(missing)'}'"
     return None
+
+
+def locked_marketplace_row(
+    dep_ref: DependencyReference,
+    lockfile: LockFile | None,
+    marketplace_index: dict | None = None,
+) -> LockedDependency | None:
+    """Return the lock row an unchanged marketplace declaration still matches.
+
+    The row must be the lock's single association for the declaration's
+    ``{name, marketplace}``, carry no replacement binding, and satisfy
+    :func:`marketplace_ref_mismatch`. Never performs catalog I/O. Callers
+    looking up many declarations pass one ``lockfile.marketplace_index()``.
+    """
+    if lockfile is None or getattr(dep_ref, "is_marketplace", False) is not True:
+        return None
+    locked_dep = lockfile.get_dependency(
+        dep_ref.get_unique_key(), marketplace_index=marketplace_index
+    )
+    if (
+        locked_dep is None
+        or locked_dep.replacement is not None
+        or marketplace_ref_mismatch(dep_ref, locked_dep) is not None
+    ):
+        return None
+    return locked_dep
+
+
+def _owns_locked_servers(
+    lockfile: LockFile, locked_dep: LockedDependency, package_dir: Path
+) -> bool:
+    """True when the lock records MCP or LSP servers contributed by *locked_dep*.
+
+    Each kind's owner token comes from its provenance writer: MCP names the
+    declaring package, LSP uses the lock key or, on a first install, the
+    package's ``apm_modules``-relative *package_dir*.
+    """
+    from apm_cli.install.lsp.integration import package_lsp_owner
+    from apm_cli.integration.mcp_config_view import mcp_package_owner
+
+    mcp_owners = {mcp_package_owner(locked_dep.name, package_dir=package_dir)}
+    lsp_owners = {
+        package_lsp_owner(owner) for owner in (locked_dep.get_unique_key(), package_dir.as_posix())
+    }
+    for owners, provenance in (
+        (mcp_owners, lockfile.mcp_config_provenance),
+        (lsp_owners, lockfile.lsp_config_provenance),
+    ):
+        for recorded in (provenance or {}).values():
+            tokens = recorded if isinstance(recorded, list) else [recorded]
+            if owners.intersection(tokens):
+                return True
+    return False
+
+
+MARKETPLACE_REPLAYED = "replayed"
+MARKETPLACE_UNLOCKED = "unlocked"
+MARKETPLACE_UPDATE = "update"
+MARKETPLACE_CATALOG_METADATA = "catalog-metadata"
+
+
+@dataclass(frozen=True)
+class MarketplaceReplay:
+    """Outcome of the replay-vs-re-resolve decision for one declaration."""
+
+    reason: str
+    reference: DependencyReference | None = None
+
+
+def locked_marketplace_replay(
+    dep_ref: DependencyReference,
+    lockfile: LockFile | None,
+    *,
+    update_refs: bool = False,
+    modules_dir: Path | None = None,
+) -> MarketplaceReplay:
+    """Decide whether a marketplace declaration replays its lock row (#3911).
+
+    Single owner of "replay vs re-resolve" for object-form marketplace
+    declarations. A row found by :func:`locked_marketplace_row` replays
+    without catalog, alias or registration I/O (``replayed``); the row's
+    commit and hashes then pin the download. New, changed, ambiguous,
+    replacement-bound or under-evidenced entries are ``unlocked`` and
+    ``apm update`` / ``--refresh`` (*update_refs*) is ``update``; both
+    resolve through the marketplace.
+
+    ``catalog-metadata`` covers one case: catalog entries may define MCP or
+    LSP servers inline, and the lock cannot rebuild that metadata, so a row
+    whose package owns locked servers replays only while its materialized
+    copy under *modules_dir* exists. A cold copy reads the catalog for that
+    metadata only; :func:`catalog_metadata_refusal` keeps the lock's pin.
+    """
+    if update_refs:
+        return MarketplaceReplay(MARKETPLACE_UPDATE)
+    locked_dep = locked_marketplace_row(dep_ref, lockfile)
+    if locked_dep is None:
+        return MarketplaceReplay(MARKETPLACE_UNLOCKED)
+    replayed = locked_dep.to_edge_reference(dep_ref)
+    if modules_dir is not None and replayed.get_install_path(modules_dir).is_dir():
+        return MarketplaceReplay(MARKETPLACE_REPLAYED, replayed)
+    if _owns_locked_servers(lockfile, locked_dep, replayed.get_install_path(Path())):
+        return MarketplaceReplay(MARKETPLACE_CATALOG_METADATA)
+    return MarketplaceReplay(MARKETPLACE_REPLAYED, replayed)
+
+
+def frozen_marketplace_refusal(decision: MarketplaceReplay) -> ValueError | None:
+    """Return the ``--frozen`` refusal for a declaration the lock cannot replay.
+
+    Only an unlocked declaration is refused; ``catalog-metadata`` rows keep
+    reading the catalog because only it holds their server definitions.
+    """
+    if decision.reason != MARKETPLACE_UNLOCKED:
+        return None
+    return ValueError(
+        "--frozen replays marketplace dependencies from apm.lock.yaml only, and "
+        "no locked entry matches this declaration. Run 'apm install' without "
+        "--frozen, then commit apm.lock.yaml"
+    )
+
+
+def catalog_metadata_refusal(
+    dep_ref: DependencyReference,
+    resolved: DependencyReference,
+    lockfile: LockFile | None,
+) -> ValueError | None:
+    """Refuse a ``catalog-metadata`` re-read whose catalog no longer pins the lock row.
+
+    The catalog is read only for the server definitions the lock cannot
+    rebuild; the locked commit still pins the download. A catalog that now
+    selects another source or ref would silently re-pin the package, so only
+    ``apm update`` may move it.
+    """
+    locked_dep = locked_marketplace_row(dep_ref, lockfile)
+    if (
+        locked_dep is not None
+        and resolved.get_unique_key() == locked_dep.get_unique_key()
+        and not detect_ref_change(resolved, locked_dep)
+    ):
+        return None
+    locked = (
+        f"{locked_dep.get_unique_key()}#{locked_dep.resolved_ref or locked_dep.resolved_commit}"
+        if locked_dep is not None
+        else "another selection"
+    )
+    current = f"{resolved.get_unique_key()}#{resolved.reference or 'HEAD'}"
+    return ValueError(
+        f"the catalog now selects {current}, but apm.lock.yaml pins {locked}. "
+        "Catalog edits do not change what installs; run "
+        f"'apm update {dep_ref.get_display_name()}' to move to the catalog's selection"
+    )
 
 
 def _routes_to_locked_proxy(dep_ref: DependencyReference, locked_dep: Any) -> bool:
@@ -252,8 +423,12 @@ def detect_ref_change(
 
     # Git/local deps: direct ref comparison. Handles None→value, value→None,
     # and value→value. No truthiness guard on locked_dep.resolved_ref —
-    # None != "v1.0.0" is True.
-    return dep_ref.reference != locked_dep.resolved_ref
+    # None != "v1.0.0" is True. A full-SHA pin is satisfied only by that exact
+    # locked commit, whatever resolved_ref the lock row records.
+    return (
+        dep_ref.reference != locked_dep.resolved_ref
+        or revision_pin_mismatch(dep_ref.reference, locked_dep) is not None
+    )
 
 
 def should_force_ref_recheck(
@@ -270,7 +445,11 @@ def should_force_ref_recheck(
     callback. The resolver reads a package's ``apm.yml`` from whatever path this
     gate leaves in place, so returning False means "the materialized copy is
     current". A normal install rechecks local packages (their source can change
-    without any ref moving) and manifest/lock drift. An explicit update also
+    without any ref moving), manifest/lock drift, and a copy whose commit or
+    content contradicts its lock row (:func:`locked_copy_is_stale`);
+    *update_keys* scopes both
+    the local recheck and the update rechecks to a targeted run's selected
+    subtree. An explicit update also
     rechecks mutable Git refs, semver ranges and hook-only packages. Hook
     replacements must pass staged admission before any live content is replaced.
 
@@ -283,8 +462,10 @@ def should_force_ref_recheck(
         return True
     if dep_ref.is_local:
         # #3401 / #3501: the apm_modules copy is from the previous install, so
-        # reading it would resolve transitive deps from a stale manifest.
-        return True
+        # reading it would resolve transitive deps from a stale manifest. A
+        # targeted run re-reads only its selected subtree; an unselected local
+        # package keeps its locked state, even mid-edit (#3649).
+        return update_keys is None or dep_ref.get_unique_key() in update_keys
     if getattr(dep_ref, "artifactory_prefix", None):
         return False
     if locked_dep is None:
@@ -313,7 +494,91 @@ def should_force_ref_recheck(
             # one.
             return not is_full_revision_pin(dep_ref.reference)
         return False
-    return detect_ref_change(dep_ref, locked_dep, update_refs=False)
+    if detect_ref_change(dep_ref, locked_dep, update_refs=False):
+        return True
+    # #3884: an unchanged manifest ref does not prove the copy on disk holds
+    # the locked commit; a stale copy would resolve children from an old apm.yml.
+    return package_path is not None and locked_copy_is_stale(locked_dep, package_path)
+
+
+LOCKED_COPY_GIT_HEAD = "git-head"
+LOCKED_COPY_PIN = "pin"
+LOCKED_COPY_CONTENT_HASH = "content-hash"
+
+
+def _locked_commit(locked_dep: Any) -> str | None:
+    commit = getattr(locked_dep, "resolved_commit", None)
+    if isinstance(commit, str) and commit and commit != "cached":
+        return commit
+    return None
+
+
+def locked_copy_proof(
+    locked_dep: Any, package_path: Path, *, trust_marker: bool = False
+) -> str | None:
+    """Return how the copy at *package_path* proves it holds *locked_dep*, else None.
+
+    This is the single owner of "is this apm_modules copy the locked
+    content". Strongest evidence first: a readable ``.git`` HEAD decides on
+    its own; otherwise the ``.apm-pin`` marker naming the locked
+    ``resolved_commit``, then the recorded ``content_hash`` (rows without a
+    commit, or copies without a marker). The marker only catches honest
+    staleness, so by default only the git HEAD or the verified content hash
+    prove a copy whose bytes may be deployed; *trust_marker* admits the
+    marker for resolution freshness (:func:`locked_copy_is_stale`).
+    """
+    if locked_dep is None or not package_path.is_dir():
+        return None
+    commit = _locked_commit(locked_dep)
+    if commit is not None:
+        if (package_path / ".git").exists():
+            try:
+                from git import Repo as GitRepo
+
+                head = GitRepo(package_path).head.commit.hexsha
+            except Exception:  # unreadable checkout: fall back to marker and hash
+                head = None
+            if head is not None:
+                return LOCKED_COPY_GIT_HEAD if head == commit else None
+        if trust_marker:
+            from apm_cli.install.cache_pin import CachePinError, verify_marker
+
+            try:
+                verify_marker(package_path, commit)
+                return LOCKED_COPY_PIN
+            except CachePinError:
+                pass
+    from apm_cli.install.phases._redownload import _should_skip_redownload
+
+    if _should_skip_redownload(locked_dep, package_path):
+        return LOCKED_COPY_CONTENT_HASH
+    return None
+
+
+def locked_copy_holds_commit(locked_dep: Any, package_path: Path) -> bool:
+    """Whether a cached copy proves the locked commit for replay (marker admitted)."""
+    return locked_copy_proof(locked_dep, package_path, trust_marker=True) is not None
+
+
+def locked_copy_is_stale(locked_dep: Any, package_path: Path) -> bool:
+    """Return whether an existing copy contradicts what *locked_dep* records.
+
+    Only evidence can contradict a copy: a recorded content hash, an
+    ``.apm-pin`` marker or a ``.git`` checkout that does not prove the locked
+    content. A legacy copy with none of these (and a row without a content
+    hash) is kept, as before #3884; installs mark it from then on.
+    """
+    if locked_dep is None or not package_path.is_dir():
+        return False
+    if locked_copy_proof(locked_dep, package_path, trust_marker=True) is not None:
+        return False
+    from apm_cli.install.cache_pin import MARKER_FILENAME
+
+    return bool(
+        getattr(locked_dep, "content_hash", None)
+        or (_locked_commit(locked_dep) is not None and (package_path / MARKER_FILENAME).exists())
+        or (_locked_commit(locked_dep) is not None and (package_path / ".git").exists())
+    )
 
 
 def _refetches_mutable_ref_during_resolution(dep_ref: DependencyReference) -> bool:

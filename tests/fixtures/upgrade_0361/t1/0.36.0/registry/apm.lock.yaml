@@ -1,0 +1,27 @@
+lockfile_version: '2'
+apm_version: 0.36.0
+dependencies:
+- repo_url: acme/widget
+  name: widget
+  host: github.com
+  resolved_ref: 1.0.0
+  version: 1.0.0
+  package_type: apm_package
+  deployed_files:
+  - .github/instructions/guide.instructions.md
+  deployed_file_hashes:
+    .github/instructions/guide.instructions.md: sha256:38d1785d1d2d1361749c0365fa6eca1fddd5c4300c14e755640c9e348720edac
+  source: registry
+  content_hash: sha256:ad54c4979a8e8780257778ceee0ae9ba99d2bed435e2238c2e372b39543f5555
+  resolved_url: https://registry.corp.example/apm/v1/packages/acme/widget/versions/1.0.0/download
+  resolved_hash: sha256:188dd724bd13cf89857ac3a7a7341648f16c4323008144556803c610eb29179e
+deployments:
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/guide.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - acme/widget
+  active_owner: acme/widget
+  content_hash: sha256:38d1785d1d2d1361749c0365fa6eca1fddd5c4300c14e755640c9e348720edac

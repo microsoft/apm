@@ -105,13 +105,39 @@ def test_global_install_and_uninstall_keep_same_name_foreign_servers(tmp_path, m
         config.write_text(json.dumps(contents), encoding="utf-8")
 
     runner = CliRunner()
+    # A differing same-name connection is preserved and reported (#3239, #3681).
+    installed = runner.invoke(
+        cli, ["install", "--global", str(package), "--target", "cursor,opencode"]
+    )
+    assert installed.exit_code == 1, installed.output
+    output = " ".join(installed.output.split())
+    assert output.count("MCP server 'test-server' conflicts with the existing") == 2, output
+    for config, contents in configs.items():
+        assert json.loads(config.read_text(encoding="utf-8")) == contents
+
+    # A failed install records nothing; there is no global manifest to uninstall from.
+    assert not (home / ".apm" / "apm.yml").exists()
+
+    # Identical same-name entries stay foreign: install succeeds without
+    # claiming them, and uninstall leaves them in place.
+    scratch_home = tmp_path / "scratch-home"
+    monkeypatch.setenv("HOME", str(scratch_home))
+    rendered = runner.invoke(
+        cli, ["install", "--global", str(package), "--target", "cursor,opencode"]
+    )
+    assert rendered.exit_code == 0, rendered.output
+    for config in configs:
+        scratch = scratch_home / config.relative_to(home)
+        config.write_text(scratch.read_text(encoding="utf-8"), encoding="utf-8")
+    identical = {config: json.loads(config.read_text(encoding="utf-8")) for config in configs}
+    monkeypatch.setenv("HOME", str(home))
     for args in (
         ["install", "--global", str(package), "--target", "cursor,opencode"],
         ["uninstall", "--global", str(package)],
     ):
         result = runner.invoke(cli, args)
         assert result.exit_code == 0, result.output
-        for config, contents in configs.items():
+        for config, contents in identical.items():
             assert json.loads(config.read_text(encoding="utf-8")) == contents
 
 

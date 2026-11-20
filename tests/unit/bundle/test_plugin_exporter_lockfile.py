@@ -231,3 +231,43 @@ class TestPluginExportIncludesLockfile:
                 f"Hash mismatch for {rel_path}: "
                 f"expected {expected_hash[:12]}..., got {actual_hash[:12]}..."
             )
+
+
+class TestPluginExportWithoutProjectLockfile:
+    """Issue #3846: no project apm.lock.yaml must still yield an integrity manifest."""
+
+    def _setup_local_only_project(self, tmp_path: Path) -> Path:
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: local-only\nversion: 1.0.0\ndependencies: {}\n", encoding="utf-8"
+        )
+        skill_dir = project / ".apm" / "skills" / "foo"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: foo\ndescription: Foo.\n---\n# Foo\n", encoding="utf-8"
+        )
+        return project
+
+    def test_bundle_embeds_lockfile_with_bundle_files(self, tmp_path: Path) -> None:
+        from apm_cli.bundle.local_bundle import verify_bundle_integrity
+
+        project = self._setup_local_only_project(tmp_path)
+
+        result = export_plugin_bundle(project_root=project, output_dir=tmp_path / "build")
+
+        bundle_lock = result.bundle_path / "apm.lock.yaml"
+        assert bundle_lock.is_file()
+        lock_data = yaml.safe_load(bundle_lock.read_text(encoding="utf-8"))
+        assert lock_data["dependencies"] == []
+        bundle_files = lock_data["pack"]["bundle_files"]
+        assert set(bundle_files) == {"plugin.json", "skills/foo/SKILL.md"}
+        assert verify_bundle_integrity(result.bundle_path, lock_data) == []
+        # The synthesized lockfile lives only in the bundle.
+        assert not (project / "apm.lock.yaml").exists()
+
+        (result.bundle_path / "skills" / "foo" / "SKILL.md").write_text(
+            "tampered", encoding="utf-8"
+        )
+        errors = verify_bundle_integrity(result.bundle_path, lock_data)
+        assert any("skills/foo/SKILL.md" in err for err in errors)

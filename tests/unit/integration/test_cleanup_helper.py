@@ -529,3 +529,66 @@ def test_cowork_stale_entry_from_lockfile_error_retains_in_failed(tmp_path, diag
     assert stale in result.failed
     msgs = [d.message for d in diagnostics._diagnostics]
     assert any("failed path resolution" in m for m in msgs)
+
+
+def test_case_only_rename_keeps_live_file_and_adopts_its_spelling(project_root, diagnostics):
+    """A stale spelling that is the live file's directory entry is renamed, never deleted."""
+    rules = project_root / ".github" / "instructions"
+    rules.mkdir(parents=True)
+    old = rules / "Guide.instructions.md"
+    old.write_text("v1")
+    recorded = {".github/instructions/Guide.instructions.md": compute_file_hash(old)}
+    case_insensitive = (rules / "guide.instructions.md").exists()
+    if case_insensitive:
+        (rules / "guide.instructions.md").write_text("v2")  # writer keeps old spelling
+
+    result = remove_stale_deployed_files(
+        [".github/instructions/Guide.instructions.md"],
+        project_root,
+        dep_key="acme/pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        recorded_hashes=recorded,
+        live_paths=[".github/instructions/guide.instructions.md"],
+    )
+
+    if case_insensitive:
+        assert result.aliased == [".github/instructions/Guide.instructions.md"]
+        assert result.deleted == [] and result.retained == []
+        assert sorted(p.name for p in rules.iterdir()) == ["guide.instructions.md"]
+        assert (rules / "guide.instructions.md").read_text() == "v2"
+    else:
+        assert result.deleted == [".github/instructions/Guide.instructions.md"]
+        assert result.aliased == []
+
+
+def test_alias_index_is_built_once_per_cleanup(project_root, diagnostics, monkeypatch):
+    """Existing stale files cost O(stale + live) spelling keys, not O(stale x live)."""
+    from apm_cli.utils import paths
+
+    rules = project_root / ".github" / "instructions"
+    rules.mkdir(parents=True)
+    stale = []
+    for i in range(30):
+        (rules / f"old{i}.instructions.md").write_text("x")
+        stale.append(f".github/instructions/old{i}.instructions.md")
+    live = [f".github/instructions/new{i}.instructions.md" for i in range(300)]
+    recorded = {rel: compute_file_hash(project_root / rel) for rel in stale}
+    calls = {"key": 0}
+    real_key = paths._spelling_key
+    monkeypatch.setattr(
+        paths, "_spelling_key", lambda p: calls.__setitem__("key", calls["key"] + 1) or real_key(p)
+    )
+
+    result = remove_stale_deployed_files(
+        stale,
+        project_root,
+        dep_key="acme/pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        recorded_hashes=recorded,
+        live_paths=live,
+    )
+
+    assert sorted(result.deleted) == sorted(stale)
+    assert calls["key"] <= len(stale) + len(live)

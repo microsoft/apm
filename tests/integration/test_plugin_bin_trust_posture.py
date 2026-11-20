@@ -147,19 +147,20 @@ def test_trust_bin_none_deploys_with_warning(tmp_path: Path) -> None:
     assert any("adds executables to Claude Code's PATH" in msg for msg in logger.warning_messages)
 
 
-def test_service_scans_deployable_plugin_bin_before_target_write(tmp_path: Path) -> None:
-    """The canonical install service blocks a hostile authorized plugin bin."""
+def test_user_scope_claude_plugin_bin_routes_natively_under_policy_and_scan(
+    tmp_path: Path,
+) -> None:
+    """A user-scope Claude plugin keeps bin/ inside its native root (#3290).
+
+    No loose copy reaches ``~/.claude/skills``; the org ``bin_deploy`` policy
+    parks the whole plugin, and the hidden-character scan of the native root
+    blocks hostile bin content before anything is queued for deployment.
+    """
+    from apm_cli.models.dependency import DependencyReference
+    from apm_cli.policy.schema import ApmPolicy, BinDeployPolicy
+
     project_root = tmp_path / "home"
     (project_root / ".claude").mkdir(parents=True)
-    clean_info, _clean_bin = _write_marketplace_plugin(
-        tmp_path / "packages" / "clean-tool",
-        manifest_name="MyOwner/CleanTool",
-    )
-    package_info, source_bin = _write_marketplace_plugin(
-        tmp_path / "packages" / "hostile-tool",
-        manifest_name="MyOwner/HostileTool",
-    )
-    source_bin.write_text("#!/bin/sh\necho hostile \u202e\n", encoding="utf-8")
     dispatch = get_dispatch_table()
     integrators = {name: entry.integrator_class() for name, entry in dispatch.items()}
     bundle = IntegratorBundle(
@@ -171,38 +172,55 @@ def test_service_scans_deployable_plugin_bin_before_target_write(tmp_path: Path)
         hook=integrators["hooks"],
         canvas=integrators["canvas"],
     )
-    clean_result = integrate_package_primitives(
-        clean_info,
-        project_root,
-        targets=[KNOWN_TARGETS["claude"]],
-        integrators=bundle,
-        force=False,
-        managed_files=None,
-        diagnostics=DiagnosticCollector(),
-        package_name="owner/clean-tool",
-        scope=InstallScope.USER,
-        trust_bin=True,
-    )
-    clean_deployed = project_root / ".claude" / "skills" / "clean-tool" / "bin" / "tool"
-    assert clean_deployed.is_file()
-    assert ".claude/skills/clean-tool/bin/tool" in clean_result["deployed_files"]
 
-    result = integrate_package_primitives(
-        package_info,
-        project_root,
-        targets=[KNOWN_TARGETS["claude"]],
-        integrators=bundle,
-        force=False,
-        managed_files=None,
-        diagnostics=DiagnosticCollector(),
-        package_name="owner/hostile-tool",
-        scope=InstallScope.USER,
-        trust_bin=True,
-    )
+    def integrate(label: str, policy: Any = None) -> tuple[Any, DiagnosticCollector]:
+        package_info, source_bin = _write_marketplace_plugin(
+            tmp_path / "packages" / label, manifest_name=label
+        )
+        package_info.dependency_ref = DependencyReference.parse(f"owner/{label}")
+        if label == "hostile-tool":
+            source_bin.write_text("#!/bin/sh\necho hostile \u202e\n", encoding="utf-8")
+        ctx = SimpleNamespace(
+            claude_native_plugins={}, claude_native_keys=set(), blocked_executables=[]
+        )
+        diagnostics = DiagnosticCollector()
+        integrate_package_primitives(
+            package_info,
+            project_root,
+            skill_subset=None,
+            targets=[KNOWN_TARGETS["claude"]],
+            integrators=bundle,
+            force=False,
+            managed_files=None,
+            diagnostics=diagnostics,
+            package_name=f"owner/{label}",
+            scope=InstallScope.USER,
+            trust_bin=True,
+            ctx=ctx,
+            policy=policy,
+        )
+        return ctx, diagnostics
 
-    deployed = project_root / ".claude" / "skills" / "hostile-tool" / "bin" / "tool"
-    assert result["deployed_files"] == []
-    assert not deployed.exists()
+    ctx, _ = integrate("clean-tool")
+    plugin = ctx.claude_native_plugins["owner/clean-tool"]
+    assert (plugin.source_root / "bin/tool").is_file()
+
+    denied, diagnostics = integrate(
+        "denied-tool", ApmPolicy(bin_deploy=BinDeployPolicy(deny=("owner/denied-tool",)))
+    )
+    assert denied.claude_native_plugins == {}
+    messages = " ".join(
+        item.message for items in diagnostics.by_category().values() for item in items
+    )
+    assert "Parked native plugin owner/denied-tool" in messages
+    assert "bin_deploy.deny" in messages
+
+    hostile, diagnostics = integrate("hostile-tool")
+    assert hostile.claude_native_plugins == {}
+    assert diagnostics.has_critical_security
+
+    assert not (project_root / ".claude" / "skills").exists()
+    assert not (project_root / ".agents").exists()
 
 
 def test_trust_bin_none_non_tty_skips() -> None:

@@ -31,6 +31,7 @@ from apm_cli.core.target_catalog import (
     expand_all,
     normalize_target_name,
 )
+from apm_cli.utils.file_ops import obstructed_path_message
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -53,27 +54,144 @@ set.  Adding a new rule format means: add it here, set ``output_compare=True``
 on the mapping, and add a ``_convert_to_*`` branch in ``_render_instruction``.
 """
 
+
+@dataclass(frozen=True)
+class UserRootVariable:
+    """Environment variable that selects a harness's user-scope home directory."""
+
+    env_var: str
+    default_dir: str
+    """Home-relative default root used when the variable is unset or blank."""
+
+    tool_label: str
+    evidence_url: str
+    """Official documentation of the variable."""
+
+    verbatim: bool = False
+    """Use a nonblank value untrimmed, as the harness's own resolver does."""
+
+
+USER_ROOT_VARIABLES: dict[str, UserRootVariable] = {
+    "claude": UserRootVariable(
+        env_var="CLAUDE_CONFIG_DIR",
+        default_dir=".claude",
+        tool_label="Claude Code",
+        evidence_url="https://code.claude.com/docs/en/env-vars",
+    ),
+    "hermes": UserRootVariable(
+        env_var="HERMES_HOME",
+        default_dir=".hermes",
+        tool_label="Hermes Agent",
+        evidence_url="https://hermes-agent.nousresearch.com/docs/reference/environment-variables",
+    ),
+    "codex": UserRootVariable(
+        env_var="CODEX_HOME",
+        default_dir=".codex",
+        tool_label="Codex CLI",
+        evidence_url="https://developers.openai.com/codex/config-advanced",
+        verbatim=True,
+    ),
+    "copilot": UserRootVariable(
+        env_var="COPILOT_HOME",
+        default_dir=".copilot",
+        tool_label="GitHub Copilot CLI",
+        evidence_url=(
+            "https://docs.github.com/en/copilot/reference/copilot-cli-reference/"
+            "cli-config-dir-reference"
+        ),
+    ),
+}
+"""Canonical owner of harness user-root variables (``harness-user-root-resolution``).
+
+Each value of a variable is a separate profile of the same runtime, and all
+of them share one user lockfile. Read these variables only through
+:func:`configured_user_root` and :func:`resolve_user_root`.
+"""
+
 USER_ROOT_ENV_VARS: dict[str, str] = {
-    "claude": "CLAUDE_CONFIG_DIR",
-    "hermes": "HERMES_HOME",
-    "codex": "CODEX_HOME",
+    name: variable.env_var for name, variable in USER_ROOT_VARIABLES.items()
 }
-"""Targets whose user-scope root an environment variable selects.
+"""Targets whose user-scope root an environment variable selects, by variable name."""
 
-Each value of the variable is a separate profile of the same runtime, and
-all of them share one user lockfile.
-"""
 
-_TOOL_RESOLVED_USER_ROOTS: dict[str, str] = {
-    "codex": "Codex CLI",
-}
-"""Targets whose user-root variable follows the tool's own resolver, by tool label.
+def _default_user_dir(target: str) -> str:
+    """Return *target*'s home-relative default user root.
 
-A nonblank value is used verbatim (not trimmed) and must be absolute; a
-relative value raises :class:`PathTraversalError` instead of resolving
-against the working directory. The Codex MCP adapter reads ``CODEX_HOME``
-the same way, so compiled files and MCP config share one root.
-"""
+    Targets without a user-root variable (OpenCode's ``.config/opencode``) use
+    their profile's documented ``user_root_dir``.
+    """
+    variable = USER_ROOT_VARIABLES.get(target)
+    if variable is not None:
+        return variable.default_dir
+    root_dir = KNOWN_TARGETS[target].user_root_dir
+    if root_dir is None:
+        raise KeyError(f"target '{target}' has no static user root")
+    return root_dir
+
+
+def configured_user_root(target: str) -> Path | None:
+    """Return the absolute root *target*'s user-root variable selects, or ``None``.
+
+    An unset or blank variable, or a target without a variable, returns
+    ``None`` (the harness default applies).
+    ``~`` is expanded; the path is not resolved, so callers can reject a
+    symlinked location before normalizing. A relative value raises
+    :class:`PathTraversalError` instead of resolving against the working
+    directory, for every variable.
+    """
+    import os
+
+    variable = USER_ROOT_VARIABLES.get(target)
+    if variable is None:
+        return None
+    raw = os.environ.get(variable.env_var, "")
+    if not raw.strip():
+        return None
+    expanded = Path(raw if variable.verbatim else raw.strip()).expanduser()
+    if not expanded.is_absolute():
+        raise PathTraversalError(
+            f"{variable.env_var} is set to a non-absolute path; cannot locate the "
+            f"{variable.tool_label} configuration directory. {variable.env_var} must be "
+            f"an absolute path; set one or unset it to use ~/{variable.default_dir}."
+        )
+    return expanded
+
+
+def resolve_user_root(target: str) -> Path:
+    """Return *target*'s user-scope home: the configured root, else ``~/<default>``."""
+    configured = configured_user_root(target)
+    if configured is not None:
+        return configured
+    return Path.home() / _default_user_dir(target)
+
+
+def user_root_is_default(target: str) -> bool:
+    """Return whether *target*'s user root is physically its default location."""
+    configured = configured_user_root(target)
+    if configured is None:
+        return True
+    default = Path.home() / _default_user_dir(target)
+    return configured.resolve(strict=False) == default.resolve(strict=False)
+
+
+def user_root_exists(target: str) -> bool:
+    """Return whether *target*'s user root is an existing directory.
+
+    A relative value selects no root, so it detects nothing; deploying to that
+    target still fails clearly through :func:`configured_user_root`.
+    """
+    try:
+        return resolve_user_root(target).is_dir()
+    except PathTraversalError:
+        return False
+
+
+def user_root_display(target: str) -> str:
+    """Return a human-readable user root: ``~/<default>`` or the configured path."""
+    configured = configured_user_root(target)
+    if configured is None:
+        return f"~/{_default_user_dir(target)}"
+    return configured.as_posix()
 
 
 def _posix_shell_host() -> bool:
@@ -168,9 +286,9 @@ class PrimitiveMapping:
     * The deployed file is never byte-identical to its source, so a
       source-based adopt always misses (apm#1662).  The integrator instead
       compares against the rendered output and (re)writes when stale.
-    * The target is APM-owned per-file (``target_name`` derives 1:1 from a
-      source instruction), so ``managed_files`` is NOT consulted -- any
-      existing file at the target path is APM's, not user-authored.
+    * Ownership uses the shared collision decision: a ``managed_files`` path
+      is rewritten, while an unmanaged differing file is user-authored and
+      is skipped unless ``--force``.
     * The deployed filename is renamed from ``<x>.instructions.md`` to
       ``<x>{extension}``.
 
@@ -557,26 +675,16 @@ class TargetProfile:
         if self.name == "copilot":
             generated_files = ()
 
-        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude), Hermes
-        # honors HERMES_HOME (default ~/.hermes) and Codex honors CODEX_HOME
-        # (default ~/.codex); mirror that at user scope so `apm install -g`
-        # and `apm compile --global` land where the tool reads.
-        if self.name in USER_ROOT_ENV_VARS:
-            import os
-
-            env_var = USER_ROOT_ENV_VARS[self.name]
-            raw = os.environ.get(env_var, "")
-            tool_label = _TOOL_RESOLVED_USER_ROOTS.get(self.name)
-            if raw.strip():
-                expanded = Path(raw if tool_label else raw.strip()).expanduser()
-                if tool_label and not expanded.is_absolute():
-                    raise PathTraversalError(
-                        f"{env_var} is set to a non-absolute path; cannot locate the "
-                        f"{tool_label} configuration directory."
-                    )
+        # Claude Code (CLAUDE_CONFIG_DIR), Hermes (HERMES_HOME), Codex
+        # (CODEX_HOME) and Copilot CLI (COPILOT_HOME) relocate their user
+        # home; mirror that at user scope so `apm install -g` and
+        # `apm compile --global` land where the tool reads.
+        if self.name in USER_ROOT_VARIABLES:
+            configured = configured_user_root(self.name)
+            if configured is not None:
                 # ``resolve`` collapses ``..`` so traversal segments cannot
                 # leak into ``root_dir`` and escape ``project_root / root_dir``.
-                abs_path = expanded.resolve(strict=False)
+                abs_path = configured.resolve(strict=False)
                 home = Path.home().resolve(strict=False)
                 try:
                     # Keep ``root_dir`` home-relative so cleanup prefix matching holds.
@@ -690,8 +798,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # AntigravityClientAdapter), NOT settings.json.
     # Antigravity has no TOML command surface (legacy Gemini commands
     # convert to skills upstream), so there is no commands primitive.
-    # User scope: skills -> ~/.gemini/antigravity-cli/skills/; MCP ->
-    # ~/.gemini/config/mcp_config.json (handled by the adapter).
+    # User scope: skills -> ~/.gemini/config/skills/ (read by the
+    # Antigravity App, CLI and IDE); MCP -> ~/.gemini/config/mcp_config.json
+    # (handled by the adapter). Skills recorded under the retired
+    # ~/.gemini/antigravity-cli/ root are cleaned up as stale managed files.
     # Instructions/hooks are not offered at user scope because Antigravity
     # spreads them across heterogeneous ~/.gemini/ subdirs.
     # Compile family is "agents" (emits AGENTS.md, not GEMINI.md).
@@ -716,7 +826,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         auto_create=True,
         detect_by_dir=False,
         user_supported="partial",
-        user_root_dir=".gemini/antigravity-cli",
+        user_root_dir=".gemini/config",
         unsupported_user_primitives=("instructions", "hooks"),
         hooks_config_display=".agents/hooks.json",
     ),
@@ -1314,26 +1424,6 @@ def _is_flag_enabled(flag_name: str, *, create_config: bool = True) -> bool:
     return is_enabled(flag_name, create_config=create_config)
 
 
-def resolve_hermes_root() -> Path:
-    """Resolve the Hermes home directory.
-
-    Honors ``$HERMES_HOME`` (default ``~/.hermes``).  Returns an expanded,
-    normalized ``Path`` (``..`` segments collapsed via ``resolve``) so traversal
-    in ``$HERMES_HOME`` cannot create unintended intermediate directories during
-    ``mkdir(parents=True)``; the directory is not required to exist.  Mirrors the
-    normalization in ``TargetProfile.for_scope``.  Used both by the user-scope
-    skills deploy path and by ``HermesClientAdapter`` to locate ``config.yaml``
-    for MCP writes.
-    """
-    import os
-    from pathlib import Path
-
-    env = os.environ.get("HERMES_HOME", "").strip()
-    if env:
-        return Path(env).expanduser().resolve(strict=False)
-    return (Path.home() / ".hermes").resolve(strict=False)
-
-
 def _flag_gated(profile: TargetProfile, *, create_config: bool = True) -> bool:
     """Return ``True`` if *profile* passes its flag gate (or has none)."""
     if profile.requires_flag is None:
@@ -1402,12 +1492,13 @@ def selected_user_profiles() -> dict[str, TargetProfile]:
     """Return the user-scope profile each :data:`USER_ROOT_ENV_VARS` target selects.
 
     Without the variable the default root (``~/.claude``, ``~/.hermes``,
-    ``~/.codex``) is the selected profile. A target whose variable cannot
-    select a root (a relative ``CODEX_HOME``) is omitted so other targets'
-    cleanup keeps working; commands that deploy to it still fail clearly.
+    ``~/.codex``, ``~/.copilot``) is the selected profile. A target whose
+    variable cannot select a root (a relative value) is omitted so other
+    targets' cleanup keeps working; commands that deploy to it still fail
+    clearly.
     """
     profiles: dict[str, TargetProfile] = {}
-    for name in USER_ROOT_ENV_VARS:
+    for name in USER_ROOT_VARIABLES:
         base = KNOWN_TARGETS.get(name)
         scoped = scoped_profile_or_none(base, user_scope=True) if base is not None else None
         if scoped is not None:
@@ -1418,8 +1509,8 @@ def selected_user_profiles() -> dict[str, TargetProfile]:
 def scoped_profile_or_none(profile: TargetProfile, *, user_scope: bool) -> TargetProfile | None:
     """Return ``profile.for_scope()`` for a scan that may include inactive targets.
 
-    A tool-resolved user-root variable that cannot select a root (a relative
-    ``CODEX_HOME``) makes only that target unresolvable: scans over
+    A user-root variable that cannot select a root (a relative
+    ``CODEX_HOME`` or ``COPILOT_HOME``) makes only that target unresolvable: scans over
     :data:`KNOWN_TARGETS` or lockfile rows skip it, so Claude-only installs,
     uninstalls and skill cleanup keep working. Paths that deploy to the target
     (``resolve_targets``, ``apm compile --global``) call ``for_scope``
@@ -1428,7 +1519,7 @@ def scoped_profile_or_none(profile: TargetProfile, *, user_scope: bool) -> Targe
     try:
         return profile.for_scope(user_scope=user_scope)
     except PathTraversalError:
-        if profile.name not in _TOOL_RESOLVED_USER_ROOTS:
+        if not user_scope or profile.name not in USER_ROOT_VARIABLES:
             raise
         return None
 
@@ -1443,13 +1534,29 @@ def is_other_profile_path(profile: TargetProfile, value: str) -> bool:
     against the selected root; it neither resolves nor follows symlinks.
     Separators are compared in POSIX form: an absolute root keeps native
     separators (``D:\\profiles\\b``) while lockfile values use ``/``.
+    A project-scope profile whose root differs from its user root (Copilot's
+    ``.github``) has no other profiles.
     """
-    if profile.name not in USER_ROOT_ENV_VARS or "://" in value:
+    if profile.name not in USER_ROOT_VARIABLES or "://" in value:
+        return False
+    static = KNOWN_TARGETS.get(profile.name)
+    if (
+        static is not None
+        and profile.root_dir == static.root_dir
+        and static.effective_root(user_scope=True) != static.root_dir
+    ):
         return False
     prefixes = tuple(
         prefix.replace("\\", "/") for prefix in get_integration_prefixes(targets=[profile])
     )
     return not value.replace("\\", "/").startswith(prefixes)
+
+
+def _user_root_dir_exists(profile: TargetProfile, home: Path) -> bool:
+    """Return whether *profile*'s user-scope root exists, honoring its user-root variable."""
+    if profile.name in USER_ROOT_VARIABLES:
+        return user_root_exists(profile.name)
+    return (home / profile.effective_root(user_scope=True)).is_dir()
 
 
 def active_targets_user_scope(
@@ -1522,7 +1629,7 @@ def active_targets_user_scope(
         if p.user_supported
         and p.detect_by_dir
         and _flag_gated(p, create_config=create_config)
-        and (home / p.effective_root(user_scope=True)).is_dir()
+        and _user_root_dir_exists(p, home)
     ]
     if detected:
         return detected
@@ -1610,8 +1717,21 @@ def active_targets(
     return [KNOWN_TARGETS["copilot"]]
 
 
+class TargetRootObstructedError(PathTraversalError):
+    """A project target root exists but is not a directory APM can deploy into.
+
+    Shares the ``PathTraversalError`` family with a symlinked target root, so
+    install surfaces it verbatim instead of as a resolution failure.
+    """
+
+
 def _validate_project_target_root(project_root: Path, profile: TargetProfile) -> Path:
-    """Return a contained project target root without following symlinks."""
+    """Return a contained project target root without following symlinks.
+
+    Every primitive deploy directory (``<root>/<subdir>``, honouring a
+    mapping's ``deploy_root``) is checked as well, so integrators never
+    write through a linked subdirectory such as ``.github/prompts``.
+    """
     deploy_path = profile.deploy_path(project_root)
     if profile.resolved_deploy_root is not None:
         return deploy_path
@@ -1619,6 +1739,21 @@ def _validate_project_target_root(project_root: Path, profile: TargetProfile) ->
         raise PathTraversalError(
             f"Refusing deployment through symlinked target root: {profile.root_dir}"
         )
+    for mapping in profile.primitives.values():
+        primitive_rel = Path(mapping.deploy_root or profile.root_dir, mapping.subdir)
+        try:
+            linked = has_symlink_component(
+                project_root, project_root / primitive_rel, raise_on_error=True
+            )
+        except OSError:
+            # An obstructed component (for example a file in place of the
+            # root) is reported by the obstructed-path diagnostics instead.
+            continue
+        if linked:
+            raise PathTraversalError(
+                "Refusing deployment through symlinked target directory: "
+                f"{primitive_rel.as_posix()}"
+            )
     return ensure_path_within(deploy_path, project_root)
 
 
@@ -1670,6 +1805,10 @@ def materialize_project_target_profiles(
         if profile is None:
             continue
         deploy_path = _validate_project_target_root(project_root, profile)
+        if deploy_path.exists() and not deploy_path.is_dir():
+            raise TargetRootObstructedError(
+                obstructed_path_message(deploy_path, project_root, blocker="file")
+            )
         # Skills-only roots are created by the skill integrator on first write,
         # so an install that deploys nothing leaves no empty directory behind.
         if not deploy_path.is_dir() and not profile.skills_only:
@@ -1726,9 +1865,15 @@ def resolve_audit_targets(
                 f"'{flag}' is disabled. Run "
                 f"'apm experimental enable {flag}' to audit this installation."
             )
-    return resolve_targets(
+    from apm_cli.integration.skill_layout import (
+        recorded_deployed_paths,
+        resolve_reintegration_targets,
+    )
+
+    return resolve_reintegration_targets(
         get_workspace_deploy_root(project_root),
         user_scope=user_scope,
         explicit_target=decision.value,
+        recorded_paths=recorded_deployed_paths(lock),
         create_config=False,
     )

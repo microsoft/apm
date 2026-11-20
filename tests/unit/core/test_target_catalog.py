@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.core.apm_yml import CANONICAL_TARGETS
 from apm_cli.core.target_catalog import (
+    DEPRECATED_TARGET_ALIASES,
     TARGET_CAPABILITIES,
     TargetCapability,
     _build_target_catalog,
@@ -41,12 +42,12 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
             {
                 "claude",
                 "codex",
+                "copilot",
                 "cursor",
                 "gemini",
                 "grok-build",
                 "kiro",
                 "opencode",
-                "vscode",
                 "windsurf",
             }
         )
@@ -63,9 +64,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
     assert frozenset({"intellij"}) == MCP_ONLY_TARGETS
     assert TARGET_ALIASES == {
         "agy": "antigravity",
-        "agents": "vscode",
-        "copilot": "vscode",
-        "vscode": "vscode",
+        "agents": "copilot",
     }
     assert (
         frozenset(
@@ -104,7 +103,6 @@ def test_current_runtime_mapping_is_characterized() -> None:
         "agents": "copilot",
         "copilot": "copilot",
         "intellij": "copilot",
-        "vscode": "copilot",
     }
 
 
@@ -319,6 +317,8 @@ def test_every_accepted_value_is_advertised_and_parses() -> None:
             assert value in help_fragment
             with pytest.warns(Warning) if value == "agents" else nullcontext():
                 assert parse_target_field(value) is not None
+        for alias, target in DEPRECATED_TARGET_ALIASES.items():
+            assert f"'{alias}' is a deprecated alias of '{target}'." in help_fragment
 
 
 @pytest.mark.parametrize("command", COMMANDS)
@@ -444,3 +444,43 @@ def _capability(
         runtimes=runtimes,
         commands=frozenset(COMMANDS),
     )
+
+
+def test_deprecated_aliases_are_accepted_but_never_advertised(tmp_path) -> None:
+    """vscode still parses with a warning, but generated manifests and errors omit it."""
+    from apm_cli.core.errors import UnknownTargetError
+    from apm_cli.core.target_catalog import (
+        advertised_manifest_target_names,
+        manifest_target_names,
+    )
+    from apm_cli.core.target_detection import _validate_canonical_v2
+
+    assert "vscode" in manifest_target_names()
+    assert "vscode" not in advertised_manifest_target_names()
+    with pytest.raises(UnknownTargetError) as excinfo:
+        _validate_canonical_v2(["bogus"])
+    assert "vscode" not in str(excinfo.value)
+
+
+def test_manifest_agents_value_is_not_reported_as_a_flag(tmp_path) -> None:
+    """`target: agents` warns once, from the manifest owner, never as `--target agents`."""
+    import warnings as _warnings
+    from pathlib import Path
+
+    from apm_cli.core.target_detection import (
+        AgentsTargetDeprecationWarning,
+        agents_alias_was_detected,
+        parse_target_field,
+    )
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        parse_target_field("agents", source_path=Path(tmp_path) / "apm.yml")
+    assert not agents_alias_was_detected()
+    assert not [w for w in caught if issubclass(w.category, AgentsTargetDeprecationWarning)]
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        parse_target_field("agents")
+    assert agents_alias_was_detected()
+    assert [w for w in caught if issubclass(w.category, AgentsTargetDeprecationWarning)]

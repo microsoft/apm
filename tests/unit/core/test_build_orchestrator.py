@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -20,6 +21,7 @@ from apm_cli.core.build_orchestrator import (
     ProducerResult,
     detect_outputs,
 )
+from apm_cli.core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
 from apm_cli.marketplace.builder import BuildReport, MarketplaceOutputReport
 
 
@@ -201,8 +203,9 @@ class TestBuildOrchestrator:
         _write(apm, "name: x\nversion: 0.1.0\ndescription: y\n")
         opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
 
-        with pytest.raises(BuildError, match="Nothing to pack"):
+        with pytest.raises(BuildError, match="Nothing to pack") as excinfo:
             BuildOrchestrator().run(opts)
+        assert "'claude', 'codex', 'copilot'" in str(excinfo.value)
 
     def test_collects_warnings_from_all_producers(self, tmp_path: Path):
         apm = tmp_path / "apm.yml"
@@ -464,6 +467,37 @@ class TestPluginManifestProducer:
         assert expected in result.outputs
         assert expected.exists()
 
+    def test_codex_only_targets_produce_codex_plugin_json(self, tmp_path: Path) -> None:
+        """targets: [codex] packs a Codex manifest instead of 'Nothing to pack' (#3077)."""
+        apm = self._apm_yml(tmp_path, "[codex]")
+        assert OutputKind.PLUGIN_MANIFEST in detect_outputs(apm)
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm, bundle_format="agent-plugin")
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        expected = tmp_path / ".codex-plugin" / "plugin.json"
+        assert result.outputs == [expected]
+        assert json.loads(expected.read_text(encoding="utf-8"))["version"] == "1.0.0"
+
+    @pytest.mark.parametrize(
+        ("bundle_format", "skipped"),
+        [("claude-plugin", set()), ("agent-plugin", {"claude"})],
+    )
+    def test_all_targets_skip_only_claude_under_agent_plugin(
+        self, tmp_path: Path, bundle_format: str, skipped: set[str]
+    ) -> None:
+        apm = self._apm_yml(tmp_path, "[claude, copilot, codex]")
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm, bundle_format=bundle_format)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        expected = {
+            tmp_path / path for name, path in PLUGIN_ECOSYSTEM_PATHS.items() if name not in skipped
+        }
+        assert set(result.outputs) == expected
+        for name in skipped:
+            assert not (tmp_path / PLUGIN_ECOSYSTEM_PATHS[name]).exists()
+
     def test_default_legacy_mode_produces_both_sidecars(self, tmp_path: Path) -> None:
         apm = tmp_path / "apm.yml"
         _write(
@@ -598,15 +632,9 @@ class TestPluginManifestProducer:
     def test_conflicting_targets_raises_build_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from apm_cli.core.errors import ConflictingTargetsError
-
         apm = self._apm_yml(tmp_path, "claude")
+        apm.write_text(apm.read_text() + "targets: [cursor]\n")
         opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
 
-        def _raise(data: dict) -> list[str]:
-            raise ConflictingTargetsError("both target and targets set")
-
-        monkeypatch.setattr("apm_cli.core.apm_yml.parse_targets_field", _raise)
-
-        with pytest.raises(BuildError, match=r"both target and targets set"):
+        with pytest.raises(BuildError, match=r"target"):
             PluginManifestProducer().produce(opts, logger=None)

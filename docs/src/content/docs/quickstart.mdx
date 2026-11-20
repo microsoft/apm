@@ -1,223 +1,181 @@
 ---
-title: "Quickstart"
-description: "Install APM, install your first package, and run an agent in 5 minutes."
-sidebar:
-  order: 1
+title: Give every teammate the same skills, plugins and MCP servers
+description: Install a skill, a marketplace plugin and an MCP server with one tool, commit two files, and every clone gets the same agent setup. Five minutes.
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Steps, FileTree, Aside, LinkCard, CardGrid } from '@astrojs/starlight/components';
 
-You will install APM, scaffold a project, install a package, and run an
-agent script. Five minutes, four commands. This is the consumer path --
-you are running someone else's package, not authoring one.
+You share a repository with teammates who use coding agents, and everyone's setup is a little
+different. In five minutes you will add a skill, a plugin from a marketplace and an MCP server,
+commit two files, and watch a fresh clone get the same setup, checked against a lockfile.
 
-If you want to publish a package, jump to the
-[pack and distribute guide](/apm/producer/). If you are
-rolling APM out across an org, start with the
-[governance guide](/apm/enterprise/governance-guide/).
+**You need:** APM ([install it](../getting-started/installation/)), a git repository, and GitHub
+Copilot or Claude Code.
 
-## 1. Install APM
+<Steps>
 
-**macOS (already using Homebrew):**
+1. **Pick the agents you use.**
 
-```bash
-brew install apm
-```
+   ```bash frame="terminal"
+   apm init -y --target copilot,claude
+   ```
 
-No custom tap needed. Update with `brew upgrade apm`.
+   This writes `apm.yml`, the manifest that lists what your agents load. `--target` names the
+   agent tools (harnesses) APM writes for: `.github/` for GitHub Copilot, `.claude/` for Claude
+   Code.
 
-**Linux / macOS without Homebrew:**
+2. **Install a skill**, the same way `npx skills add` does.
 
-```bash
-curl -sSL https://aka.ms/apm-unix | sh
-```
+   ```bash frame="terminal"
+   apm install vercel-labs/agent-skills --skill deploy-to-vercel
+   ```
 
-Open a new shell after a native desktop install. If the current terminal cannot
-find `apm`, run the exact shell-specific `PATH` command printed by the installer
-for that shell.
+   ```text frame="none"
+   [i] Targets: claude, copilot  (source: apm.yml)
+     [+] vercel-labs/agent-skills #main @1a2c79d4
+     |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
+     [!] 1 dependency unpinned: vercel-labs/agent-skills -- apm.lock.yaml pins the
+   resolved commit; to track releases on update, add a semver range in apm.yml
+   such as #^1.0.0 (a tag like #v1.0.0 stays put)
+   [*] Installed 1 APM dependency in 6.5s.
+   ```
 
-**Windows (PowerShell):**
+   This skill follows the repository's `main` branch, so APM points out that the lockfile
+   records the exact commit you got, `1a2c79d4`. Teammates get that commit until you run
+   `apm update`. Add a semver range such as `#^1.0.0` to follow tagged releases; a fixed tag like `#v1.0.0` stays on that release.
 
-```powershell
-irm https://aka.ms/apm-windows | iex
-```
+3. **Install a plugin from a marketplace.** A marketplace is a published list of plugins;
+   this is Anthropic's.
 
-Verify:
+   ```bash frame="terminal"
+   apm marketplace add anthropics/claude-code --ref v2.1.328
+   apm install commit-commands@claude-code-plugins
+   ```
 
-```bash
-apm --version
-```
+   ```text frame="none"
+   [+] anthropics/claude-plugins-official/plugins/commit-commands#main
+   ...
+     |-- 3 prompts integrated -> .github/prompts/
+     |-- 3 commands integrated -> .claude/commands/
+   [*] Installed 1 APM dependency in 6.2s.
+   ```
 
-For Scoop, pip, manual checksum-verified archive installs, or air-gapped mirrors,
-see [Installation](../getting-started/installation/).
+   One plugin, written in each harness's own format: commands for Claude Code, prompts for
+   GitHub Copilot. `apm.yml` records where the plugin's files actually live, so the lockfile
+   can pin them.
 
-## 2. Initialize a project
+4. **Add an MCP server.**
 
-```bash
-apm init my-agent
-cd my-agent
-```
+   ```bash frame="terminal"
+   apm install --mcp io.github.github/github-mcp-server --transport http
+   ```
 
-`apm init` writes one file -- the manifest:
+   ```text frame="none"
+   [i] Targeting declared targets from apm.yml: claude, copilot
+   |  [+]  io.github.github/github-mcp-server -> Claude Code, Copilot CLI (configured)
+   [*] Configured 1 server
+   ```
 
-```
-my-agent/
-+-- apm.yml
-```
+   One line in `apm.yml`, and APM writes the configuration each harness reads. No hand-edited
+   JSON, and the same server on every machine.
 
-Open `apm.yml`. It looks like this:
+5. **Commit the manifest and the lockfile.**
 
-```yaml
-name: my-agent
-version: 1.0.0
-description: APM project for my-agent
-author: your-handle
-# Which agent platforms to deploy to (uncomment to pin):
-# targets:
-#   - copilot
-#   - claude
+   ```yaml title="apm.yml"
+   dependencies:
+     apm:
+       - git: vercel-labs/agent-skills
+         skills:
+           - deploy-to-vercel
+       - git: https://github.com/anthropics/claude-plugins-official
+         path: plugins/commit-commands
+         ref: main
+     mcp:
+       - name: io.github.github/github-mcp-server
+         transport: http
+   ```
 
-dependencies:
-  apm: []
-  mcp: []
-includes: auto
-scripts: {}
-```
+   ```bash frame="terminal"
+   git add apm.yml apm.lock.yaml .gitignore
+   git commit -m "Add agent dependencies"
+   ```
 
-Three fields matter day one:
+   `apm.yml` says what you asked for. `apm.lock.yaml` records what you got: the exact commit of
+   each source and a SHA-256 hash of every file APM wrote.
 
-- `dependencies.apm` -- the packages you install. Empty until step 3.
-- `dependencies.mcp` -- MCP servers, wired into every detected harness.
-- `scripts` -- optional named shell commands you run with the
-  experimental `apm run` (see [Run scripts](/apm/consumer/run-scripts/)).
+   ```yaml title="apm.lock.yaml" {3,5-6}
+   - repo_url: vercel-labs/agent-skills
+     ...
+     resolved_commit: 1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62
+     deployed_file_hashes:
+       .agents/skills/deploy-to-vercel/SKILL.md: sha256:418ca2a60d35...
+       .claude/skills/deploy-to-vercel/SKILL.md: sha256:418ca2a60d35...
+   ```
 
-`includes: auto` ships local content from the authoritative source layout:
-`.apm/` when that directory exists, or supported plugin-native directories at
-the project root otherwise. The
-`targets:` block is commented out so APM auto-detects the harnesses
-present in your repo (`.github/`, `.claude/`, `.cursor/`, etc.). For the
-full schema, see [Package anatomy](/apm/concepts/package-anatomy/).
+   APM added its download cache,
+   `apm_modules/`, to `.gitignore`. Committing the files it wrote is optional: any clone
+   rebuilds them from the lockfile
+   ([should I commit them?](../concepts/how-apm-works/#common-questions)).
 
-## 3. Install a package
+6. **Be your teammate.** Clone the repository into a second folder and install from the
+   lockfile.
 
-```bash
-apm install microsoft/apm-sample-package#v1.0.0 --target copilot
-```
+   ```bash frame="terminal"
+   git clone . ../teammate && cd ../teammate
+   apm install --frozen
+   ```
 
-`--target copilot` is shown explicitly because a fresh project has no
-harness markers yet. Once a recognized Copilot marker such as
-`.github/copilot-instructions.md` exists, the flag becomes optional.
+   ```text frame="none"
+   |  [+]  io.github.github/github-mcp-server -> Claude Code, Copilot CLI (configured)
+   ...
+   [*] Installed 2 APM dependencies and 1 MCP server in 1.5s.
+   [i] Deployed files verified against apm.lock.yaml.
+   ```
 
-Output (abridged):
+   `--frozen` installs exactly what the lockfile records and fails if `apm.yml` disagrees. Use
+   it in CI. Your teammate now has:
 
-```
-[+] microsoft/apm-sample-package #v1.0.0 @fb285168
-|-- 2 prompts integrated -> .github/prompts/
-|-- 1 agents integrated -> .github/agents/
-|-- 1 instruction(s) integrated -> .github/instructions/
-|-- 1 skill(s) integrated -> .agents/skills/
-[+] github.com/github/awesome-copilot/skills/review-and-refactor
-|-- Skill integrated -> .agents/skills/
-[*] Installed 2 APM dependencies in 1.4s.
-```
+   <FileTree>
+   - .agents/skills/deploy-to-vercel/SKILL.md
+   - .claude/
+     - commands/commit.md and 2 more
+     - skills/deploy-to-vercel/SKILL.md
+   - .github/prompts/commit.prompt.md and 2 more
+   - .mcp.json
+   </FileTree>
 
-Three things were written:
+7. **Check the files against the lockfile.**
 
-```
-my-agent/
-+-- apm.yml              # updated: package added under dependencies.apm
-+-- apm.lock.yaml        # NEW: pins resolved sources + content hashes
-+-- apm_modules/         # NEW: package cache (gitignored automatically)
-+-- .agents/skills/      # NEW: harness-neutral skills
-+-- .github/             # NEW: prompts, agents, instructions for Copilot
-```
+   ```bash frame="terminal"
+   apm audit
+   ```
 
-The package's transitive dependency (`review-and-refactor`) was
-resolved and installed in the same pass. `apm.lock.yaml` records the
-exact commit and content hash for both, so every teammate who runs
-`apm install` after cloning gets the identical tree.
+   ```text frame="none"
+   [+] Replayed 2 package(s)
+   [+] No drift detected
+   [*] 8 file(s) scanned -- no issues found
+   ```
 
-:::note[What just happened under the hood]
-APM scanned the package for hidden Unicode before any agent could read
-it (Promise 2: see [Security](/apm/enterprise/security/))
-and pinned its content hash in `apm.lock.yaml`. If your org ships an
-`apm-policy.yml`, those rules ran first (Promise 3: see
-[Governance guide](/apm/enterprise/governance-guide/)).
-:::
+   `apm audit` rebuilds what the lockfile describes and compares it with the files on disk. It
+   also flags hidden Unicode characters that can carry instructions a reviewer cannot see.
 
-:::tip[Coming from npm?]
-APM's verbs match npm's semantics:
+</Steps>
 
-- `apm install` -- install and deploy dependencies, like `npm install`.
-- `apm update` -- refresh dependencies to the latest matching versions or refs,
-  with a consent prompt, like `npm update`.
-- `apm install --frozen` -- lockfile-only install for CI; fails on
-  drift, like `npm ci`.
-- `apm prune` -- remove packages from `apm_modules/` that are no
-  longer in `apm.yml`, like `npm prune`.
+## What you just did
 
-For CLI upgrades, use your package manager (`brew upgrade apm` for Homebrew)
-or `apm self-update` for standalone installs. See
-[Update and refresh](../consumer/update-and-refresh/#update-the-apm-cli-binary).
+- **Declared** a skill, a plugin and an MCP server in `apm.yml`, once, for two harnesses.
+- **Locked** them in `apm.lock.yaml`: exact commits and per-file hashes.
+- **Verified** a fresh clone against the lockfile. A file that changes shows up as drift.
 
-For private packages, set `GITHUB_APM_PAT` -- see
-[private packages](/apm/consumer/private-and-org-packages/).
-:::
+<Aside type="note" title="What APM does not do">
+APM controls what gets installed. It does not run your agent or limit what the agent does at
+runtime; your harness does that. A lockfile records what you installed, not that it is safe.
+See [How APM works](../concepts/how-apm-works/).
+</Aside>
 
-## What to commit
-
-| Path | Commit? | Why |
-|------|---------|-----|
-| `apm.yml` | Yes | Manifest -- declares dependencies, shared with the team |
-| `apm.lock.yaml` | Yes | Lockfile -- pins exact commits and content hashes for reproducible installs |
-| Target-owned deployment directories (for example `.github/`, `.claude/`, `.grok/`, and `.agents/`) | Yes | Deployed files -- reviewable and discoverable after clone, not necessarily self-contained |
-| `apm_modules/` | No | Installed dependencies -- gitignored automatically; restored from the lockfile by `apm install` |
-
-After cloning, run `apm install` at the repository root to restore linked
-context under `apm_modules/`. Discoverability does not guarantee usability.
-Keep referenced resources and
-[native Copilot Agent Plugins](../consumer/copilot-agent-plugins/) available
-while agents or tools use them, even after APM exits.
-
-:::tip[Keeping deployed files in sync]
-When you change `apm.yml`, run `apm install` and commit the updated manifest,
-lockfile, and deployed files. A
-[CI drift check](../integrations/ci-cd/#verify-deployed-primitives) catches stale files.
-:::
-
-## What next
-
-Your project is ready: dependencies pinned, primitives deployed, every
-detected harness configured. The package's prompts and skills are
-already discoverable from your AI tool of choice -- start a Copilot
-chat, open Claude Code, or invoke the agent from any harness that
-read its instructions on disk.
-
-:::note[Looking for `apm run`?]
-APM also ships an experimental script runner -- think `npx` for AI
-runtime CLIs. Declare a `scripts:` entry in `apm.yml` and execute it
-with `apm run <name>`. It is optional, off the critical path, and
-not required to use any installed package. See
-[Run scripts](/apm/consumer/run-scripts/) if you want to wire one up.
-:::
+## Next
 
 <CardGrid>
-  <Card title="Use more packages" icon="open-book">
-    Browse the consumer guide: search marketplaces, pin versions, manage
-    transitive dependencies, and wire MCP servers into every harness.
-    [Dependencies](/apm/consumer/manage-dependencies/)
-  </Card>
-  <Card title="Author your own" icon="rocket">
-    Build a primitive others can install -- skills, prompts, agents,
-    plugins -- and pack it for distribution.
-    [Pack and distribute](/apm/producer/)
-  </Card>
-  <Card title="Govern installs at scale" icon="setting">
-    Ship `apm-policy.yml`, gate CI with `apm audit --ci`, and pin a
-    private registry for your org.
-    [Governance guide](/apm/enterprise/governance-guide/)
-  </Card>
+  <LinkCard title="Run in CI" description="Fail the build when the files and the lockfile disagree." href="/apm/consumer/run-in-ci/" />
+  <LinkCard title="Add MCP and LSP servers" description="Registry servers, your own servers, secrets and transports." href="/apm/consumer/install-mcp-servers/" />
 </CardGrid>
-
-If something failed along the way, check
-[Troubleshooting](/apm/troubleshooting/ssl-issues/).

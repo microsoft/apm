@@ -345,7 +345,7 @@ class TestVendorNeutralCatalog:
         with patch("apm_cli.commands.pack.BuildOrchestrator") as MockOrch:
             MockOrch.return_value.run.return_value = mock_result
             runner = CliRunner()
-            result = runner.invoke(pack_cmd, [], catch_exceptions=False)
+            result = runner.invoke(pack_cmd, [], catch_exceptions=False, env={"COLUMNS": "240"})
 
         out = result.output
         assert "[claude]" in out
@@ -353,18 +353,17 @@ class TestVendorNeutralCatalog:
         assert ".claude-plugin/marketplace.json" in out
         assert ".agents/plugins/marketplace.json" in out
         # Single docs pointer with the expected hostname + anchor path.
-        # Rich may line-wrap the URL in the CLI output; assert on canonical
-        # host + path (fragment is verified in the unit-level catalog test
-        # where Rich does not wrap).
+        # A wide COLUMNS keeps Rich from wrapping the URL; the fragment is
+        # verified in the unit-level catalog test.
         from urllib.parse import urlparse
 
         urls = [tok.strip("(),.;'\"") for tok in out.split() if "://" in tok.strip("(),.;'\"")]
-        docs_urls = [u for u in urls if "publish-to-a-marketplace" in urlparse(u).path]
+        docs_urls = [u for u in urls if "installing-from-marketplaces" in urlparse(u).path]
         assert len(docs_urls) == 1, f"expected exactly one docs URL, got {docs_urls!r}"
         parsed = urlparse(docs_urls[0])
         assert parsed.scheme == "https"
         assert parsed.hostname == "microsoft.github.io"
-        assert parsed.path == "/apm/producer/publish-to-a-marketplace/"
+        assert parsed.path == "/apm/consumer/installing-from-marketplaces/"
         for forbidden in (
             "copilot plugin install",
             "claude plugin install",

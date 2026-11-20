@@ -79,7 +79,7 @@ _log = logging.getLogger(__name__)
 # `--allow-protocol-fallback` section (Starlight site defined in
 # docs/astro.config.mjs).
 _PROTOCOL_FALLBACK_DOCS_URL = (
-    "https://microsoft.github.io/apm/guides/dependencies/#restoring-the-legacy-permissive-chain"
+    "https://microsoft.github.io/apm/consumer/install-packages/#transport-selection"
 )
 
 
@@ -496,9 +496,9 @@ class GitHubPackageDownloader:
 
     # --- Artifactory VCS archive download support ---
 
-    def _get_artifactory_headers(self) -> dict[str, str]:
+    def _get_artifactory_headers(self, *, scheme: str, host: str) -> dict[str, str]:
         """Backward-compat stub -- delegates to download strategies."""
-        return self._strategies.get_artifactory_headers()
+        return self._strategies.get_artifactory_headers(scheme=scheme, host=host)
 
     def _download_artifactory_archive(
         self,
@@ -649,8 +649,10 @@ class GitHubPackageDownloader:
         stream: bool = False,
         retry_throttles: bool = True,
         allow_netrc: bool = True,
+        redirect_base: str | None = None,
     ) -> requests.Response:
         """Backward-compat stub -- delegates to download strategies."""
+        extra = {} if redirect_base is None else {"redirect_base": redirect_base}
         return self._strategies.resilient_get(
             url,
             headers,
@@ -659,6 +661,7 @@ class GitHubPackageDownloader:
             stream=stream,
             retry_throttles=retry_throttles,
             allow_netrc=allow_netrc,
+            **extra,
         )
 
     def _sanitize_git_error(self, error_message: str) -> str:

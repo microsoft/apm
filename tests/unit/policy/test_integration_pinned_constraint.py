@@ -134,7 +134,7 @@ def _run_via_target_check_seam(deps, policy):
         deps,
         lockfile=None,
         policy=policy,
-        effective_target="vscode",
+        effective_target=("copilot",),
         fetch_outcome="cached",
         fail_fast=False,
     )

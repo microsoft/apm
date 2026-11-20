@@ -339,6 +339,33 @@ class TestProjectScopeGateForCowork:
 
             run(ctx)  # Should not raise
 
+    @pytest.mark.parametrize(
+        ("selected", "expected"),
+        [(("claude", "opencode"), "opencode (hooks)"), (("claude",), None)],
+    )
+    def test_user_scope_warns_only_for_selected_targets(
+        self, tmp_path: Path, inject_config: Any, selected, expected
+    ) -> None:
+        """'install -g' names primitives only its selected targets skip (#3994)."""
+        inject_config({})
+        ctx = _make_ctx(tmp_path, scope=InstallScope.USER)
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[KNOWN_TARGETS[name] for name in selected],
+            ),
+            patch("apm_cli.core.target_detection.detect_target"),
+        ):
+            from apm_cli.install.phases.targets import run
+
+            run(ctx)
+        warnings = [c.args[0] for c in ctx.logger.warning.call_args_list]
+        scoped = [w for w in warnings if w.startswith("User scope does not deploy")]
+        if expected is None:
+            assert scoped == []
+        else:
+            assert len(scoped) == 1 and expected in scoped[0] and "claude" not in scoped[0]
+
     def test_project_scope_non_cowork_target_unaffected(
         self, tmp_path: Path, inject_config: Any
     ) -> None:

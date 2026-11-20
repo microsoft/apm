@@ -200,7 +200,7 @@ class TestDetectLocalBundle:
         bundle = _make_plugin_bundle(tmp_path / "source")
         lock_path = bundle / "apm.lock.yaml"
         lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
-        lock["lockfile_version"] = "4"
+        lock["lockfile_version"] = "5"
         lock_path.write_text(yaml.safe_dump(lock), encoding="utf-8")
         source = {
             "directory": bundle,
@@ -210,7 +210,7 @@ class TestDetectLocalBundle:
 
         with pytest.raises(
             UnsupportedLockfileVersionError,
-            match=r"Unsupported lockfile version '4'; supported versions: 1, 2, 3",
+            match=r"Unsupported lockfile version '5'; supported versions: 1, 2, 3, 4",
         ):
             detect_local_bundle(source)
 
@@ -789,3 +789,50 @@ class TestReadBundlePluginJson:
     def test_returns_empty_dict_when_missing(self, tmp_path: Path) -> None:
         result = read_bundle_plugin_json(tmp_path)
         assert result == {}
+
+
+class TestBundleLockfileGenerator:
+    """A bundle lock written by a newer APM warns, never refuses (#3963)."""
+
+    @pytest.fixture
+    def warnings(self, monkeypatch) -> list[str]:
+        from apm_cli.deps import lockfile_generator
+        from apm_cli.utils import console
+
+        monkeypatch.setattr(lockfile_generator, "running_cli_version", lambda: "0.25.0")
+        captured: list[str] = []
+        monkeypatch.setattr(console, "_rich_warning", lambda message, **_: captured.append(message))
+        return captured
+
+    @staticmethod
+    def _stamp(bundle: Path, version: str) -> None:
+        lock_path = bundle / "apm.lock.yaml"
+        lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        lock["apm_version"] = version
+        lock_path.write_text(yaml.safe_dump(lock), encoding="utf-8")
+
+    def test_newer_generator_warns_with_both_versions_and_upgrade_routes(
+        self, tmp_path: Path, warnings: list[str]
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        self._stamp(bundle, "99.0.0")
+
+        result = detect_local_bundle(bundle)
+
+        assert result is not None
+        assert len(warnings) == 1
+        assert "written by APM 99.0.0, newer than this APM 0.25.0" in warnings[0]
+        for route in ("apm self-update", "brew upgrade apm", "pip install --upgrade apm-cli"):
+            assert route in warnings[0]
+        assert "will refuse" not in warnings[0]
+
+    @pytest.mark.parametrize("version", ["0.25.0", "0.1.0", None])
+    def test_current_older_or_unstamped_generator_is_silent(
+        self, tmp_path: Path, warnings: list[str], version: str | None
+    ) -> None:
+        bundle = _make_plugin_bundle(tmp_path)
+        if version is not None:
+            self._stamp(bundle, version)
+
+        assert detect_local_bundle(bundle) is not None
+        assert warnings == []

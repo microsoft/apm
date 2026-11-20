@@ -21,6 +21,7 @@ from apm_cli.core.scope import (
     warn_unsupported_user_scope,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.policy.discovery import PolicyFetchResult
 
 # ---------------------------------------------------------------------------
 # InstallScope enum
@@ -376,29 +377,14 @@ class TestScopeWarnings:
         assert "copilot" not in unsupported
         assert "claude" not in unsupported
 
-    def test_warn_message_includes_partial_targets(self):
-        msg = warn_unsupported_user_scope()
-        assert msg  # non-empty because there are partially supported targets
-        # All four targets now support user scope
-        assert "cursor" in msg
-        assert "opencode" in msg
-        assert "copilot" in msg
-        # Claude and Cursor are fully supported
-        assert "claude" in msg
-        assert "fully supported" in msg.lower()
-        # Copilot, opencode (and others) remain partially supported
-        assert "partially supported" in msg.lower()
-
-    def test_warn_message_includes_unsupported_primitives(self):
-        msg = warn_unsupported_user_scope()
-        # Copilot now supports instructions at user scope (#650); not in warning.
-        assert "copilot (instructions)" not in msg
-        # Cursor now supports instructions at user scope; not in warning.
-        assert "cursor (instructions)" not in msg
-        # OpenCode excludes hooks
-        assert "opencode (hooks)" in msg
-        # Windsurf excludes instructions
+    def test_warning_names_only_selected_targets(self):
+        """A Claude-only global install is not warned about other targets (#3994)."""
+        assert warn_unsupported_user_scope(["claude"]) == ""
+        msg = warn_unsupported_user_scope(["claude", "windsurf", "opencode"])
         assert "windsurf (instructions)" in msg
+        assert "opencode (hooks)" in msg
+        assert "claude" not in msg
+        assert "antigravity" not in msg
 
 
 # ---------------------------------------------------------------------------
@@ -485,3 +471,34 @@ class TestActiveTargetsUserScope:
             result = active_targets_user_scope()
         names = {t.name for t in result}
         assert "opencode" in names
+
+
+def test_user_scope_grants_read_apm_home_while_policy_stays_anchored(tmp_path, monkeypatch) -> None:
+    """Grants come from $APM_HOME/apm.yml; org policy is still discovered from the deploy root."""
+    from types import SimpleNamespace
+
+    from apm_cli.security import executables
+
+    home, apm_home = tmp_path / "home", tmp_path / "elsewhere/apm-home"
+    home.mkdir()
+    apm_home.mkdir(parents=True)
+    (apm_home / "apm.yml").write_text(
+        "name: u\nversion: 1.0.0\nexecutables:\n  allow:\n    owner/pkg:\n      hooks: true\n"
+    )
+    (home / "apm.yml").write_text(
+        "name: d\nversion: 1.0.0\nexecutables:\n  allow:\n    owner/decoy:\n      hooks: true\n"
+    )
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    discovered: list = []
+    monkeypatch.setattr(
+        "apm_cli.policy.discovery.discover_policy_with_chain",
+        lambda root: discovered.append(root) or PolicyFetchResult(outcome="absent"),
+    )
+    allow = executables.resolve_project_exec_allow_map(
+        home,
+        SimpleNamespace(allow_executables=None),
+        user_scope=True,
+    )
+    assert discovered == [home]
+    assert allow is not None and allow["owner/pkg"]["hooks"] is True
+    assert "owner/decoy" not in allow

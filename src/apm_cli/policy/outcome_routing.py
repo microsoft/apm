@@ -24,6 +24,7 @@ and the exact gating semantics match the pre-extraction behaviour.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.install.errors import PolicyViolationError
@@ -83,6 +84,7 @@ def route_discovery_outcome(
     logger,
     fetch_failure_default: str,
     raise_blocking_errors: bool = True,
+    blocked_label: str = "Install blocked",
 ) -> ApmPolicy | None:
     """Route a :class:`PolicyFetchResult` to logging + fail-closed decisions.
 
@@ -105,6 +107,9 @@ def route_discovery_outcome(
         ``policy.fetch_failure=block``).  When ``False`` (used by
         ``install --dry-run``), the function returns normally and the
         caller is expected to render a preview instead.
+    blocked_label:
+        Prefix of a :class:`PolicyViolationError` message; readers outside
+        ``apm install`` name the block neutrally.
 
     Returns
     -------
@@ -133,7 +138,7 @@ def route_discovery_outcome(
             )
         if raise_blocking_errors:
             raise PolicyViolationError(
-                "Install blocked: policy hash mismatch -- pinned policy.hash "
+                f"{blocked_label}: policy hash mismatch -- pinned policy.hash "
                 "does not match fetched policy bytes "
                 f"(source={source or 'unknown'}). "
                 "Update apm.yml policy.hash or contact your org admin.",
@@ -150,7 +155,7 @@ def route_discovery_outcome(
             )
         if raise_blocking_errors:
             raise PolicyViolationError(
-                "Install blocked: org policy inheritance chain is incomplete "
+                f"{blocked_label}: org policy inheritance chain is incomplete "
                 f"(source={source or 'unknown'}). Restore the unreachable parent "
                 "policy before retrying.",
                 policy_source=source or "unknown",
@@ -161,11 +166,13 @@ def route_discovery_outcome(
     # canonical logger helper for consistent wording (Logging C1/C2,
     # UX F1/F2/F4).
     if outcome in _NON_FOUND_LOGGED_OUTCOMES:
+        hint = fetch_result.discovery_hint
         if logger is not None:
             logger.policy_discovery_miss(
                 outcome=outcome,
                 source=source,
                 error=fetch_result.error or fetch_result.fetch_error,
+                hint=hint,
             )
         if (
             raise_blocking_errors
@@ -173,10 +180,10 @@ def route_discovery_outcome(
             and fetch_failure_default == "block"
         ):
             raise PolicyViolationError(
-                "Install blocked: no enforceable org policy was resolved "
+                f"{blocked_label}: no enforceable org policy was resolved "
                 f"(outcome={outcome}) and project apm.yml has "
                 "policy.fetch_failure_default=block "
-                f"(source={source or 'unknown'})",
+                f"(source={source or 'unknown'})" + (f". {hint}" if hint else ""),
                 policy_source=source or "unknown",
             )
         return None
@@ -204,7 +211,7 @@ def route_discovery_outcome(
             )
         if raise_blocking_errors and policy is not None and policy.fetch_failure == "block":
             raise PolicyViolationError(
-                "Install blocked: org policy refresh failed and the cached "
+                f"{blocked_label}: org policy refresh failed and the cached "
                 "policy declares fetch_failure=block "
                 f"(source={source or 'unknown'})",
                 policy_source=source or "unknown",
@@ -227,3 +234,106 @@ def route_discovery_outcome(
 
     # Defensive: unrecognised outcome -- skip enforcement.
     return None
+
+
+class _TrustReaderLog:
+    """Logger adapter for trust readers.
+
+    A trust reader runs after (or instead of) the command's own policy
+    announcement, so a resolved policy is not announced again. A miss is
+    reported once the outcome is known not to block: a blocking outcome
+    raises, and the exception is then the only report.
+    """
+
+    def __init__(self, logger) -> None:
+        self._logger = logger
+        self._pending: list[dict] = []
+
+    def policy_resolved(self, **_kwargs) -> None:
+        return None
+
+    def policy_discovery_miss(self, **kwargs) -> None:
+        self._pending.append(kwargs)
+
+    def flush(self) -> None:
+        render = getattr(self._logger, "policy_discovery_miss", None)
+        for kwargs in self._pending:
+            if render is not None:
+                render(**kwargs)
+            else:
+                _report_miss_neutrally(self._logger, **kwargs)
+        self._pending.clear()
+
+
+def _report_miss_neutrally(logger, *, outcome: str, source: str = "", error=None, **_kw) -> None:
+    """Report a policy miss for a command that has no policy wording of its own."""
+    verbose = bool(getattr(logger, "verbose", False))
+    if outcome in ("absent", "no_git_remote") and not verbose:
+        return
+    from apm_cli.utils.console import _rich_warning
+
+    detail = f": {error}" if error else ""
+    if outcome == "cached_stale":
+        message = (
+            f"Using stale cached org policy (refresh failed{detail}); enforcement still applies."
+        )
+    else:
+        message = (
+            f"Org policy not applied (outcome={outcome}, source={source or 'unknown'}){detail}"
+        )
+    _rich_warning(message, symbol="warning")
+
+
+def discover_trust_policy(project_root: Path) -> PolicyFetchResult:
+    """Discover org policy for *project_root*; a discovery error is a fetch failure.
+
+    A command that has several trust readers discovers once and hands the
+    result to each of them (a local bundle install, for example).
+    """
+    from .discovery import PolicyFetchResult, discover_policy_with_chain
+
+    try:
+        return discover_policy_with_chain(Path(project_root))
+    except (OSError, ValueError, RuntimeError) as exc:
+        return PolicyFetchResult(outcome="cache_miss_fetch_fail", fetch_error=str(exc))
+
+
+def resolve_trust_policy(
+    project_root: Path,
+    *,
+    no_policy: bool = False,
+    logger=None,
+    announce: bool = True,
+    raise_blocking_errors: bool = True,
+    fetch_result: PolicyFetchResult | None = None,
+) -> ApmPolicy | None:
+    """Return the org policy an executables-trust reader may apply.
+
+    The single policy-outcome owner for trust readers. The discovery outcome
+    routes through :func:`route_discovery_outcome` with the project's
+    ``policy.fetch_failure_default``, exactly as package installs do: an
+    unusable policy raises :class:`PolicyViolationError` when the project or
+    the cached policy asks to block, and is reported otherwise.
+    ``announce=False`` suppresses the
+    miss report (for read-only replays whose command reports it);
+    ``raise_blocking_errors=False`` serves dry-run previews. *fetch_result*
+    is a discovery the caller already holds, from :func:`discover_trust_policy`.
+    """
+    if no_policy:
+        return None
+    from .project_config import read_project_fetch_failure_default
+
+    root = Path(project_root)
+    if fetch_result is None:
+        fetch_result = discover_trust_policy(root)
+    log = _TrustReaderLog(logger) if announce else None
+    policy = route_discovery_outcome(
+        fetch_result,
+        logger=log,
+        fetch_failure_default=read_project_fetch_failure_default(root),
+        raise_blocking_errors=raise_blocking_errors,
+        blocked_label="Blocked by org policy",
+    )
+    if log is not None:
+        log.flush()
+    return policy

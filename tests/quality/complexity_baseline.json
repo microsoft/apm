@@ -35,6 +35,11 @@
         "PLR0911"
       ]
     },
+    "scripts/architecture_linter/checks/registry_owner_guards.py": {
+      "_raw_target_read": [
+        "PLR0911"
+      ]
+    },
     "src/apm_cli/adapters/client/base.py": {
       "MCPClientAdapter._infer_registry_name": [
         "PLR0911"
@@ -242,13 +247,19 @@
       "AuthResolver._resolve_token": [
         "PLR0911"
       ],
-      "AuthResolver.execute_with_bearer_fallback": [
+      "AuthResolver.build_error_context": [
         "PLR0911"
       ],
       "AuthResolver.try_with_fallback": [
-        "C901",
-        "PLR0911",
-        "PLR0915"
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/core/auth_outcome.py": {
+      "_classify_response": [
+        "PLR0911"
+      ],
+      "_classify_text": [
+        "PLR0911"
       ]
     },
     "src/apm_cli/core/command_logger.py": {
@@ -258,9 +269,7 @@
     },
     "src/apm_cli/core/target_detection.py": {
       "detect_target": [
-        "C901",
-        "PLR0911",
-        "PLR0912"
+        "PLR0911"
       ]
     },
     "src/apm_cli/deps/apm_resolver.py": {
@@ -268,6 +277,7 @@
         "PLR0913"
       ],
       "APMDependencyResolver._try_load_dependency_package": [
+        "C901",
         "PLR0911"
       ],
       "APMDependencyResolver.build_dependency_tree": [
@@ -279,11 +289,6 @@
     "src/apm_cli/deps/bare_cache.py": {
       "build_clone_failure_message": [
         "PLR0913"
-      ]
-    },
-    "src/apm_cli/deps/clone_engine.py": {
-      "CloneEngine.execute": [
-        "PLR0915"
       ]
     },
     "src/apm_cli/deps/download_strategies.py": {
@@ -384,7 +389,8 @@
     },
     "src/apm_cli/install/mcp/command.py": {
       "run_mcp_install": [
-        "PLR0913"
+        "PLR0913",
+        "PLR0915"
       ]
     },
     "src/apm_cli/install/mcp/conflicts.py": {
@@ -393,7 +399,17 @@
       ]
     },
     "src/apm_cli/install/mcp/integration.py": {
+      "prepare_mcp_integration": [
+        "PLR0913"
+      ],
       "run_mcp_integration": [
+        "C901",
+        "PLR0913",
+        "PLR0915"
+      ]
+    },
+    "src/apm_cli/install/mcp/ownership.py": {
+      "compare_native_mcp_connection": [
         "PLR0913"
       ]
     },
@@ -470,13 +486,17 @@
     "src/apm_cli/integration/mcp_integrator.py": {
       "MCPIntegrator.install": [
         "PLR0913"
+      ],
+      "MCPIntegrator.remove_stale": [
+        "C901"
       ]
     },
     "src/apm_cli/integration/mcp_integrator_install.py": {
       "_install_registry_group": [
         "C901",
         "PLR0912",
-        "PLR0913"
+        "PLR0913",
+        "PLR0915"
       ],
       "_install_self_defined_deps": [
         "PLR0913"
@@ -487,7 +507,9 @@
         "PLR0915"
       ],
       "run_mcp_install": [
-        "PLR0913"
+        "C901",
+        "PLR0913",
+        "PLR0915"
       ]
     },
     "src/apm_cli/integration/skill_integrator.py": {
@@ -495,6 +517,9 @@
         "PLR0913"
       ],
       "SkillIntegrator._promote_sub_skills": [
+        "PLR0913"
+      ],
+      "SkillIntegrator._promote_sub_skills_standalone": [
         "PLR0913"
       ],
       "SkillIntegrator.integrate_package_skill": [
@@ -520,9 +545,6 @@
       ]
     },
     "src/apm_cli/marketplace/resolver.py": {
-      "_compute_cross_repo_misconfig_risk": [
-        "PLR0911"
-      ],
       "_extract_in_repo_path_and_ref": [
         "PLR0911"
       ]
@@ -559,6 +581,9 @@
     },
     "src/apm_cli/policy/_gitlab.py": {
       "_fetch_gitlab_ancestry": [
+        "PLR0911"
+      ],
+      "_fetch_gitlab_contents": [
         "PLR0911"
       ]
     },
@@ -597,7 +622,8 @@
         "PLR0911"
       ],
       "run_dependency_policy_checks": [
-        "PLR0911"
+        "PLR0911",
+        "PLR0913"
       ],
       "run_policy_checks": [
         "PLR0911"
@@ -605,6 +631,11 @@
     },
     "src/apm_cli/primitives/parser.py": {
       "_extract_primitive_name": [
+        "PLR0911"
+      ]
+    },
+    "src/apm_cli/security/trust.py": {
+      "admit_native_plugin": [
         "PLR0911"
       ]
     },

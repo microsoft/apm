@@ -24,6 +24,7 @@ from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.policy.ci_checks import _check_lockfile_exists
+from apm_cli.security.trust import McpAdmission
 
 MCP_ONLY_APM_YML = """\
 name: jira
@@ -117,7 +118,7 @@ class TestLegacyLockfileIsMigratedFirst(_ProjectCase):
         from apm_cli.deps.lockfile import LEGACY_LOCKFILE_NAME, migrate_lockfile_if_needed
 
         legacy = self.root / LEGACY_LOCKFILE_NAME
-        lock = LockFile(apm_version="0.0.1-test")
+        lock = LockFile(apm_version="0.0.1")
         lock.save(legacy)
         self.assertTrue(legacy.exists())
 
@@ -178,7 +179,7 @@ dependencies:
             self.manifest,
             None,
             self.root / APM_MODULES_DIR,
-            trust_transitive_self_defined=True,
+            admission=McpAdmission(None, one_off=True),
         )
         return dict(view.configs)
 
@@ -243,7 +244,7 @@ class TestExistingLockfileBehaviourUnchanged(_ProjectCase):
         self.assertEqual(self.lock_path.read_text(encoding="utf-8"), first)
 
     def test_existing_lockfile_is_updated_not_replaced(self):
-        lock = LockFile(apm_version="0.0.1-test")
+        lock = LockFile(apm_version="0.0.1")
         lock.lsp_servers = ["some-lsp"]
         lock.save(self.lock_path)
 

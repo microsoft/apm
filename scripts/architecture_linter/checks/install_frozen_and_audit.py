@@ -69,6 +69,7 @@ def _last_line_re(facts: object, pattern: re.Pattern[str]) -> int | None:
 _FROZEN_OWNER = "src/apm_cli/install/service.py"
 # req-lk-017: frozen install and audit content-integrity share one verifier.
 _DEPLOYED_HASH_VERIFIER = "src/apm_cli/policy/ci_checks.py"
+_DRIFT_DIFF = "src/apm_cli/install/drift.py"
 _DEPLOYED_HASH_FRAGMENTS = (
     (_FROZEN_OWNER, "resolve_audit_scope(lockfile_path.parent, committed)"),
     (_FROZEN_OWNER, "= verify_deployed_file_hashes(deploy_root, committed, targets)"),
@@ -78,6 +79,9 @@ _DEPLOYED_HASH_FRAGMENTS = (
         "hash_mismatches, unresolved_hash_paths = verify_deployed_file_hashes(",
     ),
     (_DEPLOYED_HASH_VERIFIER, "= resolve_audit_scope(project_root, lock)"),
+    # Plain audit's drift row reads local-bundle hashes through the same
+    # verifier, so it never disagrees with --ci (#3989).
+    (_DRIFT_DIFF, "= verify_deployed_file_hashes(project_root, lockfile, targets)"),
 )
 
 
@@ -95,8 +99,10 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     outcome, outcome_fail = _facts_for(provider, "src/apm_cli/install/outcome.py", rule_id)
     mcp, mcp_fail = _facts_for(provider, "src/apm_cli/install/mcp/integration.py", rule_id)
     audit, audit_fail = _facts_for(provider, _DEPLOYED_HASH_VERIFIER, rule_id)
+    drift, drift_fail = _facts_for(provider, _DRIFT_DIFF, rule_id)
     failures = (
-        owner_fail
+        drift_fail
+        + owner_fail
         + adapter_fail
         + services_fail
         + integration_fail
@@ -218,7 +224,7 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         or not _before(acquisition, hydrated_check)
         or not _before(hydrated_check, deployment)
         or not all(
-            _present(owner if path == _FROZEN_OWNER else audit, needle)
+            _present({_FROZEN_OWNER: owner, _DRIFT_DIFF: drift}.get(path, audit), needle)
             for path, needle in _DEPLOYED_HASH_FRAGMENTS
         )
         or bool(duplicates)
@@ -356,6 +362,13 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "run_owned_mcp_integration",
             "retain_deferred_mcp_claims",
         ),
+        # A bundle reinstall reconciles its owner's servers even when it ships
+        # none, so revoke, deny and repack retire them (#3956).
+        (
+            "src/apm_cli/install/local_bundle_handler.py",
+            "_wire_legacy_bundle_mcp_servers",
+            "run_owned_mcp_integration",
+        ),
         ("src/apm_cli/adapters/client/claude.py", "configure_mcp_server", "mcp_native_hash"),
         ("src/apm_cli/adapters/client/codex.py", "configure_mcp_server", "mcp_native_hash"),
         (
@@ -381,6 +394,19 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
                     f"{function} must route native MCP ownership through {required_call}",
                 )
             )
+    bundle = provider.file_facts("src/apm_cli/install/local_bundle_handler.py")
+    if not any(
+        "bool(bundle_mcp_deps) or bundle_info.format == BundleFormat.CLAUDE_PLUGIN.value" in line
+        for line in _lines(bundle)
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                "src/apm_cli/install/local_bundle_handler.py",
+                "A Claude bundle must reconcile its owned MCP servers even when its "
+                "filtered list is empty (#3956)",
+            )
+        )
     cleanup = provider.file_facts("src/apm_cli/integration/mcp_integrator.py")
     opt_in_gate = re.compile(r'/ "\.(?:claude|opencode)"\)\.is_dir\(\)')
     for number, line in enumerate(_lines(cleanup), start=1):
@@ -420,13 +446,14 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             and call.qualname.rsplit(".", 1)[-1] == "require_removable_mcp_connections"
             for call in getattr(cleanup, "calls", ())
         )
-        != 3
+        != 4
     ):
         findings.append(
             _summary(
                 rule_id,
                 "src/apm_cli/integration/mcp_integrator.py",
-                "Codex and both Claude cleanup scopes must verify their managed baseline",
+                "Codex, both Claude cleanup scopes and the shared Copilot project .mcp.json "
+                "must verify their managed baseline",
             )
         )
     if not _present_re(
@@ -532,7 +559,7 @@ def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ..
                     )
     # Prune and the expected-path selector ask the same owner which lock
     # entries are retained instead of re-deriving ``depth > 1`` (#3668).
-    for path in ("src/apm_cli/commands/prune.py", "src/apm_cli/commands/_helpers.py"):
+    for path in ("src/apm_cli/commands/prune.py", "src/apm_cli/install/orphans.py"):
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)
         if failures:
@@ -558,6 +585,8 @@ def check_uninstall_reachability(provider: FactsProvider) -> tuple[Violation, ..
 
 _AUDIT_REPLAY_OWNER = "src/apm_cli/install/audit_replay.py"
 _AUDIT_ROOTS_OWNER = "src/apm_cli/install/audit_target_roots.py"
+_LINK_RESOLVER_OWNER = "src/apm_cli/compilation/link_resolver.py"
+_LIVE_LINK_FRAME = "target_location = live_root / target_location.relative_to(replay_root)"
 _LOCKFILE_OWNER = "src/apm_cli/deps/lockfile.py"
 _SELF_ENTRY_CONSTRUCTOR = re.compile(r"""repo_url\s*=\s*["']<self>["']""")
 
@@ -635,23 +664,39 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
         return tuple(failures)
 
     findings.extend(
-        _unique_definitions(provider, rule_id, _AUDIT_ROOTS_OWNER, ("replay_modules_root",))
+        _unique_definitions(provider, rule_id, _AUDIT_ROOTS_OWNER, ("replay_deployment_frame",))
     )
     roots, roots_fail = _facts_for(provider, _AUDIT_ROOTS_OWNER, rule_id)
+    resolver, resolver_fail = _facts_for(provider, _LINK_RESOLVER_OWNER, rule_id)
     findings.extend(roots_fail)
+    findings.extend(resolver_fail)
     replay_calls = _name_calls_in(drift, "run_replay")
-    projection_calls = _name_calls_in(roots, "replay_modules_root")
+    frame_calls = _name_calls_in(roots, "replay_deployment_frame")
     if (
-        "replay_modules_root" not in replay_calls
+        "replay_deployment_frame" not in replay_calls
         or {"get_modules_dir", "get_deploy_root"} & replay_calls
-        or not {"get_modules_dir", "get_deploy_root"} <= projection_calls
-        or not _present(roots, "InstallScope.USER if user_scope else InstallScope.PROJECT")
+        or not {"get_modules_dir", "get_deploy_root"} <= frame_calls
     ):
         findings.append(
             _summary(
                 rule_id,
                 _AUDIT_ROOTS_OWNER,
                 "Audit deployment modules must use the canonical scope projection",
+            )
+        )
+    # Replay renders links in live coordinates and verifies native images it
+    # materialized, wherever APM_HOME sits relative to HOME (#3901).
+    if not (
+        _present(drift, "package_info.deployment_frame = deployment_frame")
+        and _present(drift, "replay_path=install_path,")
+        and _present(resolver, _LIVE_LINK_FRAME)
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                "src/apm_cli/install/drift.py",
+                "Audit replay must render dependency links in the live deployment frame "
+                "and verify native plugins against the materialized replay image",
             )
         )
 
@@ -664,7 +709,9 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
     if not (
         _body_has(run_replay_body, "integrate_package_primitives(")
         and _body_has(run_replay_body, "skill_subset=")
-        and _body_has(run_replay_body, "package_info.dependency_ref.skill_subset")
+        and _body_has(
+            run_replay_body, "effective_dependency_selection(package_info.dependency_ref)"
+        )
     ):
         findings.append(
             _summary(
@@ -702,31 +749,70 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
 
     audit_gate_calls = _name_calls_in(audit, "_audit_ci_gate")
     audit_gate_body = _awk_body(audit, re.compile(r"^def _audit_ci_gate\("), re.compile(r"^def "))
-    if not _body_has(
-        audit_gate_body,
-        "get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve()",
+    materialization_body = _awk_body(
+        owner,
+        re.compile(r"^def resolve_ci_audit_materialization\("),
+        re.compile(r"^(def |class |@)"),
+    )
+    lockfile, lockfile_fail = _facts_for(provider, _LOCKFILE_OWNER, rule_id)
+    findings.extend(lockfile_fail)
+    modules_content_body = _awk_body(
+        lockfile,
+        re.compile(r"^    def records_modules_content\("),
+        re.compile(r"^    (def |@)"),
+    )
+    # #3781: one owner decides whether a workspace needs live package
+    # materialization; the user workspace needs it only when the lockfile
+    # records apm_modules content (packages or local bundle staging).
+    if not (
+        _body_has(
+            materialization_body,
+            "get_workspace_deploy_root(project_root) != project_root.resolve()",
+        )
+        and _body_has(materialization_body, "lockfile.records_modules_content()")
+        and _body_has(modules_content_body, "self.get_package_dependencies()")
+        and _body_has(modules_content_body, "self.local_staging_slugs()")
+        and _body_has(materialization_body, "prepare_ci_audit_replay(")
+        and "resolve_ci_audit_materialization" in audit_gate_calls
+        and not {"get_workspace_deploy_root", "prepare_ci_audit_replay"} & audit_gate_calls
+        and not _body_has(audit_gate_body, "apm_modules")
+        and not _body_has(audit_gate_body, "APM_MODULES_DIR")
     ):
         findings.append(
             _summary(
                 rule_id,
-                "src/apm_cli/commands/audit.py",
-                "CI audit must compare resolved workspace identities before refusing global replay",
+                _AUDIT_REPLAY_OWNER,
+                "CI audit must ask resolve_ci_audit_materialization whether a workspace "
+                "needs package materialization (resolved identity; user scope only when "
+                "the lockfile records apm_modules content)",
             )
         )
+    findings.extend(
+        _duplicate_definition_lines(
+            provider,
+            rule_id=rule_id,
+            prefix=_SRC_PREFIX,
+            pattern=re.compile(r"installed package materialization is missing"),
+            owner=_AUDIT_REPLAY_OWNER,
+            message="Missing-materialization refusals belong to resolve_ci_audit_materialization",
+            respect_exempt=False,
+        )
+    )
     config_body = _awk_body(
         ci_checks, re.compile(r"^def _check_config_consistency\("), re.compile(r"^def ")
     )
     subset_body = _awk_body(
         ci_checks, re.compile(r"^def _check_skill_subset_consistency\("), re.compile(r"^def ")
     )
+    view_body = _awk_body(ci_checks, re.compile(r"^def audit_mcp_view\("), re.compile(r"^def "))
     if (
         not _present_re(owner, re.compile(r"^def prepare_ci_audit_replay\("))
-        or "prepare_ci_audit_replay" not in audit_gate_calls
         or "run_replay" in audit_gate_calls
         or not _body_has(config_body, "prepared_replay.modules_root")
         or not _body_has(subset_body, "prepared_replay.modules_root")
         or not _body_has(subset_body, "prepared_replay_error is not None")
-        or not _body_has(config_body, "project_root / APM_MODULES_DIR")
+        or not _body_has(config_body, "audit_mcp_view(")
+        or not _body_has(view_body, "project_root / APM_MODULES_DIR")
         or not _body_has(subset_body, "project_root / APM_MODULES_DIR")
     ):
         findings.append(

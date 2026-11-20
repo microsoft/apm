@@ -591,3 +591,72 @@ class TestRichErrorNarrowWidthWrapping:
         normalized = " ".join(rendered.split())
         assert "Claude import" in normalized
         assert "No import setting was changed" in normalized
+
+
+def test_warning_never_wraps_remediation_command(monkeypatch, capsys):
+    """A command hint on a continuation line stays copy-pasteable (#3994)."""
+    from apm_cli.utils.console import _reset_console, _rich_warning
+
+    monkeypatch.setenv("COLUMNS", "40")
+    _reset_console()
+    command = "apm approve github.com/acme/a-long-package-name/sub/path"
+    try:
+        _rich_warning(f"Parked MCP server 'x' needs approval\n    Approve: {command}")
+        out = capsys.readouterr().out
+    finally:
+        _reset_console()
+    assert f"    Approve: {command}\n" in out
+
+
+def test_info_never_splits_a_url(monkeypatch, capsys):
+    """A docs URL is printed as one copyable token at 80 columns (#3994)."""
+    from apm_cli.utils.console import _reset_console, _rich_info
+
+    monkeypatch.setenv("COLUMNS", "80")
+    _reset_console()
+    url = "https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#install-patterns"
+    try:
+        _rich_info(f"See: {url}", symbol="info")
+        out = capsys.readouterr().out
+    finally:
+        _reset_console()
+    assert url in out
+
+
+def test_truncated_cells_use_ascii_ellipsis(capsys):
+    """Rich's U+2026 ellipsis never reaches output; '...' does (#3994)."""
+    from rich.table import Table
+
+    from apm_cli.utils.console import new_console
+
+    console = new_console(width=30, force_terminal=False)
+    table = Table()
+    table.add_column("Name", overflow="ellipsis", no_wrap=True, max_width=12)
+    table.add_row("a-very-long-package-name-that-will-truncate")
+    console.print(table)
+    out = capsys.readouterr().out
+    assert "\u2026" not in out
+    assert "..." in out
+
+
+def test_ascii_ellipsis_keeps_ansi_styles_intact():
+    """In a color terminal the dots never land inside an SGR escape (#3994)."""
+    import io
+    import re
+
+    from rich.table import Table
+    from rich.text import Text
+
+    from apm_cli.utils.console import new_console
+
+    buf = io.StringIO()
+    console = new_console(file=buf, width=40, force_terminal=True, color_system="standard")
+    table = Table()
+    table.add_column("Name", overflow="ellipsis", no_wrap=True, max_width=10)
+    table.add_row(Text("abcdefgh", style="green") + Text("ijklmnop", style="blue"))
+    console.print(table)
+    out = buf.getvalue()
+    assert "\u2026" not in out
+    assert ".." in out
+    assert not re.search(r"\x1b\[[0-9;]*\.", out)
+    assert "\x1b[32mabcdefgh\x1b[0m" in out

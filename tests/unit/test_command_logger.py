@@ -565,6 +565,62 @@ class TestInstallLogger:
         assert "(cached)" in msg
 
     @patch("apm_cli.core.command_logger._rich_echo")
+    def test_download_complete_prints_ref_once(self, mock_echo):
+        """A name that already spells the ref does not repeat it (#3994)."""
+        logger = InstallLogger()
+        logger.download_complete("host/o/r/plugins/x#main", ref="main", sha="30c0ac7f")
+        msg = mock_echo.call_args[0][0]
+        assert msg == "  [+] host/o/r/plugins/x #main @30c0ac7f"
+
+    @patch("apm_cli.core.command_logger._rich_echo")
+    def test_held_package_header_prints_on_release(self, mock_echo):
+        """Held header lines print only when released, in order (#3994)."""
+        logger = InstallLogger(verbose=True)
+        with logger.held_package_header() as held:
+            logger.download_complete("owner/repo", ref="v1", sha="abc12345")
+            logger.package_auth("GITHUB_TOKEN", "pat")
+        mock_echo.assert_not_called()
+        for emit in held:
+            emit()
+        assert [call.args[0] for call in mock_echo.call_args_list] == [
+            "  [+] owner/repo #v1 @abc12345",
+            "    Auth: GITHUB_TOKEN (pat)",
+        ]
+
+    @patch("apm_cli.core.command_logger._rich_echo")
+    def test_acquire_all_then_announce_keeps_each_header_above_its_tree(self, mock_echo):
+        """Acquiring every package first still prints each header block in order (#3994)."""
+        from types import SimpleNamespace
+
+        from apm_cli.install.template import announce_package, prepare_integration_materialization
+
+        logger = InstallLogger(verbose=True)
+
+        def source(name):
+            def acquire():
+                logger.download_complete(name, ref="v1", sha="abc12345")
+                logger.package_type_info("APM package")
+                return object()
+
+            return SimpleNamespace(ctx=SimpleNamespace(logger=logger), acquire=acquire)
+
+        sources = [source("a/one"), source("b/two")]
+        for src in sources:
+            prepare_integration_materialization(src)
+        assert mock_echo.call_count == 0
+        for src, name in zip(sources, ("one", "two"), strict=True):
+            announce_package(src)
+            mock_echo(f"  |-- {name} integrated")
+        assert [call.args[0] for call in mock_echo.call_args_list] == [
+            "  [+] a/one #v1 @abc12345",
+            "    Package type: APM package",
+            "  |-- one integrated",
+            "  [+] b/two #v1 @abc12345",
+            "    Package type: APM package",
+            "  |-- two integrated",
+        ]
+
+    @patch("apm_cli.core.command_logger._rich_echo")
     def test_download_complete_legacy_ref_suffix(self, mock_echo):
         logger = InstallLogger()
         logger.download_complete("owner/repo", ref_suffix="old-style")

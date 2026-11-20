@@ -249,8 +249,9 @@ marker. Do not confuse it with `requires_windows` -- there is no
 used for this purpose. `windows_compat` tests run on **every OS**
 (Linux, macOS, Windows) as part of the normal unit suite; the marker
 additionally selects them for a dedicated, focused PR-time job
-(`windows-compat-gate` in `.github/workflows/ci.yml`, `runs-on:
-windows-latest`) that runs `pytest -m windows_compat tests/unit`.
+(`Windows Compatibility Gate` in `.github/workflows/ci.yml`: three
+duration-balanced `windows-latest` shards) that runs `pytest -m
+windows_compat tests/unit tests/integration`.
 That job exists because the full Windows matrix in
 `build-release.yml` only runs post-merge -- without this gate, a
 Windows-only regression (CRLF line endings, backslash path

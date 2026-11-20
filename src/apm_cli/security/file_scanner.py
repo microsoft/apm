@@ -415,13 +415,25 @@ def _scan_claimed_files(
             continue
 
         if surface is None:
-            surface = PrimitiveSurface(
+            # A recorded file under an absolute user root (``COPILOT_HOME`` or
+            # ``CLAUDE_CONFIG_DIR`` outside HOME) is labelled from that root.
+            recorded_root = next(
+                (
+                    target.managed_deploy_root
+                    for target in targets
+                    if target.managed_deploy_root is not None
+                    and abs_path.is_relative_to(target.managed_deploy_root)
+                ),
                 project_root,
+            )
+            surface = PrimitiveSurface(
+                recorded_root,
                 abs_path,
                 "*.md" if is_directory else None,
                 "recorded",
                 "document" if abs_path.suffix in {".md", ".mdc"} or is_directory else "executable",
                 "recorded",
+                external=recorded_root != project_root,
                 user_scope=user_scope,
             )
         if is_directory:

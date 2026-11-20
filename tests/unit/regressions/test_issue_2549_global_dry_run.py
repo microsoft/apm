@@ -71,7 +71,6 @@ def test_global_dry_run_redirects_absent_manifest_without_creating_user_state(
     preview_manifest, temp_dir = _prepare_dry_run_manifest_path(
         user_manifest,
         dry_run=True,
-        user_scope=True,
         has_packages=True,
     )
     try:
@@ -90,7 +89,6 @@ def test_existing_user_manifest_is_read_in_place(tmp_path: Path) -> None:
     preview_manifest, temp_dir = _prepare_dry_run_manifest_path(
         user_manifest,
         dry_run=True,
-        user_scope=True,
         has_packages=True,
     )
 

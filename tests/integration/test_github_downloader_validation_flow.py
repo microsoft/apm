@@ -9,6 +9,7 @@ Strategy: hermetic -- all external I/O is mocked.
 from __future__ import annotations
 
 import contextlib
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -59,6 +60,19 @@ def _configure_http_remote_env(downloader: GitHubPackageDownloader) -> None:
             suppress_credential_helpers=True,
         )
     )
+
+
+def _commit_cached_checkout(checkout: Path) -> None:
+    """Commit every file in *checkout*, as a persistent-cache checkout carries .git.
+
+    The cache fast path validates tracked links against the checkout's Git
+    objects (#3457), so a fixture without .git falls through to a clone.
+    """
+    actor = Actor("APM Test", "apm-test@example.invalid")
+    cached_repo = Repo.init(checkout)
+    cached_repo.index.add([path.name for path in checkout.iterdir() if path.name != ".git"])
+    cached_repo.index.commit("seed cache", author=actor, committer=actor)
+    cached_repo.close()
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +483,7 @@ class TestDownloadWholeRepositoryPersistentCache:
         cached_checkout = tmp_path / "cached"
         cached_checkout.mkdir()
         (cached_checkout / "apm.yml").write_text("name: agent-cfg\nversion: 1.0.0\n")
+        _commit_cached_checkout(cached_checkout)
 
         dl = _make_downloader()
         dl.git_env.update(
@@ -498,6 +513,11 @@ class TestDownloadWholeRepositoryPersistentCache:
             patch.object(dl, "resolve_git_reference", return_value=resolved_ref),
             patch("apm_cli.deps.github_downloader.validate_apm_package") as mock_validate,
             patch("apm_cli.utils.file_ops.robust_copy2"),
+            patch.object(
+                dl,
+                "_clone_with_fallback",
+                side_effect=AssertionError("cache hit must not clone"),
+            ),
         ):
             mock_result = MagicMock()
             mock_result.is_valid = True
@@ -540,6 +560,7 @@ class TestDownloadWholeRepositoryPersistentCacheAgentPluginRejection:
         cached_checkout = tmp_path / "cached"
         cached_checkout.mkdir()
         (cached_checkout / "plugin.json").write_text("{}", encoding="utf-8")
+        _commit_cached_checkout(cached_checkout)
 
         dl = _make_downloader()
         persistent_cache = MagicMock()
@@ -563,6 +584,11 @@ class TestDownloadWholeRepositoryPersistentCacheAgentPluginRejection:
                 side_effect=AgentPluginManifestError("unsupported schema"),
             ),
             patch("apm_cli.deps.github_downloader._rmtree") as mock_rmtree,
+            patch.object(
+                dl,
+                "_clone_with_fallback",
+                side_effect=AssertionError("cache hit must not clone"),
+            ),
         ):
             with pytest.raises(AgentPluginManifestError):
                 dl.download_package(dep_ref, target_path)

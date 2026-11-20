@@ -1,7 +1,7 @@
 """LSP dependency model."""
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
@@ -45,6 +45,12 @@ class LSPDependency:
     max_restarts: int | None = None
     resolved_by: str | None = None
     approval_keys: tuple[str, ...] = ()
+    # Materialized root of the declaring package; renders an authored
+    # ``${CLAUDE_PLUGIN_ROOT}`` per target and is never serialized.
+    plugin_root: str | None = field(default=None, compare=False)
+    # Runtimes that load this server natively from its declaring plugin, so
+    # APM never writes it there. Never serialized and not part of equality.
+    native_runtimes: frozenset[str] = field(default=frozenset(), compare=False)
 
     _VALID_TRANSPORTS = frozenset({"stdio", "socket"})
 

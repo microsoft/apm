@@ -18,6 +18,7 @@ from ..core.target_detection import (
     should_compile_claude_md,
     should_compile_copilot_instructions_md,
     should_compile_gemini_md,
+    target_without_compile_output,
 )
 from ..primitives.discovery import discover_primitives
 from ..primitives.models import Instruction, PrimitiveCollection
@@ -203,7 +204,9 @@ class CompilationConfig:
                     config.chatmode = compilation_config["chatmode"]
                 if "resolve_links" in compilation_config:
                     config.resolve_links = compilation_config["resolve_links"]
+                # architecture-authority-exempt: compilation-target-field
                 if "target" in compilation_config:
+                    # architecture-authority-exempt: compilation-target-field
                     config.target = compilation_config["target"]
 
                 # Distributed compilation settings (Task 7)
@@ -468,12 +471,12 @@ class AgentsCompiler:
             if "gemini" in requested_outputs and should_compile_gemini_md(routing_target):
                 results.append(self._compile_gemini_md(config, primitives))
 
-            # Some targets (e.g. agent-skills) use only the data-driven
-            # integration layer and have no root-context compilation output.
+            # Targets without a compile family (skills-only, experimental) use
+            # only the integration layer and have no root-context output.
             if not results:
-                if logger and config.target == "agent-skills":
+                if logger and (no_output := target_without_compile_output(config.target)):
                     logger.progress(
-                        "agent-skills -- no compile outputs, skipping",
+                        f"{no_output.name} -- no compile outputs, skipping",
                         symbol="info",
                     )
                 return CompilationResult(
@@ -562,6 +565,7 @@ class AgentsCompiler:
         # AGENTS.md for instructions, so dedup must not fire for those
         # targets (issue #1678).
         # --force-instructions / --no-dedup lets users opt out entirely.
+        dedup_coverage = "deployed rules already cover this target"
         if config.no_dedup:
             skip_instructions = False
             self._log(
@@ -577,6 +581,7 @@ class AgentsCompiler:
                 rules_dir_rel, target_key = dedup_rules
                 dep_dir = self.base_dir / rules_dir_rel
                 log_dep_dir = f"{rules_dir_rel}/"
+                dedup_coverage = f"{log_dep_dir} already covers {target_key.title()}"
 
                 expected_filenames = _build_expected_rule_filenames(target_key, primitives)
 
@@ -646,7 +651,7 @@ class AgentsCompiler:
                 self._log(
                     "progress",
                     f"Skipped {suppressed_count} empty AGENTS.md {noun} -- "
-                    ".github/instructions/ already covers Copilot; "
+                    f"{dedup_coverage}; "
                     "pass --force-instructions to write all AGENTS.md files",
                     symbol="info",
                 )
@@ -655,7 +660,7 @@ class AgentsCompiler:
                 self._log(
                     "progress",
                     f"AGENTS.md not generated ({suppressed_count} {noun}) -- "
-                    ".github/instructions/ already covers Copilot; "
+                    f"{dedup_coverage}; "
                     "pass --force-instructions to write AGENTS.md",
                     symbol="info",
                 )
@@ -1120,6 +1125,7 @@ class AgentsCompiler:
         stats["claude_empty_due_to_no_primitives"] = (
             would_emit_no_claude_md and not skip_instructions
         )
+        stats["claude_native_rules_only"] = would_emit_no_claude_md and skip_instructions
 
         if would_emit_no_claude_md:
             if protected_claude_paths:
@@ -1254,7 +1260,7 @@ class AgentsCompiler:
         from .gemini_formatter import GeminiFormatter
 
         gemini_formatter = GeminiFormatter(str(self.base_dir))
-        gemini_result = gemini_formatter.format_distributed(primitives)
+        gemini_result = gemini_formatter.format_distributed(primitives, dry_run=config.dry_run)
 
         protected_gemini_paths = {
             path
@@ -1382,7 +1388,7 @@ class AgentsCompiler:
             output_path=" | ".join(output_paths) if output_paths else "",
             content="\n\n---\n\n".join(content_parts) if content_parts else "",
             warnings=list(dict.fromkeys(merged_warnings)),
-            errors=merged_errors,
+            errors=list(dict.fromkeys(merged_errors)),
             stats=merged_stats,
             has_critical_security=any(r.has_critical_security for r in results),
         )

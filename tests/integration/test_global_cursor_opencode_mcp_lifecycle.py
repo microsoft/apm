@@ -100,6 +100,13 @@ def _servers(scenario: _Scenario, target: str) -> dict:
     return document[_TARGETS[target][1]]
 
 
+def _conflict(result: CommandResult, name: str) -> None:
+    """A differing same-name user connection is preserved and reported (#3239, #3681)."""
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, output
+    assert f"MCP server '{name}' conflicts with the existing" in output, output
+
+
 def _workspace(scenario: _Scenario) -> dict[str, bytes]:
     return {
         path.relative_to(scenario.cwd).as_posix(): path.read_bytes()
@@ -119,10 +126,10 @@ def test_installed_global_prune_preserves_skipped_foreign_name(
     _seed(scenario, target, {"foreign": foreign})
     _write_root(scenario, [_server("foreign"), _server("managed")])
     install = ("install", "-g", "--target", target, "--no-policy")
-    assert scenario.run(*install).returncode == 0
+    _conflict(scenario.run(*install), "foreign")
     assert scenario.lock().mcp_target_servers == {target: ["managed"]}
     _write_root(scenario, [_server("foreign", "new-source-value"), _server("managed")])
-    assert scenario.run(*install).returncode == 0
+    _conflict(scenario.run(*install), "foreign")
     assert "foreign" in _servers(scenario, target)
     assert _servers(scenario, target)["foreign"] == foreign
     assert scenario.lock().mcp_target_servers == {target: ["managed"]}
@@ -148,7 +155,7 @@ def test_installed_global_prune_intersects_each_targets_ownership(
     _seed(scenario, "opencode", {"obsolete": foreign})
     _write_root(scenario, [_server("obsolete"), _server("keep")])
     install = ("install", "-g", "--target", "cursor,opencode", "--no-policy")
-    assert scenario.run(*install).returncode == 0
+    _conflict(scenario.run(*install), "obsolete")
     assert scenario.lock().mcp_target_servers == {
         "cursor": ["keep", "obsolete"],
         "opencode": ["keep"],
@@ -264,9 +271,21 @@ def test_installed_global_mcp_refusal_preserves_owned_state(
     assert _workspace(scenario) == workspace_before
 
 
+def _rendered(scenario: _Scenario, target: str, server: dict, monkeypatch) -> dict:
+    """Render *server* exactly as the native user config would store it."""
+    from apm_cli.factory import ClientFactory
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.models.dependency.mcp import MCPDependency
+
+    monkeypatch.setenv("HOME", str(scenario.isolated.home))
+    client = ClientFactory.create_client(target, user_scope=True)
+    info = MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(server))
+    return client.render_server_config(info)
+
+
 @pytest.mark.parametrize("target", list(_TARGETS))
 def test_installed_global_package_update_prune_and_uninstall(
-    tmp_path: Path, apm_binary_path: Path, target: str
+    tmp_path: Path, apm_binary_path: Path, target: str, monkeypatch
 ) -> None:
     """Local source revisions drive global native state and package provenance."""
     scenario = _scenario(tmp_path, apm_binary_path)
@@ -280,7 +299,9 @@ def test_installed_global_package_update_prune_and_uninstall(
     package = factory.create(
         "global-mcp-package", mcp_dependencies=[managed, _server("obsolete"), _server("foreign")]
     )
-    foreign = {"command": ["mine"]}
+    # An identical user entry under a declared name stays foreign: never
+    # claimed, updated or retired (a differing one is a conflict, #3681).
+    foreign = _rendered(scenario, target, _server("foreign"), monkeypatch)
     _seed(scenario, target, {"foreign": foreign})
     install = ("install", "-g", "--target", target, "--no-policy", "--trust-transitive-mcp")
     assert scenario.run(*install, str(package.root)).returncode == 0
@@ -375,7 +396,11 @@ def test_legacy_global_opencode_adoption_preserves_json_types(
     native = _servers(scenario, "opencode")["probe"]
     native["enabled"] = enabled
     _seed(scenario, "opencode", {"probe": native})
-    assert scenario.run(*command).returncode == 0
+    adopted = scenario.run(*command)
+    if enabled is True:
+        assert adopted.returncode == 0, adopted.stdout
+    else:
+        _conflict(adopted, "probe")
     expected = {"opencode": ["probe"]} if enabled is True else {}
     assert scenario.lock().mcp_target_servers == expected
     _write_root(scenario, [])

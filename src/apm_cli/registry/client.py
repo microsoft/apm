@@ -11,6 +11,8 @@ from urllib.parse import quote, urlparse, urlunparse
 
 import requests
 
+from ..mcp_transport import canonical_remote_transport
+
 _log = logging.getLogger(__name__)
 
 # Hard byte ceiling for an MCP registry HTTP body. The registry URL can come
@@ -225,6 +227,10 @@ def is_valid_mcp_server_name(server_name: object) -> bool:
     return isinstance(server_name, str) and _SERVER_NAME_RE.fullmatch(server_name) is not None
 
 
+class RegistryEgressRefusedError(RuntimeError):
+    """Raised when registry-only mode forbids a direct MCP registry request."""
+
+
 class ServerNotFoundError(ValueError):
     """Raised when a server lookup against the registry returns 404.
 
@@ -368,6 +374,32 @@ class SimpleRegistryClient:
         self._timeout = _resolve_timeout()
         self._http_cache = self._init_http_cache()
 
+    def _refuse_direct_egress_when_proxy_only(self) -> None:
+        """Refuse an unsanctioned MCP registry when ``PROXY_REGISTRY_ONLY`` is set.
+
+        Registry-only mode sanctions no direct egress for dependency content;
+        MCP server metadata is dependency content. Only the registry the
+        operator configured (``--registry``, ``MCP_REGISTRY_URL``, or ``apm
+        config``) is the sanctioned mirror. The public default and a
+        manifest's own ``registry:`` URL are refused unless that URL names
+        the configured registry (#3994).
+        """
+        from apm_cli.deps.registry_proxy import is_enforce_only
+
+        if not is_enforce_only() or self.registry_url_source in {"flag", "env", "config"}:
+            return
+        if self.registry_url_source == "explicit":
+            configured, configured_source = resolve_mcp_registry_url(None)
+            if configured_source != "default" and redact_mcp_registry_url(
+                normalize_mcp_registry_url(configured)
+            ) == redact_mcp_registry_url(self.registry_url):
+                return
+        raise RegistryEgressRefusedError(
+            f"PROXY_REGISTRY_ONLY is set: refusing direct MCP registry lookup at "
+            f"{self.registry_url}. Point MCP_REGISTRY_URL (or 'apm config set "
+            "mcp-registry-url') at your proxied registry, or unset PROXY_REGISTRY_ONLY."
+        )
+
     @staticmethod
     def _init_http_cache():
         """Resolve the shared HTTP response cache, or ``None`` if disabled.
@@ -403,6 +435,7 @@ class SimpleRegistryClient:
         Falls back to a plain ``session.get`` when the cache is disabled
         or unavailable.
         """
+        self._refuse_direct_egress_when_proxy_only()
         # Cache key includes query params so paginated/search URLs are
         # cached independently.
         cache_key = url
@@ -592,10 +625,11 @@ class SimpleRegistryClient:
 
     @classmethod
     def _normalize_v0_1_server(cls, server: dict[str, Any]) -> dict[str, Any]:
-        """Apply package-shape normalization to a server detail dict.
+        """Apply package- and remote-shape normalization to a server detail dict.
 
         Returns a shallow copy with each entry of ``packages`` normalized
-        via :meth:`_normalize_v0_1_package`. The input dict is not mutated,
+        via :meth:`_normalize_v0_1_package` and each entry of ``remotes``
+        via :meth:`_normalize_v0_1_remote`. The input dict is not mutated,
         matching the copy semantics of the sibling normalizer.
         """
         if not isinstance(server, dict):
@@ -604,6 +638,23 @@ class SimpleRegistryClient:
         packages = normalized.get("packages")
         if isinstance(packages, list) and packages:
             normalized["packages"] = [cls._normalize_v0_1_package(p) for p in packages]
+        remotes = normalized.get("remotes")
+        if isinstance(remotes, list) and remotes:
+            normalized["remotes"] = [cls._normalize_v0_1_remote(r) for r in remotes]
+        return normalized
+
+    @staticmethod
+    def _normalize_v0_1_remote(remote: dict[str, Any]) -> dict[str, Any]:
+        """Record the canonical transport of one remote under ``transport``.
+
+        An unknown transport is left as published so the adapter that renders
+        it reports the error with its own runtime label.
+        """
+        if not isinstance(remote, dict):
+            return remote
+        normalized = dict(remote)
+        with contextlib.suppress(ValueError):
+            normalized["transport"] = canonical_remote_transport(remote)
         return normalized
 
     def get_server(self, server_name: str, version: str = "latest") -> dict[str, Any]:

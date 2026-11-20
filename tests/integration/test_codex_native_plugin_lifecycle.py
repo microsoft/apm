@@ -228,6 +228,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
     """The real install cannot claim native delivery after a skills-only projection."""
     codex = shutil.which("codex")
     assert codex is not None
+    targets = "codex,claude" if mcp_shape == "inline" else "codex"
     env = _environment(tmp_path)
     source = tmp_path / "source"
     _source(source, "FIRST")
@@ -243,7 +244,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
         {
             "name": "consumer",
             "version": "1.0.0",
-            "targets": ["codex"],
+            "targets": targets.split(","),
             "dependencies": {"apm": [str(source)]},
             "allowExecutables": {str(reference): {"mcp": True}},
         },
@@ -252,7 +253,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
     runner = ApmLifecycleRunner((str(apm_binary_path),))
     result = _apm(
         runner,
-        ("install", "-g", "--target", "codex", "--no-policy"),
+        ("install", "-g", "--target", targets, "--no-policy"),
         tmp_path,
         env,
         "codex-native-first",
@@ -315,7 +316,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
     managed_config = config_path.read_bytes()
     result = _apm(
         runner,
-        ("install", "-g", "--frozen", "--target", "codex", "--no-policy"),
+        ("install", "-g", "--frozen", "--target", targets, "--no-policy"),
         tmp_path,
         env,
         "codex-native-frozen-noop",
@@ -327,7 +328,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
     (source / "resources/__pycache__/asset.bin").chmod(0o755)
     result = _apm(
         runner,
-        ("install", "-g", "--target", "codex", "--no-policy"),
+        ("install", "-g", "--target", targets, "--no-policy"),
         tmp_path,
         env,
         "codex-native-executable-mode-update",
@@ -369,7 +370,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
         before = next(iter(json.loads(ledger.read_bytes())["plugins"].values()))
         result = _apm(
             runner,
-            ("install", "-g", "--frozen", "--target", "codex", "--no-policy"),
+            ("install", "-g", "--frozen", "--target", targets, "--no-policy"),
             tmp_path,
             env,
             f"codex-native-{label}-restore",
@@ -395,7 +396,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
     safe_rmtree(Path(before["snapshot"]["path"]), ledger.parent / "snapshots")
     result = _apm(
         runner,
-        ("install", "-g", "--frozen", "--target", "codex", "--no-policy"),
+        ("install", "-g", "--frozen", "--target", targets, "--no-policy"),
         tmp_path,
         env,
         "codex-native-missing-transport-restore",
@@ -414,7 +415,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
         publisher_manifest = (source / ".codex-plugin/plugin.json").read_bytes()
     result = _apm(
         runner,
-        ("install", "-g", "--update", "--target", "codex", "--no-policy"),
+        ("install", "-g", "--update", "--target", targets, "--no-policy"),
         tmp_path,
         env,
         "codex-native-same-version-update",
@@ -779,7 +780,7 @@ def test_project_refusal_and_foreign_collision_do_not_cross_write(
         runner, ("install", "--target", "codex", "--no-policy"), tmp_path, env, "project-refusal"
     )
     assert result.returncode != 0
-    assert "user scope" in result.stdout + result.stderr
+    assert "user scope" in " ".join((result.stdout + result.stderr).split())
     assert native_config.read_bytes() == before
     assert not list((tmp_path / ".agents").rglob("SKILL.md"))
     assert not any(path.is_file() for path in (tmp_path / ".codex").rglob("*"))

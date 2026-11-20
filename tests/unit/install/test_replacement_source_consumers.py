@@ -46,7 +46,7 @@ from apm_cli.models.dependency.replacement import (
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 from apm_cli.policy.policy_checks import _check_dependency_allowlist, _check_dependency_denylist
 from apm_cli.policy.schema import DependencyPolicy
-from apm_cli.utils.content_hash import compute_package_hash
+from apm_cli.utils.content_hash import compute_package_digests, compute_package_hash
 
 pytestmark = pytest.mark.component
 
@@ -98,13 +98,13 @@ def test_plan_inputs_hash_staged_local_replacement_before_canonical_plan(
 
     with (
         patch(
-            "apm_cli.utils.content_hash.compute_package_hash", wraps=compute_package_hash
+            "apm_cli.utils.content_hash.compute_package_digests", wraps=compute_package_digests
         ) as hashing,
         patch("apm_cli.install.plan.build_update_plan", wraps=build_update_plan) as planning,
     ):
         plan = build_resolved_update_plan(context, lock)
 
-    hashing.assert_called_once_with(staged)
+    hashing.assert_called_once_with(staged, exclude=(), legacy=False)
     planning.assert_called_once_with(
         lock,
         context.deps_to_install,
@@ -422,6 +422,28 @@ def test_replacement_does_not_inherit_upstream_executable_approval(
 
 
 @pytest.mark.parametrize(
+    ("source", "declared_key"),
+    [
+        ({"path": "../local"}, "../local"),
+        ({"git": "https://github.com/team/fork", "ref": "patched"}, "team/fork"),
+        (
+            {"git": "https://github.com/team/fork", "ref": "patched", "path": "pkgs/sub"},
+            "team/fork/pkgs/sub",
+        ),
+    ],
+)
+def test_replacement_consent_is_keyed_by_the_declared_source(
+    tmp_path: Path, source: dict, declared_key: str
+) -> None:
+    """Consent written for the ``with:`` source the consumer declared unlocks it."""
+    selected, _, _ = _locked(tmp_path, source)
+    package = SimpleNamespace(dependency_ref=selected)
+    approval = {declared_key: {"hooks": True, "bin": True, "mcp": True}}
+
+    assert check_executable_approval("mixedorg/mixedrepo", package, approval)[:3] == (True,) * 3
+
+
+@pytest.mark.parametrize(
     "source", [{"path": "../local"}, {"git": "https://github.com/team/fork", "ref": "patched"}]
 )
 def test_dependency_policy_evaluates_the_selected_source(tmp_path: Path, source: dict) -> None:
@@ -607,3 +629,19 @@ def test_install_policy_gate_blocks_selected_source_before_publication(
     assert not (tmp_path / "apm.lock.yaml").exists()
     assert not list((tmp_path / "apm_modules").rglob("apm.yml"))
     assert not (tmp_path / ".github/instructions/selected.instructions.md").exists()
+
+
+def test_replaced_dependency_replays_the_locked_skill_target_pairing(tmp_path: Path) -> None:
+    """#3763: replay of a replaced source keeps the locked per-edge pairing."""
+    from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+    _, locked, _ = _locked(tmp_path, {"git": "https://github.com/fork/MixedRepo", "ref": "main"})
+    pairing = merge_edge_pairings([(["alpha"], ["claude"]), (["gamma"], ["copilot"])])
+    locked.skill_subset = list(pairing.skill_subset)
+    locked.target_subset = list(pairing.target_subset)
+    locked.subset_pairings = pairing.to_lock_records()
+
+    replayed = LockedDependency.from_dict(locked.to_dict()).to_dependency_ref()
+
+    assert replayed.replacement is not None
+    assert replayed.subset_pairings == pairing

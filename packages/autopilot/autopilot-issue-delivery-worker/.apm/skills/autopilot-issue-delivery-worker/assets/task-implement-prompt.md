@@ -49,6 +49,16 @@ The lens defines the coverage discipline -- follow it exactly.
 4. Fold any docs the task itself requires (Starlight pages under docs/,
    and apm-usage resource files when CLI/flags/formats/auth/policy/
    primitive formats change). Whole-issue docs may be their own task.
+   Edit `CHANGELOG.md` ONLY if it is in your `files_hint` (the plan
+   assigns this shared file to exactly one task). That task adds ONE
+   line under `## [Unreleased]` per
+   `.github/instructions/changelog.instructions.md`:
+   effect first, 25 words or fewer, ending with `(#PR)`, in ONE
+   section. Breaking or must-act changes go only under `### Breaking
+   changes and upgrade notes` with a one-line migration. Never write
+   `### Highlights`. If a line for this change already exists,
+   edit it instead of adding another. Internal-only tasks (tests, CI,
+   refactors) get no line.
 5. Run the lint contract until silent before returning:
    `uv run --extra dev ruff check src/ tests/` and
    `uv run --extra dev ruff format --check src/ tests/`.

@@ -21,7 +21,7 @@ from apm_cli.install.primitive_classification import (
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
 from apm_cli.primitives.models import resolve_user_invocable
-from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
+from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
@@ -32,24 +32,78 @@ if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
-# Kiro capability tags approved for agent 'tools' frontmatter.
-# Source: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
-# Fail closed: any value not in this set blocks deployment of that agent.
-KIRO_AGENT_ALLOWED_TOOLS: frozenset[str] = frozenset(
+# Kiro agent ``tools`` vocabulary (IDE 1.0 / CLI V3).
+# Sources (accessed 2026-11-19):
+#   https://kiro.dev/docs/custom-agents/configuration-reference/#tools-field
+#   https://kiro.dev/docs/tools/#configuring-tool-access
+# Fail closed: a value outside this vocabulary blocks deployment of that agent
+# only; sibling agents still deploy (req-tg-009).
+KIRO_AGENT_TOOL_TAGS: frozenset[str] = frozenset({"read", "write", "shell", "web", "subagent"})
+KIRO_AGENT_TOOL_SPECIAL_VALUES: frozenset[str] = frozenset({"@builtin", "@mcp", "*"})
+KIRO_AGENT_TOOL_IDS: frozenset[str] = frozenset(
     {
-        "read",
-        "write",
-        "shell",
-        "web",
-        "subagent",
+        "read_file",
+        "list_directory",
+        "file_search",
+        "grep_search",
+        "code",
+        "fs_write",
+        "fs_append",
+        "str_replace",
+        "delete_file",
+        "execute_bash",
+        "execute_pwsh",
+        "control_bash_process",
+        "control_pwsh_process",
+        "get_process_output",
+        "list_processes",
+        "remote_web_search",
+        "web_fetch",
+        "invoke_sub_agent",
+        "disclose_context",
+        "introspect",
         "knowledge",
-        "context",
-        "todo_list",
-        "@mcp",
-        "@builtin",
-        "*",
+        "createHook",
+        "kiro_powers",
     }
 )
+# Accepted by earlier APM releases; kept so agents that deploy today keep deploying.
+KIRO_AGENT_TOOL_COMPAT_VALUES: frozenset[str] = frozenset({"context", "todo_list"})
+KIRO_AGENT_ALLOWED_TOOLS: frozenset[str] = (
+    KIRO_AGENT_TOOL_TAGS
+    | KIRO_AGENT_TOOL_SPECIAL_VALUES
+    | KIRO_AGENT_TOOL_IDS
+    | KIRO_AGENT_TOOL_COMPAT_VALUES
+)
+# ``@server`` or ``@server/tool`` (``@builtin`` and ``@mcp`` take no tool
+# suffix; tool names follow MCP SEP-986), or ``subagent/<agent>`` to limit
+# which sub-agents an agent may start.
+_KIRO_SELECTOR_RE = re.compile(
+    r"@(?!(?:builtin|mcp)/)[A-Za-z0-9][A-Za-z0-9_.-]{0,127}(?:/[A-Za-z0-9_.-]{1,128})?"
+    r"|subagent/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}"
+)
+_KIRO_TOOLS_HINT = (
+    "Approved Kiro tool selectors: category tags ("
+    + ", ".join(sorted(KIRO_AGENT_TOOL_TAGS))
+    + "); built-in tool IDs ("
+    + ", ".join(sorted(KIRO_AGENT_TOOL_IDS))
+    + "); compatibility values ("
+    + ", ".join(sorted(KIRO_AGENT_TOOL_COMPAT_VALUES))
+    + "); @server, @server/tool, or subagent/<agent>; "
+    + ", ".join(sorted(KIRO_AGENT_TOOL_SPECIAL_VALUES))
+    + "."
+)
+
+
+def is_kiro_agent_tool(value: str) -> bool:
+    """Return True when *value* is a valid Kiro agent ``tools`` selector."""
+    return value in KIRO_AGENT_ALLOWED_TOOLS or bool(_KIRO_SELECTOR_RE.fullmatch(value))
+
+
+# Outcomes of :meth:`AgentIntegrator._deploy_rendered_agent`.
+_ADOPTED = "adopted"
+_SKIPPED = "skipped"
+_WRITTEN = "written"
 
 
 class AgentIntegrator(BaseIntegrator):
@@ -213,6 +267,7 @@ class AgentIntegrator(BaseIntegrator):
                 files_skipped += 1
                 continue
 
+            links_resolved = 0
             if mapping.format_id == "kiro_agent":
                 # req-tg-009: Preflight render+validate MUST run before any
                 # content-identity adoption fast-path or filesystem mutation.
@@ -225,71 +280,42 @@ class AgentIntegrator(BaseIntegrator):
                 if not ok:
                     files_skipped += 1
                     continue
-
-                # Compare rendered artifact (not raw source) against existing
-                # target so a pre-placed file with invalid tools cannot be
-                # adopted by matching source bytes.
-                rel_path = portable_relpath(target_path, project_root)
-                if target_path.exists() and not target_path.is_symlink():
-                    try:
-                        existing = target_path.read_bytes()
-                        rendered_bytes = normalize_crlf_to_lf(rendered).encode("utf-8")
-                        if existing == rendered_bytes:
-                            target_paths.append(target_path)
-                            files_adopted += 1
-                            continue
-                    except OSError:
-                        pass
-                if self.check_collision(
-                    target_path, rel_path, managed_files, force, diagnostics=diagnostics
-                ):
-                    files_skipped += 1
-                    continue
-
-                # Safe to materialize: ensure parent dirs exist then write.
+            else:
+                # Non-kiro path: eager mkdir (existing behavior preserved).
                 if not agents_dir_created:
                     agents_dir.mkdir(parents=True, exist_ok=True)
                     agents_dir_created = True
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                write_text_lf(target_path, rendered)
-                files_integrated += 1
-                target_paths.append(target_path)
-                continue
-
-            # Non-kiro path: eager mkdir (existing behavior preserved).
-            if not agents_dir_created:
-                agents_dir.mkdir(parents=True, exist_ok=True)
-                agents_dir_created = True
-
-            rel_path = portable_relpath(target_path, project_root)
-
-            skip, adopted = self._check_adopt_or_skip(
-                target_path, source_file, rel_path, managed_files, force, diagnostics, target_paths
-            )
-            if skip:
-                if adopted:
-                    files_adopted += 1
-                else:
-                    files_skipped += 1
-                continue
-
-            if mapping.format_id == "codex_agent":
-                links_resolved = self._write_codex_agent(
-                    source_file,
-                    target_path,
-                    diagnostics=diagnostics,
-                    package_name=package_info.package.name,
-                    resolve_links=self.resolve_links,
-                )
-            else:
-                if mapping.format_id == "opencode_agent":
-                    self._warn_opencode_frontmatter(
-                        source_file, diagnostics, package_info.package.name
+                if mapping.format_id == "codex_agent":
+                    rendered, links_resolved = self._render_codex_agent(
+                        source_file,
+                        target_path,
+                        diagnostics=diagnostics,
+                        package_name=package_info.package.name,
+                        resolve_links=self.resolve_links,
                     )
-                links_resolved = self.copy_agent(source_file, target_path)
+                else:
+                    rendered, links_resolved = self._render_copy_agent(source_file, target_path)
+
+            outcome = self._deploy_rendered_agent(
+                target_path,
+                source_file,
+                portable_relpath(target_path, project_root),
+                rendered,
+                managed_files=managed_files,
+                force=force,
+                diagnostics=diagnostics,
+                target_paths=target_paths,
+            )
+            if outcome == _ADOPTED:
+                files_adopted += 1
+                continue
+            if outcome == _SKIPPED:
+                files_skipped += 1
+                continue
+            if mapping.format_id == "opencode_agent":
+                self._warn_opencode_frontmatter(source_file, diagnostics, package_info.package.name)
             total_links_resolved += links_resolved
             files_integrated += 1
-            target_paths.append(target_path)
 
         return IntegrationResult(
             files_integrated=files_integrated,
@@ -347,6 +373,17 @@ class AgentIntegrator(BaseIntegrator):
             KNOWN_TARGETS["copilot"],
         )
 
+    def _render_copy_agent(self, source: Path, target: Path) -> tuple[str, int]:
+        """Render a verbatim-copy agent: the source text with context links resolved.
+
+        Returns:
+            tuple[str, int]: Rendered text and number of links resolved.
+        """
+        if source.is_symlink():
+            raise ValueError(f"Refusing to read symlink source: {source}")
+        content = source.read_text(encoding="utf-8")
+        return self.resolve_links(content, source, target)
+
     def copy_agent(self, source: Path, target: Path) -> int:
         """Copy agent file verbatim, resolving context links.
 
@@ -357,12 +394,50 @@ class AgentIntegrator(BaseIntegrator):
         Returns:
             int: Number of links resolved
         """
-        if source.is_symlink():
-            raise ValueError(f"Refusing to read symlink source: {source}")
-        content = source.read_text(encoding="utf-8")
-        content, links_resolved = self.resolve_links(content, source, target)
+        content, links_resolved = self._render_copy_agent(source, target)
         write_text_lf(target, content)
         return links_resolved
+
+    def _deploy_rendered_agent(
+        self,
+        target_path: Path,
+        source_file: Path,
+        rel_path: str,
+        rendered: str,
+        *,
+        managed_files: set[str] | None,
+        force: bool,
+        diagnostics,
+        target_paths: list,
+    ) -> str:
+        """Adopt, skip, or write an already-rendered agent (render, then adopt).
+
+        Every agent writer renders first (Codex TOML, Kiro filtered markdown,
+        verbatim copy with rewritten links) and hands the exact string here.
+        Adoption is decided only by :meth:`_check_adopt_or_skip` against that
+        string, and the same string is written, so a target APM wrote earlier
+        is adopted even when the lockfile does not list it (#3722).
+
+        Returns:
+            ``"adopted"``, ``"skipped"`` or ``"written"``. On adopt and write
+            *target_path* is appended to *target_paths*.
+        """
+        skip, adopted = self._check_adopt_or_skip(
+            target_path,
+            source_file,
+            rel_path,
+            managed_files,
+            force,
+            diagnostics,
+            target_paths,
+            expected_content=rendered,
+        )
+        if skip:
+            return _ADOPTED if adopted else _SKIPPED
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_lf(target_path, rendered)
+        target_paths.append(target_path)
+        return _WRITTEN
 
     # ------------------------------------------------------------------
     # OpenCode validate-and-warn (Phase 1 of #581)
@@ -587,15 +662,15 @@ class AgentIntegrator(BaseIntegrator):
         )
 
     @staticmethod
-    def _write_codex_agent(
+    def _render_codex_agent(
         source: Path,
         target: Path,
         *,
         diagnostics: DiagnosticCollector | None = None,
         package_name: str = "",
         resolve_links: ResolveLinks | None = None,
-    ) -> int:
-        """Transform an ``.agent.md`` file to Codex ``.toml`` format.
+    ) -> tuple[str, int]:
+        """Render an ``.agent.md`` file to Codex ``.toml`` format.
 
         Preserves ``name``, ``description``, and native model settings;
         uses the markdown body as ``developer_instructions``.
@@ -605,7 +680,7 @@ class AgentIntegrator(BaseIntegrator):
         *source* for the generated *target* before serialization (#2966).
 
         Returns:
-            int: Number of links resolved in ``developer_instructions``.
+            tuple[str, int]: Rendered TOML string and number of links resolved.
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
@@ -721,7 +796,37 @@ class AgentIntegrator(BaseIntegrator):
             **model_settings,
             "developer_instructions": body.strip(),
         }
-        write_text_lf(target, _toml.dumps(doc))
+        return _toml.dumps(doc), links_resolved
+
+    @staticmethod
+    def _write_codex_agent(
+        source: Path,
+        target: Path,
+        *,
+        diagnostics: DiagnosticCollector | None = None,
+        package_name: str = "",
+        resolve_links: ResolveLinks | None = None,
+    ) -> int:
+        """Transform an ``.agent.md`` file to Codex ``.toml`` format and write it.
+
+        Preserves ``name``, ``description``, and native model settings;
+        uses the markdown body as ``developer_instructions``.
+
+        *resolve_links* is the shared :meth:`BaseIntegrator.resolve_links`
+        owner; it rewrites source-relative Markdown links in the body from
+        *source* for the generated *target* before serialization (#2966).
+
+        Returns:
+            int: Number of links resolved in ``developer_instructions``.
+        """
+        rendered, links_resolved = AgentIntegrator._render_codex_agent(
+            source,
+            target,
+            diagnostics=diagnostics,
+            package_name=package_name,
+            resolve_links=resolve_links,
+        )
+        write_text_lf(target, rendered)
         return links_resolved
 
     # ------------------------------------------------------------------
@@ -771,12 +876,13 @@ class AgentIntegrator(BaseIntegrator):
         fail-closed evaluation runs prior to any content-identity fast-path.
 
         Returns (rendered_str, True) on success or (None, False) if the
-        source declares tools outside KIRO_AGENT_ALLOWED_TOOLS or has an
-        unparseable frontmatter. On failure an actionable diagnostic is
-        emitted via diagnostics.error -- the caller MUST skip all target
-        mutations without writing any bytes.
+        source declares a tool that :func:`is_kiro_agent_tool` rejects. On
+        failure an actionable warning is emitted -- the caller MUST skip all
+        target mutations for this agent without writing any bytes. The
+        warning is non-fatal so conformant sibling agents still deploy and
+        are recorded (req-tg-009).
 
-        Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
+        Ref: https://kiro.dev/docs/tools/ (accessed 2026-11-19)
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
@@ -801,19 +907,17 @@ class AgentIntegrator(BaseIntegrator):
                         tools_out = None
                     elif isinstance(tools_raw, list):
                         tools_strs = [str(t).strip() for t in tools_raw]
-                        incompatible = set(tools_strs) - KIRO_AGENT_ALLOWED_TOOLS
+                        incompatible = {t for t in tools_strs if not is_kiro_agent_tool(t)}
                         if incompatible:
                             if diagnostics is not None:
                                 names = ", ".join(sorted(incompatible))
-                                diagnostics.error(
+                                diagnostics.warn(
                                     message=(
                                         f"Kiro agent {printable_ascii_text(source.name)}: "
                                         f"unsupported tool(s) {names!a} -- "
                                         "agent will not be deployed. "
-                                        "Remove or replace with Kiro-approved capability "
-                                        "tags (read, write, shell, web, subagent, knowledge, "
-                                        "context, todo_list, @mcp, @builtin, *). "
-                                        "Ref: https://kiro.dev/docs/custom-agents/"
+                                        f"{_KIRO_TOOLS_HINT} "
+                                        "Ref: https://kiro.dev/docs/tools/"
                                     ),
                                     package=printable_ascii_text(package_name),
                                 )
@@ -821,15 +925,15 @@ class AgentIntegrator(BaseIntegrator):
                         tools_out = tools_strs
                     elif isinstance(tools_raw, str):
                         tool = tools_raw.strip()
-                        if tool not in KIRO_AGENT_ALLOWED_TOOLS:
+                        if not is_kiro_agent_tool(tool):
                             if diagnostics is not None:
-                                diagnostics.error(
+                                diagnostics.warn(
                                     message=(
                                         f"Kiro agent {printable_ascii_text(source.name)}: "
                                         f"unsupported tool {tool!a} -- "
                                         "agent will not be deployed. "
-                                        "Use a Kiro-approved capability tag. "
-                                        "Ref: https://kiro.dev/docs/custom-agents/"
+                                        f"{_KIRO_TOOLS_HINT} "
+                                        "Ref: https://kiro.dev/docs/tools/"
                                     ),
                                     package=printable_ascii_text(package_name),
                                 )
@@ -837,10 +941,10 @@ class AgentIntegrator(BaseIntegrator):
                         tools_out = [tool]
                     else:
                         if diagnostics is not None:
-                            diagnostics.error(
+                            diagnostics.warn(
                                 message=(
                                     f"Kiro agent {printable_ascii_text(source.name)}: "
-                                    "'tools' must be a list of capability tags -- "
+                                    "'tools' must be a list of tool selectors -- "
                                     "agent will not be deployed. "
                                     "Fix: use a YAML list, e.g. 'tools: [read, write]'. "
                                     "Ref: https://kiro.dev/docs/custom-agents/"
@@ -873,31 +977,6 @@ class AgentIntegrator(BaseIntegrator):
             rendered = body
 
         return rendered, True
-
-    @staticmethod
-    def _write_kiro_agent(
-        source: Path,
-        target: Path,
-        *,
-        diagnostics=None,
-        package_name: str = "",
-    ) -> bool:
-        """Write a pre-rendered Kiro agent to disk; fail closed on invalid tools.
-
-        Delegates render+validate to _preflight_render_kiro_agent (the single
-        owner). Writes only when validation passes. Callers in the integration
-        loop should prefer calling _preflight_render_kiro_agent directly so
-        the rendered content can be reused for the adopt comparison.
-
-        Ref: https://kiro.dev/docs/custom-agents/ (accessed 2026-08-03)
-        """
-        rendered, ok = AgentIntegrator._preflight_render_kiro_agent(
-            source, diagnostics=diagnostics, package_name=package_name
-        )
-        if not ok:
-            return False
-        write_text_lf(target, rendered)  # type: ignore[arg-type]
-        return True
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def integrate_package_agents(
@@ -965,22 +1044,25 @@ class AgentIntegrator(BaseIntegrator):
                     )
                 files_skipped += 1
                 continue
-            rel_path = portable_relpath(target_path, project_root)
-
-            if self.try_adopt_identical(
-                target_path, source_file, target_paths, lf_normalized_deploy=True
-            ):
+            rendered, links_resolved = self._render_copy_agent(source_file, target_path)
+            outcome = self._deploy_rendered_agent(
+                target_path,
+                source_file,
+                portable_relpath(target_path, project_root),
+                rendered,
+                managed_files=managed_files,
+                force=force,
+                diagnostics=diagnostics,
+                target_paths=target_paths,
+            )
+            if outcome == _SKIPPED:
+                files_skipped += 1
+                continue
+            if outcome == _ADOPTED:
                 files_adopted += 1
             else:
-                if self.check_collision(
-                    target_path, rel_path, managed_files, force, diagnostics=diagnostics
-                ):
-                    files_skipped += 1
-                    continue
-                links_resolved = self.copy_agent(source_file, target_path)
                 total_links_resolved += links_resolved
                 files_integrated += 1
-                target_paths.append(target_path)
 
             if claude_agents_dir:
                 claude_target = KNOWN_TARGETS["claude"]
@@ -999,16 +1081,21 @@ class AgentIntegrator(BaseIntegrator):
                             package=package_info.package.name,
                         )
                     continue
-                claude_rel = portable_relpath(claude_path, project_root)
-                if self.try_adopt_identical(
-                    claude_path, source_file, target_paths, lf_normalized_deploy=True
+                claude_rendered, _ = self._render_copy_agent(source_file, claude_path)
+                if (
+                    self._deploy_rendered_agent(
+                        claude_path,
+                        source_file,
+                        portable_relpath(claude_path, project_root),
+                        claude_rendered,
+                        managed_files=managed_files,
+                        force=force,
+                        diagnostics=diagnostics,
+                        target_paths=target_paths,
+                    )
+                    == _ADOPTED
                 ):
                     files_adopted += 1
-                elif not self.check_collision(
-                    claude_path, claude_rel, managed_files, force, diagnostics=diagnostics
-                ):
-                    self.copy_agent(source_file, claude_path)
-                    target_paths.append(claude_path)
 
             if cursor_agents_dir:
                 cursor_target = KNOWN_TARGETS["cursor"]
@@ -1027,16 +1114,21 @@ class AgentIntegrator(BaseIntegrator):
                             package=package_info.package.name,
                         )
                     continue
-                cursor_rel = portable_relpath(cursor_path, project_root)
-                if self.try_adopt_identical(
-                    cursor_path, source_file, target_paths, lf_normalized_deploy=True
+                cursor_rendered, _ = self._render_copy_agent(source_file, cursor_path)
+                if (
+                    self._deploy_rendered_agent(
+                        cursor_path,
+                        source_file,
+                        portable_relpath(cursor_path, project_root),
+                        cursor_rendered,
+                        managed_files=managed_files,
+                        force=force,
+                        diagnostics=diagnostics,
+                        target_paths=target_paths,
+                    )
+                    == _ADOPTED
                 ):
                     files_adopted += 1
-                elif not self.check_collision(
-                    cursor_path, cursor_rel, managed_files, force, diagnostics=diagnostics
-                ):
-                    self.copy_agent(source_file, cursor_path)
-                    target_paths.append(cursor_path)
 
         return IntegrationResult(
             files_integrated=files_integrated,

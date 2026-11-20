@@ -117,7 +117,7 @@ the URL so misconfigurations are easy to spot in CI logs. Direct
 See [`apm config`](../config/#resolution-order) for the canonical resolution
 order. The same chain resolves `dependencies.mcp`; a per-dependency
 `registry:` URL overrides it for that entry only. To compare curated and open
-registries, see [Choosing an MCP registry](../../../consumer/choosing-an-mcp-registry/).
+registries, see [Choosing an MCP registry](../../../consumer/install-mcp-servers/#choosing-an-mcp-registry).
 Whenever a non-default endpoint is in effect, `apm install` names it once with
 `Using MCP registry: <url> (<source>)` before the lookup.
 

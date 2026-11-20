@@ -133,6 +133,10 @@ requirements:
     keyword: MUST
     section: "4.5"
     conformance_class: consumer
+  - id: req-mf-027
+    keyword: MUST
+    section: "4.5"
+    conformance_class: consumer
   - id: req-ext-001
     keyword: MUST
     section: "4.1"
@@ -213,6 +217,7 @@ requirements:
     keyword: MUST
     section: "5.2"
     conformance_class: consumer
+    notes: "lockfile_version names the content_hash byte stream: framed in version 4, legacy in 1-3; only a writable install promotes, from verified bytes"
   - id: req-lk-017
     keyword: MUST
     section: "5.2"
@@ -320,7 +325,7 @@ requirements:
     keyword: MUST
     section: "6.3.1"
     conformance_class: governance
-    notes: "allow, deny, and exact require package operands use the documented per-host repository case rule of req-rs-016 plus the registry-coordinate case rule; ASCII normalization does not cross virtual paths, refs, registry names, MCP names, unmanaged paths, or case-sensitive host/source identities; recursive-glob ambiguity remains case-sensitive and deny precedence remains unchanged; clause (g): a first pattern segment containing a dot and not beginning with one names a host matched exactly (ASCII case-folded, numeric port and one trailing dot ignored on both sides) against the written or implementation-default effective host, while hostless patterns (including ./ and ../ local-path patterns) match every host; dependencies.require is not host-qualified"
+    notes: "allow, deny, and exact require package operands use the documented per-host repository case rule of req-rs-016 plus the registry-coordinate case rule; ASCII normalization does not cross virtual paths, refs, registry names, MCP names, unmanaged paths, or case-sensitive host/source identities; recursive-glob ambiguity remains case-sensitive and deny precedence remains unchanged; clause (g): a first pattern segment containing a dot and not beginning with one names a host matched exactly (ASCII case-folded, numeric port and one trailing dot ignored on both sides) against the effective host (written host, else the declaring manifest's default_host:, else implementation-default host), while hostless allow/deny patterns (including ./ and ../ local-path patterns) match every host; a dependencies.require entry names one host with the same effective host and ASCII mapping; a hostless entry names the implementation-default host, never rebound by a manifest default_host:; the entry resolves to the first identified dependency on the manifest and lockfile side, reading the lock entry by that dependency's own lockfile identity; an entry identifying no dependency is a violation under enforcement, never skipped"
   - id: req-pl-019
     keyword: MUST
     section: "6.8.1"
@@ -403,6 +408,11 @@ requirements:
     section: "7.7"
     conformance_class: consumer
     notes: "full-SHA update extensions deterministically select the highest eligible non-prerelease annotated tag, retain pins with no eligible tag, persist git-literal provenance, and stop before writes on malformed or failed remote resolution"
+  - id: req-rs-018
+    keyword: MUST
+    section: "7.4.1"
+    conformance_class: consumer
+    notes: "multi-edge skills x targets selections merge by exact per-edge pairing with all absorbing per axis, independent of order and depth; lock records unions plus canonical subset_pairings only when the flat product over-selects; inconsistent records and frozen selection changes fail"
   - id: req-pr-001
     keyword: MUST
     section: "8.2"
@@ -504,6 +514,42 @@ requirements:
     section: "8.5.10"
     conformance_class: consumer
     notes: "a Cursor instruction whose normalized applyTo is exactly one universal ** pattern (scalar, padded, or single-item list) emits alwaysApply: true with no globs at project and user scope; other non-empty sets, including ** mixed with scoped patterns, keep globs; absent, empty, or null applyTo emits neither key"
+  - id: req-na-001
+    keyword: MUST
+    section: "8.5.11"
+    conformance_class: consumer
+    notes: "a consumer that natively activates does so only for a target selected by the req-tg-008 effective target intersection and a scope and disclosed client version that meets Part A criteria A1-A5 by published documentation; unknown qualification does not qualify; the conformance statement discloses each target, scope, oldest qualified version and cited source per criterion"
+  - id: req-na-002
+    keyword: MUST
+    section: "8.5.11"
+    conformance_class: consumer
+    notes: "activated set derives only from the lockfile; only the approved plugin root is deployed from locked bytes to <profile root>/<plugin>/ under a safe single-segment name (no leading dot, trailing dot or space, separators, @, :, or control bytes; Unicode case-fold collisions refused) with req-tg-013 claimant selection; the lock records the root and a pinned sha256 root digest over every regular file's byte-wise sorted POSIX path (no normalization; .git components and the consumer's root apm.yml and .apm/ normalization output excluded, not deployed, and not referenceable by the manifest), NUL, exec-bit byte and raw content digest; symlinks or escaping paths make the plugin ineligible, handled like req-na-006 and never silent; checked for drift with expected and observed digests; a generated .claude-plugin/marketplace.json lists only activated plugins by relative path; the resolved dependency root is never declared; project-scope output is not ignored; the deployed root substitutes for in-place placement under req-tg-013"
+  - id: req-na-003
+    keyword: MUST
+    section: "8.5.11"
+    conformance_class: consumer
+    notes: "declaration only through documented activation entries in the A1 settings file, with a local directory source at the profile root, relative at project scope; no other keys, private target state, trust decisions or autoUpdate; no target binary, CLI or RPC located, invoked or version-checked during install, update, restore, uninstall or prune"
+  - id: req-na-004
+    keyword: MUST
+    section: "8.5.11"
+    conformance_class: consumer
+    oracle: tests/fixtures/spec-conformance/native-activation/req-na-004.json
+    notes: "ownership of activation entries, deployed roots and marketplace entries derives from the previous and next lockfile plus the source binding; add what next needs, remove only what previous produced with the same binding; preserve unrelated keys and explicit false; with a missing previous lock and an existing entry remove nothing and report; a moved or renamed binding or foreign entry is reported, nothing is written under either name and no second marketplace is declared for the same profile root; first activation needs no diagnostic; the consumer owns only lock-produced plugin roots and the generated marketplace under the profile root and never overwrites an unowned plugin directory unless its digest matches; unparseable settings fail closed; one rollback unit; no receipt or ledger file"
+  - id: req-na-005
+    keyword: MUST
+    section: "8.5.11"
+    conformance_class: consumer
+    notes: "a consumer that natively activates writes enable true only when an implementation-defined, disclosed approval bound to the req-na-002 root digest covers the plugin root and the req-tg-013 admission gates (lock integrity, req-sc-015 scan, executable authorization) admit it for every plugin format; an update to uncovered content keeps the previous lock entry, root and entries with a diagnostic, or retires them in the lock write's rollback unit; the lock never pins undeployed content; otherwise not deployed under the profile root, not declared, never declared disabled, with a default-visible diagnostic; never replace a deployed root with uncovered content"
+  - id: req-na-006
+    keyword: MUST
+    section: "8.5.11"
+    conformance_class: consumer
+    notes: "a consumer that natively activates gives a target and scope that does not qualify no native activation and no private state or activation entries; explicit split install or refusal with a default-visible diagnostic naming target, scope and unmet or unknown criterion (A1-A5); never silent; dry-run reports the same decision; req-tg-011 governs opaque dependencies; req-tg-013 registrations without native activation are unaffected"
+  - id: req-na-007
+    keyword: MUST
+    section: "8.5.11"
+    conformance_class: consumer
+    notes: "generated marketplace name is deterministic, stable across clones of one project by a disclosed project identity and independent of user, host and absolute path at project scope, distinct between projects and between project and user scope; a name already declared with a different source is refused with a diagnostic before activation entries are written"
   - id: req-pr-006
     keyword: MUST
     section: "8.1"
@@ -583,6 +629,11 @@ requirements:
     conformance_class: consumer
     oracle: tests/fixtures/spec-conformance/source-plan/req-sc-015.json
     notes: "one post-authorization source-file set drives every install and uninstall re-integration scan and primitive materialization; source-only files and symlink entries are excluded"
+  - id: req-sc-016
+    keyword: MUST
+    section: "10.13"
+    conformance_class: consumer
+    notes: "proposed in amendment 0.1.64 (PR #3918), Section 9.3 pending: transitive self-defined, registry-naming or overlaying MCP server admitted only by root re-declaration, a consuming-manifest or per-user grant bound to package + server + full sha256 definition fingerprint, or a non-persisted per-invocation opt-in; never by lockfile state; a changed definition is withheld with a diagnostic even under the opt-in; organization denial wins over every path"
   - id: req-rg-001
     keyword: MUST
     section: "11.3.3"

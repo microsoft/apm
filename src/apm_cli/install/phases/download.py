@@ -33,7 +33,12 @@ def run(ctx: InstallContext) -> None:
     # resolve.py).  detect_ref_change / build_download_ref live in
     # apm_cli.drift and tests import them from there, so direct import
     # is safe here -- no test patches at apm_cli.commands.install.X.
-    from apm_cli.drift import build_download_ref, detect_ref_change
+    from apm_cli.drift import (
+        LOCKED_COPY_CONTENT_HASH,
+        build_download_ref,
+        detect_ref_change,
+        locked_copy_proof,
+    )
 
     deps_to_install = ctx.deps_to_install
     existing_lockfile = ctx.existing_lockfile
@@ -76,47 +81,31 @@ def run(ctx: InstallContext) -> None:
         # detect_ref_change() handles all transitions including None->ref.
         _pd_locked_chk = existing_lockfile.get_dependency(_pd_key) if existing_lockfile else None
         _pd_ref_changed = detect_ref_change(_pd_ref, _pd_locked_chk, update_refs=update_refs)
-        # Skip if lockfile SHA matches local HEAD.
+        # Skip when the copy on disk already holds the locked content, as
+        # decided by the canonical copy-validity owner (#3884).
         # Normal mode: only when the ref hasn't changed in the manifest.
         # Update mode: defer to the sequential loop which resolves the
         # remote ref and compares -- if unchanged, the download is skipped
         # entirely; if changed, it falls back to sequential download.
-        if (
-            _pd_path.exists()
-            and _pd_locked_chk
+        # Content-hash-only rows have no commit anchor, so update mode never
+        # reuses them here.
+        _pd_has_commit = bool(
+            _pd_locked_chk
             and _pd_locked_chk.resolved_commit
             and _pd_locked_chk.resolved_commit != "cached"
-            and (update_refs or not _pd_ref_changed)
-        ):
-            try:
-                from git import Repo as _PDGitRepo
-
-                if _PDGitRepo(_pd_path).head.commit.hexsha == _pd_locked_chk.resolved_commit:
-                    continue
-            except Exception:
-                # Git check failed (e.g. .git removed after download).
-                # Fall back to content-hash verification so correctly
-                # installed packages are not re-downloaded every run (#763).
-                from apm_cli.install.phases._redownload import _should_skip_redownload
-
-                if _should_skip_redownload(_pd_locked_chk, _pd_path):
-                    ctx.content_hash_verified_deps.add(_pd_key)
-                    continue
-        elif (
-            _pd_path.exists()
-            and _pd_locked_chk
-            and _pd_locked_chk.content_hash
+        )
+        _pd_reuse_allowed = (
+            (update_refs or not _pd_ref_changed)
+            if _pd_has_commit
+            else bool(_pd_locked_chk and _pd_locked_chk.content_hash)
             and not update_refs
             and not _pd_ref_changed
-        ):
-            # Content-hash-only lockfile entries have no commit anchor.
-            # The hash is the sole trust signal: skip only after verifying
-            # on-disk bytes still match it, otherwise fall through to the
-            # fresh-download path and its supply-chain mismatch check.
-            from apm_cli.install.phases._redownload import _should_skip_redownload
-
-            if _should_skip_redownload(_pd_locked_chk, _pd_path):
+        )
+        if _pd_path.exists() and _pd_reuse_allowed:
+            _pd_proof = locked_copy_proof(_pd_locked_chk, _pd_path)
+            if _pd_proof == LOCKED_COPY_CONTENT_HASH:
                 ctx.content_hash_verified_deps.add(_pd_key)
+            if _pd_proof is not None:
                 continue
         # Build download ref (use locked commit for reproducibility).
         # build_download_ref() uses the manifest ref when ref_changed is True.

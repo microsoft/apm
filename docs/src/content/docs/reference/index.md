@@ -29,14 +29,16 @@ Per-command pages live under [`reference/cli/`](./cli/install/). Grouped by life
 | [Manifest schema](./manifest-schema/)                        | Every field in `apm.yml`                                         |
 | [Lockfile spec](./lockfile-spec/)                            | `apm.lock.yaml` schema, semantics, and integrity contract        |
 | [Policy schema](./policy-schema/)                            | `apm-policy.yml` rules, merge semantics, severity                |
+| [Registry HTTP API](./registry-http-api/)                    | Wire contract for APM registry servers: endpoints, auth, errors  |
 | [Targets matrix](./targets-matrix/)                          | Which primitive types each target (Copilot, Claude, ...) supports |
+| [MCP variable compatibility](./mcp-variable-compatibility/)  | How each harness reads env references in MCP config, and what APM writes |
 | [Baseline checks](./baseline-checks/)                        | The CI checks `apm audit --ci` runs                              |
 | [Environment variables](./environment-variables/)            | Every env var APM reads, with precedence                         |
 | [Primitive types](./primitive-types/)                        | Skill, prompt, instruction, agent, hook, command                 |
 | [Package types](./package-types/)                            | APM packages, plugins, marketplaces                              |
-| [Examples](./examples/)                                      | Worked end-to-end examples                                       |
+| [Examples](../quickstart/)                                      | Worked end-to-end examples                                       |
 | [Experimental](./experimental/)                              | Surface area still subject to change                             |
-| [Common errors](./common-errors/)                            | Symptoms, causes, and fixes for frequently reported errors       |
+| [Common errors](../troubleshooting/common-errors/)                            | Symptoms, causes, and fixes for frequently reported errors       |
 
 ## Conventions used in reference pages
 

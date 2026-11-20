@@ -135,11 +135,17 @@ class SafeMCPInstaller:
                 result = self.adapter.configure_mcp_server(server_ref, **kwargs)
 
                 if result:
+                    from ..install.mcp.ownership import written_native_hash
+
                     summary.add_installed(server_ref)
-                    if server_ref in self.adapter.written_mcp_hashes:
-                        summary.native_hashes[server_ref] = self.adapter.written_mcp_hashes[
-                            server_ref
-                        ]
+                    fingerprint = written_native_hash(
+                        self.adapter,
+                        server_ref,
+                        requested_info=cached_info,
+                        existing_configs=self.conflict_detector.get_existing_server_configs(),
+                    )
+                    if fingerprint is not None:
+                        summary.native_hashes[server_ref] = fingerprint
                     self._log_success(server_ref)
                 else:
                     summary.add_failed(server_ref, "configuration failed")
@@ -159,10 +165,9 @@ class SafeMCPInstaller:
 
     def _log_success(self, server_ref: str):
         """Log successful server installation."""
+        # The integrator's install tree reports success once (#3994).
         if self.logger:
-            self.logger.success(f"  + {server_ref}")
-        else:
-            _rich_success(f"  + {server_ref}")
+            self.logger.verbose_detail(f"  + {server_ref}")
 
     def _log_failure(self, server_ref: str):
         """Log failed server installation."""

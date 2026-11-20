@@ -23,12 +23,11 @@ fields without prompts.
 With `--discover`, inventories existing skill and package
 directories in recognized layouts. It
 does not copy, translate, or execute their content. Add `--apply` (or `--write`)
-to merge missing local package references into `apm.yml`.
+to merge missing local package references into `apm.yml`; `--apply` implies
+`--discover`.
 
-The legacy `--plugin` and `--marketplace` flags (which scaffold a
-plugin or marketplace authoring block alongside `apm.yml`) are
-deprecated but still accepted; use [`apm plugin init`](../plugin/)
-and [`apm marketplace init`](../marketplace/) instead.
+To scaffold a plugin, use [`apm plugin init`](../plugin/); to add a
+marketplace authoring block, use [`apm marketplace init`](../marketplace/).
 
 ## Arguments
 
@@ -43,14 +42,12 @@ and [`apm marketplace init`](../marketplace/) instead.
 | `-y`, `--yes` | off | Skip interactive prompts. Plain `apm init --yes` keeps its existing behavior and overwrites an existing `apm.yml`; with `--discover --apply`, it consents to a merge instead. |
 | `--discover` | off | Report admissible existing skill and package directories without changing files. Unsupported loose native rules, hooks, MCP configuration, and similar files are reported but not translated. |
 | `--format text\|json\|yaml` | `text` | Select discovery report format. Used with `--discover`. |
-| `--apply`, `--write` | off | After discovery, create or merge the consumer `apm.yml` with missing `dependencies.apm` local path references. Requires consent unless `--yes` is set. |
+| `--apply`, `--write` | off | Run discovery, then create or merge the consumer `apm.yml` with missing `dependencies.apm` local path references. Implies `--discover`. Requires consent unless `--yes` is set. |
 | `-g`, `--global` | off | Discover user-scope packages. Applied local references use installer-compatible absolute or home-rooted paths, not project-relative paths. |
-| `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name must be kebab-case, max 64 chars. |
-| `--marketplace` | off | **Deprecated.** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
-| `--target` | (prompt) | Comma-separated target list for normal initialization. It cannot be combined with `--discover`; select deployment targets on the later `apm install`. Stable manifest targets include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, and `agent-skills`; `all` expands the default stable set. |
+| `--target` | (prompt) | Comma-separated target list for normal initialization. It cannot be combined with `--discover`; select deployment targets on the later `apm install`. Stable manifest targets include `copilot`, `claude`, `grok-build`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, and the explicit-only `hermes` and `grok-bot`; `all` expands the default stable set. |
 | `--name` | directory name | Project name written to `apm.yml` for in-place init. Same rules as `PROJECT_NAME`. Ignored, with a warning, when `PROJECT_NAME` is given. |
 | `--description` | auto-detected | Project description written to `apm.yml`. |
-| `--version` | `1.0.0` (`0.1.0` with `--plugin --yes`) | Project version written to `apm.yml`. Must not be empty. An explicit value is kept in plugin mode. |
+| `--version` | `1.0.0` | Project version written to `apm.yml`. Must not be empty. |
 | `--author` | `git config user.name` | Project author written to `apm.yml`. |
 | `-v`, `--verbose` | off | Show detailed output. |
 
@@ -62,9 +59,12 @@ They cannot be combined with `--discover`.
 Target precedence: `--target` flag > interactive prompt > auto-detect at
 compile time (used with `--yes` or in non-TTY shells).
 
-`init` writes only manifest-safe stable targets. For example, `--target agents`,
-`--target vscode`, and the MCP-only `--target intellij` persist the canonical
-`copilot` identifier, while `--target all` expands to the default stable set.
+`init` writes only manifest-safe stable targets, canonicalizing aliases first.
+For example, `--target agents` and `--target vscode` persist `copilot`,
+`--target agy` persists `antigravity`, and `--target all` expands to the
+default stable set. `--target intellij` names an IDE, not a target: `init`
+exits `1` before writing anything (use `copilot` for GitHub Copilot in
+JetBrains IDEs).
 Experimental selectors such as `grok-cloud` are accepted by the shared CLI
 target parser but are not persisted in `apm.yml`; enable them, then select them
 with `apm install --target grok-cloud`.
@@ -88,17 +88,6 @@ $ apm init --yes --name my-app --description "Team agent setup" --version 0.1.0 
 [+] APM project initialized successfully!
 Created Files
   * apm.yml  Project configuration
-```
-
-Plugin authoring project (creates `plugin.json` plus `apm.yml` with
-`devDependencies`, version defaults to `0.1.0`):
-
-```bash
-$ apm init my-skill --plugin --yes
-[+] APM project initialized successfully!
-Created Files
-  * apm.yml      Project configuration
-  * plugin.json  Plugin metadata
 ```
 
 Pin targets up front, skip the prompt:
@@ -135,16 +124,14 @@ the author and target harness remain responsible for compliance.
 
 ## Behavior
 
-- **Plain init files created:** `apm.yml` always. `plugin.json` when `--plugin` is
-  set. The `marketplace:` block is appended to `apm.yml` when
-  `--marketplace` is set.
+- **Plain init files created:** `apm.yml` only.
 - **Auto-detected fields:**
   - `name` -- from `PROJECT_NAME` or the current directory name. Falls back
     to `my-project` if the derived name is invalid (filesystem roots and
     other edge cases).
   - `author` -- from `git config user.name`, fallback `Developer`.
   - `description` -- generated from project name.
-  - `version` -- `1.0.0` (or `0.1.0` with `--plugin --yes`).
+  - `version` -- `1.0.0`.
 - **Plain init with existing `apm.yml`:** prints `[!] apm.yml already exists`
   and prompts to overwrite. With `--yes`, overwrites without asking.
 - **Discovery:** reports existing admissible skill or package directories.
@@ -164,7 +151,14 @@ the author and target harness remain responsible for compliance.
   path for teammates who run `apm install`. Global references use absolute or
   home-rooted paths accepted by the installer.
 - **Target seeding on re-init:** when `apm.yml` exists, the prompt
-  pre-checks targets read from its existing `target:` field.
+  pre-checks targets read from its existing `targets:` list, or from the
+  legacy `target:` field rewritten to an equivalent `targets:` list (for
+  example, `agents` becomes `copilot` and `agy` becomes `antigravity`). A
+  legacy target with no `targets:`
+  equivalent (such as `intellij`) is not carried over: `--yes` and
+  non-interactive runs exit `1` before writing; pass `--target` to choose
+  targets explicitly. The rewritten manifest is parsed back before it is
+  written.
 - **Codex hint:** if `.codex/` is present, suggests
   `--target agent-skills` to also deploy skills to `.agents/skills/`.
 - **Existing plugin sources:** when plugin-native directories such as
@@ -180,30 +174,33 @@ the author and target harness remain responsible for compliance.
     `https://github.com/microsoft/agentrc`.
   - Instructions already exist: no mention (suppressed entirely).
 - **Exit codes:** `0` on success or a declined plain-init prompt; `1` on invalid
-  project or plugin name, empty `--version`, refused discovery apply, declined discovery consent,
+  project name, empty `--version`, refused discovery apply, declined discovery consent,
+  an existing legacy target with no `targets:` equivalent on a non-interactive re-init,
   or unhandled error. Discovery consent refusal leaves files unchanged.
   Invalid option combinations, including `--discover --target` and
   `--discover` with a metadata flag, exit `2`.
 
-## Deprecations
+## Removed flags
 
-The `--plugin` and `--marketplace` flags are deprecated but remain
-functional for compatibility. Each invocation prints a one-line warning
-to stderr pointing at the replacement command (`apm plugin init` or
-`apm marketplace init`). Migrate to:
+`apm init --plugin` and `apm init --marketplace` were removed in 0.37.
+Both exit `2` without writing anything and name the replacement:
 
-- [`apm plugin init`](../plugin/) -- replaces `apm init --plugin`.
-- [`apm marketplace init`](../marketplace/) -- replaces
-  `apm init --marketplace`.
+- [`apm plugin init`](../plugin/) replaces `apm init --plugin`, including
+  `--version`, `--author` and `--description`. `--name` has no equivalent:
+  pass the project name as `PROJECT_NAME`.
+- [`apm marketplace init`](../marketplace/) replaces
+  `apm init --marketplace`. Run it inside the project directory.
+
+The refusal prints the full replacement command, keeping your project name,
+`--yes`, `--target` and metadata flags.
 
 ## Related
 
-- [`apm plugin init`](../plugin/) -- scaffold a publishable plugin
-  (replaces `apm init --plugin`).
+- [`apm plugin init`](../plugin/) -- scaffold a publishable plugin.
 - [`apm marketplace init`](../marketplace/) -- scaffold a marketplace
-  authoring block (replaces `apm init --marketplace`).
+  authoring block.
 - [`apm install`](../install/) -- next step: install dependencies and
   deploy to targets.
 - [Quickstart](../../../quickstart/) -- guided first project.
-- [Concepts: package anatomy](../../../concepts/package-anatomy/) --
+- [Concepts: package anatomy](../../../producer/create-a-package/) --
   what goes in `apm.yml`.

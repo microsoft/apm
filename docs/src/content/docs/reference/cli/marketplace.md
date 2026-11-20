@@ -18,7 +18,7 @@ apm marketplace add SOURCE [--name N] [--ref R | --branch B] [--host FQDN] [--pa
 apm marketplace list
 apm marketplace browse NAME [--offline]
 apm marketplace update [NAME]
-apm marketplace remove NAME
+apm marketplace remove NAME [--yes]
 apm marketplace validate NAME
 
 # Author
@@ -165,6 +165,7 @@ apm marketplace add acme/agent-skills --path catalogs/backend/marketplace.json -
 | `--branch`, `-b` | Deprecated alias for `--ref`. |
 | `--host` | Git host FQDN for `OWNER/REPO` shorthand. Default: `github.com`. Ignored when `SOURCE` already carries a host (URL, hosted `marketplace.json`, or local path); a warning is shown for hosted JSON, local paths, or a conflicting embedded host. |
 | `--path` | Repository-relative path to the catalog JSON file, such as `catalogs/frontend/marketplace.json`. Skips auto-discovery. Applies to git-backed sources and local repository directories, not to hosted `marketplace.json` URLs or a direct local file. |
+| `--offline` | Read a local `apm.yml` source without network; JSON, Git and HTTPS catalog sources reject it. See [Live local authoring catalogs](#live-local-authoring-catalogs). |
 | `--verbose`, `-v` | Show detailed output. |
 
 Without `--path`, APM checks `marketplace.json`,
@@ -194,9 +195,19 @@ token-free and noninteractive. See the
 for the full policy. Hosted `marketplace.json`
 URLs are public HTTPS only: APM sends no auth headers. Use a
 git-backed marketplace for private catalogs. When packages are
-installed from a hosted JSON URL, the lockfile records the source URL
-and fetched content digest. See
+installed from a remote catalog (hosted JSON URL or Git), the lockfile
+records the catalog origin (`source_url`) and a content digest
+(`source_digest`); local catalogs record neither. See
 [`getting-started/authentication`](../../../getting-started/authentication/).
+
+**One catalog, one name.** Registering a second name for a catalog that is
+already registered (same origin and `--path`) succeeds with a `[!]` warning
+naming the existing alias. Re-adding an existing name with a different URL
+rebinds it on this machine only; a project whose lockfile recorded the old
+origin then fails `apm update`, `apm install <plugin>@<alias>` and
+`apm outdated` rather than switching catalogs; `apm install` keeps replaying
+the locked marketplace. See
+[lockfile `source_url`](../../lockfile-spec/#per-entry-fields).
 
 **Azure DevOps.** Services (`dev.azure.com`, `*.visualstudio.com`) use
 `ADO_APM_PAT`, then the Azure CLI bearer. Server hosts registered through
@@ -218,7 +229,9 @@ apm marketplace list --verbose
 
 ### `apm marketplace browse NAME`
 
-Show the packages exposed by a registered marketplace.
+Show the packages exposed by a registered marketplace. Each plugin prints
+its full install name (`plugin@marketplace`) and version, with the
+description wrapped underneath.
 
 ```bash
 apm marketplace browse awesome-agents
@@ -227,7 +240,10 @@ apm marketplace browse awesome-agents
 ### `apm marketplace update [NAME]`
 
 Refresh the local cache for one marketplace, or all when `NAME` is
-omitted.
+omitted. Each catalog is revalidated (a conditional request where the host
+supports it). If a catalog cannot be fetched or is invalid, its last valid
+cached copy is kept and the command exits non-zero, naming every catalog that
+failed; catalogs that did refresh stay refreshed.
 
 ```bash
 apm marketplace update                 # refresh every registered marketplace
@@ -379,8 +395,8 @@ remote, as `apm marketplace check` requires; otherwise the command exits
 ### `apm marketplace package set NAME`
 
 Update fields on an existing package entry. Same flag set as
-`package add` minus `--no-verify`; only the fields you pass are
-modified.
+`package add` minus `--name` and `--no-verify` (`--subdir` has no `-s`
+short form); only the fields you pass are modified.
 
 ### `apm marketplace package remove NAME`
 

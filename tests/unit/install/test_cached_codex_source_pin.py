@@ -63,7 +63,7 @@ def _write_issue_fixture(apm_home: Path, *, locked_commit: str, pin_commit: str 
             encoding="utf-8",
             newline="\n",
         )
-    content_hash = compute_package_hash(package)
+    content_hash = compute_package_hash(package, framed=False)  # version 1 lock
     assert content_hash == _ISSUE_CONTENT_HASH
     (apm_home / "apm.lock.yaml").write_text(
         "lockfile_version: '1'\n"

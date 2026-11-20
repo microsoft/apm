@@ -60,6 +60,7 @@ from apm_cli.policy.schema import (
     SecurityPolicy,
     UnmanagedFilesPolicy,
 )
+from tests.utils.simulated_ado_chain import StaticPolicyResolver
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -188,7 +189,7 @@ class TestURLChainCache:
         }
 
         with patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=lambda url, **_kwargs: responses[url],
         ) as transport:
             cold = discover_policy_with_chain(tmp_path, policy_override=leaf_url)
@@ -225,7 +226,7 @@ class TestURLChainCache:
         }
 
         with patch(
-            "apm_cli.policy.discovery.requests.get",
+            "apm_cli.policy.discovery.policy_get",
             side_effect=lambda url, **_kwargs: responses[url],
         ) as transport:
             first = discover_policy_with_chain(tmp_path, policy_override=leaf_url)
@@ -1110,8 +1111,11 @@ dependencies:
         return response
 
     with (
-        patch("apm_cli.policy.discovery._get_token_for_host", return_value=None),
-        patch("apm_cli.policy.discovery.requests.get", side_effect=get) as transport,
+        patch(
+            "apm_cli.policy.discovery._policy_auth_resolver",
+            return_value=StaticPolicyResolver(None),
+        ),
+        patch("apm_cli.policy.discovery.policy_get", side_effect=get) as transport,
     ):
         cold = discover_policy_with_chain(
             tmp_path,
@@ -1202,8 +1206,11 @@ dependencies:
         return response
 
     with (
-        patch("apm_cli.policy.discovery._get_token_for_host", return_value=None),
-        patch("apm_cli.policy.discovery.requests.get", side_effect=get) as transport,
+        patch(
+            "apm_cli.policy.discovery._policy_auth_resolver",
+            return_value=StaticPolicyResolver(None),
+        ),
+        patch("apm_cli.policy.discovery.policy_get", side_effect=get) as transport,
     ):
         cold = discover_policy_with_chain(tmp_path, policy_override=leaf_ref)
         assert cold.policy is not None

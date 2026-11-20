@@ -449,6 +449,26 @@ def test_agent_bundle_rejects_unrepresentable_resolved_mcp(tmp_path: Path) -> No
         export_agent_plugin_bundle(project, tmp_path / "build")
 
 
+def test_agent_bundle_rejects_claude_plugin_root_mcp(tmp_path: Path) -> None:
+    project = _write_agent_project(tmp_path / "project")
+    _write_lockfile(
+        project,
+        mcp_configs={
+            "synthdb": {
+                "name": "synthdb",
+                "registry": False,
+                "transport": "stdio",
+                "command": "node",
+                "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/server.js"],
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match=r"'synthdb'.*CLAUDE_PLUGIN_ROOT"):
+        export_agent_plugin_bundle(project, tmp_path / "build")
+    assert not (tmp_path / "build").exists()
+
+
 def test_agent_bundle_rejects_nonconforming_manifest_name(tmp_path: Path) -> None:
     project = _write_agent_project(tmp_path / "project")
     apm_yml = project / "apm.yml"
@@ -668,3 +688,37 @@ def test_agent_bundle_archives_are_reproducible(
     )
 
     assert first.bundle_path.read_bytes() == second.bundle_path.read_bytes()
+
+
+_DECLARED_DEPS = {
+    "apm": "  apm:\n    - acme/tools\n",
+    "mcp": "  mcp:\n    - name: srv\n      registry: false\n      transport: stdio\n      command: srv\n",
+    "lsp": (
+        "  lsp:\n    - name: kit-lsp\n      command: kit-ls\n"
+        "      extensionToLanguage:\n        .kit: kit\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("kind", sorted(_DECLARED_DEPS))
+def test_agent_bundle_without_lockfile_refuses_declared_dependencies(
+    tmp_path: Path, kind: str
+) -> None:
+    """Only a dependency-free project packs without a lock; none is dropped (#3994)."""
+    project = _write_agent_project(tmp_path / "project")
+    (project / "apm.lock.yaml").unlink()
+    manifest = project / "apm.yml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "dependencies:\n" + _DECLARED_DEPS[kind],
+        encoding="utf-8",
+    )
+    with pytest.raises(FileNotFoundError, match="run 'apm install' first"):
+        export_agent_plugin_bundle(project, tmp_path / "build")
+    assert not (tmp_path / "build").exists()
+
+
+def test_agent_bundle_without_lockfile_packs_a_dependency_free_project(tmp_path: Path) -> None:
+    project = _write_agent_project(tmp_path / "project")
+    (project / "apm.lock.yaml").unlink()
+    result = export_agent_plugin_bundle(project, tmp_path / "build")
+    assert "apm.lock.yaml" in result.files

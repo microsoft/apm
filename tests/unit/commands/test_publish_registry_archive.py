@@ -187,8 +187,25 @@ class TestResolvePackageId:
     def test_package_identity_is_lowercase(self) -> None:
         assert _resolve_package_id("Acme/My-Skill") == ("acme", "my-skill")
 
-    def test_github_https_url_stripped(self) -> None:
-        assert _resolve_package_id("https://github.com/acme/my-skill") == ("acme", "my-skill")
+    @pytest.mark.parametrize(
+        ("package_id", "expected"),
+        [
+            ("gitlab.com/acme/my-skill", ("gitlab.com/acme", "my-skill")),
+            ("https://gitlab.com/acme/my-skill", ("gitlab.com/acme", "my-skill")),
+            ("https://github.com/acme/my-skill", ("github.com/acme", "my-skill")),
+            ("dev.azure.com/org/proj/repo", ("dev.azure.com/org/proj", "repo")),
+        ],
+    )
+    def test_host_is_kept_in_owner(self, package_id: str, expected: tuple[str, str]) -> None:
+        """#3844: the host is part of the identity, so hosts never collide."""
+        assert _resolve_package_id(package_id) == expected
+
+    def test_identity_matches_consumer_split(self) -> None:
+        """Publish addresses the same registry path install requests."""
+        from apm_cli.deps.registry.resolver import split_registry_identity
+
+        for identity in ("acme/my-skill", "gitlab.com/acme/my-skill"):
+            assert _resolve_package_id(identity) == split_registry_identity(identity)
 
     def test_malformed_value_raises(self) -> None:
         with pytest.raises(UsageError, match="owner/repo"):

@@ -278,14 +278,14 @@ def test_post_pack_catalog_emits_artifacts_and_docs_url() -> None:
             cleaned = token.strip("(),.;'\"")
             if "://" not in cleaned:
                 continue
-            if "publish-to-a-marketplace" in urlparse(cleaned).path:
+            if "installing-from-marketplaces" in urlparse(cleaned).path:
                 docs_urls.append(cleaned)
     assert len(docs_urls) == 1, f"expected exactly one docs URL, got {docs_urls!r}"
     parsed = urlparse(docs_urls[0])
     assert parsed.scheme == "https"
     assert parsed.hostname == "microsoft.github.io"
-    assert parsed.path == "/apm/producer/publish-to-a-marketplace/"
-    assert parsed.fragment == "consume-from-any-assistant"
+    assert parsed.path == "/apm/consumer/installing-from-marketplaces/"
+    assert parsed.fragment == "install-patterns"
 
 
 def test_post_pack_catalog_suppressed_in_dry_run() -> None:
@@ -399,6 +399,22 @@ class TestPackReleaseGatesIntegration:
         # Envelope always carries the keys; both should be null when not requested.
         assert data["version_alignment"] is None
         assert data["drift"] is None
+
+    def test_json_envelope_reports_the_bundle(self, tmp_path: Path, monkeypatch) -> None:
+        """A successful bundle build is not reported as "bundle": null (#3994)."""
+        import json as _json
+
+        from apm_cli.bundle.packer import PackResult
+        from apm_cli.core.build_orchestrator import BuildResult, OutputKind, ProducerResult
+
+        _scaffold(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        bundle = PackResult(bundle_path=tmp_path / "build" / "pkg-1.0.0", files=["a.md"])
+        built = BuildResult(producer_results=[ProducerResult(OutputKind.BUNDLE, payload=bundle)])
+        monkeypatch.setattr("apm_cli.commands.pack.BuildOrchestrator.run", lambda *_a, **_k: built)
+        result = CliRunner().invoke(pack_cmd, ["--offline", "--json"])
+        data = _json.loads(result.output)
+        assert data["bundle"] == {"path": bundle.bundle_path.as_posix(), "files": ["a.md"]}
 
     def test_check_versions_only_payload_shape(self, tmp_path: Path, monkeypatch) -> None:
         import json as _json

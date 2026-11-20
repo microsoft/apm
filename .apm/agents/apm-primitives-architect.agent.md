@@ -6,7 +6,7 @@ description: >-
   Activate when authoring new primitives, refactoring existing skill
   bundles, designing multi-agent orchestration, or assessing whether a
   primitive change adheres to PROSE and Agent Skills best practices.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # APM Primitives Architect

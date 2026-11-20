@@ -18,7 +18,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
@@ -420,7 +419,7 @@ class TestMarketplaceUpdate:
         assert "No marketplaces" in result.output or "registered" in result.output
 
     def test_update_partial_failure(self, runner: CliRunner, tmp_path: Path) -> None:
-        """One marketplace failing during update doesn't abort the whole run."""
+        """One failing marketplace does not stop the others, but the run exits 1."""
         sources = [_fake_source("good"), _fake_source("bad")]
         good_manifest = _fake_manifest("good")
 
@@ -444,9 +443,11 @@ class TestMarketplaceUpdate:
                 ),
             ):
                 result = runner.invoke(cli, ["marketplace", "update"])
-        # Should complete (exit 0) but warn about the bad marketplace
-        assert result.exit_code == 0
-        assert "bad" in result.output or "network" in result.output
+        # The good catalog still refreshes; the failure is named and fails closed (#3910).
+        assert result.exit_code == 1
+        assert "good (" in result.output
+        assert "bad: network error" in result.output
+        assert "Refreshed 1 of 2 marketplace(s); failed: bad" in result.output
 
 
 # ===========================================================================
@@ -993,12 +994,10 @@ class TestInstallAutoBootstrap:
                 result = runner.invoke(cli, ["install", "--dry-run", "owner/new-pkg"])
         assert result.exit_code == 0
 
-    def test_no_apm_yml_with_target_flag_persists_targets(
+    def test_no_apm_yml_with_target_flag_previews_targets(
         self, runner: CliRunner, tmp_path: Path
     ) -> None:
-        """Auto-bootstrap persists CLI targets through the integration path."""
-        from apm_cli.core.apm_yml import parse_targets_field
-
+        """Dry-run bootstrap previews CLI targets and writes no apm.yml (#3865)."""
         with runner.isolated_filesystem(temp_dir=str(tmp_path)):
             with (
                 patch("apm_cli.commands.install.AuthResolver", autospec=True),
@@ -1008,14 +1007,15 @@ class TestInstallAutoBootstrap:
                 ),
             ):
                 result = runner.invoke(
-                    cli, ["install", "--dry-run", "owner/new-pkg", "--target", "copilot"]
+                    cli,
+                    ["install", "--dry-run", "owner/new-pkg", "--target", "copilot"],
+                    env={"COLUMNS": "240"},
                 )
 
-            assert result.exit_code == 0
-            with open("apm.yml", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
-            assert config.get("targets") == ["copilot"]
-            assert parse_targets_field(config) == ["copilot"]
+            assert result.exit_code == 0, result.output
+            assert "Dry run: Would create apm.yml" in result.output
+            assert "Dry run: Would set targets: copilot (in apm.yml)" in result.output
+            assert not Path("apm.yml").exists()
 
 
 # ===========================================================================

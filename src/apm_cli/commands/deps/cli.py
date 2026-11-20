@@ -17,8 +17,9 @@ from ...core.project_name import DEFAULT_BOOTSTRAP_PROJECT_NAME
 from ...core.target_catalog import target_all_exclusion_help, target_help_fragment
 from ...core.target_detection import TargetParamType
 from ...deps.lock_parent_placement import installed_manifest_children, place_legacy_lock_parents
-from ...deps.lockfile import LockedDependency
+from ...deps.lockfile import LockedDependency, LockfileConflictError
 from ...models.apm_package import APMPackage
+from ...models.manifest_io import InvalidManifestError
 from ...utils.path_security import PathTraversalError
 from .._helpers import (
     UnknownPackageError,
@@ -272,7 +273,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                 if dep.alias is not None:
                     install_path = dep.get_install_path(apm_modules_path)
                     physical_key = install_path.relative_to(apm_modules_path).as_posix()
-                    dep_key = dep.get_canonical_dependency_string()
+                    # An aliased slot keeps host and port in its row (B4, #3967).
+                    dep_key = dep.get_unique_key()
                     physical_to_logical[physical_key] = dep_key
                     declared_sources[dep_key] = source
                     continue
@@ -307,7 +309,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     declared_sources[f"{repo_parts[0]}/{repo_parts[1]}/{package_name}"] = source
                 elif is_gh:
                     declared_sources[f"{repo_parts[0]}/{package_name}"] = source
-    except PathTraversalError:
+    except (PathTraversalError, InvalidManifestError):
         raise
     except Exception:
         pass  # Continue without orphan detection if apm.yml parsing fails
@@ -323,16 +325,13 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         lockfile_path = get_lockfile_path(apm_dir)
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
-            for dep in lockfile.dependencies.values():
+            for dep in lockfile.get_package_dependencies():
                 # Local slots and explicit aliases retain their logical lockfile identity.
                 if dep.source == "local" or dep.alias is not None or dep.replacement is not None:
                     install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
                     physical_key = install_path.relative_to(apm_modules_path).as_posix()
-                    dep_key = (
-                        dep.repo_url
-                        if dep.source == "local"
-                        else dep.get_canonical_dependency_string()
-                    )
+                    # An aliased slot keeps host and port in its row (B4, #3967).
+                    dep_key = dep.repo_url if dep.source == "local" else dep.get_unique_key()
                     physical_to_logical[physical_key] = dep_key
                 else:
                     dep_key = dep.get_canonical_dependency_string()
@@ -352,7 +351,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
                     )
                 if getattr(dep, "is_insecure", False):
                     insecure_lock_deps[dep_key] = dep
-    except PathTraversalError:
+    except (PathTraversalError, LockfileConflictError):
         raise
     except Exception:
         pass  # Continue without lockfile if it can't be read
@@ -577,7 +576,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             show_header=True,
             header_style="bold cyan",
         )
-        table.add_column("Package", style="bold white")
+        table.add_column("Package", style="bold white", overflow="fold")
         table.add_column("Version", style="yellow")
         table.add_column("Source", style="blue")
         if insecure_only:
@@ -698,10 +697,10 @@ def list_packages(global_, show_all, insecure_only):
         # Import Rich components with fallback
         import shutil
 
-        from rich.console import Console
+        from apm_cli.utils.console import new_console
 
         term_width = shutil.get_terminal_size((120, 24)).columns
-        console = Console(width=max(120, term_width))
+        console = new_console(width=max(120, term_width))
         has_rich = True
     except ImportError:
         has_rich = False
@@ -835,6 +834,8 @@ def _build_dep_tree(apm_dir):
                     result["children_map"] = children_map
                     result["unresolved"] = list(placement.unresolved)
                     return result
+    except LockfileConflictError:
+        raise
     except Exception:
         pass
 
@@ -884,10 +885,11 @@ def tree(global_):
 
     try:
         # Import Rich components with fallback
-        from rich.console import Console
         from rich.tree import Tree
 
-        console = Console()
+        from apm_cli.utils.console import new_console
+
+        console = new_console()
         has_rich = True
     except ImportError:
         has_rich = False
@@ -1109,8 +1111,9 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     # breaking release.
     _rich_warning(
         "'apm deps update' is deprecated; use 'apm update' instead. "
-        "'apm update' now supports -g/--global, [PACKAGES]..., --force, and "
-        "--parallel-downloads, plus an interactive plan, --dry-run, and --yes.",
+        "'apm update' now supports -g/--global, [PACKAGES]..., --force, "
+        "--parallel-downloads, --target, and --legacy-skill-paths, plus an "
+        "interactive plan, --dry-run, and --yes.",
         symbol="warning",
     )
 
@@ -1126,6 +1129,9 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
 
     scope = InstallScope.USER if global_ else InstallScope.PROJECT
     project_root = get_apm_dir(scope)
+    from ...deps.lockfile_generator import require_current_cli
+
+    require_current_cli(project_root, command="apm deps update")
     apm_yml_path = project_root / APM_YML_FILENAME
 
     if not apm_yml_path.exists():
@@ -1178,20 +1184,24 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
 
     logger.start(f"Updating {noun}...")
 
+    from ...install.service import InstallService
+
     try:
-        install_result = _install_apm_dependencies(
-            apm_package,
-            update_refs=True,
-            verbose=verbose,
-            only_packages=only_pkgs,
-            force=force,
-            parallel_downloads=parallel_downloads,
-            logger=logger,
-            auth_resolver=auth_resolver,
-            target=target,
-            scope=scope,
-            legacy_skill_paths=legacy_skill_paths,
-        )
+        # Update intent revalidates marketplace catalogs, as `apm update` does (#3961).
+        with InstallService.catalog_freshness(update_refs=True, refresh=False):
+            install_result = _install_apm_dependencies(
+                apm_package,
+                update_refs=True,
+                verbose=verbose,
+                only_packages=only_pkgs,
+                force=force,
+                parallel_downloads=parallel_downloads,
+                logger=logger,
+                auth_resolver=auth_resolver,
+                target=target,
+                scope=scope,
+                legacy_skill_paths=legacy_skill_paths,
+            )
     except Exception as e:
         logger.error(f"Update failed: {e}")
         if not verbose:

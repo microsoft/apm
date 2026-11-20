@@ -14,6 +14,8 @@ follow symlinks when checking current bytes.
 from __future__ import annotations
 
 import os
+import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -24,6 +26,7 @@ from ..utils.content_hash import compute_file_hash
 from ..utils.diagnostics import printable_ascii_text
 from ..utils.git_env import redact_git_diagnostic
 from ..utils.path_security import has_symlink_component
+from ..utils.paths import physical_alias
 from .lockfile import _SELF_KEY as PROJECT_SELF_OWNER
 from .lockfile import (
     LockedDependency,
@@ -298,6 +301,92 @@ def _record_provenance(
     )
 
 
+def _nfc(path: Path) -> Path:
+    return Path(unicodedata.normalize("NFC", str(path)))
+
+
+def _precomposed_spelling(path: Path, roots: Iterable[Path]) -> Path | None:
+    """Return *path* respelled as ``<root>/<NFC member>`` when it names the same file.
+
+    Records hold precomposed (NFC) members relative to a deploy or target
+    root, while macOS hands out decomposed (NFD) paths. The root and the
+    query are compared in NFC so either may carry either spelling, but the
+    returned path keeps the root's own spelling so it still matches
+    :func:`_roots`. ``physical_alias`` confirms through the filesystem that
+    both spellings are one file. Only NFD -> NFC is retried.
+    """
+    query = _nfc(path)
+    for root in roots:
+        try:
+            member = query.relative_to(_nfc(root))
+        except ValueError:
+            continue
+        if not member.parts or ".." in member.parts:
+            continue
+        candidate = root / member
+        if candidate == path:
+            continue
+        anchor = Path(path.anchor)
+        alias = physical_alias(
+            path.relative_to(anchor).as_posix(),
+            anchor,
+            (candidate.relative_to(candidate.anchor).as_posix(),),
+        )
+        if alias is not None:
+            return candidate
+    return None
+
+
+def _retry_roots(ledger, deploy_root: Path, user_scope: bool) -> list[Path]:
+    """Return the deploy roots and every recorded target root, each in every spelling."""
+    roots = list(_roots(deploy_root))
+    for target in sorted(
+        {
+            record.locator.target
+            for record in ledger.records.values()
+            if record.locator.kind is LocatorKind.TARGET_RELATIVE
+        }
+    ):
+        root = _target_root(target, user_scope)
+        if root is not None:
+            roots.extend(_roots(root))
+    return list(dict.fromkeys(roots))
+
+
+def _match_records(
+    absolute: Path,
+    ledger,
+    deploy_root: Path,
+    user_scope: bool,
+    canonical: bool,
+    scope_value: str,
+) -> tuple[tuple[Path, str] | None, list[tuple[str, DeploymentRecord, tuple[Path, str]]]]:
+    """Return the project-relative match and every exact-path ledger record for *absolute*."""
+    project_match = _relative_to_any(absolute, _roots(deploy_root))
+    matched: list[tuple[str, DeploymentRecord, tuple[Path, str]]] = []
+    target_matches: dict[str, tuple[Path, str] | None] = {}
+    for key, record in ledger.records.items():
+        if canonical and not DeploymentLedgerCodec.locator_in_scope(record.locator, scope_value):
+            continue
+        kind = record.locator.kind
+        value = record.locator.value.rstrip("/")
+        if kind is LocatorKind.PROJECT_RELATIVE:
+            match = project_match
+        elif kind is LocatorKind.TARGET_RELATIVE:
+            target = record.locator.target
+            if target not in target_matches:
+                root = _target_root(target, user_scope)
+                target_matches[target] = (
+                    _relative_to_any(absolute, _roots(root)) if root is not None else None
+                )
+            match = target_matches[target]
+        else:
+            continue
+        if match is not None and value == match[1]:
+            matched.append((key, record, match))
+    return project_match, matched
+
+
 def lookup_file_provenance(
     query: str,
     *,
@@ -329,29 +418,23 @@ def lookup_file_provenance(
         violation.locator.key
         for violation in DeploymentLedgerCodec.owner_reference_violations(lockfile, ledger=ledger)
     }
-    project_match = _relative_to_any(absolute, _roots(deploy_root))
 
-    matched: list[tuple[str, DeploymentRecord, tuple[Path, str]]] = []
-    target_matches: dict[str, tuple[Path, str] | None] = {}
-    for key, record in ledger.records.items():
-        if canonical and record.locator.scope != scope_value:
-            continue
-        kind = record.locator.kind
-        value = record.locator.value.rstrip("/")
-        if kind is LocatorKind.PROJECT_RELATIVE:
-            match = project_match
-        elif kind is LocatorKind.TARGET_RELATIVE:
-            target = record.locator.target
-            if target not in target_matches:
-                root = _target_root(target, user_scope)
-                target_matches[target] = (
-                    _relative_to_any(absolute, _roots(root)) if root is not None else None
-                )
-            match = target_matches[target]
-        else:
-            continue
-        if match is not None and value == match[1]:
-            matched.append((key, record, match))
+    project_match, matched = _match_records(
+        absolute, ledger, deploy_root, user_scope, canonical, scope_value
+    )
+    precomposed = (
+        None
+        if matched
+        else _precomposed_spelling(absolute, _retry_roots(ledger, deploy_root, user_scope))
+    )
+    if precomposed is not None:
+        # macOS hands out decomposed (NFD) paths, for example from Finder
+        # drag and drop; the filesystem confirmed both spellings are one file.
+        retried_match, retried = _match_records(
+            precomposed, ledger, deploy_root, user_scope, canonical, scope_value
+        )
+        if retried or project_match is None:
+            project_match, matched = retried_match, retried
 
     records = [
         _record_provenance(record, match[0], match[1], lockfile, record.locator.key in violations)

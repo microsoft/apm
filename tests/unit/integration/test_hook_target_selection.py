@@ -62,6 +62,7 @@ def test_codex_only_dep_does_not_leak_hooks_to_claude(tmp_path: Path) -> None:
     result = integrate_package_primitives(
         _package_info(package_path),
         project,
+        skill_subset=None,
         targets=[_hook_only_target("claude"), _hook_only_target("codex")],
         integrators=IntegratorBundle(
             prompt=None,

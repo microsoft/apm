@@ -14,6 +14,7 @@ This is the Template Method companion to the Strategy pattern in
 from __future__ import annotations
 
 import shlex
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -21,7 +22,7 @@ from apm_cli.agent_plugins.errors import (
     AgentPluginDeploymentBoundaryError,
     AgentPluginTargetExcludedError,
 )
-from apm_cli.install.package_resolution import effective_deploy_skill_subset
+from apm_cli.install.package_resolution import effective_dependency_selection
 from apm_cli.install.services import (
     IntegratorBundle,
     PackageDeploymentPlan,
@@ -33,6 +34,7 @@ from apm_cli.install.sources import (
     DependencySource,
     Materialization,
 )
+from apm_cli.utils.file_ops import describe_path_obstruction
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -40,7 +42,7 @@ if TYPE_CHECKING:
 _MATERIALIZATION_UNSET = object()
 
 
-def _effective_allow(ctx) -> dict | None:
+def effective_allow_map(ctx) -> dict | None:
     """Return the effective (deny-wins) allow-map for the install context.
 
     Builds the #1873 trust context from three layers and materialises the
@@ -62,11 +64,19 @@ def _effective_allow(ctx) -> dict | None:
     if getattr(ctx, "exec_trust_ctx", None) is not None:
         return getattr(ctx, "exec_allow_map", None)
 
+    from apm_cli.core.scope import is_user_scope, manifest_root
+    from apm_cli.security.executables import project_manifest_path
+
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
     project_root = getattr(ctx, "source_root", None) or getattr(ctx, "project_root", None)
+    # The scope owner names the manifest directory (APM_HOME under -g, #3954);
+    # the trust owner reads that apm.yml file.
+    manifest_path = project_manifest_path(
+        manifest_root(project_root, user_scope=is_user_scope(getattr(ctx, "scope", None)))
+    )
     project_allow = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
     trust_ctx = exec_trust_context_for_project(
-        project_root,
+        manifest_path,
         policy=policy,
         fallback_allow_executables=project_allow,
         logger=getattr(ctx, "logger", None),
@@ -97,6 +107,7 @@ def run_integration_template(
         materialization, terminal_deltas = prepare_integration_materialization(source)
         if terminal_deltas is not None:
             return terminal_deltas
+    announce_package(source)
     if materialization is None:
         return None
 
@@ -108,14 +119,28 @@ def run_integration_template(
 def prepare_integration_materialization(
     source: DependencySource,
 ) -> tuple[Materialization | None, dict[str, int] | None]:
-    """Acquire one package without deploying it."""
+    """Acquire one package without deploying it.
+
+    Its ``[+]`` header is held for :func:`announce_package`, so each header
+    prints above its own integration tree even when every package is
+    acquired first (#3994).
+    """
     from apm_cli.deps.plugin_parser import DeclaredPluginComponentError
 
-    try:
-        return source.acquire(), None
-    except DeclaredPluginComponentError as exc:
-        source.ctx.diagnostics.error(str(exc), package=source.dep_key)
-        return None, {}
+    hold = getattr(getattr(source.ctx, "logger", None), "held_package_header", None)
+    with hold() if callable(hold) else nullcontext([]) as held:
+        source._held_header_lines = held
+        try:
+            return source.acquire(), None
+        except DeclaredPluginComponentError as exc:
+            source.ctx.diagnostics.error(str(exc), package=source.dep_key)
+            return None, {}
+
+
+def announce_package(source: DependencySource) -> None:
+    """Emit the header lines held while *source* was acquired."""
+    for emit in list(vars(source).pop("_held_header_lines", None) or ()):
+        emit()
 
 
 def preflight_agent_plugin_materializations(
@@ -180,7 +205,7 @@ def preflight_skill_materializations(
             enforce_agent_plugin_deployment_boundary(materialization.package_info)
         except AgentPluginTargetExcludedError:
             continue
-        dependency = source.dep_ref
+        selection = effective_dependency_selection(source.dep_ref, ctx)
         plan = prepare_package_deployment(
             materialization.package_info,
             ctx.project_root,
@@ -189,14 +214,10 @@ def preflight_skill_materializations(
             package_name=materialization.dep_key,
             logger=ctx.logger,
             scope=ctx.scope,
-            skill_subset=effective_deploy_skill_subset(
-                skill_subset_from_cli=ctx.skill_subset_from_cli,
-                cli_subset=ctx.skill_subset,
-                persisted_subset=dependency.skill_subset,
-            ),
-            dep_target_subset=dependency.target_subset,
+            skill_subset=selection.skill_subset,
+            dep_target_subset=selection.target_subset,
             ctx=ctx,
-            allow_executables=_effective_allow(ctx),
+            allow_executables=effective_allow_map(ctx),
             trust_bin=ctx.trust_bin,
         )
         plans[materialization.dep_key] = plan
@@ -213,6 +234,7 @@ def preflight_skill_materializations(
             package_name="_local",
             logger=ctx.logger,
             scope=ctx.scope,
+            skill_subset=effective_dependency_selection(None, ctx).skill_subset,
             ctx=ctx,
             is_first_party=True,
         )
@@ -273,6 +295,9 @@ def preflight_agent_plugin_dry_run(
         targets = getattr(ctx, "targets", None)
     with native_registration_scope(targets):
         for dependency in dependencies:
+            if dependency.is_marketplace:
+                # Not resolved by the offline preview: nothing materialized to inspect.
+                continue
             if dependency.is_local and dependency.local_path:
                 package_path = Path(dependency.local_path).expanduser()
                 if not package_path.is_absolute():
@@ -486,21 +511,16 @@ def _integrate_materialization(
         return deltas
 
     try:
-        # Per-package effective subset: ``--skill`` is additive (issue
-        # #1786), so deploy the UNION of the persisted apm.yml ``skills:``
-        # and the current CLI ``--skill`` values -- a targeted ``--skill``
-        # install lands on top of previously pinned skills instead of
-        # erasing them. ``--skill '*'`` resets to the full bundle (None).
-        effective_skill_subset = effective_deploy_skill_subset(
-            skill_subset_from_cli=ctx.skill_subset_from_cli,
-            cli_subset=ctx.skill_subset,
-            persisted_subset=dep_ref.skill_subset,
-        )
+        # Per-package effective selection: ``--skill`` is additive (issue
+        # #1786), so the owner unions the persisted apm.yml ``skills:``
+        # with the current CLI ``--skill`` values. ``--skill '*'`` resets
+        # to the full bundle (None).
+        selection = effective_dependency_selection(dep_ref, ctx)
         # When the additive union deploys more skills than the user named on
         # this invocation, name the retained pins so the deployed set is not
         # a silent surprise (verbose only -- the count already renders).
-        if logger and ctx.skill_subset and effective_skill_subset:
-            retained = sorted(set(effective_skill_subset) - set(ctx.skill_subset))
+        if logger and ctx.skill_subset and selection.skill_subset:
+            retained = sorted(set(selection.skill_subset) - set(ctx.skill_subset))
             if retained:
                 logger.verbose_detail(
                     f"    [i] {dep_key}: retaining previously pinned "
@@ -525,10 +545,11 @@ def _integrate_materialization(
             package_name=dep_key,
             logger=logger,
             scope=ctx.scope,
-            skill_subset=effective_skill_subset,
-            dep_target_subset=dep_ref.target_subset,
+            skill_subset=selection.skill_subset,
+            skill_pairing=selection.skill_pairing,
+            dep_target_subset=selection.target_subset,
             ctx=ctx,
-            allow_executables=_effective_allow(ctx),
+            allow_executables=effective_allow_map(ctx),
             trust_bin=getattr(ctx, "trust_bin", None),
             deployment_plan=deployment_plan,
         )
@@ -563,8 +584,9 @@ def _integrate_materialization(
         # Local packages key the diagnostic by local_path; cached/fresh
         # key by dep_key -- a behavioural detail preserved from legacy.
         package_key = dep_ref.local_path if (dep_ref.is_local and dep_ref.local_path) else dep_key
+        reason = describe_path_obstruction(e, Path(ctx.project_root)) or e
         diagnostics.error(
-            f"{source.INTEGRATE_ERROR_PREFIX}: {e}",
+            f"{source.INTEGRATE_ERROR_PREFIX}: {reason}",
             package=package_key,
         )
 

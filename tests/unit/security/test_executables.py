@@ -36,7 +36,6 @@ from apm_cli.security.executables import (
     _is_fully_approved,
     build_approval_key,
     filter_lsp_by_allow_executables,
-    filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
     local_bundle_approval_key,
@@ -631,8 +630,12 @@ class TestPromptExecutableApproval:
             prompt_executable_approval([decl])
         out = capsys.readouterr().out
         assert "allowExecutables" not in out
-        assert "apm approve --recommended" in out
+        # No org set configured: the bulk command would find nothing (#3994).
+        assert "apm approve --recommended" not in out
         assert "apm policy explain" in out
+        with pytest.raises(SystemExit):
+            prompt_executable_approval([decl], recommend=("owner/pkg",))
+        assert "apm approve --recommended" in capsys.readouterr().out
 
 
 class TestAliasDeprecationWarning:
@@ -693,7 +696,7 @@ class TestSaveUserExecutablesAtomic:
 
 
 # ---------------------------------------------------------------------------
-# filter_mcp_by_allow_executables (fail-closed under v1 deny-wins)
+# filter_lsp_by_allow_executables (fail-closed under v1 deny-wins)
 # ---------------------------------------------------------------------------
 
 
@@ -724,43 +727,6 @@ class _RecordingLogger:
 
     def warning(self, message: str, *args, **kwargs) -> None:
         self.warnings.append(message)
-
-
-class TestFilterMcpFailClosed:
-    """filter_mcp_by_allow_executables stays fail-closed under v1 deny-wins.
-
-    The v1 resolver drives the effective map from the project-level
-    ``executables`` block (personal consent merges in elsewhere); these
-    tests confirm the gate filters unapproved and unnamed deps regardless.
-    """
-
-    def test_none_gate_passes_all(self) -> None:
-        deps = [_FakeMcpDep("a"), _FakeMcpDep("b")]
-        logger = _RecordingLogger()
-        assert filter_mcp_by_allow_executables(deps, None, logger) == deps
-        assert logger.warnings == []
-
-    def test_unapproved_filtered_out(self) -> None:
-        deps = [_FakeMcpDep("a")]
-        logger = _RecordingLogger()
-        result = filter_mcp_by_allow_executables(deps, {}, logger)
-        assert result == []
-        assert logger.warnings  # surfaced a remediation warning
-
-    def test_project_allowed_slug_passes(self) -> None:
-        deps = [_FakeMcpDep("a")]
-        logger = _RecordingLogger()
-        result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
-        assert result == deps
-        assert logger.warnings == []
-
-    def test_unnamed_dep_is_fail_closed(self) -> None:
-        # A falsy/missing name must never bypass the gate.
-        deps = [_FakeMcpDep(None), _FakeMcpDep("")]
-        logger = _RecordingLogger()
-        result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
-        assert result == []
-        assert logger.warnings
 
 
 class TestFilterLspFailClosed:
@@ -891,3 +857,218 @@ def test_registrable_exec_statuses_excludes_every_untrusted_value() -> None:
     assert TRUST_GATED not in REGISTRABLE_EXEC_STATUSES
     assert "some-future-status" not in REGISTRABLE_EXEC_STATUSES
     assert frozenset({None, TRUST_ABSENT, TRUST_DEPLOYED}) == REGISTRABLE_EXEC_STATUSES
+
+
+class TestDenyIdentitySpellings:
+    """Deny rules match every spelling of one package identity."""
+
+    @staticmethod
+    def _ctx(*, org_deny=(), project_allow=None, project_deny=None, user_deny=None):
+        from types import SimpleNamespace
+
+        from apm_cli.security.executables import ExecTrustContext, build_exec_trust_context
+
+        policy = SimpleNamespace(
+            executables=SimpleNamespace(
+                deny_all=False, deny=list(org_deny), require=(), recommend=(), enforce=()
+            ),
+            bin_deploy=None,
+        )
+        ctx = build_exec_trust_context(
+            policy=policy,
+            project_data={
+                "executables": {"allow": project_allow or {}, "deny": project_deny or {}}
+            },
+            migrate_user_legacy=False,
+        )
+        if user_deny:
+            from dataclasses import replace
+
+            ctx = replace(ctx, user_deny=user_deny)
+        assert isinstance(ctx, ExecTrustContext)
+        return ctx
+
+    @pytest.mark.parametrize(
+        "deny",
+        [
+            "contoso/pkg-hook",
+            "Contoso/Pkg-Hook",
+            "github.com/contoso/pkg-hook",
+            "https://github.com/Contoso/Pkg-Hook.git",
+            "contoso/*",
+            "Contoso/*",
+        ],
+    )
+    @pytest.mark.parametrize(
+        "key", ["github.com/contoso/pkg-hook#v1.0.0", "contoso/pkg-hook", "Contoso/Pkg-Hook"]
+    )
+    def test_org_deny_matches_any_spelling(self, deny: str, key: str) -> None:
+        from apm_cli.security.executables import resolve_exec_decision
+
+        ctx = self._ctx(org_deny=[deny], project_allow={key.split("#")[0]: {"hooks": True}})
+        decision = resolve_exec_decision(ctx, key, "hooks")
+        assert decision.allowed is False
+        assert decision.trust_state == "denied"
+
+    def test_org_deny_covers_sub_packages(self) -> None:
+        from apm_cli.security.executables import resolve_exec_decision
+
+        key = "github.com/contoso/pkg-hook/skills/review"
+        ctx = self._ctx(org_deny=["contoso/pkg-hook"], project_allow={key: {"hooks": True}})
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is False
+
+    def test_denied_prefix_does_not_cover_sibling_names(self) -> None:
+        from apm_cli.security.executables import resolve_exec_decision
+
+        key = "contoso/pkg-hooks"
+        ctx = self._ctx(org_deny=["contoso/pkg-hook"], project_allow={key: {"hooks": True}})
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is True
+
+    @pytest.mark.parametrize("layer", ["project", "user"])
+    def test_project_and_user_deny_match_any_spelling(self, layer: str) -> None:
+        from apm_cli.security.executables import resolve_exec_decision
+
+        key = "github.com/contoso/pkg-hook#v1.0.0"
+        deny = {"contoso/pkg-hook#1.0.0": {"hooks": True}}
+        kwargs = {"project_deny": deny} if layer == "project" else {"user_deny": deny}
+        ctx = self._ctx(project_allow={"github.com/contoso/pkg-hook": {"hooks": True}}, **kwargs)
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is False
+
+    def test_deny_ignores_the_port_and_grants_do_not(self) -> None:
+        """#3927: denies cover every port of a package; a grant names one server."""
+        from apm_cli.security.executables import canonical_exec_identity, resolve_exec_decision
+
+        assert canonical_exec_identity("https://github.com:8443/Evil/Pkg.git") == "evil/pkg"
+        ported = "github.com:8443/acme/tool"
+        ctx = self._ctx(project_allow={"acme/tool": {"hooks": True}})
+        assert resolve_exec_decision(ctx, "acme/tool", "hooks").allowed is True
+        assert resolve_exec_decision(ctx, ported, "hooks").allowed is False
+
+        allow = {ported: {"hooks": True}}
+        for ctx in (
+            self._ctx(org_deny=["acme/tool"], project_allow=allow),
+            self._ctx(org_deny=["github.com:7999/acme/*"], project_allow=allow),
+            self._ctx(project_allow=allow, project_deny={"acme/tool": {"hooks": True}}),
+        ):
+            assert resolve_exec_decision(ctx, ported, "hooks").allowed is False
+
+    def test_content_bound_keys_stay_exact(self) -> None:
+        from apm_cli.security.executables import canonical_exec_identity
+
+        key = "bundle@sha256:abc"
+        assert canonical_exec_identity(key) == key
+
+
+class TestCanonicalExecIdentityHostCase:
+    """Identity case folding follows the host classification."""
+
+    @pytest.mark.parametrize(
+        ("key", "expected"),
+        [
+            ("contoso.ghe.com/Evil/Pkg", "contoso.ghe.com/evil/pkg"),
+            ("https://dev.azure.com/Org/Proj/_git/Repo", "dev.azure.com/org/proj/repo"),
+            ("dev.azure.com/org/proj/_git/repo#main", "dev.azure.com/org/proj/repo"),
+            ("gitlab.com/Evil/Pkg", "gitlab.com/Evil/Pkg"),
+        ],
+    )
+    def test_case_folding_by_host(self, key: str, expected: str) -> None:
+        from apm_cli.security.executables import canonical_exec_identity
+
+        assert canonical_exec_identity(key) == expected
+
+    def test_ghes_host_from_environment_is_case_folded(self, monkeypatch) -> None:
+        from apm_cli.security.executables import canonical_exec_identity
+
+        monkeypatch.setenv("GITHUB_HOST", "ghe.corp.example.com")
+        assert canonical_exec_identity("ghe.corp.example.com/Evil/Pkg") == (
+            "ghe.corp.example.com/evil/pkg"
+        )
+
+    def test_ado_deny_matches_case_variant(self) -> None:
+        from types import SimpleNamespace
+
+        from apm_cli.security.executables import build_exec_trust_context, resolve_exec_decision
+
+        key = "dev.azure.com/Org/Proj/Repo"
+        policy = SimpleNamespace(
+            executables=SimpleNamespace(
+                deny_all=False,
+                deny=["dev.azure.com/org/proj/repo"],
+                require=(),
+                recommend=(),
+                enforce=(),
+            ),
+            bin_deploy=None,
+        )
+        ctx = build_exec_trust_context(
+            policy=policy,
+            project_data={"executables": {"allow": {key: {"hooks": True}}}},
+            migrate_user_legacy=False,
+        )
+        assert resolve_exec_decision(ctx, key, "hooks").allowed is False
+
+
+def test_locked_replacement_keys_name_the_selected_source() -> None:
+    """MCP/LSP views key a replaced row like the install gate, never upstream (#3710)."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.security.executables import locked_dependency_approval_keys
+
+    lock = LockFile.from_yaml(
+        """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      path: ./local-hooky
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        path: ./local-hooky
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+    )
+    (locked,) = lock.get_package_dependencies()
+
+    assert locked_dependency_approval_keys(locked) == ("./local-hooky",)
+
+
+def test_locked_fork_replacement_keys_name_the_fork() -> None:
+    """A fork-replaced row is keyed by the fork, with and without its ref."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.security.executables import locked_dependency_approval_keys
+
+    lock = LockFile.from_yaml(
+        """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      git: https://github.com/myfork/hooky.git
+      ref: v1.2.0
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        git: https://github.com/myfork/hooky.git
+        ref: v1.2.0
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+    )
+    (locked,) = lock.get_package_dependencies()
+
+    assert locked_dependency_approval_keys(locked) == ("myfork/hooky#v1.2.0", "myfork/hooky")

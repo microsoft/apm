@@ -55,9 +55,13 @@ class DependencyPolicy:
 
 @dataclass(frozen=True)
 class McpTransportPolicy:
-    """Allowed MCP transport protocols."""
+    """Allowed MCP transport protocols.
 
-    allow: tuple[str, ...] | None = None  # stdio, sse, http, streamable-http
+    ``allow`` holds canonical names only (stdio, streamable-http, sse); the
+    parser folds the ``http`` alias into ``streamable-http``.
+    """
+
+    allow: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

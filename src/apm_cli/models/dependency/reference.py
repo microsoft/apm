@@ -22,6 +22,7 @@ from ...utils.github_host import (
 )
 from ...utils.path_security import (
     PathTraversalError,
+    decode_url_path_segments,
     parse_url_path_segments,
     validate_path_segments,
 )
@@ -48,10 +49,11 @@ from .identity import (
     build_canonical_dependency_string,
     build_dependency_unique_key,
     case_insensitive_identity_prefix_segments,
+    effective_policy_host,
     is_case_insensitive_package_identity,
     normalize_package_repo_url,
-    normalize_policy_host,
 )
+from .manifest_host import manifest_host_strips, qualify_manifest_shorthand
 from .materialization import build_materialization_path
 from .object_fields import (
     apply_optional_dependency_fields,
@@ -65,6 +67,7 @@ from .types import VirtualPackageType
 
 if TYPE_CHECKING:
     from .replacement import ReplacementBinding
+    from .subsets import EdgeSelection, SkillTargetSelection
 
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
@@ -137,6 +140,15 @@ class DependencyReference(ProviderCoordinateMixin):
     marketplace_version_spec: str | None = None
     marketplace_manifest: dict[str, object] | None = None
     replacement: "ReplacementBinding | None" = field(default=None, repr=False, compare=False)
+    # Every edge that declared this node, set by the resolver's selection merge
+    # (#3735). Diagnostics only: never part of identity and never persisted.
+    selection_contributors: "tuple[EdgeSelection, ...]" = field(
+        default=(), repr=False, compare=False
+    )
+    # Exact per-target skill selection when skill_subset x target_subset would
+    # over-select (req-rs-018); None means the flat product is exact. Set by
+    # the resolver's merge or decoded from the lockfile; never identity.
+    subset_pairings: "SkillTargetSelection | None" = field(default=None, repr=False, compare=False)
 
     @property
     def source_reference(self) -> "DependencyReference":
@@ -185,14 +197,8 @@ class DependencyReference(ProviderCoordinateMixin):
 
     @property
     def policy_host(self) -> str | None:
-        """Return the effective host compared by host-qualified policy patterns.
-
-        A reference without an explicit host resolves to the configured default
-        host (``GITHUB_HOST`` or ``github.com``). Local paths have no host.
-        """
-        if self.is_local:
-            return None
-        return normalize_policy_host(self.host or default_host())
+        """Return the effective host compared by host-qualified policy patterns."""
+        return effective_policy_host(self.host, is_local=self.is_local)
 
     @property
     def ref_kind(self) -> str | None:
@@ -390,6 +396,7 @@ class DependencyReference(ProviderCoordinateMixin):
         return build_dependency_unique_key(
             self.repo_url,
             host=self.host,
+            port=self.port,
             source="local" if self.is_local else self.source,
             local_path=self.local_path,
             is_virtual=self.is_virtual,
@@ -412,24 +419,25 @@ class DependencyReference(ProviderCoordinateMixin):
             return f"local:{self.anchored_local_path}"
         return self.get_unique_key()
 
-    def _format_reference(self, repo_url: str) -> str:
-        """Format one scheme-free reference from the supplied repository path."""
+    def _format_reference(self, repo_url: str, *, manifest_form: bool = True) -> str:
+        """Format a scheme-free reference; *manifest_form* strips the manifest's host."""
         if self.is_local and self.local_path:
             return self.local_path
 
         host = self.host or default_host()
-        is_default = host.lower() == default_host().lower()
         host_label = f"{host}:{self.port}" if self.port else host
-
-        if is_default and not self.port and not self.artifactory_prefix:
-            result = repo_url
-        elif self.artifactory_prefix:
-            result = f"{host_label}/{self.artifactory_prefix}/{repo_url}"
-        else:
-            result = f"{host_label}/{repo_url}"
-
+        result = repo_url
         if self.is_virtual and self.virtual_path:
             result = f"{result}/{self.virtual_path}"
+
+        if self.artifactory_prefix:
+            result = f"{host_label}/{self.artifactory_prefix}/{result}"
+        elif self.port or not (
+            manifest_host_strips(host, result)
+            if manifest_form
+            else host.lower() == default_host().lower()
+        ):
+            result = f"{host_label}/{result}"
         if self.reference:
             result = f"{result}#{self.reference}"
         return result
@@ -451,10 +459,10 @@ class DependencyReference(ProviderCoordinateMixin):
         Returns:
             str: Canonical dependency string
         """
-        return self._format_reference(self.canonical_repo_url)
+        return self._format_reference(self.canonical_repo_url, manifest_form=False)
 
     def to_display_reference(self) -> str:
-        """Return a portable reference retaining source repository casing."""
+        """Return the apm.yml form (source casing; strips the manifest's default host)."""
         return self._format_reference(self.repo_url)
 
     def get_identity(self) -> str:
@@ -576,7 +584,7 @@ class DependencyReference(ProviderCoordinateMixin):
             f"Shorthand '@alias' is not supported in '{preview}'. "
             f"Use object form with 'git:', optional 'path:', and 'alias:' "
             f"fields to install a dependency under a custom directory name. "
-            f"See: https://microsoft.github.io/apm/consumer/manage-dependencies/#reference-formats"
+            f"See: https://microsoft.github.io/apm/consumer/install-packages/#reference-formats"
         )
 
     @staticmethod
@@ -759,7 +767,7 @@ class DependencyReference(ProviderCoordinateMixin):
             "Use the `path:` key instead: "
             "`git: <repo-url>` + `path: <primitive>/<name>` "
             "(or the shorthand `org/repo/<primitive>/<name>`). "
-            "See https://microsoft.github.io/apm/consumer/manage-dependencies/"
+            "See https://microsoft.github.io/apm/consumer/install-packages/"
         )
 
     @classmethod
@@ -1003,7 +1011,7 @@ class DependencyReference(ProviderCoordinateMixin):
                 f".collection.yml is no longer supported. "
                 f"Convert '{virtual_path}' to an apm.yml with a "
                 f"'dependencies' section. "
-                f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                f"See: https://microsoft.github.io/apm/consumer/install-packages/"
             )
 
     @classmethod
@@ -1314,7 +1322,7 @@ class DependencyReference(ProviderCoordinateMixin):
                     f".collection.yml is no longer supported. "
                     f"Convert '{virtual_path}' to an apm.yml with a "
                     f"'dependencies' section. "
-                    f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                    f"See: https://microsoft.github.io/apm/consumer/install-packages/"
                 )
 
             # Accept any path ending in a recognised virtual file
@@ -1523,7 +1531,7 @@ class DependencyReference(ProviderCoordinateMixin):
         allowed_pattern = _path_segment_pattern(is_ado_host)
         validate_path_segments("/".join(uparts), context="repository path")
         for part in uparts:
-            if not re.match(allowed_pattern, part.rstrip(".git")):
+            if not re.match(allowed_pattern, part.removesuffix(".git")):
                 raise ValueError(f"Invalid repository path component: {part}")
 
         quoted_repo = "/".join(urllib.parse.quote(p, safe="") for p in uparts)
@@ -1607,7 +1615,7 @@ class DependencyReference(ProviderCoordinateMixin):
                         f".collection.yml is no longer supported. "
                         f"Convert '{ado_virtual}' to an apm.yml with a "
                         f"'dependencies' section. "
-                        f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                        f"See: https://microsoft.github.io/apm/consumer/install-packages/"
                     )
 
                 # Accept any recognised virtual file extension; reject other
@@ -1741,6 +1749,16 @@ class DependencyReference(ProviderCoordinateMixin):
 
         return host, port, repo_url, reference, alias, effective_is_virtual, effective_virtual_path
 
+    @staticmethod
+    def _reject_git_suffixed_repo_name(name: str) -> None:
+        # Parsing removes exactly one ".git" transport suffix, so a name that
+        # still ends in ".git" would be written to apm.yml as a different repo.
+        if name.endswith(".git"):
+            raise ValueError(
+                f"Invalid repository path component: {name}. A repository name "
+                "cannot end in '.git' once its '.git' suffix is removed"
+            )
+
     @classmethod
     def _validate_final_repo_fields(cls, host, repo_url, *, allow_percent_encoded: bool = False):
         """Validate a repository path and return its ADO coordinates when applicable."""
@@ -1751,7 +1769,10 @@ class DependencyReference(ProviderCoordinateMixin):
                     f"Invalid Azure DevOps repository format: {repo_url}. Expected 'org/project/repo'"
                 )
             ado_parts = repo_url.split("/")
-            validate_path_segments(repo_url, context="Azure DevOps repository path")
+            validate_path_segments(
+                repo_url, context="Azure DevOps repository path", reject_all_dots=True
+            )
+            cls._reject_git_suffixed_repo_name(ado_parts[2])
             return ado_parts[0], ado_parts[1], ado_parts[2]
 
         segments = repo_url.split("/")
@@ -1764,7 +1785,10 @@ class DependencyReference(ProviderCoordinateMixin):
         )
         if not all(re.match(allowed_pattern, s) for s in segments):
             raise ValueError(f"Invalid repository format: {repo_url}. Contains invalid characters")
-        validate_path_segments(repo_url, context="repository path")
+        validate_path_segments(repo_url, context="repository path", reject_all_dots=True)
+        cls._reject_git_suffixed_repo_name(
+            decode_url_path_segments(segments[-1], context="repository path")[0]
+        )
         for seg in segments:
             if any(seg.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
                 raise ValueError(
@@ -1863,6 +1887,7 @@ class DependencyReference(ProviderCoordinateMixin):
 
         cls._reject_shorthand_alias(dependency_str)
         reject_unsupported_ado_server_base_path(dependency_str)
+        dependency_str = qualify_manifest_shorthand(dependency_str)  # req-mf-019
 
         cls.parse_host_qualified_reference(dependency_str)
 

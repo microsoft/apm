@@ -356,7 +356,7 @@ class TestReadApmYmlTarget:
     def test_parse_targets_field_exception_returns_none(self, tmp_path: Path) -> None:
         (tmp_path / "apm.yml").write_text("name: pkg\ntarget: copilot\n", encoding="utf-8")
         with patch(
-            "apm_cli.core.apm_yml.parse_targets_field",
+            "apm_cli.models.manifest_targets.parse_targets_field",
             side_effect=ValueError("bad"),
         ):
             result = _read_apm_yml_target(tmp_path)

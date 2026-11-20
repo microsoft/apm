@@ -10,13 +10,27 @@
     },
     {
       "id": "marketplace-locked-selection",
-      "decision": "Marketplace requested-ref consistency against locked selection evidence",
-      "owner": "drift.py (marketplace_ref_mismatch); consumes deps/lockfile.py declaration association and marketplace/resolver.py selected-version evidence",
+      "decision": "Requested-ref consistency against locked selection evidence: marketplace selections and full-SHA manifest pins (install drift, install --frozen, audit ref consistency), and lock-first replay vs re-resolve of marketplace declarations",
+      "owner": "drift.py (marketplace_ref_mismatch, revision_pin_mismatch, locked_marketplace_row, locked_marketplace_replay); consumes deps/lockfile.py declaration association and marketplace/resolver.py selected-version evidence; deps/apm_resolver.py (_resolve_marketplace_dep) asks locked_marketplace_replay before any catalog I/O",
       "selectors": [
         "src/apm_cli/policy/ci_checks.py",
         "src/apm_cli/install/phases/lockfile.py"
       ],
-      "guards": ["marketplace-integrations-locked-evidence"]
+      "guards": [
+        "marketplace-integrations-locked-evidence",
+        "transport-platform-revision-pin-lock-consistency"
+      ]
+    },
+    {
+      "id": "marketplace-catalog-origin",
+      "decision": "Which catalog a marketplace alias names: canonical origin recorded as lock source_url/source_digest for every remote catalog kind, fail-closed alias rebind against the lock, and duplicate-origin registration warning",
+      "owner": "marketplace/source_identity.py (marketplace_origin, same_marketplace_origin) owns the origin key; marketplace/models.py (catalog_digest), applied for Git kinds by marketplace/client.py _parse_catalog, owns the Git catalog digest; deps/lockfile.py (marketplace_rows) selects the locked rows for an alias/plugin pair; marketplace/catalog_origin.py (require_locked_catalog_origin, require_locked_row_origin, registrations_sharing_origin) compares lock and registrations; every marketplace resolution entry point checks the origin before catalog I/O (deps/apm_resolver.py _resolve_marketplace_dep, commands/install.py plugin@alias intercept, commands/outdated.py, uninstall registry fallback; apm view is a listed read-only exemption); also marketplace/resolver.py, apm marketplace add, user-manifest reconcile",
+      "selectors": [
+        "src/apm_cli/marketplace/catalog_origin.py"
+      ],
+      "guards": [
+        "marketplace-integrations-catalog-origin"
+      ]
     },
     {
       "id": "marketplace-tag-pattern",
@@ -34,6 +48,15 @@
         "src/apm_cli/marketplace/registration.py"
       ],
       "guards": ["marketplace-integrations-source-admission"]
+    },
+    {
+      "id": "marketplace-dependency-confusion-admission",
+      "decision": "Whether a resolved marketplace entry may be installed despite the #1326 bare cross-repo dependency-confusion sentinel",
+      "owner": "marketplace/dependency_confusion.py (admit_marketplace_resolution); required consumers are enforced by guard marketplace-integrations-dependency-confusion",
+      "selectors": [
+        "src/apm_cli/marketplace/dependency_confusion.py"
+      ],
+      "guards": ["marketplace-integrations-dependency-confusion"]
     },
     {
       "id": "marketplace-entry-ref-verification",
@@ -76,6 +99,16 @@
         "src/apm_cli/marketplace/validator.py"
       ],
       "guards": ["marketplace-integrations-raw-diagnostics"]
+    },
+    {
+      "id": "marketplace-catalog-freshness",
+      "decision": "Explicit marketplace refresh revalidates each needed catalog once per invocation or fails, never serving stale data",
+      "owner": "marketplace/client.py (fetch_marketplace require_fresh, catalog_freshness_scope, fetch_or_cache); install/service.py (InstallService.catalog_freshness) maps command intent",
+      "selectors": [
+        "src/apm_cli/marketplace/shadow_detector.py",
+        "src/apm_cli/commands/marketplace/__init__.py"
+      ],
+      "guards": ["marketplace-integrations-catalog-freshness"]
     },
     {
       "id": "catalog-only-marketplace-manifest",
@@ -148,6 +181,19 @@
       "guards": ["marketplace-integrations-native-registration"]
     },
     {
+      "id": "claude-native-plugin-registration",
+      "decision": "Intact Claude plugin admission, lockfile-derived native ownership (native_plugin records), deployment to ~/.agents/plugins, and settings-only declaration through the shared native settings writer without any vendor CLI",
+      "owner": "claude_plugins/admission.py (plan_native_claude_plugin); claude_plugins/registrar.py (reconcile_claude_plugins, verify_claude_native_cache); native_plugins/ (record, layout, settings)",
+      "selectors": [
+        "src/apm_cli/claude_plugins/admission.py",
+        "src/apm_cli/claude_plugins/registrar.py",
+        "src/apm_cli/native_plugins/layout.py",
+        "src/apm_cli/native_plugins/record.py",
+        "src/apm_cli/native_plugins/settings.py"
+      ],
+      "guards": ["marketplace-integrations-claude-ownership"]
+    },
+    {
       "id": "codex-native-plugin-lifecycle",
       "decision": "Qualified Codex compatibility-bundle admission, public native lifecycle, APM transport ownership and immutable source-pin integrity",
       "owner": "codex_plugins/registrar.py (synchronize_codex_plugins, verify_codex_source_identity), admission.py, client.py; utils/content_hash.py owns the opt-in native fingerprint",
@@ -173,6 +219,16 @@
         "src/apm_cli/copilot_plugins/catalog.py"
       ],
       "guards": ["marketplace-integrations-copilot-ownership"]
+    },
+    {
+      "id": "pack-plugin-manifests",
+      "decision": "Pack-time targets-to-ecosystem plugin.json paths and per-ecosystem manifest shape (claude, copilot, codex)",
+      "owner": "core/plugin_manifest.py (PLUGIN_ECOSYSTEM_PATHS, build_plugin_manifest, write_plugin_manifest_with_outcome); codex_plugins/manifest.py derives CODEX_COMPAT_MANIFEST from it",
+      "selectors": [
+        "src/apm_cli/core/plugin_manifest.py",
+        "src/apm_cli/core/build_orchestrator.py"
+      ],
+      "guards": ["marketplace-integrations-pack-plugin-manifests"]
     }
   ]
 }

@@ -527,6 +527,7 @@ class TestIntegratePackagePrimitivesTargetGating:
             _integrate_package_primitives(
                 package_info,
                 project_root,
+                skill_subset=None,
                 targets=[KNOWN_TARGETS["copilot"]],
                 managed_files=set(),
                 force=False,
@@ -557,6 +558,7 @@ class TestIntegratePackagePrimitivesTargetGating:
             _integrate_package_primitives(
                 package_info,
                 project_root,
+                skill_subset=None,
                 targets=[KNOWN_TARGETS["claude"]],
                 managed_files=set(),
                 force=False,
@@ -586,6 +588,7 @@ class TestIntegratePackagePrimitivesTargetGating:
             _integrate_package_primitives(
                 package_info,
                 project_root,
+                skill_subset=None,
                 targets=[KNOWN_TARGETS["cursor"]],
                 managed_files=set(),
                 force=False,
@@ -638,6 +641,7 @@ class TestCursorCommandEndToEnd:
         result = integrate_package_primitives(
             pkg_info,
             temp_project,
+            skill_subset=None,
             targets=[KNOWN_TARGETS["cursor"]],
             integrators=IntegratorBundle(
                 prompt=PromptIntegrator(),
@@ -794,6 +798,7 @@ class TestInputToArgumentsEndToEnd:
         result = integrate_package_primitives(
             pkg_info,
             temp_project,
+            skill_subset=None,
             targets=[KNOWN_TARGETS["claude"]],
             integrators=IntegratorBundle(
                 prompt=PromptIntegrator(),

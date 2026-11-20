@@ -579,6 +579,7 @@ def test_dispatch_dependency_named_local_is_not_first_party(tmp_path: Path, enab
     result = integrate_package_primitives(
         _dispatch_pkg_info(tmp_path),
         project_root,
+        skill_subset=None,
         targets=[_copilot()],
         integrators=_canvas_only_bundle(),
         force=False,
@@ -607,6 +608,7 @@ def test_dispatch_first_party_flag_deploys(tmp_path: Path, enable_canvas):
     result = integrate_package_primitives(
         _dispatch_pkg_info(tmp_path),
         project_root,
+        skill_subset=None,
         targets=[_copilot()],
         integrators=_canvas_only_bundle(),
         force=False,
@@ -633,6 +635,7 @@ def test_dispatch_dependency_deploys_with_trust(tmp_path: Path, enable_canvas):
     result = integrate_package_primitives(
         _dispatch_pkg_info(tmp_path),
         project_root,
+        skill_subset=None,
         targets=[_copilot()],
         integrators=_canvas_only_bundle(),
         force=False,

@@ -359,6 +359,7 @@ class TestIntegratePackagePrimitives:
             services.integrate_package_primitives(
                 make_package_info(package_dir),
                 tmp_path,
+                skill_subset=None,
                 targets=[target],
                 integrators=IntegratorBundle(
                     prompt=MagicMock(),
@@ -515,7 +516,7 @@ class TestIntegratePackagePrimitives:
         )
 
         assert result["commands"] == 1
-        assert tree_messages(logger) == ["  |-- 1 commands integrated -> .github/commands/"]
+        assert tree_messages(logger) == ["  |-- 1 command integrated -> .github/commands/"]
 
     def test_multi_target_dispatch_entries_are_skipped(self, tmp_path: Path) -> None:
         target = make_target(primitives={"prompts": make_mapping(subdir="prompts")})
@@ -833,7 +834,7 @@ class TestIntegratePackagePrimitives:
         )
 
         assert tree_messages(logger) == [
-            "  |-- 1 commands integrated -> copilot-app/workflows/",
+            "  |-- 1 command integrated -> copilot-app/workflows/",
             "  |-- workflows arrive disabled; enable from the Copilot App's Workflows tab",
         ]
 
@@ -857,7 +858,7 @@ class TestIntegratePackagePrimitives:
         )
 
         assert tree_messages(logger) == [
-            "  |-- 1 commands adopted -> copilot-app/workflows/",
+            "  |-- 1 command adopted -> copilot-app/workflows/",
             "  |-- (files unchanged)",
         ]
 
@@ -888,6 +889,7 @@ class TestIntegratePackagePrimitives:
             services.integrate_package_primitives(
                 make_package_info(package_dir),
                 tmp_path,
+                skill_subset=None,
                 targets=[make_target(name="copilot-cowork", primitives={})],
                 integrators=IntegratorBundle(
                     prompt=MagicMock(),
@@ -923,6 +925,7 @@ class TestIntegratePackagePrimitives:
             services.integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=[make_target(name="copilot-cowork", primitives={})],
                 integrators=IntegratorBundle(
                     prompt=MagicMock(),
@@ -958,7 +961,7 @@ class TestIntegratePackagePrimitives:
             logger=MagicMock(),
         )
 
-        assert tree_messages(logger) == ["  |-- 1 prompts integrated -> .github/prompts/"]
+        assert tree_messages(logger) == ["  |-- 1 prompt integrated -> .github/prompts/"]
 
     def test_deployed_path_entry_called_for_each_target_path(self, tmp_path: Path) -> None:
         target_paths = [tmp_path / "a", tmp_path / "b"]

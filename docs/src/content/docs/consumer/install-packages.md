@@ -1,291 +1,203 @@
 ---
-title: Install packages
-description: Add APM packages to your project as dependencies and let install resolve everything.
+title: Add and remove packages
+description: Add a package from a repo, tag, subfolder, single file or local bundle, see why it is installed, and remove it cleanly.
 ---
 
-To add an APM package to your project, declare it in `apm.yml` under
-`dependencies.apm:` and run `apm install`. APM resolves the graph,
-scans every primitive, writes `apm.lock.yaml`, and deploys the result
-into each agent harness directory you target.
+Use this page to bring a skill, agent or set of instructions from another
+repository into your project, at a version the whole team shares. A
+**package** is any git repository or folder APM can install, with or without
+its own `apm.yml`.
 
-```bash
-apm install microsoft/apm-sample-package
-```
+## Add a package
 
-That command edits `apm.yml`, fetches the package, walks its
-transitive deps, runs the security scan, writes the lockfile, and
-integrates skills, prompts, instructions, agents, hooks, and commands
-into every detected harness. The next contributor runs bare
-`apm install` and gets the same bytes, pinned by commit and content
-hash.
-
-This page covers APM packages. For MCP servers, see
-[Install MCP servers](../install-mcp-servers/). For local bundles, see
-[Deploy a bundle](../deploy-a-bundle/).
-
-## Add a dependency
-
-Two ways. They produce the same `apm.yml`.
-
-**With the CLI.** Pass the package as a positional argument. APM
-resolves it, validates it, and appends it to `dependencies.apm:` in
-`apm.yml`:
-
-```bash
+```bash frame="terminal"
 apm install microsoft/apm-sample-package#v1.0.0
-apm install github/awesome-copilot/skills/review-and-refactor
-apm install ./packages/my-shared-skills        # local path
-apm install ./ai/agents/xyz.agent.md            # one local primitive
-apm install --dev acme/internal-debug-agents   # devDependencies
 ```
 
-**By editing `apm.yml`.** Add entries under `dependencies.apm:` then
-run bare `apm install`:
+APM adds the entry to `apm.yml`, downloads the package and its dependencies
+into `apm_modules/`, and writes files where each harness (the agent tool that
+reads them) looks: `.github/` for GitHub Copilot, `.claude/` for Claude Code.
+It records the commit and file hashes in `apm.lock.yaml`. A failed install
+restores `apm.yml`.
 
-```yaml
-name: my-project
-version: 0.1.0
-dependencies:
-  apm:
-    - microsoft/apm-sample-package#v1.0.0
-    - github/awesome-copilot/skills/review-and-refactor
-    - https://gitlab.com/acme/coding-standards.git
-    - ./packages/my-shared-skills
-devDependencies:
-  apm:
-    - acme/internal-debug-agents
+You can also edit the manifest and run a bare `apm install`:
+
+```diff title="apm.yml"
+ dependencies:
+   apm:
+     - microsoft/apm-sample-package#v1.0.0
++    - contoso/review-skills#v1.1.0
 ```
 
-```bash
-apm install
+## Reference formats
+
+`apm install` and `dependencies.apm` accept these forms:
+
+| Form | Example | Use it for |
+|---|---|---|
+| Shorthand | `contoso/review-skills` | A GitHub repo at its default branch |
+| Tag, branch or commit | `contoso/review-skills#v1.1.0`, `#main`, `#<40-char SHA>` | A fixed (tag, SHA) or moving (branch) version |
+| Semver range | `contoso/review-skills#^1.1.0` | The highest matching release tag |
+| Subfolder | `github/awesome-copilot/skills/review-and-refactor` | One skill or folder from a larger repo |
+| Single file | `contoso/standards/prompts/review.prompt.md` | One primitive file |
+| Other host | `gitlab.com/acme/standards#v2.0`, `dev.azure.com/org/project/repo` | GitLab, GitHub Enterprise, Azure DevOps |
+| Git URL | `https://...git`, `git@host:org/repo.git` | An explicit transport |
+| Local path | `./packages/shared-skills`, `./ai/agents/reviewer.agent.md` | A folder, or one `.agent.md`, `.instructions.md` or `.prompt.md` |
+| Marketplace | `review-kit@contoso` (CLI) | A plugin listed in a [marketplace](../installing-from-marketplaces/) |
+
+Shorthand resolves against `github.com` unless `apm.yml` sets `default_host:`.
+For nested GitLab groups or aliases, use the
+[object form](../../reference/manifest-schema/#412-object-form) (`git:`,
+`path:`, `ref:`, `alias:`). Private hosts need
+[credentials](../../getting-started/authentication/).
+
+### Pin a semver range
+
+A range (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`) resolves against the
+repository's tags (`v1.2.3`, `review-skills-v1.2.3` or
+`review-skills--v1.2.3`) and locks the highest match. Clones replay that tag;
+[`apm update`](../update-and-refresh/) or an edit to the range moves it.
+
+## Install one skill from a collection
+
+When a repository ships many skills under `skills/<name>/`, take the ones you
+need:
+
+```bash frame="terminal"
+apm install contoso/review-skills --skill security-review
 ```
 
-Supported reference forms: `owner/repo` shorthand (with optional
-`#ref` for a tag, branch, or commit), full HTTPS or SSH git URLs,
-virtual subdirectory paths into a monorepo, single-file references,
-and local paths starting with `./`, `../`, or `/`. For private hosts
-and tokens, see [Authentication](../authentication/).
+APM saves the selection as a `skills:` list on the entry, so a bare
+`apm install` deploys the same subset. A later `--skill` adds to the list;
+`--skill '*'` resets it to every skill. To drop one, edit the `skills:` list
+and run `apm install`.
 
-Local files must end in `.agent.md`, `.instructions.md`, or `.prompt.md`.
-APM copies only the selected file into an ordinary package, then applies the
-same policy, rendering, ownership, update, and removal flow as other packages.
-It does not link to the source or collect neighboring assets. Use a directory
-package with `apm.yml` when the primitive needs companion files.
+## Install local paths and bundles
 
-Relative paths are anchored to the manifest that declares them, including
-nested local packages. `--root` redirects output, not source lookup. With
-`--global`, use an absolute path or `~/...`; project-relative paths remain
-unsupported. Select a real file, not a file symlink.
+A local folder or file installs like any other package. A single file is
+copied alone, so use a folder when it needs companion files. Rerun
+`apm install` after you edit the source.
 
-## What `apm install` does
+A **bundle** is a `.zip` (or legacy `.tar.gz`) or folder that `apm pack`
+produced, with `plugin.json` at its root:
 
-The pipeline is deterministic. Each phase must pass before the next runs.
-
-1. **Resolve.** Walk `dependencies.apm:` and `devDependencies.apm:`,
-   follow transitive deps, pick versions.
-2. **Policy gate.** If `apm-policy.yml` is in scope (locally or via
-   your org), every resolved dependency is checked against the
-   allow-list before anything touches disk. Skip with `--no-policy`
-   for a single invocation; this does not bypass `apm audit --ci`.
-3. **Scan.** The pre-deploy security scan inspects every primitive
-   for hidden Unicode (zero-width characters, bidi controls, tag
-   characters). Critical findings block the install. Override with
-   `--force`.
-4. **Integrate.** Write primitives into each selected target's owned
-   directories, such as `.github/`, `.claude/`, `.grok/`, and the cross-tool
-   `.agents/skills/`.
-5. **Lockfile.** Write `apm.lock.yaml` with pinned versions, content
-   hashes, and the resolved dependency set.
-
-On a fresh clone or CI runner without local deployment receipts, a committed
-skill is kept and its receipts are recorded when every file in its directory
-matches what the install would write and is recorded in `apm.lock.yaml`. On
-`apm update`, a committed skill that matches what the currently locked version
-renders (fetched from its locked commit) is replaced with the new version; if
-one of its files was edited, the update fails before writing any file or the
-lockfile. The lockfile hashes are not used as proof. If any file differs, or another existing
-skill cannot be overwritten because its local deployment receipt is missing,
-install exits nonzero before stale-file cleanup and lockfile replacement. The
-refused files and prior lock contents are preserved, including during cold
-`--frozen` replay and when dependencies deliver the same skill. This is not a
-full rollback: files admitted earlier in the run may remain. Move the
-conflicting file aside and retry, or use `--force` only when you intend to
-overwrite it. Files edited since a valid recorded deployment remain protected
-with a warning.
-
-For the deeper view of how compile fits in, see
-[Lifecycle](../../concepts/lifecycle/).
-
-:::note[Coming from npm?]
-`apm install` mirrors `npm install` deliberately. The big difference:
-APM also runs a security scan and, if present, an org policy gate
-before writing anything to disk. To refresh dependencies to their
-latest matching versions or refs, use `apm update` (mirrors `npm update`).
-CLI upgrades use your package manager (`brew upgrade apm` for Homebrew), or
-`apm self-update` for standalone installs. See
-[Update and refresh](../update-and-refresh/#update-the-apm-cli-binary).
-:::
-
-## Where files land
-
-APM detects which harnesses your project uses and deploys to all of
-them. Detection priority:
-
-1. `--target <slug>` flag (highest).
-2. The `targets:` field in `apm.yml`.
-3. Auto-detect from the
-   [documented filesystem signals](../../reference/cli/targets/#detection-signals).
-
-With no signal, install exits with a target-selection error.
-
-Pin targets explicitly when you want reproducibility across machines:
-
-```yaml
-name: my-project
-targets:
-  - copilot
-  - claude
-  - cursor
+```bash frame="terminal"
+apm install ./dist/review-skills-1.1.0.zip --target copilot
 ```
 
-For the full reach map of which primitive lands where on each
-harness, see [Primitives and targets](../../concepts/primitives-and-targets/).
+APM checks the files against the hashes `apm pack` recorded in the bundle,
+deploys them and records them in `apm.lock.yaml`. It does not edit `apm.yml`. A reinstall
+removes bundle MCP and LSP servers that are no longer shipped, are denied or are not
+approved. Bundle MCP servers are recorded in the lockfile, so they pass `apm audit --ci`
+and `apm install --frozen` and survive other installs and uninstalls; `apm install -g
+<bundle>` records them in `$APM_HOME/apm.lock.yaml`. A `bundle:` entry counts only
+when the lockfile also records its deployment, and org MCP policy still applies to
+it. Org policy resolves as for a package install; when it cannot be resolved,
+`policy.fetch_failure_default` decides. Approved bundle hooks are re-checked on
+every install, update and prune, and retired once their approval is removed or
+org policy denies them. With `-g`, bundle executable approvals are read from `~/.apm/apm.yml`, never the
+current directory's `apm.yml`. To build one, see
+[Build a plugin](../../producer/build-a-plugin/).
 
-Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), Windsurf (`.windsurf/rules/`), and Kiro (`.kiro/steering/`) is automatic and idempotent -- re-running `apm install` adopts unchanged rules without rewriting them.
+## Transport selection
 
-## What to commit
+APM picks one transport per dependency and does not silently switch:
 
-Commit `apm.yml`, `apm.lock.yaml`, and target-owned outputs; keep `apm_modules/`
-gitignored. Committed agent files are reviewable and discoverable after clone,
-not necessarily self-contained: run `apm install` to restore linked package
-context. Keep those installed resources available while native agents or tools
-follow the deployed links; do not remove `apm_modules/` just because install
-has finished.
+| Dependency form | Transport |
+|---|---|
+| `ssh://...` or `user@host:...` | SSH |
+| `https://...` or `http://...` | The scheme you wrote |
+| Shorthand with `--ssh`, `APM_GIT_PROTOCOL=ssh` or `apm config set prefer-ssh true` | SSH |
+| Any other shorthand | HTTPS |
 
-See the [Quickstart](../../quickstart/#what-to-commit) for details, and
-[`apm_modules/` is derived](../../reference/lockfile-spec/#apm_modules-is-derived)
-for reinstall and safe cleanup guidance.
+Same-host git `insteadOf` rewrites still apply; rewrites that add
+credentials, downgrade to `http://` or change host are refused. Use
+`--allow-protocol-fallback` for a migration window, no longer. `http://` sources
+need `--allow-insecure`.
 
 ## Transitive dependencies and the lockfile
 
-`apm install` resolves the full dependency graph, not just your
-top-level entries. Versions and content hashes are pinned in
-`apm.lock.yaml` so every contributor and CI run installs the exact
-same bytes. Commit the lockfile.
+APM installs your dependencies' dependencies too. The lockfile records each
+package's commit and a SHA-256 hash per file, so `apm install` on another
+machine replays the same bytes, even for branches. APM installs one version
+per package: if two dependencies pin different commits of one package, install
+fails naming both paths. Align the refs in `apm.yml`; never edit the lockfile.
 
-:::note[Lockfile replay]
-Plain `apm install` and `apm install --frozen` replay locked commits for
-unchanged dependencies, including transitive packages, and reuse matching
-[cached package content](../../reference/cli/cache/) when available. This keeps
-mutable branches and tags pinned to their recorded commits.
+Ask why a package is on disk:
 
-Run [`apm update`](../../reference/cli/update/) or `apm install --refresh` to
-establish current upstream mutable refs. `apm outdated` checks the same current
-state without changing the lockfile. See the
-[lockfile specification](../../reference/lockfile-spec/) for the replay
-contract.
-:::
-
-Transitive **APM** packages flow through automatically. Transitive
-**MCP servers** are gated: if a deep dependency declares a new MCP
-server, install pauses and asks you to re-declare it in your
-top-level `apm.yml`. Use `--trust-transitive-mcp` to skip this in
-trusted environments. See
-[Drift and secure-by-default](../drift-and-secure-by-default/) for
-the rationale.
-
-## Inspect what got installed
-
-```bash
-apm list                  # list scripts declared in apm.yml
-apm view <package>        # details for one installed package
+```bash frame="terminal"
+apm deps why github/awesome-copilot/skills/review-and-refactor
 ```
 
-`apm view` reads from `apm.lock.yaml` and `apm_modules/` -- use it to
-confirm what shipped without re-running install. `apm list` shows the
-runnable scripts your manifest exposes (see
-[Run scripts](../run-scripts/)).
+```text frame="none"
+[i] github/awesome-copilot@unknown  (transitive)
 
-## Useful flags
-
-```bash
-apm install --dry-run                  # preview locally known dependencies
-apm install --target claude,cursor     # only deploy to these harnesses
-apm install --exclude gemini           # deploy to all targets except gemini
-apm install --only apm                 # skip MCP server integration this run
-apm install --frozen                   # CI: lockfile-only; fail on drift
-apm install --update                   # resolve current upstream refs
-apm install --refresh                  # resolve refs and bypass cached content
-apm install --force                    # collision/security override; no ref refresh
-apm install --dev                      # treat positional args as devDependencies
-apm install -g <package>               # install to user scope (~/.apm/)
-apm install -v                         # verbose: show resolution and integration
+    microsoft/apm-sample-package   [declared in apm.yml]
+    +-- github/awesome-copilot/skills/review-and-refactor
 ```
 
-Targets with native user-scope instruction files pick up global instructions
-during install. Targets whose user-scope instruction surface is a root context
-file require explicit
-[`apm compile --global`](../../reference/cli/compile/#global-compilation);
-`apm install -g` prints a hint and writes no root context file.
+The sample pulls this skill without a tag, so APM shows no version
+(`@unknown`); the lockfile still pins its commit. `apm deps list` lists installed
+packages and `apm deps tree` shows the graph (`apm list` lists scripts).
 
-For project-scope installs, targets that require
-[post-install instruction compilation](../../reference/targets-matrix/#post-install-instruction-compilation)
-print a hint when dependency instructions require `apm compile`. The hint names
-the root context files that compile will update.
+MCP servers that come from a transitive package are held back until you
+approve them: see [Approve hooks and MCP servers](../approve-executables/).
 
-`--dry-run` includes required indirect APM dependencies when metadata is
-available locally. Offline gaps make the preview incomplete and suppress
-orphan-removal predictions; stale-file integration cleanup is not previewed.
-See [preview limits](../../reference/cli/install/#preview-without-writing)
-and the full flag reference, or run `apm install --help`.
+## What to commit
+
+Commit `apm.yml` and `apm.lock.yaml`. APM adds its download folder,
+`apm_modules/`, to `.gitignore`. Committing the deployed harness files is
+optional, since any clone rebuilds them from the lockfile
+([should I commit them?](../../concepts/how-apm-works/#common-questions)).
+
+## Remove a package
+
+```bash frame="terminal"
+apm uninstall contoso/review-skills
+```
+
+This removes the `apm.yml` entry, its lockfile row and its deployed files.
+`review-kit@contoso` works for marketplace entries. After deleting an entry by
+hand, run `apm prune` (preview with `--dry-run`) to remove orphaned packages.
+
+## Verify
+
+```bash frame="terminal"
+apm audit
+```
+
+```text frame="none"
+[+] Replayed 2 package(s)
+[+] No drift detected
+...
+```
+
+`apm audit` rebuilds what the lockfile describes and compares it with disk.
 
 ## When things go wrong
 
-- **Package contains symbolic links.** A link inside a dependency whose
-  target stays in the same repository commit is installed as a copy of the
-  target's content (a link to a directory becomes a copy of that
-  directory). APM reads the target from the locked commit's Git objects, so
-  no host needs symlink privileges (Windows Developer Mode is not required),
-  the package records the same `content_hash` on Windows, macOS and Linux,
-  and a lockfile from one platform verifies with `--frozen` on another.
-  A link that points outside the repository, to a missing path, or in a
-  loop fails the install before hashing with an error naming the link.
-  APM sets `core.symlinks=false` only on its own Git commands and does not
-  change your Git configuration; cached checkouts made by older APM
-  versions are re-created automatically.
-- **Line endings differ across platforms.** APM checks out dependencies with
-  `core.autocrlf=false` and `core.eol=lf` on its own Git commands, so
-  `text` / `text=auto` files keep their committed LF bytes on every platform
-  (details in the [`content_hash` field](../../reference/lockfile-spec/)).
-  Your Git configuration is not changed. Older cached checkouts are
-  re-created on their next use, so the first install after upgrading can
-  take longer. A lockfile recorded by an older APM on Windows can still fail
-  `--frozen` with `Content hash mismatch`; see
-  [the recovery steps](../../troubleshooting/common-errors/#content-hash-mismatch-for-pkg-expected-a-got-b).
-- **Critical security finding.** Install aborts with the offending
-  characters and file path. Patch upstream when you can; use
-  `--force` only when you can document the exception.
-- **Unmanaged skill conflict.** A differing local skill file refuses the
-  complete selected plan before native deployment or manifest/lock success
-  state. Rename the local skill or narrow a valid existing skill/target
-  selection; see [install behavior](../../reference/cli/install/#behavior).
-- **Policy violation.** Install aborts before any file is written.
-  Adjust the dependency or update org policy. See
-  [Governance on the consumer ramp](../governance-on-the-consumer-ramp/).
-- **Auth failure on a private repo.** Set `GITHUB_APM_PAT` or the
-  matching host token. See [Authentication](../authentication/) and
-  [Private and org packages](../private-and-org-packages/).
-- **Drift between `apm_modules/` and the lockfile.** Run
-  `apm audit --ci` locally to reproduce the CI gate; see
-  [Update and refresh](../update-and-refresh/) to recover.
-- **Skipped symlinked agent source.** `apm install` warns and skips agent
-  files or directories that are symlinks (for example
-  `.apm/agents -> ../agents`). Fix by shipping real files and directories in
-  the source package, then rerun `apm install`. Do not edit `apm_modules/` --
-  cached edits are not a durable fix. For a third-party package,
-  ask the author to publish real sources. See
-  [Instructions and agents](../../producer/author-primitives/instructions-and-agents/#agents).
+- **`No harness detected`.** See
+  [Choose your harnesses](../choose-harnesses/).
+- **401, 403 or "not accessible" on a private repo.** See
+  [Use private sources](../../getting-started/authentication/).
+- **Critical hidden-Unicode finding.** Install stops and names the file. Fix
+  it upstream; `--force` overrides.
+- **Policy violation.** Your organization's policy blocked the dependency
+  before any file was written. Run `apm policy status`; see
+  [Set an org policy](../../enterprise/apm-policy/).
+- **One package in a multi-package install fails.** If a download fails, or a local
+  path is not a package, APM integrates nothing from that run. Fix the failing entry
+  and rerun.
+- **A local file is in the way.** APM does not overwrite files it did not
+  write. Move it and rerun.
+- **`--frozen` fails with `Content hash mismatch`.** See
+  [Common errors](../../troubleshooting/common-errors/#content-hash-mismatch-for-pkg-expected-a-got-b).
+- **Lockfile written by a newer APM.** Upgrade APM; see
+  [Install failures](../../troubleshooting/install-failures/#lockfile-written-by-a-newer-apm).
 
-Once your dependencies are installed, scripts run them.
-[Run scripts](../run-scripts/) shows how to wire `apm.yml`'s
-`scripts:` block to invoke compiled prompts in any harness.
+:::tip[Other options]
+`--dev` adds to `devDependencies` (left out of `apm pack`). `--dry-run`
+previews. `-g` installs for your user account, not the project
+([Choose your harnesses](../choose-harnesses/#install-for-your-user-account)).
+Every flag: [`apm install`](../../reference/cli/install/).
+:::

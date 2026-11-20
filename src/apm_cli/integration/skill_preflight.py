@@ -11,9 +11,11 @@ from typing import TYPE_CHECKING, Literal
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.integration.base_integrator import BaseIntegrator, untrusted_baseline_message
 from apm_cli.integration.skill_adoption import (
+    installing_commit,
     is_skill_dir_identical_to_source,
     skill_tree_baselines,
 )
+from apm_cli.integration.skill_support import skill_dir_has_content
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.diagnostics import DiagnosticCollector, printable_ascii_text
 
@@ -85,13 +87,30 @@ def preflight_skill_selection(
         else skill_subset_filter_tokens(skill_subset)
     )
     available = frozenset(selection.children)
+    dependency = package_info.dependency_ref
+    package_key = (
+        dependency.get_unique_key() if dependency is not None else package_info.install_path.name
+    )
+    # #3204 holds per declaring edge: a merged union must not hide one
+    # parent's selection that matches nothing (#3735).
+    for edge in getattr(dependency, "selection_contributors", ()) or ():
+        edge_filter = skill_subset_filter_tokens(edge.skill_subset)
+        if SkillIntegrator._skill_filter_misses_available(edge_filter, available):
+            SkillIntegrator._error_no_skill_filter_match(
+                available,
+                tuple(edge.skill_subset or ()),
+                package_key,
+                diagnostics=diagnostics,
+                logger=logger,
+                declared_by=edge.declared_by() if edge.parent_chain else None,
+            )
+            return False
     if not SkillIntegrator._skill_filter_misses_available(name_filter, available):
         return True
-    dependency = package_info.dependency_ref
     SkillIntegrator._error_no_skill_filter_match(
         available,
         tuple(skill_subset or ()),
-        dependency.get_unique_key() if dependency is not None else package_info.install_path.name,
+        package_key,
         diagnostics=diagnostics,
         logger=logger,
     )
@@ -201,6 +220,29 @@ def find_unmanaged_conflicts(
     replay_owners = integrator._replay_owners
     adopted: dict[tuple[Path, Path], dict[Path, str]] = {}
     unchanged: dict[tuple[Path, Path], bool] = {}
+    left_alone: dict[tuple[Path, Path], bool] = {}
+
+    def user_skill_dir(source_root: Path, destination: Path, target: TargetProfile) -> bool:
+        """Mirror materialization, which never writes into an unclaimed populated skill dir.
+
+        Members of such a directory (for example ``apm install <bundle>``
+        output) are skipped there, so they are not replacement refusals here.
+        """
+        key = (source_root, destination)
+        if key not in left_alone:
+            left_alone[key] = (
+                skill_dir_has_content(destination)
+                and BaseIntegrator.check_collision(
+                    destination,
+                    deployed_path_entry(destination, project_root, [target]),
+                    managed,
+                    False,
+                    diagnostics=DiagnosticCollector(),
+                )
+                and integrator._ownership_maps(project_root)[0].get(name) != owner
+                and not is_skill_dir_identical_to_source(source_root, destination)
+            )
+        return left_alone[key]
 
     def claimed(path: Path, destination: Path) -> bool:
         entry = deployed_path_entry(path, project_root, targets)
@@ -264,6 +306,8 @@ def find_unmanaged_conflicts(
                     if unmanaged and identical:
                         continue
                     if not unmanaged:
+                        if user_skill_dir(source_root, destination, target):
+                            continue
                         key = (source_root, destination)
                         if key not in adopted:
                             # Copies keep identical members only for a raw-identical sub-skill.
@@ -281,6 +325,7 @@ def find_unmanaged_conflicts(
                                 plan=source_plan,
                                 owner=owner,
                                 targets=targets,
+                                commit=installing_commit(package_info),
                             )
                         if path in adopted[key] or (identical and unchanged[key]):
                             continue

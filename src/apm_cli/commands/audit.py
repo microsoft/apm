@@ -10,6 +10,7 @@ Exit codes:
 """
 
 import dataclasses
+import functools
 import os
 import sys
 from pathlib import Path
@@ -33,6 +34,7 @@ from ..utils.console import (
     _rich_echo,
     _rich_error,
     _rich_success,
+    _rich_warning,
 )
 from ..utils.diagnostics import printable_ascii_text
 
@@ -473,6 +475,7 @@ def _preview_strip(
     if console:
         try:
             from rich.table import Table
+            from rich.text import Text
 
             table = Table(
                 show_header=True,
@@ -490,7 +493,7 @@ def _preview_strip(
                 crit = sum(1 for f in strippable if f.severity == "critical")
                 warn = sum(1 for f in strippable if f.severity == "warning")
                 table.add_row(
-                    rel_path,
+                    Text(rel_path),
                     str(crit) if crit else "-",
                     str(warn) if warn else "-",
                     str(len(strippable)),
@@ -517,6 +520,18 @@ def _preview_strip(
     return affected
 
 
+def _report_passed(ci_result: "CIAuditResult", total: int) -> None:
+    """Summarize a passing run; warn-mode violations are not a clean pass (#3994)."""
+    warned = sum(1 for check in ci_result.checks if check.warned)
+    if not warned:
+        _rich_success(f"{STATUS_SYMBOLS['success']} All {total} check(s) passed")
+        return
+    _rich_warning(
+        f"{total} check(s) passed; {warned} {'reports' if warned == 1 else 'report'} violations under "
+        "'enforcement: warn' and fail once the policy switches to block."
+    )
+
+
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
 
@@ -539,23 +554,26 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
             table.add_column("Message", style="white")
 
             for check in ci_result.checks:
+                # Text, not markup: Rich would parse "[x]" as a tag (#3845).
                 status = (
-                    f"[green]{STATUS_SYMBOLS['check']}[/green]"
+                    Text(STATUS_SYMBOLS["warning"], style="yellow")
+                    if check.warned
+                    else Text(STATUS_SYMBOLS["check"], style="green")
                     if check.passed
-                    else f"[red]{STATUS_SYMBOLS['cross']}[/red]"
+                    else Text(STATUS_SYMBOLS["cross"], style="red")
                 )
                 table.add_row(status, Text(check.name), Text(printable_ascii_text(check.message)))
 
             console.print()
             console.print(table)
 
-            # Show details for failed checks
-            for check in ci_result.failed_checks:
-                if check.details:
+            # Show details for failed and warned checks
+            for check in ci_result.checks:
+                if check.details and (check.warned or not check.passed):
                     console.print()
                     _rich_echo(
                         f"  {check.name} details:",
-                        color="red",
+                        color="yellow" if check.warned else "red",
                         bold=True,
                     )
                     for detail in check.details:
@@ -564,7 +582,7 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
             console.print()
             summary = ci_result.to_json()["summary"]
             if ci_result.passed:
-                _rich_success(f"{STATUS_SYMBOLS['success']} All {summary['total']} check(s) passed")
+                _report_passed(ci_result, summary["total"])
             else:
                 _rich_error(
                     f"{STATUS_SYMBOLS['error']} {summary['failed']} of "
@@ -584,15 +602,17 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
     for check in ci_result.checks:
         symbol = STATUS_SYMBOLS["check"] if check.passed else STATUS_SYMBOLS["cross"]
         color = "green" if check.passed else "red"
+        if check.warned:
+            symbol, color = STATUS_SYMBOLS["warning"], "yellow"
         _rich_echo(printable_ascii_text(f"  {symbol} {check.name}: {check.message}"), color=color)
-        if not check.passed and check.details:
+        if (check.warned or not check.passed) and check.details:
             for detail in check.details:
                 _rich_echo(f"      - {printable_ascii_text(detail)}", color="dim")
 
     _rich_echo("")
     summary = ci_result.to_json()["summary"]
     if ci_result.passed:
-        _rich_success(f"{STATUS_SYMBOLS['success']} All {summary['total']} check(s) passed")
+        _report_passed(ci_result, summary["total"])
     else:
         _rich_error(
             f"{STATUS_SYMBOLS['error']} {summary['failed']} of {summary['total']} check(s) failed"
@@ -618,33 +638,31 @@ def _audit_ci_gate(
     """
     logger = cfg.logger
 
+    from ..install.audit_replay import resolve_ci_audit_materialization
     from ..policy.ci_checks import _check_drift, run_baseline_checks
     from ..policy.policy_checks import run_policy_checks
 
     fail_fast = not no_fail_fast
 
-    prepared_replay = None
-    prepared_replay_error = None
-    if (cfg.project_root / "apm.yml").exists() and not (cfg.project_root / "apm_modules").exists():
-        from ..core.scope import get_workspace_deploy_root
-        from ..deps.lockfile import get_lockfile_path
-        from ..install.audit_replay import CiAuditReplayError, prepare_ci_audit_replay
+    from ..policy.discovery import discover_policy_with_chain
 
-        if get_lockfile_path(cfg.project_root).exists():
-            if get_workspace_deploy_root(cfg.project_root) != cfg.project_root.resolve():
-                prepared_replay_error = (
-                    "installed package materialization is missing at "
-                    f"{cfg.project_root / 'apm_modules'}; run 'apm install --global' "
-                    "to restore it"
-                )
-            else:
-                try:
-                    prepared_replay = prepare_ci_audit_replay(
-                        cfg.project_root,
-                        verbose=cfg.verbose,
-                    )
-                except CiAuditReplayError as exc:
-                    prepared_replay_error = str(exc)
+    # One policy discovery per run, shared by drift replay and policy checks.
+    fetch_policy = functools.cache(
+        lambda: discover_policy_with_chain(
+            cfg.project_root, policy_override=policy_source or None, no_cache=no_cache
+        )
+    )
+
+    def replay_policy():
+        if no_policy and not policy_source:
+            return None
+        return getattr(fetch_policy(), "policy", None)
+
+    materialization = resolve_ci_audit_materialization(
+        cfg.project_root, verbose=cfg.verbose, policy_provider=replay_policy
+    )
+    prepared_replay = materialization.prepared_replay
+    prepared_replay_error = materialization.error
 
     # Always run baseline checks
     ci_result = run_baseline_checks(
@@ -653,12 +671,12 @@ def _audit_ci_gate(
         ci_mode=True,
         prepared_replay=prepared_replay,
         prepared_replay_error=prepared_replay_error,
+        no_policy=no_policy,
     )
 
     # Resolve policy source: explicit --policy wins; otherwise mirror
     # install's auto-discovery (closes #827) so CI catches sideloaded
     # files via unmanaged-files checks. --no-policy skips discovery.
-    from ..policy.discovery import discover_policy_with_chain
     from ..policy.project_config import (
         read_project_fetch_failure_default,
     )
@@ -668,11 +686,7 @@ def _audit_ci_gate(
     # Explicit --policy and auto-discovery (mirror install path) share one
     # discovery call so --no-cache forces a fresh fetch for both (#3659).
     if (policy_source or not no_policy) and (not fail_fast or ci_result.passed):
-        fetch_result = discover_policy_with_chain(
-            cfg.project_root,
-            policy_override=policy_source or None,
-            no_cache=no_cache,
-        )
+        fetch_result = fetch_policy()
 
     # An explicit --policy <source> names the exact policy the caller wants
     # enforced, so failing to load it fails closed regardless of
@@ -750,6 +764,8 @@ def _audit_ci_gate(
                     f"[x] {cause} (policy.fetch_failure_default=block)",
                     err=True,
                 )
+                if fetch_result.discovery_hint:
+                    click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
                 sys.exit(1)
             else:
                 click.echo(
@@ -757,6 +773,8 @@ def _audit_ci_gate(
                     "(set policy.fetch_failure_default=block in apm.yml to fail closed)",
                     err=True,
                 )
+                if cfg.verbose and fetch_result.discovery_hint:
+                    click.echo(f"[i] {fetch_result.discovery_hint}", err=True)
                 fetch_result = None
 
     if fetch_result is not None and fetch_result.found:
@@ -769,7 +787,15 @@ def _audit_ci_gate(
             from ..policy.models import CheckResult
             from ..policy.policy_checks import FAIL_CLOSED_POLICY_CHECKS
 
-            policy_result = run_policy_checks(cfg.project_root, policy_obj, fail_fast=fail_fast)
+            policy_result = run_policy_checks(
+                cfg.project_root,
+                policy_obj,
+                fail_fast=fail_fast,
+                modules_root=(
+                    prepared_replay.modules_root if prepared_replay is not None else None
+                ),
+                no_policy=no_policy,
+            )
             if policy_obj.enforcement == "block":
                 ci_result.checks.extend(policy_result.checks)
             else:
@@ -785,6 +811,7 @@ def _audit_ci_gate(
                             message=check.message
                             + (" (enforcement: warn)" if not check.passed else ""),
                             details=check.details,
+                            warned=not check.passed,
                         )
                     )
 
@@ -814,6 +841,7 @@ def _audit_ci_gate(
                         cache_only=prepared_replay is None,
                         verbose=cfg.verbose,
                         prepared_replay=prepared_replay,
+                        policy_provider=replay_policy,
                     )
                 ci_result.checks.append(drift_check)
     elif no_drift and cfg.output_format == "text":
@@ -966,7 +994,9 @@ def _resolve_fail_on_drift(project_root: Path) -> bool:
     hard failure. Discovery is invoked by the caller only when drift was
     actually detected, keeping the no-drift common path free of extra work.
     """
-    if os.environ.get("APM_POLICY_DISABLE"):
+    from ..policy.discovery import policy_disabled_by_env
+
+    if policy_disabled_by_env():
         return False
     try:
         from ..policy.discovery import discover_policy_with_chain
@@ -978,6 +1008,68 @@ def _resolve_fail_on_drift(project_root: Path) -> bool:
     if policy is None:
         return False
     return bool(policy.security.audit.fail_on_drift)
+
+
+def _require_installed_package_key(
+    package: str, lockfile: LockFile | None, logger, project_root: Path
+) -> str:
+    """Return the ``apm.lock.yaml`` key for *package* or exit 1 (#3840, #3953).
+
+    Selection routes through the ``apm uninstall`` selector, offline, so every
+    form uninstall accepts (lock key, URL, ``host/owner/repo``,
+    ``owner/repo#ref``, ``plugin@marketplace``, ``_local/<name>``) resolves
+    exactly as install recorded it under the project manifest's
+    ``default_host:`` (req-mf-019, #3843). An unknown package fails so a typo
+    in a CI gate cannot pass silently.
+    """
+    from ..constants import APM_YML_FILENAME
+    from ..models.dependency.manifest_host import manifest_host_scope_for
+    from ..models.manifest_io import load_manifest
+    from .uninstall.engine import select_installed_lock_key
+
+    manifest_path = project_root / APM_YML_FILENAME
+    try:
+        manifest = load_manifest(manifest_path) if manifest_path.is_file() else None
+    except Exception as e:
+        logger.error(f"Failed to read {APM_YML_FILENAME}: {e}")
+        sys.exit(1)
+    try:
+        host_scope = manifest_host_scope_for(manifest)
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
+    try:
+        with host_scope:
+            selection = select_installed_lock_key(package, manifest, lockfile)
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
+    if selection is not None:
+        if selection.installed_via:
+            logger.warning(
+                f"'{package}' is not installed from that marketplace; auditing "
+                f"{selection.key}, installed via {selection.installed_via}."
+            )
+        return selection.key
+    logger.error(
+        f"Package '{package}' is not installed: no matching dependency in apm.lock.yaml. "
+        "Run 'apm deps list' to see installed packages."
+    )
+    sys.exit(1)
+
+
+def _reject_invalid_manifest(project_root: Path, logger: CommandLogger) -> None:
+    """Refuse an apm.yml every command refuses, before scanning or stripping."""
+    from ..models.manifest_io import InvalidManifestError, read_manifest_text
+
+    manifest_path = project_root / "apm.yml"
+    if not manifest_path.is_file():
+        return
+    try:
+        read_manifest_text(manifest_path)
+    except InvalidManifestError as exc:
+        logger.error(str(exc))
+        sys.exit(1)
 
 
 def _audit_content_scan(
@@ -1034,6 +1126,8 @@ def _audit_content_scan(
 
         try:
             lockfile = LockFile.read(lockfile_path)
+            if package:
+                package = _require_installed_package_key(package, lockfile, logger, project_root)
             owner_violations = (
                 DeploymentLedgerCodec.owner_reference_violations(lockfile)
                 if lockfile is not None
@@ -1055,9 +1149,7 @@ def _audit_content_scan(
 
         if files_scanned == 0 and not coverage and not external and not owner_violations:
             if package:
-                logger.warning(
-                    f"Package '{package}' not found in apm.lock.yaml or has no deployed files"
-                )
+                logger.warning(f"Package '{package}' has no deployed files -- nothing to scan")
             elif effective_format == "text":
                 logger.progress("No recognized deployed primitives found -- nothing to scan")
             if effective_format == "text":
@@ -1322,10 +1414,7 @@ def _audit_content_scan(
     "--policy",
     "policy_source",
     default=None,
-    help=(
-        f"Policy source. {POLICY_SOURCE_FORMS_HELP} "
-        "Used with --ci for policy checks. [experimental]"
-    ),
+    help=f"Policy source. {POLICY_SOURCE_FORMS_HELP} Used with --ci for policy checks.",
 )
 @click.option(
     "--no-cache",
@@ -1459,6 +1548,11 @@ def audit(  # noqa: PLR0913 -- Click handler
         apm audit --external sarif --external-sarif r.sarif  # Any SARIF
     """
     project_root = Path.cwd()
+    if not file_path:
+        # Lockfile-backed audits must not certify a newer generator's lockfile.
+        from ..deps.lockfile_generator import require_current_cli
+
+        require_current_cli(project_root, command="apm audit")
     logger = CommandLogger("audit", verbose=verbose)
 
     cfg = _AuditConfig(
@@ -1518,6 +1612,9 @@ def audit(  # noqa: PLR0913 -- Click handler
             "--policy requires --ci mode. "
             "Use 'apm audit --ci --policy <source>' to run policy checks."
         )
+
+    if not file_path:
+        _reject_invalid_manifest(project_root, logger)
 
     _audit_content_scan(
         cfg,

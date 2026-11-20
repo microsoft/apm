@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "local-tool": {
+      "type": "local",
+      "tools": [
+        "*"
+      ],
+      "id": "",
+      "command": "node",
+      "args": [
+        "server.js"
+      ]
+    }
+  }
+}

@@ -13,6 +13,10 @@ Ports three of the owner guards recorded in
   fields and harness aliases.
 * ``hooks-integrations-jetbrains-mcp-path`` -- AC28 JetBrains Copilot MCP
   path.
+* ``hooks-integrations-mcp-json-config-write`` -- MCP JSON config
+  parse-for-update and atomic write owned by MCPClientAdapter.
+* ``hooks-integrations-plugin-root-render`` -- portable MCP/LSP
+  ``${CLAUDE_PLUGIN_ROOT}`` binding, per-target render and legacy equivalence.
 """
 
 from __future__ import annotations
@@ -50,10 +54,21 @@ _MCP_INSTALL = "src/apm_cli/integration/mcp_integrator_install.py"
 _MCP_INTEGRATION = "src/apm_cli/install/mcp/integration.py"
 
 
+_LSP_INTEGRATOR = "src/apm_cli/integration/lsp_integrator.py"
+
+
 _APM_PACKAGE = "src/apm_cli/models/apm_package.py"
 
 
 _MCP_SCOPE_OWNER = "src/apm_cli/integration/mcp_config_view.py"
+# LSP owns its own ``bundle:`` provenance namespace.
+_LSP_BUNDLE_OWNER = "src/apm_cli/install/lsp/integration.py"
+_EXECUTABLES_OWNER = "src/apm_cli/security/executables.py"
+# Uninstall only intersects with managed servers and never admits one.
+_MCP_RAW_VIEW_CONSUMER = "src/apm_cli/commands/uninstall/engine.py"
+_MCP_AUDIT_CONSUMER = "src/apm_cli/policy/ci_checks.py"
+# Audit's org-policy wrapper judges the MCP servers the audit view keeps.
+_MCP_POLICY_AUDIT = "src/apm_cli/policy/policy_checks.py"
 
 
 _MCP_ADAPTER_BASE = "src/apm_cli/adapters/client/base.py"
@@ -138,7 +153,7 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
     """
     rule_id = "mutation_writes.mcp_target_selection"
     facts_by_path, failures = _read_required(
-        provider, rule_id, (_MCP_INSTALL, _MCP_INTEGRATION, _APM_PACKAGE)
+        provider, rule_id, (_MCP_INSTALL, _MCP_INTEGRATION, _APM_PACKAGE, _LSP_INTEGRATOR)
     )
     if failures:
         return failures
@@ -186,7 +201,7 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
         return ()
 
     findings: list[Violation] = []
-    if not _span_has_fixed(install_facts, adapter_span, "parse_targets_field(apm_config)"):
+    if not _span_has_fixed(install_facts, adapter_span, "manifest_target_restriction(apm_config)"):
         findings.append(
             violation(
                 rule_id, _MCP_INSTALL, "manifest adapter must parse targets from the manifest"
@@ -213,12 +228,44 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
                 "resolver must consult the manifest adapter before runtime discovery",
             )
         )
-    if _span_has_fixed(install_facts, resolver_span, "parse_targets_field("):
+    if _span_has_fixed(install_facts, resolver_span, "parse_targets_field(") or _span_has_fixed(
+        install_facts, resolver_span, "manifest_target_restriction("
+    ):
         findings.append(
             violation(rule_id, _MCP_INSTALL, "resolver must not parse manifest targets itself")
         )
+    # C4 (#3967): MCP and LSP, project and user scope, read --exclude through one owner.
+    lsp_facts = facts_by_path[_LSP_INTEGRATOR]
+    for facts, span, path, call in (
+        (
+            install_facts,
+            resolver_span,
+            _MCP_INSTALL,
+            "filter_excluded_mcp_runtimes(target_runtimes, exclude)",
+        ),
+        (
+            lsp_facts,
+            _function_span(lsp_facts, "resolve_target_runtimes", top_level=False),
+            _LSP_INTEGRATOR,
+            "filter_excluded_mcp_runtimes(candidates, exclude)",
+        ),
+    ):
+        if (
+            span is None
+            or not _span_has_fixed(facts, span, call)
+            or _span_has_regex(facts, span, r"= \{exclude\b|\(exclude, \"--exclude\"\)")
+        ):
+            findings.append(
+                violation(
+                    rule_id,
+                    path,
+                    "resolver must apply --exclude through filter_excluded_mcp_runtimes",
+                )
+            )
     validation_line = _first_span_line(
-        integration_facts, integration_span, "parse_targets_field(mcp_apm_config)"
+        integration_facts,
+        integration_span,
+        "package_target_declaration(apm_package).validate_for_install()",
     )
     install_line = _first_span_line(integration_facts, integration_span, "MCPIntegrator.install(")
     if validation_line is None or install_line is None or validation_line >= install_line:
@@ -252,6 +299,78 @@ def _check_mcp_target_selection(provider: FactsProvider) -> Iterable[Violation]:
                 "Selected MCP targets must delegate safe-config preflight before no-op detection",
             )
         )
+    findings.extend(_dependency_target_selection_findings(provider, rule_id, install_facts))
+    return findings
+
+
+# Per-dependency ``targets:`` narrowing (#2606): one owner decides which runtimes
+# receive a server; install writes, claim pruning and --frozen claims route
+# through it instead of re-reading ``dep.targets``.
+_MCP_DEPENDENCY_TARGET_CONSUMERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        _MCP_INSTALL,
+        "run_mcp_install",
+        (
+            "mcp_dependency_runtimes(dep, target_runtimes)",
+            "selected = {target: mcp_servers_for_runtime(mcp_deps, target) for target in",
+            "managed_target_servers[target] &= selected[target]",
+            "transfer_deselected_shared_claims(",
+        ),
+    ),
+    (
+        _MCP_INTEGRATION,
+        "run_mcp_integration",
+        (
+            "admitted = mcp_servers_for_runtime(mcp_deps, owned_target)",
+            "mcp_deps, owned_target, named_only=True",
+            "deselected_mcp_claims(",
+            "target_decision.from_manifest",
+        ),
+    ),
+    (
+        _MCP_INTEGRATION,
+        "run_owned_mcp_integration",
+        ("mcp_servers_for_runtime(dependencies, target)", "deselected_mcp_claims("),
+    ),
+    (
+        "src/apm_cli/install/service_integration.py",
+        "run_service_integrations",
+        ("mcp_servers_for_runtime(prepared_mcp.dependencies, target)",),
+    ),
+)
+
+
+def _dependency_target_selection_findings(
+    provider: FactsProvider, rule_id: str, install_facts: FileFacts
+) -> list[Violation]:
+    findings: list[Violation] = []
+    owner_spans = _function_spans(install_facts, "mcp_dependency_runtimes")
+    if len(owner_spans) != 1 or not _span_has_fixed(
+        install_facts, owner_spans[0], "declared = _declared_mcp_targets(dep)"
+    ):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_INSTALL,
+                "mcp_dependency_runtimes must be the one per-dependency MCP target owner",
+            )
+        )
+    for path, function, fragments in _MCP_DEPENDENCY_TARGET_CONSUMERS:
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        findings.extend(failures)
+        if failures:
+            continue
+        span = _function_span(facts, function)
+        for fragment in fragments:
+            if span is None or not _span_has_fixed(facts, span, fragment):
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        f"{function} must route MCP dependency targets through "
+                        f"mcp_dependency_runtimes (missing {fragment!r})",
+                    )
+                )
     return findings
 
 
@@ -334,6 +453,17 @@ def _check_mcp_declaration_scope(provider: FactsProvider) -> Iterable[Violation]
             )
         )
     if not _span_has_fixed(
+        facts, locked_span, "mcp_dependency.requires_transitive_trust"
+    ) or not _span_has_fixed(facts, unlocked_span, "dependency.requires_transitive_trust"):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_SCOPE_OWNER,
+                "dependency collectors must gate transitive declarations through "
+                "MCPDependency.requires_transitive_trust",
+            )
+        )
+    if not _span_has_fixed(
         facts, derive_span, "active_package_keys=active_package_keys,"
     ) or not _span_has_fixed(
         facts,
@@ -367,6 +497,76 @@ def _check_mcp_declaration_scope(provider: FactsProvider) -> Iterable[Violation]
             exempt=False,
         )
     )
+    if not _span_has_fixed(facts, derive_span, "_bundle_owned_baseline(lockfile"):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_SCOPE_OWNER,
+                "derive must keep recorded local-bundle MCP servers as baseline",
+            )
+        )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(
+                provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER, _LSP_BUNDLE_OWNER)
+            ),
+            pattern=r"""f?["']bundle:(?:["']|\{)""",
+            message="Local-bundle MCP owner tokens belong to CurrentMcpConfigView",
+            exempt=False,
+        )
+    )
+    findings.extend(_check_bundle_baseline_admission(provider, rule_id, facts))
+    return findings
+
+
+def _check_bundle_baseline_admission(
+    provider: FactsProvider, rule_id: str, facts: FileFacts
+) -> list[Violation]:
+    """A ``bundle:`` claim is baseline only with its receipt, and audit policy judges it.
+
+    The baseline owner requires the lock's MCP deployment receipt, and the
+    audit policy wrapper judges exactly the view's kept servers: apm.yml
+    servers alone only when there is no lock to keep anything.
+    """
+    findings: list[Violation] = []
+    baseline_span = _function_span(facts, "_bundle_owned_baseline")
+    if (
+        baseline_span is None
+        or not _span_has_fixed(
+            facts, baseline_span, "DeploymentLedgerCodec.mcp_native_hashes(lockfile)"
+        )
+        or not _span_has_fixed(facts, baseline_span, "and name in deployed")
+    ):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_SCOPE_OWNER,
+                "a bundle: provenance is baseline only with the lock's MCP deployment receipt",
+            )
+        )
+    policy, failures = checked_facts(provider, _MCP_POLICY_AUDIT, rule_id, require_python=True)
+    if failures:
+        return [*findings, *failures]
+    span = _function_span(policy, "run_policy_checks")
+    lines = [text.strip() for _, text in _span_lines(policy, span)] if span else []
+    reads = [index for index, text in enumerate(lines) if "get_all_mcp_dependencies()" in text]
+    if (
+        not span
+        or "view, _admission = audit_mcp_view(" not in lines
+        or "mcp_deps = list(view.kept_dependencies())" not in lines
+        or "mcp_brought_in_by=mcp_brought_in_by," not in lines
+        or len(reads) != 1
+        or lines[reads[0] - 1] != "if lock is None:"
+    ):
+        findings.append(
+            violation(
+                rule_id,
+                _MCP_POLICY_AUDIT,
+                "audit MCP policy must judge every server CurrentMcpConfigView keeps",
+            )
+        )
     return findings
 
 
@@ -386,12 +586,42 @@ def _check_mcp_omission_evidence(provider: FactsProvider) -> Iterable[Violation]
             '"dependency": dependency.get_unique_key()',
             '"declaration": declaration.to_dict()',
             "if valid and name not in admitted:",
+            "def consent_problems(",
+            "verdict = admission.admit(subject)",
+            '"reason": str(verdict.reason)',
+            "REASON_UNAPPROVED: self.gated_names,",
+            "def select(",
+            "admission: McpAdmission,",
+            "recorded: LockFile | None,",
+            "view = view.with_recorded_omissions(recorded)",
+            "view = replace(view, selection_replayed=True)",
+            "evidence == self.omissions.get(name, False)",
         ),
-        "src/apm_cli/policy/ci_checks.py": (").with_recorded_omissions(lock)",),
+        "src/apm_cli/policy/ci_checks.py": (
+            "CurrentMcpConfigView.select(",
+            "recorded=lock,",
+            "exact=False,",
+        ),
         "src/apm_cli/install/mcp/integration.py": (
             "include_dependency_mcp=should_install",
-            "current_view.omission_evidence(lockfile or LockFile())",
+            "return self.omission_view.omission_evidence(lockfile)",
+            "omissions = prepared.omissions(lockfile)",
+            "admission = McpAdmission.for_project(",
+            "admission=admission,",
+            "current_view = CurrentMcpConfigView.select(",
+            "recorded=None,",
             "current_view if should_install else None",
+        ),
+        # #3925, #3902: both --frozen MCP checks admit through the trust owner
+        # and verify recorded evidence.
+        "src/apm_cli/install/service.py": (
+            "current = CurrentMcpConfigView.select(",
+            "admission=admission,",
+            "recorded=lockfile,",
+        ),
+        "src/apm_cli/install/phases/integrate.py": (
+            "admission=McpAdmission.for_project(",
+            'trust_context=getattr(effective_allow_map(ctx), "trust_context", None)',
         ),
     }
     facts_by_path, failures = _read_required(provider, rule_id, tuple(required))
@@ -413,8 +643,127 @@ def _check_mcp_omission_evidence(provider: FactsProvider) -> Iterable[Violation]
             provider,
             rule_id=rule_id,
             paths=_python_paths(provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER,)),
-            pattern=r"^\s*def (?:omission_evidence|with_recorded_omissions|_declaration_fingerprint)\(",
+            pattern=(
+                r"^\s*def (?:omission_evidence|with_recorded_omissions"
+                r"|consent_problems|_declaration_fingerprint)\("
+            ),
             message="MCP omission selection and comparison belong to CurrentMcpConfigView",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER,)),
+            pattern=r"\.with_(?:recorded_omissions|unapproved_executables)\(",
+            message="Lockfile comparisons derive the MCP view through CurrentMcpConfigView.select",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(
+                provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER, _MCP_RAW_VIEW_CONSUMER)
+            ),
+            pattern=r"CurrentMcpConfigView\.derive\(",
+            message="Lockfile comparisons must not skip the executables gate or evidence",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(
+                provider, under=_SRC, exclude=(_MCP_SCOPE_OWNER, _MCP_AUDIT_CONSUMER)
+            ),
+            pattern=r"\bexact=False\b",
+            message="Only audit accepts structural omission evidence (it re-checks consent)",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_EXECUTABLES_OWNER,)),
+            pattern=r"\bfilter_mcp_by_allow_executables\(",
+            message="MCP executables approval routes through security/trust.py McpAdmission",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_EXECUTABLES_OWNER,)),
+            pattern=r"resolved_by\b.*\bis not None\b.*\bis_self_defined\b",
+            message="MCP admission belongs to security/trust.py McpAdmission",
+            exempt=False,
+        )
+    )
+    return tuple(findings)
+
+
+_PLUGIN_ROOT_OWNER = "src/apm_cli/deps/plugin_root_render.py"
+_RAW_STDIO_READ_RE = r"""(?:\.get\(\s*|\[\s*)["']_raw_stdio["']"""
+
+
+def _check_plugin_root_render(provider: FactsProvider) -> Iterable[Violation]:
+    """Recorded MCP/LSP state keeps the authored plugin root; only renders expand it."""
+    rule_id = "mutation_writes.plugin_root_render"
+    required = {
+        _PLUGIN_ROOT_OWNER: (
+            "def bind_plugin_roots(",
+            "def render_plugin_root(",
+            "def finalize_project_root(",
+            "def legacy_absolute_equivalent(",
+        ),
+        _APM_PACKAGE: ('if kind in ("mcp", "lsp")', "bind_plugin_roots("),
+        _MCP_ADAPTER_BASE: (
+            "def _self_defined_stdio(",
+            "finalize_project_root(",
+            "def __init_subclass__(",
+        ),
+        _MCP_SCOPE_OWNER: ("legacy_absolute_equivalent(", "equivalent=self._legacy_equivalent"),
+        _MCP_INTEGRATION: ("current_view.replay_recorded_roots(mcp_deps, old_mcp_configs)",),
+        "src/apm_cli/integration/lsp_integrator.py": ("LSPIntegrator._render_plugin_roots(",),
+    }
+    facts_by_path, failures = _read_required(provider, rule_id, tuple(required))
+    findings: list[Violation] = list(failures)
+    if failures:
+        return tuple(findings)
+    for path, fragments in required.items():
+        for fragment in fragments:
+            findings.extend(
+                _require(
+                    _has_fixed(facts_by_path[path], fragment),
+                    rule_id,
+                    path,
+                    "MCP/LSP plugin roots must stay authored in recorded state and expand "
+                    "only through deps/plugin_root_render.py at the target render",
+                )
+            )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_ADAPTERS_CLIENT, exclude=(_MCP_ADAPTER_BASE,)),
+            pattern=_RAW_STDIO_READ_RE,
+            message="Adapters read self-defined stdio through MCPClientAdapter._self_defined_stdio",
+            exempt=False,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_SRC, exclude=(_PLUGIN_ROOT_OWNER,)),
+            pattern=r"^\s*def (?:render_plugin_root|legacy_absolute_equivalent|_substitute_plugin_root)\(",
+            message="Plugin-root rendering and legacy equivalence belong to deps/plugin_root_render.py",
             exempt=False,
         )
     )
@@ -629,8 +978,10 @@ def _check_mcp_passthrough_denylist(provider: FactsProvider) -> Iterable[Violati
                 '        "enabled",\n'
                 '        "env_http_headers",\n'
                 '        "environment",\n'
+                '        "httpUrl",\n'
                 '        "http_headers",\n'
                 '        "id",\n'
+                '        "serverUrl",\n'
                 "    }\n"
                 ")",
             ),
@@ -774,6 +1125,60 @@ def _check_jetbrains_mcp_path(provider: FactsProvider) -> Iterable[Violation]:
             paths=_python_paths(provider, under=_SRC, exclude=(_INTELLIJ_OWNER,)),
             pattern=r"github-copilot.{0,80}intellij|intellij.{0,80}github-copilot",
             message="JetBrains Copilot MCP paths must come from the IntelliJ adapter",
+            exempt=True,
+        )
+    )
+    return tuple(findings)
+
+
+def _check_mcp_json_config_write(provider: FactsProvider) -> Iterable[Violation]:
+    """MCP JSON config merge-writes must route through the base adapter owner.
+
+    ``MCPClientAdapter`` owns parse-for-update (refuse to rewrite a file it
+    cannot parse, or a project-scope config that is a symbolic link) and the
+    atomic writer; no other adapter may serialize JSON straight into a config
+    file handle or rewrite an unparsable config from scratch.
+    """
+    rule_id = "mutation_writes.mcp_json_config_write"
+    facts, failures = checked_facts(provider, _MCP_ADAPTER_BASE, rule_id, require_python=True)
+    findings: list[Violation] = list(failures)
+    if not failures:
+        for owner in ("_parse_json_config_for_update", "_write_json_config"):
+            findings.extend(
+                _require(
+                    _count_regex_lines(facts, rf"^\s+def {owner}\(") == 1,
+                    rule_id,
+                    _MCP_ADAPTER_BASE,
+                    f"{owner} must be defined exactly once on MCPClientAdapter",
+                )
+            )
+            span = _function_span(facts, owner, top_level=False)
+            findings.extend(
+                _require(
+                    span is not None
+                    and _span_has_fixed(facts, span, "self._is_linked_project_config("),
+                    rule_id,
+                    _MCP_ADAPTER_BASE,
+                    f"{owner} must refuse project-scope MCP configs that are symlinks",
+                )
+            )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_ADAPTERS_CLIENT, exclude=(_MCP_ADAPTER_BASE,)),
+            pattern=r"json\.dump\(|write_text\(\s*json\.dumps|open\([^)]*[\"']w[\"']",
+            message="MCP JSON config writes must use MCPClientAdapter._write_json_config",
+            exempt=True,
+        )
+    )
+    findings.extend(
+        _duplicate_scan(
+            provider,
+            rule_id=rule_id,
+            paths=_python_paths(provider, under=_ADAPTERS_CLIENT, exclude=(_MCP_ADAPTER_BASE,)),
+            pattern=r"rewriting from scratch",
+            message="Unparsable MCP configs must fail closed via _parse_json_config_for_update",
             exempt=True,
         )
     )
@@ -924,6 +1329,13 @@ RULES: tuple[Rule, ...] = (
         check=_check_mcp_omission_evidence,
     ),
     Rule(
+        id="mutation_writes.plugin_root_render",
+        group=GROUP,
+        guard_ids=("hooks-integrations-plugin-root-render",),
+        description="MCP/LSP plugin roots stay authored in recorded state and expand per target.",
+        check=_check_plugin_root_render,
+    ),
+    Rule(
         id="mutation_writes.mcp_package_launcher",
         group=GROUP,
         guard_ids=("hooks-integrations-mcp-package-launcher",),
@@ -950,6 +1362,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("hooks-integrations-jetbrains-mcp-path",),
         description="JetBrains Copilot MCP config paths must come from the IntelliJ adapter.",
         check=_check_jetbrains_mcp_path,
+    ),
+    Rule(
+        id="mutation_writes.mcp_json_config_write",
+        group=GROUP,
+        guard_ids=("hooks-integrations-mcp-json-config-write",),
+        description="MCP JSON config merge-writes must route through the base adapter owner.",
+        check=_check_mcp_json_config_write,
     ),
 )
 

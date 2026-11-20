@@ -26,7 +26,6 @@ import io
 import json
 import zipfile
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -42,6 +41,7 @@ from apm_cli.deps.transport_selection import (
 )
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.archive import safe_extract_zip
+from tests.utils.simulated_ado_chain import install_simulated_ado_chain
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -76,12 +76,7 @@ def _make_host(
     ctx.git_env = {}
     auth.resolve.return_value = ctx
     auth.resolve_for_dep.return_value = ctx
-    auth.execute_with_bearer_fallback.side_effect = (
-        lambda _dep, primary_op, _bearer_op, _is_auth_failure: SimpleNamespace(
-            outcome=primary_op(),
-            bearer_attempted=False,
-        )
-    )
+    install_simulated_ado_chain(auth)
     auth.classify_host.return_value = MagicMock(
         kind="github",
         api_base="https://api.github.com",
@@ -215,6 +210,33 @@ class TestResilientGet:
             )
         assert result is rate_resp
         mock_sleep.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "failures",
+        [
+            [_fake_response(503, b"", headers={})],
+            [requests.exceptions.ConnectionError("reset")],
+        ],
+        ids=["503", "connection-error"],
+    )
+    def test_redirect_base_attempts_keep_retry_semantics(self, failures) -> None:
+        """Owner-routed attempts still retry transient failures, one hop each."""
+        url = "https://dev.azure.com/o/p/_apis/git/repositories/r/items"
+        ok_resp = _fake_response(200, b"ok")
+        with (
+            patch(
+                "apm_cli.utils.http_credentials.CredentialScopedSession.request",
+                side_effect=[*failures, ok_resp],
+            ) as request,
+            patch("time.sleep"),
+        ):
+            result = self.delegate.resilient_get(
+                url, {"Authorization": "Bearer t"}, max_retries=3, redirect_base=url
+            )
+        assert result is ok_resp
+        assert request.call_count == 2
+        assert all(call.kwargs["allow_redirects"] is False for call in request.call_args_list)
+        assert all(call.kwargs.get("auth") is not None for call in request.call_args_list)
 
     def test_503_triggers_retry(self) -> None:
         rate_resp = _fake_response(503, b"unavail", headers={})
@@ -534,20 +556,19 @@ class TestBuildRepoUrl:
 class TestGetArtifactoryHeaders:
     def test_no_registry_config_no_token_empty_headers(self) -> None:
         d = DownloadDelegate(_make_host())
-        assert d.get_artifactory_headers() == {}
+        assert d.get_artifactory_headers(scheme="https", host="art.example.com") == {}
 
     def test_no_registry_config_with_artifactory_token(self) -> None:
         d = DownloadDelegate(_make_host(artifactory_token="art-tok"))
-        headers = d.get_artifactory_headers()
-        assert headers["Authorization"] == "Bearer art-tok"
+        assert d.get_artifactory_headers(scheme="https", host="art.example.com") == {}
 
-    def test_uses_registry_config_get_headers(self) -> None:
+    def test_uses_registry_config_headers_for_origin(self) -> None:
         cfg = MagicMock()
-        cfg.get_headers.return_value = {"Authorization": "Bearer reg-tok"}
+        cfg.headers_for.return_value = {"Authorization": "Bearer reg-tok"}
         d = DownloadDelegate(_make_host(registry_config=cfg))
-        headers = d.get_artifactory_headers()
+        headers = d.get_artifactory_headers(scheme="https", host="art.example.com")
         assert headers["Authorization"] == "Bearer reg-tok"
-        cfg.get_headers.assert_called_once()
+        cfg.headers_for.assert_called_once_with("https", "art.example.com")
 
 
 # ---------------------------------------------------------------------------
@@ -1165,15 +1186,10 @@ class TestDownloadAdoFile:
             ),
         ]
 
-        def execute(_dep, primary_op, bearer_op, is_auth_failure):
-            primary = primary_op()
-            assert is_auth_failure(primary)
-            return SimpleNamespace(
-                outcome=bearer_op("fresh-bearer"),
-                bearer_attempted=True,
-            )
-
-        host.auth_resolver.execute_with_bearer_fallback.side_effect = execute
+        provider = MagicMock()
+        provider.is_available.return_value = True
+        provider.get_bearer_token.return_value = "fresh-bearer"
+        host.auth_resolver.bearer_provider = provider
         result = DownloadDelegate(host).download_ado_file(
             self._dep(),
             "apm.yml",
@@ -1206,7 +1222,7 @@ class TestDownloadAdoFile:
     def test_404_with_html_content_type_does_not_trigger_sign_in_detection(self) -> None:
         """Regression lock: 404 response with text/html body must NOT fire the HTML sign-in guard.
 
-        ADO can return 404 pages as text/html.  _check_html_signin must only fire
+        ADO can return 404 pages as text/html.  Sign-in detection must only fire
         on 200 responses so 404s fall through to raise_for_status and then to the
         main/master ref fallback path rather than raising a misleading 'sign-in page'
         error.  This test proves the status-code guard added in the HTML detection fix.
@@ -1965,3 +1981,52 @@ class TestBuildUnsupportedOrMissingError:
             is_github_host=False,
         )
         assert "v1.2.3" in msg
+
+
+def test_ado_download_sign_in_redirect_is_classified_not_followed() -> None:
+    """A sign-in 302 reaches the auth chain as auth_required; it is never followed."""
+    from apm_cli.core.auth import AuthResolver
+    from apm_cli.core.auth_outcome import AuthAttemptFailed, AuthOutcomeKind, classify_auth_outcome
+
+    host = _make_host()
+    delegate = DownloadDelegate(host)
+    host._resilient_get.side_effect = delegate.resilient_get
+    host.auth_resolver.http_authorization_headers.side_effect = (
+        AuthResolver.http_authorization_headers
+    )
+    outcomes: list[AuthOutcomeKind] = []
+
+    def _chain(_host, operation, **_kwargs):
+        try:
+            return operation(None, {})
+        except AuthAttemptFailed as failed:
+            outcome = classify_auth_outcome(host_kind="ado", response=failed.response)
+            outcomes.append(outcome.kind)
+            raise
+
+    host.auth_resolver.try_with_fallback.side_effect = _chain
+    sign_in = MagicMock(status_code=302)
+    sign_in.headers = {"Location": "https://app.vssps.visualstudio.com/_signin?realm=x"}
+    dep = MagicMock(
+        host="dev.azure.com",
+        port=None,
+        ado_organization="org",
+        ado_project="proj",
+        ado_repo="repo",
+        repo_url="org/proj/_git/repo",
+    )
+
+    with (
+        patch(
+            "apm_cli.utils.http_credentials.CredentialScopedSession.request",
+            return_value=sign_in,
+        ) as request,
+        pytest.raises(RuntimeError, match="HTTP 302"),
+    ):
+        delegate.download_ado_file(dep, "apm.yml", ref="feature")
+
+    assert outcomes == [AuthOutcomeKind.AUTH_REQUIRED]
+    assert request.call_count == 1
+    assert request.call_args.kwargs["allow_redirects"] is False
+    assert urlparse(request.call_args.kwargs["url"]).hostname == "dev.azure.com"
+    assert request.call_args.kwargs.get("auth") is not None

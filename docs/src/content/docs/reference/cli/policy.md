@@ -32,7 +32,7 @@ to opt into a CI-friendly contract that exits `1` when no usable policy
 is resolved.
 
 For the `apm-policy.yml` schema and enforcement model, see
-[Policy reference](../../../enterprise/policy-reference/).
+[Policy reference](../../policy-schema/).
 
 ## Subcommands
 
@@ -72,6 +72,7 @@ The table and JSON renderers expose the same fields:
 | `rule_summary` | Human one-liners for non-empty rule axes. |
 | `rule_counts` | Per-axis integer counts. `-1` means "no opinion" (allow-list omitted); `0` means "explicitly empty". JSON only. |
 | `fetch_error`, `error` | Populated when discovery or refresh failed. |
+| `warnings` | Non-fatal warnings raised while loading the policy. |
 
 #### Exit codes
 
@@ -143,6 +144,7 @@ APM Policy Status
   Cache age        4m ago
   Extends chain    acme-corp/apm-baseline
   Effective rules  3 dependency denies; 2 mcp denies; 1 required manifest fields
+  Warnings         none
 ```
 
 ## Related
@@ -151,9 +153,9 @@ APM Policy Status
   resolution; honors `--no-policy` to bypass.
 - [`apm audit`](../audit/) -- gate on rule violations with `--ci`;
   complements `apm policy status --check`.
-- [Policy reference](../../../enterprise/policy-reference/) -- canonical
+- [Policy reference](../../policy-schema/) -- canonical
   `apm-policy.yml` schema and enforcement semantics.
-- [Governance deep-dive](../../../enterprise/governance-guide/) --
+- [Governance deep-dive](../../../enterprise/security/) --
   how policy fits the broader enterprise governance model.
 - [APM policy: getting started](../../../enterprise/apm-policy/)
   -- author and publish your first `apm-policy.yml`.

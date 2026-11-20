@@ -1,49 +1,57 @@
-# entry-sanitizer -- one concise "so what" per PR
+# entry-sanitizer -- one short line per user-visible change
 
-Loaded by `cut-release` at Phase 3. Rewrites the [Unreleased]
-block into a dated version block with one entry per
-user-facing PR.
+Loaded by `cut-release` at Phase 3. Re-sanitizes the whole
+[Unreleased] block into a dated version block where each change
+has one line in one section, plus release-time Highlights.
 
 ## Per-entry rubric
 
-For each PR that survives the DROP list below:
+The format contract is `.github/instructions/changelog.instructions.md`
+(source: `.apm/instructions/changelog.instructions.md`). Read it
+first, including its good/bad examples. This rubric applies it:
 
-1. ONE entry per PR. Do not split into multiple bullets across
-   sections unless the same PR genuinely changed two distinct
-   user-visible surfaces (rare; usually a sign the PR was
-   under-scoped).
-2. TWO-SENTENCE CAP. First sentence: what changed (concrete CLI
-   surface or behavior). Second sentence (optional): the "so
-   what" -- what the user can now do, what bug stopped biting,
-   what failure mode is closed. Drop everything else.
+1. ONE CHANGE, ONE LINE, ONE SECTION. Most PRs get one line. A PR
+   with several user-visible fixes groups them by theme into as
+   few lines as stay clear. Only release-time Highlights may
+   repeat a change.
+2. EFFECT FIRST, 25 WORDS OR FEWER. Say what users can now do or
+   what no longer breaks. Drop mechanism, internal names, and lists
+   of every touched command; the PR holds the detail.
 3. PR NUMBER at the end in parentheses: `(#1495)`. If the PR
-   closes an issue, prefix: `(closes #1488, #1496)`. Multiple
-   numbers go inside one parenthesis group.
-4. ATTRIBUTION for external contributors: append
-   `(by @username, #NNNN)`. Internal contributors are not named.
-5. BREAKING marker: prefix entry with `**BREAKING:**`. Always
-   land breakings in the appropriate section (usually Changed or
-   Security); never bury them in Fixed.
+   closes an issue: `(closes #1488, #1496)`. Related PRs that
+   deliver one change share one line: `(#3765, #3818)`.
+4. ATTRIBUTION for external contributors, before the PR ref:
+   `-- by @username (#NNNN)`. Keep every existing credit variant
+   (`-- reported by`, `-- thanks`, `-- with`). Internal
+   contributors are not named.
+5. BREAKING and must-act changes (including deprecations that
+   need action) go ONLY under `### Breaking changes and upgrade
+   notes`, one line each with the migration. Prefix true
+   breakings with `**BREAKING:**`. Never restate them under
+   Added, Changed or Deprecated.
 6. CONCRETE LANGUAGE. Use the exact CLI surface affected:
    ``\`apm install -g\` now ...`` not "global install is now ...".
 7. NO REPO INTERNALS. The reader is a user, not a maintainer.
    "Refactored the BFS resolver" is wrong; "`apm install --update`
    now re-resolves direct git-source semver dependencies" is right.
+8. KEEP CAVEATS that change what a user should trust (for example
+   "Not yet verified against a live Azure DevOps organization").
 
 ## Section mapping
 
 | Diff shape | Section |
 |------------|---------|
 | New CLI command, new flag with new default ON, new manifest field, new spec, new policy, new feature | **Added** |
-| Behavior change to existing surface (default flip, output format change, exit code change, BREAKING) | **Changed** |
+| BREAKING change, or any change / deprecation users must act on | **Breaking changes and upgrade notes** (only there) |
+| Behavior change to existing surface that needs no user action (output format, message wording) | **Changed** |
 | Bug fix to existing surface (was wrong, now right) | **Fixed** |
-| Surface marked for removal with timeline | **Deprecated** |
+| Surface marked for removal, no action needed yet | **Deprecated** |
 | Surface removed from the CLI / config / manifest | **Removed** |
 | Security-relevant fix or hardening (CVE, attack surface closed) | **Security** |
-| Measurable speedup / memory reduction on a user-visible path | **Performance** |
+| Measurable speedup / memory reduction on a user-visible path | **Changed** |
 
-If a PR fits two sections, pick the user-MOST-VISIBLE one and
-mention the other in the body. Do not double-list.
+If a change fits two sections, pick one: upgrade notes if users
+must act, otherwise the user-MOST-VISIBLE type. Never double-list.
 
 ## DROP list (do NOT include in changelog)
 
@@ -76,20 +84,36 @@ hunk to write the entry; ignore the `.apm/` noise.
 
 ## Consolidation rules
 
-The existing [Unreleased] block may already have entries the
-contributor wrote. Treat them as drafts, not gospel:
+The existing [Unreleased] block was written PR by PR and drifts.
+Treat every line as a draft and re-sanitize the whole block:
 
-- If two existing entries point at the same PR (#NNNN appears
-  twice), MERGE into one entry. Keep the longer / more specific
-  prose.
-- If an existing entry violates the rubric (six sentences,
-  internal jargon, no "so what"), REWRITE it -- do not preserve
-  the original phrasing out of politeness.
+- DEDUPE ACROSS SECTIONS. If a change appears in more than one
+  section (Highlights + upgrade notes + Changed is the usual
+  pattern) or twice in one, keep ONE line in the right section and
+  fold any caveat or migration from the others into it.
+- REMOVE PR-written Highlights; they are rebuilt below.
+- CONDENSE. Rewrite any line over ~25 words, any multi-sentence
+  line, and any line that explains mechanism.
+- GROUP. Several lines from one PR become as few themed lines as
+  stay clear (for example, one line for all `apm audit` fixes);
+  several PRs that deliver one change share one line.
+- DROP internal-only lines (test, CI, maintainer tooling) per the
+  DROP list, even if a contributor added them.
+- PRESERVE every user-facing PR reference and every credit. After
+  rewriting, diff the set of `#NNNN` refs and `@user` credits
+  before vs after; only DROP-list PRs may disappear.
 - If an existing entry references a PR not in Phase 1's output
   (likely because it was tagged Unreleased before the previous
-  release), that's a bug in the previous release's sanitizer
-  pass. Surface to the operator at checkpoint 2; ask whether to
-  keep it (likely "fix the typo and ship") or drop it.
+  release), surface it to the operator at checkpoint 2; ask
+  whether to keep it or drop it.
+
+## Highlights
+
+Only cut-release writes `### Highlights`, and only for the
+released version: 2-4 short pointers to the changes a user would
+most want to hear about (new capability, broad fix, anything in
+the upgrade notes), each with its PR refs. This is the one allowed
+repeat of a change.
 
 ## Output shape
 
@@ -100,21 +124,32 @@ The rewritten block goes in place of `[Unreleased]`:
 
 ## [X.Y.Z] - YYYY-MM-DD
 
+### Highlights
+
+- <headline change>. (#NNNN)
+
+### Breaking changes and upgrade notes
+
+- **BREAKING:** <change>; <one-line migration>. (#NNNN)
+- <must-act note>; <what to do>. (#NNNN)
+
 ### Added
 
 - <entry>. (#NNNN)
-- <entry>. (closes #AAAA, #BBBB)
+- <entry>. -- by @user (#NNNN)
 
 ### Changed
 
-- **BREAKING:** <entry>. (#NNNN)
-- <entry>. (#NNNN)
+- <entry>. (closes #AAAA, #BBBB)
 
 ### Fixed
 
 - <entry>. (#NNNN)
-- <entry>. (by @user, #NNNN)
 ```
+
+Omit empty sections. Section order: Highlights, Breaking changes
+and upgrade notes, Added, Changed, Deprecated, Removed, Fixed,
+Security.
 
 An empty `[Unreleased]` placeholder stays above the new version
 heading -- the next release cycle adds entries to it.
@@ -123,37 +158,15 @@ The date is TODAY in `YYYY-MM-DD` (read from the operator's
 environment / current_datetime in the session header; do not
 recall).
 
-## Worked example (v0.16.0)
+## Worked example (v0.36.1)
 
-Inputs from Phase 1: 19 PRs. Drop list killed 5 (skill refactor,
-docs-only PRs, internal test, chore). Remaining 14:
+Fixed lines from `## [0.36.1]` in `CHANGELOG.md` show the line
+style:
 
 ```
-### Added
-- OpenAPM v0.1 normative spec ... (closes #1502, #1517)
-- `ref:` on git-source dependencies now accepts semver ranges ... (closes #1488, #1496)
-- `apm deps why <package>` ... (#1495)
-- `policy.dependencies.require_pinned_constraint: true` ... (#1494)
-- Deterministic Artifactory boundary probe ... (#1472)
-
-### Changed
-- **BREAKING:** `apm install` now exits `1` ... (#1496)
-- Artifactory parse-time boundary detection ... (#1472)
-
-### Fixed
-- `install.ps1` on Windows ... (closes #1509, #1512)
-- `apm.cmd` Windows shim is now written as ASCII ... (#1522)
-- `install.ps1` is now strict ASCII ... (#1523)
-- `apm install --target opencode` ... (Phase 1 of #581, #1513)
-- `apm compile --target claude` ... (closes #1445, #1514)
-- `apm install git@gitlab.com:` ... (closes #1501, #1515)
-- `apm install -g` hook integration ... (closes #1499, #1516)
-- `apm install --update` re-resolves git-semver ... (#1496)
-- `=1.2.3` pinned classification ... (follow-up to #1494, #1506)
-- `apm uninstall` windsurf cleanup ... (by @yoelabril, #1486)
-- `apm unpack` deprecation banner softened ... (#1511)
+- `apm uninstall` keeps a surviving package's `skills:` selection instead of redeploying all its skills. (#3784)
+- Repository names ending in `g`, `i`, `t` or `.`, such as `git/git`, install again. -- by @goranai (#3767)
+- Azure DevOps installs fall back to `ADO_APM_PAT`, `az`, then your Git credential helper; not yet verified against a live organization. (closes #3752, #3753, #3758, #3790)
 ```
 
-Two PRs from Phase 1 attached to the same `#1472` -- consolidated
-across Added / Changed / Fixed (the PR genuinely changed three
-surfaces, so three entries is correct here, not over-listing).
+The last line condenses the 0.36.1 Azure DevOps entry to one sentence, keeping its caveat and all four refs.

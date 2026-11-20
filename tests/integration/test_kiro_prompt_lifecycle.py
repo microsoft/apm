@@ -197,8 +197,9 @@ def test_kiro_prompt_installed_lifecycle(
         ).stdout
     )
     assert {check["name"] for check in drift["checks"] if not check["passed"]} == {"drift"}
+    # The skipped user-authored collision is never a managed local edit (#3682).
     assert [(item["path"], item["kind"]) for item in drift["drift"]["drift"]] == [
-        (".kiro/prompts/collision.md", "modified")
+        (".kiro/prompts/collision.md", "unmanaged-conflict")
     ]
     assert snapshot() == audit_before
 

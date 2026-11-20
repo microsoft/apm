@@ -7,7 +7,10 @@ sidebar:
 
 Start with [CONTRIBUTING.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md)
 for issue-first scope approval, PR eligibility, small corrections, private
-security reporting, and the transition for existing contributions.
+security reporting, and the transition for existing contributions. To list your
+organization, follow
+[Adding your organization to ADOPTERS.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#adding-your-organization-to-adoptersmd):
+no issue or scope record needed.
 [GOVERNANCE.md](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md) names
 the responsible human maintainers and explains decisions and responsibilities.
 The [public maintainer roster](https://github.com/microsoft/apm/blob/main/MAINTAINERS.md)
@@ -189,7 +192,7 @@ apm install --target claude
 
 The local exclusion avoids changing repository-wide ignore rules. This install
 also adds deploy paths to `apm.lock.yaml`; leave that local override uncommitted.
-Check the [target catalogue](../../concepts/primitives-and-targets/#target-catalogue)
+Check the [target catalogue](../../reference/targets-matrix/)
 for other targets; some write to more than one root.
 
 ## Testing
@@ -411,7 +414,7 @@ cannot mask a missed release.
 For instant feedback before pushing, install the pre-commit hooks:
 
 ```bash
-uv run pre-commit install
+uvx pre-commit install
 ```
 
 This is optional -- CI is the authoritative gate. The pre-commit hook rev may lag behind the CI version; check `.pre-commit-config.yaml` against `uv.lock` if you see discrepancies.
@@ -453,6 +456,7 @@ consistency with the repository pin, and action-pin consistency.
 
 The CodeQL workflow runs Python and GitHub Actions analysis on pull requests,
 pushes to `main`, merge-queue `checks_requested` events, and the weekly schedule.
+Python uses a standard Ubuntu ARM64 runner; Actions analysis stays on x86_64.
 Keep the workflow path, `analyze` job ID, and language matrix stable: they
 identify the analysis configurations GitHub compares against the base branch.
 PR results do not replace results for the merge queue's separate commit.
@@ -519,8 +523,9 @@ other user-facing strings. The CLI accepts both forms on input. Persist flag
 state only in `~/.apm/config.json` through `update_config`.
 
 When a flag graduates to the default, remove its gate and `FLAGS` entry in the
-same PR. Add a `CHANGELOG.md` entry under `Changed`, with a migration note if
-the previous default differed.
+same PR. Add one `CHANGELOG.md` line: under `Changed`, or, if users must act
+because the previous default differed, only under `Breaking changes and upgrade
+notes` with the migration.
 
 ## Adding or changing a normative requirement (OpenAPM v0.1)
 
@@ -531,7 +536,7 @@ coupled edits in the same PR:
 1. **Spec:** add or change a `<a id="req-XXX"></a>` anchor and its prose in
    `docs/src/content/docs/specs/openapm-v0.1.md`, plus the matching Appendix C row.
 2. **Manifest:** update
-   `docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`
+   `docs/public/specs/manifests/openapm-v0.1.requirements.yml`
    to remain a byte-equivalent projection of the canonical anchors.
 3. **Test:** add or extend a `@pytest.mark.req("req-XXX")` test under
    `tests/spec_conformance/`. If a real assertion is not yet possible, call

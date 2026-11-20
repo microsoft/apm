@@ -23,6 +23,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -406,6 +408,50 @@ class TestCompileCommandNoApmYml:
             result = runner.invoke(cli, ["compile"])
 
         assert result.exit_code != 0 or "Not an APM project" in result.output
+
+
+_NO_COMPILE_OUTPUT_TARGETS = sorted(
+    capability.name
+    for capability in TARGET_CAPABILITIES.values()
+    if capability.compile_family is None
+)
+
+
+class TestCompileTargetWithoutCompileOutput:
+    """Explicit skills-only/experimental targets are a no-op, never auto-detect (#3842)."""
+
+    def _run(self, target: str) -> tuple[Any, list[str]]:
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
+            Path(".claude").mkdir()
+            apm_dir = Path(".apm") / "instructions"
+            apm_dir.mkdir(parents=True)
+            (apm_dir / "test.instructions.md").write_text(
+                "---\ndescription: Test\napplyTo: '**'\n---\nUse type hints.\n"
+            )
+            with patch("apm_cli.core.experimental.is_enabled", return_value=False):
+                result = runner.invoke(cli, ["compile", "--target", target])
+            root_files = sorted(p.name for p in Path(".").glob("*.md"))
+        return result, root_files
+
+    @pytest.mark.parametrize("target", _NO_COMPILE_OUTPUT_TARGETS)
+    def test_explicit_target_is_successful_noop(self, target: str) -> None:
+        result, root_files = self._run(target)
+        output = " ".join(result.output.split())
+
+        assert result.exit_code == 0, result.output
+        assert root_files == []
+        assert "auto-detect" not in output
+        assert f"{target} has no compile outputs -- skipping" in output
+        experimental_flag = TARGET_CAPABILITIES[target].experimental_flag
+        if experimental_flag is not None:
+            flag = experimental_flag.replace("_", "-")
+            assert f"apm experimental enable {flag}" in output
 
 
 class TestCompileCommandAllFlag:

@@ -277,11 +277,11 @@ class TestCheckRequiredPackagesDeployed:
         assert not result.passed
         assert "1 required package" in result.message
 
-    def test_required_not_in_manifest_skipped(self):
-        # Package in require but not in deps -- check 3 handles it, not 4
+    def test_required_not_in_manifest_is_not_skipped(self):
+        # An undeclared required package cannot be located in the lock (#3993).
         policy = DependencyPolicy(require=("acme/missing",))
         result = _check_required_packages_deployed([], _lock(), policy)
-        assert result.passed
+        assert not result.passed
 
 
 class TestCheckRequiredPackageVersion:
@@ -416,28 +416,20 @@ class TestCheckMcpDenylist:
 class TestCheckMcpTransport:
     def test_no_transport_restrictions(self):
         policy = McpPolicy(transport=McpTransportPolicy(allow=None))
-        result = _check_mcp_transport([_mcp("my-server")], policy)
+        result = _check_mcp_transport({}, policy)
         assert result.passed
         assert "No MCP transport restrictions" in result.message
 
     def test_allowed_transport_passes(self):
         policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
-        mcp = MCPDependency(name="my-server", transport="stdio")
-        result = _check_mcp_transport([mcp], policy)
+        result = _check_mcp_transport({"my-server": frozenset({"stdio"})}, policy)
         assert result.passed
 
     def test_disallowed_transport_fails(self):
         policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
-        mcp = MCPDependency(name="my-server", transport="sse")
-        result = _check_mcp_transport([mcp], policy)
+        result = _check_mcp_transport({"my-server": frozenset({"sse"})}, policy)
         assert not result.passed
         assert "1 MCP transport violation" in result.message
-
-    def test_no_transport_on_mcp_passes(self):
-        policy = McpPolicy(transport=McpTransportPolicy(allow=("stdio",)))
-        mcp = MCPDependency(name="my-server", transport=None)
-        result = _check_mcp_transport([mcp], policy)
-        assert result.passed  # None transport is not checked
 
 
 class TestCheckMcpSelfDefined:
@@ -479,46 +471,46 @@ class TestCheckMcpSelfDefined:
 class TestCheckCompilationTarget:
     def test_no_restrictions_configured(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(enforce=None, allow=None))
-        result = _check_compilation_target({"target": "vscode"}, policy)
+        result = _check_compilation_target(("copilot",), policy)
         assert result.passed
         assert "No compilation target restrictions" in result.message
 
     def test_no_target_in_manifest(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({}, policy)
+        result = _check_compilation_target((), policy)
         assert result.passed
         assert "No compilation target set" in result.message
 
-    def test_raw_yml_none_with_enforce(self):
+    def test_no_selection_with_enforce(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
         result = _check_compilation_target(None, policy)
         assert result.passed
 
     def test_enforce_matches(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({"target": "vscode"}, policy)
+        result = _check_compilation_target(("copilot",), policy)
         assert result.passed
         assert "Compilation target compliant" in result.message
 
     def test_enforce_mismatch(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({"target": "claude"}, policy)
+        result = _check_compilation_target(("claude",), policy)
         assert not result.passed
         assert "not present" in result.message
 
     def test_allow_list_matches(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(allow=("vscode", "claude")))
-        result = _check_compilation_target({"target": "vscode"}, policy)
+        result = _check_compilation_target(("copilot",), policy)
         assert result.passed
 
     def test_allow_list_rejects(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(allow=("vscode",)))
-        result = _check_compilation_target({"target": "claude"}, policy)
+        result = _check_compilation_target(("claude",), policy)
         assert not result.passed
 
     def test_target_as_list(self):
         policy = CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
-        result = _check_compilation_target({"target": ["vscode", "claude"]}, policy)
+        result = _check_compilation_target(("copilot", "claude"), policy)
         assert result.passed
 
 
@@ -781,7 +773,7 @@ class TestRunDependencyPolicyChecks:
         policy = ApmPolicy(
             compilation=CompilationPolicy(target=CompilationTargetPolicy(enforce="vscode"))
         )
-        result = run_dependency_policy_checks([], policy=policy, effective_target="claude")
+        result = run_dependency_policy_checks([], policy=policy, effective_target=("claude",))
         assert not result.passed
         names = [c.name for c in result.checks]
         assert "compilation-target" in names
@@ -829,7 +821,7 @@ class TestRunDependencyPolicyChecks:
             [],
             policy=policy,
             fail_fast=False,
-            effective_target="claude",
+            effective_target=("claude",),
             manifest_includes=None,
             mcp_deps=[mcp],
         )
@@ -1715,42 +1707,42 @@ class TestComputeCrossRepoMisconfigRisk:
     def _source(self, host="corp.ghe.com"):
         return MarketplaceSource(name="mkt", owner="acme", repo="marketplace", host=host)
 
-    def test_dep_ref_returns_none(self):
-        plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "other/repo"})
-        src = self._source()
-        dep_ref = DependencyReference.parse("some/thing")
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo", dep_ref)
-        assert result is None
+    def test_bare_url_source_returns_risk(self):
+        # A structured ref parsed from a bare locator still defaults to github.com (#3937).
+        plugin = MarketplacePlugin(name="p", source={"type": "url", "url": "other/repo"})
+        result = _compute_cross_repo_misconfig_risk(plugin, self._source(), "other/repo")
+        assert result is not None
+        assert result.suggested_qualified_repo == "corp.ghe.com/other/repo"
 
     def test_non_dict_source_returns_none(self):
         plugin = MarketplacePlugin(name="p", source="./local")
         src = self._source()
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "acme/marketplace/local", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "acme/marketplace/local")
         assert result is None
 
     def test_non_github_type_returns_none(self):
         plugin = MarketplacePlugin(name="p", source={"type": "npm", "package": "@scope/pkg"})
         src = self._source()
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "scope/pkg", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "scope/pkg")
         assert result is None
 
     def test_in_marketplace_returns_none(self):
         # Repo field points to the marketplace itself -> in-marketplace
         plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "acme/marketplace"})
         src = self._source()
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "acme/marketplace", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "acme/marketplace")
         assert result is None
 
     def test_github_com_no_prefix_needed_returns_none(self):
         plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "other/repo"})
         src = MarketplaceSource(name="mkt", owner="acme", repo="marketplace", host="github.com")
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo")
         assert result is None
 
     def test_ghe_cross_repo_returns_risk(self):
         plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "other/repo"})
         src = self._source("corp.ghe.com")
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo")
         assert result is not None
         assert result.marketplace_host == "corp.ghe.com"
         assert result.bare_repo_field == "other/repo"
@@ -1796,7 +1788,7 @@ class TestResolveMarketplacePlugin:
             [{"name": "my-plugin", "source": "./plugins/my-plugin", "description": "A plugin"}]
         )
 
-        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.request") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             result = resolve_marketplace_plugin("my-plugin", "test-market")
 
@@ -1815,7 +1807,7 @@ class TestResolveMarketplacePlugin:
             ]
         )
 
-        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.request") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             result = resolve_marketplace_plugin("ext-plugin", "test-market")
 
@@ -1829,7 +1821,7 @@ class TestResolveMarketplacePlugin:
             [{"name": "existing-plugin", "source": "./plugins/existing"}]
         )
 
-        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.request") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             with pytest.raises(PluginNotFoundError):
                 resolve_marketplace_plugin("nonexistent-plugin", "test-market")
@@ -1851,7 +1843,7 @@ class TestResolveMarketplacePlugin:
             ]
         )
 
-        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.request") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             result = resolve_marketplace_plugin("versioned", "test-market", version_spec="v2.5.0")
 
@@ -1880,7 +1872,7 @@ class TestResolveMarketplacePlugin:
             ]
         )
         warnings_emitted: list[str] = []
-        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.request") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             result = resolve_marketplace_plugin(
                 "versioned",
@@ -1897,7 +1889,7 @@ class TestResolveMarketplacePlugin:
             [{"name": "iter-plugin", "source": "./plugins/iter-plugin"}]
         )
 
-        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.request") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             canonical, plugin = resolve_marketplace_plugin("iter-plugin", "test-market")
 

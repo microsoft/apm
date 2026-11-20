@@ -1671,8 +1671,8 @@ class TestCredentialFallbackOrderRegressionTrap:
     def test_ado_attempts_bearer_before_raising(self):
         """ADO: when PAT fails with auth signal, bearer MUST be attempted before raising.
 
-        Regression trap -- if the _try_ado_bearer_fallback() call is removed from the
-        ADO branch of try_with_fallback, this test fails because get_bearer_token() is
+        Regression trap -- if the bearer step is removed from the ADO chain in
+        core/auth_chain.py, this test fails because get_bearer_token() is
         never called and the original PAT exception propagates without the bearer attempt.
         """
         from apm_cli.core.azure_cli import AzureCliBearerError
@@ -1686,7 +1686,7 @@ class TestCredentialFallbackOrderRegressionTrap:
 
                 def _get_bearer():
                     bearer_calls.append(1)
-                    raise AzureCliBearerError("no az login")
+                    raise AzureCliBearerError("no az login", kind="not_logged_in")
 
                 mock_provider.get_bearer_token.side_effect = _get_bearer
 
@@ -1698,12 +1698,15 @@ class TestCredentialFallbackOrderRegressionTrap:
                 with (
                     patch.object(
                         GitHubTokenManager,
-                        "resolve_credential_from_git",
+                        "resolve_git_helper_credential",
                         return_value=None,
                     ),
                     pytest.raises(
                         RuntimeError,
-                        match=r"ADO_APM_PAT, az CLI bearer, and git credential fill",
+                        match=(
+                            r"ADO_APM_PAT was rejected.*az CLI bearer could not get a token"
+                            r".*git credential fill returned no credential"
+                        ),
                     ) as caught,
                 ):
                     resolver.try_with_fallback("dev.azure.com", ado_op)

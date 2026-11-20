@@ -32,6 +32,7 @@ from apm_cli.deps.carried_license import CarriedLicense
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.provider_coordinates import ProviderCoordinateMixin
 from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.native_plugins.record import NativePluginRecord
 
 pytestmark = pytest.mark.unit
 
@@ -159,6 +160,15 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
     kwargs["target_subset"] = draw(
         st.one_of(st.just([]), st.permutations(["copilot", "claude"]).map(sorted))
     )
+    kwargs["subset_pairings"] = maybe(
+        None,
+        st.just(
+            [
+                {"skills": ["alpha"], "targets": ["claude"]},
+                {"skills": ["beta"], "targets": ["copilot"]},
+            ]
+        ),
+    )
     kwargs["resolved_url"] = maybe(None, st.just("https://registry.example.invalid/pkg.tgz"))
     kwargs["resolved_hash"] = maybe(None, _SHA.map(lambda s: f"sha256:{s}"))
     kwargs["constraint"] = maybe(None, st.just("^1.0.0"))
@@ -170,7 +180,16 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
         st.just((CarriedLicense("LICENSE", "LICENSE", "sha256:" + "0" * 64),)),
     )
     kwargs["exec_status"] = maybe(None, st.sampled_from(_ALLOWED_EXEC_STATUS))
+    kwargs["exec_allowed_types"] = maybe((), st.just(("bin", "hooks")))
     kwargs["name"] = maybe(None, st.just("consume-contract"))
+    kwargs["native_plugin"] = maybe(
+        None,
+        st.just(
+            NativePluginRecord(
+                "plugin", "sha256:" + "0" * 64, "apm-u-0a1b2c3d", "/h/.agents/plugins"
+            )
+        ),
+    )
     # Empty maps are omitted from to_dict(); from_dict restores {}. Include
     # both so the round trip covers omission and a non-empty vendor map.
     kwargs["extensions"] = draw(
@@ -191,6 +210,8 @@ def locked_dependency_kwargs(draw: st.DrawFn) -> dict[str, Any]:
     )
     # Replacement evidence has cross-field constraints tested separately.
     kwargs["replacement"] = None
+    # The row's hash stream is carried by lockfile_version, not by the row.
+    kwargs["content_hash_framed"] = True
     kwargs["_unknown_fields"] = draw(
         st.one_of(st.just({}), st.just({"future_consumer_field": {"enabled": True}}))
     )
@@ -722,7 +743,11 @@ def test_alias_placement_property_breaks_if_reconstruction_drops_alias(
 def test_subset_persistence_is_permutation_invariant(
     skill_permutation: tuple[str, ...], target_permutation: tuple[str, ...]
 ) -> None:
-    """Any input order of the same subset must persist identically (sorted)."""
+    """Any input order of the same subset must persist identically (sorted).
+
+    Target aliases persist canonically: ``vscode`` is recorded as ``copilot``.
+    """
+    canonical_targets = ["claude", "copilot"]
     dep_ref = DependencyReference(
         repo_url="acme/example",
         host="gitlab.example.invalid",
@@ -736,11 +761,11 @@ def test_subset_persistence_is_permutation_invariant(
     persisted = locked.to_dict()
 
     assert persisted["skill_subset"] == sorted(skill_permutation)
-    assert persisted["target_subset"] == sorted(target_permutation)
+    assert persisted["target_subset"] == canonical_targets
 
     reconstructed = LockedDependency.from_dict(persisted).to_dependency_ref()
     assert reconstructed.skill_subset == sorted(skill_permutation)
-    assert reconstructed.target_subset == sorted(target_permutation)
+    assert reconstructed.target_subset == canonical_targets
 
 
 @pytest.mark.parametrize(

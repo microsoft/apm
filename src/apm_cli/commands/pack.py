@@ -20,7 +20,7 @@ from ..core.command_logger import CommandLogger
 from ..core.target_detection import TargetParamType
 
 MARKETPLACE_DOCS_URL = (
-    "https://microsoft.github.io/apm/producer/publish-to-a-marketplace/#consume-from-any-assistant"
+    "https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#install-patterns"
 )
 
 _PACK_HELP = """\
@@ -28,9 +28,10 @@ Pack distributable artifacts from your APM project.
 
 Reads apm.yml to decide what to produce:
 
+\b
   dependencies: block  ->  bundle (directory or archive; see --archive and --archive-format)
   marketplace: block   ->  selected marketplace artifacts
-  target: / targets:   ->  ecosystem-specific plugin.json (claude/copilot)
+  targets:             ->  ecosystem-specific plugin.json (claude/copilot/codex)
   both blocks present  ->  bundle plus selected marketplace artifacts
 
 The lockfile (apm.lock.yaml) pins bundle contents. An enriched copy
@@ -59,9 +60,11 @@ Examples:
   # marketplace.claude.output / marketplace.codex.output
 
 Exit codes:
+
+\b
   0  Success
-  1  Build or runtime error
-  2  Manifest schema validation error
+  1  Build or runtime error (including apm.yml parse or schema errors)
+  2  Usage error (invalid flags or arguments)
   3  Version alignment check failed (--check-versions)
   4  Marketplace working-tree drift detected (--check-clean)
   5  Strict marketplace metadata check failed (--strict-metadata)
@@ -361,6 +364,18 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
     marketplace_formats = _parse_marketplace_filter(marketplace_filter, ctx, json_output)
     # _parse_marketplace_filter raises/exits on error via _emit_json_error_or_raise
     project_root = Path(".").resolve()
+    from ..deps.lockfile_generator import (
+        LockfileGeneratorError,
+        check_current_cli,
+        refusal_exit,
+    )
+
+    try:
+        check_current_cli(project_root, command="apm pack")
+    except LockfileGeneratorError as exc:
+        if not json_output:
+            raise refusal_exit(exc) from exc
+        _emit_json_error_or_raise(ctx, json_output, "lockfile_generator", str(exc))
     # Authoring-path nudge (#1777): warn when the author's own package declares
     # no license. Suppressed under --json (machine output). Never blocks pack.
     if not json_output:
@@ -378,7 +393,8 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
 
         try:
             detected, _reason = detect_target(project_root)
-            effective_target = detected if detected else None
+            # "minimal" means no target folder was found: record no target.
+            effective_target = detected if detected and detected != "minimal" else None
         except Exception:
             effective_target = None
     else:
@@ -623,6 +639,11 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
                 )
             elif sub.kind is OutputKind.PLUGIN_MANIFEST and isinstance(sub.payload, dict):
                 envelope["plugin_manifests"] = sub.payload
+            elif sub.kind is OutputKind.BUNDLE and sub.payload is not None:
+                envelope["bundle"] = {
+                    "path": Path(sub.payload.bundle_path).as_posix(),
+                    "files": list(sub.payload.files),
+                }
         if drift_metadata_enrichment is not None:
             envelope["metadata_enrichment"] = drift_metadata_enrichment.to_json_dict()
             metadata_warnings = set(drift_metadata_enrichment.warnings)
@@ -726,6 +747,11 @@ def _bundle_size_suffix(bundle_path) -> str:
     return f" ({size / (1024 * 1024):.1f} MiB)"
 
 
+def _lock_note(pack_result) -> str:
+    """Every bundle embeds apm.lock.yaml; name it when the file list omits it (#3994)."""
+    return "" if "apm.lock.yaml" in pack_result.files else " plus apm.lock.yaml"
+
+
 def _render_bundle_result(
     logger,
     pack_result,
@@ -753,7 +779,8 @@ def _render_bundle_result(
                 logger.verbose_detail(f"    {original} -> {mapped}")
         if pack_result.files:
             logger.dry_run_notice(
-                f"Would pack {len(pack_result.files)} file(s) -> {pack_result.bundle_path}"
+                f"Would pack {len(pack_result.files)} file(s){_lock_note(pack_result)} -> "
+                f"{pack_result.bundle_path}"
             )
             for f in pack_result.files:
                 logger.tree_item(f"  {f}")
@@ -771,7 +798,8 @@ def _render_bundle_result(
     else:
         size_suffix = _bundle_size_suffix(pack_result.bundle_path)
         logger.success(
-            f"Packed {len(pack_result.files)} file(s) -> {pack_result.bundle_path}{size_suffix}"
+            f"Packed {len(pack_result.files)} file(s){_lock_note(pack_result)} -> "
+            f"{pack_result.bundle_path}{size_suffix}"
         )
         for f in pack_result.files:
             logger.verbose_detail(f"    {f}")
@@ -791,14 +819,30 @@ def _render_bundle_result(
             )
         elif fmt == BundleFormat.CLAUDE_PLUGIN:
             logger.progress(
-                "Claude plugin bundle ready -- contains plugin.json plus "
-                "plugin-native directories and an embedded apm.lock.yaml."
+                "Claude plugin bundle ready -- contains plugin.json, "
+                "plugin-native directories, and an embedded apm.lock.yaml "
+                "for integrity verification."
             )
         # Issue #1207: target-agnostic bundles install into any consumer
         # project.  Print a copy-pasteable share line so packing creates
         # the social hand-off naturally.
         if pack_result.bundle_path:
-            logger.info(f"Share with: apm install {pack_result.bundle_path}")
+            # A bare 'build/x' would parse as owner/repo; spell it as a path.
+            share = Path(pack_result.bundle_path)
+            share_arg = str(share) if share.is_absolute() else f"./{share.as_posix()}"
+            # Only the Claude plugin layout installs imperatively (#3994).
+            if fmt == BundleFormat.CLAUDE_PLUGIN:
+                logger.info(f"Share with: apm install {share_arg}")
+            elif fmt == BundleFormat.AGENT_PLUGIN:
+                logger.info(
+                    "Share: consumers add the bundle path under dependencies.apm in their "
+                    "apm.yml, then run 'apm install --target copilot'."
+                )
+            else:
+                logger.info(
+                    f"Share with: apm unpack {share_arg} (deprecated legacy layout; "
+                    "pack without --format apm to share with 'apm install')"
+                )
 
 
 def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, outputs=None):
@@ -878,7 +922,8 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
     name="unpack",
     help=(
         "[Deprecated] Extract an APM bundle into the current project. "
-        "Use 'apm install <bundle-path>' instead -- this command will be removed in a future release."
+        "Reads only '--format apm' bundles; install plugin bundles (the default) "
+        "with 'apm install <bundle-path>'. This command will be removed in a future release."
     ),
 )
 @click.argument("bundle_path", type=click.Path(exists=True))
@@ -906,7 +951,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
     logger.warning(
         "'apm unpack' is deprecated and will be removed in a future release. "
-        "Use 'apm install <bundle-path>' instead.",
+        "Repack with the default plugin format and use 'apm install <bundle-path>'.",
     )
     try:
         logger.start(f"Unpacking {bundle_path} -> {output}")
@@ -1012,7 +1057,7 @@ def _log_bundle_meta(result, output_dir, logger):
     if not meta:
         return
 
-    bundle_target = meta.get("target", "")
+    bundle_target = meta.get("target", "")  # architecture-authority-exempt: bundle-pack-metadata
     dep_count = len(result.dependency_files) if result.dependency_files else 0
     file_count = len(result.files) if result.files else 0
 
@@ -1046,5 +1091,5 @@ def _log_bundle_meta(result, output_dir, logger):
         )
         logger.verbose_detail(
             f"    To get a {display_project}-targeted bundle, "
-            f"ask the publisher to run: apm pack --target {display_project}"
+            f"ask the publisher to declare targets: [{display_project}] in apm.yml and run apm pack"
         )

@@ -1,13 +1,10 @@
 # Governance and Policy
 
-**Note:** The policy engine is experimental (early preview). Schema fields and
-defaults may change between releases. Pin your APM version and monitor the
-CHANGELOG when using policy features.
-
 ## Policy file location
 
 - **Org-level:** hosted in a repo, fetched via `--policy org` or `--policy URL`
-- **Repo-level:** `apm-policy.yml` in the repository root
+- **Repo-level:** not auto-discovered; a repo `apm-policy.yml` applies only
+  when passed to `apm audit --ci --policy`
 - **Local override:** `--policy ./path/to/apm-policy.yml`
 
 Org policy governs project installs only: discovery starts from the project's
@@ -46,7 +43,7 @@ cache:
   ttl: 3600                             # policy cache in seconds
 
 dependencies:
-  allow: []                             # allowed patterns
+  allow: null                           # allowed patterns (null = no opinion; [] = allow nothing)
   deny: []                              # denied patterns (takes precedence)
   require: []                           # required packages
   require_resolution: project-wins      # project-wins | policy-wins | block
@@ -54,16 +51,16 @@ dependencies:
   require_pinned_constraint: false      # when true, direct deps must declare a bounded ref (bans NO_REF, '*', bare branch, '>=X' without upper bound)
 
 mcp:
-  allow: []                             # allowed server patterns
+  allow: null                           # allowed server patterns
   deny: []                              # denied patterns
   transport:
-    allow: []                           # stdio | sse | http | streamable-http
+    allow: null                         # stdio | streamable-http | sse (http = streamable-http); checks the effective transport, registry servers included
   self_defined: warn                    # deny | warn | allow
-  trust_transitive: false               # trust MCP from transitive deps
+  trust_transitive: false               # parsed but not enforced; consent is `apm approve`
 
 compilation:
   target:
-    allow: [vscode, claude]             # permitted targets
+    allow: [copilot, claude]            # permitted targets
     enforce: null                       # force specific target (must be present in target list)
   strategy:
     enforce: null                       # distributed | single-file
@@ -73,7 +70,7 @@ manifest:
   required_fields: []                   # fields that must exist in apm.yml
   scripts: allow                        # allow | deny
   content_types:
-    allow: []                           # instructions | skill | hybrid | prompts
+    allow: null                         # instructions | skill | hybrid | prompts
   require_explicit_includes: false      # mandate explicit `includes:` list in apm.yml (rejects `auto` and undeclared)
 
 unmanaged_files:
@@ -121,6 +118,21 @@ dependencies:
 - Enforced at install and by `apm audit` (direct deps incl. dev deps and
   `replace` sources, plus lockfile transitives).
 
+`dependencies.require` entries are exact and name ONE host: a hostless
+entry (`contoso/baseline`) names the default host only; write other hosts
+in full (`gitlab.example.com/group/sub/pkg`). `required-packages` (apm.yml)
+and `required-packages-deployed` (apm.lock.yaml) compare that same
+identity; an entry matching no declared package fails both, and the
+message names the other host and the entry that would match it (for a
+trusted host). An explicit proxy path (`host/artifactory/...`) is identified
+by the proxy host; prefer `PROXY_REGISTRY_URL` with plain shorthand.
+A project `default_host:` never rebinds a hostless entry, and `GITHUB_HOST`
+varies per machine, so org-wide policies should host-qualify every entry.
+Required-package matching follows source replacement: with a root
+`replace:` rule, an entry names the selected package (the fork), and the
+lock entry is read under the original's key. `apm install` and
+`apm audit --ci` agree, also on `registry_source`.
+
 ## Registry source governance (experimental)
 
 Gate dependency sources to REST-based APM registries declared via the
@@ -141,7 +153,7 @@ registry_source:
 | `allow_non_registry` | `true` | When `false`, every dep MUST be routed through a configured registry; git-shorthand and `- git:` deps are blocked at install time. |
 
 The same registry-source rule applies to `apm install`,
-`apm install <pkg>`, `apm deps update`, and `apm audit --ci`.
+`apm install <pkg>`, `apm update`, and `apm audit --ci`.
 
 ## Integrity and drift enforcement
 
@@ -159,7 +171,7 @@ security:
 
 | Field | Default | Behavior |
 |-------|---------|----------|
-| `integrity.require_hashes` | `false` | When `true`, every non-local lockfile entry MUST carry a content hash. Missing or empty hashes fail closed at install time and surface in `apm audit --ci --policy` as `dependency-content-hashes`. Local deps are exempt. A local bundle with cached policy but no embedded `apm.lock.yaml` fails closed; a bundle with a lock receives full `pack.bundle_files` verification. Bundle installs never fetch policy from the network. Logical OR on inheritance. |
+| `integrity.require_hashes` | `false` | When `true`, every non-local lockfile entry MUST carry a content hash. Missing or empty hashes fail closed at install time and surface in `apm audit --ci --policy` as `dependency-content-hashes`. Local deps are exempt. A local bundle without an embedded `apm.lock.yaml` fails closed under this setting; a bundle with a lock receives full `pack.bundle_files` verification. Bundle installs resolve org policy as package installs do. Logical OR on inheritance. |
 | `audit.fail_on_drift` | `false` | When `true`, a bare `apm audit` exits non-zero when workspace content drifts from the lockfile (default-off keeps drift advisory at exit 0). Only changes the exit code; `apm audit --ci` already gates on drift. Logical OR on inheritance. |
 
 Canonical deployment ownership is an always-on integrity boundary, not a
@@ -229,6 +241,8 @@ executables:
 
 Glob scope (v1): only `deny` supports glob patterns (the safety ceiling). `allow`, `recommend`, and `require` are exact-match only -- widening the GRANT side with a wildcard has a larger blast radius and is deferred.
 
+Ports: a non-default port is part of the package key (`host:port/owner/repo`). `deny` ignores the port; `allow`, `recommend`, and `require` must name the ported key.
+
 The install gate and `apm audit` resolve trust through one shared deny-wins,
 first-match-wins ladder:
 
@@ -249,6 +263,48 @@ labels its deciding layer `org-enforce-degraded` to make the v1 degrade explicit
 The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
 `apm approve` / `apm deny`); the user layer is `~/.apm/config.json`
 `executables.{allow,deny}` (machine-local, via `--user`, lowest authority).
+`apm approve` pins `hooks` and `mcp` grants per item to a `sha256:<64 hex>`
+fingerprint of what runs; `bin`, `lsp` and `canvas` stay `true`. A native
+Copilot/Codex plugin, loaded intact, gets one `plugin:` pin over its whole
+root (every file's path and bytes; executable bits are left out so the pin
+holds across operating systems), next to item pins for a split install; any
+byte change parks it, and `.apm/` content that is not a
+copy of a pinned file makes it unapprovable:
+
+```yaml
+executables:
+  allow:
+    acme/agent-kit:
+      hooks:
+        .apm/hooks/lint-on-save.json: sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb
+      mcp:
+        kit-docs: sha256:3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d
+    acme/tools:
+      bin: true
+    acme/superpowers:
+      plugin: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+      hooks:
+        hooks/hooks.json: sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae
+```
+
+The MCP fingerprint covers transport, command, args, env, url, headers, cwd,
+registry, version, package, tools, enabled and extra keys; the hook
+fingerprint covers the hook JSON plus the scripts it references (not code it
+downloads at run time). Admission per item, first match wins: deny (org,
+user, project), which wins over every grant, including pins and the one-off
+`--trust-transitive-mcp` flag, for self-defined MCP servers, hooks, and
+transitive MCP servers that need trust; a pin (match deploys, mismatch parks as `definition-changed`;
+the project pin decides alone, a user pin applies only when the project has
+none); a transitive MCP server that is self-defined, sets its own `registry:`
+or an overlay parks as `untrusted-transitive` unless `--trust-transitive-mcp`
+(one run only); then the type-level ladder. Legacy `hooks: true` /
+`mcp: true` still deploy any content and warn on every install; `mcp: true`
+never admits a transitive server. An item-level `true` or malformed digest is
+an error; a pinned map under `deny` denies the whole type. Pinned `apm.yml`
+files need APM 0.37 or later on every client. The lockfile is evidence, never
+consent: `apm audit --ci` re-evaluates MCP admission from `apm.yml` and org
+policy (never the user layer) and fails a server the lock admitted but
+`apm.yml` does not approve.
 Each locked dependency records its resolved state in the `exec_status` field of
 `apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, `absent`).
 
@@ -261,7 +317,7 @@ executables are untrusted (denied or gated).
 
 There is no `enforce` mandate runtime or package signing in this release: an org
 `executables.enforce` rung is accepted but fail-safe degrades to `recommend`
-(allowed, still overridable by a deny). Local bundle LSP, MCP, and canvas
+(allowed, still overridable by a deny). Local bundle hook, LSP, MCP, and canvas
 approvals use a narrower content-bound key: when one is skipped, APM prints an
 exact `executables.allow` entry containing that bundle's SHA-256 digest. A
 different bundle that claims the same package name cannot inherit the grant. Inspect the
@@ -373,16 +429,19 @@ undeclared local content at install / audit time.
 
 ## Inheritance rules
 
-Most fields tighten as the policy chain descends. The exception is `deny` and
-`require` lists: a child policy may use `[]` to explicitly clear an inherited
-list (removing entries the parent set). All other fields obey the rules below:
+Inheritance is tighten-only: a child policy can add restrictions but never
+remove ones its parent set. On `deny` and `require` lists a child `[]` adds
+nothing and the parent's entries still apply; on allow lists a child `[]`
+narrows to nothing (no package is allowed). One exception widens:
+`unmanaged_files.exclude` is unioned. Fields merge as follows:
 
 | Field | Merge rule |
 |-------|-----------|
 | `enforcement` | Escalates: `off` < `warn` < `block` |
 | Allow lists | Intersection (child narrows parent) |
-| Deny lists | Union (child adds to parent). Omitting or `null` = transparent; `[]` = explicit empty override. |
-| `require` | Union (combines required packages). Omitting or `null` = transparent; `[]` = explicit empty override. |
+| Deny lists | Union (child adds to parent). Omitting, `null`, or `[]` leaves the parent's entries in force. |
+| `require` | Union (combines required packages). Omitting, `null`, or `[]` leaves the parent's entries in force. |
+| `fetch_failure` | Escalates: `warn` < `block` (stricter wins) |
 | `max_depth` | `min(parent, child)` |
 | `require_pinned_constraint` | Logical OR (once enabled, child cannot relax) |
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
@@ -399,7 +458,8 @@ Chain limit: 5 levels max. Cycles are detected and rejected.
 | `*/approved` | `any-org/approved` |
 | `exact/match` | Only `exact/match` |
 
-Deny is evaluated first. Empty allow list permits all (except denied).
+Deny is evaluated first. A `null` allow list permits all (except denied); an
+empty `[]` allow list permits nothing.
 
 Identity casing compares GitHub and registry owner/repository prefixes case-insensitively and keeps other identity boundaries case-sensitive. See [Identity casing](https://microsoft.github.io/apm/reference/policy-schema/#identity-casing) for recursive-glob behavior, upgrade risk, and workaround removal.
 
@@ -413,7 +473,7 @@ These checks run without a policy file:
 - `deployed-files-present` -- all deployed files exist
 - `no-orphaned-packages` -- no packages in lockfile absent from manifest
 - `skill-subset-consistency` -- selected skill subsets match the lockfile
-- `config-consistency` -- MCP configs match lockfile
+- `config-consistency` -- MCP configs match lockfile; servers the executables gate left out pass, and a server the lock admits but `apm.yml` does not approve fails
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
 - `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration
 
@@ -428,10 +488,12 @@ modify the manifest, lockfile, or deployment.
 
 Additional checks when a policy is provided:
 
-- **Dependencies:** allowlist, denylist, required packages, transitive depth
+- **Dependencies:** allowlist, denylist, required packages (present, deployed,
+  version, executables trusted), transitive depth, pinned constraints, registry source
+- **Integrity:** dependency content hashes
 - **MCP:** allowlist, denylist, transport, self-defined servers
 - **Compilation:** target, strategy, source attribution
-- **Manifest:** required fields, scripts policy
+- **Manifest:** required fields, explicit includes, scripts policy
 - **Unmanaged:** unmanaged file detection
 
 ## CLI usage
@@ -466,7 +528,10 @@ may use. This section covers how that contract is enforced at `apm install` time
 
 APM auto-discovers org policy from the project's git remote by checking
 `.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub
-API-compatible hosts. Azure DevOps hosts use repository `apm-policy` in project
+API-compatible hosts. No policy found is silent by default; on github.com, `*.ghe.com` and
+the `GITHUB_HOST` host, `apm policy status`, `--verbose` and the `fetch_failure_default: block`
+error hint that a private `.github-private` may be unreadable (GitHub answers 404 for it).
+Azure DevOps hosts use repository `apm-policy` in project
 `apm`, with a legacy `_apm/_apm` fallback after a 404. GitLab looks for `apm-policy`
 at every namespace from the top-level group down to the project's own subgroup
 (e.g. `acme/apm-policy`, `acme/dept-a/apm-policy`, `acme/dept-a/team-x/apm-policy`)
@@ -481,7 +546,7 @@ token read access to every ancestor `apm-policy`.
 Configure a self-managed host with
 `GITLAB_HOST` or `APM_GITLAB_HOSTS`, and use `APM_GITLAB_POLICY_REPO` to select
 another project name. Repositories with no detectable git remote (unpacked
-bundles, temp dirs) emit an explicit "could not determine org" line and skip
+bundles, temp dirs) print a "could not determine org" line with `--verbose` and skip
 discovery.
 
 The `--policy <override>` flag is **audit-only today**  --  it works on
@@ -489,8 +554,10 @@ The `--policy <override>` flag is **audit-only today**  --  it works on
 
 ### 3. Inheritance and composition
 
-Policy resolves through the chain: enterprise hub -> org -> repo override.
-The merge follows "Inheritance rules" above (most fields tighten; deny/require lists support explicit `[]` override).
+Policy resolves through the chain: enterprise hub -> org. A repo `apm-policy.yml`
+is not part of the discovered chain; it applies only when passed to
+`apm audit --ci --policy`.
+The merge follows "Inheritance rules" above (tighten-only; a child cannot remove inherited entries).
 
 **Multi-level extends:** install-time enforcement and `apm audit --ci` both
 resolve the full `extends:` chain up to `MAX_CHAIN_DEPTH = 5`. Cycles are
@@ -501,11 +568,16 @@ relax an ancestor that requires an explicit `includes:` list.
 
 ### 4. What gets enforced
 
-- **Dependencies:** allow, deny, require (presence + optional version pin), max_depth
-- **MCP:** allow, deny, transport.allow, self_defined, trust_transitive
-- **Compilation:** target.allow / target.enforce (target-aware)
-- **Manifest:** required_fields, scripts, content_types.allow
-- **Unmanaged files:** action against configured directories
+- **Dependencies:** allow, deny, require (presence + optional version pin), max_depth, require_pinned_constraint
+- **Registry source:** require, allow_non_registry
+- **MCP:** allow, deny, transport.allow, self_defined (`trust_transitive` is parsed but not enforced)
+- **Compilation:** target.allow / target.enforce (target-aware). `target:`, `targets:`, and CSV forms are one declaration; aliases resolve before comparison (`vscode`/`agents` are `copilot`); `all` in `allow` allows everything. Install judges its effective selection; audit judges the targets `apm.yml` declares.
+- **Manifest:** require_explicit_includes
+- **Integrity:** security.integrity.require_hashes
+
+`manifest.required_fields`, `manifest.scripts`, `compilation.strategy`,
+`compilation.source_attribution` and `unmanaged_files` are checked only by
+`apm audit --ci`; `manifest.content_types` is not enforced.
 
 ### 5. When enforcement runs
 
@@ -514,7 +586,7 @@ relax an ancestor that requires an explicit `includes:` list.
 | `apm install` | NEW  --  gate runs after resolve, before integration / target writes |
 | `apm install <pkg>` | NEW  --  snapshot apm.yml, run gate, rollback on block |
 | `apm install --mcp` | NEW  --  dedicated MCP preflight |
-| `apm deps update` | NEW  --  runs the install pipeline, so the same gate applies |
+| `apm update` | NEW  --  runs the install pipeline, so the same gate applies |
 | `apm install --dry-run` | NEW  --  read-only preflight; renders "would be blocked" |
 | `apm audit --ci` | Existing  --  same checks against on-disk manifest + lockfile |
 
@@ -532,78 +604,84 @@ relax an ancestor that requires an explicit `includes:` list.
 
 ### 7. CLI examples
 
-Symbol legend: `[+]` success, `[!]` warning, `[x]` error, `[i]` info.
+Symbol legend: `[>]` progress, `[+]` success, `[!]` warning, `[x]` error, `[i]` info, `[*]` summary.
 
 Successful install (verbose) under `enforcement: block`:
 
 ```shell
 $ apm install --verbose
-[i] Resolving dependencies...
-[i] Policy: org:contoso/.github (cached, fetched 12m ago) -- enforcement=block
-[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
+[>] Installing dependencies from apm.yml...
+[!] Policy: org:contoso/.github (cached, fetched 12m ago) -- enforcement=block
+[*] Installed 4 APM dependencies, 2 MCP servers in 1.2s.
 ```
 
 Block: denied dependency aborts the install before integration:
 
 ```shell
 $ apm install
-[i] Resolving dependencies...
+[>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
-[x] Policy violation: acme/evil-pkg -- Blocked by org policy at org:contoso/.github -- remove `acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
-[x] Install aborted: 1 policy check failed
+[x] Policy violation: github.com/acme/evil-pkg -- denied by pattern: acme/evil-pkg
+  Blocked by org policy at org:contoso/.github (dependency-denylist) -- remove `github.com/acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[x] Install blocked by org policy -- see violations above
 ```
 
 Warn: same dep, `enforcement: warn` -- install succeeds, violation flows to summary:
 
 ```shell
 $ apm install
-[i] Resolving dependencies...
-[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
-
-[!] Policy
-    acme/evil-pkg -- Blocked by org policy at org:contoso/.github -- remove `acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[>] Installing dependencies from apm.yml...
+  [!] 1 policy warning
+    +- [dependency-denylist] 1 dependency(ies) match deny list: acme/evil-pkg: denied by pattern: acme/evil-pkg
+[*] Installed 4 APM dependencies, 2 MCP servers in 1.2s.
 ```
 
 Escape hatches (`--no-policy` flag and `APM_POLICY_DISABLE=1` env var) emit the same loud warning every invocation:
 
 ```shell
 $ apm install --no-policy
+[>] Installing dependencies from apm.yml...
 [!] Policy enforcement disabled by --no-policy for this invocation. This does NOT bypass apm audit --ci. CI will still fail the PR for the same policy violation.
-[i] Resolving dependencies...
-[+] Installed 4 APM dependencies, 2 MCP servers in 1.2s
+[*] Installed 4 APM dependencies, 2 MCP servers in 1.2s.
 ```
 
 `--dry-run` previews violations (capped at five per severity bucket; overflow collapses):
 
 ```shell
 $ apm install --dry-run
-[i] Resolving dependencies...
-[i] Policy: org:contoso/.github -- enforcement=block
-[!] Would be blocked by policy: acme/evil-pkg -- denylist match: acme/evil-pkg
-[!] Would be blocked by policy: acme/banned -- denylist match: acme/banned
-[!] ... and 4 more would be blocked by policy. Run `apm audit` for full report.
-[i] Dry-run: no files written
+[>] Installing dependencies from apm.yml...
+[!] Policy: org:contoso/.github -- enforcement=block
+[!] Would be blocked by policy: github.com/acme/evil-pkg -- denied by pattern: acme/*
+[!] Would be blocked by policy: github.com/acme/banned -- denied by pattern: acme/*
+[!] Would be blocked by policy: github.com/acme/old -- denied by pattern: acme/*
+[!] Would be blocked by policy: github.com/acme/legacy -- denied by pattern: acme/*
+[!] Would be blocked by policy: github.com/acme/tools -- denied by pattern: acme/*
+[!] ... and 2 more would be blocked by policy. Run `apm audit` for full report.
+[i] Dry run mode - showing what would change:
 ```
 
 `apm install <pkg>` blocked -- manifest restored:
 
 ```shell
 $ apm install acme/evil-pkg
-[i] Resolving dependencies...
+[*] Updated apm.yml with 1 new package(s)
+[>] Installing 1 new package...
 [!] Policy: org:contoso/.github -- enforcement=block
-[x] Policy violation: acme/evil-pkg -- Blocked by org policy at org:contoso/.github -- remove `acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[x] Policy violation: github.com/acme/evil-pkg -- denied by pattern: acme/evil-pkg
+  Blocked by org policy at org:contoso/.github (dependency-denylist) -- remove `github.com/acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
 [i] apm.yml restored to its previous state.
-[x] Install aborted: 1 policy check failed
+[x] Install blocked by org policy -- see violations above
 ```
+
+One violation line per offending dependency or MCP server; the hint names what to change in apm.yml (for a transitive MCP server, the dependency that brings it in) and cites the check in parentheses.
 
 Transitive MCP server blocked -- APM packages stay installed, MCP configs are not written:
 
 ```shell
 $ apm install
-[i] Resolving dependencies...
+[>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
-[+] Installed 4 APM dependencies in 0.8s
-[x] Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
+[x] MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
 ```
 
 ### 8. Escape hatches
@@ -614,7 +692,7 @@ fail the PR for the same policy violation.
 
 | Hatch | Scope |
 |-------|-------|
-| `--no-policy` | On `apm install`, `apm install <pkg>`, `apm install <bundle>`, `apm install --mcp`. Skips install-time discovery + enforcement for one invocation; loud warning. Not on `apm deps update`. |
+| `--no-policy` | On `apm install`, `apm install <pkg>`, `apm install <bundle>`, `apm install --mcp`. Skips install-time discovery + enforcement for one invocation; loud warning. Not on `apm update`; use `APM_POLICY_DISABLE=1` there. |
 | `APM_POLICY_DISABLE=1` | Env var equivalent. Same loud warning. |
 
 `APM_POLICY` is reserved for a future override env var and is **not**
@@ -626,7 +704,8 @@ Resolved effective policy is cached under the platform user cache at
 `apm/policy_v1/<project-key>/`. Default
 TTL comes from the policy's `cache.ttl` (`3600` seconds). Beyond TTL, APM serves
 the stale cache on refresh failure with a loud warning, up to a hard ceiling
-of 7 days (`MAX_STALE_TTL`). `--no-cache` forces a fresh fetch. Writes are
+of 7 days (`MAX_STALE_TTL`). `--no-cache` on `apm audit` and `apm policy status`
+forces a fresh fetch. Writes are
 atomic (temp file + rename).
 
 ### 9.5. Network failure semantics
@@ -638,9 +717,9 @@ atomic (temp file + rename).
 - **Garbage response** (HTTP 200 with non-YAML body, e.g. captive portal):
   same posture as fetch failure -- warn loudly, cache fallback if present.
 - **No policy resolved (`no_git_remote` / `absent` / `empty`):** since
-  #1159, these emit a `[!]` warning to stderr and honour
-  `policy.fetch_failure_default: block` for parity with fetch failures.
-  Pre-fix they were silently fail-open even with `block` set.
+  #1159, these honour `policy.fetch_failure_default: block` for parity with
+  fetch failures. `apm audit --ci` warns on all three; `apm install` warns
+  on `empty` and shows `absent` / `no_git_remote` only with `--verbose`.
 
 Opt in to fail-closed semantics with the `policy.fetch_failure: warn|block`
 knob on `apm-policy.yml` (applies when a cached policy is available) or
@@ -669,13 +748,14 @@ time. MD5 / SHA-1 not accepted.
 ### 9.7. Diagnostic command
 
 `apm policy status` prints discovery outcome, source, enforcement, cache
-age, `extends` chain, and rule counts (table or `--json`). Always exits 0
-so it is safe for CI / SIEM ingestion. Supports `--policy-source` and
-`--no-cache`.
+age, `extends` chain, and rule counts (table or `--json`). It exits 0 by
+default, so it is safe for SIEM ingestion; add `--check` to exit 1 when no
+usable policy is found (any outcome other than `found`), for CI gates.
+Supports `--policy-source` and `--no-cache`.
 
 ### 9.8. `apm audit --ci` auto-discovery
 
-When `--policy` (alias `--policy-source`) is omitted, `apm audit --ci`
+When `--policy` is omitted, `apm audit --ci`
 auto-discovers the org policy from the git remote, mirroring the install
 path. Use `--no-policy` to skip discovery for a single invocation.
 
@@ -684,8 +764,8 @@ emit a `[!]` warning to stderr by default and exit 1 with `[x]` when
 the project sets `policy.fetch_failure_default: block` -- pre-fix they
 silently exited 0, leaving CI green with no enforcement applied. JSON
 and SARIF output on stdout stays clean (all diagnostics on stderr).
-Explicit `--policy <file>` keeps the legacy fall-through (no warning)
-so opt-in pointers at minimal baseline files do not regress.
+`--policy org` keeps the legacy fall-through (no warning); any other
+explicit `--policy` that yields no policy fails closed (see CLI usage).
 
 ### 10. Errors and exit codes
 
@@ -711,12 +791,12 @@ Violation classes:
 | Class | Triggers | Remediation |
 |-------|----------|-------------|
 | `denylist` | `dependencies.deny` match | Remove dep from `apm.yml`, request org-policy update, or `--no-policy` for one-off bypass |
-| `allowlist` | Dep not in non-empty `dependencies.allow` | Add to org allowlist or switch to an approved package |
+| `allowlist` | Dep not in a set `dependencies.allow` (`[]` allows nothing) | Add to org allowlist or switch to an approved package |
 | `required` | Missing `dependencies.require` entry, or version-pin mismatch | Add the dep (and pin) to `apm.yml`. Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block |
-| `pinned-constraint` | `dependencies.require_pinned_constraint: true` + a direct dep with no ref, a wildcard, a bare branch, or a bare `>=X.Y` | Pin the dep to an exact version (`1.2.3` or npm/cargo-style `=1.2.3`; pip-style `==1.2.3` is not supported), caret/tilde/bounded semver range, literal tag (`vX.Y.Z`, or `{name}-vX.Y.Z` / `{name}--vX.Y.Z` for the dep's own package name), or a full SHA. The constraint is judged as declared in `apm.yml` (a `replace:` rule by the ref it selects), not the tag a range resolved to. Roll out enforcement with `warn` before `block`. |
-| `transport` | MCP transport not in `mcp.transport.allow` | Switch transport, or request `mcp.transport.allow` update |
-| `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | Re-run with `--target <allowed>`, or adjust `compilation.target` in `apm.yml` |
-| `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny` / `transport` / `self_defined` | Remove offending dep, request policy update, or set `mcp.trust_transitive: true` |
+| `pinned-constraint` | `dependencies.require_pinned_constraint: true` + a direct dep with no ref, a wildcard, a bare branch, or a bare `>=X.Y` | Pin the dep to an exact version (`1.2.3` or npm/cargo-style `=1.2.3`; pip-style `==1.2.3` is not supported), caret/tilde/bounded semver range, literal tag (`vX.Y.Z`, or `{name}-vX.Y.Z` / `{name}--vX.Y.Z` for the dep's own package name), an exact package release tag (`name@X.Y.Z` / `@scope/name@X.Y.Z`), or a full SHA. Leading zeros or non-ASCII digits (`v01.2.3`) are not SemVer and fail as bare branches. The check judges declared release intent, not immutability (a tag can move; `apm install --frozen` replays the locked commit). The constraint is judged as declared in `apm.yml` (a `replace:` rule by the ref it selects), not the tag a range resolved to. Roll out enforcement with `warn` before `block`. |
+| `transport` | Effective MCP transport (the registry remote, package = stdio, or a self-defined server's declared transport) not in `mcp.transport.allow`, or the registry cannot resolve the server | Switch transport, pick one with `transport:` in apm.yml when the server offers several, check registry reachability, or request `mcp.transport.allow` update |
+| `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | Re-run with `--target <allowed>`, or adjust `targets:` in `apm.yml` |
+| `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny` / `transport` / `self_defined` | Remove the dep that brings it in, or request a policy update. `--trust-transitive-mcp` does not bypass policy, and `mcp.trust_transitive` is parsed but not enforced |
 
 Full message text per outcome and per class lives in
 `docs/src/content/docs/enterprise/policy-reference.md` section10. Violation messages

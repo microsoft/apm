@@ -17,7 +17,7 @@
     },
     {
       "id": "dependency-identity-materialization",
-      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; root-owned exact source replacement and original ownership; embedded git URL subpath validation",
+      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; host-bound exact policy require identity (required_package_policy_hosts), resolved once by policy/matcher.py DependencyPolicyIndex.find for the manifest and, via the matched dependency's unique key, the lockfile; distinct remote packages never share one materialization directory (MaterializationSlots, before fetch); root-owned exact source replacement and original ownership; embedded git URL subpath validation",
       "owner": "models/dependency/identity.py + materialization.py + replacement.py (typed root binding and clean selected-source projection) + object_fields.py (alias validation) + deps/apm_resolver.py (remote source-coordinate anchoring) + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py) + install/plan.py (root intent comparison) + install/phases/lockfile.py (including empty-graph root intent persistence)",
       "selectors": [
         "src/apm_cli/models/dependency/identity.py",
@@ -63,10 +63,13 @@
     },
     {
       "id": "cached-policy-shape",
-      "decision": "Cached policy shape",
-      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY)",
+      "decision": "Cached policy shape and the APM_POLICY_DISABLE switch reader",
+      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY; policy_disabled_by_env)",
       "selectors": ["src/apm_cli/policy/discovery.py"],
-      "guards": ["contracts-tooling-cached-policy-shape"]
+      "guards": [
+        "contracts-tooling-cached-policy-shape",
+        "install-deployment-policy-disable-switch-owner"
+      ]
     },
     {
       "id": "policy-content-hash",
@@ -100,6 +103,23 @@
       "guards": ["contracts-tooling-project-yaml-write-delegation"]
     },
     {
+      "id": "lifecycle-script-firing-gate",
+      "decision": "Whether a discovered lifecycle script may fire (APM_NO_SCRIPTS, org executables.deny_all, project script trust)",
+      "owner": "core/lifecycle_scripts.py (build_runner_from_context is the only LifecycleScriptRunner constructor)",
+      "selectors": ["src/apm_cli/core/lifecycle_scripts.py"],
+      "guards": ["contracts-tooling-lifecycle-script-gate"]
+    },
+    {
+      "id": "lockfile-generator-compatibility",
+      "decision": "Whether the running CLI may write, replay or certify a lockfile another APM generated (apm_version)",
+      "owner": "deps/lockfile_generator.py (assert_writable, check_current_cli, require_current_cli, warn_if_newer); utils/version_checker.py (release_precedence) orders versions; deps/lockfile.py (LockFile.write) stamps apm_version",
+      "selectors": ["src/apm_cli/deps/lockfile_generator.py"],
+      "guards": [
+        "contracts-tooling-lockfile-generator-gate",
+        "contracts-tooling-lockfile-generator-stamp"
+      ]
+    },
+    {
       "id": "read-only-lockfile-path",
       "decision": "Lockfile read path, timestamp emission, reproducible fallback, and marketplace declaration association",
       "owner": "deps/lockfile.py (resolve_lockfile_path_for_read, LockFile.write, resolve_reproducible_timestamp, LockedDependency alias projection, LockFile.get_dependency)",
@@ -119,6 +139,16 @@
       "owner": "compilation/footer.py (build_generation_footer)",
       "selectors": ["src/apm_cli/compilation/footer.py"],
       "guards": ["contracts-tooling-generation-footer"]
+    },
+    {
+      "id": "literal-affix-removal",
+      "decision": "Literal prefix/suffix removal on identity and path text (str.removeprefix/removesuffix; multi-character strip arguments are allowlisted character sets only)",
+      "owner": "models/dependency/reference.py (repository segment .git suffix) and marketplace/output_mappers.py (pluginRoot prefix); allowlist in scripts/architecture_linter/checks/contracts_strip_charset.py",
+      "selectors": [
+        "src/apm_cli/marketplace/output_mappers.py",
+        "scripts/architecture_linter/checks/contracts_strip_charset.py"
+      ],
+      "guards": ["contracts-tooling-strip-charset"]
     }
   ]
 }

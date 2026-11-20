@@ -124,6 +124,20 @@ class TestDepsListCommand(_DepsCmdBase):
         assert result.exit_code == 0
         assert "myorg/myrepo" in result.output
 
+    def test_list_with_project_self_entry_in_lock(self):
+        """The lock's virtual self-entry (own .apm/ content) never breaks list (#3994)."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "myorg", "myrepo")
+            (tmp / "apm.lock.yaml").write_text(
+                "lockfile_version: '1'\ndependencies: []\n"
+                "local_deployed_files:\n- .claude/rules/a.md\n",
+                encoding="utf-8",
+            )
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
+                result = self.runner.invoke(cli, ["deps", "list"])
+        assert result.exit_code == 0, result.output
+        assert "myorg/myrepo" in result.output
+
     def test_list_global_flag(self):
         """--global flag targets user scope directory."""
         from apm_cli.core.scope import InstallScope
@@ -242,6 +256,9 @@ class TestDepsListCommand(_DepsCmdBase):
                 "safeorg/saferepo": secure_dep,
                 "insecureorg/insecurerepo": insecure_dep,
             }
+            mock_lockfile.get_package_dependencies.return_value = list(
+                mock_lockfile.dependencies.values()
+            )
 
             mock_lf_path = MagicMock()
             mock_lf_path.exists.return_value = True
@@ -273,6 +290,9 @@ class TestDepsListCommand(_DepsCmdBase):
             mock_lockfile.dependencies = {
                 "childorg/childrepo": insecure_dep,
             }
+            mock_lockfile.get_package_dependencies.return_value = list(
+                mock_lockfile.dependencies.values()
+            )
 
             mock_lf_path = MagicMock()
             mock_lf_path.exists.return_value = True
@@ -303,6 +323,9 @@ class TestDepsListCommand(_DepsCmdBase):
             mock_lockfile.dependencies = {
                 "safeorg/saferepo": secure_dep,
             }
+            mock_lockfile.get_package_dependencies.return_value = list(
+                mock_lockfile.dependencies.values()
+            )
 
             mock_lf_path = MagicMock()
             mock_lf_path.exists.return_value = True
@@ -506,7 +529,7 @@ class TestDepsTreeCommand(_DepsCmdBase):
             lock = LockFile(
                 lockfile_version="1",
                 generated_at="2025-01-01T00:00:00+00:00",
-                apm_version="0.0.0-test",
+                apm_version="0.0.0",
             )
             lock.add_dependency(
                 LockedDependency(
@@ -541,7 +564,7 @@ class TestDepsTreeCommand(_DepsCmdBase):
             lock = LockFile(
                 lockfile_version="1",
                 generated_at="2025-01-01T00:00:00+00:00",
-                apm_version="0.0.0-test",
+                apm_version="0.0.0",
             )
             for dependency in (
                 LockedDependency(repo_url=repo_url, depth=1, version="1.0.0"),

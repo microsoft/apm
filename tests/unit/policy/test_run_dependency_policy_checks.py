@@ -305,7 +305,9 @@ class TestSharedDependencyNames:
 
         assert canonical.call_count == (len(deps) if names is None else 0)
         present = names is None or "org/pkg" in names
-        assert result.passed == (present if helper == "manifest" else not present)
+        # The lock is empty: deployed fails either way and never skips (#3993).
+        expected = {"manifest": present, "deployed": False, "executable": not present}[helper]
+        assert result.passed == expected
         assert result.details == ([] if result.passed else ["org/pkg"])
         if names is not None:
             assert names == ({"org/pkg"} if present else set())
@@ -477,7 +479,7 @@ class TestTargetChecks:
         policy = ApmPolicy(
             compilation=CompilationPolicy(target=CompilationTargetPolicy(allow=("vscode",)))
         )
-        result = run_dependency_policy_checks(deps, policy=policy, effective_target="claude")
+        result = run_dependency_policy_checks(deps, policy=policy, effective_target=("claude",))
         assert not result.passed
         assert "compilation-target" in _failed_names(result)
 
@@ -487,7 +489,7 @@ class TestTargetChecks:
         policy = ApmPolicy(
             compilation=CompilationPolicy(target=CompilationTargetPolicy(allow=("vscode",)))
         )
-        result = run_dependency_policy_checks(deps, policy=policy, effective_target="vscode")
+        result = run_dependency_policy_checks(deps, policy=policy, effective_target=("copilot",))
         assert result.passed
         assert "compilation-target" in _check_names(result)
 

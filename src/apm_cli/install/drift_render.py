@@ -9,10 +9,12 @@ from typing import TYPE_CHECKING
 import click
 
 from apm_cli.core.command_logger import CommandLogger
+from apm_cli.deps.file_provenance import LOCAL_BUNDLE_OWNER
 from apm_cli.install.local_edits import (
     count_exportable_findings,
     local_edit_hint,
     rendering_change_hint,
+    restore_locked_content_hint,
     unedited_modified_paths,
 )
 from apm_cli.utils.console import STATUS_SYMBOLS
@@ -128,9 +130,11 @@ def render_drift_text(
 
     if by_kind.get("unmanaged-conflict"):
         lines.append(
-            f"  {STATUS_SYMBOLS['info']} Rename the conflicting local skill or choose a valid "
-            "skill/target selection before reinstalling. Ordinary 'apm install' refuses "
-            "unmanaged conflicts; it cannot repair these files."
+            f"  {STATUS_SYMBOLS['info']} Rename the conflicting local file or skill (APM "
+            "does not own it), or choose a valid skill/target selection, before "
+            "reinstalling. Ordinary 'apm install' skips or refuses unmanaged "
+            "conflicts; it cannot repair these files. 'apm install --force' "
+            "overwrites a skipped non-skill file."
         )
         if any(finding.kind != "unmanaged-conflict" for finding in findings):
             lines.append(
@@ -144,10 +148,19 @@ def render_drift_text(
             "to restore content-integrity coverage."
         )
     else:
-        lines.append(
-            f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files "
-            "with the lockfile."
-        )
+        edited = [
+            finding for finding in by_kind.get("modified", []) if finding.path not in unedited
+        ]
+        bundle_edits = {finding.package == LOCAL_BUNDLE_OWNER for finding in edited}
+        for bundle in sorted(bundle_edits):
+            subject = "the modified bundle files" if bundle else "the modified files"
+            hint = restore_locked_content_hint(subject, bundle=bundle)
+            lines.append(f"  {STATUS_SYMBOLS['info']} {hint}.")
+        if len(edited) < len(findings):
+            lines.append(
+                f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files "
+                "with the lockfile."
+            )
     return "\n".join(lines).rstrip() + "\n"
 
 

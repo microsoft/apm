@@ -294,6 +294,16 @@ class TestIterSemverTags:
         tags = [t[1] for t in out]
         assert tags == ["v1.0.0"]
 
+    def test_skips_tags_outside_semver_grammar(self) -> None:
+        # ``^1.0.0`` must never select a leading-zero tag as ``1.9.0`` (#3795).
+        refs = _refs_from(
+            ("v01.9.0", "a" * 40),
+            ("v1.9.0-01", "b" * 40),
+            ("v1.0.0", "c" * 40),
+        )
+        out = iter_semver_tags(refs, package_name="foo", patterns=DEFAULT_TAG_PATTERNS)
+        assert [t[1] for t in out] == ["v1.0.0"]
+
     def test_name_placeholder_scoped_to_package_name(self) -> None:
         """``{name}--v{version}`` must only match tags for the requested package.
 

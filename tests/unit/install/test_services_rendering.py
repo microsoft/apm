@@ -166,6 +166,7 @@ class TestMultiTargetCollapseRule:
             integrate_package_primitives(
                 pkg,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="test-pkg",
@@ -262,6 +263,7 @@ class TestAdoptedFileVisibility:
             integrate_package_primitives(
                 pkg,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="test-pkg",
@@ -330,6 +332,7 @@ class TestWarmCacheAnnotation:
             integrate_package_primitives(
                 pkg,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="test-pkg",
@@ -359,6 +362,7 @@ class TestWarmCacheAnnotation:
             integrate_package_primitives(
                 pkg,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="test-pkg",
@@ -395,6 +399,7 @@ class TestWarmCacheAnnotation:
             integrate_package_primitives(
                 pkg,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="test-pkg",
@@ -431,6 +436,7 @@ class TestAggregateCounterPreserved:
             result = integrate_package_primitives(
                 pkg,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="test-pkg",

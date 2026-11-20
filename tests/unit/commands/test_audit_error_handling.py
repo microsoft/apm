@@ -410,6 +410,77 @@ class TestPreviewStrip:
         assert result == 0
 
 
+class TestRichTableMarkupEscaping:
+    """#3845: bracketed text in audit tables must not be parsed as Rich markup."""
+
+    @staticmethod
+    def _console():
+        import io
+
+        from rich.console import Console
+
+        return Console(file=io.StringIO(), width=120, color_system=None)
+
+    def test_ci_table_shows_cross_for_failed_check(self) -> None:
+        from apm_cli.commands.audit import _render_ci_results
+        from apm_cli.policy.models import CheckResult, CIAuditResult
+
+        console = self._console()
+        result = CIAuditResult(
+            checks=[
+                CheckResult(name="lockfile-exists", passed=True, message="ok"),
+                CheckResult(name="required-packages", passed=False, message="missing"),
+            ]
+        )
+        with patch("apm_cli.commands.audit._get_console", return_value=console):
+            _render_ci_results(result)
+        lines = console.file.getvalue().splitlines()
+        failed_row = next(line for line in lines if "missing" in line)
+        passed_row = next(line for line in lines if "lockfile-exists" in line)
+        assert "[x]" in failed_row
+        assert "[+]" in passed_row
+
+    def test_warn_mode_check_names_its_subjects(self) -> None:
+        """Warn-mode CI names the denied dependency the team must fix (#3994)."""
+        from apm_cli.commands.audit import _render_ci_results
+        from apm_cli.policy.models import CheckResult, CIAuditResult
+
+        console = self._console()
+        result = CIAuditResult(
+            checks=[
+                CheckResult(
+                    name="dependency-denylist",
+                    passed=True,
+                    message="1 dependency(ies) match deny list (enforcement: warn)",
+                    details=["github.com/acme/tools"],
+                    warned=True,
+                ),
+            ]
+        )
+        with (
+            patch("apm_cli.commands.audit._get_console", return_value=console),
+            patch("apm_cli.commands.audit._rich_echo") as echo,
+            patch("apm_cli.commands.audit._rich_warning") as warning,
+            patch("apm_cli.commands.audit._rich_success") as success,
+        ):
+            _render_ci_results(result)
+        row = next(line for line in console.file.getvalue().splitlines() if "deny" in line)
+        assert "[!]" in row
+        echoed = " ".join(call.args[0] for call in echo.call_args_list)
+        assert "github.com/acme/tools" in echoed
+        assert "enforcement: warn" in warning.call_args.args[0]
+        # No green "All N passed" next to a violation (#3994).
+        success.assert_not_called()
+
+    def test_strip_preview_keeps_bracketed_path(self) -> None:
+        console = self._console()
+        findings = {".github/prompts/[x]note.md": [_make_finding("critical")]}
+        with patch("apm_cli.commands.audit._get_console", return_value=console):
+            with patch("apm_cli.commands.audit._rich_echo"):
+                _preview_strip(findings, _make_logger())
+        assert "[x]note.md" in console.file.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # _audit_content_scan -- key branches
 # ---------------------------------------------------------------------------
@@ -497,7 +568,7 @@ class TestAuditContentScanBranches:
                             _audit_content_scan(cfg, None, None, strip=False, dry_run=False)
         assert exc_info.value.code == 1
 
-    def test_package_not_found_warning_and_exit(self, tmp_path: Path) -> None:
+    def test_package_not_installed_errors_and_exits_one(self, tmp_path: Path) -> None:
         logger = _make_logger()
         lock_file = tmp_path / "apm.lock.yaml"
         lock_file.write_text("lockfile_version: '1'\ndependencies: []\n")
@@ -516,8 +587,9 @@ class TestAuditContentScanBranches:
                 with patch("apm_cli.commands.audit.scan_project_result") as mock_scan:
                     mock_scan.return_value = FileScanResult({}, frozenset())
                     _audit_content_scan(cfg, "owner/repo", None, strip=False, dry_run=False)
-        assert exc_info.value.code == 0
-        logger.warning.assert_called()
+        assert exc_info.value.code == 1
+        logger.error.assert_called()
+        mock_scan.assert_not_called()
 
     def test_dry_run_without_strip_warns(self, tmp_path: Path) -> None:
         logger = _make_logger()

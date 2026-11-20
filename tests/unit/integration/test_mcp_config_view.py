@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.mcp_config_view import (
     CurrentMcpConfigView,
@@ -16,6 +17,8 @@ from apm_cli.integration.mcp_config_view import (
 )
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.models.dependency.mcp import MCPDependency
+from apm_cli.security.executables import build_exec_trust_context, locked_dependency_approval_keys
+from apm_cli.security.trust import McpAdmission
 from tests.unit.copilot_plugins._builders import write_agent_plugin
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
@@ -40,7 +43,7 @@ def test_dependency_omission_requires_bound_selection_evidence(
         root,
         lock,
         modules,
-        trust_transitive_self_defined=False,
+        admission=McpAdmission(None),
         include_dependency_mcp=include_dependency_mcp,
     )
     assert selected.dependencies == ()
@@ -55,6 +58,93 @@ def test_dependency_omission_requires_bound_selection_evidence(
     changed = _derive(root, lock, modules).with_recorded_omissions(lock)
     assert changed.diff(lock.mcp_configs).source_only == {"firebase"}
     assert changed.problems
+
+
+@pytest.mark.parametrize(
+    "declaration,approved,omitted",
+    [
+        ({"name": "tools", "registry": False, "transport": "stdio", "command": "x"}, False, True),
+        ({"name": "tools", "registry": False, "transport": "stdio", "command": "x"}, True, False),
+        ("tools", False, False),
+    ],
+    ids=["gated-unapproved", "gated-approved", "registry-not-gated"],
+)
+def test_unapproved_executables_omission_binds_gated_declaration(
+    tmp_path: Path, declaration: dict | str, approved: bool, omitted: bool
+) -> None:
+    """Only a gated package server the filter left out is parked and accepted by audit."""
+    root = _write_manifest(tmp_path, name="consumer")
+    source = tmp_path / "package"
+    _write_manifest(source, name="tools", mcp=[declaration])
+    dependency = LockedDependency(
+        repo_url="_local/tools", source="local", local_path=str(source), depth=1
+    )
+    lock = _lock(dependency)
+    modules = tmp_path / "apm_modules"
+    identity = locked_dependency_approval_keys(dependency)[0].split("#", 1)[0]
+    allow = {identity: {"mcp": True}} if approved else {}
+    ctx = build_exec_trust_context(
+        policy=None, project_data={"executables": {"allow": allow}}, include_user=False
+    )
+    view = CurrentMcpConfigView.derive(root, lock, modules, admission=McpAdmission(ctx))
+    assert ("tools" in view.omission_evidence(lock)) is omitted
+    assert ("tools" in view.configs) is not omitted
+
+    lock.mcp_omissions = {
+        "tools": {
+            "declaration": view.declaration_fingerprints["tools"],
+            "reason": "unapproved-executables",
+        }
+    }
+    audited = view.with_recorded_omissions(lock)
+    gated = not isinstance(declaration, str)
+    assert audited.diff(lock.mcp_configs).is_empty is gated
+    assert bool(audited.problems) is not gated
+
+
+@pytest.mark.parametrize(
+    "approved,reason,accepted",
+    [
+        (False, "unapproved-executables", True),
+        (True, "unapproved-executables", False),
+        (False, "only-apm", False),
+    ],
+    ids=["parked-matching", "approved-since", "other-reason"],
+)
+def test_gated_selection_accepts_only_this_runs_omission_evidence(
+    tmp_path: Path, approved: bool, reason: str, accepted: bool
+) -> None:
+    """#3925: after the gate ran, recorded evidence must equal what this run records."""
+    root = _write_manifest(tmp_path, name="consumer")
+    source = tmp_path / "package"
+    _write_manifest(source, name="tools", mcp=[_self_defined("tools", "x")])
+    dependency = LockedDependency(
+        repo_url="_local/tools", source="local", local_path=str(source), depth=1
+    )
+    lock = _lock(dependency)
+    modules = tmp_path / "apm_modules"
+    fingerprint = _derive(root, lock, modules).declaration_fingerprints["tools"]
+    lock.mcp_omissions = {"tools": {"declaration": fingerprint, "reason": reason}}
+    from apm_cli.security.executables import (
+        build_exec_trust_context,
+        locked_dependency_approval_keys,
+    )
+
+    identity = locked_dependency_approval_keys(dependency)[0].split("#", 1)[0]
+    allow = {identity: {"mcp": True}} if approved else {}
+    gate = build_exec_trust_context(policy=None, project_data={"executables": {"allow": allow}})
+
+    selected = CurrentMcpConfigView.select(
+        root,
+        lock,
+        modules,
+        admission=McpAdmission(gate),
+        recorded=lock,
+        allow_pending=False,
+    )
+
+    assert (not selected.problems) is accepted
+    assert ("tools" in selected.configs) is approved
 
 
 @pytest.mark.parametrize(
@@ -86,7 +176,7 @@ def test_omission_never_masks_unknown_or_previously_admitted_state(
     lock = _lock(dependency)
     modules = tmp_path / "apm_modules"
     selected = CurrentMcpConfigView.derive(
-        root, lock, modules, trust_transitive_self_defined=False, include_dependency_mcp=False
+        root, lock, modules, admission=McpAdmission(None), include_dependency_mcp=False
     )
     lock.mcp_omissions = selected.omission_evidence(lock)
     if damage == "lost":
@@ -132,7 +222,7 @@ def test_admitted_config_supersedes_obsolete_omission(tmp_path: Path, root_decla
     )
     modules = tmp_path / "apm_modules"
     selected = CurrentMcpConfigView.derive(
-        root, lock, modules, trust_transitive_self_defined=False, include_dependency_mcp=False
+        root, lock, modules, admission=McpAdmission(None), include_dependency_mcp=False
     )
     lock.mcp_omissions = selected.omission_evidence(lock)
     assert set(lock.mcp_omissions) == {"firebase"}
@@ -176,14 +266,15 @@ def test_omission_fingerprint_uses_authored_portable_declaration(
     _write_manifest(source, name="firebase", mcp=[declaration])
     _write_manifest(replay_source, name="firebase", mcp=[declaration])
     selected = CurrentMcpConfigView.derive(
-        root, lock, installed, trust_transitive_self_defined=False, include_dependency_mcp=False
+        root, lock, installed, admission=McpAdmission(None), include_dependency_mcp=False
     )
     lock.mcp_omissions = selected.omission_evidence(lock)
     assert set(lock.mcp_omissions) == {"firebase"}
     installed_view = _derive(root, lock, installed)
     replay_view = _derive(root, lock, replay)
     assert installed_view.problems == replay_view.problems == ()
-    assert installed_view.configs["firebase"][field] != replay_view.configs["firebase"][field]
+    assert installed_view.configs["firebase"][field] == replay_view.configs["firebase"][field]
+    assert installed_view.configs["firebase"][field] == declaration[field]
     assert replay_view.declaration_fingerprints == installed_view.declaration_fingerprints
     audited = replay_view.with_recorded_omissions(lock)
     assert audited.configs == {}
@@ -193,7 +284,7 @@ def test_omission_fingerprint_uses_authored_portable_declaration(
     declaration[field] = [literal] if field == "args" else {"SCRIPT": literal}
     _write_manifest(source, name="firebase", mcp=[declaration])
     selected = CurrentMcpConfigView.derive(
-        root, lock, installed, trust_transitive_self_defined=False, include_dependency_mcp=False
+        root, lock, installed, admission=McpAdmission(None), include_dependency_mcp=False
     )
     lock.mcp_omissions = selected.omission_evidence(lock)
     other_literal = str(replay_source.resolve() / "start.mjs")
@@ -225,7 +316,7 @@ def test_pending_sources_preserve_known_omission_evidence(tmp_path: Path) -> Non
         root,
         lock,
         tmp_path / "apm_modules",
-        trust_transitive_self_defined=False,
+        admission=McpAdmission(None),
         include_dependency_mcp=False,
         allow_pending=True,
         active_package_keys=frozenset(lock.dependencies),
@@ -281,7 +372,7 @@ def test_omission_and_compat_views_preserve_nested_single_file_admission(
         root,
         lock,
         modules,
-        trust_transitive_self_defined=False,
+        admission=McpAdmission(None),
         include_dependency_mcp=include_dependency_mcp,
         allow_pending=False,
     )
@@ -374,7 +465,7 @@ def _derive(
         root,
         lockfile,
         modules_root,
-        trust_transitive_self_defined=True,
+        admission=McpAdmission(None, one_off=True),
     )
 
 
@@ -553,6 +644,40 @@ def test_root_declaration_wins_duplicate_name(tmp_path: Path) -> None:
     assert [dep.name for dep in view.dependencies] == ["shared", "unique"]
     assert view.configs["shared"]["command"] == "root-command"
     assert view.provenance == {"unique": "tools"}
+    assert view.brought_in_by == {"unique": "./packages/tools"}
+
+
+def test_brought_in_by_traces_transitive_servers_to_direct_apm_yml_entry(
+    tmp_path: Path,
+) -> None:
+    """#3835 review: removal hints need the direct dependency's key, never a display name."""
+    root = _write_manifest(tmp_path, name="consumer", mcp=["root-server"])
+    modules_root = tmp_path / "apm_modules"
+    parent = LockedDependency(repo_url="acme/parent-pkg", depth=1)
+    mid = LockedDependency(repo_url="acme/mid-pkg", depth=2, resolved_by="acme/parent-pkg")
+    leaf = LockedDependency(repo_url="acme/leaf-pkg", depth=3, resolved_by="acme/mid-pkg")
+    orphan = LockedDependency(repo_url="acme/orphan-pkg", depth=2, resolved_by="acme/gone")
+    other = LockedDependency(repo_url="acme/other-pkg", depth=1)
+    for locked, name, mcp in (
+        (parent, "parent-pkg", ["direct-child"]),
+        (mid, "mid", None),
+        (leaf, "leaf", ["deep-child", "shared"]),
+        (orphan, "orphan", ["unknown-chain"]),
+        (other, "other", ["shared", "root-server"]),
+    ):
+        _write_manifest(
+            locked.to_dependency_ref().get_install_path(modules_root), name=name, mcp=mcp
+        )
+
+    view = _derive(root, _lock(parent, mid, leaf, orphan, other), modules_root)
+
+    assert view.provenance["direct-child"] == "parent-pkg"
+    assert view.provenance["deep-child"] == "leaf"
+    # Unknown or ambiguous chains and root-declared servers name no entry.
+    assert view.brought_in_by == {
+        "direct-child": "acme/parent-pkg",
+        "deep-child": "acme/parent-pkg",
+    }
 
 
 def test_symmetric_diff_reports_changed_source_only_and_lock_only() -> None:
@@ -589,6 +714,44 @@ def test_provenance_never_exempts_lock_only_name() -> None:
     diff = view.diff({"removed": {"name": "removed"}})
 
     assert diff.lock_only == frozenset({"removed"})
+
+
+def test_local_bundle_servers_are_recorded_baseline(tmp_path: Path) -> None:
+    """#3955: only bundle-owned lock servers are baseline; a declaration supersedes them."""
+    root = _write_manifest(tmp_path, name="consumer", mcp=[_self_defined("shared", "root")])
+    package_dir = tmp_path / "packages" / "forger"
+    _write_manifest(package_dir, name="bundle:evil", mcp=[_self_defined("forged", "x")])
+    locked = LockedDependency(
+        repo_url="_local/forger", source="local", local_path="./packages/forger", depth=1
+    )
+    lock = _lock(locked)
+    lock.mcp_configs = {
+        "bundled": {"name": "bundled", "command": "b"},
+        "shared": {"name": "shared", "command": "b"},
+        "removed": {"name": "removed"},
+        "claimed": {"name": "claimed", "command": "c"},
+    }
+    lock.mcp_config_provenance = {
+        "bundled": "bundle:mcppkg",
+        "shared": "bundle:mcppkg",
+        "removed": "old-package",
+        "claimed": "bundle:mcppkg",
+    }
+    # A bundle install records a native-entry receipt; a bare claim has none.
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lock,
+        {"claude": ["bundled", "shared", "claimed"]},
+        native_hashes={"claude": {"bundled": "sha256:" + "b" * 64, "shared": "sha256:" + "c" * 64}},
+    )
+
+    view = _derive(root, lock, tmp_path / "apm_modules")
+
+    assert view.bundle_owned == frozenset({"bundled"})
+    assert view.configs["bundled"] == {"name": "bundled", "command": "b"}
+    assert view.configs["shared"]["command"] == "root"
+    assert view.provenance == {"bundled": "bundle:mcppkg", "forged": "package:bundle:evil"}
+    assert view.diff(lock.mcp_configs).lock_only == frozenset({"removed", "claimed"})
+    assert {dep.name for dep in view.kept_dependencies()} == {"bundled", "shared", "forged"}
 
 
 def test_local_package_config_change_is_detected(tmp_path: Path) -> None:
@@ -649,6 +812,44 @@ def test_removed_local_and_remote_declarations_are_lock_only(tmp_path: Path) -> 
     )
 
     assert diff.lock_only == frozenset({"local-removed", "remote-removed"})
+
+
+@pytest.mark.parametrize("strict", [None, False])
+@pytest.mark.parametrize("shape", ["hooks", "mcp", "invalid", "wrong-lock-type"])
+def test_local_claude_source_is_never_mutated_or_waived_during_mcp_inspection(
+    tmp_path: Path, strict: bool | None, shape: str
+) -> None:
+    """Without the install-synthesized manifest, MCP stays uncollected and the source untouched."""
+    root = _write_manifest(tmp_path, name="consumer")
+    source = tmp_path / "publisher"
+    manifest = source / ".claude-plugin/plugin.json"
+    manifest.parent.mkdir(parents=True)
+    data = {"name": "owned-plugin", "version": "1.0.0"}
+    if shape == "mcp":
+        data["mcpServers"] = {"owned-server": {"command": "DO_NOT_EXECUTE"}}
+    manifest.write_text("[" if shape == "invalid" else json.dumps(data), encoding="ascii")
+    hooks = source / "hooks/hooks.json"
+    hooks.parent.mkdir()
+    hooks.write_text('{"hooks": {}}', encoding="ascii")
+    before = ArtifactSnapshot.capture(source)
+    dependency = LockedDependency(
+        repo_url="_local/publisher",
+        source="local",
+        local_path=str(source),
+        package_type="apm_package" if shape == "wrong-lock-type" else "marketplace_plugin",
+    )
+    view = CurrentMcpConfigView.derive(
+        root,
+        _lock(dependency),
+        tmp_path / "apm_modules",
+        admission=McpAdmission(None, one_off=True),
+        allow_pending=strict,
+    )
+    assert view.problems
+    assert view.configs == {}
+    assert_unchanged(before, ArtifactSnapshot.capture(source))
+    assert not (source / "apm.yml").exists()
+    assert not (source / ".apm").exists()
 
 
 def test_missing_package_manifest_records_problem(tmp_path: Path) -> None:
@@ -1104,7 +1305,7 @@ def test_transitive_self_defined_trust_matches_install_behavior(tmp_path: Path) 
         root,
         lockfile,
         tmp_path / "apm_modules",
-        trust_transitive_self_defined=False,
+        admission=McpAdmission(None),
     )
     trusted = _derive(root, lockfile, tmp_path / "apm_modules")
 
@@ -1112,13 +1313,11 @@ def test_transitive_self_defined_trust_matches_install_behavior(tmp_path: Path) 
     assert [dep.name for dep in trusted.dependencies] == ["direct-server", "deep-server"]
 
 
-def test_only_unchanged_previously_trusted_transitive_config_is_preserved(
-    tmp_path: Path,
-) -> None:
-    """A no-op update preserves prior trust without trusting changed code."""
+def test_transitive_self_defined_server_needs_per_run_trust(tmp_path: Path) -> None:
+    """A transitive self-defined server is collected only with per-run trust."""
     root = _write_manifest(tmp_path, name="root")
     deep_dir = tmp_path / "packages" / "deep"
-    package = _write_manifest(
+    _write_manifest(
         deep_dir,
         name="deep",
         mcp=[_self_defined("deep-server", "trusted-command")],
@@ -1129,41 +1328,22 @@ def test_only_unchanged_previously_trusted_transitive_config_is_preserved(
         local_path="./packages/deep",
         depth=2,
     )
-    stored_config = package.get_mcp_dependencies()[0].to_dict()
 
-    preserved = CurrentMcpConfigView.derive(
+    untrusted = CurrentMcpConfigView.derive(
         root,
         _lock(deep),
         tmp_path / "apm_modules",
-        trust_transitive_self_defined=False,
-        trusted_transitive_configs={"deep-server": ("deep", stored_config)},
+        admission=McpAdmission(None),
     )
-    changed = CurrentMcpConfigView.derive(
+    trusted = CurrentMcpConfigView.derive(
         root,
         _lock(deep),
         tmp_path / "apm_modules",
-        trust_transitive_self_defined=False,
-        trusted_transitive_configs={
-            "deep-server": (
-                "deep",
-                {
-                    **stored_config,
-                    "command": "different-command",
-                },
-            )
-        },
-    )
-    wrong_declarer = CurrentMcpConfigView.derive(
-        root,
-        _lock(deep),
-        tmp_path / "apm_modules",
-        trust_transitive_self_defined=False,
-        trusted_transitive_configs={"deep-server": ("other-package", stored_config)},
+        admission=McpAdmission(None, one_off=True),
     )
 
-    assert [dependency.name for dependency in preserved.dependencies] == ["deep-server"]
-    assert changed.dependencies == ()
-    assert wrong_declarer.dependencies == ()
+    assert untrusted.dependencies == ()
+    assert [dependency.name for dependency in trusted.dependencies] == ["deep-server"]
 
 
 def test_view_dependencies_are_mcp_dependency_objects(tmp_path: Path) -> None:
@@ -1339,7 +1519,7 @@ def test_cold_cache_exemption_emits_verbose_trace(
         root,
         _lock(locked),
         modules_root,
-        trust_transitive_self_defined=True,
+        admission=McpAdmission(None, one_off=True),
         logger=logger,
     )
 
@@ -1448,7 +1628,7 @@ def test_local_claude_plugin_without_synthesized_manifest_warns(tmp_path: Path) 
         root,
         _local_plugin_lock("./plug"),
         modules,
-        trust_transitive_self_defined=True,
+        admission=McpAdmission(None, one_off=True),
         logger=logger,
     )
 
@@ -1527,7 +1707,7 @@ def test_missing_local_plugin_manifest_is_pending_only_for_restorable_preflight(
         root,
         _local_plugin_lock("./plug"),
         modules,
-        trust_transitive_self_defined=True,
+        admission=McpAdmission(None, one_off=True),
         logger=logger,
         allow_pending=allow_pending,
     )

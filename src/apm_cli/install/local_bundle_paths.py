@@ -23,7 +23,9 @@ _APM_PRIMITIVE_SUFFIXES = (
     ".md",
 )
 
-_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command"})
+# Target formats that need a primitive renderer; an opaque bundle copy would
+# write plugin-native Markdown under their extension (#3706).
+_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command", "codex_agent"})
 
 
 def bundle_pack_files(bundle_info: LocalBundleInfo) -> dict[str, str]:
@@ -92,13 +94,21 @@ def bundle_deploy_relative_path(
     known_deploy_prefixes: frozenset[str],
     *,
     target: TargetProfile | None = None,
+    hooks_approved: bool = True,
+    canvas_approved: bool = True,
 ) -> str | None:
-    """Return a bundle path relative to a target-owned deployment root."""
+    """Return a bundle path relative to a target-owned deployment root.
+
+    Only primitive files the target deploys are routed. Hook and canvas files
+    additionally require *hooks_approved* / *canvas_approved*.
+    """
     validate_path_segments(rel_path, context="bundle deploy path")
-    if _is_plugin_hook_path(rel_path):
+    if is_plugin_hook_path(rel_path):
         return None
     deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
     if deploy_rel is None:
+        return None
+    if _unapproved_executable_kind(deploy_rel, hooks_approved, canvas_approved):
         return None
     return _lower_to_target(deploy_rel, target)
 
@@ -109,18 +119,28 @@ def bundle_deploy_skip_warning(
     known_deploy_prefixes: frozenset[str],
     *,
     target: TargetProfile | None = None,
+    hooks_approved: bool = True,
+    canvas_approved: bool = True,
 ) -> str | None:
     """Return an explicit warning for a deliberately skipped bundle path."""
     validate_path_segments(rel_path, context="bundle deploy path")
-    if _is_plugin_hook_path(rel_path):
-        return (
-            f"Skipped packed bundle hook file {rel_path!r}: local bundle install "
-            "does not register plugin hooks yet. Install the package from source "
-            "to deploy its hooks."
-        )
+    if is_plugin_hook_path(rel_path):
+        return None
     deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
     if deploy_rel is None:
         return None
+    if kind := _unapproved_executable_kind(deploy_rel, hooks_approved, canvas_approved):
+        return (
+            f"Skipped packed bundle {kind} file {rel_path!r}: {kind} from this bundle "
+            "is not approved for its exact content. Run 'apm policy explain' "
+            "and approve the bundle only if policy permits."
+        )
+    target_name = target.name if target is not None else "this target"
+    if target is not None and not _is_primitive_deploy_path(deploy_rel, target):
+        return (
+            f"Skipped packed bundle path {rel_path!r} for target {target_name}: "
+            "it is not a primitive file APM deploys for that target."
+        )
     route = _plugin_layout_route(deploy_rel, target)
     if route is None:
         return None
@@ -135,12 +155,12 @@ def bundle_deploy_skip_warning(
     )
 
 
-def _is_plugin_hook_path(rel_path: str) -> bool:
+def is_plugin_hook_path(rel_path: str) -> bool:
     """Return whether a packed path is plugin-native hook config or resources.
 
-    Plugin hooks need merging into each target's hook configuration; copying
-    them as files would leave ``hooks.json`` unregistered and lower hook
-    scripts through the hook descriptor extension.
+    Plugin hooks are registered by ``local_bundle_hooks`` through the hook
+    integrator; copying them as files would leave ``hooks.json`` unregistered
+    and lower hook scripts through the hook descriptor extension.
     """
     from ..bundle.plugin_layout import PLUGIN_HOOKS_CONFIG, PLUGIN_LAYOUT
 
@@ -170,10 +190,45 @@ def _deploy_relative_candidate(
     return rel_path[len(matched_prefix) :] if matched_prefix else rel_path
 
 
+def _unapproved_executable_kind(
+    deploy_rel: str, hooks_approved: bool, canvas_approved: bool
+) -> str | None:
+    """Return the executable kind of a target-relative path that lacks approval."""
+    from ..bundle.plugin_layout import PLUGIN_LAYOUT
+
+    head = deploy_rel.split("/", 1)[0]
+    if not hooks_approved and head == PLUGIN_LAYOUT["hooks"].plugin_dir:
+        return "hooks"
+    if not canvas_approved and head == PLUGIN_LAYOUT["extensions"].plugin_dir:
+        return "canvas"
+    return None
+
+
+def _is_primitive_deploy_path(deploy_rel: str, target: TargetProfile) -> bool:
+    """Return whether a target-relative path is under a primitive directory.
+
+    Files directly under a target root (runtime settings, MCP configuration)
+    and directories no primitive mapping owns are never deployed from a bundle.
+    """
+    from ..bundle.plugin_layout import PLUGIN_LAYOUT
+
+    if "/" not in deploy_rel:
+        return False
+    head = deploy_rel.split("/", 1)[0]
+    if head in PLUGIN_LAYOUT:
+        return True
+    return any(
+        mapping.subdir and mapping.subdir.split("/", 1)[0] == head
+        for mapping in (target.primitives or {}).values()
+    )
+
+
 def _lower_to_target(rel_path: str, target: TargetProfile | None) -> str | None:
     """Lower a plugin-native bundle path into one target's deploy layout."""
-    if target is None or "/" not in rel_path:
+    if target is None:
         return rel_path
+    if not _is_primitive_deploy_path(rel_path, target):
+        return None
     route = _plugin_layout_route(rel_path, target)
     if route is None:
         from ..bundle.plugin_layout import PLUGIN_LAYOUT

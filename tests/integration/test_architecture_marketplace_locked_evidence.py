@@ -1,10 +1,11 @@
 """Static regression traps for marketplace locked-evidence consumers."""
 
+import ast
 from pathlib import Path
 
 import pytest
 
-from scripts.architecture_linter.checks.marketplace_locked_evidence import RULE_ID
+from scripts.architecture_linter.checks.marketplace_locked_evidence import ORIGIN_RULE_ID, RULE_ID
 from scripts.architecture_linter.runner import run_selected_rules
 
 pytestmark = pytest.mark.component
@@ -28,6 +29,42 @@ def test_marketplace_locked_evidence_routes_through_owners() -> None:
         ("drift.py", "marketplace_ref_mismatch(dep_ref, locked_dep)", "None"),
         ("drift.py", "satisfies_range(version, spec)", "True"),
         ("marketplace/resolver.py", "build_tag_regex(", "re.compile("),
+        (
+            "drift.py",
+            "or marketplace_ref_mismatch(dep_ref, locked_dep) is not None",
+            "or False",
+        ),
+        (
+            "drift.py",
+            "_owns_locked_servers(lockfile, locked_dep, replayed.get_install_path(Path()))",
+            "False",
+        ),
+        ("drift.py", "package_lsp_owner(owner) for owner", "owner for owner"),
+        (
+            "drift.py",
+            "{mcp_package_owner(locked_dep.name, package_dir=package_dir)}",
+            "{locked_dep.name}",
+        ),
+        ("drift.py", "locked_dep.to_edge_reference(dep_ref)", "locked_dep.to_dependency_ref()"),
+        (
+            "install/lsp/integration.py",
+            "package_lsp_owner(dependency.resolved_by)",
+            'f"package:{dependency.resolved_by}"',
+        ),
+        (
+            "integration/mcp_config_view.py",
+            "declarer = mcp_package_owner(package.name, package_dir=manifest_path.parent)",
+            "declarer = package.name or manifest_path.parent.name",
+        ),
+        ("deps/reachability.py", "locked.to_edge_reference(ref)", "locked.to_dependency_ref()"),
+        ("deps/apm_resolver.py", "locked_marketplace_replay(\n", "_skip_replay(\n"),
+        ("deps/apm_resolver.py", "frozen_marketplace_refusal(decision)", "None"),
+        (
+            "deps/apm_resolver.py",
+            "        decision = locked_marketplace_replay(",
+            "        resolve_marketplace_plugin(dep_ref)\n"
+            "        decision = locked_marketplace_replay(",
+        ),
     ],
 )
 def test_marketplace_locked_evidence_guard_rejects_bypasses(
@@ -41,3 +78,130 @@ def test_marketplace_locked_evidence_guard_rejects_bypasses(
         _ROOT, (RULE_ID,), source_overrides={source_path: source.replace(before, after)}
     )
     assert any(item.rule_id == RULE_ID for item in report.violations)
+
+
+def test_marketplace_catalog_origin_routes_through_owners() -> None:
+    """The real source tree satisfies the catalog-origin owner routes (#3912)."""
+    report = run_selected_rules(_ROOT, (ORIGIN_RULE_ID,))
+    assert not report.violations
+    assert not report.failures
+
+
+@pytest.mark.parametrize(
+    ("path", "before", "after"),
+    [
+        (
+            "marketplace/resolver.py",
+            "source_url = marketplace_origin(source)",
+            "source_url = manifest.source_url",
+        ),
+        (
+            "marketplace/client.py",
+            "        source_digest = catalog_digest(data)\n",
+            "        pass\n",
+        ),
+        (
+            "marketplace/catalog_origin.py",
+            "for dep in lockfile.marketplace_rows(marketplace_name, plugin_name)",
+            "for dep in lockfile.dependencies.values()",
+        ),
+        (
+            "marketplace/catalog_origin.py",
+            "    if not same_marketplace_origin(locked.source_url, current):",
+            "    if locked.source_url != current:",
+        ),
+        (
+            "commands/marketplace/__init__.py",
+            "        _warn_if_duplicate_origin(logger, final_source)\n",
+            "",
+        ),
+    ],
+)
+def test_marketplace_catalog_origin_guard_rejects_bypasses(
+    path: str, before: str, after: str
+) -> None:
+    """Recording or comparing the alias instead of the catalog origin is a violation."""
+    source_path = f"src/apm_cli/{path}"
+    source = (_ROOT / source_path).read_text(encoding="utf-8")
+    assert source.count(before) == 1
+    mutated = source.replace(before, after)
+    ast.parse(mutated)  # a syntax error would trip the rule for the wrong reason
+    report = run_selected_rules(_ROOT, (ORIGIN_RULE_ID,), source_overrides={source_path: mutated})
+    assert any(item.rule_id == ORIGIN_RULE_ID for item in report.violations)
+
+
+def test_marketplace_catalog_origin_guard_requires_check_before_catalog_io() -> None:
+    """The alias origin check must run before the catalog is fetched."""
+    source_path = "src/apm_cli/deps/apm_resolver.py"
+    source = (_ROOT / source_path).read_text(encoding="utf-8")
+    guard = (
+        "        require_locked_catalog_origin(\n"
+        "            dep_ref.marketplace_name, dep_ref.marketplace_plugin_name, "
+        "self._existing_lockfile\n"
+        "        )\n"
+    )
+    assert source.count(guard) == 1
+    moved = source.replace(guard, "").replace(
+        "        return resolved\n\n    def _resolve_marketplace_or_record_error",
+        guard + "        return resolved\n\n    def _resolve_marketplace_or_record_error",
+    )
+    assert moved != source.replace(guard, "")
+    ast.parse(moved)
+    report = run_selected_rules(_ROOT, (ORIGIN_RULE_ID,), source_overrides={source_path: moved})
+    assert any(
+        item.rule_id == ORIGIN_RULE_ID and "before" in item.message for item in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "before", "after"),
+    [
+        (
+            "commands/install.py",
+            "                    require_locked_catalog_origin("
+            "marketplace_name, plugin_name, existing_lockfile)\n",
+            "",
+        ),
+        (
+            "commands/outdated.py",
+            "        require_locked_row_origin(dep)\n",
+            "        pass\n",
+        ),
+        (
+            "commands/uninstall/engine.py",
+            "                        require_locked_row_origin(locked, marketplace_name=marketplace_name)\n",
+            "                        pass\n",
+        ),
+    ],
+    ids=["cli-install-intercept", "outdated", "uninstall-registry-fallback"],
+)
+def test_every_marketplace_entry_point_requires_the_origin_check(
+    path: str, before: str, after: str
+) -> None:
+    """Dropping the origin check from any registered entry point is a violation (#3959)."""
+    source_path = f"src/apm_cli/{path}"
+    source = (_ROOT / source_path).read_text(encoding="utf-8")
+    assert source.count(before) == 1
+    mutated = source.replace(before, after)
+    ast.parse(mutated)
+    report = run_selected_rules(_ROOT, (ORIGIN_RULE_ID,), source_overrides={source_path: mutated})
+    assert any(
+        item.rule_id == ORIGIN_RULE_ID and item.path == source_path for item in report.violations
+    )
+
+
+def test_an_unregistered_marketplace_resolution_entry_point_is_a_violation() -> None:
+    """A new caller of resolve_marketplace_plugin must be registered with the guard."""
+    source_path = "src/apm_cli/commands/deps/cli.py"
+    source = (_ROOT / source_path).read_text(encoding="utf-8")
+    mutated = (
+        source
+        + "\n\ndef _sneaky(plugin, alias):\n"
+        + "    from apm_cli.marketplace.resolver import resolve_marketplace_plugin\n\n"
+        + "    return resolve_marketplace_plugin(plugin, alias)\n"
+    )
+    ast.parse(mutated)
+    report = run_selected_rules(_ROOT, (ORIGIN_RULE_ID,), source_overrides={source_path: mutated})
+    assert any(
+        item.rule_id == ORIGIN_RULE_ID and "_sneaky" in item.message for item in report.violations
+    )
