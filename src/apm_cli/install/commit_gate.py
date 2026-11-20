@@ -232,6 +232,34 @@ def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None
     ctx.mcp_policy_enforced = True
 
 
+def check_before_resolve(ctx: InstallContext, committed: LockFile | None) -> None:
+    """Refuse a frozen install the committed lockfile already fails, before any write.
+
+    ``--frozen`` commits the existing lockfile, so its ``require_hashes``
+    verdict is known before resolution. Judging it here keeps a refused
+    frozen run from re-materializing ``apm_modules`` or reporting packages
+    it will not install (I7). :func:`check_before_deploy` judges the same
+    lockfile again for every other install.
+    """
+    from apm_cli.install.service import InstallService
+
+    if ctx.dry_run or ctx.no_policy or committed is None:
+        return
+    if not InstallService.frozen_disposition(ctx).withhold_lockfile_writes:
+        return
+    from apm_cli.core.scope import is_user_scope, manifest_root
+    from apm_cli.deps.lockfile import get_lockfile_path
+    from apm_cli.install.integrity import enforce_policy_hashes
+    from apm_cli.policy.outcome_routing import resolve_trust_policy
+
+    policy = resolve_trust_policy(
+        manifest_root(ctx.project_root, user_scope=is_user_scope(getattr(ctx, "scope", None))),
+        announce=False,
+        raise_blocking_errors=False,
+    )
+    enforce_policy_hashes(policy, committed, get_lockfile_path(ctx.apm_dir))
+
+
 def check_before_deploy(ctx: InstallContext) -> None:
     """Run every check that must pass before the first deployed byte."""
     from apm_cli.install.integrity import enforce_installed_hash_policy
