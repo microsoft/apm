@@ -49,11 +49,13 @@ from scripts.architecture_linter.checks.install_effective_selection import (
 from scripts.architecture_linter.checks.install_frozen_and_audit import (
     _GUARD_AUDIT_REPLAY,
     _GUARD_FROZEN,
+    _GUARD_FROZEN_FLAG_READER,
     _GUARD_LIFECYCLE_SERIALIZATION,
     _GUARD_MCP_OWNERSHIP,
     _GUARD_UNINSTALL_REACHABILITY,
     check_audit_replay,
     check_frozen,
+    check_frozen_flag_reader,
     check_lifecycle_serialization,
     check_mcp_ownership_migration,
     check_uninstall_reachability,
@@ -85,6 +87,10 @@ from scripts.architecture_linter.checks.install_lsp_plugin import (
 from scripts.architecture_linter.checks.install_manifest_snapshot import (
     GUARD_MANIFEST_SNAPSHOT,
     check_manifest_snapshot,
+)
+from scripts.architecture_linter.checks.install_orphan_removal import (
+    GUARD_ORPHAN_SELECTION,
+    check_orphan_selection,
 )
 from scripts.architecture_linter.checks.install_package_content_hash import (
     GUARD as _GUARD_PACKAGE_CONTENT_HASH,
@@ -152,11 +158,9 @@ from scripts.architecture_linter.checks.install_trust_integrity import (
 )
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
     _GUARD_IMMUTABLE_REQUIREMENTS,
-    _GUARD_ORPHAN_SELECTION,
     _GUARD_RESOLUTION_REPLACEMENT,
     _GUARD_UNINSTALL_SELECTION,
     check_immutable_requirements,
-    check_orphan_selection,
     check_resolution_replacement,
     check_uninstall_selection,
 )
@@ -209,8 +213,8 @@ RULES: tuple[Rule, ...] = (
         check_single_file_materialization,
     ),
     _rule(
-        _GUARD_ORPHAN_SELECTION,
-        "Prune and orphan warnings share declaration-aware package selection.",
+        GUARD_ORPHAN_SELECTION,
+        "Every command's orphan removal decision routes through install/orphans.py.",
         check_orphan_selection,
     ),
     _rule(
@@ -252,6 +256,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_FROZEN,
         "Frozen install mutation eligibility routes through InstallService before mutation.",
         check_frozen,
+    ),
+    _rule(
+        _GUARD_FROZEN_FLAG_READER,
+        "Only InstallService reads the install frozen flag; phases consume its disposition.",
+        check_frozen_flag_reader,
     ),
     _rule(
         GUARD_MANIFEST_SNAPSHOT,

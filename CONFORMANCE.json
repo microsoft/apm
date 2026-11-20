@@ -155,7 +155,7 @@
       "keyword": "MUST",
       "section": "5.5",
       "status": "active",
-      "test_count": 32,
+      "test_count": 33,
       "tests": [
         "tests/spec_conformance/test_codex_mcp_reqs.py::test_frozen_mcp_drift_precedes_codex_legacy_repair[False-http]",
         "tests/spec_conformance/test_codex_mcp_reqs.py::test_frozen_mcp_drift_precedes_codex_legacy_repair[False-stdio]",
@@ -180,6 +180,7 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_cold_dependency_evidence_cannot_defer_direct_mcp_drift[True]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_preserves_conflicted_lockfile_bytes[crlf]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_preserves_conflicted_lockfile_bytes[lf]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_lock_withholding_is_decided_once_and_cannot_be_omitted",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_mcp_validation_fails_before_durable_mutation",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[absent-project]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_selected_store_rejects_source_decoy_without_writes[absent-user]",
@@ -255,8 +256,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_cowork_deployed_hash_reqs.py::test_cowork_deployed_file_hash_is_canonical_sha256_envelope",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_canonical_tree_sha256_field_present"
       ]
     },
@@ -368,12 +370,13 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 4,
+      "test_count": 5,
       "tests": [
         "tests/spec_conformance/test_lockfile_reqs.py::TestFinalLockfileTargetContraction::test_removes_dropped_target_instruction_file",
         "tests/spec_conformance/test_lockfile_reqs.py::test_cli_target_without_manifest_targets_preserves_inactive_state",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_keeps_shared_root_paths_another_declared_target_governs",
-        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reconciles_inactive_target_paths_fail_safe"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reconciles_inactive_target_paths_fail_safe",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_orphan_cleanup_preserves_paths_an_active_dependency_deploys"
       ]
     },
     {
@@ -425,6 +428,21 @@
         "tests/spec_conformance/test_staging_recovery_reqs.py::test_staged_recovery_preserves_errors_and_recoverable_bytes[independent-recovery]",
         "tests/spec_conformance/test_staging_recovery_reqs.py::test_staged_recovery_preserves_errors_and_recoverable_bytes[manifest]",
         "tests/spec_conformance/test_staging_recovery_reqs.py::test_staged_recovery_preserves_errors_and_recoverable_bytes[relocation]"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-lk-024",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 5,
+      "tests": [
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_file_differing_from_its_evidence_is_kept",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_forged_lockfile_hash_keeps_the_file_and_names_it",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[locked-render]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[receipt]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_spec_states_hash_alone_never_authorizes_deletion"
       ]
     },
     {
@@ -2123,7 +2141,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 111,
+      "active": 112,
       "skipped": 3,
       "unbound": 0,
       "xfail": 0
@@ -2147,5 +2165,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 148
+  "total_requirements": 149
 }

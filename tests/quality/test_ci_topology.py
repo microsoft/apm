@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -8,7 +9,7 @@ import tomllib
 from collections import Counter
 from collections.abc import Sequence
 from copy import deepcopy
-from itertools import product
+from itertools import pairwise, product
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ from tests.quality.repository_python_inventory import (
 from tests.workflow_contracts import (
     WorkflowNode,
     load_workflow,
+    run_bash,
     shell_commands,
     workflow_job,
     workflow_step,
@@ -70,6 +72,7 @@ LIFECYCLE_SMOKE_SHARD_JOBS = (
     "lifecycle-smoke-shard-1",
     "lifecycle-smoke-shard-2",
     "lifecycle-smoke-shard-3",
+    "lifecycle-smoke-shard-4",
 )
 LIFECYCLE_SMOKE_SHARDS = tuple(range(1, len(LIFECYCLE_SMOKE_SHARD_JOBS) + 1))
 # The aggregate also requires the cross-shard GATE cell coverage check (#4031).
@@ -79,7 +82,7 @@ LIFECYCLE_SMOKE_AGGREGATE_STEP = "Require every lifecycle shard"
 LIFECYCLE_SMOKE_DURATIONS = ".github/ci-durations/linux-x86_64.json"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
-LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 10
+LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 15
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 LIFECYCLE_SMOKE_ROOT = "tests/integration"
 LIFECYCLE_SMOKE_E2E_ENV = "APM_E2E_TESTS"
@@ -934,7 +937,7 @@ def _assert_lifecycle_smoke_timeout(job: WorkflowNode) -> None:
     timeout = job.get("timeout-minutes")
     assert isinstance(timeout, int)
     assert timeout == LIFECYCLE_SMOKE_TIMEOUT_MINUTES, (
-        "lifecycle-smoke needs its measured 10-minute whole-job budget, "
+        "lifecycle-smoke needs its measured 15-minute whole-job budget, "
         "without an inadequate deadline or an unbounded increase"
     )
 
@@ -995,16 +998,16 @@ def test_lifecycle_shards_collect_exact_required_union() -> None:
 @pytest.mark.parametrize(
     "shards",
     [
-        [[], ["a"], ["b"]],
-        [["a"], ["a"], ["b"]],
-        [["a", "a"], ["b"], ["c"]],
-        [["a"], ["b"], ["d"]],
-        [["a"], ["b", "c"]],
+        [[], ["a"], ["b"], ["c"]],
+        [["a"], ["a"], ["b"], ["c"]],
+        [["a", "a"], ["b"], ["c"], ["d"]],
+        [["a"], ["b"], ["c"], ["e"]],
+        [["a"], ["b"], ["c", "d"]],
     ],
 )
 def test_lifecycle_shard_partition_drift_fails(shards: list[list[str]]) -> None:
     with pytest.raises(AssertionError):
-        _assert_lifecycle_shard_partition(["a", "b", "c"], shards)
+        _assert_lifecycle_shard_partition(["a", "b", "c", "d"], shards)
 
 
 @pytest.mark.parametrize("missing_job", LIFECYCLE_SMOKE_AGGREGATE_NEEDS)
@@ -1080,7 +1083,7 @@ def test_lifecycle_shard_binding_drift_fails(
         ('--shard-index "$LIFECYCLE_SHARD"', ""),
         ("-p scripts.ci_sharding", ""),
         ('--shard-index "$LIFECYCLE_SHARD"', "--shard-index 1"),
-        ("--shard-count 3", "--shard-count 2"),
+        ("--shard-count 4", "--shard-count 3"),
         (f"--shard-durations {LIFECYCLE_SMOKE_DURATIONS}", ""),
         ("--durations=20", "--durations=20 --splits 2 --group 1"),
         ("--durations=20", "--durations=20 -k partial"),
@@ -1401,3 +1404,240 @@ def test_lifecycle_smoke_removed_from_expected_checks_fails() -> None:
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_required(merge_gate)
+
+
+# Shard layout (#4030): PR unit parallelism, main-push Windows unit shards and
+# the macOS arm64 unit/build split. Same selections; only the layout changes.
+RELEASE_WORKFLOW = REPO_ROOT / ".github/workflows/build-release.yml"
+UNIT_SHARD_STEP = "Run tests with coverage"
+WINDOWS_UNIT_SHARD_JOBS = ("windows-unit-1", "windows-unit-2", "windows-unit-3")
+WINDOWS_PUSH_BUILD_JOB = "build-windows-push"
+WINDOWS_PUSH_GATE_STEP = "Require Windows push tests"
+MACOS_ARM_UNIT_JOB = "unit-macos-arm"
+MACOS_ARM_BUILD_JOB = "build-and-validate-macos-arm"
+MACOS_UNIT_COMMAND = "uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal"
+PROMOTED_SKIP = "needs.release-plan.outputs.mode == 'promoted' && needs.{job}.result == 'skipped'"
+
+
+@pytest.fixture
+def release_workflow() -> WorkflowNode:
+    return deepcopy(load_workflow(RELEASE_WORKFLOW))
+
+
+def _assert_unit_shard_layout(ci: WorkflowNode) -> None:
+    job = workflow_job(ci, "build-and-test-shard")
+    assert job["strategy"]["matrix"]["shard"] == [1, 2]
+    tokens = shlex.split(workflow_step(job, UNIT_SHARD_STEP)["run"].replace("\\\n", " "))
+    pairs = list(pairwise(tokens))
+    assert ("--shard-count", "2") in pairs
+    worker_flags = [t for t in tokens if t.startswith(("-n", "--numprocesses", "--dist"))]
+    assert worker_flags == ["-n", "--dist"], "PR unit shards must set xdist exactly once"
+    assert ("-n", "auto") in pairs and ("--dist", "worksteal") in pairs
+
+
+def _assert_windows_unit_layout(release: WorkflowNode) -> None:
+    jobs = release["jobs"]
+    shard_jobs = tuple(sorted(j for j in jobs if j.startswith("windows-unit-")))
+    assert shard_jobs == WINDOWS_UNIT_SHARD_JOBS
+    count = len(WINDOWS_UNIT_SHARD_JOBS)
+    for index, job_id in enumerate(WINDOWS_UNIT_SHARD_JOBS, 1):
+        job = jobs[job_id]
+        assert job["name"] == f"Windows units ({index}/{count})"
+        assert job["env"] == {"SHARD": str(index)}
+        assert "continue-on-error" not in job
+        step = workflow_step(job, "Run unit tests (Windows diagnostics)")
+        assert f"--shard-count {count} --shard-index $env:SHARD" in step["run"]
+    build = jobs[WINDOWS_PUSH_BUILD_JOB]
+    assert build["needs"] == ["release-plan", "windows-installer", *WINDOWS_UNIT_SHARD_JOBS]
+    expected = ["${{ needs.release-plan.outputs.mode }}"] + [
+        "${{ needs." + dep + ".result }}" for dep in build["needs"]
+    ]
+    assert build["env"]["PUSH_RESULTS"].split(":") == expected
+    gate = workflow_step(build, WINDOWS_PUSH_GATE_STEP)
+    values = ["push"] + ["success"] * len(build["needs"])
+
+    def accepts(parts: list[str]) -> bool:
+        return run_bash(gate["run"], env={"PUSH_RESULTS": ":".join(parts)}).returncode == 0
+
+    assert accepts(values), "Windows push gate must accept every shard succeeding"
+    for index in range(1, len(values)):
+        for result in ("failure", "cancelled", "skipped", ""):
+            assert not accepts([*values[:index], result, *values[index + 1 :]]), (
+                f"Windows push gate accepted {result!r} at position {index}"
+            )
+    assert not accepts(values[:-1]), "Windows push gate accepted a missing shard"
+
+
+def _assert_macos_arm_split(release: WorkflowNode) -> None:
+    jobs = release["jobs"]
+    unit = jobs[MACOS_ARM_UNIT_JOB]
+    build = jobs[MACOS_ARM_BUILD_JOB]
+    assert unit["runs-on"] == build["runs-on"] == "macos-latest"
+    assert unit["needs"] == build["needs"] == ["release-plan"]
+    assert unit["if"] == (
+        "needs.release-plan.outputs.mode != 'push' && needs.release-plan.outputs.run_unit == 'true'"
+    )
+    assert "continue-on-error" not in unit
+    unit_steps = _run_steps(unit)
+    step = unit_steps[-1]
+    assert step["run"] == MACOS_UNIT_COMMAND
+    assert "if" not in step and "continue-on-error" not in step
+    setup = [s for s in _run_steps(build) if s.get("name") != "Build binary"]
+    assert unit_steps[:-1] == setup[: len(unit_steps) - 1], "unit job must keep the build setup"
+    for job_id in (MACOS_ARM_BUILD_JOB, "build-and-validate-macos-intel"):
+        assert all("tests/unit" not in str(s.get("run", "")) for s in _run_steps(jobs[job_id]))
+    for consumer in ("create-release", "daily-release-smoke-signal"):
+        assert MACOS_ARM_UNIT_JOB in jobs[consumer]["needs"], consumer
+    condition = " ".join(jobs["create-release"]["if"].split())
+    assert (
+        f"(needs.{MACOS_ARM_UNIT_JOB}.result == 'success' || "
+        f"({PROMOTED_SKIP.format(job=MACOS_ARM_UNIT_JOB)}))"
+    ) in condition
+
+
+def test_shard_layout_matches_issue_4030() -> None:
+    _assert_unit_shard_layout(load_workflow(REPO_ROOT / ".github/workflows/ci.yml"))
+    release = load_workflow(RELEASE_WORKFLOW)
+    _assert_windows_unit_layout(release)
+    _assert_macos_arm_split(release)
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("-n auto --dist worksteal", "-n 2 --dist worksteal"),
+        ("-n auto --dist worksteal", "-n auto --dist load"),
+        ("-n auto --dist worksteal", "-n auto --dist worksteal -n 2"),
+        ("--shard-count 2", "--shard-count 3"),
+    ],
+)
+def test_unit_shard_layout_drift_fails(
+    provisional_ci: WorkflowNode, before: str, after: str
+) -> None:
+    step = workflow_step(workflow_job(provisional_ci, "build-and-test-shard"), UNIT_SHARD_STEP)
+    step["run"] = step["run"].replace(before, after)
+    with pytest.raises(AssertionError):
+        _assert_unit_shard_layout(provisional_ci)
+
+
+@pytest.mark.parametrize(
+    "mutation", ["drop-shard", "drop-need", "drop-result", "count", "ignore-gate"]
+)
+def test_windows_unit_layout_drift_fails(release_workflow: WorkflowNode, mutation: str) -> None:
+    jobs = release_workflow["jobs"]
+    build = jobs[WINDOWS_PUSH_BUILD_JOB]
+    if mutation == "drop-shard":
+        del jobs["windows-unit-3"]
+    elif mutation == "drop-need":
+        build["needs"].remove("windows-unit-3")
+    elif mutation == "drop-result":
+        build["env"]["PUSH_RESULTS"] = build["env"]["PUSH_RESULTS"].rsplit(":", 1)[0]
+    elif mutation == "count":
+        step = workflow_step(jobs["windows-unit-1"], "Run unit tests (Windows diagnostics)")
+        step["run"] = step["run"].replace("--shard-count 3", "--shard-count 2")
+    else:
+        gate = workflow_step(build, WINDOWS_PUSH_GATE_STEP)
+        gate["run"] = gate["run"].replace("test ", "true ")
+    with pytest.raises(AssertionError):
+        _assert_windows_unit_layout(release_workflow)
+
+
+@pytest.mark.parametrize(
+    "mutation", ["drop-unit", "unit-selection", "release-need", "release-gate", "unit-in-build"]
+)
+def test_macos_arm_split_drift_fails(release_workflow: WorkflowNode, mutation: str) -> None:
+    jobs = release_workflow["jobs"]
+    if mutation == "drop-unit":
+        del jobs[MACOS_ARM_UNIT_JOB]
+    elif mutation == "unit-selection":
+        jobs[MACOS_ARM_UNIT_JOB]["steps"][-1]["run"] += " -k smoke"
+    elif mutation == "release-need":
+        jobs["create-release"]["needs"].remove(MACOS_ARM_UNIT_JOB)
+    elif mutation == "release-gate":
+        jobs["create-release"]["if"] = jobs["create-release"]["if"].replace(
+            f"needs.{MACOS_ARM_UNIT_JOB}.result == 'success'", "true"
+        )
+    else:
+        jobs[MACOS_ARM_BUILD_JOB]["steps"].append({"run": MACOS_UNIT_COMMAND})
+    with pytest.raises((AssertionError, KeyError)):
+        _assert_macos_arm_split(release_workflow)
+
+
+# Opt-in full integration before the queue (#4116): ci-integration.yml runs on
+# workflow_dispatch and on PRs labeled `full-integration`; merge-gate.yml
+# requires its checks at PR time only when that label is present.
+FULL_INTEGRATION_LABEL = "full-integration"
+FULL_INTEGRATION_GATE = (
+    "github.event_name != 'pull_request' || "
+    f"contains(github.event.pull_request.labels.*.name, '{FULL_INTEGRATION_LABEL}')"
+)
+FULL_INTEGRATION_CHECKS = (
+    "Build (Linux)",
+    "Smoke Test (Linux)",
+    "Integration Tests (Linux)",
+    "Release Validation (Linux)",
+)
+_GATE_CONTEXTS = re.compile(
+    r"^\$\{\{ github\.event_name == 'merge_group' && '([^']+)' \|\| "
+    r"contains\(github\.event\.pull_request\.labels\.\*\.name, 'full-integration'\) "
+    r"&& '([^']+)' \|\| '([^']+)' \}\}$"
+)
+
+
+def _integration_triggers(workflow: WorkflowNode) -> dict:
+    triggers = workflow["on"]
+    assert isinstance(triggers, dict)
+    return triggers
+
+
+def _assert_full_integration_opt_in(integration: WorkflowNode, merge_gate: WorkflowNode) -> None:
+    triggers = _integration_triggers(integration)
+    assert set(triggers) == {"merge_group", "workflow_dispatch", "pull_request"}, sorted(triggers)
+    assert triggers["pull_request"] == {
+        "branches": ["main"],
+        "types": ["labeled", "synchronize", "reopened"],
+    }
+    for job_id, job in integration["jobs"].items():
+        condition = str(job.get("if", ""))
+        assert FULL_INTEGRATION_GATE in condition, (
+            f"{job_id} must be skipped on PRs without the {FULL_INTEGRATION_LABEL} label"
+        )
+
+    wait = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")
+    match = _GATE_CONTEXTS.match(str(wait["env"]["EXPECTED_CHECKS"]))
+    assert match, "EXPECTED_CHECKS must branch on merge_group, then on the label"
+    merge_time, labeled, unlabeled = (
+        tuple(name.strip() for name in group.split(",")) for group in match.groups()
+    )
+    assert not set(FULL_INTEGRATION_CHECKS) & set(unlabeled)
+    assert labeled == (*unlabeled, *FULL_INTEGRATION_CHECKS)
+    assert set(FULL_INTEGRATION_CHECKS) <= set(merge_time)
+
+
+def test_ci_integration_can_be_dispatched() -> None:
+    integration = load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW)
+    assert "workflow_dispatch" in _integration_triggers(integration)
+
+
+def test_full_integration_label_runs_and_gates_only_labeled_prs() -> None:
+    _assert_full_integration_opt_in(
+        load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW),
+        load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml"),
+    )
+
+
+@pytest.mark.parametrize("mutation", ["ungated-job", "pull-request-target", "unlabeled-gate"])
+def test_full_integration_opt_in_drift_fails(mutation: str) -> None:
+    integration = deepcopy(load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW))
+    merge_gate = deepcopy(load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml"))
+    if mutation == "ungated-job":
+        del integration["jobs"]["build"]["if"]
+    elif mutation == "pull-request-target":
+        integration["on"]["pull_request_target"] = {"branches": ["main"]}
+    else:
+        wait = workflow_step(workflow_job(merge_gate, "gate"), "Wait for all required checks")
+        expression = str(wait["env"]["EXPECTED_CHECKS"])
+        head, _, unlabeled = expression.rpartition(" || '")
+        wait["env"]["EXPECTED_CHECKS"] = f"{head} || 'Build (Linux),{unlabeled}"
+    with pytest.raises(AssertionError):
+        _assert_full_integration_opt_in(integration, merge_gate)

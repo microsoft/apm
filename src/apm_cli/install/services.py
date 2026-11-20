@@ -219,6 +219,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     """
     enforce_agent_plugin_deployment_boundary(package_info)
 
+    from apm_cli.core.deployment_ledger import recorded_writes
     from apm_cli.integration.dispatch import get_dispatch_table
 
     from ..core.scope import InstallScope
@@ -532,12 +533,10 @@ def integrate_package_primitives(  # noqa: PLR0913
                 _call_kwargs["trust_canvas"] = True
                 _call_kwargs["is_first_party"] = is_first_party
                 _call_kwargs["package_name"] = package_name
-            _int_result = getattr(_integrator, _entry.integrate_method)(
-                _target,
-                package_info,
-                project_root,
-                **_call_kwargs,
-            )
+            with recorded_writes(integrators.skill, _integrator, [_target], package_info):
+                _int_result = getattr(_integrator, _entry.integrate_method)(
+                    _target, package_info, project_root, **_call_kwargs
+                )
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:
                 deployed.append(_deployed_path_entry(tp, project_root, targets))
@@ -626,22 +625,23 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
         _emit_integration_hints(_prim_name, _info, _log_integration)
 
-    skill_result = integrators.skill.integrate_package_skill(
-        package_info,
-        project_root,
-        diagnostics=diagnostics,
-        managed_files=managed_files,
-        force=force,
-        targets=projection_targets,
-        skill_subset=skill_subset,
-        skill_pairing=skill_pairing,
-        scope=scope,
-        policy=policy,
-        skip_bin=_skip_bin,
-        bin_skip_reason_override=_bin_skip_reason_override,
-        trust_bin=trust_bin,
-        source_plan=source_plan,
-    )
+    with recorded_writes(integrators.skill, integrators.skill, projection_targets, package_info):
+        skill_result = integrators.skill.integrate_package_skill(
+            package_info,
+            project_root,
+            diagnostics=diagnostics,
+            managed_files=managed_files,
+            force=force,
+            targets=projection_targets,
+            skill_subset=skill_subset,
+            skill_pairing=skill_pairing,
+            scope=scope,
+            policy=policy,
+            skip_bin=_skip_bin,
+            bin_skip_reason_override=_bin_skip_reason_override,
+            trust_bin=trust_bin,
+            source_plan=source_plan,
+        )
     _skill_target_paths = _skill_summary_paths(
         skill_result.target_paths, project_root, targets
     ) or ["skills/"]

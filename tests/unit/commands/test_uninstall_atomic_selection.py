@@ -75,6 +75,7 @@ def test_global_lsp_cleanup_failure_uses_global_recovery_command(tmp_path: Path)
     ):
         updated, error = _cleanup_stale_lsp(
             apm_package=MagicMock(),
+            manifest_path=tmp_path / "apm.yml",
             lockfile=MagicMock(),
             lockfile_path=tmp_path / "apm.lock.yaml",
             modules_dir=tmp_path / "apm_modules",

@@ -92,7 +92,6 @@ _FIXED_TOP = (
 # Data shapes
 # ---------------------------------------------------------------------------
 
-
 @dataclass
 class DepSpec:
     """A single entry parsed from `[project] dependencies`.
@@ -214,7 +213,9 @@ def load_metadata(
 # `licenses/` subdirectory layout because that's what modern (>=3.10) wheels
 # emit; we then accept the legacy top-level layout, and finally the British
 # spelling (`LICENCE`) used by tomli among others.
-_LICENSE_FILENAME = re.compile(r"^(LICENSE|LICENCE|COPYING|NOTICE)(\.[A-Za-z0-9]+)?$")
+_LICENSE_FILENAME = re.compile(
+    r"^(LICENSE|LICENCE|COPYING|NOTICE)(\.[A-Za-z0-9]+)?$"
+)
 
 
 def _is_license_file(rel_path: str) -> bool:
@@ -257,7 +258,7 @@ def read_installed_license(pyproject_name: str) -> str | None:
             pep639.append(f)
         else:
             legacy.append(f)
-    chosen = pep639 or legacy
+    chosen = (pep639 or legacy)
     if not chosen:
         return None
     # Prefer LICENSE over COPYING when both are present.
@@ -272,7 +273,6 @@ def read_installed_license(pyproject_name: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Renderer
 # ---------------------------------------------------------------------------
-
 
 def render_component(dep: DepSpec, meta: ComponentMeta, license_text: str) -> str:
     parts: list[str] = []
@@ -363,7 +363,6 @@ def render_notice(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
-
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(

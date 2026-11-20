@@ -274,6 +274,10 @@ def _lock_bundle_paths(lock_dir: Path | None) -> frozenset[str]:
     return DeploymentLedgerCodec.local_bundle_values(DeploymentLedgerCodec.from_lockfile(lockfile))
 
 
+class BundleHookTargetsUnresolved(RuntimeError):
+    """The scope's targets could not be resolved, so no hook was re-checked."""
+
+
 def scope_bundle_hook_inputs(scope: Any, apm_package: Any, *, no_policy: bool, logger: Any):
     """Return ``(deploy_root, targets, allow_provider)`` for one command scope."""
     from apm_cli.core.scope import get_deploy_root, is_user_scope
@@ -283,7 +287,10 @@ def scope_bundle_hook_inputs(scope: Any, apm_package: Any, *, no_policy: bool, l
     root = get_deploy_root(scope)
     user_scope = is_user_scope(scope)
     explicit = list(getattr(apm_package, "canonical_targets", None) or ()) or None
-    targets = resolve_targets(root, user_scope=user_scope, explicit_target=explicit)
+    try:
+        targets = resolve_targets(root, user_scope=user_scope, explicit_target=explicit)
+    except Exception as exc:
+        raise BundleHookTargetsUnresolved(str(exc)) from exc
 
     def allow_provider() -> dict[str, dict[str, bool]]:
         return resolve_project_exec_allow_map(

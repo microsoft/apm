@@ -130,6 +130,7 @@ class ProspectiveInstallPlan:
     ) -> ProspectiveInstallPlan:
         """Build the scoped, trust-filtered offline plan for one CLI invocation."""
         from apm_cli.core.scope import get_modules_dir, get_source_root
+        from apm_cli.install.service import InstallService
 
         source_root = get_source_root(ctx.scope)
         plan = cls.from_apm_package(
@@ -148,7 +149,7 @@ class ProspectiveInstallPlan:
             update=RefFreshnessPolicy.for_install_intent(
                 update_refs=ctx.update, refresh=ctx.refresh
             ).requires_remote,
-            frozen=ctx.frozen,
+            frozen=InstallService.frozen_disposition(ctx).replay,
         )
 
     def with_resolved_dependencies(

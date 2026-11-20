@@ -22,10 +22,11 @@ from apm_cli.install.manifest_reconcile import union_preserving
 from apm_cli.install.phases import cleanup
 from apm_cli.install.sources import Materialization
 from apm_cli.install.template import run_integration_template
-from apm_cli.integration.cleanup import CleanupResult
+from apm_cli.integration.cleanup import CleanupResult, DeploymentEvidence
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
+from tests.utils.deployment_evidence import no_evidence, receipted_evidence
 
 pytestmark = pytest.mark.component
 
@@ -149,6 +150,11 @@ def test_receipt_retirement_is_batched_and_preserves_unremoved_members(
         project_root=root,
     )
     ctx.diagnostics = DiagnosticCollector()
+    # Real local receipts are the deletion evidence (#3701); loaded up front so
+    # the batched-retirement counts below cover only the cleanup pass.
+    ctx.deployment_evidence = DeploymentEvidence.collect(
+        root, user_scope=False, lockfile=None, lockfile_root=root, diagnostics=ctx.diagnostics
+    )
     remove = cleanup.remove_stale_deployed_files
 
     def remove_or_abort(*args, **kwargs):
@@ -272,6 +278,10 @@ def test_real_cleanup_preserves_survivors_and_refusals_in_ledger(
         project_root=tmp_path,
     )
     ctx.diagnostics = DiagnosticCollector()
+    # A row without a hash predates receipts: nothing proves APM wrote it (#3701).
+    ctx.deployment_evidence = (
+        no_evidence(tmp_path) if case == "no-hash" else receipted_evidence(tmp_path)
+    )
     if case == "no-target":
         ctx.targets = []
     if case == "edited":
@@ -292,7 +302,7 @@ def test_real_cleanup_preserves_survivors_and_refusals_in_ledger(
     assert deployed.exists() is retained
     if retained:
         assert deployed.read_bytes() == expected_bytes
-    # A claim without a recorded hash is kept, never deleted (#3663).
+    # A claim without deployment evidence is kept, never deleted (#3663, #3701).
     refused = case in {"edited", "unlink-failed", "no-hash"}
     assert ctx.package_deployed_files[owner] == ([path] if refused else [])
     assert ctx.package_cleanup_retained == ({owner: {path: hashes.get(path)}} if refused else {})
@@ -447,7 +457,9 @@ class TestFrozenKeepsOrphans:
 
         remove.assert_not_called()
         assert ctx.orphan_cleanup_retained == {"removed-pkg": {"a/b.md": "abc123", "a/c.md": None}}
-        assert trim.call_args.args[1] == frozenset()
+        settled = trim.call_args.args[1]
+        assert settled.removed_keys == frozenset()
+        assert settled.retained_keys == {"removed-pkg"}
         ctx.logger.frozen_orphans_kept.assert_called_once_with(["removed-pkg"])
 
 
