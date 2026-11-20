@@ -201,6 +201,8 @@ def test_codex_bundle_agent_user_scope_lock_and_audit(
     bundle = world.pack()
     home = world.isolated.home
     (home / ".codex").mkdir(exist_ok=True)
+    # Bundle installs never write apm.yml; a user-scope audit needs the user manifest.
+    _write(world.isolated.config_root / "apm.yml", "name: user\nversion: 1.0.0\n")
 
     world.apm(world.root, "install", "-g", str(bundle), "--target", "codex", _NO_POLICY)
 
