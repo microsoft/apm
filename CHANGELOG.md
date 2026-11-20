@@ -172,6 +172,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --frozen` now fails like `apm audit --ci` when a denied or unapproved hook was removed but `apm.lock.yaml` still records it, naming each missing file. (closes #4043, #4054)
 - `apm install --frozen` and `apm audit --ci` fail when `apm deny` or org policy changed a package's executables decision since `apm.lock.yaml` recorded it. (closes #4053, #4065)
 - Local bundle installs record deployment receipts, so skill path migration removes their unedited legacy copies. (#4223)
+- `apm install --frozen` reports a dependency MCP server parked for unapproved executables once. (closes #4422, #4440)
 
 ## [0.37.0] - 2026-11-20
 

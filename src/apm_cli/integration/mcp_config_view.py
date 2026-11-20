@@ -1135,6 +1135,30 @@ def _collect_locked_dependencies(
     return result
 
 
+class _ParkedNoticeSilenced:
+    """A logger view that drops parked-server notices and keeps every other line.
+
+    ``apm install --frozen`` checks MCP drift before and after hydration; the
+    MCP phase is the one printer of each parked server (#4422).
+    """
+
+    def __init__(self, logger: Any) -> None:
+        self._logger = logger
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        if str(message).startswith("Parked MCP server"):
+            return
+        self._logger.warning(message, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._logger, name)
+
+
+def without_parked_notices(logger: Any) -> Any:
+    """Return *logger* without parked-server notices (None stays None)."""
+    return None if logger is None else _ParkedNoticeSilenced(logger)
+
+
 def parked_mcp_message(
     dependency: MCPDependency,
     package: str,

@@ -764,13 +764,14 @@ class InstallService:
     ) -> None:
         """Reject restored MCP drift before a package can activate native configuration."""
         from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.integration.mcp_config_view import without_parked_notices
 
         reasons = InstallService._frozen_mcp_reasons(
             package,
             lockfile,
             modules_dir,
             admission=admission,
-            logger=logger,
+            logger=without_parked_notices(logger),
             allow_pending=False,
             active_package_keys=active_package_keys,
         )
