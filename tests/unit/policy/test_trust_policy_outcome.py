@@ -127,3 +127,38 @@ def test_warn_outcome_is_reported_through_a_plain_logger(
     _readers(project)["project-map"]()
     out = capsys.readouterr()
     assert "policy" in (out.out + out.err).lower()
+
+
+def test_blocking_outcome_names_org_policy_and_reports_once(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _block_on_fetch_failure(project)
+    _discovery(monkeypatch, PolicyFetchResult(outcome="cache_miss_fetch_fail", fetch_error="x"))
+    with pytest.raises(PolicyViolationError, match=r"^Blocked by org policy: no enforceable"):
+        _readers(project)["project-map"]()
+    out = capsys.readouterr()
+    assert "Org policy not applied" not in out.out + out.err
+
+
+def test_warn_outcome_is_reported_once_with_neutral_wording(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _discovery(monkeypatch, PolicyFetchResult(outcome="cache_miss_fetch_fail", fetch_error="x"))
+    _readers(project)["project-map"]()
+    out = " ".join(capsys.readouterr().out.split())
+    assert out.count("Org policy not applied (outcome=cache_miss_fetch_fail") == 1
+    assert "--no-policy" not in out
+
+
+def test_stale_cached_policy_is_reported_as_still_enforced(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    policy = ApmPolicy(executables=ExecutablesPolicy(deny_all=True))
+    _discovery(
+        monkeypatch, PolicyFetchResult(outcome="cached_stale", policy=policy, fetch_error="x")
+    )
+    allow = _readers(project)["project-map"]()
+    out = " ".join(capsys.readouterr().out.split())
+    assert not (allow or {}).get("acme/hooky", {}).get("hooks")
+    assert "enforcement still applies" in out
+    assert "not applied" not in out

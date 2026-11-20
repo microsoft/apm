@@ -13,7 +13,9 @@ from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.phases._redownload import _should_skip_redownload
 from apm_cli.install.source_helpers import (
     ensure_carried_licenses_match,
+    locked_commit_unchanged,
     record_carried_package_hash,
+    update_accepts_new_content,
 )
 from apm_cli.utils.content_hash import compute_package_hash
 
@@ -169,3 +171,37 @@ def test_skip_redownload_with_legacy_lock_never_trusts_unrecorded_copies(tmp_pat
     package, legacy_hash, _records = _package(tmp_path)
 
     assert _should_skip_redownload(SimpleNamespace(content_hash=legacy_hash), package) is False
+
+
+_SHA_A, _SHA_B = "a" * 40, "b" * 40
+
+
+@pytest.mark.parametrize(
+    ("locked", "commit", "unchanged"),
+    [
+        (_SHA_A, _SHA_A, True),
+        (_SHA_A, _SHA_B, False),
+        ("cached", "cached", False),
+        (None, None, False),
+        ("", "", False),
+    ],
+    ids=["same", "moved", "cached-sentinel", "no-commit", "empty"],
+)
+def test_locked_commit_unchanged_truth_table(locked, commit, unchanged) -> None:
+    row = SimpleNamespace(resolved_commit=locked)
+    assert locked_commit_unchanged(row, commit) is unchanged
+    update = SimpleNamespace(update_refs=True)
+    install = SimpleNamespace(update_refs=False)
+    assert update_accepts_new_content(update, row, commit) is not unchanged
+    assert update_accepts_new_content(install, row, commit) is False
+
+
+def test_update_accepts_new_carried_licences_for_a_moved_commit(tmp_path: Path) -> None:
+    package, _legacy_hash, records = _package(tmp_path)
+    forged = (CarriedLicense("LICENSE", "LICENSE", "sha256:" + "0" * 64),)
+    ctx = _ctx(tmp_path, package_carried_licenses={"k": records}, update_refs=True)
+    locked = SimpleNamespace(carried_licenses=forged, resolved_commit=_SHA_A)
+
+    ensure_carried_licenses_match(ctx, "k", package, locked, _SHA_B)
+
+    assert (package / "LICENSE").is_file()

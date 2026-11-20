@@ -273,10 +273,15 @@ def _report_miss_neutrally(logger, *, outcome: str, source: str = "", error=None
     from apm_cli.utils.console import _rich_warning
 
     detail = f": {error}" if error else ""
-    _rich_warning(
-        f"Org policy not applied (outcome={outcome}, source={source or 'unknown'}){detail}",
-        symbol="warning",
-    )
+    if outcome == "cached_stale":
+        message = (
+            f"Using stale cached org policy (refresh failed{detail}); enforcement still applies."
+        )
+    else:
+        message = (
+            f"Org policy not applied (outcome={outcome}, source={source or 'unknown'}){detail}"
+        )
+    _rich_warning(message, symbol="warning")
 
 
 def discover_trust_policy(project_root: Path) -> PolicyFetchResult:

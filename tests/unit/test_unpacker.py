@@ -671,6 +671,37 @@ class TestUnpackRefusesExecutables:
         with pytest.raises(ValueError, match=r"Refusing to unpack 1 executable file"):
             unpack_bundle(bundle, output)
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "apm-hooks.json",
+            ".github/hooks/apm-hooks.json",
+            "lsp-config.json",
+            "config.yaml",
+            ".claude.json",
+            ".opencode/agents/opencode.json",
+        ],
+    )
+    def test_config_names_are_executable_content(self, path):
+        from apm_cli.bundle.unpacker import executable_content_kind
+
+        assert executable_content_kind(path) is not None
+
+    def test_owner_catalog_paths_are_executable_content(self):
+        from apm_cli.bundle.unpacker import executable_content_kind
+        from apm_cli.core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
+        from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS
+
+        paths = ["/".join(spec.project_relative_path) for spec in _LSP_TARGET_SPECS.values()]
+        paths += list(PLUGIN_ECOSYSTEM_PATHS.values())
+        paths += [f".claude/skills/x/{p}" for p in PLUGIN_ECOSYSTEM_PATHS.values()]
+        assert all(executable_content_kind(p) == "hook, MCP or LSP configuration" for p in paths)
+
+    def test_client_settings_names_are_bounded_by_depth(self):
+        from apm_cli.bundle.unpacker import executable_content_kind
+
+        assert executable_content_kind(".github/skills/x/settings.json") is None
+
     def test_non_executable_content_still_unpacks(self, tmp_path):
         deployed = [
             ".github/agents/a.md",
