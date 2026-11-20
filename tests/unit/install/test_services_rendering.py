@@ -23,8 +23,6 @@ import pytest
 from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.targets import KNOWN_TARGETS
 
-pytestmark = pytest.mark.component
-
 
 def _to_bundle(d: dict) -> IntegratorBundle:
     """Convert a dict of old-style integrator kwargs to an IntegratorBundle."""

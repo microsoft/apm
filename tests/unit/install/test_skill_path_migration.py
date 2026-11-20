@@ -22,8 +22,6 @@ from apm_cli.install.skill_path_migration import (
     execute_migration,
 )
 
-pytestmark = pytest.mark.component
-
 # ---------------------------------------------------------------------------
 # Lightweight stubs -- avoid importing the real lockfile module
 # ---------------------------------------------------------------------------

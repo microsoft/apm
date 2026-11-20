@@ -17,8 +17,6 @@ from apm_cli.install.request import InstallRequest
 from apm_cli.install.service import InstallService, _outermost
 from apm_cli.models.dependency.reference import DependencyReference
 
-pytestmark = pytest.mark.component
-
 
 def _build_lockfile(deps: list[LockedDependency]) -> LockFile:
     lock = LockFile(

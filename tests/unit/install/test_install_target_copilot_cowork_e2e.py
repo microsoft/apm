@@ -39,8 +39,6 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 
-pytestmark = pytest.mark.component
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------

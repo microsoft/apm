@@ -24,8 +24,6 @@ from apm_cli.install.lsp.integration import (
 )
 from apm_cli.models.dependency.lsp import LSPDependency
 
-pytestmark = pytest.mark.component
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

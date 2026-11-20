@@ -37,8 +37,6 @@ from apm_cli.native_plugins.settings import (
     write_declaration,
 )
 
-pytestmark = pytest.mark.component
-
 _NAME = "apm-u-3f9c"
 
 

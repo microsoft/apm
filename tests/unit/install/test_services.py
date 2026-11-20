@@ -19,8 +19,6 @@ from apm_cli.install.services import (
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.paths import portable_relpath
 
-pytestmark = pytest.mark.component
-
 # ---------------------------------------------------------------------------
 # Helper: convert legacy integrators dict to IntegratorBundle
 # ---------------------------------------------------------------------------

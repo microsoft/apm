@@ -21,8 +21,6 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
-pytestmark = pytest.mark.component
-
 
 class _RecordingLogger:
     """Minimal InstallLogger stand-in that records visibility calls."""
