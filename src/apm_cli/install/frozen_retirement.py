@@ -103,19 +103,24 @@ def enforce_frozen_presence(
             targets=targets,
         )
     if stale := _stale_exec_decisions(request, committed, lockfile_dir, deploy_root, targets):
-        from apm_cli.install.errors import FrozenInstallError
-
         # On a merged-config target (claude settings.json) a gated hook leaves
         # no recorded file missing; the recorded decision is the only evidence
         # that the lock is stale (#4053).
-        raise FrozenInstallError(
-            "--frozen: apm.lock.yaml records an executables decision the gate no longer makes.",
-            reasons=[f"  - {decision.describe()}" for decision in stale],
-            tip=(
-                "Tip: run 'apm install' without --frozen, retaining --root DIR "
-                "or --global if specified, then commit apm.lock.yaml."
-            ),
-        )
+        raise _stale_decisions_error(stale)
+
+
+def _stale_decisions_error(stale: Sequence[Any]) -> Exception:
+    """The ``--frozen`` refusal for recorded executables decisions that changed."""
+    from apm_cli.install.errors import FrozenInstallError
+
+    return FrozenInstallError(
+        "--frozen: apm.lock.yaml records an executables decision the gate no longer makes.",
+        reasons=[f"  - {decision.describe()}" for decision in stale],
+        tip=(
+            "Tip: run 'apm install' without --frozen, retaining --root DIR "
+            "or --global if specified, then commit apm.lock.yaml."
+        ),
+    )
 
 
 def _stale_exec_decisions(

@@ -498,14 +498,16 @@ def exec_policy_from_discovery(discover: Callable[[], Any]) -> Any:
     callers fail toward the install gate's fetch-failure posture instead of
     deciding as if there were no org policy.
     """
-    from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
+    from apm_cli.policy.outcome_routing import classify_discovery_outcome
 
     try:
         fetch = discover()
     except Exception as exc:
         raise ExecPolicyUnavailable(str(exc)) from exc
-    if getattr(fetch, "outcome", "") in POLICY_RESOLUTION_FAILURE_OUTCOMES:
-        raise ExecPolicyUnavailable(fetch.outcome)
+    route = classify_discovery_outcome(fetch, fetch_failure_default="warn")
+    # A blocking or unresolved outcome is indeterminate, never "no policy".
+    if route.blocks or route.unresolved:
+        raise ExecPolicyUnavailable(route.outcome)
     return getattr(fetch, "policy", None)
 
 

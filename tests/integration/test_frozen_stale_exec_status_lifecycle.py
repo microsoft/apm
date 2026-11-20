@@ -21,9 +21,11 @@ import yaml
 from tests.integration._mcp_chain_kit import Chain
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.promise("P-INV-I3", "P-OWN-frozen-install-mutation-eligibility"),
 ]
 
 _PACKAGE = "./pkgs/hooky"
