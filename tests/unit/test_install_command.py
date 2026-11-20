@@ -1237,7 +1237,7 @@ class TestInstallGlobalFlag:
             os.chdir(str(repo_root))
 
     def test_global_flag_shows_scope_info(self):
-        """--global flag should display user scope info message and unsupported target warning."""
+        """--global shows user scope info, without warnings about unselected targets."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             try:
                 os.chdir(tmp_dir)
@@ -1248,8 +1248,8 @@ class TestInstallGlobalFlag:
                     result = self.runner.invoke(cli, ["install", "--global"])
                 assert result.exit_code == 1
                 assert "user scope" in result.output.lower() or "~/.apm/" in result.output
-                # Should warn about unsupported targets
-                assert "cursor" in result.output.lower()
+                # No target is selected yet, so no unrelated-target warning (#3994).
+                assert "user scope does not deploy" not in result.output.lower()
             finally:
                 os.chdir(self.original_dir)
 
@@ -1267,8 +1267,8 @@ class TestInstallGlobalFlag:
                 assert (fake_home / ".apm" / "apm_modules").is_dir()
                 assert result.exit_code == 1  # No packages or manifest provided
                 assert "user scope" in result.output.lower() or "~/.apm/" in result.output
-                # Should warn about unsupported targets
-                assert "cursor" in result.output.lower()
+                # No target is selected yet, so no unrelated-target warning (#3994).
+                assert "user scope does not deploy" not in result.output.lower()
             finally:
                 os.chdir(self.original_dir)
 
@@ -1586,7 +1586,7 @@ class TestContentHashFallback:
             (pkg_dir / "file.txt").write_text("hello")
             content_hash = compute_package_hash(pkg_dir)
 
-            assert verify_package_hash(pkg_dir, content_hash) is True
+            assert verify_package_hash(pkg_dir, content_hash, framed=True) is True
 
     def test_hash_mismatch_triggers_redownload(self):
         """Mismatched content hash on real files returns False."""
@@ -1597,7 +1597,7 @@ class TestContentHashFallback:
             pkg_dir.mkdir()
             (pkg_dir / "file.txt").write_text("original")
 
-            assert verify_package_hash(pkg_dir, "sha256:badhash") is False
+            assert verify_package_hash(pkg_dir, "sha256:badhash", framed=True) is False
 
     def test_should_skip_redownload_true_when_hash_matches_and_dir_exists(self):
         """Production helper returns True when content_hash matches an existing dir."""
@@ -1684,7 +1684,8 @@ class TestAllowInsecureFlag:
         assert "use --allow-insecure for http:// packages" in normalized
         assert "--allow-insecure-host HOSTNAME" in result.output
         assert "Git source, ref, host provider, transport, and MCP config state" in normalized
-        assert "Use 'apm audit' for on-disk integrity." in normalized
+        assert "deployed files do not match the hashes it records" in normalized
+        assert "Use 'apm audit' for on-disk integrity." not in normalized
 
     def test_allow_insecure_host_rejects_non_hostname(self):
         """The explicit transitive host option only accepts bare hostnames."""
@@ -2320,7 +2321,7 @@ class TestInstallMcpFlag:
             patch.object(Path, "home", return_value=fake_home),
             patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
             patch(
-                "apm_cli.integration.mcp_integrator_install.discover_user_scope_mcp_runtimes",
+                "apm_cli.integration.mcp_user_scope_runtimes.discover_user_scope_mcp_runtimes",
                 return_value=(["claude"], []),
             ),
             patch("apm_cli.install.mcp.command.MCPIntegrator") as integrator,
@@ -2615,7 +2616,7 @@ class TestInstallMcpFlag:
             patch.object(Path, "home", return_value=fake_home),
             patch("apm_cli.commands.install._get_invocation_argv", return_value=argv),
             patch(
-                "apm_cli.integration.mcp_integrator_install.discover_user_scope_mcp_runtimes",
+                "apm_cli.integration.mcp_user_scope_runtimes.discover_user_scope_mcp_runtimes",
                 return_value=(["claude"], []),
             ),
             patch("apm_cli.commands.install._run_mcp_install") as run_mcp_install,

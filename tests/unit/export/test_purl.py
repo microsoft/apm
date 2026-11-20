@@ -32,6 +32,29 @@ def test_git_dep_infers_github_from_repo_url_when_host_type_absent():
     assert build_purl(dep) == "pkg:github/acme/git-utils@def789ghi012"
 
 
+def test_default_host_github_dep_uses_recorded_host():
+    # Lockfiles record default-host deps as host-less `owner/repo` plus
+    # `host: github.com`; they must not fall back to pkg:generic (#3994).
+    dep = LockedDependency(
+        repo_url="microsoft/apm-sample-package",
+        host="github.com",
+        resolved_commit="fb2851683be0",
+    )
+    assert build_purl(dep) == "pkg:github/microsoft/apm-sample-package@fb2851683be0"
+
+
+def test_subdirectory_dep_carries_purl_subpath():
+    dep = LockedDependency(
+        repo_url="github/awesome-copilot",
+        host="github.com",
+        resolved_commit="1683f50e",
+        virtual_path="skills/review-and-refactor",
+    )
+    assert (
+        build_purl(dep) == "pkg:github/github/awesome-copilot@1683f50e#skills/review-and-refactor"
+    )
+
+
 def test_git_dep_infers_bitbucket_from_repo_url():
     dep = LockedDependency(
         repo_url="bitbucket.org/team/widget",

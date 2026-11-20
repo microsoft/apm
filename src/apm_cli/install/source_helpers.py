@@ -53,6 +53,25 @@ def supply_chain_mismatch_hint(ctx: Any, dep_key: str) -> str:
     )
 
 
+def content_hash_mismatch_hint(ctx: Any, dep_key: str) -> str:
+    """Explain how to recover from a same-commit content mismatch.
+
+    Only a moved commit may change content, so ``apm update`` cannot accept
+    new bytes for the locked commit; re-pinning is deliberate (#4027).
+    """
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.lockfile import get_lockfile_path
+
+    install = "apm install -g" if ctx.scope is InstallScope.USER else "apm install"
+    apm_dir = getattr(ctx, "apm_dir", None)
+    lockfile = get_lockfile_path(apm_dir) if apm_dir is not None else "apm.lock.yaml"
+    return (
+        "This may indicate a supply-chain attack. Run 'apm cache clean' and retry. "
+        f"To accept the new content, remove the '{dep_key}' entry from "
+        f"{lockfile} and run '{install}'."
+    )
+
+
 def ref_update_operation_label() -> str:
     """Name the invoked ref-updating command (``update``, ``install --update``, ...)."""
     import click
@@ -161,6 +180,30 @@ def carried_licenses_for(ctx: Any, dep_key: str, locked_dep: Any) -> tuple:
     return tuple(getattr(locked_dep, "carried_licenses", ()) or ())
 
 
+def package_digests(ctx: Any, package_path: Path, exclude: Any = ()) -> Any:
+    """Digests to record: the legacy stream only while the existing lock uses it."""
+    from apm_cli.deps.lockfile import records_framed_content_hashes
+    from apm_cli.utils.content_hash import compute_package_digests
+
+    framed = records_framed_content_hashes(getattr(ctx, "existing_lockfile", None))
+    return compute_package_digests(package_path, exclude=exclude, legacy=not framed)
+
+
+def record_package_digests(ctx: Any, dep_key: str, digests: Any) -> str:
+    """Record one package's digests in the stream the existing lockfile uses.
+
+    *digests* is a :class:`~apm_cli.utils.content_hash.PackageDigests` of the
+    bytes this run accepted. The framed digest is kept beside it so the
+    lockfile phase can promote the lock to version 4 without re-reading.
+    """
+    from apm_cli.deps.lockfile import records_framed_content_hashes
+
+    framed = records_framed_content_hashes(getattr(ctx, "existing_lockfile", None))
+    ctx.package_hashes[dep_key] = digests.select(framed=framed)
+    ctx.package_framed_hashes[dep_key] = digests.framed
+    return ctx.package_hashes[dep_key]
+
+
 def record_carried_package_hash(
     ctx: Any,
     dep_key: str,
@@ -176,7 +219,6 @@ def record_carried_package_hash(
     Returns the excluded package-relative paths.
     """
     from apm_cli.deps.carried_license import carried_copies_intact, carried_license_paths
-    from apm_cli.utils import content_hash
 
     if package_info is not None:
         carried = tuple(getattr(package_info, "carried_licenses", ()) or ())
@@ -187,23 +229,51 @@ def record_carried_package_hash(
     ctx.package_carried_licenses[dep_key] = carried
     excluded = carried_license_paths(carried)
     if install_path.is_dir():
-        ctx.package_hashes[dep_key] = content_hash.compute_package_hash(
-            install_path, exclude=excluded
-        )
+        record_package_digests(ctx, dep_key, package_digests(ctx, install_path, excluded))
     return excluded
 
 
+def locked_commit_unchanged(locked_dep: Any, commit: str | None) -> bool:
+    """Return whether *commit* is the commit *locked_dep* records.
+
+    A row without a commit on either side (registry or other commit-less
+    rows) has no commit identity, so it never counts as unchanged (#4027).
+    """
+    locked_commit = getattr(locked_dep, "resolved_commit", None)
+    return bool(commit not in (None, "", "cached") and commit == locked_commit)
+
+
+def update_accepts_new_content(ctx: Any, locked_dep: Any, resolved_commit: str | None) -> bool:
+    """Return whether this run may lock new content without the hash check.
+
+    Only ``apm update`` may, and only for a commit that moved: an unchanged
+    commit must still hold its locked content (#4027). The one exception is
+    a lock row APM 0.28 wrote for a marketplace plugin, which hashed another
+    materialization of the same commit (see ``legacy_plugin_compat``).
+    """
+    if ctx.update_refs and locked_commit_unchanged(locked_dep, resolved_commit):
+        from apm_cli.install.legacy_plugin_compat import legacy_plugin_row_rehashable
+
+        return legacy_plugin_row_rehashable(getattr(ctx, "existing_lockfile", None), locked_dep)
+    return bool(ctx.update_refs and not locked_commit_unchanged(locked_dep, resolved_commit))
+
+
 def ensure_carried_licenses_match(
-    ctx: Any, dep_key: str, install_path: Path, locked_dep: Any
+    ctx: Any,
+    dep_key: str,
+    install_path: Path,
+    locked_dep: Any,
+    resolved_commit: str | None = None,
 ) -> None:
     """Fail closed when fresh carried licences differ from the lock record (#3556).
 
     The copies are excluded from content_hash, so the lock's carried records
-    are their integrity baseline, as content_hash is for the package.
+    are their integrity baseline, as content_hash is for the package; ``apm
+    update`` may change them only for a moved commit (#4027).
     """
     locked = getattr(locked_dep, "carried_licenses", ()) if locked_dep else ()
     if (
-        ctx.update_refs
+        update_accepts_new_content(ctx, locked_dep, resolved_commit)
         or dep_key in ctx.expected_hash_change_deps
         or not locked
         or frozenset(locked) == frozenset(ctx.package_carried_licenses.get(dep_key, ()))
@@ -216,7 +286,7 @@ def ensure_carried_licenses_match(
     raise DirectDependencyError(
         f"Licence file mismatch for {dep_key}: the licence files carried "
         "from the repository differ from the lockfile record. "
-        + supply_chain_mismatch_hint(ctx, dep_key)
+        + content_hash_mismatch_hint(ctx, dep_key)
     )
 
 

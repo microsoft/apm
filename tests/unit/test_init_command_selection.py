@@ -478,24 +478,23 @@ class TestInitCommand:
                 result = self._run(".", "--yes")
         assert result.exit_code == 0
 
-    def test_plugin_flag_deprecated_warning(self, tmp_path):
+    def test_plugin_flag_was_removed(self, tmp_path):
         with self.runner.isolated_filesystem(temp_dir=tmp_path):
             with (
                 patch("apm_cli.commands.init._resolve_init_targets", return_value=None),
                 patch("apm_cli.commands.init._validate_plugin_name", return_value=True),
             ):
                 result = self._run("--plugin", "--yes")
-        assert result.exit_code == 0
-        # Deprecated flag warning should appear in stderr (or output)
+        assert result.exit_code == 2
 
-    def test_marketplace_flag_deprecated_warning(self, tmp_path):
+    def test_marketplace_flag_was_removed(self, tmp_path):
         with self.runner.isolated_filesystem(temp_dir=tmp_path):
             with (
                 patch("apm_cli.commands.init._resolve_init_targets", return_value=None),
                 patch("apm_cli.commands.init._validate_plugin_name", return_value=True),
             ):
                 result = self._run("--marketplace", "--yes")
-        assert result.exit_code == 0
+        assert result.exit_code == 2
 
     def test_existing_apm_yml_with_yes_overwrites(self, tmp_path):
         with self.runner.isolated_filesystem(temp_dir=tmp_path):

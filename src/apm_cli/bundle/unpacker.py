@@ -1,5 +1,6 @@
 """Bundle unpacker  -- extracts and verifies APM bundles."""
 
+import functools
 import os
 import shutil
 import tempfile
@@ -168,13 +169,10 @@ def unpack_bundle(
             if dep_files:
                 dep_file_map[dep_key] = dep_files
 
-        # Security + feature gate: canvas extensions are executable Node
-        # bundles (``extension.mjs``).  ``apm unpack`` (deprecated) copies
-        # deployed files verbatim WITHOUT routing through ``CanvasIntegrator``.
-        # When the canvas feature flag is OFF, drop paths silently.
-        # When ON, canvas files are allowed (apm unpack has no project context
-        # so no allowExecutables enforcement is available; the user is assumed
-        # to understand what they are unpacking for this deprecated command).
+        # Feature gate: canvas extensions are executable Node bundles
+        # (``extension.mjs``). With the canvas flag OFF their paths are
+        # dropped and counted; with it ON they are refused below with the
+        # rest of the bundle's executable content.
         canvas_blocked = 0
         from ..core.experimental import is_enabled
         from ..integration.canvas_integrator import is_canvas_bundle_path
@@ -189,7 +187,18 @@ def unpack_bundle(
                     if not dep_file_map[_k]:
                         del dep_file_map[_k]
 
-        # 3. Verify completeness
+        # 3. Verify completeness. A plugin bundle (root plugin.json, the
+        # default 'apm pack' output) is not a deployment layout (#3994).
+        if (source_dir / "plugin.json").is_file():
+            raise ValueError(
+                "This is a plugin-format bundle (the default 'apm pack' output); "
+                "install it with 'apm install <bundle-path>'. 'apm unpack' reads only "
+                "bundles packed with '--format apm'."
+            )
+        # Executable content (hooks, hook scripts, MCP/LSP config, bin,
+        # canvas extensions) deploys only through ``apm install <bundle>``,
+        # which applies the executables gate, org policy and the lockfile.
+        _refuse_executable_content(unique_files, source_dir, bundle_path)
         verified = True
         if not skip_verify:
             missing = [f for f in unique_files if not (source_dir / f).exists()]
@@ -327,3 +336,112 @@ def _validated_unpack_destinations(
                         )
         destinations.append((rel_path, dest))
     return destinations
+
+
+# Basenames that only name hook, MCP or LSP server configuration, at any depth
+# (``.kiro/settings/mcp.json``, ``.agents/mcp_config.json``).
+_EXECUTABLE_CONFIG_NAMES = frozenset(
+    {
+        "hooks.json",
+        "apm-hooks.json",
+        "mcp.json",
+        ".mcp.json",
+        "mcp_config.json",
+        "lsp.json",
+        ".lsp.json",
+        "lsp-config.json",
+        "opencode.json",
+        "opencode.jsonc",
+    }
+)
+# Client settings files that can register hooks or servers; they sit at the
+# project root or directly under a client root (``.claude/settings.json``).
+_CLIENT_SETTINGS_NAMES = frozenset(
+    {
+        "settings.json",
+        "settings.local.json",
+        "config.toml",
+        "config.yaml",
+        ".claude.json",
+    }
+)
+# Directory segments whose files are hook resources or bin executables.
+_EXECUTABLE_DIR_NAMES = frozenset({"hooks", "bin"})
+
+
+@functools.lru_cache(maxsize=1)
+def _lsp_config_paths() -> frozenset[str]:
+    """Project-scope LSP config paths, as the LSP integrator writes them."""
+    from ..integration.lsp_integrator import _LSP_TARGET_SPECS
+
+    return frozenset(
+        "/".join(spec.project_relative_path).lower() for spec in _LSP_TARGET_SPECS.values()
+    )
+
+
+@functools.lru_cache(maxsize=1)
+def _plugin_manifest_paths() -> tuple[str, ...]:
+    """Plugin manifest paths; a manifest can declare hooks, MCP and LSP servers."""
+    from ..core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
+
+    return tuple(path.lower() for path in PLUGIN_ECOSYSTEM_PATHS.values())
+
+
+def executable_content_kind(rel_path: str) -> str | None:
+    """Return why a bundle path is executable content, or ``None``."""
+    from ..integration.canvas_integrator import is_canvas_bundle_path
+
+    parts = [seg for seg in rel_path.replace("\\", "/").split("/") if seg]
+    if not parts:
+        return None
+    if is_canvas_bundle_path(rel_path):
+        return "canvas extension"
+    name = parts[-1].lower()
+    joined = "/".join(parts).lower()
+    if (
+        name in _EXECUTABLE_CONFIG_NAMES
+        or (len(parts) <= 2 and name in _CLIENT_SETTINGS_NAMES)
+        or joined in _lsp_config_paths()
+        or any(joined == m or joined.endswith("/" + m) for m in _plugin_manifest_paths())
+    ):
+        return "hook, MCP or LSP configuration"
+    for seg in parts[:-1]:
+        if seg.lower() in _EXECUTABLE_DIR_NAMES:
+            return "hook resource" if seg.lower() == "hooks" else "bin executable"
+    return None
+
+
+def _bundle_file_paths(rel_paths: list[str], source_dir: Path) -> list[str]:
+    """Expand directory entries into the files a copy would write."""
+    expanded: dict[str, None] = {}
+    for rel in rel_paths:
+        expanded[rel] = None
+        src = source_dir / rel
+        if src.is_dir() and not src.is_symlink():
+            for walk_root, _dirs, files in os.walk(src):
+                base = Path(rel) / Path(walk_root).relative_to(src)
+                expanded.update(dict.fromkeys((base / name).as_posix() for name in files))
+    return list(expanded)
+
+
+def _refuse_executable_content(rel_paths: list[str], source_dir: Path, bundle_path: Path) -> None:
+    """Refuse a bundle that carries executable content.
+
+    ``apm unpack`` copies files verbatim, so it cannot apply the executables
+    gate, org policy or a lockfile record; ``apm install <bundle>`` does.
+    """
+    refused = [
+        (rel, kind)
+        for rel in _bundle_file_paths(rel_paths, source_dir)
+        if (kind := executable_content_kind(rel))
+    ]
+    if not refused:
+        return
+    listed = "\n".join(f"  - {rel}  ({kind})" for rel, kind in refused[:10])
+    more = f"\n  ... and {len(refused) - 10} more" if len(refused) > 10 else ""
+    raise ValueError(
+        f"Refusing to unpack {len(refused)} executable file(s); 'apm unpack' cannot "
+        f"apply the executables gate or org policy:\n{listed}{more}\n\n"
+        f"Install the bundle instead: apm install {bundle_path}\n"
+        "(repack a legacy '--format apm' bundle with 'apm pack --archive' first)"
+    )

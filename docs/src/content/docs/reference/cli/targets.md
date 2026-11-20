@@ -102,7 +102,7 @@ match per target is enough to activate it.
 | `opencode` | `.opencode/` directory | `.opencode/` |
 | `windsurf` | `.windsurf/` directory | `.windsurf/` |
 | `kiro` | `.kiro/` directory | `.kiro/` |
-| `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm install` / `apm deps update` (compile is a no-op for this target). | `.agents/` |
+| `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm install` / `apm update` (compile is a no-op for this target). | `.agents/` |
 
 Notes:
 
@@ -130,4 +130,4 @@ Notes:
 - [`apm install`](../install/) -- uses the same target resolution to decide which harness configs to wire.
 - [`apm compile`](../compile/) -- compiles primitives for the targets shown here.
 - [Targets matrix](../../targets-matrix/) -- per-target output layout and feature support.
-- [Concepts: primitives and targets](../../../concepts/primitives-and-targets/)
+- [Concepts: primitives and targets](../../targets-matrix/)

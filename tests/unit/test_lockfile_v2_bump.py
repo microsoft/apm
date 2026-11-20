@@ -114,13 +114,13 @@ class TestVersionFieldStaysInSync:
 
 
 def test_v3_lockfile_fails_closed_as_unsupported() -> None:
-    """Version 4 (next unknown) still fails closed."""
+    """Version 5 (next unknown) still fails closed."""
     with pytest.raises(
         UnsupportedLockfileVersionError,
-        match=r"Unsupported lockfile version '4'; supported versions: 1, 2, 3",
+        match=r"Unsupported lockfile version '5'; supported versions: 1, 2, 3, 4",
     ):
         LockFile.from_yaml(
-            "lockfile_version: '4'\n"
+            "lockfile_version: '5'\n"
             "dependencies: []\n"
             "installed_plugins:\n"
             "  - identity: stable-plugin\n"
@@ -137,7 +137,7 @@ def test_unquoted_integer_lockfile_version_is_the_same_version(declared: str) ->
     assert "lockfile_version: '1'" in lock.to_yaml()
 
 
-@pytest.mark.parametrize("declared", ["4", "true", "1.0"])
+@pytest.mark.parametrize("declared", ["5", "true", "1.0"])
 def test_unsupported_unquoted_lockfile_version_names_itself(declared: str) -> None:
     with pytest.raises(UnsupportedLockfileVersionError) as excinfo:
         LockFile.from_yaml(f"lockfile_version: {declared}\ndependencies: []\n")

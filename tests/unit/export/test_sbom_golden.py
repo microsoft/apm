@@ -51,6 +51,18 @@ def _fixture_lockfile() -> LockFile:
             content_hash="sha256:aaa111",
         )
     )
+    # The shape real lockfiles record for a default-host GitHub subdirectory
+    # package: host-less repo_url, `host: github.com`, and a content hash.
+    lf.add_dependency(
+        LockedDependency(
+            repo_url="acme/skills",
+            host="github.com",
+            resolved_commit="feed01",
+            virtual_path="skills/review",
+            is_virtual=True,
+            content_hash="sha256:bbb222",
+        )
+    )
     lf.add_dependency(
         LockedDependency(
             repo_url="github.com/acme/oci-tools",

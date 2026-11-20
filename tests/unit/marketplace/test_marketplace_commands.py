@@ -79,6 +79,21 @@ class TestMarketplaceAdd:
         assert "apm install <plugin>@addy-agent-skills" in result.output
 
     @patch("apm_cli.marketplace.registry.add_marketplace")
+    @patch("apm_cli.marketplace.registration.probe_registration")
+    def test_failed_first_add_never_suggests_update(self, mock_probe, mock_add, runner):
+        """Nothing is registered, so the retry is the add itself (#3994)."""
+        from apm_cli.commands.marketplace import marketplace
+        from apm_cli.marketplace.errors import MarketplaceFetchError
+
+        mock_probe.side_effect = MarketplaceFetchError("catalog", "HTTP 503")
+        result = runner.invoke(marketplace, ["add", "acme/catalog", "--name", "team"])
+        assert result.exit_code == 1
+        flat = " ".join(result.output.split())
+        assert "rerun this 'apm marketplace add' command" in flat
+        assert "marketplace update" not in flat
+        mock_add.assert_not_called()
+
+    @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.client._auto_detect_path_with_payload")
     def test_add_cli_name_overrides_manifest(self, mock_detect, mock_fetch, mock_add, runner):

@@ -36,6 +36,15 @@ def _resolved_key(
     return (locked or dependency).get_unique_key()
 
 
+class _SilentLogger:
+    """Discard the MCP resolver's progress lines while dry-run previews its choice."""
+
+    verbose = False
+
+    def __getattr__(self, _name: str) -> Any:
+        return lambda *_args, **_kwargs: None
+
+
 @dataclass(frozen=True)
 class ProspectiveInstallPlan:
     """Represent the install state that dry-run would use without persisting it."""
@@ -51,6 +60,9 @@ class ProspectiveInstallPlan:
     updated_apm_identities: frozenset[str] = frozenset()
     resolved_apm_dependencies: tuple[DependencyReference, ...] | None = None
     dependency_preview_errors: tuple[str, ...] = ()
+    dependency_declaration_errors: tuple[str, ...] = ()
+    # Project-scope MCP runtimes the install would select (None: not resolved).
+    mcp_target_runtimes: tuple[str, ...] | None = None
 
     @classmethod
     def from_apm_package(
@@ -127,6 +139,7 @@ class ProspectiveInstallPlan:
             only_packages=ctx.only_packages,
             updated_packages=updated_packages,
         ).with_allowed_lsp_dependencies(apm_package, ctx.logger)
+        plan = plan.with_mcp_target_runtimes(apm_package, ctx)
         return plan.with_resolved_dependencies(
             apm_package,
             project_root=source_root if source_root != ctx.project_root else ctx.apm_dir,
@@ -188,7 +201,45 @@ class ProspectiveInstallPlan:
             selected_apm_dependencies=dependencies,
             resolved_apm_dependencies=resolved_dependencies,
             dependency_preview_errors=tuple(errors),
+            dependency_declaration_errors=tuple(graph.declaration_errors),
         )
+
+    def with_mcp_target_runtimes(
+        self, apm_package: APMPackage, ctx: InstallContext
+    ) -> ProspectiveInstallPlan:
+        """Select project MCP runtimes with the install's own resolver, silently."""
+        from apm_cli.core.scope import InstallScope
+
+        if not self.selected_mcp_dependencies or ctx.scope is InstallScope.USER:
+            return self
+        from apm_cli.core.target_detection import resolve_package_target_decision
+        from apm_cli.install.lsp.integration import lsp_target_config
+        from apm_cli.integration.mcp_integrator_install import _resolve_target_runtimes
+
+        explicit_target = ctx.target or ctx.runtime
+        try:
+            decision = ctx.target_decision or resolve_package_target_decision(
+                ctx.project_root,
+                package=apm_package,
+                explicit_target=explicit_target,
+                create_config=False,
+            )
+            runtimes = _resolve_target_runtimes(
+                runtime=ctx.runtime,
+                exclude=ctx.exclude,
+                verbose=False,
+                apm_config=lsp_target_config(apm_package),
+                project_root=ctx.project_root,
+                user_scope=False,
+                explicit_target=decision.value,
+                target_decision=decision,
+                scope=ctx.scope,
+                logger=_SilentLogger(),
+                console=None,
+            )
+        except (KeyError, RuntimeError, ValueError):
+            return self
+        return replace(self, mcp_target_runtimes=tuple(runtimes or ()))
 
     def with_allowed_lsp_dependencies(
         self, apm_package: Any, logger: Any

@@ -253,7 +253,16 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
         from apm_cli.integration import skill_integrator
 
         source = inspect.getsource(skill_integrator)
-        calls = [node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Call)]
+        tree = ast.parse(source)
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        # A filter bound to a local name counts only when every binding of that
+        # name is the canonical filter call (the adoption check reuses it).
+        bindings: dict[str, list[ast.AST]] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        bindings.setdefault(target.id, []).append(node.value)
         member_copies = [
             node
             for node in calls
@@ -263,6 +272,10 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
         for call in member_copies:
             with self.subTest(line=call.lineno):
                 ignore = next((kw.value for kw in call.keywords if kw.arg == "ignore"), None)
+                if isinstance(ignore, ast.Name):
+                    values = bindings.get(ignore.id, [])
+                    self.assertEqual(len(values), 1, ignore.id)
+                    ignore = values[0]
                 self.assertIsInstance(ignore, ast.Call)
                 self.assertIsInstance(ignore.func, ast.Name)
                 self.assertEqual(ignore.func.id, "_build_deployable_copy_ignore")

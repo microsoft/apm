@@ -115,3 +115,46 @@ def test_alias_reader_refuses_escape_without_inspecting_external_package(
     assert_snapshot_set_unchanged(
         before, ArtifactSnapshotSet.capture({"store": store, "external": external})
     )
+
+
+def test_ported_alias_and_default_port_sibling_list_as_distinct_rows(tmp_path: Path) -> None:
+    """An aliased same-repo pair on another port keeps its host:port identity (B4)."""
+    for path, name in (
+        (tmp_path / "apm_modules" / "test" / "tool", "tool"),
+        (tmp_path / "apm_modules" / "tool-other", "tool"),
+    ):
+        path.mkdir(parents=True)
+        dump_yaml({"name": name, "version": "1.0.0"}, path / "apm.yml")
+    dump_yaml(
+        {
+            "name": "consumer",
+            "version": "1.0.0",
+            "dependencies": {
+                "apm": [
+                    "test/tool",
+                    {"git": "https://github.com:8443/test/tool.git", "alias": "tool-other"},
+                ]
+            },
+        },
+        tmp_path / "apm.yml",
+    )
+    lock = LockFile()
+    lock.add_dependency(LockedDependency(repo_url="test/tool", resolved_commit="a" * 40))
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="test/tool",
+            host="github.com",
+            port=8443,
+            alias="tool-other",
+            resolved_commit="b" * 40,
+        )
+    )
+    lock.save(tmp_path / "apm.lock.yaml")
+
+    packages, orphans = _resolve_scope_deps(tmp_path, MagicMock())
+
+    assert orphans == []
+    assert {package["name"] for package in packages} == {
+        "test/tool",
+        "github.com:8443/test/tool",
+    }

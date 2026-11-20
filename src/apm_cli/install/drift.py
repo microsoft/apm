@@ -225,12 +225,14 @@ def _verify_remote_cache_candidate(lock_dep: LockedDependency, candidate: Path) 
             f"expected {candidate}; run 'apm install' to populate the cache"
         )
     if lock_dep.resolved_commit:
-        from apm_cli.install.cache_pin import CachePinError, verify_marker
+        from apm_cli.drift import locked_copy_holds_commit
 
-        try:
-            verify_marker(candidate, lock_dep.resolved_commit)
-        except CachePinError as exc:
-            raise CacheMissError(f"{exc}; run 'apm install' to refresh apm_modules cache") from exc
+        # One copy-validity owner for install and audit (#3964).
+        if not locked_copy_holds_commit(lock_dep, candidate):
+            raise CacheMissError(
+                f"{candidate} does not hold the locked commit {lock_dep.resolved_commit}; "
+                "run 'apm install' to refresh apm_modules cache"
+            )
 
 
 def _materialize_install_path(
@@ -535,6 +537,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     CacheMissError
         Surfaced verbatim when a locked dep cannot be materialized.
     """
+    from apm_cli.claude_plugins.registrar import verify_claude_native_cache
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
     from apm_cli.install.audit_target_roots import replay_deployment_frame, replay_target
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
@@ -721,6 +724,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             package_name=dep_key,
                             logger=None,
                             scope=None,
+                            native_claude_user_scope=config.user_scope,
                             skill_subset=selection.skill_subset,
                             skill_pairing=selection.skill_pairing,
                             ctx=None,
@@ -732,7 +736,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         )
                     except AgentPluginTargetExcludedError:
                         continue
-                    if result.get("native_plugin"):
+                    if result.get("native_plugin") and not result.get("native_claude_plugin"):
                         verify_native_plugin_cache(
                             lock_dep,
                             install_path,
@@ -753,6 +757,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                                 records=codex_records,
                                 **identity,
                             )
+                    if result.get("native_claude_plugin"):
+                        verify_claude_native_cache(
+                            modules_dir=live_modules_dir, locked=lock_dep, source_root=install_path
+                        )
                     replayed_count += 1
     finally:
         if snapshot_started:
@@ -1016,5 +1024,18 @@ def diff_scratch_against_project(
             # Replay deploys no hooks here, yet APM-owned entries remain (#3924).
             findings.append(DriftFinding(path=rel, kind="modified", package=""))
         # else: untracked governed file -- ignore (user authored).
+
+    if local_bundle_paths:
+        # A local bundle has no replay source: its locked hashes are the
+        # baseline. Plain audit and --ci read them through the one verifier
+        # content-integrity and --frozen use (req-lk-017), so both agree.
+        from apm_cli.policy.ci_checks import verify_deployed_file_hashes
+
+        drifted, _unresolved = verify_deployed_file_hashes(project_root, lockfile, targets)
+        findings.extend(
+            DriftFinding(path=item.path, kind="modified", package=item.owner)
+            for item in drifted
+            if item.path in local_bundle_paths
+        )
 
     return findings

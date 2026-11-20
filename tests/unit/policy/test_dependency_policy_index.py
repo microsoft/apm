@@ -53,7 +53,7 @@ def test_index_preserves_first_match_across_case_prefix_buckets(reverse: bool) -
     ]
     if reverse:
         deps.reverse()
-    query = "Contoso/Tools"
+    query = "gitlab.com/Contoso/Tools"
     assert all(dependency_policy_name_matches(dep, query) for dep in deps)
     index = DependencyPolicyIndex.from_dependencies(deps)
     assert index.find_name(query) == deps[0].get_canonical_dependency_string()
