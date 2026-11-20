@@ -1362,6 +1362,9 @@ CANVAS_SKIPPED_UNAPPROVED = _entry(
     "approve its canvas extensions",
     then="run 'apm install' to deploy them",
 )
+REPOSITORY_NOT_FOUND = _entry(
+    "repository-not-found", "apm uninstall {package}", "remove it from apm.yml"
+)
 # -- end W4 phases-targets --
 # -- end install/policy (W4) ---------------------------------------------------
 

@@ -46,6 +46,8 @@ _HASH = "needs upstream content to change under a locked commit (same-commit has
 _LEGACY_SKILLS = "needs legacy per-client skill deployments recorded by an older APM"
 
 COMPONENT_ONLY: dict[str, str] = {
+    "repository-not-found": "needs a direct dependency whose host answers repository-not-found; "
+    "covered by the install not-found lifecycle tests",
     "install-audit-force": "needs the external-scanners flag and a block audit mode; covered "
     "by the install audit policy floor tests",
     "codex-admission-stale": _CODEX,

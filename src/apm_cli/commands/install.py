@@ -242,12 +242,6 @@ def _scoped_lockfile(scope):
     return LockFile.read(resolve_lockfile_path_for_read(apm_dir, read_only=True))
 
 
-def _frozen_lock_has_dependencies(scope) -> bool:
-    """Whether the lockfile a --frozen install verified locks any dependency."""
-    lock = _scoped_lockfile(scope)
-    return bool(lock is not None and lock.dependencies)
-
-
 def _resolve_package_references(
     packages,
     current_deps,
@@ -1622,7 +1616,11 @@ def install(  # noqa: PLR0913
             )
             summary_rendered = True
 
-            if frozen and command_result.exit_code == 0 and _frozen_lock_has_dependencies(scope):
+            if (
+                frozen
+                and command_result.exit_code == 0
+                and getattr(_scoped_lockfile(scope), "dependencies", None)
+            ):
                 # --frozen verified lockfile structure and deployed hashes (req-lk-017),
                 # also on a converged run that installs nothing (#4184).
                 logger.info(
