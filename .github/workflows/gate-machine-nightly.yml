@@ -1,8 +1,9 @@
 name: GATE State Machine Nightly
 
-# M-GATE nightly exploration (#4031). The PR lifecycle shards run the GATE
-# state machine with 4 derandomized examples per scope; this workflow explores
-# 25 fresh examples per scope through `python -m apm_cli.cli`. A failure opens
+# M-GATE nightly exploration (#4031, #4095). The PR lifecycle shards run the
+# GATE state machine through `python -m apm_cli.cli` with 4 derandomized
+# examples per scope; this workflow builds the packaged binary and explores 25
+# fresh examples per scope through it (APM_LIFECYCLE_DRIVER=binary). A failure opens
 # (or updates) one tracking issue; the next green run closes it. Hypothesis
 # prints a @reproduce_failure blob for every falsifying example.
 
@@ -25,7 +26,7 @@ jobs:
   gate-machine:
     name: GATE State Machine (25 examples per scope)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,15 +42,22 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install frozen development dependencies
-        run: uv sync --frozen --extra dev
+      - name: Install frozen development and build dependencies
+        run: uv sync --frozen --extra dev --extra build
+
+      - name: Build binary
+        run: |
+          chmod +x scripts/build-binary.sh
+          uv run ./scripts/build-binary.sh
 
       - name: Explore GATE sequences
         env:
           APM_GATE_MAX_EXAMPLES: "25"
+          APM_LIFECYCLE_DRIVER: binary
         run: |
+          export APM_BINARY_PATH="$PWD/dist/apm-linux-x86_64/apm"
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
-            -n 2 --durations=10 -k sequences tests/integration/test_generated_gate_state_machine.py
+            -n 2 --durations=10 -k sequences tests/lifecycle/machines/test_m_gate.py
 
   signal:
     name: GATE Nightly Signal

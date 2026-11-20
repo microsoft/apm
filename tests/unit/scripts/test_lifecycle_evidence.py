@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -31,8 +32,17 @@ from scripts.lifecycle_contracts import (
     validate_contracts,
     validate_execution,
 )
+from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.isolated_apm_environment import DURABLE_ENVIRONMENT_ROOTS, IsolatedApmEnvironment
-from tests.utils.lifecycle_evidence import LifecycleEvidencePlugin, _physical_roots, snapshot
+from tests.utils.lifecycle_evidence import (
+    KnownOutputCell,
+    LifecycleEvidencePlugin,
+    OutputOracleError,
+    _physical_roots,
+    check_cli_output,
+    expect_output_violation,
+    snapshot,
+)
 
 pytestmark = pytest.mark.component
 pytest_plugins = ["pytester"]
@@ -1236,3 +1246,83 @@ def test_observer_requires_real_runner_and_hypothesis_execution(pytester: pytest
     assert record["events"]
     assert all(event["model"] == 1 and event["returncode"] == 0 for event in record["events"])
     assert record["phases"] == {"setup": "passed", "call": "passed", "teardown": "passed"}
+
+
+_APM = (sys.executable, "-m", "apm_cli.cli")
+
+
+def _cli(args: tuple[str, ...], stdout: str = "", stderr: str = "", code: int = 0, prefix=_APM):
+    return CommandResult((*prefix, *args), code, stdout, stderr, Path("."))
+
+
+@pytest.mark.parametrize(
+    ("args", "stdout", "stderr", "code", "law"),
+    [
+        (("install",), "[+] Installed \u2713\n", "", 0, "I6: stdout has characters outside"),
+        (("install",), "", "\x1b[31m[x] failed\n", 1, "I6: stderr has characters outside"),
+        (("audit", "--format", "json"), "[i] not json\n", "", 0, "I6: JSON mode printed invalid"),
+        (("list", "--json"), "", "", 1, "I6: JSON mode printed invalid"),
+        (("install",), "", "Traceback (most recent call last):\n", 1, "I9: stderr has a Python"),
+        (("install",), "", "", 3, "I8: exit code 3 is outside [0, 1, 2]"),
+        (("pack",), "", "", 6, "I8: exit code 6 is outside [0, 1, 2, 3, 4, 5]"),
+        (("install",), "[+] a\n  copied\n  copied\n", "", 0, "I9: stdout repeats a line"),
+        (("install",), "[!] Skipped x\n[+] b\n[!] Skipped x\n", "", 0, "I9: stdout repeats a"),
+        (("install",), "[+] p\n  |-- 1 skill\n  [i] n\n  |-- 1 skill\n", "", 0, "I9: stdout"),
+    ],
+)
+def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, code, law) -> None:
+    with pytest.raises(OutputOracleError, match=re.escape(law)):
+        check_cli_output(args, _cli(args, stdout, stderr, code))
+
+
+@pytest.mark.parametrize(
+    ("args", "stdout", "code", "prefix"),
+    [
+        (
+            ("install",),
+            "[+] p1\n  |-- 1 skill integrated\n[+] p2\n  |-- 1 skill integrated\n",
+            0,
+            _APM,
+        ),
+        (("deps", "list"), "+------+\n|  a   |\n+------+\n+------+\n", 0, _APM),
+        (("audit", "--json"), '{"ok": true}\n', 3, ("/opt/bin/apm",)),
+        (("audit", "--json"), "", 2, _APM),
+        (
+            ("--version",),
+            "\u2713 Traceback (most recent call last)\n",
+            9,
+            (sys.executable, "-c", "x"),
+        ),
+    ],
+)
+def test_output_oracle_accepts_contract_output_and_ignores_non_apm_commands(
+    args, stdout, code, prefix
+) -> None:
+    check_cli_output(args, _cli(args, stdout, code=code, prefix=prefix))
+
+
+def test_known_output_cell_is_a_strict_expected_failure() -> None:
+    cell = KnownOutputCell(
+        "sample-cell", "I6", "#1", lambda args, _scenario: args[:1] == ("install",), "stdout"
+    )
+    bad = _cli(("install",), "\u2713\n")
+    check_cli_output(("install",), bad, known_cells=(cell,))
+    with pytest.raises(OutputOracleError, match="I8: exit code 7"):
+        check_cli_output(("install",), _cli(("install",), "\u2713\n", code=7), known_cells=(cell,))
+    with pytest.raises(
+        OutputOracleError, match=r"sample-cell \(#1\) did not fail.*remove the cell"
+    ):
+        check_cli_output(("install",), _cli(("install",), "ok\n"), known_cells=(cell,))
+    check_cli_output(("compile",), _cli(("compile",), "ok\n"), known_cells=(cell,))
+
+
+def test_expect_output_violation_suspends_only_the_named_laws() -> None:
+    crash = _cli(("install",), "", "Traceback (most recent call last):\n", 1)
+    with expect_output_violation("I9", reason="the test asserts crash rendering"):
+        check_cli_output(("install",), crash)
+        with pytest.raises(OutputOracleError, match="I8"):
+            check_cli_output(("install",), _cli(("install",), code=9))
+    with pytest.raises(OutputOracleError, match="I9"):
+        check_cli_output(("install",), crash)
+    with pytest.raises(ValueError, match="reason"), expect_output_violation("I9", reason=" "):
+        pass

@@ -1,14 +1,16 @@
-"""M-GATE: the executable-trust sub-machine of the generated lifecycle model (#4031).
+"""M-GATE: the executable-trust sub-machine of the lifecycle family (#4031, #4095).
 
-The machine drives the real CLI through declare and undeclare of executable
-(hook), LSP and native-plugin content, approve, deny, revoke, policy
-tightening, install, install --frozen, update, uninstall, prune and
-audit --ci, at project scope and at user scope with
-``APM_HOME`` outside ``HOME``. After every step ``check_cross_cutting`` runs
-the I1-I9 laws plus the reference-model law ``R``.
+The machine drives the real CLI (``tests/lifecycle/driver.py``: engine on PR,
+binary on the nightly) through declare and undeclare of executable (hook),
+LSP and native-plugin content, approve, deny, revoke, policy tightening,
+install, install --frozen, update, uninstall, prune and audit --ci, at
+project scope and at user scope with ``APM_HOME`` outside ``HOME``. After
+every step ``check_cross_cutting`` runs the I1-I9 laws plus the
+reference-model law ``R``.
 
 Every rule emits ``cell:<OP>|<SRC>|<PRIM>|<GATE>|<SCOPE>`` as a Hypothesis
-event and records it in ``VISITED_CELLS`` for the session hook.
+event and records it in ``VISITED_CELLS`` for the session hook in
+``tests/lifecycle/machines/conftest.py``.
 """
 
 from __future__ import annotations
@@ -28,11 +30,8 @@ from hypothesis.control import currently_in_test_context
 from hypothesis.stateful import RuleBasedStateMachine, precondition, rule
 
 from apm_cli.deps.lockfile import LockFile
-from tests.unit.copilot_plugins._builders import write_agent_plugin
-from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
-from tests.utils.artifact_snapshot import ArtifactSnapshotSet
-from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
-from tests.utils.lifecycle_oracle import (
+from tests.lifecycle import driver
+from tests.lifecycle.oracles import (
     ExpectedCell,
     Observation,
     Operation,
@@ -40,6 +39,10 @@ from tests.utils.lifecycle_oracle import (
     partition_expected,
     strict_misses,
 )
+from tests.unit.copilot_plugins._builders import write_agent_plugin
+from tests.utils.apm_lifecycle_runner import CommandResult
+from tests.utils.artifact_snapshot import ArtifactSnapshotSet
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateSnapshot, LifecycleSurfaceRoots
 
 SCOPES = ("project", "user")
@@ -196,7 +199,7 @@ class GateWorld:
     scope: str
     isolated: IsolatedApmEnvironment
     env: dict[str, str]
-    runner: ApmLifecycleRunner
+    entry_point: tuple[str, ...]
     workspace: Path
     cwd: Path
     deploy_root: Path
@@ -205,13 +208,12 @@ class GateWorld:
     roots: dict[str, Path] = field(default_factory=dict)
 
     @classmethod
-    def create(cls, root: Path, engine_command: tuple[str, ...], scope: str) -> GateWorld:
+    def create(cls, root: Path, entry_point: tuple[str, ...], scope: str) -> GateWorld:
         isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
         env = isolated.subprocess_env()
         env["APM_NON_INTERACTIVE"] = "1"
         # Wide output keeps one diagnostic per line, so I9 never sees wrap artifacts.
         env["COLUMNS"] = "400"
-        runner = ApmLifecycleRunner(engine_command, timeout_seconds=120)
         sources = isolated.package_root
         packages = {
             "hook": _hook_package(sources / "hook-kit"),
@@ -247,7 +249,7 @@ class GateWorld:
             scope,
             isolated,
             env,
-            runner,
+            tuple(entry_point),
             workspace,
             cwd,
             deploy_root,
@@ -256,8 +258,13 @@ class GateWorld:
             roots,
         )
 
-    def run(self, args: tuple[str, ...], label: str) -> CommandResult:
-        return self.runner.run(args, cwd=self.cwd, env=self.env, scenario_id=f"gate-{label}")
+    @property
+    def project(self) -> Path:
+        """The directory every command runs in (the driver's world contract)."""
+        return self.cwd
+
+    def run(self, args: tuple[str, ...]) -> CommandResult:
+        return driver.run(self, args, scope=self.scope, entry_point=self.entry_point)
 
     def global_flag(self) -> tuple[str, ...]:
         return ("--global",) if self.scope == "user" else ()
@@ -587,7 +594,7 @@ class GateMachine(RuleBasedStateMachine):
 
         self._step(
             Operation(verdict, (surface,), tightening=verdict == "deny"),
-            lambda: self.world.run((verdict, *user, path), f"{verdict}-{surface}"),
+            lambda: self.world.run((verdict, *user, path)),
             reference=reference,
         )
         if verdict == "deny":
@@ -622,7 +629,7 @@ class GateMachine(RuleBasedStateMachine):
                 paired=paired or {},
                 modifiers=("FROZEN",) if mode == "frozen" else (),
             ),
-            lambda: self.world.run(args, name),
+            lambda: self.world.run(args),
             reference=self._install_reference(mode),
         )
         if mode == "plain" and result is not None and result.returncode == 0:
@@ -634,7 +641,7 @@ class GateMachine(RuleBasedStateMachine):
         args = ("update", *self.world.global_flag(), "--yes")
         result = self._step(
             Operation("update", mutating=True),
-            lambda: self.world.run(args, "update"),
+            lambda: self.world.run(args),
             reference=self._install_reference("plain"),
         )
         self.converged = result is not None and result.returncode == 0 and self.converged
@@ -647,7 +654,7 @@ class GateMachine(RuleBasedStateMachine):
         self.converged = False
         result = self._step(
             Operation("uninstall", (kind,), mutating=True),
-            lambda: self.world.run(args, f"uninstall-{kind}"),
+            lambda: self.world.run(args),
         )
         declared = self.world.manifest().get("dependencies", {}).get("apm", [])
         if result is not None and str(self.world.packages[kind]) not in declared:
@@ -656,7 +663,7 @@ class GateMachine(RuleBasedStateMachine):
     @rule()
     @precondition(lambda self: self.scope == "project")
     def prune(self) -> None:
-        self._step(Operation("prune", mutating=True), lambda: self.world.run(("prune",), "prune"))
+        self._step(Operation("prune", mutating=True), lambda: self.world.run(("prune",)))
 
     @rule(json_output=st.booleans())
     @precondition(lambda self: self.scope == "project")
@@ -664,7 +671,7 @@ class GateMachine(RuleBasedStateMachine):
         args = ("audit", "--ci", *(("--format", "json") if json_output else ()))
         audit = self._step(
             Operation("audit-ci", read_only=True, json_output=json_output),
-            lambda: self.world.run(args, "audit-ci"),
+            lambda: self.world.run(args),
         )
         assert audit is not None
         self._install("frozen", paired={"audit": audit.returncode})
