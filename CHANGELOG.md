@@ -113,6 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` writes `apm.lock.yaml` when the project's own `.apm/` hooks only merge into shared harness settings, so `apm audit --ci` checks them for drift. (closes #4033, #4489)
 - `apm install` on Windows works from deep project paths: the Git config safety check no longer fails with `'$GIT_DIR' too big` for staged dependencies. (#4487)
 - A refreshed org policy that fails validation no longer drops a valid cached policy: install and `apm audit --ci` keep applying the cached policy, as for an unreachable policy host. (#4476, #4481)
+- `apm audit --ci` verifies the skill selection of a local Claude plugin without `apm.yml` installed with `--skill`, instead of reporting it as unverified. (#4494)
 - Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
 - `apm audit --ci` and `apm install --frozen` advice for edited files says what install does per file kind; `apm install` warns before overwriting edits. (closes #4090, #4143)
 - `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)
