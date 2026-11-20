@@ -12,9 +12,9 @@ from apm_cli.core.command_logger import CommandLogger
 from apm_cli.deps.file_provenance import LOCAL_BUNDLE_OWNER
 from apm_cli.install.local_edits import (
     count_exportable_findings,
+    edited_file_remediations,
     local_edit_hint,
     rendering_change_hint,
-    restore_locked_content_hint,
     unedited_modified_paths,
 )
 from apm_cli.utils.console import STATUS_SYMBOLS
@@ -151,11 +151,15 @@ def render_drift_text(
         edited = [
             finding for finding in by_kind.get("modified", []) if finding.path not in unedited
         ]
-        bundle_edits = {finding.package == LOCAL_BUNDLE_OWNER for finding in edited}
-        for bundle in sorted(bundle_edits):
-            subject = "the modified bundle files" if bundle else "the modified files"
-            hint = restore_locked_content_hint(subject, bundle=bundle)
-            lines.append(f"  {STATUS_SYMBOLS['info']} {hint}.")
+        # True per primitive kind (RA-009): see install/local_edits.py.
+        for bundle in sorted({finding.package == LOCAL_BUNDLE_OWNER for finding in edited}):
+            paths = [
+                finding.path
+                for finding in edited
+                if (finding.package == LOCAL_BUNDLE_OWNER) is bundle
+            ]
+            for remediation in edited_file_remediations(paths, bundle=bundle):
+                lines.append(f"  {STATUS_SYMBOLS['info']} {remediation.sentence()}")
         if len(edited) < len(findings):
             lines.append(
                 f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files "

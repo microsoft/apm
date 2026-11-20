@@ -546,6 +546,16 @@
       ]
     },
     {
+      "issue": 4090,
+      "fixed_in": "0.37.0",
+      "summary": "apm audit --ci and apm install --frozen advised that a plain apm install keeps local edits, but install overwrites edited instructions, agents, prompts, commands and rules behind an info line and refuses edited skills; the advice now states what install does per kind and the overwrite notice is a warning naming the files.",
+      "failure_modes": ["outcome", "observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_local_edit_advice_lifecycle.py::test_local_edit_advice_is_true_and_restores_each_kind"
+      ]
+    },
+    {
       "issue": 4091,
       "fixed_in": "0.37.0",
       "summary": "apm lifecycle trust and untrust wrote the script trust store outside the cross-process lifecycle serialization owner, so a concurrent lifecycle writer could drop a recorded trust or restore a revoked one while the command reported success.",

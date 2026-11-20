@@ -802,7 +802,7 @@ class InstallService:
         """
         from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.errors import FrozenInstallError
-        from apm_cli.install.local_edits import restore_locked_content_hint
+        from apm_cli.install.local_edits import edited_file_remediations
         from apm_cli.policy.ci_checks import resolve_audit_scope, verify_deployed_file_hashes
 
         lockfile_path = _frozen_lockfile_path(request)
@@ -825,11 +825,12 @@ class InstallService:
                 + " To keep local edits, run 'apm export-patch' or move them aside first."
             )
         else:
-            tip = (
-                "Tip: nothing was deployed. "
-                f"{restore_locked_content_hint('the listed files')}. To keep local "
-                "edits, run 'apm export-patch' or move them aside first."
+            # True per primitive kind (RA-009): see install/local_edits.py.
+            advice = " ".join(
+                item.sentence()
+                for item in edited_file_remediations(drift.path for drift in drifted)
             )
+            tip = f"Tip: nothing was deployed. {advice}"
         raise FrozenInstallError(
             "--frozen: deployed files do not match the hashes recorded in apm.lock.yaml.",
             reasons=[

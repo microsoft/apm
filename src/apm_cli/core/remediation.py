@@ -151,6 +151,24 @@ RESTORE_EDITED = _entry(
     before="delete {subject}",
     then="commit the result",
 )
+# What a plain 'apm install' does to an edited managed file depends on its
+# kind (RA-009): it overwrites instructions, agents, prompts, commands and
+# rules, and refuses to overwrite a skill. Deleting first restores both.
+RESTORE_EDITED_OVERWRITE = _entry(
+    "drift-restore-edited-overwrite",
+    "apm install",
+    "restore the locked content (a plain 'apm install' also overwrites these edited "
+    "instructions, agents, prompts, commands and rules)",
+    before="delete {subject}",
+    then="commit the result",
+)
+RESTORE_EDITED_SKILL = _entry(
+    "drift-restore-edited-skill",
+    "apm install",
+    "restore the locked content (a plain 'apm install' refuses to overwrite an edited skill)",
+    before="delete {subject}",
+    then="commit the result",
+)
 RESTORE_EDITED_FORCE = _entry(
     "drift-restore-edited-force",
     "apm install --force",
