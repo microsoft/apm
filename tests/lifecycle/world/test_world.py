@@ -405,6 +405,28 @@ def test_marketplace_source_installs(lifecycle_world: World, package: str, scope
     _assert_surfaces(world, package, scope)
 
 
+def _tree_bytes(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def test_marketplace_update_dry_run_writes_nothing_under_apm_home(lifecycle_world: World) -> None:
+    """#4484: update --dry-run re-verifies marketplace provenance read-only (I5)."""
+    world = lifecycle_world
+    _ok(world, ["marketplace", "add", world.services.marketplace_url])
+    _install_and_approve(world, "p-skill:marketplace", "project")
+    home = _tree_bytes(world.apm_home)
+    project = _tree_bytes(world.project)
+
+    _ok(world, ["update", "--dry-run"])
+
+    assert _tree_bytes(world.apm_home) == home
+    assert _tree_bytes(world.project) == project
+
+
 def test_local_bundle_installs_offline(lifecycle_world: World) -> None:
     world = lifecycle_world
     bundle = world.packages["p-exec:bundle"]
