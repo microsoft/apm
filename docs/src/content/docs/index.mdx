@@ -1,121 +1,156 @@
 ---
-title: APM - Agent Package Manager
-description: A dependency manager for AI agents. Declare the skills, prompts, instructions, plugins, and MCP servers your project needs in one apm.yml.
+title: Agent Package Manager
+description: Lock what your agents load. APM declares, locks and governs the skills, plugins, MCP servers and hooks your coding agents use, on the harnesses you already run.
 template: splash
 hero:
-  title: Agent Package Manager
-  tagline: A dependency manager for AI agents -- like npm for agent context.
+  title: Lock what your agents load.
+  tagline: Portable by manifest. Verified by lockfile. Governed by policy.
   actions:
-    - text: Quickstart
+    - text: Get started in 5 minutes
       link: /apm/quickstart/
       icon: right-arrow
       variant: primary
-    - text: View on GitHub
-      link: https://github.com/microsoft/apm
-      icon: external
-      variant: minimal
+    - text: Roll out across your organization
+      link: /apm/enterprise/
+      variant: secondary
 ---
 
-import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Card, CardGrid, LinkCard, Tabs, TabItem } from '@astrojs/starlight/components';
 
-APM is a dependency manager for AI agents. Declare the skills, prompts, instructions, plugins, and MCP servers your project needs in one `apm.yml`, then any developer runs `apm install` to deploy each primitive to the harnesses that support it. See the [targets matrix](./reference/targets-matrix/) for support across GitHub Copilot, Claude Code, Grok Build, Cursor, OpenCode, Codex, Gemini, Windsurf, and Kiro.
-
-<CardGrid>
-  <Card title="Portable by manifest" icon="document">
-    One `apm.yml` across supported harnesses and machines. The lockfile pins exact versions and content hashes so a fresh clone resolves the same package content byte-for-byte.
-  </Card>
-  <Card title="Secure by default" icon="approve-check-circle">
-    Every install scans for hidden Unicode, pins content hashes, and blocks transitive MCP servers unless they are explicitly declared or trusted. No opt-in required.
-  </Card>
-  <Card title="Governed by policy" icon="setting">
-    `apm-policy.yml` is enforced at install time, including transitive MCP. Tighten-only inheritance flows enterprise -> org -> repo. Runtime behavior is your harness's domain. See the [Governance Guide](/apm/enterprise/governance-guide/).
-  </Card>
-</CardGrid>
-
-## Install APM
+APM is the dependency manager for the agent supply chain: one manifest, one lockfile and one
+org policy for the skills, plugins and MCP servers your agents load, with the harnesses and
+marketplaces you already use.
 
 <Tabs syncKey="os">
-  <TabItem label="macOS (Homebrew)" icon="apple">
-    Already use Homebrew?
-
-    ```bash
+  <TabItem label="macOS">
+    ```bash frame="terminal"
     brew install apm
     ```
-
-    No custom tap needed. Update with `brew upgrade apm`.
   </TabItem>
-  <TabItem label="Linux / macOS (no Homebrew)" icon="document">
-    ```bash
+  <TabItem label="Linux">
+    ```bash frame="terminal"
     curl -sSL https://aka.ms/apm-unix | sh
     ```
   </TabItem>
-  <TabItem label="Windows" icon="seti:windows">
-    ```powershell
+  <TabItem label="Windows">
+    ```powershell frame="terminal"
     irm https://aka.ms/apm-windows | iex
     ```
   </TabItem>
 </Tabs>
 
-Homebrew is optional. See [all installation options](./getting-started/installation/)
-for pip, Scoop, and manual installs. For standalone Unix installs, follow the
-installer's shell-specific `PATH` guidance if the current terminal cannot find
-`apm`.
+No account and no registry. Packages come from git: GitHub, GitHub Enterprise, Azure DevOps,
+GitLab. [Other install options](./getting-started/installation/).
 
-Then try it on a sample package:
+**Works with your harness**, the agent tool that reads the files: GitHub Copilot, Claude Code,
+Grok Build, Cursor, OpenCode, Codex, Gemini CLI, Windsurf and Kiro.
 
-```bash
-apm install microsoft/apm-sample-package
+## Skills, plugins and MCP servers, one tool
+
+```bash frame="terminal"
+# A skill, the way npx skills add does it
+apm install vercel-labs/agent-skills --skill deploy-to-vercel
+
+# A plugin from a marketplace
+apm marketplace add anthropics/claude-code
+apm install commit-commands@claude-code-plugins
+
+# An MCP server, configured for every harness in the project
+apm install --mcp io.github.github/github-mcp-server --transport http
 ```
 
-## The manifest
+Commit `apm.yml` and `apm.lock.yaml`. A teammate clones the repository and gets the same setup:
 
-This example omits `$schema` and uses APM's working-draft contract. For an
-explicit schema, see [contract selection and the corrected schema candidate](./reference/manifest-schema/#2-document-structure);
-the older published schemas reject the Git-plus-path form shown below.
-
-```yaml
-# apm.yml -- ships with your repo, like package.json
-name: my-project
-version: 1.0.0
-dependencies:
-  apm:
-    # Skills, prompts, agents, plugins -- from any GitHub repo, with version pinning
-    - anthropics/skills/skills/frontend-design
-    - microsoft/apm-sample-package
-    - github/awesome-copilot/plugins/context-engineering#v2.1
-    - github/awesome-copilot/agents/api-architect.agent.md
-    # GitLab, Azure DevOps, Bitbucket, Gitea, any git server
-    - git: https://gitlab.com/acme/coding-standards.git
-      path: instructions/security
-      ref: v2.0
-    - dev.azure.com/acme/platform/_git/prompts/review.prompt.md
-    - bitbucket.org/team/agent-rules#main
-  mcp:
-    # MCP servers governed by the same manifest
-    - io.github.github/github-mcp-server
-    - io.github.microsoft/playwright-mcp
+```text frame="none"
+$ apm install --frozen
+[*] Installed 2 APM dependencies and 1 MCP server in 1.5s.
+[i] Deployed files verified against apm.lock.yaml.
 ```
 
-```bash
-git clone <repo> && cd <repo> && apm install
-```
+[Try it in five minutes](./quickstart/).
 
-That's it. Each selected harness receives the primitives it supports in one command; every dependency is pinned, and every MCP server is policy-checked before it touches disk.
+## MCP servers without hand-edited JSON
 
-## Pick your path
+Every harness keeps MCP servers in its own file and format: a shared `.mcp.json` for Claude
+Code and GitHub Copilot, `.cursor/mcp.json` for Cursor, `.codex/config.toml` for Codex, and more.
+Declare a server once in `apm.yml` and APM writes each of those files for you, on every machine.
+
+- **One declaration, every harness.** Add a harness later and the same servers follow.
+- **Secrets stay out of the repository.** Write tokens as `${VAR}` references; APM translates
+  them into each harness's own syntax, so the harness reads the value when it starts the server.
+- **No surprise servers.** A self-defined server that arrives through someone else's package is
+  held back until you declare or approve it.
+
+[Add MCP and LSP servers](./consumer/install-mcp-servers/).
+
+## Copies drift silently. Locked dependencies show you the drift.
+
+A skill pasted into ten repositories becomes ten skills. Declare it once instead, and APM records
+exactly what you got.
 
 <CardGrid>
-  <Card title="Use a package" icon="rocket">
-    Install someone else's primitives and run them on your harness. Start in the [consumer ramp](/apm/consumer/).
+  <Card title="apm.yml -- what you asked for">
+    ```yaml
+    targets: [copilot, claude]
+    dependencies:
+      apm:
+        - contoso/review-skills#^1.2.0
+      mcp:
+        - name: io.github.github/github-mcp-server
+    ```
   </Card>
-  <Card title="Author and publish" icon="open-book">
-    Build skills, prompts, plugins, or full packages others can install. Start in the [producer ramp](/apm/producer/).
-  </Card>
-  <Card title="Govern at fleet scale" icon="setting">
-    Policy, audit, and CI gating across the org. Start in the [enterprise ramp](/apm/enterprise/).
+  <Card title="apm.lock.yaml -- what you got">
+    ```yaml
+    - repo_url: contoso/review-skills
+      resolved_ref: v1.2.3
+      resolved_commit: 7f3c2a91...
+      deployed_file_hashes:
+        .claude/skills/review/SKILL.md: sha256:11427002...
+    ```
   </Card>
 </CardGrid>
 
+APM writes each harness's own format, so nobody changes tools. Keep your harness and your
+marketplaces; APM adds the manifest, the lockfile and the policy underneath.
+[See what lands where](./reference/targets-matrix/).
+
+## Three ways in
+
+<CardGrid>
+  <LinkCard title="Use skills, plugins and MCP servers" description="Install them once; keep every clone and CI run identical. apm install" href="/apm/consumer/" />
+  <LinkCard title="Publish packages" description="Ship versioned skills and plugins that teams pin and update on their schedule. apm init" href="/apm/producer/" />
+  <LinkCard title="Govern your organization" description="Decide which sources agents may load from, and check every pull request. apm audit --ci" href="/apm/enterprise/" />
+  <LinkCard title="Why this matters" description="What the agent supply chain is, and why teams build marketplaces of agent capabilities." href="/apm/concepts/agent-supply-chain/" />
+</CardGrid>
+
+## From one repository to your whole organization
+
+Teams that run coding agents at scale end up building the same thing: a marketplace of approved
+agent capabilities, published by a central team and installed by many repositories. APM is the
+dependency layer under that marketplace.
+
+| Step | What you turn on | What you get |
+|---|---|---|
+| 1 | `apm.yml` and `apm.lock.yaml` in each repository | The same files on every machine |
+| 2 | `apm install --frozen` and `apm audit --ci` in CI | CI fails when the files and the lockfile disagree |
+| 3 | An organization `apm-policy.yml` | One place to allow or deny sources, MCP servers and executables |
+| 4 | An `executables:` policy, approvals and an exported inventory | Hooks and MCP servers need an approval before they deploy; a CycloneDX or SPDX list on demand |
+
+APM governs what gets installed. Your harness governs what runs.
+[Read the security model](./enterprise/security/).
+
+## Recognized by practitioners
+
+- Thoughtworks Technology Radar Vol. 35 (November 2026) places APM in **Trial**, describing it as
+  a tool that treats agent context as a supply chain.
+  [Read the entry](https://www.thoughtworks.com/radar/tools/summary/agent-package-manager).
+- Version updates for APM manifests in [Dependabot](./consumer/update-and-refresh/#dependabot)
+  and [Renovate](./consumer/update-and-refresh/#renovate); Agent Packages repositories in
+  [JFrog Artifactory](./enterprise/org-marketplace/); runs in
+  [GitHub Agentic Workflows](./consumer/run-in-ci/).
+- An open specification, [OpenAPM v0.1](./specs/openapm-v01/), with conformance tests.
+- [Organizations using APM](./about/adopters/), listed with their consent.
+
 ---
 
-APM is open source under the [microsoft](https://github.com/microsoft/apm) org. Software and the software-facing OpenAPM specification use [Apache-2.0](https://github.com/microsoft/apm/blob/main/LICENSE); general documentation uses [CC-BY-4.0](https://github.com/microsoft/apm/blob/main/LICENSE-DOCS), with [scope and exclusions](https://github.com/microsoft/apm/blob/main/LICENSING.md). Built on [AGENTS.md](https://agents.md), [Agent Skills](https://agentskills.io), [MCP](https://modelcontextprotocol.io). See the [changelog](https://github.com/microsoft/apm/blob/main/CHANGELOG.md) for what shipped recently.
+APM is open source under the [microsoft](https://github.com/microsoft/apm) organization on GitHub. Software and the software-facing OpenAPM specification use [Apache-2.0](https://github.com/microsoft/apm/blob/main/LICENSE); general documentation uses [CC-BY-4.0](https://github.com/microsoft/apm/blob/main/LICENSE-DOCS), with [scope and exclusions](https://github.com/microsoft/apm/blob/main/LICENSING.md). Built on [AGENTS.md](https://agents.md), [Agent Skills](https://agentskills.io) and [MCP](https://modelcontextprotocol.io). See the [changelog](https://github.com/microsoft/apm/blob/main/CHANGELOG.md) for what shipped recently.
