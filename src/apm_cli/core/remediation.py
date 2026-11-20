@@ -195,6 +195,52 @@ RESYNC_AFTER_UNMANAGED_CONFLICT = _entry(
 # -- W2 marketplace --
 # -- end W2 marketplace --
 # -- W2 bundle --
+PACK_LOCKFILE_MISSING = _entry(
+    "pack-lockfile-missing",
+    "apm install",
+    "resolve dependencies into apm.lock.yaml",
+    then="pack again",
+)
+PACK_INSTALLED_FILES_MISSING = _entry(
+    "pack-installed-files-missing",
+    "apm install",
+    "restore the installed files recorded in apm.lock.yaml",
+    then="pack again",
+)
+PACK_INSTALLED_FILE_TAMPERED = _entry(
+    "pack-installed-file-tampered",
+    "apm install",
+    "restore the attested content",
+    before="delete {path}",
+    then="pack again",
+)
+PACK_SKILL_SUBSET_MISSING = _entry(
+    "pack-skill-subset-missing",
+    "apm install",
+    "re-deploy the expected skills",
+    then="pack again",
+)
+PACK_DEPENDENCY_UNATTESTED = _entry(
+    "pack-dependency-unattested",
+    "apm install",
+    "record provenance in apm.lock.yaml",
+    then="pack again",
+)
+AGENT_PLUGIN_SURFACES_DROPPED = _entry(
+    "agent-plugin-surfaces-dropped",
+    "apm pack --format claude-plugin",
+    "preserve {surfaces} in the legacy Claude client format",
+)
+AGENT_PLUGIN_MCP_UNPORTABLE = _entry(
+    "agent-plugin-mcp-unportable",
+    "apm pack --claude-plugin",
+    "pack the MCP server in the legacy Claude plugin format",
+)
+UNPACK_CRITICAL_FINDINGS = _entry(
+    "unpack-critical-findings",
+    "apm unpack <bundle-path> --force",
+    "deploy the bundle anyway (not recommended)",
+)
 # -- end W2 bundle --
 # -- end W2 -------------------------------------------------------------------
 
