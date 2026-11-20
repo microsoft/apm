@@ -51,11 +51,11 @@ class _Scope:
             return self.scene.home / ".copilot" / "lsp-config.json"
         return self.scene.project / ".github" / "lsp.json"
 
-    def declare(self, *names: str) -> None:
+    def declare(self, *names: str, targets: tuple[str, ...] = ("copilot",)) -> None:
         manifest = {
             "name": "lsp-consumer",
             "version": "1.0.0",
-            "targets": ["copilot"],
+            "targets": list(targets),
             "dependencies": {"apm": [str(self.packages[n].root) for n in names]},
         }
         (self.manifest_root / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
@@ -74,6 +74,28 @@ class _Scope:
         if not self.lsp_config.exists():
             return set()
         return set(json.loads(self.lsp_config.read_text(encoding="utf-8")).get("lspServers", {}))
+
+    def harness_servers(self) -> dict[str, set[str]]:
+        """Return the LSP server names each LSP-capable harness config holds."""
+        base = self.scene.home if self.user else self.scene.project
+        configs = {
+            "copilot": (self.lsp_config, "lspServers"),
+            "claude": (
+                base / ".claude" / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json",
+                "lspServers",
+            ),
+            "opencode": (
+                self.scene.home / ".config" / "opencode" / "opencode.json"
+                if self.user
+                else self.scene.project / "opencode.json",
+                "lsp",
+            ),
+        }
+        servers: dict[str, set[str]] = {}
+        for harness, (path, key) in configs.items():
+            data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            servers[harness] = set(data.get(key) or {})
+        return servers
 
     def locked_views(self) -> dict[str, set[str]]:
         lock_path = self.manifest_root / "apm.lock.yaml"
@@ -147,6 +169,22 @@ def test_lsp_only_uninstall_removes_the_server_and_keeps_survivors(scope: _Scope
 
     assert result.returncode == 0, describe(result)
     assert scope.configured() == set()
+    assert all(view == set() for view in scope.locked_views().values()), scope.locked_views()
+
+
+def test_lsp_only_uninstall_clears_every_harness_it_wrote(scope: _Scope) -> None:
+    """After uninstall, no LSP-capable harness config keeps the server (#4045)."""
+    harnesses = ("copilot", "claude", "opencode")
+    scope.declare("lsp-kit", targets=harnesses)
+    installed = scope.scene.install(",".join(harnesses), user=scope.user)
+    assert installed.returncode == 0, describe(installed)
+    assert scope.harness_servers() == {harness: {"kit-lsp"} for harness in harnesses}
+
+    result = scope.uninstall("lsp-kit")
+
+    assert result.returncode == 0, describe(result)
+    assert _MANIFEST_ERROR not in flat(result.stdout + result.stderr)
+    assert scope.harness_servers() == {harness: set() for harness in harnesses}
     assert all(view == set() for view in scope.locked_views().values()), scope.locked_views()
 
 
