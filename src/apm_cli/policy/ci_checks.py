@@ -324,9 +324,8 @@ def _check_exec_status_current(
     the check is not evaluated. Indeterminate answers (the provider raising
     ``ExecPolicyUnavailable``, an unreadable package) are not failures.
     """
-    from ..core.scope import manifest_root
+    from ..core.scope import scope_manifest_path
     from ..install.exec_gate import stale_exec_decisions
-    from ..security.executables import project_manifest_path
 
     if policy_provider is None:
         return CheckResult(
@@ -337,7 +336,7 @@ def _check_exec_status_current(
     stale, indeterminate = stale_exec_decisions(
         lock,
         modules_root,
-        project_manifest_path(manifest_root(project_root, user_scope=user_scope)),
+        scope_manifest_path(project_root, user_scope=user_scope),
         policy_provider=policy_provider,
         targets=list(targets),
         fallback_allow_executables=getattr(manifest, "allow_executables", None),
