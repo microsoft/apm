@@ -51,6 +51,11 @@ _OLD_RENDERINGS = {
         '[ext](https://example.com/x.md) and [anchor](#top)."\n'
     ),
 }
+# The closing line of a frozen replay that adopted both pre-0.37 renderings (#4398).
+_ADOPT_LINE = (
+    "Adopted 2 file(s) an APM before 0.37 deployed, unchanged as committed. Run "
+    "'apm install' to re-render them for this version and record deployment receipts."
+)
 _KEPT_REMEDY = (
     "Move it aside, then run 'apm install' to restore it, or 'apm install --force' to overwrite it."
 )
@@ -66,7 +71,7 @@ def _sha(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def _emulate_previous_cli_output(project: Path) -> None:
+def _emulate_previous_cli_output(project: Path, *, stamp: str = "0.35.1") -> None:
     """Rewrite files and lock hashes to what the 0.35.1 CLI recorded."""
     lock_path = project / "apm.lock.yaml"
     lock = load_yaml(lock_path)
@@ -79,7 +84,7 @@ def _emulate_previous_cli_output(project: Path) -> None:
         for deployment in lock.get("deployments") or []:
             if deployment.get("value") == relative:
                 deployment["content_hash"] = digest
-    lock["apm_version"] = "0.35.1"
+    lock["apm_version"] = stamp
     dump_yaml(lock, lock_path)
 
 
@@ -108,47 +113,105 @@ def _project(scenario: Scenario, sha: str, env: dict[str, str], targets: list[st
     return project
 
 
-def test_frozen_replay_of_previous_cli_output_fails_closed_and_names_paths(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
-    scenario = Scenario.create(tmp_path, apm_binary_path)
+def _previous_cli_clone(
+    scenario: Scenario, *, stamp: str, staged: bool
+) -> tuple[Path, dict[str, str]]:
+    """A receipt-less checkout whose files and lock are what an older CLI wrote.
+
+    *stamp* is the lock's ``apm_version``. With *staged*, the old renderings and
+    lock sit staged over committed current renderings instead of committed.
+    """
     sha, env = _published(scenario)
     project = _project(scenario, sha, env, ["copilot", "cursor", "codex"])
-    _emulate_previous_cli_output(project)
     _git(project, env, "init", "--initial-branch=main")
+    if staged:
+        _git(project, env, "add", "--all")
+        _git(project, env, "commit", "-m", "deployed by the current CLI")
+    _emulate_previous_cli_output(project, stamp=stamp)
     _git(project, env, "add", "--all")
-    _git(project, env, "commit", "-m", "deployed by 0.35.1")
-
-    clone = scenario.isolated.work_root / "ci-clone"
-    _git(scenario.isolated.work_root, env, "clone", "--quiet", str(project), str(clone))
+    if not staged:
+        _git(project, env, "commit", "-m", f"deployed by {stamp}")
+        clone = scenario.isolated.work_root / "ci-clone"
+        _git(scenario.isolated.work_root, env, "clone", "--quiet", str(project), str(clone))
+    else:
+        clone = project
     for receipts in scenario.isolated.config_root.glob("deployment-receipts*"):
         shutil.rmtree(receipts)
     shutil.rmtree(scenario.isolated.cache_root)
     scenario.isolated.cache_root.mkdir()
+    return clone, env
+
+
+def _receipts(scenario: Scenario) -> list[Path]:
+    return [
+        path
+        for root in scenario.isolated.config_root.glob("deployment-receipts*")
+        for path in root.rglob("*")
+        if path.is_file()
+    ]
+
+
+def test_frozen_replay_of_pre037_cli_output_adopts_then_install_migrates(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A committed 0.35.1 checkout is APM-owned (#4398): frozen and audit agree."""
+    scenario = Scenario.create(tmp_path, apm_binary_path)
+    clone, env = _previous_cli_clone(scenario, stamp="0.35.1", staged=False)
     lock_before = (clone / "apm.lock.yaml").read_bytes()
 
-    # Audit alone names the rendering change and does not offer export-patch.
-    audit = scenario.run("audit", "--ci", "--no-policy", cwd=clone, env=env, expect=1)
-    text = output(audit)
-    assert "render" in text and "apm export-patch" not in text, text
+    frozen = scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env)
+    text = output(frozen)
+    assert "Kept " not in text and "Deployed files verified" not in text, text
+    assert _ADOPT_LINE in text, text
+    for relative, old in _OLD_RENDERINGS.items():
+        assert (clone / relative).read_bytes() == old.encode("ascii")
+    assert (clone / "apm.lock.yaml").read_bytes() == lock_before
+    scenario.run("audit", "--ci", "--no-policy", cwd=clone, env=env)
 
-    # Frozen fails closed and names every re-rendered path. A lockfile hash
-    # never proves APM wrote the committed bytes, so it keeps them (#4360).
+    # A plain install migrates once: current renderings, receipts, a 0.37 stamp.
+    migrated = scenario.run("install", "--no-policy", cwd=clone, env=env)
+    assert "Kept " not in output(migrated), output(migrated)
+    for relative, old in _OLD_RENDERINGS.items():
+        assert (clone / relative).read_bytes() != old.encode("ascii"), relative
+    lock = load_yaml(clone / "apm.lock.yaml")
+    assert not str(lock["apm_version"]).startswith(("0.35", "0.36")), lock["apm_version"]
+    assert _receipts(scenario)
+    after = {relative: (clone / relative).read_bytes() for relative in _OLD_RENDERINGS}
+    scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env)
+    scenario.run("audit", "--ci", "--no-policy", cwd=clone, env=env)
+    assert {relative: (clone / relative).read_bytes() for relative in _OLD_RENDERINGS} == after
+
+
+@pytest.mark.parametrize("variant", ["stamp-0.37.0", "stamp-0.35.1-staged"])
+def test_frozen_replay_of_unproven_cli_output_fails_closed_and_names_paths(
+    tmp_path: Path, apm_binary_path: Path, variant: str
+) -> None:
+    """Without evidence (a 0.37 lock, or a staged change) frozen keeps and names (#4360)."""
+    scenario = Scenario.create(tmp_path, apm_binary_path)
+    clone, env = _previous_cli_clone(
+        scenario,
+        stamp="0.37.0" if variant == "stamp-0.37.0" else "0.35.1",
+        staged=variant == "stamp-0.35.1-staged",
+    )
+    lock_before = (clone / "apm.lock.yaml").read_bytes()
+
     frozen = scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env, expect=1)
     text = output(frozen)
     for relative, old in _OLD_RENDERINGS.items():
-        assert f"Kept {relative}: it differs from what APM renders" in text, text
-        assert (clone / relative).read_text(encoding="ascii") == old
-    # Every refusal prints its runnable next step: move the files aside, then install.
-    assert _KEPT_REMEDY in text, text
+        assert (
+            f"Kept {relative}: it differs from what APM renders and there is no local "
+            "deployment receipt or locked render proving APM wrote it, so it may hold "
+            f"local edits. {_KEPT_REMEDY}"
+        ) in text, text
+        assert (clone / relative).read_bytes() == old.encode("ascii")
     assert "Deployed files verified" not in text
     assert (clone / "apm.lock.yaml").read_bytes() == lock_before
     scenario.run("audit", "--ci", "--no-policy", cwd=clone, env=env, expect=1)
 
-    # The documented repair converges: move the files aside, install, then
+    # The printed remedy converges: move the files aside, install, then
     # frozen and audit agree.
     for relative in _OLD_RENDERINGS:
-        (clone / relative).unlink()
+        (clone / relative).rename(clone / f"{relative}.aside")
     scenario.run("install", "--no-policy", cwd=clone, env=env)
     assert (clone / "apm.lock.yaml").read_bytes() != lock_before
     verified = scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env)

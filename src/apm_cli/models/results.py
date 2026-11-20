@@ -44,6 +44,8 @@ class InstallResult:
     claude_native_keys: frozenset[str] = frozenset()
     # The commit gate already enforced org policy on the merged MCP set.
     mcp_policy_enforced: bool = False
+    # Unedited files an APM before 0.37 rendered, adopted as committed (#4398).
+    legacy_adopted: int = 0
     # --dry-run: the pipeline's plan (install/dry_run_plan.PipelinePreview).
     preview: object = None
     # post-install firing deferred to the caller (InstallRequest.post_install_after_services).

@@ -183,6 +183,12 @@ RESTORE_EDITED_SKILL = _entry(
 # A managed file install kept because it may hold local edits (#4360, #4504).
 KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
 KEPT_FILE_OVERWRITE = _entry("kept-file-overwrite", "apm install --force", "overwrite it")
+# Files an APM before 0.37 rendered, kept as committed by a frozen replay (#4398).
+LEGACY_RENDER_MIGRATE = _entry(
+    "legacy-render-migrate",
+    "apm install",
+    "re-render them for this version and record deployment receipts",
+)
 RESTORE_EDITED_FORCE = _entry(
     "drift-restore-edited-force",
     "apm install --force",

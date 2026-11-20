@@ -208,6 +208,8 @@ class DeploymentMaterializationSession:
         # Kept files a pre-0.37 lock proves edited, by resolved path: "drift"
         # when the package brings the recorded bytes, else "blocked" (#4398).
         self.kept_edit_kinds: dict[str, str] = {}
+        # Unedited pre-0.37 renders a frozen replay adopted as they are (#4398).
+        self.legacy_adopted = 0
         # A frozen replay verifies; it never migrates pre-0.37 renders (#4398).
         self.verify_only = False
         self._legacy_hashes = legacy_lock_hashes(lockfile)
@@ -726,11 +728,14 @@ class OverwriteGate:
 
     def adopt_legacy(self, path: Path, claim: str) -> bool:
         """A frozen install keeps an unedited pre-0.37 render as it is (#4398)."""
-        return (
+        adopted = (
             self.session is not None
             and self.session.verify_only
             and self.session.legacy_owned(path, claim)
         )
+        if adopted:
+            self.session.legacy_adopted += 1
+        return adopted
 
     def legacy_edit(self, path: Path, claim: str, rendered_hash: str) -> str | None:
         """Classify a pre-0.37 managed file whose bytes differ from its lock hash.
