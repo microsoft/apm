@@ -418,3 +418,19 @@ def test_discarded_deploy_then_source_edit_installs(
     assert (world.project / _X / "references/a.md").read_text(encoding="ascii") == (
         "reference a, version A\n"
     )
+
+
+def test_member_removed_from_source_is_still_cleaned(tmp_path: Path, apm_binary_path: Path) -> None:
+    """Positive control: retention covers kept members only; a dropped member goes."""
+    world = _new_world(tmp_path, apm_binary_path)
+    _committed_local_project(world)
+    (world.project / ".apm/skills/x/references/a.md").unlink()
+    _write(world.project / ".apm/skills/x/SKILL.md", _LOCAL_SKILL + "No references.\n")
+
+    result = world.apm("install")
+    output = _output(result)
+    assert result.returncode == 0, output
+    assert _REFUSAL not in output and _MODIFIED not in output, output
+    assert not (world.project / _X / "references/a.md").exists()
+    assert f"{_X}/references/a.md" not in _locked_files(world.project)
+    assert "No references." in (world.project / _X / "SKILL.md").read_text(encoding="ascii")
