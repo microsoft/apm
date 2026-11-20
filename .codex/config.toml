@@ -1,0 +1,10 @@
+[mcp_servers.github-mcp-server]
+command = "docker" # apm-registry-id: "ab12cd34-5678-90ef-1234-567890abcdef"
+args = ["run", "-i", "--rm", "-e", "GITHUB_DYNAMIC_TOOLSETS", "-e", "GITHUB_HOST", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "-e", "GITHUB_READ_ONLY", "-e", "GITHUB_TOOLSETS", "ghcr.io/github/github-mcp-server"]
+
+[mcp_servers.github-mcp-server.env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_token_123"
+GITHUB_TOOLSETS = "custom_toolset"
+GITHUB_HOST = ""
+GITHUB_READ_ONLY = ""
+GITHUB_DYNAMIC_TOOLSETS = "0"

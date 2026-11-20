@@ -35,9 +35,9 @@ class TestEmptyStringAndDefaults:
     """Test empty string handling and default values for both adapters."""
 
     @pytest.fixture
-    def github_mcp_server_data(self):
-        """GitHub MCP server data for testing."""
-        return {
+    def github_mcp_server_data(self, request):
+        """GitHub MCP server data; param False drops the ``required`` flags."""
+        data = {
             "id": "ab12cd34-5678-90ef-1234-567890abcdef",
             "name": "io.github.github/github-mcp-server",
             "packages": [
@@ -92,6 +92,10 @@ class TestEmptyStringAndDefaults:
                 }
             ],
         }
+        if not getattr(request, "param", True):
+            for env_var in data["packages"][0]["environment_variables"]:
+                env_var.pop("required")
+        return data
 
     def test_copilot_runtime_defers_required_variables(self, github_mcp_server_data: dict) -> None:
         """Required registry variables need no install-time secret value."""
@@ -103,6 +107,12 @@ class TestEmptyStringAndDefaults:
             "GITHUB_DYNAMIC_TOOLSETS": "1",
         }
 
+    @pytest.mark.parametrize(
+        "github_mcp_server_data",
+        [True, False],
+        ids=["declared_required", "implicit_required"],
+        indirect=True,
+    )
     def test_codex_empty_strings_trigger_defaults(self, github_mcp_server_data):
         """Test that Codex adapter treats empty strings as no value and applies defaults."""
         adapter = CodexClientAdapter()
@@ -209,6 +219,12 @@ class TestEmptyStringAndDefaults:
             if runtime_env:
                 assert "ghp_token_123" not in json.dumps(server_config)
 
+    @pytest.mark.parametrize(
+        "github_mcp_server_data",
+        [True, False],
+        ids=["declared_required", "implicit_required"],
+        indirect=True,
+    )
     def test_codex_no_overrides_gets_defaults(self, github_mcp_server_data):
         """Test that Codex adapter applies defaults when required vars provided but optional ones get defaults."""
         adapter = CodexClientAdapter()
@@ -375,6 +391,12 @@ class TestEmptyStringAndDefaults:
             if runtime_env:
                 assert "ghp_token_123" not in json.dumps(server_config)
 
+    @pytest.mark.parametrize(
+        "github_mcp_server_data",
+        [True, False],
+        ids=["declared_required", "implicit_required"],
+        indirect=True,
+    )
     def test_whitespace_only_treated_as_empty(self, github_mcp_server_data):
         """Test that whitespace-only strings are treated as empty."""
         adapter = CodexClientAdapter()
