@@ -381,6 +381,29 @@ class CleanupResult:
     case- or normalization-insensitive filesystem; renamed to the live
     spelling instead of deleted, and no longer owned."""
 
+    deleted_directories: list[str] = field(default_factory=list)
+    """Entries of ``deleted`` that were whole skill directories."""
+
+    user_scope: bool = False
+    """Whether paths are relative to the user's home (shown with ``~/``)."""
+
+    @property
+    def announced_paths(self) -> list[str]:
+        """Return the deleted entries a user is told about, each named once.
+
+        A deleted directory is named with a trailing ``/`` and stands for the
+        members deleted with it, so the count matches the listed paths.
+        """
+        directories = {path.rstrip("/") for path in self.deleted_directories}
+        prefix = "~/" if self.user_scope else ""
+        announced: list[str] = []
+        for path in sorted(dict.fromkeys(path.rstrip("/") for path in self.deleted)):
+            if any(path.startswith(f"{directory}/") for directory in directories):
+                continue
+            shown = f"{path}/" if path in directories else path
+            announced.append(shown if "://" in shown else prefix + shown)
+        return announced
+
     @property
     def retained(self) -> list[str]:
         """Return unique paths that were deliberately left on disk.
@@ -469,6 +492,7 @@ def _safe_remove_skill_directory(
             skill_dir.rmdir()
             result.deleted.append(rel_path)
             result.deleted_targets.append(skill_dir)
+            result.deleted_directories.append(rel_path)
         except OSError as exc:
             result.failed.append(rel_path)
             _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
@@ -534,6 +558,7 @@ def _safe_remove_skill_directory(
         shutil.rmtree(skill_dir)
         result.deleted.append(rel_path)
         result.deleted_targets.append(skill_dir)
+        result.deleted_directories.append(rel_path)
     except OSError as exc:
         result.failed.append(rel_path)
         _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
@@ -651,11 +676,11 @@ def remove_stale_deployed_files(
         ``deleted_targets``, calling
         :meth:`InstallLogger.cleanup_skipped_user_edit` for each entry
         in ``skipped_user_edit`` so the inline yellow warning renders,
-        and reporting ``deleted`` count to the user via
-        :meth:`InstallLogger.stale_cleanup` /
+        and naming ``announced_paths`` to the user via
+        :meth:`CommandLogger.stale_cleanup` /
         :meth:`InstallLogger.orphan_cleanup`).
     """
-    result = CleanupResult()
+    result = CleanupResult(user_scope=user_scope)
     # Callers may key hashes with native Windows separators; lookups are POSIX.
     recorded_hashes = {
         path.replace("\\", "/"): content_hash

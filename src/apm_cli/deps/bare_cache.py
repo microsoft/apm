@@ -866,13 +866,24 @@ def build_clone_failure_message(
     last_error: Exception | None,
     last_attempt_scheme: str | None,
     public_github_non_auth_failure: bool = False,
+    repository_not_found: bool = False,
 ) -> str:
     """Build the aggregate ``RuntimeError`` message for a failed transport plan.
 
     Extracted from :meth:`GitHubPackageDownloader._execute_transport_plan`
     to keep that module under the file-length guardrail. Pure formatting:
-    no I/O, no clone attempts.
+    no I/O, no clone attempts. A host that answered "not found" gets the
+    canonical not-found message alone: protocol fallback and network advice
+    cannot help a missing repository.
     """
+    if repository_not_found:
+        return auth_resolver.build_not_found_message(
+            dep_host or default_host_fn(),
+            repo_url_base,
+            dependency_repository_owner(dep_ref) if dep_ref else None,
+            port=dep_ref.port if dep_ref else None,
+            host_type=dep_ref.host_type if dep_ref else None,
+        )
     if plan.strict and len(plan.attempts) >= 1:
         tried = plan.attempts[0].label
         error_msg = f"Failed to clone repository {repo_url_base} via {tried}. "

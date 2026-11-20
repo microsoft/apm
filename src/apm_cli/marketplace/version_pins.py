@@ -19,11 +19,17 @@ and has the structure::
 
 All functions are **fail-open**: filesystem or JSON errors are logged
 and never block resolution.
+
+Resolution only *stages* a pin (:func:`stage_ref_pin`).  The install
+transaction owns one :class:`RefPinStage` per attempt and writes the
+staged pins when the attempt commits; a dry run, a failed install or a
+read-only command (``apm view``) writes nothing (#4212, #4194).
 """
 
 import json
 import logging
 import os
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -176,3 +182,71 @@ def record_ref_pin(
     key = _pin_key(marketplace_name, plugin_name, version)
     pins[key] = ref
     save_ref_pins(pins, pins_dir)
+
+
+# ------------------------------------------------------------------
+# Install-attempt staging
+# ------------------------------------------------------------------
+
+
+class RefPinStage:
+    """Ref pins resolved during one install attempt, written only on commit."""
+
+    def __init__(self) -> None:
+        self._pins: dict[tuple[str, str, str], str] = {}
+        self._lock = threading.Lock()
+
+    def add(self, marketplace_name: str, plugin_name: str, ref: str, version: str = "") -> None:
+        """Stage one plugin-to-ref mapping for :meth:`commit`."""
+        with self._lock:
+            self._pins[(marketplace_name, plugin_name, version)] = ref
+
+    def commit(self, pins_dir: str | None = None) -> None:
+        """Write every staged pin in one save and close this stage."""
+        with self._lock:
+            staged, self._pins = self._pins, {}
+        self._close()
+        if not staged:
+            return
+        pins = load_ref_pins(pins_dir)
+        for (marketplace_name, plugin_name, version), ref in staged.items():
+            pins[_pin_key(marketplace_name, plugin_name, version)] = ref
+        save_ref_pins(pins, pins_dir)
+
+    def discard(self) -> None:
+        """Drop every staged pin and close this stage."""
+        with self._lock:
+            self._pins = {}
+        self._close()
+
+    def _close(self) -> None:
+        global _active_stage
+        with _stage_lock:
+            if _active_stage is self:
+                _active_stage = None
+
+
+_stage_lock = threading.Lock()
+_active_stage: RefPinStage | None = None
+
+
+def open_ref_pin_stage() -> RefPinStage:
+    """Open the stage that receives pins resolved by this install attempt."""
+    global _active_stage
+    stage = RefPinStage()
+    with _stage_lock:
+        _active_stage = stage
+    return stage
+
+
+def stage_ref_pin(
+    marketplace_name: str,
+    plugin_name: str,
+    ref: str,
+    version: str = "",
+) -> None:
+    """Stage a pin for the open install attempt; no attempt means no write."""
+    with _stage_lock:
+        stage = _active_stage
+    if stage is not None:
+        stage.add(marketplace_name, plugin_name, ref, version)

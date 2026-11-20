@@ -264,3 +264,57 @@ def test_verification_failure_names_both_chains_without_transport_secrets(tmp_pa
     assert "Cannot verify immutable requirements" in diagnostic
     assert "Authorization" not in diagnostic
     assert "secret-value" not in diagnostic
+
+
+_PROXY_ROW = {
+    "repo_url": "acme/pkg",
+    "host": "registry-proxy.example.invalid",
+    "registry_prefix": "artifactory/github",
+    "resolved_ref": "v1.0.0",
+    "content_hash": "sha256:" + "a" * 64,
+}
+
+
+@pytest.mark.parametrize(
+    ("proxy_url", "row", "accepted"),
+    [
+        ("http://registry-proxy.example.invalid/artifactory/github", {}, True),
+        (None, {}, False),
+        ("http://other-proxy.example.invalid/artifactory/github", {}, False),
+        ("http://registry-proxy.example.invalid/artifactory/github", {"content_hash": None}, False),
+        (
+            "http://registry-proxy.example.invalid/artifactory/github",
+            {"resolved_ref": "v0.9"},
+            False,
+        ),
+    ],
+    ids=["same-proxy", "proxy-off", "other-proxy", "no-content-hash", "ref-changed"],
+)
+def test_frozen_proxy_archive_row_is_verifiable_only_on_its_route(
+    monkeypatch: pytest.MonkeyPatch, proxy_url: str | None, row: dict, accepted: bool
+) -> None:
+    """A commit-less proxy lock row replays only through its own route and ref (#4172)."""
+    from apm_cli.deps.dependency_graph import DependencyNode
+    from apm_cli.deps.immutable_requirements import (
+        ImmutableRequirementError,
+        ImmutableRequirements,
+    )
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    monkeypatch.delenv("PROXY_REGISTRY_URL", raising=False)
+    monkeypatch.delenv("ARTIFACTORY_BASE_URL", raising=False)
+    if proxy_url:
+        monkeypatch.setenv("PROXY_REGISTRY_URL", proxy_url)
+        monkeypatch.setenv("PROXY_REGISTRY_ALLOW_HTTP", "1")
+    lock = LockFile()
+    lock.add_dependency(LockedDependency(**{**_PROXY_ROW, **row}))
+    node = DependencyNode(
+        package=Mock(), dependency_ref=DependencyReference.parse("acme/pkg#v1.0.0")
+    )
+    requirements = ImmutableRequirements("consumer", lockfile=lock, frozen=True)
+
+    if accepted:
+        requirements.add(node)
+    else:
+        with pytest.raises(ImmutableRequirementError, match="no verifiable commit"):
+            requirements.add(node)
