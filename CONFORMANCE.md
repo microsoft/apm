@@ -169,12 +169,12 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-sc-003](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-003) | MUST | 10.3 | consumer | active | 7 | - |
 | [req-sc-004](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-004) | MUST | 10.5 | consumer | active | 1 | - |
 | [req-sc-005](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-005) | MUST | 10.3 | consumer | active | 2 | - |
-| [req-sc-006](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-006) | MUST | 4.2.3 | consumer | active | 20 | - |
+| [req-sc-006](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-006) | MUST | 4.2.3 | consumer | active | 4 | - |
 | [req-sc-007](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-007) | MUST | 10.3 | consumer | active | 4 | - |
 | [req-sc-008](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-008) | SHOULD | 10.3 | consumer | active | 1 | - |
 | [req-sc-009](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-009) | MUST | 10.13 | consumer | active | 10 | - |
 | [req-sc-010](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-010) | MUST | 10.13 | consumer | active | 2 | - |
-| [req-sc-011](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-011) | MUST | 10.14 | consumer | active | 2 | - |
+| [req-sc-011](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-011) | MUST | 10.14 | consumer | active | 3 | - |
 | [req-sc-012](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-012) | MUST | 10.14 | consumer | active | 2 | - |
 | [req-sc-013](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-013) | MUST | 10.3 | consumer | active | 4 | - |
 | [req-sc-014](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-014) | MUST | 10.15 | consumer | active | 5 | - |
