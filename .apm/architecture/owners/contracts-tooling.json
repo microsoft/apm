@@ -166,6 +166,16 @@
         "scripts/architecture_linter/checks/registry_module_ownership.py"
       ],
       "guards": ["registry-delegation-module-ownership"]
+    },
+    {
+      "id": "spec-conformance-coverage-kind",
+      "decision": "Which tests linked to an OpenAPM requirement count as implementation coverage: only tests the closed kind rule classifies behavioral; a requirement with only text/shape tests is reported text-only",
+      "owner": "tests/spec_conformance/_test_kind.py (classification) + tests/spec_conformance/gen_statement.py (status aggregation)",
+      "selectors": [
+        "tests/spec_conformance/_test_kind.py",
+        "tests/spec_conformance/gen_statement.py"
+      ],
+      "guards": ["contracts-tests-conformance-behavioral-coverage"]
     }
   ]
 }

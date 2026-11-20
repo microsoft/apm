@@ -28,12 +28,15 @@ from tests.spec_conformance._manifest import (
     SPEC_PATH,
     load_requirements,
 )
+from tests.spec_conformance._test_kind import BEHAVIORAL
+
+STATUSES = ("active", "skipped", "xfail", "text-only", "unbound")
 
 CONFORMANCE_JSON = REPO_ROOT / "CONFORMANCE.json"
 CONFORMANCE_MD = REPO_ROOT / "CONFORMANCE.md"
 
 SPEC_VERSION = "v0.1.1"
-GENERATOR = "gen_statement.py v1"
+GENERATOR = "gen_statement.py v2"
 USER_SCOPE_DISCLOSURE = {
     "manifest_location": "~/.apm/apm.yml",
     "lockfile_location": "~/.apm/apm.lock.yaml",
@@ -130,8 +133,14 @@ def _extract_waivers() -> dict[str, list[str]]:
 
 
 def _aggregate_status(rows: list[dict[str, str]]) -> str:
+    """Aggregate only behavioral rows; text/shape tests are not implementation coverage."""
     if not rows:
         return "unbound"
+    behavioral = [r for r in rows if r.get("kind") == BEHAVIORAL]
+    if behavioral:
+        rows = behavioral
+    elif any(r["status"] == "active" for r in rows):
+        return "text-only"
     statuses = {r["status"] for r in rows}
     if "active" in statuses:
         return "active"
@@ -155,6 +164,9 @@ def build_json() -> dict:
             "status": _aggregate_status(rows),
             "tests": [row["test_nodeid"] for row in rows],
             "test_count": len(rows),
+            "behavioral_tests": [
+                row["test_nodeid"] for row in rows if row.get("kind") == BEHAVIORAL
+            ],
         }
         if r.fixture is not None:
             entry["fixture"] = r.fixture
@@ -166,10 +178,7 @@ def build_json() -> dict:
     by_class = {c: defaultdict(int) for c in ALLOWED_CLASSES}
     for e in entries:
         by_class[e["conformance_class"]][e["status"]] += 1
-    summary = {
-        c: {k: by_class[c].get(k, 0) for k in ("active", "skipped", "xfail", "unbound")}
-        for c in ALLOWED_CLASSES
-    }
+    summary = {c: {k: by_class[c].get(k, 0) for k in STATUSES} for c in ALLOWED_CLASSES}
     return {
         "spec_version": SPEC_VERSION,
         "generator": GENERATOR,
@@ -186,12 +195,13 @@ def build_json() -> dict:
 
 def _md_class_summary(summary: dict) -> str:
     lines = []
-    lines.append("| Class | Active | Skipped | Xfail | Unbound |")
-    lines.append("|-------|-------:|--------:|------:|--------:|")
+    lines.append("| Class | Active | Skipped | Xfail | Text-only | Unbound |")
+    lines.append("|-------|-------:|--------:|------:|----------:|--------:|")
     for c in ALLOWED_CLASSES:
         s = summary[c]
         lines.append(
-            f"| {c.capitalize()} | {s['active']} | {s['skipped']} | {s['xfail']} | {s['unbound']} |"
+            f"| {c.capitalize()} | {s['active']} | {s['skipped']} | {s['xfail']} "
+            f"| {s['text-only']} | {s['unbound']} |"
         )
     return "\n".join(lines)
 
@@ -209,17 +219,21 @@ def build_md(doc: dict) -> str:
         "beyond the four sets enforced by `orphan_check.py`: spec anchors, "
         "manifest entries, Appendix C rows, and `@pytest.mark.req` markers. "
         "A requirement marked `status=active` is exercised by at least one "
-        "assertion. A requirement marked `status=skipped` carries a written "
+        "behavioral assertion: a test that exercises APM itself. A test that "
+        "only asserts spec text or fixture shape is classified text/shape by "
+        "`tests/spec_conformance/_test_kind.py` and is not implementation "
+        "coverage; a requirement with only such tests is `status=text-only`. "
+        "A requirement marked `status=skipped` carries a written "
         "waiver below; this is debt, not coverage. A requirement with "
         "`status=xfail` is asserted-but-known-broken.\n\n"
         "## Conformance classes\n\n"
-        "All four conformance classes (Producer, Consumer, Registry, "
-        "Governance) carry active coverage in this statement. The "
-        "Registry class is exercised via the trust-anchor invariant "
-        "test in `tests/spec_conformance/test_registry_reqs.py`, "
-        "which hashes the committed Registry-archive fixture and "
-        "asserts equality with the digest the paired lockfile "
-        "advertises (sec.11.3.3, req-rg-001).\n\n"
+        "The coverage summary counts a class as tested only through "
+        "behavioral tests. The Registry class (req-rg-001) is bound to a "
+        "trust-anchor invariant test in "
+        "`tests/spec_conformance/test_registry_reqs.py` that hashes the "
+        "committed Registry-archive fixture and compares it with the digest "
+        "the paired lockfile advertises (sec.11.3.3); that test checks "
+        "fixture shape, so the requirement is reported `text-only`.\n\n"
         "## Repository case rules\n\n"
         "Repository-coordinate segments are case-insensitive for "
         "`github.com`, GitHub Enterprise Cloud hosts ending in `.ghe.com`, "
@@ -255,14 +269,15 @@ def build_md(doc: dict) -> str:
     )
     rows = [
         "## Per-requirement coverage\n",
-        "| Req ID | Keyword | Sec | Class | Status | Tests | Oracle |",
-        "|--------|---------|----:|-------|--------|------:|--------|",
+        "| Req ID | Keyword | Sec | Class | Status | Behavioral / tests | Oracle |",
+        "|--------|---------|----:|-------|--------|-------------------:|--------|",
     ]
     for e in doc["requirements"]:
         rows.append(
             f"| [{e['id']}](docs/src/content/docs/specs/openapm-v0.1.md#{e['id']}) "
             f"| {e['keyword']} | {e['section']} | {e['conformance_class']} "
-            f"| {e['status']} | {e['test_count']} | {e.get('oracle', '-')} |"
+            f"| {e['status']} | {len(e['behavioral_tests'])} / {e['test_count']} "
+            f"| {e.get('oracle', '-')} |"
         )
     table = "\n".join(rows) + "\n\n"
     waivers_section = ["## Waivers\n"]

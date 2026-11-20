@@ -89,3 +89,22 @@ def test_gen_statement_publishes_user_scope_disclosure():
     markdown = CONFORMANCE_MD.read_text(encoding="ascii")
     for value in USER_SCOPE_DISCLOSURE.values():
         assert value in markdown
+
+
+def test_text_shape_tests_are_not_counted_as_implementation_coverage():
+    """A requirement whose linked tests only assert spec text or fixture shape is not tested.
+
+    req-rs-008 is linked only to an oracle-shape test that never runs APM, so the
+    statement must report it as text-only, and every requirement it reports as
+    active must name at least one behavioral test.
+    """
+    document = json.loads(CONFORMANCE_JSON.read_text(encoding="ascii"))
+    entries = {entry["id"]: entry for entry in document["requirements"]}
+
+    caret = entries["req-rs-008"]
+    assert caret["status"] == "text-only"
+    assert caret["behavioral_tests"] == []
+    for entry in document["requirements"]:
+        assert set(entry["behavioral_tests"]) <= set(entry["tests"]), entry["id"]
+        if entry["status"] == "active":
+            assert entry["behavioral_tests"], f"{entry['id']} is active with no behavioral test"

@@ -21,6 +21,7 @@ from tests.spec_conformance._manifest import (
     REPO_ROOT,
     requirements_by_id,
 )
+from tests.spec_conformance._test_kind import TEXT_SHAPE, classify_function
 
 ID_PATTERN = re.compile(r"^req-[a-z]{2,3}-[0-9]{3}$")
 
@@ -86,6 +87,8 @@ def pytest_collection_modifyitems(config, items: list[pytest.Item]) -> None:
         for m in markers:
             ids.extend(str(a) for a in m.args)
         status = _static_status(item)
+        func = getattr(item, "function", None)
+        kind = classify_function(func) if func is not None else TEXT_SHAPE
         for req_id in ids:
             if not ID_PATTERN.match(req_id):
                 errors.append(
@@ -96,7 +99,7 @@ def pytest_collection_modifyitems(config, items: list[pytest.Item]) -> None:
             if req_id not in manifest:
                 errors.append(f"{item.nodeid}: req '{req_id}' is not in the requirements manifest")
                 continue
-            coverage[req_id].append({"test_nodeid": item.nodeid, "status": status})
+            coverage[req_id].append({"test_nodeid": item.nodeid, "status": status, "kind": kind})
     if errors:
         joined = "\n".join(f"  - {e}" for e in errors)
         raise pytest.UsageError("Spec-conformance marker validation failed:\n" + joined)

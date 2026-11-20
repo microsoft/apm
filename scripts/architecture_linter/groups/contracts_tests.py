@@ -8,6 +8,9 @@ trees live in sibling modules purely so no single check module outgrows the
 module size budget; they own no RULES of their own.
 """
 
+from scripts.architecture_linter.checks.contracts_conformance_coverage import (
+    RULES as CONFORMANCE_COVERAGE_RULES,
+)
 from scripts.architecture_linter.checks.contracts_dependency_policy import RULES as POLICY_RULES
 from scripts.architecture_linter.checks.contracts_dependency_replacements import (
     RULES as REPLACEMENT_RULES,
@@ -33,6 +36,7 @@ RULES = (
     *LOCKFILE_GENERATOR_RULES,
     *LIFECYCLE_SCRIPT_GATE_RULES,
     *REMEDIATION_RULES,
+    *CONFORMANCE_COVERAGE_RULES,
 )
 
 __all__ = ["COLLECTORS", "RULES"]

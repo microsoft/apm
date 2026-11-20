@@ -11,7 +11,7 @@ This page is the entry point to the conformance statement APM publishes for [Ope
 
 Two artifacts ship at the repository root and update when the conformance inputs change:
 
-- [`CONFORMANCE.md`](https://github.com/microsoft/apm/blob/main/CONFORMANCE.md) -- human-readable per-requirement table: each requirement links to its spec anchor and lists its status (`active`, `skipped`, or `xfail`), bound test count and oracle. Read this first.
+- [`CONFORMANCE.md`](https://github.com/microsoft/apm/blob/main/CONFORMANCE.md) -- human-readable per-requirement table: each requirement links to its spec anchor and lists its status (`active`, `skipped`, `xfail`, or `text-only`), its behavioral and total bound test counts, and its oracle. Only behavioral tests (tests that exercise APM) count as coverage; a requirement bound only to spec-text or fixture-shape tests is `text-only`. Read this first.
 - [`CONFORMANCE.json`](https://github.com/microsoft/apm/blob/main/CONFORMANCE.json) -- machine-readable equivalent for tooling and downstream conformance aggregators. The fields are stable across patch versions of the spec.
 
 The CI workflow that emits both is [`.github/workflows/spec-conformance.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/spec-conformance.yml). The gate fails the build if the generated statement drifts from the committed copy, so the version of `CONFORMANCE.md` you see on `main` is exactly what CI produced from the matching spec commit.

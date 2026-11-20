@@ -1224,6 +1224,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Automatic audit discovery stops enumerating canonical primitive surfaces.",
     ),
     MutationCase(
+        guard_id="contracts-tests-conformance-behavioral-coverage",
+        rule_id="contracts-tests-conformance-behavioral-coverage",
+        path="tests/spec_conformance/gen_statement.py",
+        old='behavioral = [r for r in rows if r.get("kind") == BEHAVIORAL]',
+        new="behavioral = list(rows)",
+        intent="Conformance status counts text/shape tests as implementation coverage.",
+    ),
+    MutationCase(
         guard_id="contracts-tests-taxonomy-classification",
         rule_id="contracts-tests-taxonomy-classification",
         path="tests/quality/taxonomy_inventory_plugin.py",

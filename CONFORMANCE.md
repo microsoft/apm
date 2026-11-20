@@ -1,6 +1,6 @@
 # OpenAPM Conformance Statement -- v0.1.1
 
-Generator: gen_statement.py v1.
+Generator: gen_statement.py v2.
 Spec: [docs/src/content/docs/specs/openapm-v0.1.md](docs/src/content/docs/specs/openapm-v0.1.md)
 
 This file is generated. Do NOT edit by hand. Run
@@ -8,11 +8,11 @@ This file is generated. Do NOT edit by hand. Run
 
 ## Honesty contract
 
-There is NO automated CI detector for spec-vs-behaviour drift beyond the four sets enforced by `orphan_check.py`: spec anchors, manifest entries, Appendix C rows, and `@pytest.mark.req` markers. A requirement marked `status=active` is exercised by at least one assertion. A requirement marked `status=skipped` carries a written waiver below; this is debt, not coverage. A requirement with `status=xfail` is asserted-but-known-broken.
+There is NO automated CI detector for spec-vs-behaviour drift beyond the four sets enforced by `orphan_check.py`: spec anchors, manifest entries, Appendix C rows, and `@pytest.mark.req` markers. A requirement marked `status=active` is exercised by at least one behavioral assertion: a test that exercises APM itself. A test that only asserts spec text or fixture shape is classified text/shape by `tests/spec_conformance/_test_kind.py` and is not implementation coverage; a requirement with only such tests is `status=text-only`. A requirement marked `status=skipped` carries a written waiver below; this is debt, not coverage. A requirement with `status=xfail` is asserted-but-known-broken.
 
 ## Conformance classes
 
-All four conformance classes (Producer, Consumer, Registry, Governance) carry active coverage in this statement. The Registry class is exercised via the trust-anchor invariant test in `tests/spec_conformance/test_registry_reqs.py`, which hashes the committed Registry-archive fixture and asserts equality with the digest the paired lockfile advertises (sec.11.3.3, req-rg-001).
+The coverage summary counts a class as tested only through behavioral tests. The Registry class (req-rg-001) is bound to a trust-anchor invariant test in `tests/spec_conformance/test_registry_reqs.py` that hashes the committed Registry-archive fixture and compares it with the digest the paired lockfile advertises (sec.11.3.3); that test checks fixture shape, so the requirement is reported `text-only`.
 
 ## Repository case rules
 
@@ -38,165 +38,165 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 
 ## Coverage summary
 
-| Class | Active | Skipped | Xfail | Unbound |
-|-------|-------:|--------:|------:|--------:|
-| Producer | 12 | 0 | 0 | 0 |
-| Consumer | 111 | 3 | 0 | 0 |
-| Registry | 1 | 0 | 0 | 0 |
-| Governance | 21 | 0 | 0 | 0 |
+| Class | Active | Skipped | Xfail | Text-only | Unbound |
+|-------|-------:|--------:|------:|----------:|--------:|
+| Producer | 1 | 0 | 0 | 11 | 0 |
+| Consumer | 71 | 3 | 0 | 40 | 0 |
+| Registry | 0 | 0 | 0 | 1 | 0 |
+| Governance | 14 | 0 | 0 | 7 | 0 |
 
 ## Per-requirement coverage
 
-| Req ID | Keyword | Sec | Class | Status | Tests | Oracle |
-|--------|---------|----:|-------|--------|------:|--------|
-| [req-cf-001](docs/src/content/docs/specs/openapm-v0.1.md#req-cf-001) | MUST | 12.5 | consumer | active | 10 | - |
-| [req-cf-002](docs/src/content/docs/specs/openapm-v0.1.md#req-cf-002) | MUST | 12.3 | consumer | active | 1 | - |
-| [req-ext-001](docs/src/content/docs/specs/openapm-v0.1.md#req-ext-001) | MUST | 4.1 | consumer | active | 1 | - |
-| [req-ext-002](docs/src/content/docs/specs/openapm-v0.1.md#req-ext-002) | MUST | 4.1 | producer | active | 1 | - |
-| [req-ext-003](docs/src/content/docs/specs/openapm-v0.1.md#req-ext-003) | MUST | 4.6.2 | consumer | active | 9 | - |
-| [req-lk-001](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-001) | MUST | 5.1 | consumer | active | 1 | - |
-| [req-lk-002](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-002) | MUST | 5.4 | consumer | active | 1 | - |
-| [req-lk-003](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-003) | MUST | 5.2 | consumer | active | 9 | - |
-| [req-lk-004](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-004) | MUST | 5.4 | consumer | active | 1 | - |
-| [req-lk-005](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-005) | MUST | 5.5 | consumer | active | 2 | - |
-| [req-lk-006](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-006) | MUST | 5.5 | consumer | active | 32 | - |
-| [req-lk-007](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-007) | SHOULD | 5.5 | consumer | active | 1 | - |
-| [req-lk-008](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-008) | MUST | 5.6 | consumer | active | 3 | - |
-| [req-lk-009](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-009) | MUST | 5.6 | consumer | active | 1 | - |
-| [req-lk-010](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-010) | MUST | 5.6 | consumer | active | 1 | - |
-| [req-lk-011](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-011) | MUST | 5.2 | consumer | active | 2 | - |
-| [req-lk-012](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-012) | MUST | 5.2 | consumer | active | 2 | - |
-| [req-lk-013](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-013) | MUST | 5.2 | consumer | active | 2 | - |
-| [req-lk-014](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-014) | MUST | 5.2 | consumer | active | 1 | - |
-| [req-lk-015](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-015) | MUST | 5.6.4 | consumer | active | 1 | - |
-| [req-lk-016](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-016) | MUST | 5.2 | consumer | active | 12 | - |
-| [req-lk-017](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-017) | MUST | 5.2 | consumer | active | 2 | - |
-| [req-lk-018](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-018) | SHOULD | 5.5 | consumer | active | 1 | - |
-| [req-lk-019](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-019) | MUST | 5.2 | consumer | active | 10 | - |
-| [req-lk-020](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-020) | MUST | 5.2 | consumer | active | 5 | - |
-| [req-lk-021](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-021) | MUST | 5.2 | consumer | active | 8 | - |
-| [req-lk-022](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-022) | MUST | 5.2 | consumer | active | 6 | - |
-| [req-lk-023](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-023) | MUST | 5.2.1 | consumer | active | 7 | - |
-| [req-mf-001](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-001) | MUST | 4.1 | producer | active | 4 | - |
-| [req-mf-002](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-002) | MUST | 4.1 | producer | active | 1 | - |
-| [req-mf-003](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-003) | MUST | 4.1 | producer | active | 1 | - |
-| [req-mf-004](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-004) | SHOULD | 4.1 | producer | active | 1 | - |
-| [req-mf-005](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-005) | MUST | 4.2.1 | producer | active | 1 | - |
-| [req-mf-006](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-006) | MUST | 4.1 | consumer | active | 1 | - |
-| [req-mf-007](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-007) | MUST | 4.3.1 | consumer | active | 1 | - |
-| [req-mf-008](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-008) | MUST | 4.3.3 | consumer | active | 3 | - |
-| [req-mf-009](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-009) | MUST | 4.3.4 | consumer | active | 1 | - |
-| [req-mf-010](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-010) | MUST | 4.3.2 | consumer | active | 1 | - |
-| [req-mf-011](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-011) | MUST | 4.3.2 | consumer | active | 2 | - |
-| [req-mf-012](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-012) | MUST | 4.3.6 | consumer | active | 16 | - |
-| [req-mf-013](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-013) | MUST | 4.5 | consumer | active | 3 | - |
-| [req-mf-014](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-014) | MUST | 4.2.3 | producer | active | 1 | - |
-| [req-mf-015](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-015) | MUST | 4.2.3 | producer | active | 1 | - |
-| [req-mf-016](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-016) | MUST | 4.3.5 | consumer | skipped | 1 | - |
-| [req-mf-017](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-017) | MUST | 4.7 | producer | active | 1 | - |
-| [req-mf-018](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-018) | MUST | 4.6.1 | consumer | active | 1 | - |
-| [req-mf-019](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-019) | MUST | 4.2.4 | consumer | active | 2 | - |
-| [req-mf-020](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-020) | MUST | 4.1 | consumer | active | 3 | - |
-| [req-mf-021](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-021) | MUST | 4.8 | producer | active | 1 | - |
-| [req-mf-022](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-022) | MUST | 4.3.2 | consumer | active | 2 | - |
-| [req-mf-023](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-023) | MUST | 4.5 | consumer | active | 1 | - |
-| [req-mf-024](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-024) | MUST | 4.3.2 | consumer | active | 1 | - |
-| [req-mf-025](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-025) | MUST | 4.3.2 | consumer | active | 45 | - |
-| [req-mf-026](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-026) | MUST | 4.5 | consumer | active | 3 | - |
-| [req-mf-027](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-027) | MUST | 4.5 | consumer | active | 2 | - |
-| [req-na-001](docs/src/content/docs/specs/openapm-v0.1.md#req-na-001) | MUST | 8.5.11 | consumer | skipped | 1 | - |
-| [req-na-002](docs/src/content/docs/specs/openapm-v0.1.md#req-na-002) | MUST | 8.5.11 | consumer | active | 2 | - |
-| [req-na-003](docs/src/content/docs/specs/openapm-v0.1.md#req-na-003) | MUST | 8.5.11 | consumer | active | 1 | - |
-| [req-na-004](docs/src/content/docs/specs/openapm-v0.1.md#req-na-004) | MUST | 8.5.11 | consumer | active | 12 | tests/fixtures/spec-conformance/native-activation/req-na-004.json |
-| [req-na-005](docs/src/content/docs/specs/openapm-v0.1.md#req-na-005) | MUST | 8.5.11 | consumer | active | 2 | - |
-| [req-na-006](docs/src/content/docs/specs/openapm-v0.1.md#req-na-006) | MUST | 8.5.11 | consumer | skipped | 1 | - |
-| [req-na-007](docs/src/content/docs/specs/openapm-v0.1.md#req-na-007) | MUST | 8.5.11 | consumer | active | 1 | - |
-| [req-pl-001](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-001) | MUST | 6.1 | governance | active | 1 | - |
-| [req-pl-002](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-002) | MUST | 6.2 | governance | active | 1 | - |
-| [req-pl-003](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-003) | MUST | 6.4 | governance | active | 1 | - |
-| [req-pl-004](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-004) | MUST | 6.4 | governance | active | 1 | - |
-| [req-pl-005](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-005) | MUST | 6.5 | governance | active | 1 | - |
-| [req-pl-006](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-006) | MUST | 6.4 | governance | active | 5 | - |
-| [req-pl-007](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-007) | MUST | 6.3.1 | governance | active | 1 | - |
-| [req-pl-008](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-008) | MUST | 6.3.1 | governance | active | 1 | - |
-| [req-pl-009](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-009) | MUST | 6.6 | governance | active | 1 | - |
-| [req-pl-010](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-010) | MUST | 6.2 | governance | active | 1 | - |
-| [req-pl-011](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-011) | MUST | 6.1.1 | governance | active | 2 | - |
-| [req-pl-012](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-012) | MUST | 6.1.1 | governance | active | 1 | - |
-| [req-pl-013](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-013) | MUST | 6.8 | governance | active | 1 | - |
-| [req-pl-014](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-014) | MUST | 6.8 | governance | active | 8 | - |
-| [req-pl-015](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-015) | MUST | 6.3.5 | governance | active | 1 | - |
-| [req-pl-016](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-016) | MUST | 6.8 | governance | active | 1 | - |
-| [req-pl-017](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-017) | MUST | 6.8 | governance | active | 1 | - |
-| [req-pl-018](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-018) | MUST | 6.3.1 | governance | active | 5 | - |
-| [req-pl-019](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-019) | MUST | 6.8.1 | governance | active | 14 | - |
-| [req-pl-020](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-020) | MUST | 6.8.1 | governance | active | 3 | - |
-| [req-pl-021](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-021) | MUST | 6.1 | governance | active | 5 | - |
-| [req-pr-001](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-001) | MUST | 8.2 | consumer | active | 1 | - |
-| [req-pr-002](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-002) | MUST | 8.3 | consumer | active | 2 | - |
-| [req-pr-003](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-003) | MUST | 8.3 | consumer | active | 1 | - |
-| [req-pr-004](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-004) | MUST | 7.8 | producer | active | 10 | - |
-| [req-pr-005](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-005) | SHOULD | 7.8 | producer | active | 1 | - |
-| [req-pr-006](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-006) | MUST | 8.1 | consumer | active | 1 | - |
-| [req-pr-007](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-007) | MUST | 8.1 | consumer | active | 1 | - |
-| [req-pr-008](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-008) | MUST | 8.3.1 | consumer | active | 28 | - |
-| [req-rg-001](docs/src/content/docs/specs/openapm-v0.1.md#req-rg-001) | MUST | 11.3.3 | registry | active | 1 | - |
-| [req-rpl-001](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-001) | MUST | 4.8.1 | consumer | active | 7 | - |
-| [req-rpl-002](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-002) | MUST | 4.8.1 | consumer | active | 6 | - |
-| [req-rpl-003](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-003) | MUST | 4.8.1 | consumer | active | 5 | - |
-| [req-rpl-004](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-004) | MUST | 4.8.1 | consumer | active | 6 | - |
-| [req-rs-001](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-001) | MUST | 7.2 | consumer | active | 6 | - |
-| [req-rs-002](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-002) | MUST | 7.3 | consumer | active | 3 | - |
-| [req-rs-003](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-003) | MUST | 7.3 | consumer | active | 1 | - |
-| [req-rs-004](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-004) | MUST | 7.5 | consumer | active | 1 | - |
-| [req-rs-005](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-005) | MUST | 7.6 | consumer | active | 1 | - |
-| [req-rs-006](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-006) | MUST | 7.2 | consumer | active | 1 | - |
-| [req-rs-007](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-007) | MUST | 7.3 | consumer | active | 11 | - |
-| [req-rs-008](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-008) | MUST | 7.1 | consumer | active | 7 | - |
-| [req-rs-009](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-009) | MUST | 7.5.1 | consumer | active | 1 | - |
-| [req-rs-010](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-010) | MUST | 7.2 | consumer | active | 3 | - |
-| [req-rs-011](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-011) | MUST | 7.7 | consumer | active | 4 | - |
-| [req-rs-012](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-012) | MUST | 7.7 | consumer | active | 9 | - |
-| [req-rs-013](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-013) | MUST | 7.2 | consumer | active | 1 | - |
-| [req-rs-014](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-014) | MUST | 7.3.1 | consumer | active | 11 | - |
-| [req-rs-015](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-015) | MUST | 7.5 | consumer | active | 5 | - |
-| [req-rs-016](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-016) | MUST | 7.2 | consumer | active | 10 | - |
-| [req-rs-017](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-017) | MUST | 7.7 | consumer | active | 17 | - |
-| [req-rs-018](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-018) | MUST | 7.4.1 | consumer | active | 21 | - |
-| [req-sc-001](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-001) | MUST | 10.4 | consumer | active | 2 | - |
-| [req-sc-002](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-002) | MUST | 10.9 | consumer | active | 1 | - |
-| [req-sc-003](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-003) | MUST | 10.3 | consumer | active | 1 | - |
-| [req-sc-004](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-004) | MUST | 10.5 | consumer | active | 1 | - |
-| [req-sc-005](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-005) | MUST | 10.3 | consumer | active | 1 | - |
-| [req-sc-006](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-006) | MUST | 4.2.3 | consumer | active | 1 | - |
-| [req-sc-007](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-007) | MUST | 10.3 | consumer | active | 1 | - |
-| [req-sc-008](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-008) | SHOULD | 10.3 | consumer | active | 1 | - |
-| [req-sc-009](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-009) | MUST | 10.13 | consumer | active | 6 | - |
-| [req-sc-010](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-010) | MUST | 10.13 | consumer | active | 1 | - |
-| [req-sc-011](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-011) | MUST | 10.14 | consumer | active | 2 | - |
-| [req-sc-012](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-012) | MUST | 10.14 | consumer | active | 1 | - |
-| [req-sc-013](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-013) | MUST | 10.3 | consumer | active | 4 | - |
-| [req-sc-014](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-014) | MUST | 10.15 | consumer | active | 1 | - |
-| [req-sc-015](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-015) | MUST | 10.16 | consumer | active | 8 | tests/fixtures/spec-conformance/source-plan/req-sc-015.json |
-| [req-sc-016](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-016) | MUST | 10.13 | consumer | active | 5 | - |
-| [req-tg-001](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-001) | MUST | 8.4 | consumer | active | 1 | - |
-| [req-tg-002](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-002) | MUST | 8.5 | consumer | active | 4 | - |
-| [req-tg-003](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-003) | MUST | 8.5 | consumer | active | 1 | - |
-| [req-tg-004](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-004) | MUST | 4.2.1 | consumer | active | 1 | - |
-| [req-tg-005](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-005) | MUST | 8.5 | consumer | active | 14 | - |
-| [req-tg-006](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-006) | MUST | 8.5 | consumer | active | 1 | - |
-| [req-tg-007](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-007) | MUST | 8.5 | consumer | active | 1 | - |
-| [req-tg-008](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-008) | MUST | 8.5.3 | consumer | active | 8 | - |
-| [req-tg-009](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-009) | MUST | 8.5.1 | consumer | active | 2 | - |
-| [req-tg-010](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-010) | MUST | 8.5.4 | consumer | active | 1 | - |
-| [req-tg-011](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-011) | MUST | 8.5.5 | consumer | active | 4 | - |
-| [req-tg-012](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012) | MUST | 8.5.6 | consumer | active | 7 | - |
-| [req-tg-013](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-013) | MUST | 8.5.7 | consumer | active | 7 | - |
-| [req-tg-014](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-014) | MUST | 8.5.8 | consumer | active | 2 | - |
-| [req-tg-015](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-015) | MUST | 8.5.1 | consumer | active | 6 | - |
-| [req-tg-016](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-016) | MUST | 8.5.9 | consumer | active | 2 | - |
-| [req-tg-017](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-017) | MUST | 8.5.9 | consumer | active | 3 | - |
-| [req-tg-018](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-018) | MUST | 8.5.10 | consumer | active | 9 | - |
+| Req ID | Keyword | Sec | Class | Status | Behavioral / tests | Oracle |
+|--------|---------|----:|-------|--------|-------------------:|--------|
+| [req-cf-001](docs/src/content/docs/specs/openapm-v0.1.md#req-cf-001) | MUST | 12.5 | consumer | active | 4 / 10 | - |
+| [req-cf-002](docs/src/content/docs/specs/openapm-v0.1.md#req-cf-002) | MUST | 12.3 | consumer | text-only | 0 / 1 | - |
+| [req-ext-001](docs/src/content/docs/specs/openapm-v0.1.md#req-ext-001) | MUST | 4.1 | consumer | text-only | 0 / 1 | - |
+| [req-ext-002](docs/src/content/docs/specs/openapm-v0.1.md#req-ext-002) | MUST | 4.1 | producer | text-only | 0 / 1 | - |
+| [req-ext-003](docs/src/content/docs/specs/openapm-v0.1.md#req-ext-003) | MUST | 4.6.2 | consumer | active | 2 / 9 | - |
+| [req-lk-001](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-001) | MUST | 5.1 | consumer | text-only | 0 / 1 | - |
+| [req-lk-002](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-002) | MUST | 5.4 | consumer | text-only | 0 / 1 | - |
+| [req-lk-003](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-003) | MUST | 5.2 | consumer | active | 8 / 9 | - |
+| [req-lk-004](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-004) | MUST | 5.4 | consumer | text-only | 0 / 1 | - |
+| [req-lk-005](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-005) | MUST | 5.5 | consumer | active | 1 / 2 | - |
+| [req-lk-006](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-006) | MUST | 5.5 | consumer | active | 32 / 32 | - |
+| [req-lk-007](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-007) | SHOULD | 5.5 | consumer | text-only | 0 / 1 | - |
+| [req-lk-008](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-008) | MUST | 5.6 | consumer | active | 2 / 3 | - |
+| [req-lk-009](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-009) | MUST | 5.6 | consumer | text-only | 0 / 1 | - |
+| [req-lk-010](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-010) | MUST | 5.6 | consumer | text-only | 0 / 1 | - |
+| [req-lk-011](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-011) | MUST | 5.2 | consumer | active | 1 / 2 | - |
+| [req-lk-012](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-012) | MUST | 5.2 | consumer | active | 1 / 2 | - |
+| [req-lk-013](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-013) | MUST | 5.2 | consumer | text-only | 0 / 2 | - |
+| [req-lk-014](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-014) | MUST | 5.2 | consumer | text-only | 0 / 1 | - |
+| [req-lk-015](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-015) | MUST | 5.6.4 | consumer | text-only | 0 / 1 | - |
+| [req-lk-016](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-016) | MUST | 5.2 | consumer | active | 6 / 12 | - |
+| [req-lk-017](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-017) | MUST | 5.2 | consumer | active | 1 / 2 | - |
+| [req-lk-018](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-018) | SHOULD | 5.5 | consumer | text-only | 0 / 1 | - |
+| [req-lk-019](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-019) | MUST | 5.2 | consumer | active | 9 / 10 | - |
+| [req-lk-020](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-020) | MUST | 5.2 | consumer | active | 5 / 5 | - |
+| [req-lk-021](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-021) | MUST | 5.2 | consumer | active | 8 / 8 | - |
+| [req-lk-022](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-022) | MUST | 5.2 | consumer | active | 5 / 6 | - |
+| [req-lk-023](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-023) | MUST | 5.2.1 | consumer | active | 1 / 7 | - |
+| [req-mf-001](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-001) | MUST | 4.1 | producer | active | 3 / 4 | - |
+| [req-mf-002](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-002) | MUST | 4.1 | producer | text-only | 0 / 1 | - |
+| [req-mf-003](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-003) | MUST | 4.1 | producer | text-only | 0 / 1 | - |
+| [req-mf-004](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-004) | SHOULD | 4.1 | producer | text-only | 0 / 1 | - |
+| [req-mf-005](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-005) | MUST | 4.2.1 | producer | text-only | 0 / 1 | - |
+| [req-mf-006](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-006) | MUST | 4.1 | consumer | text-only | 0 / 1 | - |
+| [req-mf-007](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-007) | MUST | 4.3.1 | consumer | text-only | 0 / 1 | - |
+| [req-mf-008](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-008) | MUST | 4.3.3 | consumer | active | 2 / 3 | - |
+| [req-mf-009](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-009) | MUST | 4.3.4 | consumer | text-only | 0 / 1 | - |
+| [req-mf-010](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-010) | MUST | 4.3.2 | consumer | text-only | 0 / 1 | - |
+| [req-mf-011](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-011) | MUST | 4.3.2 | consumer | active | 2 / 2 | - |
+| [req-mf-012](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-012) | MUST | 4.3.6 | consumer | active | 16 / 16 | - |
+| [req-mf-013](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-013) | MUST | 4.5 | consumer | active | 2 / 3 | - |
+| [req-mf-014](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-014) | MUST | 4.2.3 | producer | text-only | 0 / 1 | - |
+| [req-mf-015](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-015) | MUST | 4.2.3 | producer | text-only | 0 / 1 | - |
+| [req-mf-016](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-016) | MUST | 4.3.5 | consumer | skipped | 0 / 1 | - |
+| [req-mf-017](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-017) | MUST | 4.7 | producer | text-only | 0 / 1 | - |
+| [req-mf-018](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-018) | MUST | 4.6.1 | consumer | text-only | 0 / 1 | - |
+| [req-mf-019](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-019) | MUST | 4.2.4 | consumer | active | 1 / 2 | - |
+| [req-mf-020](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-020) | MUST | 4.1 | consumer | active | 2 / 3 | - |
+| [req-mf-021](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-021) | MUST | 4.8 | producer | text-only | 0 / 1 | - |
+| [req-mf-022](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-022) | MUST | 4.3.2 | consumer | active | 2 / 2 | - |
+| [req-mf-023](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-023) | MUST | 4.5 | consumer | active | 1 / 1 | - |
+| [req-mf-024](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-024) | MUST | 4.3.2 | consumer | active | 1 / 1 | - |
+| [req-mf-025](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-025) | MUST | 4.3.2 | consumer | active | 29 / 45 | - |
+| [req-mf-026](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-026) | MUST | 4.5 | consumer | active | 3 / 3 | - |
+| [req-mf-027](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-027) | MUST | 4.5 | consumer | active | 2 / 2 | - |
+| [req-na-001](docs/src/content/docs/specs/openapm-v0.1.md#req-na-001) | MUST | 8.5.11 | consumer | skipped | 0 / 1 | - |
+| [req-na-002](docs/src/content/docs/specs/openapm-v0.1.md#req-na-002) | MUST | 8.5.11 | consumer | active | 2 / 2 | - |
+| [req-na-003](docs/src/content/docs/specs/openapm-v0.1.md#req-na-003) | MUST | 8.5.11 | consumer | active | 1 / 1 | - |
+| [req-na-004](docs/src/content/docs/specs/openapm-v0.1.md#req-na-004) | MUST | 8.5.11 | consumer | active | 12 / 12 | tests/fixtures/spec-conformance/native-activation/req-na-004.json |
+| [req-na-005](docs/src/content/docs/specs/openapm-v0.1.md#req-na-005) | MUST | 8.5.11 | consumer | active | 2 / 2 | - |
+| [req-na-006](docs/src/content/docs/specs/openapm-v0.1.md#req-na-006) | MUST | 8.5.11 | consumer | skipped | 0 / 1 | - |
+| [req-na-007](docs/src/content/docs/specs/openapm-v0.1.md#req-na-007) | MUST | 8.5.11 | consumer | active | 1 / 1 | - |
+| [req-pl-001](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-001) | MUST | 6.1 | governance | text-only | 0 / 1 | - |
+| [req-pl-002](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-002) | MUST | 6.2 | governance | text-only | 0 / 1 | - |
+| [req-pl-003](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-003) | MUST | 6.4 | governance | text-only | 0 / 1 | - |
+| [req-pl-004](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-004) | MUST | 6.4 | governance | text-only | 0 / 1 | - |
+| [req-pl-005](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-005) | MUST | 6.5 | governance | active | 1 / 1 | - |
+| [req-pl-006](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-006) | MUST | 6.4 | governance | active | 4 / 5 | - |
+| [req-pl-007](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-007) | MUST | 6.3.1 | governance | active | 1 / 1 | - |
+| [req-pl-008](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-008) | MUST | 6.3.1 | governance | active | 1 / 1 | - |
+| [req-pl-009](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-009) | MUST | 6.6 | governance | text-only | 0 / 1 | - |
+| [req-pl-010](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-010) | MUST | 6.2 | governance | text-only | 0 / 1 | - |
+| [req-pl-011](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-011) | MUST | 6.1.1 | governance | active | 1 / 2 | - |
+| [req-pl-012](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-012) | MUST | 6.1.1 | governance | text-only | 0 / 1 | - |
+| [req-pl-013](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-013) | MUST | 6.8 | governance | active | 1 / 1 | - |
+| [req-pl-014](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-014) | MUST | 6.8 | governance | active | 8 / 8 | - |
+| [req-pl-015](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-015) | MUST | 6.3.5 | governance | active | 1 / 1 | - |
+| [req-pl-016](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-016) | MUST | 6.8 | governance | active | 1 / 1 | - |
+| [req-pl-017](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-017) | MUST | 6.8 | governance | active | 1 / 1 | - |
+| [req-pl-018](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-018) | MUST | 6.3.1 | governance | active | 5 / 5 | - |
+| [req-pl-019](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-019) | MUST | 6.8.1 | governance | active | 14 / 14 | - |
+| [req-pl-020](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-020) | MUST | 6.8.1 | governance | active | 3 / 3 | - |
+| [req-pl-021](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-021) | MUST | 6.1 | governance | active | 5 / 5 | - |
+| [req-pr-001](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-001) | MUST | 8.2 | consumer | text-only | 0 / 1 | - |
+| [req-pr-002](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-002) | MUST | 8.3 | consumer | active | 1 / 2 | - |
+| [req-pr-003](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-003) | MUST | 8.3 | consumer | text-only | 0 / 1 | - |
+| [req-pr-004](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-004) | MUST | 7.8 | producer | text-only | 0 / 10 | - |
+| [req-pr-005](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-005) | SHOULD | 7.8 | producer | text-only | 0 / 1 | - |
+| [req-pr-006](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-006) | MUST | 8.1 | consumer | active | 1 / 1 | - |
+| [req-pr-007](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-007) | MUST | 8.1 | consumer | active | 1 / 1 | - |
+| [req-pr-008](docs/src/content/docs/specs/openapm-v0.1.md#req-pr-008) | MUST | 8.3.1 | consumer | active | 28 / 28 | - |
+| [req-rg-001](docs/src/content/docs/specs/openapm-v0.1.md#req-rg-001) | MUST | 11.3.3 | registry | text-only | 0 / 1 | - |
+| [req-rpl-001](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-001) | MUST | 4.8.1 | consumer | active | 7 / 7 | - |
+| [req-rpl-002](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-002) | MUST | 4.8.1 | consumer | active | 6 / 6 | - |
+| [req-rpl-003](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-003) | MUST | 4.8.1 | consumer | active | 5 / 5 | - |
+| [req-rpl-004](docs/src/content/docs/specs/openapm-v0.1.md#req-rpl-004) | MUST | 4.8.1 | consumer | active | 6 / 6 | - |
+| [req-rs-001](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-001) | MUST | 7.2 | consumer | active | 5 / 6 | - |
+| [req-rs-002](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-002) | MUST | 7.3 | consumer | active | 2 / 3 | - |
+| [req-rs-003](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-003) | MUST | 7.3 | consumer | text-only | 0 / 1 | - |
+| [req-rs-004](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-004) | MUST | 7.5 | consumer | text-only | 0 / 1 | - |
+| [req-rs-005](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-005) | MUST | 7.6 | consumer | text-only | 0 / 1 | - |
+| [req-rs-006](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-006) | MUST | 7.2 | consumer | text-only | 0 / 1 | - |
+| [req-rs-007](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-007) | MUST | 7.3 | consumer | active | 10 / 11 | - |
+| [req-rs-008](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-008) | MUST | 7.1 | consumer | text-only | 0 / 7 | - |
+| [req-rs-009](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-009) | MUST | 7.5.1 | consumer | text-only | 0 / 1 | - |
+| [req-rs-010](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-010) | MUST | 7.2 | consumer | active | 2 / 3 | - |
+| [req-rs-011](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-011) | MUST | 7.7 | consumer | active | 3 / 4 | - |
+| [req-rs-012](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-012) | MUST | 7.7 | consumer | active | 8 / 9 | - |
+| [req-rs-013](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-013) | MUST | 7.2 | consumer | text-only | 0 / 1 | - |
+| [req-rs-014](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-014) | MUST | 7.3.1 | consumer | active | 10 / 11 | - |
+| [req-rs-015](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-015) | MUST | 7.5 | consumer | active | 4 / 5 | - |
+| [req-rs-016](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-016) | MUST | 7.2 | consumer | active | 10 / 10 | - |
+| [req-rs-017](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-017) | MUST | 7.7 | consumer | active | 16 / 17 | - |
+| [req-rs-018](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-018) | MUST | 7.4.1 | consumer | active | 15 / 21 | - |
+| [req-sc-001](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-001) | MUST | 10.4 | consumer | active | 1 / 2 | - |
+| [req-sc-002](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-002) | MUST | 10.9 | consumer | text-only | 0 / 1 | - |
+| [req-sc-003](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-003) | MUST | 10.3 | consumer | text-only | 0 / 1 | - |
+| [req-sc-004](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-004) | MUST | 10.5 | consumer | text-only | 0 / 1 | - |
+| [req-sc-005](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-005) | MUST | 10.3 | consumer | text-only | 0 / 1 | - |
+| [req-sc-006](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-006) | MUST | 4.2.3 | consumer | text-only | 0 / 1 | - |
+| [req-sc-007](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-007) | MUST | 10.3 | consumer | text-only | 0 / 1 | - |
+| [req-sc-008](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-008) | SHOULD | 10.3 | consumer | text-only | 0 / 1 | - |
+| [req-sc-009](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-009) | MUST | 10.13 | consumer | active | 1 / 6 | - |
+| [req-sc-010](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-010) | MUST | 10.13 | consumer | text-only | 0 / 1 | - |
+| [req-sc-011](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-011) | MUST | 10.14 | consumer | active | 1 / 2 | - |
+| [req-sc-012](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-012) | MUST | 10.14 | consumer | text-only | 0 / 1 | - |
+| [req-sc-013](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-013) | MUST | 10.3 | consumer | active | 4 / 4 | - |
+| [req-sc-014](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-014) | MUST | 10.15 | consumer | text-only | 0 / 1 | - |
+| [req-sc-015](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-015) | MUST | 10.16 | consumer | active | 7 / 8 | tests/fixtures/spec-conformance/source-plan/req-sc-015.json |
+| [req-sc-016](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-016) | MUST | 10.13 | consumer | active | 5 / 5 | - |
+| [req-tg-001](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-001) | MUST | 8.4 | consumer | text-only | 0 / 1 | - |
+| [req-tg-002](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-002) | MUST | 8.5 | consumer | active | 3 / 4 | - |
+| [req-tg-003](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-003) | MUST | 8.5 | consumer | text-only | 0 / 1 | - |
+| [req-tg-004](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-004) | MUST | 4.2.1 | consumer | text-only | 0 / 1 | - |
+| [req-tg-005](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-005) | MUST | 8.5 | consumer | active | 13 / 14 | - |
+| [req-tg-006](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-006) | MUST | 8.5 | consumer | active | 1 / 1 | - |
+| [req-tg-007](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-007) | MUST | 8.5 | consumer | active | 1 / 1 | - |
+| [req-tg-008](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-008) | MUST | 8.5.3 | consumer | active | 8 / 8 | - |
+| [req-tg-009](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-009) | MUST | 8.5.1 | consumer | active | 2 / 2 | - |
+| [req-tg-010](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-010) | MUST | 8.5.4 | consumer | text-only | 0 / 1 | - |
+| [req-tg-011](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-011) | MUST | 8.5.5 | consumer | active | 3 / 4 | - |
+| [req-tg-012](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012) | MUST | 8.5.6 | consumer | active | 7 / 7 | - |
+| [req-tg-013](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-013) | MUST | 8.5.7 | consumer | active | 6 / 7 | - |
+| [req-tg-014](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-014) | MUST | 8.5.8 | consumer | active | 2 / 2 | - |
+| [req-tg-015](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-015) | MUST | 8.5.1 | consumer | active | 6 / 6 | - |
+| [req-tg-016](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-016) | MUST | 8.5.9 | consumer | active | 1 / 2 | - |
+| [req-tg-017](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-017) | MUST | 8.5.9 | consumer | active | 2 / 3 | - |
+| [req-tg-018](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-018) | MUST | 8.5.10 | consumer | active | 9 / 9 | - |
 
 ## Waivers
 
