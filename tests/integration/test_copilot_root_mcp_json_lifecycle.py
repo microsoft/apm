@@ -77,6 +77,11 @@ def _flat(text: str) -> str:
     return " ".join(text.split())
 
 
+def _audit_clean(project: _Project) -> None:
+    result = project.apm("audit", "--ci", "--no-policy")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_copilot_writes_root_mcp_json_and_leaves_user_entries(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -499,11 +504,12 @@ def test_legacy_copilot_claim_never_adopts_a_user_root_entry(
     assert project.read_json(".mcp.json")["mcpServers"] == {"echo": user_root}
     assert "echo" in project.read_json(".github/mcp.json")["mcpServers"]
 
-    # Dropping the dependency removes only APM's retired entry, never the user's.
+    # Dropping the dependency removes only APM's retired entry, never the user's;
+    # the emptied .github/mcp.json APM created is deleted (#4524).
     project.manifest(targets=["copilot"])
     project.install()
     assert project.read_json(".mcp.json")["mcpServers"] == {"echo": user_root}
-    assert project.read_json(".github/mcp.json")["mcpServers"] == {}
+    assert not (project.root / ".github/mcp.json").exists()
 
 
 def test_partial_install_keeps_unhealed_retired_claims_for_the_retry(
@@ -601,7 +607,9 @@ def test_a_lock_rewrite_before_the_mcp_phase_keeps_the_heal_pending(
     output = _flat(project.install())
 
     assert "Removed APM-managed MCP server 'echo' from .github/mcp.json" in output
-    assert project.read_json(".github/mcp.json") == {"mcpServers": {}}
+    # copilot is declared, so the emptied file APM created is deleted (#4524).
+    assert "Removed empty .github/mcp.json (APM created it and no longer writes it)" in output
+    assert not (project.root / ".github/mcp.json").exists()
     assert project.lock()["apm_version"] != "0.35.0"
 
 
@@ -621,9 +629,21 @@ def test_frozen_upgrade_keeps_the_root_entry_apm_wrote(
     _seed_036_lock(project, [_ECHO], {runtime: ["echo"]})
     project.install("--frozen")
     assert "echo" in project.read_json(".mcp.json")["mcpServers"]
+    if runtime == "copilot":
+        # --frozen cannot restamp the lock, so the emptied file stays as the
+        # proof of the move (#4524).
+        github = project.root / ".github/mcp.json"
+        assert github.read_bytes() == b'{\n  "mcpServers": {}\n}\n'
+        _audit_clean(project)
 
-    project.install()
+    output = _flat(project.install())
     assert project.lock()["mcp_target_servers"] == {"copilot": ["echo"]}
+    if runtime == "copilot":
+        assert "Removed empty .github/mcp.json (APM created it and no longer writes it)" in output
+        assert not (project.root / ".github/mcp.json").exists()
+        _audit_clean(project)
+        project.install("--frozen")
+        assert "Removed" not in _flat(project.install())
 
     project.manifest(targets=["copilot"], dependencies={"mcp": [{**_ECHO, "args": ["hi"]}]})
     project.install()

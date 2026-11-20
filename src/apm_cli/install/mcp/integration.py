@@ -529,6 +529,7 @@ def run_mcp_integration(  # noqa: PLR0913
             stored_configs=old_mcp_configs,
             native_hashes=retired_owned.hashes,
             project_root=project_root,
+            frozen=frozen,
         )
         report_retired_mcp_heal(heal, logger)
         return healable

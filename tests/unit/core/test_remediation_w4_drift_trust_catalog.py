@@ -62,6 +62,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "claude-plugin-cache-invalid": "needs a corrupted legacy Claude Plugin cache entry",
     "local-bundle-executables-parked": "executed by test_local_bundle_hooks_lifecycle::"
     "test_update_names_a_bundle_whose_executables_are_parked (#4441)",
+    "local-bundle-executables-unapproved": "needs apm approve for content-bound bundle keys "
+    "(#4490); executed by test_local_bundle_approval_hint_is_the_catalog_remedy_and_runs",
     "mcp-registry-url-invalid": "the retried --mcp install resolves against the live default "
     "MCP registry (network)",
     "mcp-update-flag": "usage refusal; the reported state is the flag combination, not "

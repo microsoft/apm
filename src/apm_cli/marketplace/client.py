@@ -32,6 +32,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, urlsplit
@@ -116,7 +117,8 @@ def _cache_dir() -> str:
     from ..config import CONFIG_DIR
 
     d = os.path.join(CONFIG_DIR, _CACHE_DIR_NAME)
-    os.makedirs(d, exist_ok=True)
+    if not _CACHE_READ_ONLY.get():
+        os.makedirs(d, exist_ok=True)
     return d
 
 
@@ -202,7 +204,9 @@ def _write_cache(
     etag: str = "",
     last_modified: str = "",
 ) -> None:
-    """Write marketplace data and metadata to cache."""
+    """Write marketplace data and metadata to cache, unless reads are read-only."""
+    if _CACHE_READ_ONLY.get():
+        return
     data_path = _cache_data_path(name)
     meta_path = _cache_meta_path(name)
     try:
@@ -1454,6 +1458,17 @@ class _CatalogInvocation:
 
 _INVOCATION_LOCK = threading.RLock()
 _invocation: _CatalogInvocation | None = None
+_CACHE_READ_ONLY: ContextVar[bool] = ContextVar("marketplace_cache_read_only", default=False)
+
+
+@contextlib.contextmanager
+def catalog_cache_read_only(enabled: bool = True) -> Iterator[None]:
+    """Read catalogs without persisting them to the cache (``--dry-run`` reads)."""
+    token = _CACHE_READ_ONLY.set(enabled)
+    try:
+        yield
+    finally:
+        _CACHE_READ_ONLY.reset(token)
 
 
 @contextlib.contextmanager
