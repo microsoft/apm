@@ -9,7 +9,11 @@ APM dependencies: Failed to resolve..." string.
 import ast
 from pathlib import Path
 
+import pytest
+
 from apm_cli.install.errors import AuthenticationError
+
+pytestmark = pytest.mark.component
 
 
 class TestAuthenticationErrorImportedInInstall:

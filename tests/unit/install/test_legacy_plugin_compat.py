@@ -18,6 +18,8 @@ from apm_cli.models.validation import validate_legacy_marketplace_plugin
 from apm_cli.utils.content_hash import compute_package_hash
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
+pytestmark = pytest.mark.component
+
 
 def _legacy_cache(root: Path) -> Path:
     package = root / "cached-plugin"

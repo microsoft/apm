@@ -31,6 +31,8 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
 )
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _mock_git_object_links():

@@ -26,6 +26,8 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
 _MINIMAL_APM_YML = "name: test\ndescription: test\nversion: 0.0.1\n"
 _BASE_ENV: dict[str, str] = {"APM_E2E_TESTS": "1"}
 

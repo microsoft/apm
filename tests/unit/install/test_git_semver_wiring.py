@@ -30,6 +30,8 @@ from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
 from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 def _make_dep_ref(*, reference="^1.2.0", source="github", is_local=False, artifactory_prefix=None):
     """Build a minimal git-source DependencyReference for tests."""

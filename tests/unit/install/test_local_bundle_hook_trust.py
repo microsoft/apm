@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from apm_cli.install.local_bundle_hook_trust import (
     REASON_NOT_GRANTED,
     REASON_UNRECORDED,
@@ -16,6 +18,8 @@ from apm_cli.integration.hook_ownership import (
     local_bundle_hook_source_marker,
     parse_local_bundle_hook_source,
 )
+
+pytestmark = pytest.mark.component
 
 _KEY = "hookpkg#1.0.0@sha256:" + "a" * 64
 

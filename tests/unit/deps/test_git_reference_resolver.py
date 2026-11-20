@@ -41,6 +41,8 @@ from tests.utils.git_credential_sentinel import (
     exercise_credential_helper,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Test helpers
 # ---------------------------------------------------------------------------

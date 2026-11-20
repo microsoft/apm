@@ -11,6 +11,7 @@ import json
 import logging
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from apm_cli.deps.plugin_parser import (
@@ -19,6 +20,8 @@ from apm_cli.deps.plugin_parser import (
     _read_lsp_json,
     synthesize_apm_yml_from_plugin,
 )
+
+pytestmark = pytest.mark.component
 
 # ===========================================================================
 # _read_lsp_json

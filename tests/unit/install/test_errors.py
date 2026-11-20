@@ -15,6 +15,8 @@ from apm_cli.install.errors import (
     log_frozen_install_error,
 )
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize("error_type", [RuntimeError, OSError, LockfileFormatError])
 def test_non_conflict_install_failures_keep_existing_prefix(error_type):

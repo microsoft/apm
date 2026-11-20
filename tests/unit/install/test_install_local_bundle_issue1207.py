@@ -36,6 +36,8 @@ from apm_cli.bundle.local_bundle import check_target_mismatch
 from apm_cli.install.services import integrate_local_bundle
 from apm_cli.integration.targets import KNOWN_TARGETS
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Minimal fixtures -- intentionally lighter than the air-gap E2E suite.
 # ---------------------------------------------------------------------------

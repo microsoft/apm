@@ -24,6 +24,8 @@ from apm_cli.install.errors import AuthenticationError, FrozenInstallError
 from apm_cli.install.pipeline import _preflight_auth_check, _run_phase
 from apm_cli.models.dependency.materialization import MaterializationPathCollisionError
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers shared across tests
 # ---------------------------------------------------------------------------

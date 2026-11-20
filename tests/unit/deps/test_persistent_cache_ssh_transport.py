@@ -23,6 +23,8 @@ from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 _HOST = "gitlab.example.com"
 _SSH_SPEC = f"git@{_HOST}:org/repo.git#main"
 

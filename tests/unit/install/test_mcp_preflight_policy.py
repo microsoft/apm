@@ -43,7 +43,7 @@ from apm_cli.policy.schema import (
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "policy"
 # Registry MCP servers resolve as stdio packages (mcp.transport.allow).
-pytestmark = pytest.mark.usefixtures("stdio_mcp_registry")
+pytestmark = [pytest.mark.component, pytest.mark.usefixtures("stdio_mcp_registry")]
 
 MCP_POLICY_FIXTURE = FIXTURE_DIR / "apm-policy-mcp.yml"
 

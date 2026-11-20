@@ -20,6 +20,8 @@ from apm_cli.install.mcp.registry import (
     validate_registry_url,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestResolveRegistryUrl:
     """Precedence chain and diagnostic emission."""

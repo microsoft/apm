@@ -28,6 +28,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # _is_tls_failure
 # ---------------------------------------------------------------------------

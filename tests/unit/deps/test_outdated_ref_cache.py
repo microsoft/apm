@@ -21,11 +21,15 @@ import sys
 import threading
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
 from apm_cli.deps.outdated_ref_cache import OutdatedRefCache, _identity_key
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
+
+pytestmark = pytest.mark.component
 
 
 def _dep(repo_url: str = "owner/repo", host=None, virtual_path=None) -> DependencyReference:

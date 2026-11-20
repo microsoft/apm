@@ -30,6 +30,8 @@ from apm_cli.install.phases.lockfile import LockfileBuilder
 from apm_cli.integration.cleanup import CleanupResult
 from apm_cli.utils.content_hash import compute_file_hash
 
+pytestmark = pytest.mark.component
+
 
 def _target(name, root_dir=None, deploy_roots=None):
     """Build a minimal target-profile stand-in for governance computation."""

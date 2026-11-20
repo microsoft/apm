@@ -34,6 +34,8 @@ from apm_cli.install.package_resolution import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 def _local_ref(path: str) -> DependencyReference:
     """Build a minimal local DependencyReference."""

@@ -32,6 +32,8 @@ from apm_cli.install.package_resolution import (
 )
 from apm_cli.install.services import integrate_package_primitives
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Unit: the additive-union helper
 # ---------------------------------------------------------------------------

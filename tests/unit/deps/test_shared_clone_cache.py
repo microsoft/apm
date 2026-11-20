@@ -19,6 +19,8 @@ import pytest
 
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _mock_git_object_links():

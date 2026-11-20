@@ -33,6 +33,8 @@ from apm_cli.install.context import InstallContext
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, ResolvedReference
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Constants - correct patch targets for lazy imports in resolve.run()
 # ---------------------------------------------------------------------------

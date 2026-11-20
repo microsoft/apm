@@ -33,6 +33,8 @@ from apm_cli.policy.schema import (
     CompilationTargetPolicy,
 )
 
+pytestmark = pytest.mark.component
+
 # Path to fixtures
 FIXTURES_DIR = Path(__file__).resolve().parent.parent.parent / "fixtures" / "policy"
 TARGET_POLICY_FIXTURE = FIXTURES_DIR / "apm-policy-target-allow.yml"

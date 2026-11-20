@@ -40,6 +40,8 @@ from apm_cli.deps.git_semver_resolver import (
 )
 from apm_cli.install.helpers.ref_reuse import _is_exact_semver_constraint
 
+pytestmark = pytest.mark.component
+
 
 def _dep_ref(*, artifactory: bool = False) -> MagicMock:
     """Build a GitHub-shorthand dependency reference.

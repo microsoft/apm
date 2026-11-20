@@ -35,6 +35,8 @@ from apm_cli.deps.tiered_ref_resolver import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 
+pytestmark = pytest.mark.component
+
 SHA_A = "a" * 40
 SHA_B = "b" * 40
 SHA_C = "c" * 40

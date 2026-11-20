@@ -29,6 +29,8 @@ from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.models.manifest_targets import ManifestTargetDeclaration
 
+pytestmark = pytest.mark.component
+
 _ECHO = {"name": "echo", "registry": False, "transport": "stdio", "command": "echo"}
 _LEGACY_COPILOT = {"type": "local", "tools": ["*"], "id": "", "command": "echo", "args": []}
 

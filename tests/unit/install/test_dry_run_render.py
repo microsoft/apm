@@ -18,6 +18,8 @@ from apm_cli.install.orphans import OrphanOperation, OrphanRemovalDecision
 from apm_cli.install.presentation.dry_run import render_and_exit as _render_and_exit
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 def _decision(files) -> OrphanRemovalDecision:
     return OrphanRemovalDecision(

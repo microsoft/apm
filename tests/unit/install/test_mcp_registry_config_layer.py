@@ -36,6 +36,8 @@ from apm_cli.integration.mcp_integrator_install import (
 from apm_cli.registry.client import SimpleRegistryClient, is_valid_mcp_server_name
 from apm_cli.registry.operations import MCPServerOperations
 
+pytestmark = pytest.mark.component
+
 CONFIG_REGISTRY = "https://registry.internal.example"
 ENV_REGISTRY = "https://env-registry.internal.example"
 # A second populated registry the user picks by hand when replaying the hint.

@@ -8,6 +8,8 @@ from apm_cli.deps import lockfile_generator
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.deps.lockfile_generator import LockfileGeneratorError, assert_writable
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def running(monkeypatch):

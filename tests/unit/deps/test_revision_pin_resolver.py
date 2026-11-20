@@ -24,6 +24,8 @@ from apm_cli.deps.revision_pins import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
+pytestmark = pytest.mark.component
+
 OLD_SHA = "a" * 40
 NEW_SHA = "b" * 40
 TAG_OBJECT_SHA = "c" * 40

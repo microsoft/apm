@@ -14,6 +14,8 @@ from apm_cli.install.mcp.conflicts import (
     validate_mcp_conflicts,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------

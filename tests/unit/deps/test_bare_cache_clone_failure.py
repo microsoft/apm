@@ -18,6 +18,8 @@ from apm_cli.deps.transport_selection import (
 )
 from apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 def _clone_failure_message(
     *,

@@ -5,10 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.replay_transport import DeclaredTransportIndex
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.yaml_io import dump_yaml
+
+pytestmark = pytest.mark.component
 
 _SHA = "a" * 40
 

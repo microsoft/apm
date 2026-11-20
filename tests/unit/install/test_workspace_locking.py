@@ -18,7 +18,7 @@ from apm_cli.install.locking import (
     lifecycle_lock,
 )
 
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
 
 def test_lifecycle_lock_is_reentrant_per_process() -> None:

@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.content_hash import compute_file_hash
+
+pytestmark = pytest.mark.component
 
 _SKILL = ".agents/skills/helper/SKILL.md"
 _STAGED = "apm_modules/bundler/.apm/instructions/glob.instructions.md"

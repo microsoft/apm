@@ -18,6 +18,8 @@ import pytest
 from apm_cli.core.auth import AuthResolver
 from apm_cli.install.errors import AuthenticationError
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

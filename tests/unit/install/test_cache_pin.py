@@ -34,6 +34,8 @@ from apm_cli.install.cache_pin import (
     write_marker,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _make_install_dir(tmp_path: Path, name: str = "pkg") -> Path:
     install = tmp_path / name

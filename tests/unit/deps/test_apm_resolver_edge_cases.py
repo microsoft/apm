@@ -35,6 +35,8 @@ from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.models.validation import PackageContentType, PackageType, validate_apm_package
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

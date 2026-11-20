@@ -10,6 +10,8 @@ import pytest
 from apm_cli.install.exec_gate import ReplayExecAllowMap
 from apm_cli.policy.discovery import PolicyFetchResult
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

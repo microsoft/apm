@@ -15,6 +15,8 @@ from apm_cli.utils.staging_guard import (
     assert_no_staging_paths,
 )
 
+pytestmark = pytest.mark.component
+
 _STAGED_SCRIPT = f"/home/dev/.apm/apm_modules/{STAGING_DIR_NAME}/abc123/replacements/de/start.mjs"
 _REFUSAL = "references the resolution staging directory"
 

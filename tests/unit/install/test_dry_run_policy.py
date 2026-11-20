@@ -37,6 +37,8 @@ from apm_cli.policy.models import CheckResult, CIAuditResult
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy
 
+pytestmark = pytest.mark.component
+
 # -- Fixtures / helpers ---------------------------------------------------
 
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "policy"

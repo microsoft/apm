@@ -52,6 +52,8 @@ from apm_cli.install.drift import (
 )
 from apm_cli.integration.hook_integrator import HookIntegrator
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # _assert_scratch_bound
 # ---------------------------------------------------------------------------

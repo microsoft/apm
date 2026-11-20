@@ -20,6 +20,8 @@ import yaml
 
 from apm_cli.install.context import InstallContext
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

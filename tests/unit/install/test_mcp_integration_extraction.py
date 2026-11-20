@@ -32,6 +32,8 @@ from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.install_preflight import PolicyBlockError
 from apm_cli.policy.parser import load_policy
 
+pytestmark = pytest.mark.component
+
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "policy"
 MCP_POLICY_FIXTURE = FIXTURE_DIR / "apm-policy-mcp.yml"
 

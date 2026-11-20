@@ -47,6 +47,8 @@ from apm_cli.utils.archive import safe_extract_zip
 from apm_cli.utils.path_security import PathTraversalError
 from tests.utils.simulated_ado_chain import install_simulated_ado_chain
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------

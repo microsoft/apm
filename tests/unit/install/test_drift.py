@@ -31,6 +31,8 @@ from apm_cli.install.drift import (
     render_drift_text,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Normalization helpers
 # ---------------------------------------------------------------------------

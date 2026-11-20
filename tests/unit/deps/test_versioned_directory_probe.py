@@ -14,6 +14,8 @@ from apm_cli.models.dependency.reference import DependencyReference
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.parametrize(
     ("path", "expected"),

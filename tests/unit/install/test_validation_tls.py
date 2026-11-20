@@ -17,6 +17,8 @@ import requests
 
 from apm_cli.install import validation
 
+pytestmark = pytest.mark.component
+
 
 class TestTlsHelpers:
     def test_is_tls_failure_detects_runtime_error_marker(self):

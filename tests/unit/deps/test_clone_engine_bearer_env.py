@@ -6,6 +6,8 @@ import subprocess as sp
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.core.auth import AuthContext, AuthResolver, HostInfo
 from apm_cli.deps.clone_engine import CloneEngine
 from apm_cli.deps.transport_selection import TransportAttempt, TransportPlan
@@ -14,6 +16,8 @@ from tests.utils.git_credential_sentinel import (
     credential_helper_trap_env,
     exercise_credential_helper,
 )
+
+pytestmark = pytest.mark.component
 
 
 def _ado_host(git_env: dict) -> MagicMock:

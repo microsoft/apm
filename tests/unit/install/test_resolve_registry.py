@@ -21,6 +21,8 @@ from apm_cli.install.phases.resolve import (
     _require_package_registry_feature_if_needed,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _set_package_registry(monkeypatch, enabled: bool):
     import apm_cli.config as _conf

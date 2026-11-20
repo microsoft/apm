@@ -22,7 +22,7 @@ from apm_cli.models.dependency.replacement import (
     replacement_rules_from_dicts,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Happy path: valid replace blocks

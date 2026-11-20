@@ -31,6 +31,8 @@ from apm_cli.install.failure_residue import (
 from apm_cli.models.results import InstallDisposition, InstallResult
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
+pytestmark = pytest.mark.component
+
 _ROLLBACK_WORDING = ("rolled back", "roll back", "rollback", "restored", "restore", "reverted")
 
 

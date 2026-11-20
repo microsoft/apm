@@ -27,6 +27,8 @@ from apm_cli.deps.artifactory_orchestrator import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 def _dep(
     *,

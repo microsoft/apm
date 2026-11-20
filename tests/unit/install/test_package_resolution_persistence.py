@@ -20,6 +20,8 @@ from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.yaml_io import dump_yaml_roundtrip, load_yaml
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _enable_package_registry(monkeypatch):

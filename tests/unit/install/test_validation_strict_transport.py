@@ -22,6 +22,8 @@ from apm_cli.deps.transport_selection import ProtocolPreference
 from apm_cli.install import validation
 from apm_cli.utils.git_env import GitUrlRewriteProbeError
 
+pytestmark = pytest.mark.component
+
 
 def _make_resolver():
     """Resolver mock sufficient for the generic-host validation branch."""

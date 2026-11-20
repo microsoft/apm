@@ -2,7 +2,8 @@
   "partition": "unit/deps+install",
   "steps_done": [
     1,
-    2
+    2,
+    3
   ],
   "folds": {
     "tests/unit/install/test_sources_phase3.py::TestLocalDependencySourceAcquire::test_success_with_apm_yml": "tests/unit/install/test_sources_materialisation.py::TestLocalDependencySourceAcquire::test_success_with_apm_yml",
@@ -30,9 +31,13 @@
     ".github/workflows/ci.yml comment for #2238 retry coverage repointed from the deleted test_download_strategies_phase3.py to test_download_strategies_selection.py (TestResilientGet moved there).",
     "Kept (same body, different context): test_validation_error_handling.py TestIsTlsFailure::test_ssl_error_returns_true and TestLocalPathNoMarkersHint::test_no_sub_packages_produces_no_output, test_download_strategies_selection.py TestBuildUnsupportedOrMissingError::test_github_host_with_fallback_ref: their twins live in tests/integration (outside every partition); deleting the unit owner copy would move pure-logic coverage out of the unit lane, the misplaced integration copy is the one to remove.",
     "Kept: test_git_remote_ops.py::TestValidateLsRemoteTagOutput::test_invalid_or_ambiguous_records_are_rejected shares only its body with protected tests/spec_conformance test_revision_pin_update_rejects_malformed_tag_records; the parametrize data differs (10 unit cases vs 6 spec cases), so neither covers the other.",
-    "Kept: test_skill_path_migration.py same-file group and the 27 test_services_branches.py/test_services_phase3.py groups: those files are owned by open pull requests."
+    "Kept: test_skill_path_migration.py same-file group and the 27 test_services_branches.py/test_services_phase3.py groups: those files are owned by open pull requests.",
+    "Classification: component when a module (or a fixture it uses) touches the filesystem (tmp_path, tempfile, write_text/mkdir, CliRunner, chdir, reading repo files via __file__ or source paths); e2e when it drives an installed CLI (none found); otherwise unit. Environment-variable patching alone stays unit.",
+    "Reclassified unit -> component: test_replacement_model.py, test_local_rows_need_reconciling.py, test_mcp_retired_shape_heal.py (all use tmp_path). Existing scheduling marks (windows_compat, usefixtures, skipif) kept in a pytestmark list.",
+    "Pre-existing sandbox failures unrelated to this change (also fail at the pre-change HEAD): real-git commits in test_bare_cache_sparse, test_shared_clone_cache, test_cache_pin, test_persistent_cache_ssh_transport, test_unix_install_ownership, and the src LOC budget in test_architecture_invariants."
   ],
   "counts_left": {
-    "same_body_groups": 32
+    "same_body_groups": 32,
+    "unclassified_modules": 0
   }
 }

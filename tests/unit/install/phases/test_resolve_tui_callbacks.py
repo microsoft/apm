@@ -14,6 +14,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 
 def _make_tui_stub() -> MagicMock:
     """Return a MagicMock that acts as an InstallTui for the callback."""
