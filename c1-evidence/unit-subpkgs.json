@@ -29,12 +29,13 @@
   "step4: kept cache/test_git_cache_recency.py: its node id is pinned by tests/fixtures/lifecycle_bug_ledger.json (protected)",
   "step4: kept scripts/test_check_complexity_ratchet.py and scripts/test_check_test_assertions.py: RATCHET_TEST_SCOPE fixture tests must live under tests/unit/scripts per tests/quality/test_ci_topology.py",
   "step4: remaining protected offenders: scripts/test_architecture_registry_conflicts.py (test_architecture_*), copilot_plugins/test_pr2705_folds.py and scripts/test_check_exact_test_duplicates.py (open PRs)",
-  "step5: AQ002 narrowed to HashMismatchError in registry resolver tests; AQ003 fixed by asserting durable cache/lock/file state left behind"
+  "step5: AQ002 narrowed to HashMismatchError in registry resolver tests; AQ003 fixed by asserting durable cache/lock/file state left behind",
+  "step5: mixed modules split by moving whole test classes (same Class::name) so pure-logic tests sit in unit modules and filesystem tests in component modules: primitives/test_discovery_walk.py and test_primitives.py are now unit; their filesystem classes moved into test_discovery_parser.py"
  ],
  "counts_left": {
   "same_body_groups": 6,
   "unclassified_modules": 7,
   "placement_offenders": 8,
-  "weak_tests": 592
+  "weak_tests": 523
  }
 }

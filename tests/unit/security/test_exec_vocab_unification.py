@@ -10,6 +10,8 @@ Covers:
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import apm_cli.security.executables as ex
@@ -72,6 +74,8 @@ class TestUserExecutablesStore:
         allow, deny = load_user_executables()
         assert allow == {"owner/repo": {"hooks": True}}
         assert deny == {"bad/pkg": {"bin": True}}
+        stored = json.loads(cfg.read_text(encoding="utf-8"))["executables"]
+        assert stored == {"allow": allow, "deny": deny}
 
     def test_migrates_and_deletes_legacy_approvals_yml(self, tmp_path, monkeypatch):
         cfg = tmp_path / "config.json"
@@ -171,6 +175,7 @@ class TestBuildExecTrustContext:
         save_user_executables({}, {"owner/repo": {EXEC_TYPE_HOOKS: True}})
         ctx = build_exec_trust_context(policy=None, project_data={})
         assert ctx.gate_enabled is True
+        assert (tmp_path / "c.json").is_file()
 
     def test_user_allow_alone_does_not_enable_gate(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ex, "_user_config_file", lambda: tmp_path / "c.json")
@@ -178,6 +183,7 @@ class TestBuildExecTrustContext:
         save_user_executables({"owner/repo": {EXEC_TYPE_HOOKS: True}}, {})
         ctx = build_exec_trust_context(policy=None, project_data={})
         assert ctx.gate_enabled is False
+        assert (tmp_path / "c.json").is_file()
 
     def test_user_consent_flows_into_context(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ex, "_user_config_file", lambda: tmp_path / "c.json")
@@ -187,3 +193,4 @@ class TestBuildExecTrustContext:
         ctx = build_exec_trust_context(policy=None, project_data=data)
         assert ctx.user_allow.get("owner/repo", {}).get(EXEC_TYPE_HOOKS) is True
         assert EXEC_TYPE_BIN not in ctx.user_allow.get("owner/repo", {})
+        assert (tmp_path / "c.json").is_file()
