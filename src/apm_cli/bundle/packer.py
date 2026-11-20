@@ -4,6 +4,8 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from apm_cli.core.scope import manifest_file
+
 from ..core.target_detection import detect_target
 from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
 from ..models.apm_package import APMPackage
@@ -126,7 +128,7 @@ def pack_bundle(
         )
 
     # 2. Read apm.yml for name / version / config target
-    apm_yml_path = project_root / "apm.yml"
+    apm_yml_path = manifest_file(project_root)
     skill_md_path = project_root / "SKILL.md"
     is_hybrid_root = apm_yml_path.exists() and skill_md_path.exists()
     try:

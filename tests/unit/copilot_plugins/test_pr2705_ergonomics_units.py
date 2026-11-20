@@ -17,6 +17,8 @@ from apm_cli.copilot_plugins.registrar import (
     discover_native_plugins,
 )
 
+pytestmark = pytest.mark.component
+
 
 class _FakeLogger:
     """Record every logger call as ``(method, message, kwargs)`` tuples."""

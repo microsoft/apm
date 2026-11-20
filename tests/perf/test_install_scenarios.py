@@ -32,9 +32,10 @@ from .conftest import (
     write_manifest,
 )
 
-pytestmark = pytest.mark.skipif(
-    not PERF_ENABLED, reason="Perf scenarios are opt-in (PYTEST_PERF=1)"
-)
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.skipif(not PERF_ENABLED, reason="Perf scenarios are opt-in (PYTEST_PERF=1)"),
+]
 
 
 def _apm_install(cwd: Path, verbose: bool = False) -> tuple[float, str]:

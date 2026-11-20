@@ -1,0 +1,85 @@
+# J05 Add a marketplace plugin, nightly (#4110). Schema: test_journeys.py.
+# Twins (twins_consumer_a.py): anthropics/claude-code serves the claude-code-plugins
+# marketplace at v2.1.0; its entries are git-subdir sources into
+# anthropics/claude-plugins-official. broken-paths declares a missing component path.
+schema: 1
+id: J05
+persona: consumer
+title: Add a marketplace plugin
+docs: [consumer/installing-from-marketplaces.md]
+world:
+  project: empty
+  setup: ["apm init -y --target claude"]
+steps:
+  - n: 1
+    run: [apm marketplace add anthropics/claude-code --ref v2.1.0]
+    exit: 0
+    files: []
+    key_lines:
+      - "[+] Marketplace 'claude-code-plugins' registered (13 plugins)"
+      - "[i] Install plugins with: apm install <plugin>@claude-code-plugins"
+    forbidden_lines: ["[!]"]
+  - n: 2
+    run: [apm marketplace browse claude-code-plugins]
+    exit: 0
+    files: []
+    key_lines:
+      - "[+] 13 plugin(s) in 'claude-code-plugins':"
+      - "  commit-commands@claude-code-plugins"
+      - "  broken-paths@claude-code-plugins"
+    forbidden_lines: ["[!]"]
+  - n: 3
+    run: [apm install commit-commands@claude-code-plugins]
+    exit: 0
+    files:
+      - apm.yml
+      - apm.lock.yaml
+      - .gitignore
+      - apm_modules/
+      - .claude/commands/commit.md
+      - .claude/commands/commit-push-pr.md
+      - .claude/commands/clean_gone.md
+    key_lines:
+      - "[+] github.com/anthropics/claude-plugins-official/plugins/commit-commands #main @<SHA8>"
+      - "|-- 3 commands integrated -> .claude/commands/"
+    forbidden_lines:
+      - "#main #main"
+      - bin/ executables skipped
+      - Skipped inactive experimental resolver
+      - "[!]"
+  - n: 4
+    run: []
+    exit: 0
+    note: >-
+      manual harness check (Claude /plugin listing or a recorded vendor sample);
+      O11 has no hermetic implementation yet
+  - n: 5
+    run: [apm install broken-paths@claude-code-plugins]
+    exit: 1
+    files: []
+    key_lines:
+      - "[x] 1 package failed:"
+      - "Plugin 'broken-paths' declares 'commands' component path './missing-commands/', which does not exist in its plugin root."
+      - "[i] apm.yml restored to its previous state."
+    forbidden_lines: [Traceback, staging, "<TMP>"]
+  - n: 6
+    run: ["rm -rf apm_modules .claude", apm install --frozen]
+    exit: 0
+    cold_cache: true
+    note: a fresh machine (no apm_modules, no deployed files, empty cache) replays the lock
+    files: []
+    key_lines:
+      - "|-- 3 commands integrated -> .claude/commands/"
+      - "[i] Deployed files verified against apm.lock.yaml."
+    forbidden_lines: ["#main #<SHA40>"]
+known_cells:
+  - id: frozen-header-repeats-ref
+    law: FORBID
+    tracking: "#4195"
+    step: 6
+    match: "#main #<SHA40>"
+  - id: failed-install-records-marketplace-pin
+    law: I5
+    tracking: "#4194"
+    step: 5
+    match: "install wrote home:.*\\.apm/cache/marketplace/version-pins\\.json"

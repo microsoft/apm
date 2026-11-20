@@ -24,6 +24,8 @@ from tests.spec_conformance._helpers import (
     sha256_hex,
 )
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.req("req-rg-001")
 def test_registry_trust_anchor_archive_bytes_match_advertised_digest():

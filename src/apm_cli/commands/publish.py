@@ -15,6 +15,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 from ..core.command_logger import CommandLogger
 from ..deps.registry.feature_gate import require_package_registry_enabled
 from ..models.dependency.identity import normalize_package_repo_url
@@ -92,7 +94,7 @@ def publish_cmd(ctx, registry_name, package_id, zip_path, dry_run, verbose):
 
     # ------------------------------------------------------------------ apm.yml
     project_root = Path.cwd()
-    apm_yml_path = project_root / "apm.yml"
+    apm_yml_path = manifest_file(project_root)
     if not apm_yml_path.exists():
         raise click.ClickException("apm.yml not found in the current directory.")
 

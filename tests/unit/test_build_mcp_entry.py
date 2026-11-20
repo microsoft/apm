@@ -10,6 +10,8 @@ import pytest
 from apm_cli.commands.install import _build_mcp_entry
 from apm_cli.models.dependency.mcp import MCPDependency
 
+pytestmark = pytest.mark.unit
+
 
 def _build(name="foo", **kw):
     defaults = dict(
@@ -147,8 +149,17 @@ class TestValidationRoundtrip:
 
 class TestExplicitTransportOverride:
     def test_explicit_transport_overrides_remote_inference(self):
-        entry, _ = _build(url="https://x/y", transport="sse")
-        assert entry["transport"] == "sse"
+        inferred, _ = _build(url="https://example.com/mcp")
+        overridden, self_def = _build(url="https://example.com/mcp", transport="streamable-http")
+        assert inferred["transport"] == "http"
+        assert self_def is True
+        assert overridden == {
+            "name": "foo",
+            "registry": False,
+            "transport": "streamable-http",
+            "url": "https://example.com/mcp",
+        }
+        assert MCPDependency.from_dict(overridden).transport == "streamable-http"
 
 
 class TestRegistryUrlOverlay:

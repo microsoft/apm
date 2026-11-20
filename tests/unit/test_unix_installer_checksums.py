@@ -19,6 +19,7 @@ import pytest
 pytestmark = [
     pytest.mark.component,
     pytest.mark.skipif(sys.platform == "win32", reason="Unix bootstrap uses POSIX shell tools"),
+    pytest.mark.promise("P-OWN-self-update-release-resolution"),
 ]
 
 ROOT = Path(__file__).resolve().parents[2]

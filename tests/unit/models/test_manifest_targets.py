@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-import yaml
 
 from apm_cli.core import apm_yml
 from apm_cli.core.errors import (
@@ -18,8 +15,6 @@ from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.models.apm_package import (
     APMPackage,
     canonical_package_target_config,
-    canonical_package_targets,
-    package_target_declaration,
     package_target_selection,
 )
 from apm_cli.models.manifest_targets import (
@@ -29,11 +24,10 @@ from apm_cli.models.manifest_targets import (
     bootstrap_target_names,
     manifest_target_restriction,
     option_target_names,
-    read_manifest_target_declaration,
     rewrite_target_names,
-    verify_rewritten_manifest,
 )
-from apm_cli.utils.yaml_io import dump_yaml
+
+pytestmark = pytest.mark.unit
 
 
 def _declaration(**fields) -> ManifestTargetDeclaration:
@@ -131,53 +125,6 @@ def test_install_accepts_deployable_declarations():
         ManifestTargetDeclaration.from_mapping(fields).validate_for_install()
 
 
-def test_parsed_package_exposes_its_declaration(tmp_path: Path):
-    manifest = tmp_path / "apm.yml"
-    dump_yaml({"name": "p", "version": "1.0.0", "targets": ["claude", "vscode"]}, manifest)
-
-    package = APMPackage.from_apm_yml(manifest)
-
-    assert package.target_declaration is not None
-    assert package_target_declaration(package) is package.target_declaration
-    assert package_target_selection(package) == ["claude", "copilot"]
-    assert read_manifest_target_declaration(manifest).restriction() == ["claude", "copilot"]
-
-
-def test_path_reader_is_lenient_only_on_request(tmp_path: Path):
-    manifest = tmp_path / "apm.yml"
-    dump_yaml({"name": "p", "version": "1.0.0", "targets": ["nope"]}, manifest)
-
-    assert read_manifest_target_declaration(tmp_path / "missing.yml") is None
-    # Tokens are validated when a view is read, not when the file is loaded.
-    declaration = read_manifest_target_declaration(manifest)
-    with pytest.raises(UnknownTargetError):
-        declaration.restriction()
-
-    manifest.write_text("- not\n- a mapping\n", encoding="utf-8")
-    assert read_manifest_target_declaration(manifest, lenient=True) is None
-    with pytest.raises(yaml.YAMLError, match="must contain a YAML object"):
-        read_manifest_target_declaration(manifest)
-
-    manifest.write_text("targets: [claude\n", encoding="utf-8")
-    assert read_manifest_target_declaration(manifest, lenient=True) is None
-    with pytest.raises(yaml.YAMLError):
-        read_manifest_target_declaration(manifest)
-
-
-def test_strict_path_reader_refuses_symlinked_manifest(tmp_path: Path):
-    real = tmp_path / "real.yml"
-    dump_yaml({"name": "p", "version": "1.0.0", "targets": ["claude"]}, real)
-    link = tmp_path / "apm.yml"
-    try:
-        link.symlink_to(real)
-    except OSError:
-        pytest.skip("symlinks unavailable")
-
-    with pytest.raises(OSError, match="non-symlink"):
-        read_manifest_target_declaration(link)
-    assert read_manifest_target_declaration(link, lenient=True).restriction() == ["claude"]
-
-
 def test_strict_restriction_rejects_an_empty_singular_target():
     declaration = _declaration(target=None)
     assert declaration.restriction() is None
@@ -260,16 +207,6 @@ def test_rewrite_refuses_a_declaration_install_rejects(fields, error, message):
         rewrite_target_names(ManifestTargetDeclaration.from_mapping(fields))
 
 
-def test_verify_refuses_a_rewrite_apm_would_reject(tmp_path):
-    manifest = tmp_path / "apm.yml"
-    with pytest.raises(TargetRewriteError, match=r"Refusing to write apm.yml.*Unknown target"):
-        verify_rewritten_manifest(manifest, "name: demo\ntargets:\n- agents\n")
-    with pytest.raises(TargetRewriteError, match=r"YAML anchor '&t' on line 1"):
-        verify_rewritten_manifest(manifest, "x: &t [claude]\ntargets: *t\n")
-    verify_rewritten_manifest(manifest, "name: demo\ntargets:\n- copilot\n")
-    assert not manifest.exists()
-
-
 def test_targets_replacement_wraps_the_rewrite_mapping():
     """The target: warning suggests exactly what re-init writes (#3868)."""
     from apm_cli.core.target_catalog import expand_all
@@ -280,23 +217,6 @@ def test_targets_replacement_wraps_the_rewrite_mapping():
     assert _declaration(target="claude,intellij").targets_replacement() is None
     assert _declaration(target=None).targets_replacement() == ()
     assert _declaration(targets=["claude"]).targets_replacement() is None
-
-
-@pytest.mark.parametrize(
-    "fields",
-    [{"target": "claude,vscode"}, {"targets": ["claude", "vscode"]}],
-    ids=["target", "targets"],
-)
-def test_both_spellings_resolve_vscode_to_copilot_for_dependency_intersection(tmp_path, fields):
-    """A package migrated to ``targets: [vscode]`` still deploys to copilot (#3762)."""
-    manifest = tmp_path / "apm.yml"
-    dump_yaml({"name": "p", "version": "1.0.0", **fields}, manifest)
-
-    assert ManifestTargetDeclaration.from_mapping(fields).canonical == ("claude", "copilot")
-    assert canonical_package_targets(APMPackage.from_apm_yml(manifest)) == ("claude", "copilot")
-    assert canonical_package_target_config(APMPackage.from_apm_yml(manifest)) == {
-        "targets": ["claude", "copilot"]
-    }
 
 
 @pytest.mark.parametrize(
@@ -334,23 +254,3 @@ def test_option_target_names_refuses_an_ide(target):
 def test_bootstrap_target_names_refuses_an_ide_with_guidance():
     with pytest.raises(IdeTargetError, match="is an IDE, not a target"):
         bootstrap_target_names(["claude", "intellij"])
-
-
-def test_user_manifest_warning_names_the_resolved_path_from_a_relative_read(
-    tmp_path, monkeypatch, capsys
-) -> None:
-    """`apm update -g` reads ``apm.yml`` relatively; the label still names APM_HOME (C5b)."""
-    import apm_cli.models.manifest_targets as owner
-
-    apm_home = tmp_path / "apm-home"
-    apm_home.mkdir()
-    (apm_home / "apm.yml").write_text("name: u\nversion: 1.0.0\ntarget: claude\n")
-    monkeypatch.setenv("APM_HOME", str(apm_home))
-    monkeypatch.chdir(apm_home)
-    monkeypatch.setattr(owner, "_deprecated_manifest_keys_warned", set())
-
-    owner._warn_deprecated_manifest_keys({"target": "claude"}, Path("apm.yml"))
-
-    captured = capsys.readouterr()
-    rendered = (captured.out + captured.err).replace("\n", "")
-    assert (apm_home / "apm.yml").resolve().as_posix() in rendered

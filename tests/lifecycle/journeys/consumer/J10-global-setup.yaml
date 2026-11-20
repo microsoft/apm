@@ -1,0 +1,62 @@
+# J10 Global (-g) setup: a marketplace plugin and an MCP server at user scope,
+# then list, frozen replay and uninstall; the project is never touched (#4110).
+# Schema: test_journeys.py. <pkg> is the world's p-skill plugin, listed by the
+# world marketplace registered in setup (docs form: <plugin>@<marketplace>).
+schema: 1
+id: J10
+persona: consumer
+title: Global (-g) setup
+docs: [consumer/installing-from-marketplaces.md, consumer/install-mcp-servers.md, reference/environment-variables.md]
+world:
+  setup:
+    - apm marketplace add lifecycle/marketplace#v1.0.0 --name lifecycle-market
+steps:
+  - n: 1
+    run: [apm install -g p-skill@lifecycle-market --target claude]
+    scope: user
+    exit: 0
+    files: []
+    key_lines:
+      - "[i] Installing to user scope (<APM_HOME>/)"
+      - "[+] lifecycle/p-skill #v1.0.0 @<SHA8>"
+      - "|-- 1 skill(s) integrated -> .claude/skills/"
+    forbidden_lines: ["[!]", "[x]"]
+  - n: 2
+    run: [apm install -g --target claude --mcp fetch -- npx -y @modelcontextprotocol/server-fetch]
+    scope: user
+    exit: 0
+    files: []
+    key_lines:
+      - "[+]  fetch -> Claude Code (configured)"
+      - "[+] Added MCP server 'fetch'"
+      - "apm.yml: <APM_HOME>/apm.yml"
+    forbidden_lines: ["[!]", "[x]"]
+  - n: 3
+    run: [apm deps list -g]
+    scope: user
+    exit: 0
+    files: []
+    key_lines: [APM Dependencies (Global), lifecycle/p-skill]
+  - n: 4
+    run: [apm install -g --frozen --target claude]
+    scope: user
+    exit: 0
+    files: []
+    key_lines:
+      - "[+] lifecycle/p-skill #v1.0.0 @<SHA8> (cached)"
+      - "[*] All servers up to date"
+      - "[i] Deployed files verified against apm.lock.yaml."
+  - n: 5
+    run: [apm uninstall -g p-skill@lifecycle-market]
+    scope: user
+    exit: 0
+    files: []
+    key_lines:
+      - "[+] p-skill@lifecycle-market - found in apm.yml (as lifecycle/p-skill)"
+      - "[i] Cleaned 2 stale deployed files for lifecycle/p-skill"
+known_cells:
+  - id: J10-frozen-global-repeats-targeting-line
+    law: O4
+    tracking: "#4196"
+    step: 4
+    match: "repeats '\\[i\\] Targeting specific runtime: claude'"

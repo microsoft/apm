@@ -29,6 +29,8 @@ from apm_cli.install.root_redirect import (
     install_root_redirect,
 )
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _restore_cwd():

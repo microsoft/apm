@@ -74,9 +74,8 @@ _TRUST_OWNER_CALLERS = frozenset(
         (_LOCAL_BUNDLE, "effective_bundle_allow_map"),
     }
 )
-# The root-taking convenience wrapper derives the PROJECT manifest from its
-# root, so only the caller that first maps a root through the scope owner
-# (core.scope.manifest_root) may use it.
+# The root-taking convenience wrapper names the manifest from a root and a
+# scope, so only the caller that also hands it the command's scope may use it.
 _ROOT_TRUST_WRAPPER = "effective_exec_map_for_project"
 _ROOT_TRUST_WRAPPER_CALLERS = frozenset({(_EXECUTABLES, "resolve_project_exec_allow_map")})
 # One owner decides a package's exec status and the types a partial approval
@@ -180,12 +179,11 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 _INSTALL_COMMAND: ("effective_bundle_allow_map as _effective_bundle_allow_map",),
                 _INSTALL_TEMPLATE: (
                     "trust_ctx = exec_trust_context_for_project(",
-                    "manifest_root(project_root, user_scope=is_user_scope(",
+                    'project_root, user_scope=is_user_scope(getattr(ctx, "scope", None))',
                 ),
                 # McpAdmission reads grants from the scope manifest (#3954, #3986).
                 "src/apm_cli/security/trust.py": (
-                    "grants_manifest = project_manifest_path(manifest_root(project_root, "
-                    "user_scope=user_scope))",
+                    "grants_manifest = scope_manifest_path(project_root, user_scope=user_scope)",
                 ),
                 "src/apm_cli/commands/update.py": ("get_manifest_path(scope),",),
                 _LSP_PIPELINE: ("effective_allow_executables = resolve_project_exec_allow_map(",),
@@ -199,8 +197,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 _LOCAL_BUNDLE: (
                     "bundle_approval_key = local_bundle_approval_key(",
                     "approval_key=bundle_approval_key,",
-                    "grants_manifest = project_manifest_path(manifest_root(project_root, "
-                    "user_scope=user_scope))",
+                    "grants_manifest = scope_manifest_path(project_root, user_scope=user_scope)",
                 ),
                 _INSTALL_SERVICES: (
                     # Bundle hooks and canvas are approved for the exact bundle content.
@@ -273,7 +270,7 @@ def _bundle_trust_scope_findings(provider: FactsProvider) -> list[Violation]:
 # What a registered caller may hand the trust owner as the manifest (A8): a
 # call to the scope owner's manifest helpers, or a name bound from one, or the
 # owner-contract parameter that carries the resolved manifest file.
-_MANIFEST_PATH_CALLS = frozenset({"project_manifest_path", "get_manifest_path"})
+_MANIFEST_PATH_CALLS = frozenset({"scope_manifest_path", "get_manifest_path"})
 _MANIFEST_PATH_PARAMS = frozenset({"manifest_path", "grants_manifest"})
 
 
@@ -358,7 +355,7 @@ def _trust_owner_argument_findings(path: str, facts: object) -> list[Violation]:
                 GUARD_EXECUTABLE_TRUST,
                 path,
                 f"{call.scope} must pass {_TRUST_OWNER} the scope's manifest file "
-                "(project_manifest_path(...) / get_manifest_path(...) or a name bound from "
+                "(scope_manifest_path(...) / get_manifest_path(...) or a name bound from "
                 "one), not a directory (#3954)",
                 line=call.line,
             )
@@ -389,7 +386,7 @@ def _trust_owner_closed_world(provider: FactsProvider) -> list[Violation]:
         if path_failures:
             continue
         # A registered caller passes a manifest the scope owner named
-        # (core.scope.get_manifest_path / manifest_root + project_manifest_path);
+        # (core.scope.get_manifest_path / scope_manifest_path);
         # it never builds apm.yml from a root itself (#3954, #3986).
         registered = {scope for caller, scope in _TRUST_OWNER_CALLERS if caller == path}
         findings.extend(_trust_owner_argument_findings(path, path_facts))
@@ -404,7 +401,7 @@ def _trust_owner_closed_world(provider: FactsProvider) -> list[Violation]:
                         GUARD_EXECUTABLE_TRUST,
                         path,
                         f"{definition.name} derives apm.yml from a root; pass the manifest "
-                        "the scope owner names (project_manifest_path(manifest_root(...)))",
+                        "the scope owner names (scope_manifest_path(...))",
                         line=definition.line,
                     )
                 )
@@ -425,7 +422,7 @@ def _trust_owner_closed_world(provider: FactsProvider) -> list[Violation]:
                 GUARD_EXECUTABLE_TRUST,
                 path,
                 f"{call.scope} calls {_ROOT_TRUST_WRAPPER} with a root; read grants from "
-                "the scope manifest (project_manifest_path(manifest_root(...)))",
+                "the scope manifest (scope_manifest_path(...))",
                 line=call.line,
             )
             for call in path_facts.calls

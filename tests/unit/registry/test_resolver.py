@@ -17,11 +17,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.deps.registry.client import RegistryClient, RegistryError, VersionEntry
+from apm_cli.deps.registry.extractor import HashMismatchError
 from apm_cli.deps.registry.resolver import (
     RegistryPackageResolver,
     RegistryResolutionError,
 )
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.component
 
 
 def _make_apm_tarball(name: str = "acme-web-skills", version: str = "1.2.0"):
@@ -194,6 +197,7 @@ class TestHappyPath:
 
         # Confirm download_archive was asked for the highest matching version.
         fake.download_archive.assert_called_once_with("acme", "web-skills", "1.5.3")
+        assert "version: 1.5.3" in (target / "apm.yml").read_text()
 
     def test_stable_range_skips_published_prerelease(self, tmp_path):
         """OpenAPM v0.1 section 7.3.1: a stable range never selects a pre-release (#3466)."""
@@ -212,6 +216,7 @@ class TestHappyPath:
         resolver.download_package(_make_dep("^1.0.0"), tmp_path / "p")
 
         fake.download_archive.assert_called_once_with("acme", "web-skills", "1.5.3")
+        assert "version: 1.5.3" in (tmp_path / "p" / "apm.yml").read_text()
 
     def test_build_metadata_selector_matches_exact_build(self, tmp_path):
         # Two published builds share the same major.minor.patch and differ only
@@ -247,6 +252,7 @@ class TestHappyPath:
         resolver.download_package(_make_dep("1.0.2+fa163e16"), tmp_path / "p")
 
         fake.download_archive.assert_called_once_with("acme", "web-skills", "1.0.2+fa163e16")
+        assert "version: 1.0.2+fa163e16" in (tmp_path / "p" / "apm.yml").read_text()
 
     def test_bare_version_selector_unaffected_by_exact_match(self, tmp_path):
         # A selector with no build metadata still resolves via range matching
@@ -266,6 +272,7 @@ class TestHappyPath:
         resolver.download_package(_make_dep("1.0.2"), tmp_path / "p")
 
         fake.download_archive.assert_called_once_with("acme", "web-skills", "1.0.2+aaa")
+        assert "version: 1.0.2+aaa" in (tmp_path / "p" / "apm.yml").read_text()
 
 
 class TestFailurePaths:
@@ -281,7 +288,7 @@ class TestFailurePaths:
         fake.archive_url.return_value = "https://x"
 
         resolver = _make_resolver(fake)
-        with pytest.raises(Exception) as excinfo:
+        with pytest.raises(HashMismatchError) as excinfo:
             resolver.download_package(_make_dep(), tmp_path / "p")
         # Either HashMismatchError or RegistryResolutionError wrapping it.
         assert "mismatch" in str(excinfo.value).lower() or "Hash" in type(excinfo.value).__name__
@@ -509,6 +516,7 @@ class TestDownloadFromLockfile:
         assert res.version == "1.2.0"
         assert res.resolved_url == locked_url
         assert res.resolved_hash == f"sha256:{digest}"
+        assert (tmp_path / "p" / "apm.yml").is_file()
 
     def test_hash_mismatch_fails_closed(self, tmp_path):
         raw, _ = _make_apm_tarball()
@@ -516,7 +524,7 @@ class TestDownloadFromLockfile:
         fake.fetch_from_url.return_value = (raw, "application/gzip")
 
         resolver = _make_resolver(fake)
-        with pytest.raises(Exception) as excinfo:
+        with pytest.raises(HashMismatchError) as excinfo:
             resolver.download_from_lockfile(
                 _make_dep(),
                 tmp_path / "p",

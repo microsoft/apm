@@ -1,0 +1,75 @@
+# J09 Switch or add a harness, nightly (#4110). Schema: test_journeys.py.
+# Twin (twins_consumer_a.py): acme/live-kit ships one instruction and one skill.
+schema: 1
+id: J09
+persona: consumer
+title: Switch or add a harness
+docs: [reference/cli/compile.md, reference/cli/targets.md, reference/targets-matrix.md]
+world:
+  project: empty
+  setup:
+    - "apm init -y --target claude,copilot"
+    - apm install acme/live-kit#main
+    - sh -c "echo mine > .claude/notes.md"
+steps:
+  - n: 1
+    run: [apm targets]
+    exit: 0
+    docs:
+      page: reference/cli/targets.md
+      commands: [apm targets]
+    files: []
+    key_lines: ["claude       active", "copilot      active", "apm.yml"]
+  - n: 2
+    edit:
+      - {replace: apm.yml, old: "  - copilot\n", new: "  - copilot\n  - cursor\n"}
+    run: [apm install]
+    exit: 0
+    files: [apm.lock.yaml, .cursor/rules/live.mdc]
+    key_lines: ["[i] Targets: claude, copilot, cursor  (source: apm.yml)"]
+  - n: 3
+    edit:
+      - {replace: apm.yml, old: "  - claude\n", new: ""}
+    run: [apm install]
+    exit: 0
+    note: APM-owned .claude/ files go; the user's .claude/notes.md stays
+    files: [apm.lock.yaml, .claude/rules/live.md, .claude/skills/live/SKILL.md]
+    key_lines:
+      - "[i] Targets: copilot, cursor  (source: apm.yml)"
+      - "[i] Cleaned 3 stale deployed files for acme/live-kit"
+  - n: 4
+    run: [apm compile --target copilot]
+    exit: 0
+    docs:
+      page: reference/cli/compile.md
+      commands: [apm compile --target copilot]
+    note: .github/instructions/ already covers Copilot, so AGENTS.md is not written
+    files: []
+    key_lines: ["AGENTS.md not generated (1 file) -- .github/instructions/ already covers Copilot"]
+    forbidden_lines: [Compilation completed but produced no output files]
+  - n: 5
+    run: [apm install --frozen]
+    exit: 0
+    files: []
+    key_lines: ["[i] Deployed files verified against apm.lock.yaml."]
+known_cells:
+  - id: targets-source-ignores-manifest
+    law: KEY
+    tracking: "#4210"
+    step: 1
+    match: "key line not printed: 'apm.yml'"
+  - id: compile-zero-output-warning-after-dedup
+    law: FORBID
+    tracking: "#4209"
+    step: 4
+    match: "produced no output files"
+  - id: integration-line-hides-destinations
+    law: O6
+    tracking: "#4211"
+    step: 2
+    match: "\\.cursor/rules/live\\.mdc changed but no output line announces it"
+  - id: install-stale-cleanup-unannounced
+    law: O6
+    tracking: "#4193"
+    step: 3
+    match: "\\.claude/.*live.* changed but no output line announces it"

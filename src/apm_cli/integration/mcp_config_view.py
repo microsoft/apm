@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.deps.path_anchoring import (
     LocalResolutionError,
     build_local_parent_index,
@@ -671,8 +672,8 @@ def _fallback_manifest_path(
     if dependency.source == "local" and dependency.local_path:
         raw = Path(dependency.local_path).expanduser()
         package_dir = raw if raw.is_absolute() else project_root / raw
-        return (package_dir / "apm.yml").resolve()
-    return (modules_root / dependency.repo_url / "apm.yml").resolve()
+        return manifest_file(package_dir).resolve()
+    return manifest_file(modules_root / dependency.repo_url).resolve()
 
 
 def _is_local_claude_plugin_source(dependency: LockedDependency, package_dir: Path) -> bool:
@@ -681,7 +682,7 @@ def _is_local_claude_plugin_source(dependency: LockedDependency, package_dir: Pa
 
     if dependency.package_type != PackageType.MARKETPLACE_PLUGIN.value:
         return False
-    if not package_dir.is_dir() or (package_dir / "apm.yml").exists():
+    if not package_dir.is_dir() or manifest_file(package_dir).exists():
         return False
     package_type, selected_manifest = detect_package_type(package_dir)
     return package_type is PackageType.MARKETPLACE_PLUGIN and not (
@@ -738,7 +739,7 @@ def _package_manifest_path(
             package_dir = dependency.to_dependency_ref().get_install_path(modules_root)
     else:
         package_dir = dependency.to_dependency_ref().get_install_path(modules_root)
-    return (package_dir / "apm.yml").resolve()
+    return manifest_file(package_dir).resolve()
 
 
 def _allows_missing_manifest(

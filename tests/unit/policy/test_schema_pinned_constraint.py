@@ -8,6 +8,8 @@ from apm_cli.policy.inheritance import merge_policies
 from apm_cli.policy.parser import PolicyValidationError, load_policy
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
+pytestmark = pytest.mark.unit
+
 
 class TestSchemaDefaults:
     def test_dependency_policy_default_field_value_is_false(self):

@@ -14,6 +14,8 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+pytestmark = pytest.mark.component
+
 _HINT = "Instructions removed for codex. Run 'apm compile' to update AGENTS.md."
 
 

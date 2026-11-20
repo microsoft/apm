@@ -8,6 +8,7 @@ Tests that:
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from apm_cli.deps.lockfile import (
@@ -15,6 +16,8 @@ from apm_cli.deps.lockfile import (
     LockFile,
 )
 from apm_cli.primitives.discovery import get_dependency_declaration_order
+
+pytestmark = pytest.mark.component
 
 
 class TestGetLockfileInstalledPaths:
