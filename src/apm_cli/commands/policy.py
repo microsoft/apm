@@ -401,8 +401,14 @@ def explain(package):
 
     Note: only resolves packages that are installed in the current project.
     """
-    from .approve import explain_decision
+    from ..install.errors import PolicyViolationError
+    from .approve import _report_policy_block, explain_decision
 
     logger = CommandLogger("policy explain")
-    explain_decision(package, logger=logger)
-    logger.render_summary()
+    try:
+        explain_decision(package, logger=logger)
+    except PolicyViolationError as exc:
+        _report_policy_block(exc)
+        sys.exit(1)
+    finally:
+        logger.render_summary()

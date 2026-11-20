@@ -309,18 +309,12 @@ class McpAdmission:
 
             policy = None
             if not no_policy:
-                from apm_cli.policy.discovery import discover_policy_with_chain
-                from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
+                from apm_cli.policy.outcome_routing import classify_project_policy
 
-                try:
-                    result = discover_policy_with_chain(project_root)
-                except (OSError, ValueError, RuntimeError) as exc:
-                    admission.policy_unavailable = type(exc).__name__
-                else:
-                    policy = getattr(result, "policy", None)
-                    outcome = getattr(result, "outcome", None)
-                    if policy is None and outcome in POLICY_RESOLUTION_FAILURE_OUTCOMES:
-                        admission.policy_unavailable = str(outcome)
+                route = classify_project_policy(project_root)
+                policy = route.policy
+                if policy is None and (route.blocks or route.unresolved):
+                    admission.policy_unavailable = route.outcome
             return exec_trust_context_for_project(
                 grants_manifest, policy=policy, logger=logger, include_user=include_user
             )
