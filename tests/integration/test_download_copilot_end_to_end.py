@@ -210,7 +210,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep") as mock_sleep,
+            patch("apm_cli.deps.download_strategies._backoff_sleep") as mock_sleep,
         ):
             mock_get.side_effect = [rate_limited, success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -226,7 +226,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             mock_get.side_effect = [unavailable, success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -242,7 +242,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             mock_get.side_effect = [forbidden, success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -255,7 +255,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             mock_get.side_effect = [requests.exceptions.ConnectionError("down"), success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -268,7 +268,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             mock_get.side_effect = [requests.exceptions.Timeout("timed out"), success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -280,7 +280,7 @@ class TestResilientGet:
         delegate = DownloadDelegate(host)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             mock_get.side_effect = requests.exceptions.ConnectionError("always fails")
             with pytest.raises(requests.exceptions.ConnectionError):
@@ -293,7 +293,7 @@ class TestResilientGet:
         rate_limited = _make_mock_response(429, headers={"Retry-After": "0.01"})
         with (
             patch("apm_cli.deps.download_strategies.requests.get", return_value=rate_limited),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 429
@@ -308,7 +308,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep") as mock_sleep,
+            patch("apm_cli.deps.download_strategies._backoff_sleep") as mock_sleep,
         ):
             mock_get.side_effect = [rate_limited, success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -341,7 +341,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep") as mock_sleep,
+            patch("apm_cli.deps.download_strategies._backoff_sleep") as mock_sleep,
         ):
             mock_get.side_effect = [rate_limited, success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)

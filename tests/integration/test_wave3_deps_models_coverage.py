@@ -256,7 +256,7 @@ class TestDownloadStrategiesWithMockedHTTP:
         mock_get.assert_called_once()
 
     @mock.patch("apm_cli.deps.download_strategies.requests.get")
-    @mock.patch("apm_cli.deps.download_strategies.time.sleep")
+    @mock.patch("apm_cli.deps.download_strategies._backoff_sleep")
     def test_resilient_get_retry_on_429(
         self, mock_sleep: mock.MagicMock, mock_get: mock.MagicMock
     ) -> None:
@@ -288,7 +288,7 @@ class TestDownloadStrategiesWithMockedHTTP:
         """Test resilient_get() retries on connection error."""
         import requests
 
-        with mock.patch("apm_cli.deps.download_strategies.time.sleep"):
+        with mock.patch("apm_cli.deps.download_strategies._backoff_sleep"):
             success = mock.MagicMock()
             success.status_code = 200
             success.headers = {}

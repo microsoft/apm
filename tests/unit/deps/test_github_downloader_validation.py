@@ -563,7 +563,7 @@ class TestRound3SafeRmtreeNotRobustRmtreeDirect:
         with (
             patch("apm_cli.deps.github_downloader_validation.safe_rmtree") as safe_rm_mock,
             patch(
-                "apm_cli.deps.github_downloader_validation.subprocess.run",
+                "subprocess.run",
                 return_value=completed,
             ),
         ):

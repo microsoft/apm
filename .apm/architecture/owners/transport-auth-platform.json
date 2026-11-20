@@ -227,6 +227,18 @@
       "owner": "deps/egress_route.py (EgressSurface, EgressRoute, route_for, is_refused, is_proxy_only); deps/registry_proxy.py parses the flag (is_enforce_only) for the owner only; consumers: install/pipeline.py, install/validation.py, install/phases/integrate.py, install/helpers/ref_reuse.py, deps/git_reference_resolver.py, deps/git_semver_resolver.py, deps/artifactory_orchestrator.py, models/dependency/reference.py, commands/view.py, commands/outdated.py, registry/client.py, marketplace/client.py, policy/_policy_http.py",
       "selectors": ["src/apm_cli/deps/egress_route.py"],
       "guards": ["transport-platform-egress-route-policy"]
+    },
+    {
+      "id": "archive-extraction-limits",
+      "decision": "Which limits every archive extraction applies, for every accepted format (tar.gz and zip): entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries (#4235)",
+      "owner": "utils/archive.py (safe_extract_tar, safe_extract_zip, read_zip_member; shared _archive_member_target, _claim_member and _stream_member); consumers: deps/registry/extractor.py, bundle/unpacker.py, bundle/local_bundle.py, deps/download_strategies.py",
+      "selectors": [
+        "src/apm_cli/utils/archive.py",
+        "src/apm_cli/deps/registry/extractor.py"
+      ],
+      "guards": [
+        "transport-platform-archive-extraction-limits"
+      ]
     }
   ]
 }

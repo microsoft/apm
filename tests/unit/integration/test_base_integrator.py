@@ -905,7 +905,7 @@ class TestInitLinkResolverLocalScoping:
 
         bi = BaseIntegrator()
 
-        with patch("apm_cli.primitives.discovery.os.walk", side_effect=spy_walk):
+        with patch("os.walk", side_effect=spy_walk):
             bi.init_link_resolver(*local_context)
 
         assert bi.link_resolver is not None

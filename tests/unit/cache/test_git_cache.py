@@ -44,7 +44,7 @@ def test_ref_receipt_stats_count_bytes_not_repositories(tmp_path: Path, count: i
     cache = GitCache(tmp_path)
     for index in range(count):
         cache.remember_resolved_ref("https://github.com/owner/repo", f"ref-{index}", "a" * 40)
-    with patch("apm_cli.cache.git_cache.os.scandir", wraps=os.scandir) as scandir:
+    with patch("os.scandir", wraps=os.scandir) as scandir:
         stats = cache.get_cache_stats()
     assert stats == {"db_count": 0, "checkout_count": 0, "total_size_bytes": 40 * count}
     assert scandir.call_count == 2
