@@ -119,34 +119,52 @@ def _engine(args: tuple[str, ...], cwd: Path, env: dict[str, str]) -> subprocess
         check=False,
     )
     if result.returncode != 0 and "Git config probe failed" in result.stdout + result.stderr:
-        result.stderr += _git_config_probe_report(env)
+        result.stderr += _git_config_probe_report(args, cwd, env)
     return result
 
 
-def _git_config_probe_report(env: dict[str, str]) -> str:
-    """Git's own answer to APM's config probe (utils/git_env.py), which APM does not print."""
-    script = (
-        "from pathlib import Path\n"
-        "from apm_cli.utils import git_env as g\n"
-        "exe = g.get_git_executable()\n"
-        "child = g.git_subprocess_env(None)\n"
-        "cmd = [exe, 'config', '--null', '--show-scope', '--list']\n"
-        "r = g._run_git_config(cmd, capture_output=True, check=False,"
-        " cwd=str(Path(exe).resolve().parent), env=child, timeout=30)\n"
-        "keys = sorted(k for k in child if k.upper().startswith(('GIT_', 'HOME', 'XDG_')))\n"
-        "print('exe', repr(exe), 'exit', r.returncode)\n"
-        "print('stderr', repr(r.stderr.decode(errors='replace')))\n"
-        "print('env', {k: child[k] for k in keys})\n"
-    )
-    probe = subprocess.run(
-        (sys.executable, "-c", script),
-        env=env,
+_PROBE_TRACE = """\
+import sys
+from apm_cli.utils import git_env as g
+
+_run = g._git_config_run
+
+
+def _traced(command, **kwargs):
+    result = _run(command, **kwargs)
+    if result.returncode != 0:
+        sys.stderr.write(
+            "[world] failing git config probe: %r cwd=%r exit=%s stderr=%r\\n"
+            % (list(command), kwargs.get("cwd"), result.returncode,
+               result.stderr.decode(errors="replace"))
+        )
+    return result
+
+
+g._git_config_run = _traced
+"""
+
+
+def _git_config_probe_report(args: tuple[str, ...], cwd: Path, env: dict[str, str]) -> str:
+    """Re-run *args* once, logging each failing git config probe APM makes (it prints none)."""
+    trace = cwd.parent / f"{cwd.name}-probe-trace"
+    trace.mkdir(exist_ok=True)
+    (trace / "sitecustomize.py").write_text(_PROBE_TRACE, encoding="ascii")
+    traced = {
+        **env,
+        "PYTHONPATH": os.pathsep.join(p for p in (str(trace), env.get("PYTHONPATH", "")) if p),
+    }
+    rerun = subprocess.run(
+        (sys.executable, "-m", "apm_cli.cli", *args),
+        cwd=cwd,
+        env=traced,
         capture_output=True,
         text=True,
+        timeout=120,
         check=False,
-        timeout=60,
     )
-    return f"\n[world] apm git config probe:\n{probe.stdout}{probe.stderr}"
+    lines = [line for line in rerun.stderr.splitlines() if line.startswith("[world]")]
+    return "\n" + "\n".join(lines or ["[world] no failing git config probe on re-run"]) + "\n"
 
 
 def _scratch_env(env: dict[str, str], scratch: Path) -> dict[str, str]:
