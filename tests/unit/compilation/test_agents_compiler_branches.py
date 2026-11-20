@@ -171,6 +171,7 @@ class TestAgentsCompilerNoResults(unittest.TestCase):
         result = compiler.compile(config, primitives, logger=logger)
         self.assertTrue(result.success)
         logger.progress.assert_called()
+        self.assertEqual(sorted(p.name for p in Path(self.tmp).glob("*.md")), [])
 
     def test_windsurf_target_returns_empty_success(self) -> None:
         compiler = AgentsCompiler(self.tmp)
