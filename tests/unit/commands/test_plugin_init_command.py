@@ -11,6 +11,7 @@ import os
 import tempfile
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
@@ -375,5 +376,22 @@ class TestInitConsumerNextSteps:
                 assert "apm run" not in result.output
                 assert "apm plugin init" in result.output
                 assert "apm marketplace init" in result.output
+            finally:
+                os.chdir(self.original_dir)
+
+    @pytest.mark.parametrize(("marker", "expect_flag"), [(None, True), (".claude", False)])
+    def test_install_step_names_a_harness_only_when_none_resolves(
+        self, marker, expect_flag, monkeypatch
+    ):
+        """A markerless project's install hint carries -t, or it exits 2 (#3994)."""
+        monkeypatch.setattr("apm_cli.config.get_install_target", lambda **_kw: None)
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                if marker:
+                    Path(tmp, marker).mkdir()
+                result = self.runner.invoke(cli, ["init", "--yes"])
+                assert result.exit_code == 0, result.output
+                assert ("apm install <owner>/<repo> -t <harness>" in result.output) is expect_flag
             finally:
                 os.chdir(self.original_dir)

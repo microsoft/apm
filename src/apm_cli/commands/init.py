@@ -525,8 +525,13 @@ def _perform_init(
                 "Pack as Claude plugin:                apm pack --format claude-plugin",
             ]
         elif source == "init":
+            install_step = "apm install <owner>/<repo>"
+            # No targets written and none detectable: install would stop at
+            # "No harness detected" unless it names one (#3994).
+            if not config.get("targets") and not _has_install_target(project_root):
+                install_step += " -t <harness>"
             next_steps = [
-                "Install a package:               apm install <owner>/<repo>",
+                f"Install a package:               {install_step}",
                 "Build a plugin? Scaffold one:    apm plugin init",
                 "Publishing a marketplace?:       apm marketplace init",
             ]
@@ -780,6 +785,18 @@ def _stdin_is_tty() -> bool:
         return bool(sys.stdin.isatty())
     except (AttributeError, ValueError):
         return False
+
+
+def _has_install_target(project_root: Path) -> bool:
+    """Whether a plain ``apm install`` here resolves a target without a flag."""
+    from ..config import get_install_target
+
+    try:
+        if get_install_target(create_config=False):
+            return True
+    except Exception:
+        return False
+    return any(sig.target not in EXPLICIT_ONLY_TARGETS for sig in detect_signals(project_root))
 
 
 def _resolve_init_targets(
