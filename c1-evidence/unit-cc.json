@@ -58,7 +58,8 @@
   "step5 lane split: link resolver filesystem classes -> test_link_resolver.py; test_link_resolver_resolution.py keeps the pure link-classification helpers with a resolver fixture rooted at a fixed path (the helpers never read base_dir) and is now unit",
   "step5 fold: test_agents_compiler_coverage TestMergeResults duplicated test_compile_cli_surface TestMergeResults; empty/multi/failure cases map to the stronger survivors (the stats-sum assertion is covered by test_merge_results_combines_numeric_stats), the identity pass-through and empty-path cases were rewritten into the survivor class",
   "step5 lane split: pure AgentsCompiler classes TestCompilationConfigPostInit and TestLogDelegation -> test_compile_cli_surface.py, TestFinalizeBuildId -> test_build_id.py (both unit)",
-  "step5 lane split: pure marketplace plugin helper tests (_resolve_ref from test_marketplace_plugin.py and test_marketplace_coverage.py merged into one TestResolveRef class, plus TestParseTags and TestVerifySource) -> new tests/unit/commands/test_marketplace_plugin_refs.py marked unit with promise P-OWN-marketplace-entry-ref-verification (owner commands/marketplace/plugin)"
+  "step5 lane split: pure marketplace plugin helper tests (_resolve_ref from test_marketplace_plugin.py and test_marketplace_coverage.py merged into one TestResolveRef class, plus TestParseTags and TestVerifySource) -> new tests/unit/commands/test_marketplace_plugin_refs.py marked unit with promise P-OWN-marketplace-entry-ref-verification (owner commands/marketplace/plugin)",
+  "ratchets: test_test_taxonomy passes with the two new promise-carrying modules; test_quality_baselines fails until the integrator remeasures (pre-existing growth outside scope, AQ003 growth from step 3 lane marking, AQ004 occurrences that moved with verbatim classes; scope AQ004 total 257 -> 217, AQ001 2 -> 0)"
  ],
  "counts_left": {
   "same_body_groups": 0,
