@@ -140,6 +140,11 @@ class DeploymentEvidence:
             user_scope=user_scope,
         )
 
+    @property
+    def receipt_hashes(self) -> dict[str, str]:
+        """Map each receipted resolved physical path to the hash APM wrote there."""
+        return dict(self._receipts)
+
     def prepare(self, claims: Iterable[str]) -> None:
         """Render now when any existing candidate file lacks a matching receipt.
 

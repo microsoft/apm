@@ -1527,7 +1527,9 @@ class TestFrozenInstallNeverWritesLockfile:
         assert exc.value.reasons == [
             "  - .claude/skills/adopted/SKILL.md is deployed by this install "
             "but not recorded in apm.lock.yaml",
-            "  - kept .claude/skills/adopted/SKILL.md: no receipt proves this install wrote it",
+            "  - kept .claude/skills/adopted/SKILL.md: already on disk before this install "
+            "(not written by it); delete or move it aside if it is not yours to keep, then "
+            "rerun 'apm install --frozen'",
         ]
         assert "the other unrecorded files were removed again" in exc.value.tip
         assert adopted.read_bytes() == b"user content\n"

@@ -260,9 +260,9 @@ class InstallService:
             # Suppress at the chokepoint, then decide from what was
             # withheld whether this install can report success.  The
             # pipeline still deploys, as `npm ci` does.
-            from apm_cli.deps.lockfile import suppress_lockfile_writes
+            from apm_cli.install.frozen_withdrawal import frozen_capture
 
-            with suppress_lockfile_writes() as withheld:
+            with frozen_capture(_frozen_lockfile_path(request)) as withheld:
                 result = self._run_pipeline(request)
         else:
             withheld = None
