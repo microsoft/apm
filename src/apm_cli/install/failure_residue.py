@@ -128,6 +128,9 @@ def report_failed_install_residue(ctx: InstallContext) -> None:
     """
     if ctx.install_finished or ctx.logger is None or ctx.dry_run or ctx.lockfile_only:
         return
+    if getattr(getattr(ctx, "transaction", None), "restores_deploy_targets", False) is True:
+        # The transaction puts these files back once the pipeline exits.
+        return
     with contextlib.suppress(Exception):
         residue = failed_install_residue(ctx)
         if residue.files or residue.entries:

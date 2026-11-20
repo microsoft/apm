@@ -216,6 +216,11 @@ class InstallTransaction:
             if self._deploy_snapshot is None and not (self.committed or self._rolled_back):
                 self._deploy_snapshot = capture_audit_gated_snapshot(ctx)
 
+    @property
+    def restores_deploy_targets(self) -> bool:
+        """Whether rollback will restore the snapshotted deploy paths."""
+        return self._deploy_snapshot is not None
+
     def release_deploy_targets(self) -> None:
         """Discard the deploy snapshot: every gate that scans deployed bytes passed."""
         with self._lock:

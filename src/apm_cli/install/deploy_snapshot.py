@@ -193,7 +193,8 @@ def _claimed_paths(ctx: InstallContext, base: Path) -> list[Path]:
         if not text or "://" in text:
             continue
         with contextlib.suppress(PathTraversalError, ValueError):
-            paths.append(ensure_path_within(base / text, base))
+            ensure_path_within(base / text, base)
+            paths.append(base / text)
     return paths
 
 
@@ -217,6 +218,8 @@ def audit_gated_paths(ctx: InstallContext, store_parent: Path) -> list[Path]:
     ]
     if not user_scope:
         candidates.append(base / ".gitignore")
+    # A symlinked deploy path is restored as a link; its target holds the bytes.
+    candidates += [Path(os.path.realpath(p)) for p in candidates]
     owned = [Path(os.path.abspath(p)) for p in (ctx.apm_modules_dir, store_parent) if p]
     chosen: list[Path] = []
     for path in sorted({Path(os.path.abspath(p)) for p in candidates}, key=lambda p: len(p.parts)):

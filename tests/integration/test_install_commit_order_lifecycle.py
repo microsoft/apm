@@ -192,6 +192,8 @@ def _assert_audit_block_commits_nothing(chain: Chain, before: dict[str, str]) ->
     assert _tree_state(chain.project) == before, text
     assert _tree_state_of(apm_home / "deployment-receipts") == receipts, text
     assert not (apm_home / "install-snapshots").exists(), text
+    assert "Deployed files restored to their previous state." in text, text
+    assert "native target" not in text, text
     text.encode("ascii")
     return text
 
