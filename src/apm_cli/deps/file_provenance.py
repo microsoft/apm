@@ -22,6 +22,7 @@ from pathlib import Path
 
 from ..core.deployment_ledger import _SHA256_PREFIX, DeploymentLedgerCodec
 from ..core.deployment_state import DeploymentRecord, LocatorKind
+from ..core.remediation import LOCKFILE_MISSING
 from ..utils.content_hash import compute_file_hash
 from ..utils.diagnostics import printable_ascii_text
 from ..utils.git_env import redact_git_diagnostic
@@ -275,7 +276,9 @@ def _read_lockfile(lock_dir: Path, user_scope: bool) -> tuple[Path, LockFile]:
             "Check file permissions, then retry."
         ) from exc
     if lockfile is None:
-        raise FileProvenanceError(f"No lockfile found at {lock_path}. Run 'apm install' first.")
+        raise FileProvenanceError(
+            f"No lockfile found at {lock_path}. {LOCKFILE_MISSING.sentence()}"
+        )
     return lock_path, lockfile
 
 

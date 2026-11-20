@@ -286,6 +286,17 @@ def _status(_world: _World) -> tuple[str, ...]:
     return ("approve", "--list")
 
 
+def _hide_characters(world: _World) -> None:
+    hidden = world.consumer.root / ".github" / "instructions" / "hidden.instructions.md"
+    hidden.parent.mkdir(parents=True, exist_ok=True)
+    hidden.write_text("---\napplyTo: '**'\n---\nhello \u202e world\n", encoding="utf-8")
+
+
+def _manifest_created(world: _World, result) -> None:
+    _expect_ok(world, result)
+    assert world.consumer.manifest_path.is_file()
+
+
 TEXT_PROOFS: tuple[_TextProof, ...] = (
     _TextProof(
         "project-manifest-missing",
@@ -363,6 +374,31 @@ TEXT_PROOFS: tuple[_TextProof, ...] = (
         1,
         _expect_ok,
     ),
+    _TextProof(
+        "hidden-characters-found",
+        _bare_world,
+        _hide_characters,
+        lambda _world: ("audit",),
+        1,
+        _expect_ok,
+    ),
+    _TextProof(
+        "hidden-characters-previewed",
+        _bare_world,
+        _hide_characters,
+        lambda _world: ("audit", "--strip", "--dry-run"),
+        0,
+        _expect_ok,
+    ),
+    _TextProof(
+        "project-manifest-bootstrap",
+        _bare_world,
+        lambda world: (world.consumer.root / ".claude").mkdir(),
+        lambda _world: ("install",),
+        1,
+        _manifest_created,
+        values=lambda world: {"<org/repo>": _slug(world.source)},
+    ),
 )
 
 
@@ -400,6 +436,76 @@ def test_command_remediation_clears_the_reported_state(
 
 # -- W3 executed proofs (modules outside commands/ and the W2 areas) ----------
 # -- W3 deps-compilation proofs --
+#
+# Compilation reports a hand-authored root context file or an orphaned
+# AGENTS.md as a warning; the same text-proof loop runs the printed command.
+
+_LOCAL_INSTRUCTION = "---\napplyTo: '**'\ndescription: Local advice\n---\n# local\n"
+
+
+def _compile_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = _publish(scenario, "advice-kit", instruction="advice")
+    consumer = scenario.consumers.create("compile-consumer")
+    scenario.consumers.add_instruction(consumer, "local", _LOCAL_INSTRUCTION)
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+def _hand_author_agents_md(world: _World) -> None:
+    (world.consumer.root / "AGENTS.md").write_text("# mine\n", encoding="ascii")
+
+
+def _orphan_agents_md(world: _World) -> None:
+    from apm_cli.compilation.constants import DISTRIBUTED_AGENTS_MD_GENERATED_MARKER
+
+    orphan = world.consumer.root / "docs" / "AGENTS.md"
+    orphan.parent.mkdir()
+    orphan.write_text(f"# AGENTS.md\n{DISTRIBUTED_AGENTS_MD_GENERATED_MARKER}\n", encoding="ascii")
+
+
+def _agents_md_generated(world: _World, result) -> None:
+    from apm_cli.compilation.constants import DISTRIBUTED_AGENTS_MD_GENERATED_MARKER
+
+    _expect_ok(world, result)
+    text = (world.consumer.root / "AGENTS.md").read_text(encoding="utf-8")
+    assert DISTRIBUTED_AGENTS_MD_GENERATED_MARKER in text, text
+
+
+def _orphan_removed(world: _World, result) -> None:
+    _expect_ok(world, result)
+    assert not (world.consumer.root / "docs" / "AGENTS.md").exists()
+
+
+W3_DEPS_COMPILATION_PROOFS: tuple[_TextProof, ...] = (
+    _TextProof(
+        "root-context-hand-authored",
+        _compile_world,
+        _hand_author_agents_md,
+        lambda _world: ("compile",),
+        0,
+        _agents_md_generated,
+        before=_unlink("AGENTS.md"),
+    ),
+    _TextProof(
+        "orphaned-agents-md",
+        _compile_world,
+        _orphan_agents_md,
+        lambda _world: ("compile",),
+        0,
+        _orphan_removed,
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    "proof", W3_DEPS_COMPILATION_PROOFS, ids=lambda proof: proof.remediation_id
+)
+def test_w3_deps_compilation_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
+) -> None:
+    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+
+
 # -- end W3 deps-compilation proofs --
 # -- W3 plugins-runtime proofs --
 # -- end W3 plugins-runtime proofs --

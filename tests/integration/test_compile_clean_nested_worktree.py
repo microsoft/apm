@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.compilation.distributed_compiler import AGENTS_MD_GENERATED_MARKER
+from apm_cli.core.remediation import NESTED_REPOSITORY_SKIPPED
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
@@ -146,9 +147,8 @@ def test_compile_root_reports_skipped_nested_repository_placement(
     assert not (destination / "src" / "AGENTS.md").exists()
     assert "Compiled 1 output file (1 AGENTS.md file)" in result.stdout
     unwrapped_stdout = result.stdout.replace("\n", "")
-    assert (
-        f"Run apm compile from {destination / 'src'} to compile it separately" in unwrapped_stdout
-    )
+    advice = NESTED_REPOSITORY_SKIPPED.bind(root=destination / "src").sentence()
+    assert advice in unwrapped_stdout
 
 
 def test_compile_clean_preserves_nested_git_worktree_agents_file(
