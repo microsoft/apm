@@ -10,6 +10,9 @@ from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
 
+pytestmark = pytest.mark.component
+
+
 _GENERATED_OR_DEPLOYED_ROOTS = (
     "apm.lock",
     "apm.lock.yaml",

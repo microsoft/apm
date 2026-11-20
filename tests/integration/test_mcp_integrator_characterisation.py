@@ -12,6 +12,8 @@ from apm_cli.install.errors import RequiredIntegrationError
 from apm_cli.integration.mcp_integrator import MCPIntegrator, _is_vscode_available
 from tests.utils.managed_mcp import install_managed_mcp
 
+pytestmark = pytest.mark.component
+
 
 def _make_dep(
     *,

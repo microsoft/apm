@@ -31,6 +31,9 @@ from apm_cli.marketplace import registry
 from apm_cli.marketplace.client import fetch_marketplace
 from apm_cli.marketplace.models import MarketplaceSource
 
+pytestmark = pytest.mark.component
+
+
 _ADO_URL = "https://dev.azure.com/contoso/platform/_git/tools"
 _MANIFEST = {
     "name": "ado-mkt",

@@ -42,6 +42,9 @@ from apm_cli.marketplace.errors import (
     RefNotFoundError,
 )
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # MarketplaceGroup.format_commands -- lines 106-121
 # ---------------------------------------------------------------------------

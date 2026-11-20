@@ -15,6 +15,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.e2e
+
+
 TIMEOUT = 180
 
 DEPENDENCY_INSTRUCTION = """---

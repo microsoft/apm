@@ -33,7 +33,10 @@ from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.validation import validate_apm_package
 
 GIT_AVAILABLE = shutil.which("git") is not None
-pytestmark = pytest.mark.skipif(not GIT_AVAILABLE, reason="git executable not available")
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.skipif(not GIT_AVAILABLE, reason="git executable not available"),
+]
 
 
 MANIFEST = {

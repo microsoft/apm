@@ -31,6 +31,9 @@ from apm_cli.integration.mcp_integrator_install import run_mcp_install
 from apm_cli.models.apm_package import clear_apm_yml_cache
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -31,7 +31,7 @@ from apm_cli.models.apm_package import (
     clear_apm_yml_cache,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_e2e_mode]
+pytestmark = [pytest.mark.component, pytest.mark.integration, pytest.mark.requires_e2e_mode]
 
 TIMEOUT = 180
 PRIMARY_REPO = "example/primary-package"

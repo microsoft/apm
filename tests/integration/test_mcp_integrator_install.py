@@ -12,7 +12,7 @@ import pytest
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 
 def test_install_delegate_empty_deps_executes_extracted_module(tmp_path, monkeypatch) -> None:

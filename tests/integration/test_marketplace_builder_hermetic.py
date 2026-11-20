@@ -51,6 +51,9 @@ from apm_cli.marketplace.errors import (
 )
 from tests.utils.metadata_transport import patch_metadata_urlopen
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

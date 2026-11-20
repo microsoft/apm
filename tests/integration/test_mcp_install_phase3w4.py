@@ -15,6 +15,9 @@ import pytest
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

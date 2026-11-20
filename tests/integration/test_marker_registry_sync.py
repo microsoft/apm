@@ -27,6 +27,11 @@ import sys
 import tomllib
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Resolve repo root from this file location -- the test relies on relative
 # layout, not on a cwd assumption.

@@ -5,12 +5,16 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.commands.mcp import (
     MCP_REGISTRY_ENV,
     _build_registry_with_diag,
     _handle_registry_network_error,
 )
 from apm_cli.core.command_logger import CommandLogger
+
+pytestmark = pytest.mark.unit
 
 
 class TestBuildRegistryWithDiag:

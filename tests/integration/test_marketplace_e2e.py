@@ -24,7 +24,7 @@ import sys
 
 import pytest
 
-pytestmark = pytest.mark.requires_apm_binary
+pytestmark = [pytest.mark.e2e, pytest.mark.requires_apm_binary]
 
 SAMPLE_MARKETPLACE_NAME = "test-mkt"
 

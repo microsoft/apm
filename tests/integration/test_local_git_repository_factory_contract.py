@@ -18,6 +18,9 @@ from tests.utils.local_git_repository import (
     LocalGitRepositoryFactory,
 )
 
+pytestmark = pytest.mark.component
+
+
 _GIT_TIMEOUT_SECONDS = 10.0
 
 

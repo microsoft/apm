@@ -64,6 +64,9 @@ from apm_cli.utils.archive import (
     safe_extract_zip,
 )
 
+pytestmark = pytest.mark.component
+
+
 # ===========================================================================
 # Shared helpers
 # ===========================================================================

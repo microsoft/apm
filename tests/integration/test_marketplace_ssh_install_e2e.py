@@ -16,7 +16,7 @@ from apm_cli.marketplace.models import (
 )
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.component, pytest.mark.integration]
 
 
 @pytest.fixture(autouse=True)
