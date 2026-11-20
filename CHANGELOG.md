@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Faster CLI startup: `apm --help` and every verb load command modules and GitPython only when needed (`apm --help` imports 332 modules instead of 767); help text and exit codes are unchanged. (closes #4118, #4150)
 - Internal: architecture-linter mutation tests share one session cache, so each file is walked and parsed once instead of once per case; findings are unchanged. (closes #4119, #4150)
 - Internal: only `InstallService` reads the `--frozen` flag; install phases consume its disposition, enforced by a closed-world architecture guard. No behavior change. (#4016)
-- Internal: each CI shard collects only its own test files instead of every test root, checked against a full collect on the same commit. (#4150)
+- Internal: each CI shard collects only its own test files instead of every test root, checked against a full collect on the same commit. (closes #4120, #4150)
 
 ### Fixed
 
