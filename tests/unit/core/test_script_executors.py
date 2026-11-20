@@ -93,7 +93,7 @@ def _patch_popen(**fake_kwargs):
         fake.init_kwargs = kwargs
         return fake
 
-    patcher = patch("apm_cli.core.script_executors.subprocess.Popen", side_effect=_factory)
+    patcher = patch("subprocess.Popen", side_effect=_factory)
     return patcher, fake
 
 
@@ -244,14 +244,14 @@ class TestCommandExecutor:
     def test_swallows_generic_error(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", bash="bad")
         with patch(
-            "apm_cli.core.script_executors.subprocess.Popen",
+            "subprocess.Popen",
             side_effect=OSError("not found"),
         ):
             _execute_command(script, _make_event())
 
     def test_skips_when_no_command(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install")
-        with patch("apm_cli.core.script_executors.subprocess.Popen") as mock_popen:
+        with patch("subprocess.Popen") as mock_popen:
             _execute_command(script, _make_event())
             mock_popen.assert_not_called()
 

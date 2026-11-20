@@ -811,7 +811,7 @@ class TestDownloadSubdirectoryPackageErrors:
                 "_clone_with_fallback",
                 return_value=MagicMock(),
             ),
-            patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
+            patch("tempfile.mkdtemp", return_value=str(tmp_path)),
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("apm_cli.utils.path_security.ensure_path_within"),
         ):
@@ -830,7 +830,7 @@ class TestDownloadSubdirectoryPackageErrors:
         with (
             patch.object(downloader, "_try_sparse_checkout", return_value=False),
             patch.object(downloader, "_clone_with_fallback", return_value=MagicMock()),
-            patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
+            patch("tempfile.mkdtemp", return_value=str(tmp_path)),
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("apm_cli.utils.path_security.ensure_path_within"),
         ):
@@ -850,7 +850,7 @@ class TestDownloadSubdirectoryPackageErrors:
 
         with (
             patch.object(downloader, "_try_sparse_checkout", side_effect=exc),
-            patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
+            patch("tempfile.mkdtemp", return_value=str(tmp_path)),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             with pytest.raises(RuntimeError, match="Access denied"):
@@ -866,7 +866,7 @@ class TestDownloadSubdirectoryPackageErrors:
 
         with (
             patch.object(downloader, "_try_sparse_checkout", side_effect=exc),
-            patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
+            patch("tempfile.mkdtemp", return_value=str(tmp_path)),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             with pytest.raises(RuntimeError, match="Access denied"):
@@ -882,7 +882,7 @@ class TestDownloadSubdirectoryPackageErrors:
 
         with (
             patch.object(downloader, "_try_sparse_checkout", side_effect=exc),
-            patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
+            patch("tempfile.mkdtemp", return_value=str(tmp_path)),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             with pytest.raises(OSError):
@@ -922,7 +922,7 @@ class TestDownloadSubdirectoryPackageErrors:
             patch.object(downloader, "_materialize_from_bare", side_effect=fake_materialize),
             patch.object(downloader, "_git_env_dict", return_value={}),
             patch.object(downloader, "_bare_clone_with_fallback"),
-            patch("apm_cli.deps.github_downloader.tempfile.mkdtemp", return_value=str(tmp_path)),
+            patch("tempfile.mkdtemp", return_value=str(tmp_path)),
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("apm_cli.utils.path_security.ensure_path_within"),
             patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
@@ -957,7 +957,7 @@ class TestTrySparseCheckout:
         fail_result.returncode = 1
         fail_result.stderr = "some error"
 
-        with patch("apm_cli.deps.github_downloader.subprocess.run", return_value=fail_result):
+        with patch("subprocess.run", return_value=fail_result):
             result = downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/foo", "main")
         assert result is False
 
@@ -991,7 +991,7 @@ class TestTrySparseCheckout:
         ok_result = MagicMock()
         ok_result.returncode = 0
 
-        with patch("apm_cli.deps.github_downloader.subprocess.run", return_value=ok_result):
+        with patch("subprocess.run", return_value=ok_result):
             result = downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/foo", "main")
         assert result is True
 
@@ -1018,7 +1018,7 @@ class TestTrySparseCheckout:
             calls_seen.append(dict(env=kwargs.get("env", {})))
             return ok_result
 
-        with patch("apm_cli.deps.github_downloader.subprocess.run", side_effect=fake_run):
+        with patch("subprocess.run", side_effect=fake_run):
             result = downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/foo", "main")
         assert result is True
         # env must contain the git header injected by the bearer auth ctx
@@ -1049,7 +1049,7 @@ class TestTrySparseCheckout:
             environments.append(kwargs["env"])
             return ok_result
 
-        with patch("apm_cli.deps.github_downloader.subprocess.run", side_effect=fake_run):
+        with patch("subprocess.run", side_effect=fake_run):
             result = downloader._try_sparse_checkout(dep, tmp_path / "sparse", "skills/foo", "main")
 
         assert result is True

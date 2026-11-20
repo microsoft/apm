@@ -486,7 +486,7 @@ def test_backup_copy_failure_cleans_staging_without_touching_cache(tmp_path: Pat
 
     with (
         patch(
-            "apm_cli.install.legacy_plugin_compat.shutil.copytree",
+            "shutil.copytree",
             side_effect=fail_second_copy,
         ),
         pytest.raises(OSError, match="backup copy failed"),

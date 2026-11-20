@@ -720,7 +720,7 @@ def test_semver_resolution_preserves_bearer_and_basic_auth_schemes(monkeypatch):
     ]
 
     cache = {}
-    with patch("apm_cli.marketplace.ref_resolver.subprocess.run", side_effect=_run):
+    with patch("subprocess.run", side_effect=_run):
         for dep in deps:
             _maybe_resolve_git_semver(
                 dep_ref=dep,
@@ -814,7 +814,7 @@ def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer(monkeypatch)
 
     dep = _ado_semver_dep()
 
-    with patch("apm_cli.marketplace.ref_resolver.subprocess.run", side_effect=_run):
+    with patch("subprocess.run", side_effect=_run):
         resolution = _maybe_resolve_git_semver(
             dep_ref=dep,
             existing_lockfile=None,
