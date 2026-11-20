@@ -31,13 +31,11 @@ _ALL = (
     "revoke-approval",
 )
 _DRY_RUN = "S-pending (neutral issue to follow): dry-run preview of gate removal"
-_BUNDLE = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
 _BIN_UNLOCKED = (
     "#4225 the user lockfile does not record the bin/ files a marketplace plugin deployed"
 )
 _XFAIL = {
     "G|dry-run|local-deny|bin": _DRY_RUN,
-    "G|bundle-install|local-deny|bin": _BUNDLE,
     **{f"G|marketplace-install|{change}|bin": _BIN_UNLOCKED for change in _ALL},
 }
 

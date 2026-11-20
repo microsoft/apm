@@ -195,8 +195,8 @@ def prune(ctx, dry_run):
             and not owner_violations
             and not absent_staging
         ):
-            if not apm_modules_dir.exists():
-                logger.progress("No apm_modules/ directory found. Nothing to prune.")
+            if (note := _empty_modules_note(apm_modules_dir)) is not None:
+                logger.progress(f"{note} Nothing to prune.")
             else:
                 logger.success(
                     "No orphaned packages found. apm_modules/ is clean.",
@@ -479,6 +479,19 @@ def prune(ctx, dry_run):
         sys.exit(1)
     finally:
         _retire_native_registration(registration_token)
+
+
+def _empty_modules_note(apm_modules_dir: Path) -> str | None:
+    """Say why nothing is installed, or None when apm_modules/ holds a package.
+
+    APM keeps hidden records there (a parked local bundle's, #4221); they are
+    not packages, so a directory holding only them has nothing to prune.
+    """
+    if not apm_modules_dir.is_dir():
+        return "No apm_modules/ directory found."
+    if any(not entry.name.startswith(".") for entry in apm_modules_dir.iterdir()):
+        return None
+    return "No packages in apm_modules/."
 
 
 def _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run: bool) -> None:

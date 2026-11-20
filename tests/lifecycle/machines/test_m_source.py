@@ -39,7 +39,6 @@ from hypothesis.stateful import initialize, rule, run_state_machine_as_test
 
 from tests.lifecycle.machines._kit import (
     Bench,
-    KnownCell,
     MachineBase,
     Step,
     WorldPool,
@@ -267,28 +266,7 @@ def _mcp_servers(observation: Observation) -> frozenset[str]:
     return frozenset(json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {})
 
 
-def _lsp_survivor(machine, op, before=None, after=None, result=None) -> bool:
-    """#4214: uninstall with a surviving LSP-only local package fails its cleanup."""
-    del before, after
-    return (
-        result is not None
-        and result.returncode == 1
-        and op.name == "uninstall"
-        and "DRYRUN" not in op.modifiers
-        and machine.lsp_survives
-    )
-
-
-KNOWN_CELLS = (
-    KnownCell(
-        "uninstall-lsp-survivor",
-        "I7",
-        "#4214",
-        r"^failed uninstall (changed (the manifest|the lockfile|deployed surfaces|durable files: .*)"
-        r"|exited 1 without announcing why)$",
-        _lsp_survivor,
-    ),
-)
+KNOWN_CELLS: tuple = ()
 
 
 class SourceMachine(MachineBase):
@@ -304,7 +282,6 @@ class SourceMachine(MachineBase):
         self.network = "online"
         self.converged = False
         self.registered = False
-        self.lsp_survives = False
 
     # -- model -----------------------------------------------------------------
 
@@ -320,8 +297,6 @@ class SourceMachine(MachineBase):
         return bool({"remote-skill", "remote-exec", "p-registry"} & set(self.slots))
 
     def exits(self, op: str, *, dry_run: bool = False) -> frozenset[int]:
-        if op == "uninstall" and self.lsp_survives and not dry_run:
-            return frozenset({0, 1})  # strict known cell #4214 owns the exit 1
         if op == "compile" and not self.bench.lock_path.is_file():
             return frozenset({1})  # "No APM content found to compile"
         if self.network == "offline" and self.remote() and op in ("install", "update", "lock"):
@@ -483,10 +458,6 @@ class SourceMachine(MachineBase):
     def _keeping(self, model: ModelState) -> ModelState:
         return model.declare(*self.model.declared)
 
-    def installed_lsp(self) -> bool:
-        lock = self.bench.lock_path
-        return lock.is_file() and "_local/p-lsp" in lock.read_text(encoding="utf-8")
-
     def _choices(self) -> list[Choice]:
         return list(self.slots.values())
 
@@ -576,19 +547,7 @@ class SourceMachine(MachineBase):
         choice = self.slots.get(slot)
         if choice is None or not applies("uninstall", choice.form):
             return
-        self.lsp_survives = "p-lsp" in self.slots and slot != "p-lsp" and self.installed_lsp()
-        step = self.command("uninstall", (self.selector(choice),), (choice,), dry_run)
-        if self.lsp_survives and step.result.returncode == 1:
-            self.lsp_survives = False
-            self.converged = False
-            self.model = self._without(self.model, (choice,))
-            self.slots.pop(slot, None)
-            self.entries.pop(slot, None)
-            # Execute the printed hint: "Run 'apm install' to resync remaining integrations."
-            assert "Run 'apm install' to resync" in step.result.stdout, step.result.stdout
-            self.reconcile("install", False)
-            return
-        self.lsp_survives = False
+        self.command("uninstall", (self.selector(choice),), (choice,), dry_run)
         if self.entries.get(slot) not in self._apm_entries():
             self.slots.pop(slot, None)
             self.entries.pop(slot, None)

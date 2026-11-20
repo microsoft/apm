@@ -27,13 +27,12 @@ from __future__ import annotations
 import json
 import re
 import shutil
-from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
 import yaml
 
-from tests.lifecycle.scenarios._kit import Scenario, assert_changes, known_defect
+from tests.lifecycle.scenarios._kit import Scenario, assert_changes
 from tests.lifecycle.world import use_policy
 
 pytestmark = [
@@ -111,20 +110,12 @@ def test_upgrade_from_prior_generator(lifecycle_world, generator) -> None:
     assert "srv" in _servers(project / ".github/mcp.json")
 
     step = scenario.run("install")
-    # From an "unknown" generator the retired entry stays, unannounced.
-    silent = generator == "unknown"
-    with (
-        known_defect("#4169", r"missing: \['project:\.github/mcp\.json'\]")
-        if silent
-        else nullcontext()
-    ):
-        assert_changes(step.changed, UPGRADE_WRITES, label=f"upgrade from {generator}")
+    assert_changes(step.changed, UPGRADE_WRITES, label=f"upgrade from {generator}")
     data = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
     assert data["apm_version"] == _running_version(scenario)
     assert {path: (project / path).read_bytes() for path in DEPLOYED} == deployed
     assert "srv" in _servers(project / ".mcp.json")
-    with known_defect("#4169", r"retired entry") if silent else nullcontext():
-        assert "srv" not in _servers(project / ".github/mcp.json"), "the retired entry is healed"
+    assert "srv" not in _servers(project / ".github/mcp.json"), "the retired entry is healed"
 
     scenario.pair()
     rerun = scenario.run("install")
