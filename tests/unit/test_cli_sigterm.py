@@ -17,7 +17,7 @@ _PROBE = textwrap.dedent(
     import os, signal, sys, time
     import apm_cli.cli as entry
 
-    def fake_cli(obj):
+    def fake_cli(obj, **_kwargs):
         try:
             os.kill(os.getpid(), signal.SIGTERM)
             time.sleep(5)

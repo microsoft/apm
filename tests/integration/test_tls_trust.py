@@ -263,7 +263,7 @@ def test_cli_bootstrap_is_idempotent_across_import_and_main(tmp_path):
             sys.executable,
             "-c",
             "import apm_cli.cli as c\n"
-            "def fake_cli(*, obj):\n"
+            "def fake_cli(*, obj, **_kwargs):\n"
             "    return None\n"
             "c.cli = fake_cli\n"
             "c.main()\n",
