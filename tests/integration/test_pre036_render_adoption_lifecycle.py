@@ -39,6 +39,7 @@ pytestmark = [
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "pre036_upgrade"
 FIXTURE_035 = FIXTURES / "v0.35.1"
+FIXTURE_036 = FIXTURES / "v0.36.1"
 # Files whose 0.37 render differs from the bytes 0.35.1 wrote.
 RE_RENDERED = (".codex/agents/editor.toml", ".cursor/rules/everywhere.mdc")
 # A file whose 0.37 render equals the bytes 0.35.1 wrote.
@@ -197,3 +198,103 @@ def test_c4_frozen_install_of_untouched_pre036_project_writes_nothing(
     assert code == 0, f"{out}\n{err}"
     assert _kept_lines(out + err) == []
     assert world.snapshot() == before
+
+
+def _forge_lock_hash(world: _World, path: str) -> bytes:
+    """Edit *path* and rewrite every lock hash recorded for it to the edited bytes."""
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    target = world.project / path
+    recorded = compute_file_hash(target)
+    target.write_bytes(target.read_bytes() + _USER_EDIT.encode("ascii"))
+    lock_path = world.project / "apm.lock.yaml"
+    lock_text = lock_path.read_text(encoding="utf-8")
+    assert lock_text.count(recorded) == 2, "expected the file hash and its ledger row"
+    lock_path.write_text(lock_text.replace(recorded, compute_file_hash(target)), "utf-8")
+    return target.read_bytes()
+
+
+_C3_EDITED = RE_RENDERED[1]
+_C3_GIT_STATES = {
+    "tracked-dirty": (),
+    "tracked-staged": (("add", "-A"),),
+    "untracked": (
+        ("rm", "-q", "--cached", "--", _C3_EDITED),
+        ("commit", "-qm", "untrack"),
+    ),
+    "tracked-clean": (("add", "-A"), ("commit", "-qm", "edit")),
+}
+
+
+@pytest.mark.parametrize(
+    ("fixture", "git_state", "overwritten"),
+    [
+        (FIXTURE_036, "tracked-dirty", False),
+        (FIXTURE_036, "tracked-clean", False),
+        (FIXTURE_035, "tracked-dirty", False),
+        (FIXTURE_035, "tracked-staged", False),
+        (FIXTURE_035, "untracked", False),
+        (FIXTURE_035, "tracked-clean", True),
+    ],
+    ids=[
+        "stamp036-dirty",
+        "stamp036-clean",
+        "stamp035-dirty",
+        "stamp035-staged",
+        "stamp035-untracked",
+        "stamp035-clean",
+    ],
+)
+def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre036_file(
+    tmp_path: Path, apm_binary_path: Path, fixture: Path, git_state: str, overwritten: bool
+) -> None:
+    """A lock hash forged to match a local edit is evidence only for a <=0.35 stamp,
+    and only while git holds the edit (tracked and clean); otherwise the edit is kept."""
+    expected = _fresh_render(tmp_path, apm_binary_path, fixture)
+    world = _World(tmp_path / "c3", apm_binary_path, fixture)
+    edited_bytes = _forge_lock_hash(world, _C3_EDITED)
+    assert edited_bytes != expected[_C3_EDITED]
+    for args in _C3_GIT_STATES[git_state]:
+        world._git("-c", "user.email=t@example.com", "-c", "user.name=t", *args)
+    git_status = world._git("status", "--porcelain", "--", _C3_EDITED)
+    assert (git_status == "") is (git_state == "tracked-clean"), git_status
+
+    code, out, err = world.run("install")
+
+    target = world.project / _C3_EDITED
+    if overwritten:
+        assert code == 0, f"{out}\n{err}"
+        assert _kept_lines(out + err) == []
+        assert target.read_bytes() == expected[_C3_EDITED]
+        # The overwritten edit stays recoverable from git.
+        assert world._git("show", f"HEAD:{_C3_EDITED}").encode("utf-8") == edited_bytes
+        _assert_lock_matches_disk(world)
+    else:
+        assert code == 1, f"{out}\n{err}"
+        assert target.read_bytes() == edited_bytes
+        assert _kept_lines(out + err) == [_kept_line(_C3_EDITED)]
+        assert world._git("status", "--porcelain", "--", _C3_EDITED) == git_status
+
+
+def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_path: Path) -> None:
+    """A project written by a released 0.36.x keeps every deployed byte on upgrade."""
+    produced_by = json.loads((FIXTURE_036 / "FIXTURE.json").read_text())["apm_version"]
+    assert produced_by.startswith("0.36."), produced_by
+    expected = _fresh_render(tmp_path, apm_binary_path, FIXTURE_036)
+    world = _World(tmp_path / "c5", apm_binary_path, FIXTURE_036)
+    before = world.snapshot()
+    deployed = sorted(p for p in before if p not in {"apm.yml", "apm.lock.yaml", ".gitignore"})
+    assert deployed and all(before[p] == expected[p] for p in deployed)
+
+    code, out, err = world.run("install")
+
+    assert code == 0, f"{out}\n{err}"
+    assert _kept_lines(out + err) == []
+    after = world.snapshot()
+    assert {p: after.get(p) for p in deployed} == {p: before[p] for p in deployed}
+    assert set(after) == set(before)
+    world.ok("audit", "--ci")
+    world.ok("install", "--frozen")
+    assert world.snapshot() == after
+    world.ok("install")
+    assert world.snapshot() == after
