@@ -205,7 +205,7 @@ def heal_retired_project_mcp_destinations(
     created it: this heal removed every server it held, or it holds none and
     the lock claims names there (an earlier ``--frozen`` heal emptied it).
     """
-    from apm_cli.utils.atomic_io import atomic_write_text
+    from apm_cli.utils.json_config import write_json_config
 
     heal = RetiredMcpHeal(removed={}, kept={}, deleted_files=[])
     for destination in RETIRED_PROJECT_MCP_DESTINATIONS:
@@ -250,10 +250,7 @@ def heal_retired_project_mcp_destinations(
             continue
         if not removed_here:
             continue
-        text = json.dumps(data, indent=2)
-        if raw.endswith("\n"):
-            text += "\n"
-        atomic_write_text(path, text)
+        write_json_config(path, data, default_trailing_newline=raw.endswith("\n"))
     return heal
 
 
