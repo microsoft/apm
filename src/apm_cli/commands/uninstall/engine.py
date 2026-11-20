@@ -1932,6 +1932,7 @@ def _cleanup_stale_mcp(
                 stored_configs=lockfile.mcp_configs,
                 native_hashes=retired.hashes,
                 project_root=deploy_root,
+                keep_signal_files=False,
             ),
             logger,
         )
