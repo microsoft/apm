@@ -298,7 +298,7 @@ def _resolve_download_strategy(
                 diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())
                 if logger:
                     logger.progress(_hash_msg)
-            stage_existing_copy(ctx, install_path)
+            stage_existing_copy(ctx, install_path, _dep_locked_chk)
             skip_download = False
 
     # When registry-only mode is active, bypass cache if the
