@@ -595,3 +595,38 @@ def test_reinstalling_an_approved_bundle_records_a_missing_key(
     assert key in record.read_text(encoding="utf-8")
     run_step(runner, ("install", "--no-policy"), cwd=project, env=env, step="kept")
     assert _target_hooks_deployed(project, target)
+
+
+def test_one_prune_retires_revoked_bundle_hooks_and_removes_an_orphan(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Prune's own lockfile write keeps the rows the hook re-check dropped."""
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    pkg = world.publish_package("pkg-a")
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_hook_bundle(world, runner, env, tmp_path / "out")
+        project = world.consumer(dependencies=[f"{pkg.slug}#v1.0.0"], targets=("copilot",))
+        _allow(project, _bundle_key(bundle))
+        run_step(runner, ("install", "--no-policy"), cwd=project, env=env, step="dep")
+        result = run_step(
+            runner, ("install", str(bundle), "--no-policy"), cwd=project, env=env, step="bundle"
+        )
+        assert _target_hooks_deployed(project, "copilot"), output(result)
+        assert lock_repo_urls(project) == {pkg.slug}
+
+        manifest = load_yaml(project / "apm.yml")
+        manifest["dependencies"]["apm"] = []
+        manifest["executables"] = {"allow": {}}
+        dump_yaml(manifest, project / "apm.yml")
+        result = run_step(runner, ("prune",), cwd=project, env=env, step="prune")
+
+    text = output(result)
+    assert not _target_hooks_deployed(project, "copilot"), text
+    assert "approval no longer granted" in text, text
+    assert lock_repo_urls(project) == set(), text
+    lock = load_yaml(project / "apm.lock.yaml") or {}
+    assert _COPILOT_HOOK not in (lock.get("local_deployed_files") or []), lock
+    assert _COPILOT_HOOK not in {row.get("value") for row in lock.get("deployments") or []}, lock
