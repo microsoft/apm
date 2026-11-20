@@ -39,7 +39,9 @@ def test_frozen_keeps_undeclared_package_until_normal_install(tmp_path, apm_bina
         frozen = kit.run("install", "--no-policy", "--frozen")
         text = output(frozen)
         assert frozen.returncode == 0, text
-        assert _KEPT in text and "Run 'apm install' to remove them." in text, text
+        assert (
+            _KEPT in text and "'apm install' to remove packages apm.yml no longer declares" in text
+        ), text
         assert tree(project) == before
         assert (project / "apm_modules/test/kit").is_dir()
 

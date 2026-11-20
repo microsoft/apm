@@ -285,7 +285,7 @@ def format_github_gitlab_host_conflict_error(hostname: str) -> str:
         "Use object form in apm.yml:\n"
         f"  - git: https://{hostname}/owner/repo\n"
         "    path: path/inside/repo\n\n"
-        "Or run APM with GITHUB_HOST unset for this command only:\n"
+        "Or unset GITHUB_HOST for this command only:\n"
         f"  env -u GITHUB_HOST GITLAB_HOST={hostname} apm install <package>"
     )
 

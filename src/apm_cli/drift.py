@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.host_providers import effective_host_provider_identity
+from apm_cli.core.remediation import CATALOG_SELECTION_MOVED, FROZEN_LOCKFILE_STALE
 from apm_cli.install.phases._skip_logic import _should_use_locked_ref
 from apm_cli.utils.github_host import default_host
 
@@ -266,8 +267,7 @@ def frozen_marketplace_refusal(decision: MarketplaceReplay) -> ValueError | None
         return None
     return ValueError(
         "--frozen replays marketplace dependencies from apm.lock.yaml only, and "
-        "no locked entry matches this declaration. Run 'apm install' without "
-        "--frozen, then commit apm.lock.yaml"
+        f"no locked entry matches this declaration. {FROZEN_LOCKFILE_STALE.sentence()}"
     )
 
 
@@ -298,8 +298,8 @@ def catalog_metadata_refusal(
     current = f"{resolved.get_unique_key()}#{resolved.reference or 'HEAD'}"
     return ValueError(
         f"the catalog now selects {current}, but apm.lock.yaml pins {locked}. "
-        "Catalog edits do not change what installs; run "
-        f"'apm update {dep_ref.get_display_name()}' to move to the catalog's selection"
+        "Catalog edits do not change what installs; "
+        f"{CATALOG_SELECTION_MOVED.bind(package=dep_ref.get_display_name()).clause()}"
     )
 
 

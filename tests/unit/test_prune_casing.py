@@ -160,7 +160,7 @@ def test_prune_ambiguous_casing_fails_before_cleanup(
     output = " ".join(result.output.split())
     assert "Found multiple package directories for one dependency:" in output
     assert "Failed to parse" not in output
-    assert "Inspect the duplicates under apm_modules/" in output
+    assert "inspect the colliding directories under apm_modules/" in output.lower()
     assert orphan.exists()
     assert (package / "notes.txt").read_bytes() == b"user content\n"
     assert (tmp_path / "apm.yml").read_bytes() == manifest

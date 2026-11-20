@@ -31,6 +31,7 @@ from typing import Any, Literal
 from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_info, _rich_success, _rich_warning
 from ..utils.path_security import ensure_path_within
+from .remediation import PLUGIN_MCP_OWNERSHIP_UNKNOWN
 
 
 def _emit(level: str, message: str, logger: Any, symbol: str) -> None:
@@ -344,7 +345,7 @@ def _warn_unknown_mcp_ownership(logger: Any) -> None:
         "warning",
         "Root .mcp.json left out of the plugin: apm.lock.yaml cannot be read, so the "
         "MCP servers APM installed there cannot be told apart from authored ones. "
-        "Fix or regenerate apm.lock.yaml with 'apm install', then run 'apm pack' again.",
+        f"{PLUGIN_MCP_OWNERSHIP_UNKNOWN.sentence()}",
         logger,
         "warning",
     )

@@ -2597,7 +2597,7 @@ def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
     if invalid_cache == "package-root-symlink":
         assert "unsafe destination" in output
         assert "without removing its target" in output
-        assert "rerun apm install" in output
+        assert "'apm install' to install the dependency under the new alias" in output
         assert "apm deps clean --yes" not in output
     elif invalid_cache == "plugin-path":
         assert "is invalid" in output

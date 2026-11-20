@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
+from ..core.remediation import HIDDEN_CHARACTERS_FLAGGED
 from ..utils.diagnostics import printable_ascii_text
 from .content_scanner import ScanFinding
 
@@ -445,9 +446,10 @@ def findings_to_markdown(
         lines.extend(
             [
                 "",
-                "Review structured prompt fields manually; use `apm audit --strip` only for eligible regular documents."
+                "Review structured prompt fields manually; for eligible regular documents, "
+                f"{HIDDEN_CHARACTERS_FLAGGED.clause()}."
                 if any(not entry.strippable and entry.status == "checked" for entry in coverage)
-                else "Run `apm audit --strip` to remove flagged characters.",
+                else HIDDEN_CHARACTERS_FLAGGED.sentence(),
             ]
         )
     lines.extend(coverage_lines)

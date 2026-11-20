@@ -215,4 +215,4 @@ class TestMarkdownReport:
     def test_strip_hint_present(self):
         findings = {"test.md": [_make_finding(file="test.md")]}
         md = findings_to_markdown(findings, files_scanned=1)
-        assert "`apm audit --strip`" in md
+        assert "'apm audit --strip'" in md

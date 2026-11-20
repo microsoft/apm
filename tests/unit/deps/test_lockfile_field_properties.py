@@ -573,7 +573,7 @@ def test_any_single_mismatched_ado_field_fails_closed(
         host=host,
         **corrupted,
     )
-    with pytest.raises(ValueError, match=r"Run `apm install <original-ado-url>`"):
+    with pytest.raises(ValueError, match=r"Run 'apm install <original-ado-url>'"):
         reference.validate_provider_coordinates()
 
 
