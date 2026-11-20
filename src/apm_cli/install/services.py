@@ -76,15 +76,26 @@ def _log_hook_display_payloads(
     log_fn: Any,
     logger: Any,
 ) -> None:
-    """Emit per-hook-file action summaries for hook transparency."""
+    """Emit per-hook-file action summaries for hook transparency.
+
+    Targets that render the same hook identically produce the same summary
+    line; each distinct line is printed once per package (#4336).
+    """
+    _printed: set[str] = set()
+
+    def _emit(line: str) -> None:
+        if line not in _printed:
+            _printed.add(line)
+            log_fn(line)
+
     for _payload in payloads:
         _src = _payload.get("source_hook_file", "hook file")
         _actions = _payload.get("actions", [])
         if _actions:
             for _act in _actions:
-                log_fn(f"  |   {_act.get('event', '?')}: {_act.get('summary', '?')} ({_src})")
+                _emit(f"  |   {_act.get('event', '?')}: {_act.get('summary', '?')} ({_src})")
         else:
-            log_fn(f"  |   Hook file integrated: {_src}")
+            _emit(f"  |   Hook file integrated: {_src}")
         if verbose and logger is not None:
             _out_path = _payload.get("output_path", "")
             logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
