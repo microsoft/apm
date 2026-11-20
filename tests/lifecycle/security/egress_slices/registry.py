@@ -33,5 +33,13 @@ SLICE = HostSlice(
         EgressRow("EP|EGRESS=registry|PROXY_ONLY=0", "PAT", "registry"),
         EgressRow("EP|EGRESS=registry|REDIRECT=none", "PAT", "registry"),
         EgressRow("E1|CRED=PAT|EGRESS=registry|REDIRECT=none", "PAT", "registry"),
+        *(
+            EgressRow(f"E1|CRED=PAT|EGRESS=registry|REDIRECT={kind}", "PAT", "registry")
+            for kind in ("same-origin", "cross-origin")
+        ),
+        *(
+            EgressRow(f"EP|EGRESS=registry|REDIRECT={kind}", "PAT", "registry")
+            for kind in ("same-origin", "cross-origin")
+        ),
     ),
 )

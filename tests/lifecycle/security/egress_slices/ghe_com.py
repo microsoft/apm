@@ -34,5 +34,9 @@ SLICE = HostSlice(
         ),
         EgressRow("EP|HOST=ghe.com|PROXY_ONLY=0", "PAT", "clone"),
         EgressRow("EP|HOST=ghe.com|REDIRECT=none", "PAT", "clone"),
+        *(
+            EgressRow(f"EP|HOST=ghe.com|REDIRECT={kind}", "PAT", "clone")
+            for kind in ("same-origin", "cross-origin")
+        ),
     ),
 )

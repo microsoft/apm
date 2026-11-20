@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from tests.lifecycle.security.egress_slices import EgressRow, HostSlice
 
+_REDIRECTS = ("same-origin", "cross-origin")
 _E2 = ("api-probe", "clone", "marketplace-fetch", "policy-fetch")
 _GHES = "ghes.lifecycle.test"
 
@@ -51,5 +52,25 @@ SLICE = HostSlice(
         EgressRow("EP|HOST=GHES|PROXY_ONLY=0", "PAT", "clone"),
         EgressRow("EP|HOST=GHES|REDIRECT=none", "PAT", "clone"),
         EgressRow("EP|PROXY_ONLY=0|REDIRECT=none", "PAT", "clone"),
+        # REDIRECT rows: every request to the host's origins answers 307, to an
+        # unserved path on the same origin or to a spare host (test_egress._redirect).
+        *(
+            EgressRow(f"E1|CRED={cred}|EGRESS={egress}|REDIRECT={kind}", cred, egress)
+            for cred in ("PAT", "gh", "helper")
+            for egress in _E2
+            for kind in _REDIRECTS
+        ),
+        *(
+            EgressRow(f"EP|CRED={cred}|REDIRECT={kind}", cred, "clone")
+            for cred in ("PAT", "gh", "helper", "none")
+            for kind in _REDIRECTS
+        ),
+        *(
+            EgressRow(f"EP|EGRESS={egress}|REDIRECT={kind}", "PAT", egress)
+            for egress in _E2
+            for kind in _REDIRECTS
+        ),
+        *(EgressRow(f"EP|HOST=GHES|REDIRECT={kind}", "PAT", "clone") for kind in _REDIRECTS),
+        *(EgressRow(f"EP|PROXY_ONLY=0|REDIRECT={kind}", "PAT", "clone") for kind in _REDIRECTS),
     ),
 )

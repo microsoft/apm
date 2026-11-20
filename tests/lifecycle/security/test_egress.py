@@ -49,7 +49,7 @@ from tests.lifecycle import driver
 from tests.lifecycle.obligation_space import security_obligations
 from tests.lifecycle.oracles import Evidence, check_obligation
 from tests.lifecycle.security.egress_slices import EgressRow, HostSlice, slices
-from tests.lifecycle.world import World, login_azure, use_policy, use_registry
+from tests.lifecycle.world import World, login_azure, routes, use_policy, use_registry
 from tests.lifecycle.world.services import (
     ADO_BEARER,
     ADO_PAT,
@@ -252,6 +252,26 @@ def _fields(cell_id: str) -> dict[str, str]:
     return dict(part.split("=", 1) for part in cell_id.split("|")[1:])
 
 
+# Where a REDIRECT row sends the host's requests: a path no route serves.
+_MOVED = "/lifecycle-egress-moved"
+# A redirect may break the operation; credential isolation is the subject.
+_REDIRECT_EXITS = (0, 1)
+
+
+def _redirect(world: World, host: HostSlice, kind: str) -> None:
+    """Answer every request to the host's own origins with a 307.
+
+    ``same-origin`` sends it to an unserved path on the same origin (a 404);
+    ``cross-origin`` sends it to a spare host outside every platform.
+    """
+    for origin in dict.fromkeys((host.git_host, *host.family)):
+        if kind == "same-origin":
+            world.services.redirect(origin, "/", f"https://{origin}{_MOVED}")
+            world.services.script(origin, _MOVED, 404, {"Content-Type": "text/plain"}, b"moved\n")
+        else:
+            world.services.redirect(origin, "/", f"https://{routes.MIRROR_HOSTS[0]}{_MOVED}")
+
+
 def registered() -> list[tuple[HostSlice, EgressRow]]:
     return [(host, row) for host in slices() for row in host.rows]
 
@@ -266,26 +286,39 @@ def run_egress_row(world: World, host: HostSlice, row: EgressRow) -> None:
         "home": world.home,
         "cache": world.cache_root or world.root / "cache",
     }
+    fields = _fields(row.id)
+    redirect = fields.get("REDIRECT") in ("same-origin", "cross-origin")
     world.services.reset()
     if row.auth:
         world.services.require_ado_auth()
+    if redirect:
+        _redirect(world, host, fields["REDIRECT"])
     before = ArtifactSnapshotSet.capture(roots)
     result: CommandResult = driver.run(world, operation.command(world, host))
     after = ArtifactSnapshotSet.capture(roots)
-    assert result.returncode == row.exit, (
-        f"{row.egress} exited {result.returncode}, wanted {row.exit}:\n"
+    exits = _REDIRECT_EXITS if redirect else row.exit
+    exits = (exits,) if isinstance(exits, int) else exits
+    assert result.returncode in exits, (
+        f"{row.egress} exited {result.returncode}, wanted {exits}:\n"
         f"{result.stdout}\n{result.stderr}"
     )
     requests = [
         request
         for request in world.services.proxy.observations
-        if request.method != "CONNECT" and operation.belongs(request)
+        if request.method != "CONNECT"
+        # A redirected step's requests to the spare hosts all belong to it.
+        and (operation.belongs(request) or (redirect and request.host in routes.MIRROR_HOSTS))
     ]
     reached = {request.host for request in requests}
-    assert host.git_host in reached or reached & set(host.family), (
+    # A redirect may end the step before the operation's own requests start.
+    touched = (
+        {r.host for r in world.services.proxy.observations if r.method != "CONNECT"}
+        if redirect
+        else reached
+    )
+    assert host.git_host in touched or touched & set(host.family), (
         f"{row.egress} never reached {host.host}: {sorted(reached)}"
     )
-    fields = _fields(row.id)
     everything = world.services.proxy.observations
     if fields.get("PROXY_ONLY") == "0":
         # Normal mode: every connection went to an origin the world's proxy serves.
@@ -302,7 +335,12 @@ def run_egress_row(world: World, host: HostSlice, row: EgressRow) -> None:
         carrying = [request for request in requests if _authorized(request)]
     others = sorted(reached - set(host.family))
     # In play: the own credential reached every own origin the operation used.
-    present = sorted(reached & set(host.family)) if row.presented and arranged.own else []
+    # A redirected first request may leave before any credential is presented.
+    present = (
+        sorted(reached & set(host.family))
+        if row.presented and arranged.own and not redirect
+        else []
+    )
     secrets = (*arranged.own, *arranged.foreign)
     check_obligation(
         row.id,
@@ -313,9 +351,13 @@ def run_egress_row(world: World, host: HostSlice, row: EgressRow) -> None:
         evidence=Evidence(
             egress=tuple(_entry(request) for request in carrying),
             egress_present_hosts=present,
-            egress_absent_hosts=(*others, *(() if arranged.own else host.family)),
+            egress_absent_hosts=(
+                *others,
+                *(() if arranged.own else host.family),
+                *(routes.MIRROR_HOSTS if redirect else ()),
+            ),
             secrets_absent=secrets,
-            exit=row.exit,
+            exit=exits,
         ),
     )
 

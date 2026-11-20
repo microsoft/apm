@@ -66,6 +66,10 @@ SLICE = HostSlice(
         EgressRow("EP|EGRESS=clone|HOST=ADO", "PAT", "clone"),
         EgressRow("EP|HOST=ADO|PROXY_ONLY=0", "PAT", "clone"),
         EgressRow("EP|HOST=ADO|REDIRECT=none", "PAT", "clone"),
+        *(
+            EgressRow(f"EP|HOST=ADO|REDIRECT={kind}", "PAT", "clone")
+            for kind in ("same-origin", "cross-origin")
+        ),
         # Auth-required world (require_ado_auth): anonymous requests get 401, so
         # each credential of APM's chain (PAT -> az bearer -> credential fill) is in play.
         *(
@@ -91,6 +95,17 @@ SLICE = HostSlice(
         EgressRow("EP|CRED=az-bearer|HOST=ADO", "az-bearer", "clone", auth=True),
         EgressRow("EP|CRED=az-bearer|PROXY_ONLY=0", "az-bearer", "clone", auth=True),
         EgressRow("EP|CRED=az-bearer|REDIRECT=none", "az-bearer", "clone", auth=True),
+        *(
+            EgressRow(f"EP|CRED=az-bearer|REDIRECT={kind}", "az-bearer", "clone", auth=True)
+            for kind in ("same-origin", "cross-origin")
+        ),
+        *(
+            EgressRow(
+                f"E1|CRED=az-bearer|EGRESS={egress}|REDIRECT={kind}", "az-bearer", egress, auth=True
+            )
+            for egress in ("api-probe", "clone", "policy-fetch")
+            for kind in ("same-origin", "cross-origin")
+        ),
         *(
             EgressRow(
                 f"E1|CRED=az-bearer|EGRESS={egress}|REDIRECT=none", "az-bearer", egress, auth=True

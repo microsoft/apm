@@ -29,8 +29,8 @@ class EgressRow:
     smoke: bool = False
     # Strict expected failure: "S-pending (neutral issue to follow): <phrase>".
     xfail: str = ""
-    # Exit the decisive command must end with (a refused anonymous request is 1).
-    exit: int = 0
+    # Exit(s) the decisive command may end with (a refused anonymous request is 1).
+    exit: int | tuple[int, ...] = 0
     # The host refuses anonymous requests (Azure DevOps: ``require_ado_auth``).
     auth: bool = False
 

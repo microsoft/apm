@@ -28,5 +28,13 @@ SLICE = HostSlice(
         EgressRow("EP|EGRESS=mcp-registry|REDIRECT=none", "none", "mcp-registry"),
         EgressRow("EP|HOST=generic|PROXY_ONLY=0", "none", "mcp-registry"),
         EgressRow("EP|HOST=generic|REDIRECT=none", "none", "mcp-registry"),
+        *(
+            EgressRow(f"EP|HOST=generic|REDIRECT={kind}", "none", "mcp-registry")
+            for kind in ("same-origin", "cross-origin")
+        ),
+        *(
+            EgressRow(f"EP|EGRESS=mcp-registry|REDIRECT={kind}", "none", "mcp-registry")
+            for kind in ("same-origin", "cross-origin")
+        ),
     ),
 )
