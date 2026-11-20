@@ -7,14 +7,19 @@
     "tests/unit/install/test_sources_phase3.py::TestLocalDependencySourceAcquire::test_success_with_apm_yml": "tests/unit/install/test_sources_materialisation.py::TestLocalDependencySourceAcquire::test_success_with_apm_yml",
     "tests/unit/install/test_sources_phase3.py::TestCachedDependencySourceAcquire::test_with_targets_and_apm_yml": "tests/unit/install/test_sources_materialisation.py::TestCachedDependencySourceAcquire::test_with_targets_and_apm_yml",
     "tests/unit/install/test_sources_phase3.py::TestCachedDependencySourceAcquire::test_with_targets_no_apm_yml": "tests/unit/install/test_sources_materialisation.py::TestCachedDependencySourceAcquire::test_with_targets_no_apm_yml",
-    "tests/unit/install/test_sources_phase3.py::TestFreshDependencySourceAcquire::test_hash_mismatch_raises_direct_dependency_error": "tests/unit/install/test_sources_materialisation.py::TestFreshDependencySourceAcquire::test_hash_mismatch_raises_direct_dependency_error"
+    "tests/unit/install/test_sources_phase3.py::TestFreshDependencySourceAcquire::test_hash_mismatch_raises_direct_dependency_error": "tests/unit/install/test_sources_materialisation.py::TestFreshDependencySourceAcquire::test_hash_mismatch_raises_direct_dependency_error",
+    "tests/unit/deps/test_download_strategies_phase3.py::TestDownloadGitlabFile::test_401_without_token_includes_context": "tests/unit/deps/test_download_strategies_selection.py::TestDownloadGitlabFile::test_401_without_token_includes_context",
+    "tests/unit/deps/test_download_strategies_phase3.py::TestDownloadGitlabFile::test_verbose_callback_called_on_success": "tests/unit/deps/test_download_strategies_selection.py::TestDownloadGitlabFile::test_verbose_callback_called_on_success"
   },
   "decisions": [
     "D5: for cross-file equal-copy groups the copy in the *_phase3*/phase3w5 module was deleted and the behavior-named twin kept, regardless of the report's keep order (D5 equality is symmetric).",
     "D5: 27 groups between tests/unit/install/test_services_branches.py and test_services_phase3.py left untouched: both files are owned by open pull requests.",
     "Twin modules test_resolve_phase3.py, test_drift_phase3.py, test_sources_phase3.py merged into test_resolve_strategy_selection.py, test_drift_detection.py, test_sources_materialisation.py: unique tests moved, twin deleted.",
     "sources fold: owner test_success_with_apm_yml asserts a superset; test_with_targets_and_apm_yml differs only by an unasserted manifest dependency; owner test_with_targets_no_apm_yml gained the twin's no-manifest assertion; owner test_hash_mismatch gained the twin's match='Content hash mismatch'.",
-    "sources: twin test_logger_download_complete_called_on_success (SKILL.md package) moved as test_logger_download_complete_called_for_skill_package to avoid a name clash with the owner's apm.yml variant."
+    "sources: twin test_logger_download_complete_called_on_success (SKILL.md package) moved as test_logger_download_complete_called_for_skill_package to avoid a name clash with the owner's apm.yml variant.",
+    "Twin modules test_apm_resolver_phase3.py and test_download_strategies_phase3.py merged into test_apm_resolver_edge_cases.py and test_download_strategies_selection.py; twins deleted.",
+    "download_strategies: 8 TestDownloadGitlabFile same-body twins differed only by the autouse Git isolation fixture; kept the owner, whose fixture drives the real sparse-Git transport to its typed failure (covers more code).",
+    "download_strategies: owner test_rate_limit_returns_first_response_without_retry, test_success_extracts_files_stripping_root_prefix and test_no_ado_token_no_auth_header replaced by the stronger twin bodies; twin gitlab test_401_without_token_includes_context (equivalent setup) and test_verbose_callback_called_on_success (owner asserts a superset) folded into owner."
   ],
   "counts_left": {}
 }
