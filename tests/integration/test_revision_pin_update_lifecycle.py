@@ -57,6 +57,8 @@ class _Scenario:
     released_old: GitCommit
     released_new: GitCommit
     retained: GitCommit
+    live_repository: LocalGitRepository | None = None
+    live_old: GitCommit | None = None
 
 
 def _instruction(marker: str) -> str:
@@ -68,6 +70,7 @@ def _new_scenario(
     root: Path,
     *,
     mcp_dependencies: tuple[dict[str, object], ...] = (),
+    branch_dependency: bool = False,
 ) -> _Scenario:
     """Create two GitHub-shaped local repositories and one pinned consumer."""
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
@@ -97,15 +100,24 @@ def _new_scenario(
 
     released_url = f"https://github.com/{_OWNER}/released"
     retained_url = f"https://github.com/{_OWNER}/retained"
-    environment = repositories.url_rewrite_subprocess_env_many(
-        ((released_repo, released_url), (retained_repo, retained_url))
-    )
+    rewrites = [(released_repo, released_url), (retained_repo, retained_url)]
+    dependencies = [
+        {"git": released_url, "ref": released_old.sha, "alias": "released"},
+        {"git": retained_url, "ref": retained.sha, "alias": "retained"},
+    ]
+    live_repo = live_old = None
+    if branch_dependency:
+        live_source = packages.create("live", targets=("claude",))
+        packages.add_instruction(live_source, "live", _instruction("live v1"))
+        live_repo = repositories.create("live", source_tree=live_source.root)
+        live_old = repositories.commit(live_repo, message="publish live v1")
+        live_url = f"https://github.com/{_OWNER}/live"
+        rewrites.append((live_repo, live_url))
+        dependencies.append({"git": live_url, "ref": "main", "alias": "live"})
+    environment = repositories.url_rewrite_subprocess_env_many(tuple(rewrites))
     consumer = LocalPackageFactory(isolated.work_root).create(
         "revision-pin-consumer",
-        dependencies=(
-            {"git": released_url, "ref": released_old.sha, "alias": "released"},
-            {"git": retained_url, "ref": retained.sha, "alias": "retained"},
-        ),
+        dependencies=tuple(dependencies),
         mcp_dependencies=mcp_dependencies,
         targets=("claude",),
     )
@@ -117,6 +129,8 @@ def _new_scenario(
         released_old=released_old,
         released_new=released_new,
         retained=retained,
+        live_repository=live_repo,
+        live_old=live_old,
     )
 
 
@@ -438,3 +452,59 @@ def test_unchanged_install_keeps_revision_pin_tag_lock_bytes(
     assert "replacements" not in repinned
     assert repinned["generated_at"] != _LEGACY_GENERATED_AT
     _assert_unchanged_installs(apm_binary_path, scenario, lock_path)
+
+
+def _plan_package_lines(text: str) -> list[str]:
+    """Return every per-package plan row (``[~]``/``[+]``/``[-]`` + owner/name)."""
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip().startswith(("[~] ", "[+] ", "[-] ")) and f"{_OWNER}/" in line
+    ]
+
+
+@pytest.mark.parametrize("branch_moves", [False, True], ids=["pin-only", "pin-and-branch"])
+def test_update_plan_lists_each_package_once_with_exact_count(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    branch_moves: bool,
+) -> None:
+    """A moved SHA pin is listed once and the total counts changed packages only (#4208)."""
+    scenario = _new_scenario(tmp_path / "lifecycle", branch_dependency=True)
+    live_repo, live_old = scenario.live_repository, scenario.live_old
+    assert live_repo is not None and live_old is not None
+    installed = _install(apm_binary_path, scenario)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    if branch_moves:
+        (live_repo.worktree / ".apm" / "instructions" / "live.instructions.md").write_text(
+            _instruction("live v2"), encoding="utf-8"
+        )
+        live_new = scenario.repositories.commit(live_repo, message="live v2")
+        assert live_new.sha != live_old.sha
+    lock_path = scenario.consumer.root / "apm.lock.yaml"
+    manifest_before = scenario.consumer.manifest_path.read_bytes()
+    lock_before = lock_path.read_bytes()
+
+    dry_run = _run(apm_binary_path, scenario, "--dry-run")
+    assert dry_run.returncode == 0, dry_run.stdout + dry_run.stderr
+    assert dry_run.stdout.isascii() and dry_run.stderr.isascii()
+    rows = _plan_package_lines(dry_run.stdout)
+    expected_rows = [f"[~] {_OWNER}/released"] + ([f"[~] {_OWNER}/live"] if branch_moves else [])
+    assert sorted(rows) == sorted(expected_rows), dry_run.stdout
+    total = [line.strip() for line in dry_run.stdout.splitlines() if "Total:" in line]
+    if branch_moves:
+        assert total == ["[i] Total: 1 revision pin rewrite + 1 dependency change."], dry_run.stdout
+    else:
+        assert total == [], dry_run.stdout
+    assert scenario.consumer.manifest_path.read_bytes() == manifest_before
+    assert lock_path.read_bytes() == lock_before
+
+    applied = _run(apm_binary_path, scenario, "--yes")
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    plan_text = applied.stdout.split("[i] Targets:", 1)[0]
+    assert sorted(_plan_package_lines(plan_text)) == sorted(expected_rows), applied.stdout
+    lock = load_yaml(lock_path)
+    commits = {entry["repo_url"]: entry["resolved_commit"] for entry in lock["dependencies"]}
+    assert scenario.released_new.sha in commits.values()
+    assert scenario.retained.sha in commits.values()
+    assert (live_new.sha if branch_moves else live_old.sha) in commits.values()

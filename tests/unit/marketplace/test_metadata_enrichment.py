@@ -43,6 +43,7 @@ def _write_config(project_root: Path) -> None:
 name: metadata-outcome
 description: Metadata outcome regression fixture
 version: 1.0.0
+license: MIT
 marketplace:
   owner:
     name: APM Tests
@@ -306,7 +307,10 @@ def test_pack_json_warns_and_strict_metadata_prevents_writes(
     assert payload["metadata_enrichment"]["outcomes"] == [
         {"package": "remote-tool", "status": "failed", "cause": "transport closed"}
     ]
-    assert len(payload["warnings"]) == 1
+    assert payload["warnings"] == [
+        "Package 'remote-tool': metadata enrichment failed (transport closed). "
+        "Restore repository, network, or credential access and retry."
+    ], payload["warnings"]
     artifact = tmp_path / ".claude-plugin" / "marketplace.json"
     assert artifact.is_file()
 
