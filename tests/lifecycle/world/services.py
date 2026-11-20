@@ -286,30 +286,38 @@ class WorldServices:
         if len(parts) == 3:
             return _json(200, {"full_name": f"{owner}/{repo}", "default_branch": "main"})
         if len(parts) == 5 and parts[3] == "commits":
-            sha = self._rev_parse(repository, parts[4])
-            if sha is None:
-                return _not_found()
-            if "sha" in (request.header("Accept") or ""):
-                return ScriptedResponse(200, {"Content-Type": "text/plain"}, sha.encode("ascii"))
-            return _json(200, {"sha": sha})
+            return self._api_commit(request, repository, parts[4])
         if len(parts) == 5 and parts[3] == "contents":
-            ref = (parse_qs(request.query).get("ref") or ["HEAD"])[0]
-            content = self._blob(repository, ref, parts[4])
-            if content is None:
-                return _not_found()
-            if "raw" in (request.header("Accept") or ""):
-                return ScriptedResponse(200, {"Content-Type": "application/octet-stream"}, content)
-            return _json(
-                200,
-                {
-                    "type": "file",
-                    "name": parts[4].rsplit("/", 1)[-1],
-                    "path": parts[4],
-                    "encoding": "base64",
-                    "content": base64.b64encode(content).decode("ascii"),
-                },
-            )
+            return self._api_contents(request, repository, parts[4])
         return _not_found()
+
+    def _api_commit(self, request: ScriptedRequest, repository: Path, ref: str) -> ScriptedResponse:
+        sha = self._rev_parse(repository, ref)
+        if sha is None:
+            return _not_found()
+        if "sha" in (request.header("Accept") or ""):
+            return ScriptedResponse(200, {"Content-Type": "text/plain"}, sha.encode("ascii"))
+        return _json(200, {"sha": sha})
+
+    def _api_contents(
+        self, request: ScriptedRequest, repository: Path, file_path: str
+    ) -> ScriptedResponse:
+        ref = (parse_qs(request.query).get("ref") or ["HEAD"])[0]
+        content = self._blob(repository, ref, file_path)
+        if content is None:
+            return _not_found()
+        if "raw" in (request.header("Accept") or ""):
+            return ScriptedResponse(200, {"Content-Type": "application/octet-stream"}, content)
+        return _json(
+            200,
+            {
+                "type": "file",
+                "name": file_path.rsplit("/", 1)[-1],
+                "path": file_path,
+                "encoding": "base64",
+                "content": base64.b64encode(content).decode("ascii"),
+            },
+        )
 
     def _raw(self, request: ScriptedRequest) -> ScriptedResponse:
         parts = unquote(request.path).lstrip("/").split("/")
