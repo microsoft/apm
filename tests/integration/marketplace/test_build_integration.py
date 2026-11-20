@@ -431,7 +431,7 @@ class TestTagPatternClosure:
                 side_effect=_fake_resolve,
             ),
             patch("apm_cli.marketplace.version_pins.check_ref_pin", return_value=None),
-            patch("apm_cli.marketplace.version_pins.record_ref_pin"),
+            patch("apm_cli.marketplace.version_pins.stage_ref_pin"),
             patch("apm_cli.marketplace.shadow_detector.detect_shadows", return_value=[]),
         ):
             canonical, _ = resolve_marketplace_plugin(
