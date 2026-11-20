@@ -105,7 +105,7 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
     "mcp-install": (Ev(_INSTALL, 948, '"--mcp"'), Ev(_INSTALL, 880, '"--target"')),
     "approve-deny": (
         Ev(_APPROVE, 223, 'argument("packages"'),
-        Ev(_APPROVE, 317, 'argument("packages"'),
+        Ev(_APPROVE, 327, 'argument("packages"'),
     ),
     "audit": (
         Ev("src/apm_cli/commands/audit.py", 1418, 'argument("package"'),
