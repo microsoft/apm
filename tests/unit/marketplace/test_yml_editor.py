@@ -15,6 +15,8 @@ from apm_cli.marketplace.yml_editor import (
     update_plugin_entry,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

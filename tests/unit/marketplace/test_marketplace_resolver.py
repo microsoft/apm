@@ -28,6 +28,8 @@ from apm_cli.marketplace.resolver import (
 )
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 
 class TestParseMarketplaceRef:
     """Regex positive/negative cases for NAME@MARKETPLACE detection."""

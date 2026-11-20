@@ -1,0 +1,99 @@
+# J07 Update and upgrade, nightly (#4110). Schema: test_journeys.py.
+# Twins (twins_consumer_a.py): acme/release-kit has annotated tags v1.0.0 and v1.1.0
+# on fixed commit dates, so the v1.0.0 commit SHA below is stable; v1.1.0 changes
+# review, adds triage and drops legacy. acme/live-kit tracks #main. p-skill comes
+# from the world marketplace (lifecycle-market).
+schema: 1
+id: J07
+persona: consumer
+title: Update and upgrade
+docs: [consumer/update-and-refresh.mdx, enterprise/drift-detection.md]
+world:
+  project: empty
+  git: init
+  setup:
+    - "apm init -y --target copilot"
+    - apm marketplace add lifecycle/marketplace --ref v1.0.0
+    - apm install acme/release-kit#6a2b9bdb90792fcee80ecbbb345b368446506e71
+    - apm install acme/live-kit#main
+    - apm install p-skill@lifecycle-market
+    - git add -A
+    - git -c maintenance.auto=false -c gc.auto=0 -c user.name=apm -c user.email=apm@example.invalid commit -qm base
+steps:
+  - n: 1
+    run: [apm outdated]
+    exit: 0
+    docs:
+      page: consumer/update-and-refresh.mdx
+      commands: [apm outdated]
+    files: []
+    key_lines: ["v1.1.0 (c9663563)", "[!] 1 outdated dependency found"]
+  - n: 2
+    run: [apm update --dry-run]
+    exit: 0
+    docs:
+      page: consumer/update-and-refresh.mdx
+      commands: [apm update --dry-run]
+    files: []
+    key_lines:
+      - "ref: 6a2b9bdb -> c9663563 (v1.1.0)"
+      - "[i] Dry run: no changes applied."
+  - n: 3
+    run: [apm update --yes]
+    exit: 0
+    note: the SHA pin moves to the newest annotated release tag and gains a tag comment
+    files:
+      - apm.yml
+      - apm.lock.yaml
+      - apm_modules/
+      - .agents/skills/legacy/SKILL.md
+      - .agents/skills/review/SKILL.md
+      - .agents/skills/triage/SKILL.md
+    key_lines:
+      - "ref: 6a2b9bdb -> c9663563 (v1.1.0)"
+      - "[i] Cleaned 2 stale deployed files for acme/release-kit"
+  - n: 4
+    run:
+      - git add -A
+      - git -c maintenance.auto=false -c gc.auto=0 -c user.name=apm -c user.email=apm@example.invalid commit -qm update
+      - rm -rf apm_modules .agents .github
+      - apm install --frozen
+    exit: 0
+    cold_cache: true
+    git_clean: true
+    note: a fresh checkout of the committed update replays it exactly
+    files: []
+    key_lines: ["[i] Deployed files verified against apm.lock.yaml."]
+  - n: 5
+    run: [apm deps update acme/release-kit]
+    exit: 0
+    files: []
+    key_lines:
+      - "[!] 'apm deps update' is deprecated; use 'apm update' instead."
+      - "[*] All packages already at latest refs."
+  - n: 6
+    run: [apm self-update --check]
+    exit: 0
+    env:
+      APM_RELEASE_METADATA_URL: https://raw.githubusercontent.com/acme/apm-release-mirror/main/latest.json
+    note: the release metadata mirror twin serves the current release as latest
+    files: []
+    key_lines: ["[i] Current version:", "[+] You're already on the latest version:"]
+known_cells:
+  - id: update-plan-lists-pinned-package-twice
+    law: O4
+    tracking: "#4208"
+    step: 2
+    match: "repeats '\\[~\\] acme/release-kit'"
+  - id: update-plan-lists-pinned-package-twice-apply
+    law: O4
+    tracking: "#4208"
+    step: 3
+    match: "repeats '\\[~\\] acme/release-kit'"
+  # No O1 golden until the defect is fixed: the pinned package line prints
+  # twice (O4), so regen_goldens refuses the transcript.
+  - id: update-plan-lists-pinned-package-twice-golden
+    law: O1
+    tracking: "#4208"
+    step: 3
+    match: "no golden tests/lifecycle/journeys/goldens/J07/03\\.txt"

@@ -143,10 +143,10 @@ def _bundle_target_decision(candidate: UnpackCandidate) -> EffectiveTargetDecisi
 
 def _project_registries(output_dir: Path) -> dict[str, str] | None:
     """The ``registries:`` map of the project at *output_dir*, if any."""
-    from ..constants import APM_YML_FILENAME
+    from ..core.scope import manifest_file
     from ..models.apm_package import APMPackage
 
-    manifest = output_dir / APM_YML_FILENAME
+    manifest = manifest_file(output_dir)
     if not manifest.is_file():
         return None
     try:
@@ -184,9 +184,9 @@ def unpack_record_root(output_dir: Path) -> Path | None:
     An APM project root (``apm.yml`` present) records the files, exactly as
     ``apm install <bundle>`` does; any other directory stays untracked.
     """
-    from ..constants import APM_YML_FILENAME
+    from ..core.scope import manifest_file
 
-    return output_dir if (output_dir / APM_YML_FILENAME).is_file() else None
+    return output_dir if manifest_file(output_dir).is_file() else None
 
 
 def record_unpacked_files(output_dir: Path, files: Sequence[str], logger: Any) -> None:

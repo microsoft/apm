@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.scope import manifest_file
+
 from ..constants import DEFAULT_SKIP_DIRS
 from ..utils import perf_stats
 from ..utils.exclude import should_exclude, validate_exclude_patterns
@@ -342,7 +344,7 @@ def get_dependency_declaration_order(
     installed_root = installation_root if installation_root is not None else project_root
     modules_root = installed_root / "apm_modules"
     ensure_path_within(modules_root, installed_root)
-    apm_yml_path = project_root / "apm.yml"
+    apm_yml_path = manifest_file(project_root)
     ensure_path_within(apm_yml_path, project_root)
     dependency_names: list[str] = []
     if apm_yml_path.exists() or apm_yml_path.is_symlink():

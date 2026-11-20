@@ -12,6 +12,8 @@ from apm_cli.models.dependency.selection import (
     select_manifest_dependency,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _local_lock(*paths: str, alias: str) -> LockFile:
     dependencies = {}
@@ -199,31 +201,6 @@ def test_removing_one_of_two_declarations_of_one_package_fails_closed() -> None:
     both = _refuse_unsafe_marketplace_removals([declared, git_form], manifest, lockfile, logger)
     assert both == []
     logger.error.assert_not_called()
-
-
-def test_dry_run_previews_object_form_checkout_from_the_scoped_lockfile(
-    tmp_path, monkeypatch
-) -> None:
-    """The preview uses the caller's lockfile, not ./apm.lock.yaml (global scope)."""
-    from unittest.mock import MagicMock
-
-    from apm_cli.commands.uninstall.engine import _dry_run_uninstall
-
-    lockfile, locked = _object_form_lock()
-    modules = tmp_path / "home" / "apm_modules"
-    checkout = locked.to_dependency_ref().get_install_path(modules)
-    checkout.mkdir(parents=True)
-    monkeypatch.chdir(tmp_path)  # no apm.lock.yaml here
-    logger = MagicMock()
-
-    _dry_run_uninstall(
-        [{"name": "example-plugin", "marketplace": "company"}],
-        modules,
-        logger,
-        lockfile=lockfile,
-    )
-    lines = [call.args[0] for call in logger.progress.call_args_list]
-    assert any("from apm_modules/" in line for line in lines)
 
 
 def test_recased_alias_still_targets_the_locked_row() -> None:

@@ -14,7 +14,7 @@ rules -- without running a full `apm install` or `apm audit`.
 
 ```bash
 apm policy status [--policy-source SOURCE] [--no-cache]
-                  [-o table|json] [--json] [--check]
+                  [-o table|json] [--json] [--check] [-g]
 apm policy explain PACKAGE
 ```
 
@@ -53,6 +53,7 @@ apm policy status [OPTIONS]
 | `-o`, `--output {table,json}` | Output format. Default: `table`. |
 | `--json` | Emit JSON. Alias of `-o json`. |
 | `--check` | Exit `1` when no usable policy is resolved (any `outcome` other than `found`). Default exit is always `0`. |
+| `-g`, `--global` | Show the user-scope (`apm install -g`) posture. User scope has no git remote, so no org policy is discovered: `outcome` is `no_git_remote` and `source` is `none`. |
 
 Direct policy URLs should not embed credentials. Cache metadata and command
 output omit URL userinfo, query strings, and fragments.
@@ -63,6 +64,7 @@ The table and JSON renderers expose the same fields:
 
 | Field | Meaning |
 |---|---|
+| `scope` | `project`, or `user` with `-g`. |
 | `outcome` | Discovery result, one of: `found`, `absent`, `empty`, `disabled`, `no_git_remote`, `cached_stale`, `cache_miss_fetch_fail`, `garbage_response`, `malformed`, `hash_mismatch`, `incomplete_chain`. Every command that reads policy handles an outcome the same way. |
 | `source` | Resolved source label (e.g. `org:owner/repo`, `url:https://...`, `file:./path`). |
 | `enforcement` | Effective enforcement mode: `block`, `warn`, or `off`. |

@@ -21,6 +21,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from apm_cli.core.command_logger import CommandLogger
+
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -50,7 +54,7 @@ def _make_result(
 class TestHandleGlobalFlag:
     """Tests for _handle_global_flag()."""
 
-    def test_no_apm_modules_returns_error(self, tmp_path):
+    def test_no_apm_modules_returns_error(self, tmp_path, capsys):
         """apm_modules missing -> returns 1 and prints error."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -58,7 +62,7 @@ class TestHandleGlobalFlag:
         source_root.mkdir()
         # apm_modules does NOT exist
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with patch(
             "apm_cli.core.scope.get_apm_dir",
@@ -67,10 +71,10 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 1
-        logger.error.assert_called_once()
-        assert "apm_modules not found" in str(logger.error.call_args).lower()
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert out.count("[x] User-scope apm_modules not found") == 1
 
-    def test_success_written_status(self, tmp_path):
+    def test_success_written_status(self, tmp_path, capsys):
         """Result with 'written' status -> prints [+] and returns 0."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -81,7 +85,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "written")]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -96,10 +100,11 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        calls_str = str(logger.success.call_args_list)
-        assert "[+]" in calls_str or "claude" in calls_str.lower()
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert "claude: wrote" in out
+        assert "Compiled 1 user-scope root context file(s)." in out
 
-    def test_success_would_write_status(self, tmp_path):
+    def test_success_would_write_status(self, tmp_path, capsys):
         """Result with 'would-write' status -> prints [*] and returns 0."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -110,7 +115,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "would-write")]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -125,10 +130,11 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=True, logger=logger)
 
         assert rc == 0
-        calls_str = str(logger.info.call_args_list)
-        assert "[*]" in calls_str or "would" in calls_str.lower()
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert "claude: would write" in out
+        assert "Would compile 1 user-scope root context file(s)." in out
 
-    def test_success_unchanged_status(self, tmp_path):
+    def test_success_unchanged_status(self, tmp_path, capsys):
         """Result with 'unchanged' status -> returns 0 without default detail."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -139,7 +145,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "unchanged")]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -154,11 +160,10 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        logger.info.assert_called_once_with(
-            "No user-scope root context files changed.", symbol="info"
-        )
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert out.count("[i] No user-scope root context files changed.") == 1
 
-    def test_success_skipped_no_instructions(self, tmp_path):
+    def test_success_skipped_no_instructions(self, tmp_path, capsys):
         """Result with 'skipped-no-instructions' -> returns 0 without default detail."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -169,7 +174,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", None, "skipped-no-instructions")]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -184,9 +189,8 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        logger.info.assert_called_once_with(
-            "No user-scope root context files changed.", symbol="info"
-        )
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert out.count("[i] No user-scope root context files changed.") == 1
 
     def test_success_skipped_hand_authored(self, tmp_path):
         """Result with 'skipped-hand-authored' -> prints [i] and returns 0."""
@@ -221,7 +225,7 @@ class TestHandleGlobalFlag:
             symbol="info",
         )
 
-    def test_error_status_returns_1(self, tmp_path):
+    def test_error_status_returns_1(self, tmp_path, capsys):
         """Result with 'error:...' status -> prints [x] and returns 1."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -232,7 +236,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "error:disk full")]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -247,9 +251,10 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 1
-        logger.error.assert_called()
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert "[x] claude: disk full" in out
 
-    def test_critical_security_result_returns_1(self, tmp_path):
+    def test_critical_security_result_returns_1(self, tmp_path, capsys):
         """Critical security result -> returns 1 even when status is written."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -267,7 +272,7 @@ class TestHandleGlobalFlag:
             )
         ]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
         with (
             patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
             patch(
@@ -278,8 +283,11 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 1
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert "claude: wrote" in out
+        assert "Compiled" not in out
 
-    def test_multiple_results_mixed_status(self, tmp_path):
+    def test_multiple_results_mixed_status(self, tmp_path, capsys):
         """Multiple results with different status values."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -293,7 +301,7 @@ class TestHandleGlobalFlag:
             _make_result("vscode", str(tmp_path / ".vscode/AGENTS.md"), "unchanged"),
         ]
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -308,9 +316,11 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        logger.success.assert_called()
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert "claude: wrote" in out
+        assert "Compiled 1 user-scope root context file(s); 1 unchanged." in out
 
-    def test_no_results_returns_success(self, tmp_path):
+    def test_no_results_returns_success(self, tmp_path, capsys):
         """Empty results list -> returns 0."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -321,7 +331,7 @@ class TestHandleGlobalFlag:
 
         results = []
 
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch(
@@ -336,7 +346,8 @@ class TestHandleGlobalFlag:
             rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        logger.info.assert_called_once()
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert out.count("No user-scope targets produced output") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -489,20 +500,23 @@ class TestGlobalCompileHonorsDeclaredTargets:
             f"Global targets from {source_root / 'apm.yml'}: claude, codex"
         )
 
-    def test_declared_target_without_root_output_has_accurate_message(self, tmp_path):
+    def test_declared_target_without_root_output_has_accurate_message(self, tmp_path, capsys):
         """A valid no-output target does not suggest reinstalling packages."""
         source_root = self._prepare(
             tmp_path,
             "name: h\nversion: 1.0.0\ntarget: agent-skills\n",
         )
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         self._run(source_root, logger)
 
-        logger.info.assert_called_once_with(
-            "Declared global targets (agent-skills) produce no user-scope "
-            "root context output. No files changed.",
-            symbol="info",
+        out = " ".join("".join(capsys.readouterr()).split())
+        assert (
+            out.count(
+                "[i] Declared global targets (agent-skills) produce no user-scope "
+                "root context output. No files changed."
+            )
+            == 1
         )
 
     def test_declared_targets_exclude_explicit_only_and_gated_targets(self, tmp_path):
@@ -575,7 +589,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert names == ["copilot"]
 
-    def test_malformed_manifest_fails_closed_without_compiling(self, tmp_path):
+    def test_malformed_manifest_fails_closed_without_compiling(self, tmp_path, capsys):
         """Broken YAML must not degrade to "nothing declared" and write all 11."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -583,7 +597,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
             tmp_path,
             "name: h\nversion: 1.0.0\ntargets: [claude\n  broken: [[[\n",
         )
-        logger = MagicMock()
+        logger = CommandLogger("compile")
         compile_mock = MagicMock(return_value=[])
 
         with (
@@ -594,7 +608,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        error = logger.error.call_args.args[0].lower()
+        error = " ".join("".join(capsys.readouterr()).split()).lower()
         assert "failed to parse" in error
         assert "fix the manifest and rerun 'apm compile -g'" in error
 
@@ -624,7 +638,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
         assert "rerun 'apm compile -g'" in error
         assert "apm install" not in error
 
-    def test_unreadable_manifest_fails_closed_without_compiling(self, tmp_path):
+    def test_unreadable_manifest_fails_closed_without_compiling(self, tmp_path, capsys):
         """A manifest read error must not expand to every known target."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -632,7 +646,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
             tmp_path,
             "name: h\nversion: 1.0.0\ntargets: [claude]\n",
         )
-        logger = MagicMock()
+        logger = CommandLogger("compile")
         compile_mock = MagicMock(return_value=[])
 
         with (
@@ -647,18 +661,18 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        error = str(logger.error.call_args).lower()
+        error = " ".join("".join(capsys.readouterr()).split()).lower()
         assert "failed to read" in error
         assert "permission denied" in error
         assert "ensure it is a readable yaml file" in error
         assert "rerun 'apm compile -g'" in error
 
-    def test_non_mapping_manifest_fails_closed_without_compiling(self, tmp_path):
+    def test_non_mapping_manifest_fails_closed_without_compiling(self, tmp_path, capsys):
         """A YAML sequence parses cleanly but is not a usable manifest."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
         source_root = self._prepare(tmp_path, "- claude\n- codex\n")
-        logger = MagicMock()
+        logger = CommandLogger("compile")
         compile_mock = MagicMock(return_value=[])
 
         with (
@@ -669,7 +683,9 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "must contain a yaml object" in str(logger.error.call_args).lower()
+        assert (
+            "must contain a yaml object" in " ".join("".join(capsys.readouterr()).split()).lower()
+        )
 
     def test_scalar_manifest_fails_closed_without_compiling(self, tmp_path):
         """A bare scalar document is rejected the same way a sequence is."""
@@ -687,12 +703,12 @@ class TestGlobalCompileHonorsDeclaredTargets:
         assert rc == 1
         compile_mock.assert_not_called()
 
-    def test_empty_manifest_fails_closed_without_compiling(self, tmp_path):
+    def test_empty_manifest_fails_closed_without_compiling(self, tmp_path, capsys):
         """An empty existing manifest is invalid and must not widen output."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
         source_root = self._prepare(tmp_path, "")
-        logger = MagicMock()
+        logger = CommandLogger("compile")
         compile_mock = MagicMock(return_value=[])
 
         with (
@@ -703,9 +719,9 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "empty document" in str(logger.error.call_args).lower()
+        assert "empty document" in " ".join("".join(capsys.readouterr()).split()).lower()
 
-    def test_dangling_manifest_symlink_fails_closed_without_compiling(self, tmp_path):
+    def test_dangling_manifest_symlink_fails_closed_without_compiling(self, tmp_path, capsys):
         """A present dangling manifest link is not mistaken for no manifest."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -716,7 +732,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
         except OSError:
             pytest.skip("symbolic links are unavailable")
         compile_mock = MagicMock(return_value=[])
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
@@ -726,9 +742,9 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "failed to read" in str(logger.error.call_args).lower()
+        assert "failed to read" in " ".join("".join(capsys.readouterr()).split()).lower()
 
-    def test_valid_manifest_symlink_fails_closed_without_compiling(self, tmp_path):
+    def test_valid_manifest_symlink_fails_closed_without_compiling(self, tmp_path, capsys):
         """A manifest link is rejected instead of following its target."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
@@ -740,7 +756,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
         except OSError:
             pytest.skip("symbolic links are unavailable")
         compile_mock = MagicMock(return_value=[])
-        logger = MagicMock()
+        logger = CommandLogger("compile")
 
         with (
             patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
@@ -750,9 +766,9 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "regular, non-symlink file" in str(logger.error.call_args).lower()
+        assert "regular, non-symlink file" in " ".join("".join(capsys.readouterr()).split()).lower()
 
-    def test_undecodable_manifest_fails_closed_without_compiling(self, tmp_path):
+    def test_undecodable_manifest_fails_closed_without_compiling(self, tmp_path, capsys):
         """Invalid UTF-8 reaches the handler as a YAMLError, not a raw decode error.
 
         The manifest read owner decodes the file as UTF-8, so bad bytes raise
@@ -764,7 +780,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         source_root = self._prepare(tmp_path, None)
         (source_root / "apm.yml").write_bytes(b"\xff\xfename: h\n")
-        logger = MagicMock()
+        logger = CommandLogger("compile")
         compile_mock = MagicMock(return_value=[])
 
         with (
@@ -775,16 +791,16 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "unicodedecodeerror" in str(logger.error.call_args).lower()
+        assert "unicodedecodeerror" in " ".join("".join(capsys.readouterr()).split()).lower()
 
-    def test_anchored_manifest_fails_closed_without_compiling(self, tmp_path):
+    def test_anchored_manifest_fails_closed_without_compiling(self, tmp_path, capsys):
         """req-mf-020(b): a YAML anchor in ~/.apm/apm.yml stops compile -g (#3858)."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
         source_root = self._prepare(
             tmp_path, "name: h\nversion: 1.0.0\nx: &t [claude]\ntargets: *t\n"
         )
-        logger = MagicMock()
+        logger = CommandLogger("compile")
         compile_mock = MagicMock(return_value=[])
 
         with (
@@ -795,4 +811,4 @@ class TestGlobalCompileHonorsDeclaredTargets:
 
         assert rc == 1
         compile_mock.assert_not_called()
-        assert "YAML anchor '&t' on line 3" in str(logger.error.call_args)
+        assert "YAML anchor '&t' on line 3" in " ".join("".join(capsys.readouterr()).split())

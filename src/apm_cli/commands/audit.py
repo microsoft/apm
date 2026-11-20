@@ -17,6 +17,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 from ..core.command_logger import CommandLogger
 from ..core.deployment_ledger import (
     DEPLOYMENT_OWNER_REMEDIATION,
@@ -817,7 +819,7 @@ def _audit_ci_gate(
 
     # -- Drift detection (default-on per ADR-02) --------------------
     drift_findings: list = []
-    if not no_drift and (cfg.project_root / "apm.yml").exists():
+    if not no_drift and manifest_file(cfg.project_root).exists():
         from ..deps.lockfile import LockFile, get_lockfile_path
 
         lockfile_path = get_lockfile_path(cfg.project_root)
@@ -1027,7 +1029,7 @@ def _require_installed_package_key(
     from ..models.manifest_io import load_manifest
     from .uninstall.engine import select_installed_lock_key
 
-    manifest_path = project_root / APM_YML_FILENAME
+    manifest_path = manifest_file(project_root)
     try:
         manifest = load_manifest(manifest_path) if manifest_path.is_file() else None
     except Exception as e:
@@ -1062,7 +1064,7 @@ def _reject_invalid_manifest(project_root: Path, logger: CommandLogger) -> None:
     """Refuse an apm.yml every command refuses, before scanning or stripping."""
     from ..models.manifest_io import InvalidManifestError, read_manifest_text
 
-    manifest_path = project_root / "apm.yml"
+    manifest_path = manifest_file(project_root)
     if not manifest_path.is_file():
         return
     try:
@@ -1215,7 +1217,7 @@ def _audit_content_scan(
         and not strip
         and not file_path
         and not package
-        and (project_root / "apm.yml").exists()
+        and manifest_file(project_root).exists()
     ):
         from ..policy.ci_checks import DRIFT_SKIP_PREFIX, _check_drift
 

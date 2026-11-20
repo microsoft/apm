@@ -9,6 +9,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from apm_cli.core.scope import manifest_file
+
 from ..agent_plugins import (
     MCP_SCHEMA_ID,
     PLUGIN_SCHEMA_ID,
@@ -315,7 +317,7 @@ def export_agent_plugin_bundle(
     """Export the project as an Agent Plugin bundle."""
     lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=dry_run)
     lockfile = LockFile.read(lockfile_path)
-    apm_yml_path = project_root / "apm.yml"
+    apm_yml_path = manifest_file(project_root)
     package = APMPackage.from_apm_yml(apm_yml_path)
     if lockfile is None:
         # Nothing to resolve: a fresh 'apm plugin init' scaffold packs as is,

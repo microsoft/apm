@@ -14,6 +14,8 @@ from apm_cli.cache.url_normalize import cache_shard_key
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _mock_git_object_links():
@@ -36,6 +38,7 @@ def test_remote_ref_receipt_is_shared_without_rewriting_git_refs(tmp_path: Path,
     assert replay.read_resolved_ref(url + "-other", ref) == (False, None)
     assert replay._resolve_sha(url, ref, locked_sha="a" * 40) == "a" * 40
     assert replay.read_resolved_ref(url, ref) == (True, "b" * 40)
+    assert cache._resolved_ref_path(url, ref).read_text(encoding="ascii") == "b" * 40
 
 
 @pytest.mark.parametrize("count", [2, 20])
@@ -48,6 +51,7 @@ def test_ref_receipt_stats_count_bytes_not_repositories(tmp_path: Path, count: i
         stats = cache.get_cache_stats()
     assert stats == {"db_count": 0, "checkout_count": 0, "total_size_bytes": 40 * count}
     assert scandir.call_count == 2
+    assert len(list(cache._db_root.glob("*.ref"))) == count
 
 
 def test_corrupt_remote_ref_receipt_does_not_revive_stale_bare_ref(tmp_path: Path) -> None:
@@ -64,6 +68,7 @@ def test_corrupt_remote_ref_receipt_does_not_revive_stale_bare_ref(tmp_path: Pat
     with patch.object(L2BareRevParse, "_rev_parse", return_value="a" * 40) as bare:
         assert L2BareRevParse(cache).try_resolve(dependency, "main") is None
     bare.assert_not_called()
+    assert cache._resolved_ref_path(url, "main").read_text(encoding="ascii") == "broken"
 
 
 @pytest.mark.parametrize("receipt_state", ["valid", "absent", "corrupt"])
@@ -101,6 +106,7 @@ def test_receipt_precedence_with_actual_stale_bare_reference(
     expected = {"valid": current_commit.sha, "absent": old_commit.sha, "corrupt": None}
     assert L2BareRevParse(cache).try_resolve(dependency, "main") == expected[receipt_state]
     assert L2BareRevParse._rev_parse(bare, "main") == old_commit.sha
+    assert cache._resolved_ref_path(url, "main").exists() is (receipt_state != "absent")
 
 
 @pytest.mark.windows_compat
@@ -150,12 +156,14 @@ class TestGitCacheResolveSha:
         sha = "a" * 40
         result = cache._resolve_sha("https://github.com/owner/repo", "main", locked_sha=sha)
         assert result == sha
+        assert not cache._resolved_ref_path("https://github.com/owner/repo", "main").exists()
 
     def test_ref_that_looks_like_sha(self, tmp_path: Path) -> None:
         cache = GitCache(tmp_path)
         sha = "b" * 40
         result = cache._resolve_sha("https://github.com/owner/repo", sha)
         assert result == sha
+        assert not cache._resolved_ref_path("https://github.com/owner/repo", sha).exists()
 
     @patch("subprocess.run")
     def test_ls_remote_resolution(self, mock_run: MagicMock, tmp_path: Path) -> None:
@@ -200,6 +208,7 @@ class TestGitCacheGetCheckout:
 
         result = cache.get_checkout(url, None, locked_sha=sha)
         assert result == checkout_dir
+        assert checkout_dir.is_dir()
 
     @patch("subprocess.run")
     def test_cache_hit_integrity_failure_evicts(self, mock_run: MagicMock, tmp_path: Path) -> None:
@@ -294,6 +303,7 @@ class TestGitCacheStats:
         assert stats["db_count"] == 0
         assert stats["checkout_count"] == 0
         assert stats["total_size_bytes"] == 0
+        assert not any(path.is_file() for path in tmp_path.rglob("*"))
 
     def test_counts_entries(self, tmp_path: Path) -> None:
         cache = GitCache(tmp_path)
@@ -305,6 +315,7 @@ class TestGitCacheStats:
         stats = cache.get_cache_stats()
         assert stats["db_count"] == 2
         assert stats["checkout_count"] == 1
+        assert (tmp_path / "git" / "checkouts_v1" / "shard1" / "sha1").is_dir()
 
 
 class TestGitCachePrune:

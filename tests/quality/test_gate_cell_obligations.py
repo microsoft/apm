@@ -1,6 +1,6 @@
 """The GATE obligation list is well formed and the visited GATE cells cover it (#4031).
 
-The session hook in tests/integration/conftest.py writes the cells a run
+The session hook in tests/lifecycle/machines/conftest.py writes the cells a run
 visited to ``build/gate-cells/visited-<worker>.json`` (or
 ``$APM_GATE_CELLS_DIR``). For every scope whose mandatory GATE spine completed
 in that run, the visited cells must cover that scope's obligations. With
@@ -16,8 +16,12 @@ import os
 import re
 from pathlib import Path
 
-from tests.integration._gate_machine_kit import KINDS, KNOWN_CELLS, SCOPES, GateMachine
-from tests.utils.lifecycle_oracle import ORACLE_LAWS, ledger_property_ids
+import pytest
+
+from tests.lifecycle.machines._gate_kit import KINDS, KNOWN_CELLS, SCOPES, GateMachine
+from tests.lifecycle.oracles import ORACLE_LAWS, ledger_property_ids
+
+pytestmark = pytest.mark.component
 
 _ROOT = Path(__file__).parents[2]
 _OBLIGATIONS = Path(__file__).with_name("gate_cell_obligations.json")
@@ -69,9 +73,14 @@ def test_obligations_cover_every_gate_operation_primitive_and_scope() -> None:
         rows = [row for row in parsed if row["scope"] == scope]
         assert {row["op"] for row in rows} >= _GATE_OPS, scope
         assert set(KINDS) <= {row["prim"] for row in rows}, scope
-        assert {"pending", "allow", "deny", "org-deny", "org-deny-all"} <= {
-            row["gate"] for row in rows
-        }, scope
+        gates = {row["gate"] for row in rows if row["src"] == "path"}
+        assert {"pending", "allow", "deny"} <= gates, scope
+        # User scope has no git remote and is not governed by org policy
+        # (#4087); only project scope reaches the org gates.
+        if scope == "project":
+            assert {"org-deny", "org-deny-all"} <= gates, scope
+        else:
+            assert not gates & {"org-deny", "org-deny-all"}, scope
     project_ops = {row["op"] for row in parsed if row["scope"] == "project"}
     assert {"audit-ci", "prune"} <= project_ops
 

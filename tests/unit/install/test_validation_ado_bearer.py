@@ -1,11 +1,11 @@
 """Unit tests for validation.py ADO bearer auth plumbing (#1015).
 
 Tests that:
-1. auth_scheme from the resolved dep context reaches _build_repo_url.
+1. Bearer credentials never reach the probe URL built by _build_repo_url.
 2. _dep_ctx.git_env (GIT_CONFIG_* overrides) is merged into subprocess env.
 3. Auth-related git ls-remote failures raise AuthenticationError.
 4. Non-auth failures (DNS, timeout) return False.
-5. PAT regression: auth_scheme="basic" still embeds token in URL.
+5. PAT regression: auth_scheme="basic" uses a header, never the URL.
 """
 
 import base64
@@ -17,6 +17,8 @@ import pytest
 
 from apm_cli.core.auth import AuthResolver
 from apm_cli.install.errors import AuthenticationError
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -81,7 +83,7 @@ def _make_resolver(auth_ctx=None):
 
 
 class TestBearerAuthSchemePassedToBuildRepoUrl:
-    """auth_scheme='bearer' from resolve_for_dep reaches _build_repo_url."""
+    """Bearer credentials from resolve_for_dep never reach the probe URL."""
 
     @patch("subprocess.run")
     def test_bearer_scheme_reaches_build_repo_url(self, mock_run):

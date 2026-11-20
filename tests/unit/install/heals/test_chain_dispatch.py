@@ -11,8 +11,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.install.heals.base import HealContext, HealMessage, HealMessageLevel
 from apm_cli.install.phases.heal import run_heal_chain
+
+pytestmark = pytest.mark.unit
 
 
 class _FakeHeal:

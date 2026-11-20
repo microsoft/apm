@@ -25,6 +25,8 @@ from apm_cli.utils.diagnostics import (
     DiagnosticCollector,
 )
 
+pytestmark = pytest.mark.unit
+
 # ── CATEGORY_POLICY placement in _CATEGORY_ORDER ───────────────────
 
 

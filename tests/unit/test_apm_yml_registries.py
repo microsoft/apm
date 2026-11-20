@@ -16,6 +16,8 @@ import pytest
 
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def write_yml(tmp_path):
@@ -172,6 +174,7 @@ class TestRegistriesBlockValidation:
         with pytest.raises(ValueError, match="missing required field 'url:'"):
             APMPackage.from_apm_yml(p)
 
+    @pytest.mark.req("req-mf-014")
     def test_non_http_url_rejected(self, write_yml):
         p = write_yml("""
             name: x

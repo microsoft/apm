@@ -18,6 +18,8 @@ from apm_cli.deps.dependency_graph import DependencyNode, DependencyTree
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

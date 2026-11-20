@@ -21,6 +21,8 @@ from apm_cli.core.script_trust import (
     trust_project_scripts,
 )
 
+pytestmark = pytest.mark.component
+
 BENIGN = 'name: pkg\nlifecycle:\n  post-install:\n    - type: command\n      run: "true"\n'
 
 

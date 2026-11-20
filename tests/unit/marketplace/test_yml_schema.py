@@ -16,6 +16,8 @@ from apm_cli.marketplace.yml_schema import (
     load_marketplace_yml,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

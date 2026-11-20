@@ -43,6 +43,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.deps.path_anchoring import (
     LocalResolutionError,
     build_local_parent_index,
@@ -204,7 +205,7 @@ def _is_manifestless_leaf(package_dir: Path) -> bool:
     """
     from apm_cli.models.validation import PackageType, detect_package_type
 
-    if not package_dir.is_dir() or (package_dir / "apm.yml").exists():
+    if not package_dir.is_dir() or manifest_file(package_dir).exists():
         return False
     return detect_package_type(package_dir)[0] in {
         PackageType.CLAUDE_SKILL,
@@ -363,7 +364,7 @@ def compute_forward_reachable_keys(
         if _is_manifestless_leaf(manifest_dir):
             continue
         try:
-            package = APMPackage.from_apm_yml(manifest_dir / "apm.yml", source_path=manifest_dir)
+            package = APMPackage.from_apm_yml(manifest_file(manifest_dir), source_path=manifest_dir)
         except (FileNotFoundError, ValueError) as exc:
             # Missing or malformed manifest: this subtree's true children
             # are unknown. Do NOT treat it as childless -- record it and
