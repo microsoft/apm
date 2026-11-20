@@ -437,7 +437,14 @@ Bundle files are copied into each target's layout, except agents for Codex:
 those are rendered to TOML in `.codex/agents/` (with `-g`, `~/.codex/agents/`
 or `$CODEX_HOME/agents/`), and the lockfile records the rendered hash. An agent
 that cannot be rendered, or whose name, description or body is empty (Codex
-rejects those), is skipped with a warning.
+rejects those), is skipped with a warning. For a project-scope Claude
+target, bundle instructions route like a package install: always-on and
+directory ones (files named `*.instructions.md`) are staged for `apm compile`
+into the `AGENTS.md` that `CLAUDE.md` imports, and install prints a
+`Run 'apm compile'` hint. The rest deploy to `.claude/rules/` with `paths:`;
+a rule already carrying `paths:` is copied as packed. A hand-authored
+`CLAUDE.md` without `@AGENTS.md` keeps every instruction in `.claude/rules/`,
+and install warns.
 
 :::note[Claude bundles only]
 This imperative route deploys Claude plugin bundles (the default `apm pack`
