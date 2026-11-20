@@ -465,20 +465,12 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "I9",
         "#4299",
         _runs("install", "--frozen"),
-        r"Parked MCP server .*: denied",
-        output=r"^\[!\] Parked MCP server .*: denied.*^\+- MCP Servers",
-    ),
-    KnownOutputCell(
-        "install-hook-line-per-target",
-        "I9",
-        "#4243",
-        _runs("install"),
-        r"repeats a (line|diagnostic): '\|   ",
-        # One hook integrated into two targets that render it the same way (Claude
-        # and Windsurf, or a hook file) is listed once per target, back to back.
+        r"Parked MCP server .*(: denied|from transitive package)",
+        # Each MCP view build (once per phase) re-emits a denied or unapproved
+        # transitive park: the same top-level notice line appears twice.
         output=(
-            r"^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, \.windsurf/hooks\.json$"
-            r"|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n  \|   Hook file integrated: "
+            r"^(\[!\] Parked MCP server [^\n]*?(?:: denied|from transitive package)[^\n]*)$"
+            r".*^\1$"
         ),
     ),
     KnownOutputCell(
@@ -570,14 +562,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _runs("uninstall"),
         r"repeats a (line|diagnostic): '\[(\+|i)\] .*(found in apm\.yml|from dependencies\.apm in apm\.yml)",
         output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "update-deny-all-lifecycle-notice-repeats",
-        "I9",
-        "#4333",
-        _runs("update"),
-        r"Lifecycle scripts suppressed by org policy",
-        output=r"^\s*(\[!\] Lifecycle scripts suppressed by org policy[^\n]*)$.*^\s*\1$",
     ),
     KnownOutputCell(
         "install-verbose-diagnostics-repeat",
@@ -679,15 +663,21 @@ def _logical_lines(text: str) -> list[str]:
     The console wraps a long status or tree line at its width: the broken
     line ends with the space it broke at, or fills the width when a word is
     split, and the continuation starts at column 0 with no status, tree or
-    box prefix. Joining it back keeps two different wrapped paths from
+    box prefix (or with the one space it broke at, when the broken line
+    fills the width). Joining it back keeps two different wrapped paths from
     comparing equal on their shared first half ("[>] Resolving"); a short
-    line is never joined, so plain lines such as "Phase: ..." stay apart.
+    line is never joined, so plain lines such as "Phase: ..." stay apart. A
+    plain line joins only where it broke at a space, so long unwrapped log
+    lines (which fill the width but end in no space) stay apart.
     """
     lines: list[str] = []
     previous_raw = ""
     for raw in text.splitlines():
+        broke_at_space = previous_raw.endswith(" ")
         line = raw.rstrip()
         wrapped = previous_raw.endswith(" ") or len(previous_raw) >= _WRAP_WIDTH
+        if _WRAP_WIDTH <= len(previous_raw) <= _WRAP_WIDTH + 1 and re.match(r" \S", line):
+            line = line[1:]
         previous_raw = raw
         if not line.strip():
             continue
@@ -696,7 +686,7 @@ def _logical_lines(text: str) -> list[str]:
             and wrapped
             and not line[:1].isspace()
             and not line.startswith(_LINE_OPENERS)
-            and lines[-1].strip().startswith(_LINE_OPENERS)
+            and (broke_at_space or lines[-1].strip().startswith(_LINE_OPENERS))
         ):
             lines[-1] = f"{lines[-1]} {line}"
             continue

@@ -142,6 +142,7 @@
     "P-OWN-neutral-hook-contract": "architecture owner (hooks-integrations.json): Neutral hook source grammar, per-target native shape, shared-config APM-owned drift projection, ownership-sidecar comparison, and local-bundle hook ownership markers",
     "P-OWN-onboarding-metadata-only": "architecture owner (contracts-tooling.json): Discovery inventory and consented consumer dependency delta; never source or deployment mutation",
     "P-OWN-orphan-package-selection": "architecture owner (install-deployment.json): Declaration-aware selection of orphaned installed packages",
+    "P-OWN-pack-credential-files": "architecture owner (marketplace-plugins.json): Credential files are refused by apm pack (req-sc-007)",
     "P-OWN-pack-plugin-manifests": "architecture owner (marketplace-plugins.json): Pack-time targets-to-ecosystem plugin.json paths and per-ecosystem manifest shape (claude, copilot, codex)",
     "P-OWN-package-content-hash": "architecture owner (install-deployment.json): How a package tree is digested, which stream a lock row's content_hash uses (framed in lockfile version 4, legacy in 1-3), and when a writable install promotes a lockfile to version 4 from verified bytes (#4000)",
     "P-OWN-package-format-precedence": "architecture owner (marketplace-plugins.json): Package format precedence",
