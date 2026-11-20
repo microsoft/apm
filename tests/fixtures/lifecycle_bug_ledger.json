@@ -2227,6 +2227,17 @@
       ]
     },
     {
+      "issue": 4050,
+      "fixed_in": "0.37.0",
+      "summary": "With nothing declared, apm install wrote no lockfile, so apm install --frozen failed on the converged state while apm audit --ci passed.",
+      "failure_modes": ["idempotency", "outcome"],
+      "properties": ["idempotency.byte_stable", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_frozen_empty_manifest_lifecycle.py::test_empty_manifest_frozen_install_agrees_with_audit",
+        "tests/lifecycle/machines/test_m_gate.py::test_gate_mandatory_spine_covers_obligations"
+      ]
+    },
+    {
       "issue": 4059,
       "fixed_in": "Unreleased",
       "summary": "Uninstall-time LSP reconciliation re-selected targets from the saved default or harness detection instead of the recorded lsp_target_servers, so a --target copilot project failed with No harness detected and a saved default moved surviving servers to another harness.",
@@ -2291,6 +2302,45 @@
       "regression_tests": [
         "tests/integration/test_policy_outcome_routing_lifecycle.py::test_every_policy_reader_routes_the_outcome_like_install",
         "tests/integration/test_policy_outcome_routing_lifecycle.py::test_approve_under_unreachable_policy_follows_fetch_failure_default"
+      ]
+    },
+    {
+      "issue": 4085,
+      "fixed_in": "0.37.0",
+      "summary": "A blocked transitive MCP server failed the install after the lockfile and deployed files were written, an install-time audit block left the deployed files it scanned in place, install --dry-run previewed with a second planner that missed that decision, and install --mcp judged policy outside the commit gate.",
+      "failure_modes": [
+        "outcome",
+        "transaction"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_install_commit_order_lifecycle.py::test_audit_block_keeps_previous_install_byte_identical",
+        "tests/integration/test_install_commit_order_lifecycle.py::test_audit_block_on_fresh_project_commits_nothing",
+        "tests/integration/test_install_commit_order_lifecycle.py::test_audit_block_sees_hidden_character_only_in_transformed_output",
+        "tests/integration/test_install_commit_order_lifecycle.py::test_blocked_transitive_mcp_on_fresh_project_commits_nothing",
+        "tests/integration/test_install_commit_order_lifecycle.py::test_blocked_transitive_mcp_keeps_previous_install_byte_identical",
+        "tests/integration/test_install_commit_order_lifecycle.py::test_dry_run_reaches_the_install_decision_for_transitive_mcp",
+        "tests/integration/test_install_commit_order_lifecycle.py::test_direct_mcp_entry_reaches_the_install_policy_verdict",
+        "tests/integration/test_lockfile_write_authority_lifecycle.py::test_install_mcp_entry_commits_once_and_converges_with_install",
+        "tests/integration/test_policy_install_e2e.py::TestI8TransitiveMCPDenied::test_transitive_mcp_blocked"
+      ]
+    },
+    {
+      "issue": 4086,
+      "fixed_in": "0.37.0",
+      "summary": "The lockfile had no write authority: one install persisted it once per phase, and apm compile could remove deployed files before refusing a lockfile it may not rewrite.",
+      "failure_modes": ["idempotency", "transaction"],
+      "properties": ["idempotency.byte_stable", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_lockfile_write_authority_lifecycle.py::test_install_commits_the_lockfile_once",
+        "tests/integration/test_lockfile_write_authority_lifecycle.py::test_compile_commits_the_lockfile_through_the_authority",
+        "tests/integration/test_lockfile_write_authority_lifecycle.py::test_failed_install_records_what_it_deployed_in_one_write",
+        "tests/integration/test_lockfile_write_authority_lifecycle.py::test_every_lockfile_writer_refuses_a_newer_generator_before_changing_files",
+        "tests/integration/test_lockfile_writer_mapping.py::test_each_lock_writing_command_maps_to_its_registered_writer",
+        "tests/integration/test_lockfile_writer_mapping.py::test_newer_generator_lockfile_is_refused_before_any_writer_scope_opens"
       ]
     },
     {
@@ -2410,6 +2460,16 @@
       ]
     },
     {
+      "issue": 4132,
+      "fixed_in": "0.37.0",
+      "summary": "Retiring the last file deployed under a target root removed the root itself (for example a pre-existing .github/), so the next install recreated it and the retiring install was not a fixed point.",
+      "failure_modes": ["cleanup", "idempotency"],
+      "properties": ["idempotency.byte_stable", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_cleanup_target_root_lifecycle.py::test_retiring_the_last_deployed_file_keeps_the_target_root"
+      ]
+    },
+    {
       "issue": 4140,
       "fixed_in": "0.37.0",
       "summary": "An org policy with a wrongly typed field (for example enforcement given as a list) stopped install with an internal error; it is now a malformed policy, reported and routed by policy.fetch_failure_default.",
@@ -2417,6 +2477,22 @@
       "properties": ["outcome.status_matches_state"],
       "regression_tests": [
         "tests/integration/test_policy_outcome_routing_lifecycle.py::test_wrongly_typed_policy_field_routes_as_malformed"
+      ]
+    },
+    {
+      "issue": 4153,
+      "fixed_in": "Unreleased",
+      "summary": "A user-scope install refused every relative local_path, including one declared by a dependency, and dropped that transitive dependency without a diagnostic while exiting 0; an unresolvable transitive local dependency also exited 0 at project scope.",
+      "failure_modes": [
+        "outcome",
+        "reference"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_transitive_relative_local_path_lifecycle.py::test_transitive_relative_local_paths_anchor_on_the_declaring_package",
+        "tests/integration/test_transitive_relative_local_path_lifecycle.py::test_unresolvable_transitive_local_path_fails_the_install"
       ]
     },
     {
@@ -2437,6 +2513,22 @@
       ]
     },
     {
+      "issue": 4159,
+      "fixed_in": "0.37.0",
+      "summary": "A failed install left an empty target root such as .github/ that the same install had created in the project.",
+      "failure_modes": [
+        "transaction"
+      ],
+      "properties": [
+        "transaction.failed_command_preserves_state",
+        "ownership.preserve_unowned"
+      ],
+      "regression_tests": [
+        "tests/integration/test_install_commit_order_lifecycle.py::test_failed_install_removes_the_target_root_it_created",
+        "tests/unit/install/test_deploy_snapshot.py::test_rollback_removes_only_empty_target_roots_the_attempt_created"
+      ]
+    },
+    {
       "issue": 4161,
       "fixed_in": "Unreleased",
       "summary": "apm uninstall of another package exited 1 with incomplete integration cleanup when a surviving package declares only LSP servers (approved, ungated or denied), because package validation did not accept an LSP-only package as a valid survivor.",
@@ -2449,6 +2541,42 @@
       ],
       "regression_tests": [
         "tests/integration/test_uninstall_lsp_without_mcp_lifecycle.py::test_uninstalling_another_package_reconciles_lsp_and_exits_zero"
+      ]
+    },
+    {
+      "issue": 4162,
+      "fixed_in": "0.37.0",
+      "summary": "apm uninstall exited 1 after removing the package files and rewriting the lockfile when a user file sat inside the package's deployed skill directory.",
+      "failure_modes": ["cleanup", "transaction"],
+      "properties": ["ownership.preserve_unowned", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_refusal_atomicity_lifecycle.py::test_uninstall_releases_a_skill_directory_holding_user_content"
+      ]
+    },
+    {
+      "issue": 4166,
+      "fixed_in": "Unreleased",
+      "summary": "apm update compared the resolver's default-branch name with the absent ref the lockfile records for a dependency declared without a ref, so every update reported 1 updated and re-integrated an unchanged commit.",
+      "failure_modes": [
+        "idempotency",
+        "outcome"
+      ],
+      "properties": [
+        "idempotency.byte_stable",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_update_ref_less_dependency_lifecycle.py::test_update_of_a_ref_less_dependency_reports_nothing_and_changes_no_bytes"
+      ]
+    },
+    {
+      "issue": 4168,
+      "fixed_in": "0.37.0",
+      "summary": "An install through a symlinked apm.lock.yaml deployed the new package's files and only then refused to write the lockfile, leaving untracked files on disk.",
+      "failure_modes": ["transaction", "ownership"],
+      "properties": ["transaction.failed_command_preserves_state", "filesystem.open_world_observation"],
+      "regression_tests": [
+        "tests/integration/test_install_symlinked_lockfile_lifecycle.py::test_install_refuses_a_symlinked_lockfile_before_deploying"
       ]
     },
     {
@@ -2541,6 +2669,28 @@
       ],
       "regression_tests": [
         "tests/integration/test_frozen_replay_output_lifecycle.py::test_frozen_names_user_registry_config_when_registries_disabled"
+      ]
+    },
+    {
+      "issue": 4176,
+      "fixed_in": "0.37.0",
+      "summary": "Per-project deployment receipts under $APM_HOME/deployment-receipts outlived the project roots they described, so they accumulated forever.",
+      "failure_modes": ["cleanup"],
+      "properties": ["ownership.preserve_unowned", "filesystem.open_world_observation"],
+      "regression_tests": [
+        "tests/integration/test_deployment_receipt_gc_lifecycle.py::test_orphaned_receipt_is_collected_and_live_receipt_survives",
+        "tests/unit/test_deployment_materialization_receipts.py::test_orphaned_receipt_collection_keeps_every_doubtful_receipt"
+      ]
+    },
+    {
+      "issue": 4185,
+      "fixed_in": "0.37.0",
+      "summary": "apm uninstall could exit 1 after it had already changed apm.yml, the lockfile and deployed files when the remaining packages' org-policy trust refused mid-command; uninstall now also refuses out-of-project paths before any change",
+      "failure_modes": ["transaction", "outcome"],
+      "properties": ["transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_refusal_atomicity_lifecycle.py::test_policy_refusal_mid_uninstall_changes_nothing",
+        "tests/integration/test_uninstall_refusal_atomicity_lifecycle.py::test_uninstall_refuses_out_of_project_paths_before_any_change"
       ]
     },
     {

@@ -616,6 +616,7 @@ contracts-tooling-lifecycle-script-gate
 contracts-tooling-lifecycle-policy-errors
 contracts-tooling-linter-cache-content-key
 contracts-tooling-linter-cache-parse-once
+contracts-tooling-local-path-anchor
 contracts-tooling-lockfile-generator-gate
 contracts-tooling-lockfile-generator-stamp
 contracts-tooling-lockfile-read
@@ -623,6 +624,7 @@ contracts-tooling-lockfile-symlink-write-guard
 contracts-tooling-lockfile-timestamp
 contracts-tooling-lockfile-timestamp-constructor
 contracts-tooling-lockfile-timestamp-fallback
+contracts-tooling-lockfile-write-authority
 contracts-tooling-native-lifecycle-evidence
 contracts-tooling-policy-content-hash
 contracts-tooling-policy-identity
@@ -630,6 +632,7 @@ contracts-tooling-project-yaml-write-delegation
 contracts-tooling-python-artifact-membership
 contracts-tooling-source-replacements
 contracts-tooling-strip-charset
+contracts-tooling-update-plan-recorded-ref
 install-deployment-approval-outcome-routing
 install-deployment-approval-store-identity
 install-deployment-approve-command
@@ -641,10 +644,12 @@ install-deployment-bundle-user-scope-root
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cleanup-ownership-release
+install-deployment-cleanup-target-roots
 install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
 install-deployment-codex-agent-link-resolution
 install-deployment-agent-render-then-adopt
+install-deployment-command-render-then-adopt
 install-deployment-overwrite-evidence
 install-deployment-consumer-manifest-rewrite
 install-deployment-dependency-winner-selection
@@ -660,14 +665,17 @@ install-deployment-gitlab-facade-orchestration
 install-deployment-gitlab-policy-adapter
 install-deployment-hook-pin-frozen-audit-parity
 install-deployment-incomplete-chain-routing
+install-deployment-install-lockfile-preflight
 install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
 install-deployment-lock-parent-placement
 install-deployment-locked-content-verdict
 install-deployment-locked-copy-validity
+install-deployment-lockfile-required
 install-deployment-locked-source-cache
 install-deployment-package-content-hash
+install-deployment-receipt-collection
 install-deployment-skill-layout
 install-deployment-skill-preflight
 install-deployment-skill-adoption-baseline
@@ -697,6 +705,8 @@ install-deployment-policy-remote-origin-owner
 install-deployment-policy-violation-subjects
 install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan
+install-deployment-install-entry-routing
+install-deployment-install-commit-order
 install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
 install-deployment-immutable-requirements
@@ -714,6 +724,7 @@ install-deployment-target-file-contraction
 install-deployment-trust-fingerprint
 install-deployment-trust-policy-outcome
 install-deployment-local-bundle-hook-trust
+install-deployment-uninstall-preflight
 install-deployment-local-bundle-hook-retirement
 install-deployment-uninstall-reachability
 install-deployment-uninstall-selection

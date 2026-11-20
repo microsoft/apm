@@ -59,7 +59,7 @@
         "src/apm_cli/integration/skill_support.py",
         "src/apm_cli/install/pipeline.py"
       ],
-      "guards": ["install-deployment-provenance-state"]
+      "guards": ["install-deployment-provenance-state", "install-deployment-receipt-collection"]
     },
     {
       "id": "target-scoped-deployed-file-contraction",
@@ -90,11 +90,12 @@
     {
       "id": "frozen-install-mutation-eligibility",
       "decision": "Frozen install mutation eligibility, the only read of the install frozen flag, and post-deploy deployed-hash re-verification (req-lk-017)",
-      "owner": "install/service.py (InstallService; frozen_disposition is the single frozen-flag reader and its FrozenDisposition is what cleanup, lockfile and service integration consume); deployed-hash verification shared with audit content-integrity through policy/ci_checks.py (verify_deployed_file_hashes)",
+      "owner": "install/service.py (InstallService; frozen_disposition is the single frozen-flag reader and its FrozenDisposition is what cleanup, lockfile and service integration consume); install/plan.py (manifest_requires_lockfile) decides whether a missing lockfile is converged, for frozen install and audit lockfile-exists; deployed-hash verification shared with audit content-integrity through policy/ci_checks.py (verify_deployed_file_hashes)",
       "selectors": ["src/apm_cli/install/service.py"],
       "guards": [
         "install-deployment-frozen-mutation-eligibility",
-        "install-deployment-frozen-flag-reader"
+        "install-deployment-frozen-flag-reader",
+        "install-deployment-lockfile-required"
       ]
     },
     {
@@ -110,9 +111,27 @@
     {
       "id": "prospective-dry-run-install-plan",
       "decision": "Prospective dry-run install plan and interpreted package selection",
-      "owner": "install/dry_run_plan.py (ProspectiveInstallPlan) delegates selector identity and subtree filtering to install/package_selection.py and offline dependency closure to deps/apm_resolver.py",
+      "owner": "install/dry_run_plan.py (ProspectiveInstallPlan) projects the install pipeline's own dry-run plan (PipelinePreview from run_install_pipeline(dry_run=True)) and delegates selector identity to install/package_selection.py; it runs no second resolver",
       "selectors": ["src/apm_cli/install/dry_run_plan.py", "src/apm_cli/install/package_selection.py"],
       "guards": ["install-deployment-prospective-dry-run-plan"]
+    },
+    {
+      "id": "install-entry-routing",
+      "decision": "Every install entry (package install and --dry-run) goes through run_install_pipeline; dry-run derives its preview from the pipeline plan; install --mcp reconciles its server through the install's MCP service stage",
+      "owner": "install/pipeline_entry.py (pipeline_preview, PipelinePreview, record_preview_resolution): run_install_pipeline is entered only through install/service.py InstallService, from a closed list of _install_apm_dependencies callers (commands/install.py, update.py, lock.py, deps/cli.py); dry_run=True stops before the first write and the preview projects its plan; install --mcp and apm mcp install hand their server to install/service_integration.py run_service_integrations, whose run_mcp_integration installs and records only that entry (install/mcp/entry_integration.py), so the command keeps no integrator or lockfile writes",
+      "selectors": ["src/apm_cli/install/pipeline_entry.py"],
+      "guards": ["install-deployment-install-entry-routing"]
+    },
+    {
+      "id": "install-commit-order",
+      "decision": "Every install check completes before the lockfile and deployed files are committed; a failing check leaves no committed state (req-pl-002)",
+      "owner": "install/commit_gate.py (check_before_deploy before the first integrator write in phases/integrate.py; check_before_lockfile on the staged lockfile in install/pipeline.py before its writer scope commits it (#4086); merged MCP policy via enforce_mcp_policy from a closed list of preflight sites; install --mcp and apm mcp install judge their server, with its target projection, through enforce_mcp_policy and refuse it through refuse_blocked_mcp, as apm install does); the frozen pre-deploy hash check runs in InstallService.run before the pipeline; install/transaction.py (InstallTransaction) owns completion and rollback of the attempt, including the audit-gated deploy snapshot: when the install-time content audit can block, InstallTransaction.snapshot_deploy_targets captures every path integration can write (install/deploy_snapshot.py) before the integrate phase, rollback restores it byte for byte, and release_deploy_targets discards it once the audit passed; no snapshot is taken while the audit is off; every rollback also removes the target roots the attempt created (track_created_target_roots) when they are left empty (#4159)",
+      "selectors": [
+        "src/apm_cli/install/commit_gate.py",
+        "src/apm_cli/install/deploy_snapshot.py",
+        "src/apm_cli/install/transaction.py"
+      ],
+      "guards": ["install-deployment-install-commit-order", "install-deployment-install-lockfile-preflight", "install-deployment-uninstall-preflight"]
     },
     {
       "id": "authorized-deployable-source-paths",
@@ -200,18 +219,21 @@
     {
       "id": "file-level-deploy-sync-cleanup",
       "decision": "File-level deploy / sync / cleanup",
-      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; install-time package-relative link rewriting via resolve_links, including Codex agent conversion; content adoption via _check_adopt_or_skip(expected_content=rendered) for every transforming agent writer (render, then adopt, then write the same text); a differing managed file is replaced only with this checkout's trusted receipt or bytes equal to the locked render (OverwriteGate bound by recorded_writes, #4360), never on a lockfile hash; case/normalization-only spellings of a live deployed path resolve through utils/paths (stored_alias in check_collision, a SpellingAliasIndex built once per inventory in remove_stale_deployed_files, physical_alias for one-shot queries); a stale skill directory left only for user content is released (CleanupResult.released), never retained; a member the install declared but left unwritten (DeploymentEvidence.kept, fed by the skill integrator's skip channel) is retained before any deletion gate, never stale; see integrators.instructions.md)",
+      "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; install-time package-relative link rewriting via resolve_links, including Codex agent conversion; content adoption via _check_adopt_or_skip(expected_content=rendered) for every transforming agent writer (render, then adopt, then write the same text) and for command writers (CommandIntegrator._rendered_command); a differing managed file is replaced only with this checkout's trusted receipt or bytes equal to the locked render (OverwriteGate bound by recorded_writes, #4360), never on a lockfile hash; case/normalization-only spellings of a live deployed path resolve through utils/paths (stored_alias in check_collision, a SpellingAliasIndex built once per inventory in remove_stale_deployed_files, physical_alias for one-shot queries); a stale skill directory left only for user content is released (CleanupResult.released), never retained; a member the install declared but left unwritten (DeploymentEvidence.kept, fed by the skill integrator's skip channel) is retained before any deletion gate, never stale; see integrators.instructions.md)",
       "selectors": [
         "src/apm_cli/integration/base_integrator.py",
         "src/apm_cli/integration/cleanup.py",
+        "src/apm_cli/integration/command_integrator.py",
         "src/apm_cli/install/services.py"
       ],
       "guards": [
         "install-deployment-base-integrator",
         "install-deployment-cleanup-ownership-release",
+        "install-deployment-cleanup-target-roots",
         "install-deployment-cleanup-retains-kept-members",
         "install-deployment-codex-agent-link-resolution",
         "install-deployment-agent-render-then-adopt",
+        "install-deployment-command-render-then-adopt",
         "install-deployment-overwrite-evidence"
       ]
     },

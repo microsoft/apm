@@ -809,6 +809,9 @@ def run(ctx: InstallContext) -> None:
                 getattr(effective_allow_map(ctx), "trust_context", None)
                 or getattr(ctx, "exec_trust_ctx", None),
             )
+        from apm_cli.install.commit_gate import check_before_deploy
+
+        check_before_deploy(ctx)
     except BaseException:
         _announce_held_headers(prepared_integrations)
         raise

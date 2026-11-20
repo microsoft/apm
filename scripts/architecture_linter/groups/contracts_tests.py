@@ -21,11 +21,20 @@ from scripts.architecture_linter.checks.contracts_lifecycle_script_gate import (
     RULES as LIFECYCLE_SCRIPT_GATE_RULES,
 )
 from scripts.architecture_linter.checks.contracts_linter_cache import RULES as LINTER_CACHE_RULES
+from scripts.architecture_linter.checks.contracts_local_path_anchor import (
+    RULES as LOCAL_PATH_ANCHOR_RULES,
+)
 from scripts.architecture_linter.checks.contracts_lockfile_generator import (
     RULES as LOCKFILE_GENERATOR_RULES,
 )
+from scripts.architecture_linter.checks.contracts_lockfile_write_authority import (
+    RULES as LOCKFILE_WRITE_AUTHORITY_RULES,
+)
 from scripts.architecture_linter.checks.contracts_test_taxonomy import COLLECTORS
 from scripts.architecture_linter.checks.contracts_test_taxonomy import RULES as EXISTING_RULES
+from scripts.architecture_linter.checks.contracts_update_plan_ref import (
+    RULES as UPDATE_PLAN_REF_RULES,
+)
 from scripts.architecture_linter.checks.install_approve_command import (
     RULES as APPROVE_COMMAND_RULES,
 )
@@ -36,7 +45,10 @@ RULES = (
     *GOVERNANCE_RULES,
     *REPLACEMENT_RULES,
     *LOCKFILE_GENERATOR_RULES,
+    *LOCKFILE_WRITE_AUTHORITY_RULES,
     *LIFECYCLE_SCRIPT_GATE_RULES,
+    *LOCAL_PATH_ANCHOR_RULES,
+    *UPDATE_PLAN_REF_RULES,
     *APPROVE_COMMAND_RULES,
     *CI_TOPOLOGY_RULES,
     *LINTER_CACHE_RULES,

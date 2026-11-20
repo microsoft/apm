@@ -158,9 +158,15 @@ def run_service_integrations(  # noqa: PLR0913
             if should_install_mcp and prepared_mcp.dependencies
             else []
         )
-        # The command's structural frozen check already required this baseline.
+        # The command's structural frozen check already required this baseline,
+        # unless nothing is declared and so nothing is locked (#4050).
         if existing_lock is None:
-            raise RuntimeError("Frozen service integration requires the checked lockfile")
+            from apm_cli.deps.lockfile import LockFile
+            from apm_cli.install.plan import manifest_requires_lockfile
+
+            if manifest_requires_lockfile(apm_package):
+                raise RuntimeError("Frozen service integration requires the checked lockfile")
+            existing_lock = LockFile()
         frozen_unrecorded = InstallService.enforce_frozen_services(
             existing_lock,
             mcp_servers=MCPIntegrator.get_server_names(prepared_mcp.dependencies),
@@ -219,6 +225,9 @@ def run_service_integrations(  # noqa: PLR0913
             executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
             pre_install_lock=existing_lock,
             frozen=frozen_disposition.withhold_lockfile_writes,
+            policy_enforced=getattr(ctx, "mcp_policy_enforced", False) is True,
+            # The one server apm install --mcp adds (install/mcp/entry_integration.py).
+            mcp_entry=getattr(ctx, "mcp_entry", None),
         )
     lsp_count = run_lsp_integration(
         apm_package=apm_package,

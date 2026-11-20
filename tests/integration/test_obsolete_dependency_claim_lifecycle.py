@@ -364,25 +364,29 @@ def test_dependency_target_narrowing_keeps_cleanup_and_lock_scope_aligned(
     assert lock_path.read_bytes() == settled
     scenario.run("audit", "--ci", "--format", "json")
     uninstall = ("uninstall", *(("-g",) if user_scope else ()), owner)
-    refused = scenario.runner.run(
-        uninstall,
-        scenario_id="dependency-target-narrowing-protected-uninstall",
-        cwd=scenario.project,
-        env=scenario.environment.subprocess_env(),
-    )
-    assert refused.returncode == 1, (refused.command, refused.stdout, refused.stderr)
-    assert "Resolve or remove the listed files" in refused.stdout
-    assert untracked.read_bytes() == b"Untracked personal content.\n"
-    saved_personal = scenario.deploy_root / "personal.txt"
-    untracked.rename(saved_personal)
     removed = scenario.runner.run(
         uninstall,
         scenario_id="dependency-target-narrowing-uninstall",
         cwd=scenario.project,
         env=scenario.environment.subprocess_env(),
     )
+    # The user's file in the removed package's skill directory stays (#4162).
     assert removed.returncode == 0, (removed.command, removed.stdout, removed.stderr)
-    assert saved_personal.read_bytes() == b"Untracked personal content.\n"
+    # Terminal wrapping may split tokens, so compare without whitespace.
+    output = "".join((removed.stdout + removed.stderr).split())
+    kept = untracked.relative_to(scenario.deploy_root).as_posix()
+    assert "[!]" in output, removed.stdout
+    assert "Keptskilldirectory" in output, removed.stdout
+    assert f"notownedbyAPM:{kept}" in output, removed.stdout
+    assert untracked.read_bytes() == b"Untracked personal content.\n"
+    remaining = load_yaml(scenario.lock_root / "apm.yml")["dependencies"]["apm"]
+    assert all(entry.get("path") != owner for entry in remaining), remaining
+    locked = load_yaml(lock_path)
+    assert all(
+        dependency.get("local_path") != owner and owner not in str(dependency.get("repo_url"))
+        for dependency in locked.get("dependencies") or []
+    ), locked
+    assert all(kept != row["value"] for row in locked.get("deployments") or []), locked
     assert all(
         (scenario.deploy_root / value).read_bytes() == data for value, data in sibling_bytes.items()
     )

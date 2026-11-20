@@ -29,6 +29,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.scope import manifest_file
+from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
+from apm_cli.install.frozen_selection import (
+    _changed_selections,
+    _outermost,  # noqa: F401 -- re-exported for install.frozen_withdrawal and tests
+    frozen_selection_changes,
+)
 from apm_cli.install.request import InstallRequest
 from apm_cli.models.results import InstallDisposition
 
@@ -226,6 +232,7 @@ class InstallService:
             raise frozen_services_error(reasons)
         return frozenset(deferred)
 
+    @lockfile_writer(LockfileWriter.INSTALL)
     def run(self, request: InstallRequest) -> InstallResult:
         """Execute the install pipeline and return the structured result.
 
@@ -250,6 +257,10 @@ class InstallService:
             # req-lk-017: judge the committed bytes before any integrator can
             # rewrite or keep them, so every primitive type answers alike.
             self._enforce_frozen_deployed_hashes(request, deployed=False)
+
+        if request.dry_run:
+            # A preview runs no lifecycle scripts and commits nothing.
+            return self._run_pipeline(request)
 
         runner = self._build_script_runner(request)
         event = self._build_event("pre-install", request)
@@ -301,6 +312,9 @@ class InstallService:
             update_refs=request.update_refs,
             frozen=request.frozen,
             trust_transitive_mcp=request.trust_transitive_mcp,
+            install_mcp=request.install_mcp,
+            mcp_runtime=request.mcp_runtime,
+            dry_run=request.dry_run,
             verbose=request.verbose,
             only_packages=request.only_packages,
             force=request.force,
@@ -443,6 +457,7 @@ class InstallService:
         from apm_cli.install.plan import (
             lockfile_satisfies_manifest,
             lockfile_satisfies_replacements,
+            manifest_requires_lockfile,
         )
 
         lockfile_path = _frozen_lockfile_path(request)
@@ -453,6 +468,11 @@ class InstallService:
         )
 
         if not lockfile_path.exists():
+            manifest = request.apm_package
+            if manifest is not None and not manifest_requires_lockfile(manifest):
+                # Nothing declared: install writes no lockfile, so this state
+                # is already converged and --frozen replays it as a no-op.
+                return
             raise FrozenInstallError(missing_message, tip="")
 
         try:
@@ -509,7 +529,8 @@ class InstallService:
                 lockfile,
                 modules_dir,
                 admission=admission,
-                logger=request.logger,
+                # The hydrated check and the MCP phase report parked servers.
+                logger=None,
                 allow_pending=allow_pending_mcp,
             )
         )
@@ -800,7 +821,7 @@ class InstallService:
         # same assumption.
         lockfile_path = _frozen_lockfile_path(request)
         committed = LockFile.read(lockfile_path)
-        if committed is None:  # pragma: no cover -- enforce_frozen ran first
+        if committed is None:  # nothing declared, nothing locked (#4050)
             return
         # DeploymentLedgerCodec owns the deployed-files vocabulary (see
         # `scripts/lint-architecture-boundaries.sh`); ask it directly rather
@@ -858,7 +879,7 @@ class InstallService:
 
         lockfile_path = _frozen_lockfile_path(request)
         committed = committed or LockFile.read(lockfile_path)
-        if committed is None:  # pragma: no cover -- enforce_frozen ran first
+        if committed is None:  # nothing declared, nothing locked (#4050)
             return
         deploy_root, user_scope, targets = resolve_audit_scope(lockfile_path.parent, committed)
         drifted, unresolved = verify_deployed_file_hashes(deploy_root, committed, targets)
@@ -907,87 +928,6 @@ _FROZEN_REPAIR_TIP = (
     "withheld. Rerun 'apm install' without --frozen, retaining --root DIR "
     "or --global if specified, then commit the deployed files and apm.lock.yaml."
 )
-
-
-def frozen_selection_changes(deps_to_install: Iterable[Any], committed: LockFile) -> list[str]:
-    """Name each locked dependency whose resolved selection differs (req-rs-018).
-
-    Runs before any deployment so ``--frozen`` never deploys either selection.
-    A recorded ``subset_pairings`` value that is malformed or disagrees with
-    the flat fields is reported as invalid lock state.
-    """
-    from apm_cli.models.dependency.subsets import dependency_pairing
-
-    marketplace_index = committed.marketplace_index()
-    reasons: dict[str, str] = {}
-    for dep_ref in deps_to_install:
-        key = dep_ref.get_unique_key()
-        locked = committed.get_dependency(key, marketplace_index=marketplace_index)
-        if locked is None:
-            continue
-        try:
-            recorded = locked.selection()
-        except ValueError as exc:
-            reasons[key] = f"selection for {key} is invalid in apm.lock.yaml ({exc})"
-            continue
-        if recorded != dependency_pairing(dep_ref):
-            reasons[key] = (
-                f"selection for {key} changed: the skills and targets its declaring "
-                "manifests request differ from apm.lock.yaml; run 'apm install' and "
-                "commit apm.lock.yaml"
-            )
-    return [reasons[key] for key in sorted(reasons)]
-
-
-def _changed_selections(committed: LockFile, candidate: LockFile) -> dict[str, str]:
-    """Name each locked dependency whose resolved skill or target selection changed."""
-    changed: dict[str, str] = {}
-    for dependency in candidate.get_package_dependencies():
-        key = dependency.get_unique_key()
-        locked = committed.get_dependency(key)
-        if locked is None:
-            continue
-        for field_name, label in (("skill_subset", "skills"), ("target_subset", "targets")):
-            before = sorted(getattr(locked, field_name) or ())
-            after = sorted(getattr(dependency, field_name) or ())
-            if before != after:
-                changed[key] = (
-                    f"selection for {key} changed: locked {label} {before or 'all'}, "
-                    f"resolved {label} {after or 'all'}; run 'apm install' and commit "
-                    "apm.lock.yaml"
-                )
-                break
-        else:
-            # Same unions, but the per-target pairing can still differ (req-rs-018).
-            try:
-                same = locked.selection() == dependency.selection()
-            except ValueError:
-                same = False
-            if not same:
-                changed[key] = (
-                    f"selection for {key} changed: the skills paired with each target "
-                    "differ from apm.lock.yaml; run 'apm install' and commit apm.lock.yaml"
-                )
-    return changed
-
-
-def _outermost(paths: set[str]) -> list[str]:
-    """Sort *paths*, dropping any already covered by a listed ancestor.
-
-    ``deployed_files`` records a primitive's directory as well as each file
-    beneath it, so an unrecorded skill otherwise reports twice.  Sorted
-    order puts an ancestor before its descendants, so a single pass over
-    the accumulated output is enough.
-
-    The prefix scan is O(n^2) in the number of unclaimed paths.  It runs
-    only on the error path of a failing frozen install, where *n* is what
-    one install left unrecorded and the process is about to exit.
-    """
-    outermost: list[str] = []
-    for path in sorted(paths):
-        if not any(path.startswith(f"{parent}/") for parent in outermost):
-            outermost.append(path)
-    return outermost
 
 
 def _frozen_lockfile_path(request: InstallRequest) -> Path:

@@ -53,6 +53,9 @@ def test_policy_refusals_and_approve_usage_error_write_stderr(
         world.publish_policy({**_ALLOW_ALL, "dependencies": {"deny": [package.slug]}})
         world.clear_policy_cache()
         violation = f"Policy violation: github.com/{package.slug}"
+        # Upstream moves on, so `apm update` has a change to apply (#4166).
+        (package.repository.worktree / "NEXT.md").write_text("next\n", encoding="utf-8")
+        world.repositories.commit(package.repository, message="pkg-a next")
         # Each refusal names a bypass that command accepts: install has
         # --no-policy, update only the one-shot env prefix (#3994).
         install_bypass = "--no-policy` for one-off bypass"

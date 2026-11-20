@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import yaml
 
 from apm_cli.core.scope import is_user_scope_root, manifest_file
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.deps.path_anchoring import (
     LocalResolutionError,
     build_local_parent_index,
@@ -990,11 +991,13 @@ def _collect_locked_dependencies(
             manifest = load_yaml(manifest_path)
             if not isinstance(manifest, dict):
                 raise ValueError("package manifest must be a mapping")
+            # Collecting declarations only reads: never create user config.
             package = APMPackage.from_mapping(
                 manifest,
                 package_path=manifest_path.parent,
                 source_path=manifest_path.parent,
                 manifest_path=manifest_path,
+                create_config=False,
             )
             authored_declarations = _authored_mcp_declarations(manifest)
         except (OSError, ValueError, UnicodeError, yaml.YAMLError) as exc:
@@ -1182,7 +1185,9 @@ def _collect_transitive_compat(
 
     if not modules_root.exists():
         return []
-    lockfile = LockFile.read(lock_path) if lock_path is not None and lock_path.exists() else None
+    lockfile = (
+        LockFile.read(lock_path) if lock_path is not None and lockfile_exists(lock_path) else None
+    )
     if lockfile is None:
         return _collect_unlocked_compat(
             modules_root,

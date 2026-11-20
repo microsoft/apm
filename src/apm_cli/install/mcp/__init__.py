@@ -12,6 +12,7 @@ Layout:
     command.py      ``run_mcp_install`` orchestrator
     conflicts.py    ``--mcp`` flag conflict matrix (E1-E15)
     entry.py        Pure ``apm.yml`` MCP entry builder (str | dict union)
+    entry_integration.py  The added server, reconciled by the install's MCP stage
     integration.py  ``run_mcp_integration`` -- post-install MCP reconciliation
     registry.py     ``--registry`` validation, precedence, env override
     warnings.py     F5 SSRF + F7 shell-metachar install-time warnings

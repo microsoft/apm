@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -61,6 +62,76 @@ _LOWER_HEX = frozenset("0123456789abcdef")
 # Linux (btrfs subvolumes) and macOS can report a new st_dev for the same root
 # after a reboot or remount. Windows root identity is intentionally unchanged.
 _ROOT_DEVICE_REBIND_SUPPORTED = sys.platform != "win32"
+# Receipts examined per command; collection is incremental across commands.
+_RECEIPT_COLLECTION_LIMIT = 256
+
+
+def _receipt_key(root: str, scope: str) -> str:
+    """The receipt file stem for a project *root* (as recorded) and *scope*."""
+    return hashlib.sha256(f"{Path(root)}|{scope}".encode()).hexdigest()
+
+
+def _next_receipt_batch(directory: Path, limit: int) -> list[Path]:
+    """The next *limit* receipts after the cursor, wrapping, then advance it.
+
+    Each command resumes where the previous one stopped, so retained receipts
+    never hide one behind them. The cursor exists only while there are more
+    receipts than one batch examines.
+    """
+    receipts = sorted(directory.glob("*.json"))
+    cursor = directory / ".collection-cursor"
+    last = ""
+    with contextlib.suppress(OSError, UnicodeDecodeError):
+        if not cursor.is_symlink():
+            last = cursor.read_text(encoding="ascii").strip()
+    start = next((i for i, path in enumerate(receipts) if path.name > last), 0)
+    batch = (receipts[start:] + receipts[:start])[:limit]
+    if len(receipts) > limit and not cursor.is_symlink():
+        with contextlib.suppress(OSError):
+            cursor.write_text(batch[-1].name + "\n", encoding="ascii")
+    return batch
+
+
+def retire_receipts_of_missing_projects(limit: int = _RECEIPT_COLLECTION_LIMIT) -> int:
+    """Best effort: delete receipts whose recorded project root is gone (#4176).
+
+    Receipts are not packages: this never selects package removals, which
+    stay with install/orphans.py.
+
+    A receipt goes only when its file name is the key of the root and scope it
+    records, that root is absolute and no longer exists, and the root's parent
+    directory does (so an unmounted volume never looks deleted). Any doubt
+    keeps the receipt; no error reaches the command. Returns the count removed.
+    """
+    from apm_cli.core.scope import get_apm_home
+
+    removed = 0
+    try:
+        directory = get_apm_home() / "deployment-receipts"
+        if directory.is_symlink() or not directory.is_dir():
+            return 0
+        for path in _next_receipt_batch(directory, limit):
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                data = json.loads(path.read_text(encoding="utf-8"))
+                root, scope = data["root"], data["scope"]
+                if not isinstance(root, str) or not isinstance(scope, str):
+                    continue
+                recorded = Path(root)
+                if (
+                    path.stem == _receipt_key(root, scope)
+                    and recorded.is_absolute()
+                    and not os.path.lexists(recorded)
+                    and recorded.parent.is_dir()
+                ):
+                    path.unlink()
+                    removed += 1
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+    except OSError:
+        return removed
+    return removed
 
 
 @dataclass(frozen=True)
@@ -82,6 +153,16 @@ class DeploymentCleanupSnapshot:
     hashes: dict[str, str]
 
 
+def materialization_evidence_paths(project_root: Path, scope: InstallScope) -> tuple[Path, Path]:
+    """Return ``(OS-user receipt file, checkout identity file)`` for *project_root*."""
+    from apm_cli.core.scope import get_apm_home
+
+    root = project_root.resolve()
+    key = _receipt_key(root.as_posix(), scope.value)
+    state_path = get_apm_home() / "deployment-receipts" / f"{key}.json"
+    return state_path, root / LOCAL_STATE_DIR / "installation"
+
+
 class DeploymentMaterializationSession:
     """Installation-local rendered-write evidence, subordinate to current ownership.
 
@@ -94,15 +175,10 @@ class DeploymentMaterializationSession:
     def __init__(self, project_root: Path, scope: InstallScope, lockfile: LockFile | None) -> None:
         self.root = project_root.resolve()
         self.scope = scope
-        from apm_cli.core.scope import get_apm_home
-
-        key = hashlib.sha256(f"{self.root}|{scope.value}".encode()).hexdigest()
-        apm_home = get_apm_home()
+        self.state_path, self.identity_path = materialization_evidence_paths(self.root, scope)
         # Containment is anchored one level above APM_HOME (``$HOME`` by
         # default); for a shallow custom root the symlink check is the guard.
-        self._receipts_base = apm_home.parent
-        self.state_path = apm_home / "deployment-receipts" / f"{key}.json"
-        self.identity_path = self.root / LOCAL_STATE_DIR / "installation"
+        self._receipts_base = self.state_path.parent.parent.parent
         self._records: dict[str, DeploymentRecord] = {}
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}

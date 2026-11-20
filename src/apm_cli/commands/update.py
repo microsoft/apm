@@ -69,6 +69,7 @@ from ..core.command_logger import InstallLogger
 from ..core.target_catalog import target_help_fragment
 from ..core.target_detection import TargetParamType
 from ..deps.github_downloader import GitHubPackageDownloader
+from ..deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from ..deps.revision_pins import (
     RemoteRefDownloader,
     RevisionPinResolutionError,
@@ -364,10 +365,7 @@ def _run_mcp_lsp_integration(
             pre_install_lock=existing_lock,
         )
     except PolicyBlockError:
-        logger.refusal(
-            "MCP server(s) blocked by org policy. "
-            "APM packages remain installed; MCP configs were NOT written."
-        )
+        logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
         logger.render_summary()
         sys.exit(1)
 
@@ -466,7 +464,10 @@ def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
     for row in restored:
         logger.info(f"Restored marketplace provenance for {row} from its catalog.")
     if restored and not dry_run:
-        lockfile.write(lock_path)
+        from apm_cli.deps.lockfile_write_authority import provisional_lockfile_writes
+
+        with provisional_lockfile_writes():
+            lockfile.write(lock_path)
     return lockfile
 
 
@@ -664,6 +665,7 @@ def update(
     )
 
 
+@lockfile_writer(LockfileWriter.UPDATE)
 def _run_dep_update(
     *,
     assume_yes: bool,
@@ -949,6 +951,7 @@ def _run_dep_update_locked(
             target=target,
             legacy_skill_paths=legacy_skill_paths,
             lsp_preflight=LspPreflight(),
+            trust_transitive_mcp=trust_transitive_mcp,
         )
     except FrozenInstallError as e:
         _rich_error(str(e))
