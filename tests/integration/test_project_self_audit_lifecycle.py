@@ -14,6 +14,7 @@ from tests.integration.test_required_lifecycle_state_machine import (
     _audit,
     _instruction,
     _new_scenario,
+    _run_refused,
     _run_success,
     _skill,
 )
@@ -128,6 +129,16 @@ def test_required_project_self_audit_replays_install_without_sibling_skills(
     managed.write_text("# tampered\n", encoding="utf-8")
     changed = audit("project-self-audit-changed", expected_returncode=1)
     assert {"content-integrity", "drift"} <= _failed_checks(changed)
+    # A changed managed file is never overwritten without evidence (#4360):
+    # install keeps it and exits 1; the printed remedy (move it aside) converges.
+    _run_refused(
+        scenario,
+        project,
+        managed,
+        "project-self-repair-changed-refused",
+        environment=scenario.environment,
+    )
+    managed.unlink()
     run(_INSTALL_ARGS, "project-self-repair-changed")
     assert audit("project-self-audit-repaired-changed")["passed"] is True
     _assert_same_state(installed, LifecycleStateSnapshot.capture(project.root, **capture_args))

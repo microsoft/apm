@@ -84,14 +84,19 @@ def content_hash_mismatch_hint(ctx: Any, dep_key: str) -> str:
 
 def locked_content_remediation(dep_key: str, *, user_scope: bool, apm_dir: Path | None) -> str:
     """Remediation for a dependency whose bytes contradict its locked content hash."""
+    from apm_cli.core.remediation import (
+        CONTENT_HASH_CACHE_CLEAN,
+        CONTENT_HASH_REPIN,
+        CONTENT_HASH_REPIN_GLOBAL,
+    )
     from apm_cli.deps.lockfile import get_lockfile_path
 
-    install = "apm install -g" if user_scope else "apm install"
+    repin = CONTENT_HASH_REPIN_GLOBAL if user_scope else CONTENT_HASH_REPIN
     lockfile = get_lockfile_path(apm_dir) if apm_dir is not None else "apm.lock.yaml"
     return (
-        "This may indicate a supply-chain attack. Run 'apm cache clean' and retry. "
-        f"To accept the new content, remove the '{dep_key}' entry from "
-        f"{lockfile} and run '{install}'."
+        "This may indicate a supply-chain attack. "
+        f"{CONTENT_HASH_CACHE_CLEAN.sentence()} "
+        f"To accept the new content, {repin.bind(dep_key=dep_key, lockfile=lockfile).clause()}."
     )
 
 
@@ -234,6 +239,7 @@ def materialized_manifest_snapshot(
 
     import yaml
 
+    from apm_cli.core.remediation import MATERIALIZED_MANIFEST_INVALID
     from apm_cli.install.errors import DirectDependencyError
     from apm_cli.utils.yaml_io import load_yaml
 
@@ -251,7 +257,7 @@ def materialized_manifest_snapshot(
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise DirectDependencyError(
             f"Invalid materialized manifest for {package.name}: {exc}. "
-            "Restore valid dependency metadata and rerun 'apm install'."
+            f"{MATERIALIZED_MANIFEST_INVALID.sentence()}"
         ) from exc
     snapshot.source = package.source
     snapshot.resolved_commit = package.resolved_commit
@@ -471,4 +477,13 @@ def rebuild_cached_semver_resolution(dep_locked_chk: Any) -> Any:
         resolved_sha=dep_locked_chk.resolved_commit,
         matched_pattern="",
         resolved_at=dep_locked_chk.resolved_at or "",
+    )
+
+
+def with_preserved_install_hint(message: str, install_path: Path | None) -> str:
+    """Explain that a failed replacement left the current install active."""
+    if install_path is None or not install_path.exists():
+        return message
+    return (
+        f"{message}. The existing installation remains active; fix the cause and retry the install."
     )

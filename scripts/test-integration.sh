@@ -363,6 +363,11 @@ run_e2e_tests() {
     # bare "${arr[@]}" on an empty array raises an unbound-variable error.
     # shellcheck disable=SC2206
     extra_args=(${PYTEST_EXTRA_ARGS:-})
+    # Sharded CI lanes pass their shard's test file list (a pytest
+    # @argfile written by `python -m scripts.ci_sharding files`) instead of
+    # the whole directory, so each shard imports only its own modules.
+    # shellcheck disable=SC2206
+    target_args=(${PYTEST_TARGETS:-tests/integration/})
     marker_args=()
     if [[ -n "${PYTEST_MARK_EXPR:-}" ]]; then
         marker_args=(-m "$PYTEST_MARK_EXPR")
@@ -380,7 +385,7 @@ run_e2e_tests() {
         # python -m puts the repository root on sys.path so CI can load
         # repository pytest plugins such as scripts.ci_sharding with -p.
         status=0
-        python -m pytest tests/integration/ -v --tb=short \
+        python -m pytest "${target_args[@]}" -v --tb=short \
             ${extra_args[@]+"${extra_args[@]}"} \
             ${marker_args[@]+"${marker_args[@]}"} \
             ${retry_args[@]+"${retry_args[@]}"} || status=$?

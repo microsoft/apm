@@ -191,6 +191,14 @@ rule involved:
 git config --show-origin --get-regexp '^url\..*\.insteadOf$'
 ```
 
+If Git cannot read its configuration, APM refuses too. The error shows Git's
+first diagnostic line, with credentials redacted, and the config file Git
+names. To list every config file and its origin:
+
+```bash frame="terminal"
+git config --show-origin --list
+```
+
 ## Corporate CA and proxies
 
 If your network inspects TLS, add your company's CA to APM's HTTPS trust. It

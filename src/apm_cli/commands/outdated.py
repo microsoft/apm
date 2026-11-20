@@ -6,13 +6,16 @@ For marketplace-sourced deps, checks available versions in the marketplace.
 """
 
 import logging
-import os
 import re
 import sys
 from collections.abc import Iterable
 from dataclasses import replace
 
 import click
+
+from apm_cli.core.remediation import (
+    OUTSIDE_CONSTRAINT_RELEASE,
+)
 
 from ..deps.lockfile import LockedDependency
 from ..deps.outdated_row import OutdatedRow
@@ -509,20 +512,13 @@ def outdated(global_, verbose, parallel_checks):
     # which is exactly the duplicate-resolution workload the L0 cache +
     # coalesce lock are designed to collapse.
     try:
-        from ..cache.git_cache import GitCache
-        from ..cache.paths import get_cache_root
+        from ..cache.git_cache import attach_persistent_git_cache
         from ..deps.tiered_ref_resolver import (
             RefFreshnessPolicy,
             build_tiered_ref_resolver,
         )
 
-        _git_cache = None
-        if not os.environ.get("APM_NO_CACHE"):
-            try:
-                _git_cache = GitCache(get_cache_root(), refresh=False)
-                downloader.persistent_git_cache = _git_cache
-            except (OSError, ValueError):
-                pass
+        _git_cache = attach_persistent_git_cache(downloader)
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
             git_cache=_git_cache,
@@ -601,8 +597,7 @@ def outdated(global_, verbose, parallel_checks):
     ]
     # Render the table
     try:
-        from rich.box import ASCII
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
         from ._helpers import _get_console
 
@@ -610,11 +605,10 @@ def outdated(global_, verbose, parallel_checks):
         if console is None:
             raise ImportError("Rich console not available")
 
-        table = Table(
+        table = new_table(
             title="Dependency Status",
             show_header=True,
             header_style="bold cyan",
-            box=ASCII,
         )
         # Minimum widths that overflow the terminal make Rich crop whole rows
         # (the Source column lost "marketplace: <name>" at 80 columns), so
@@ -701,8 +695,8 @@ def outdated(global_, verbose, parallel_checks):
     if has_outside_constraint:
         logger.progress(
             "Registry Latest is published; Wanted respects the manifest constraint. "
-            "'apm update' stays within that constraint. Select a newer version explicitly "
-            "in apm.yml, then run 'apm install' to take an outside-constraint release."
+            "'apm update' stays within that constraint. "
+            f"{OUTSIDE_CONSTRAINT_RELEASE.sentence()}"
         )
     conflicts = [row for row in rows if row.status == "origin-conflict"]
     for row in conflicts:

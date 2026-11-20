@@ -171,7 +171,9 @@ def test_consumer_target_contraction_retires_the_dropped_target(tmp_path: Path) 
 
     result = _install(claude_pkg, project_root, targets, dep_target_subset=["codex"])
 
-    assert result["hooks"] == 1
+    # The codex registration is already on disk, so it is adopted, not
+    # re-integrated (#4184); contraction only retires the claude side.
+    assert result["hooks"] == 0
     claude_settings = project_root / ".claude" / "settings.json"
     assert not claude_settings.exists() or not _hooks(claude_settings)
     assert set(_hooks(project_root / ".codex" / "hooks.json")) == {"SessionStart", "SubagentStart"}

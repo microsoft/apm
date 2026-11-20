@@ -42,6 +42,8 @@ class _FakeCtx:
     scope: Any = field(default_factory=lambda: InstallScope.PROJECT)
     dry_run: bool = False
     targets: list[Any] = field(default_factory=list)
+    kept_overwrites: list[tuple[str, str]] = field(default_factory=list)
+    kept_overwrite_written: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +177,10 @@ def _make_pkg(repo_url: str | None = None, reference: str | None = None) -> Magi
     dep_ref = MagicMock()
     dep_ref.reference = reference  # None means unpinned
     dep_ref.repo_url = repo_url
+    dep_ref.is_local = False
+    dep_ref.to_display_reference.return_value = repo_url
     pkg.dep_ref = dep_ref
+    pkg.resolved_commit = None
     return pkg
 
 
@@ -184,14 +189,16 @@ class TestFinalizeUnpinnedWarning:
 
     def test_no_warning_when_all_pinned(self) -> None:
         diag = DiagnosticCollector()
-        ctx = _make_ctx(unpinned_count=0, diagnostics=diag)
+        ctx = _make_ctx(installed_count=1, unpinned_count=0, diagnostics=diag)
         run(ctx)
         assert not diag.has_diagnostics
 
     def test_single_unpinned_uses_dependency_singular(self) -> None:
         diag = DiagnosticCollector()
         pkg = _make_pkg(repo_url="github.com/owner/repo", reference=None)
-        ctx = _make_ctx(unpinned_count=1, installed_packages=[pkg], diagnostics=diag)
+        ctx = _make_ctx(
+            installed_count=1, unpinned_count=1, installed_packages=[pkg], diagnostics=diag
+        )
         run(ctx)
         assert diag.has_diagnostics
         messages = [d.message for d in diag._diagnostics]
@@ -200,7 +207,9 @@ class TestFinalizeUnpinnedWarning:
     def test_multiple_unpinned_uses_dependencies_plural(self) -> None:
         diag = DiagnosticCollector()
         pkgs = [_make_pkg(repo_url=f"github.com/o/r{i}", reference=None) for i in range(3)]
-        ctx = _make_ctx(unpinned_count=3, installed_packages=pkgs, diagnostics=diag)
+        ctx = _make_ctx(
+            installed_count=1, unpinned_count=3, installed_packages=pkgs, diagnostics=diag
+        )
         run(ctx)
         messages = [d.message for d in diag._diagnostics]
         assert any("dependencies" in m for m in messages)
@@ -208,7 +217,9 @@ class TestFinalizeUnpinnedWarning:
     def test_unpinned_names_shown_in_warning(self) -> None:
         diag = DiagnosticCollector()
         pkg = _make_pkg(repo_url="github.com/owner/repo", reference=None)
-        ctx = _make_ctx(unpinned_count=1, installed_packages=[pkg], diagnostics=diag)
+        ctx = _make_ctx(
+            installed_count=1, unpinned_count=1, installed_packages=[pkg], diagnostics=diag
+        )
         run(ctx)
         messages = [d.message for d in diag._diagnostics]
         assert any("github.com/owner/repo" in m for m in messages)
@@ -216,7 +227,9 @@ class TestFinalizeUnpinnedWarning:
     def test_more_than_five_unpinned_shows_and_more(self) -> None:
         diag = DiagnosticCollector()
         pkgs = [_make_pkg(repo_url=f"github.com/o/r{i}", reference=None) for i in range(8)]
-        ctx = _make_ctx(unpinned_count=8, installed_packages=pkgs, diagnostics=diag)
+        ctx = _make_ctx(
+            installed_count=1, unpinned_count=8, installed_packages=pkgs, diagnostics=diag
+        )
         run(ctx)
         messages = [d.message for d in diag._diagnostics]
         assert any("and 3 more" in m for m in messages)
@@ -229,7 +242,9 @@ class TestFinalizeUnpinnedWarning:
         dep_ref.repo_url = None
         dep_ref.local_path = None
         pkg.dep_ref = dep_ref
-        ctx = _make_ctx(unpinned_count=1, installed_packages=[pkg], diagnostics=diag)
+        ctx = _make_ctx(
+            installed_count=1, unpinned_count=1, installed_packages=[pkg], diagnostics=diag
+        )
         run(ctx)
         messages = [d.message for d in diag._diagnostics]
         # Falls back to count-only message (no names list)
@@ -243,6 +258,7 @@ class TestFinalizeUnpinnedWarning:
         unpinned = _make_pkg(repo_url="github.com/o/unpinned", reference=None)
         pinned = _make_pkg(repo_url="github.com/o/pinned", reference="v1.0.0")
         ctx = _make_ctx(
+            installed_count=1,
             unpinned_count=1,
             installed_packages=[unpinned, pinned],
             diagnostics=diag,
@@ -254,7 +270,9 @@ class TestFinalizeUnpinnedWarning:
     def test_duplicate_unpinned_names_deduped(self) -> None:
         diag = DiagnosticCollector()
         pkgs = [_make_pkg(repo_url="github.com/o/same", reference=None) for _ in range(3)]
-        ctx = _make_ctx(unpinned_count=3, installed_packages=pkgs, diagnostics=diag)
+        ctx = _make_ctx(
+            installed_count=1, unpinned_count=3, installed_packages=pkgs, diagnostics=diag
+        )
         run(ctx)
         messages = [d.message for d in diag._diagnostics]
         # "same" should only appear once in the names list
@@ -265,8 +283,39 @@ class TestFinalizeUnpinnedWarning:
     def test_pkg_without_dep_ref_attribute_handled(self) -> None:
         diag = DiagnosticCollector()
         pkg = MagicMock(spec=[])  # no dep_ref attribute
-        ctx = _make_ctx(unpinned_count=1, installed_packages=[pkg], diagnostics=diag)
+        ctx = _make_ctx(
+            installed_count=1, unpinned_count=1, installed_packages=[pkg], diagnostics=diag
+        )
         run(ctx)  # should not raise
+
+    def test_converged_run_repeats_no_unpinned_notice(self) -> None:
+        diag = DiagnosticCollector()
+        pkg = _make_pkg(repo_url="github.com/owner/repo", reference=None)
+        ctx = _make_ctx(
+            installed_count=0, unpinned_count=1, installed_packages=[pkg], diagnostics=diag
+        )
+        run(ctx)
+        assert not any("unpinned" in d.message for d in diag._diagnostics)
+
+    def test_transitive_unpinned_is_verbose_only_and_names_its_parent(self) -> None:
+        pkg = _make_pkg(repo_url="github.com/o/child", reference=None)
+        pkg.depth = 2
+        pkg.resolved_by = "o/parent"
+        quiet = DiagnosticCollector()
+        run(
+            _make_ctx(
+                installed_count=1, unpinned_count=1, installed_packages=[pkg], diagnostics=quiet
+            )
+        )
+        assert not any("unpinned" in d.message for d in quiet._diagnostics)
+        loud = DiagnosticCollector(verbose=True)
+        run(
+            _make_ctx(
+                installed_count=1, unpinned_count=1, installed_packages=[pkg], diagnostics=loud
+            )
+        )
+        notes = [d.message for d in loud._diagnostics if "unpinned" in d.message]
+        assert notes and "declared by o/parent" in notes[0]
 
 
 def test_unpinned_hint_example_tracks_releases_when_followed() -> None:

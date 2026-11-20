@@ -9,10 +9,17 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import partial
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import (
+    DRY_RUN_INCOMPLETE,
+    LOCKED_REFS_SATISFIED,
+    ORPHANED_PACKAGES,
+)
 from apm_cli.models.results import InstallDisposition
 from apm_cli.utils.console import (
     _rich_echo,
@@ -27,6 +34,21 @@ if TYPE_CHECKING:
     from apm_cli.install.failure_residue import FailedInstallResidue
     from apm_cli.integration.cleanup import CleanupResult
     from apm_cli.policy.models import PolicyRemedy
+
+
+def _dependency_label(dep_key: str) -> str:
+    """Render a lockfile dependency key without a machine-specific path.
+
+    A local dependency declared by absolute or home path is keyed by that
+    path; output names it ``_local/<name>``, as the manifest and lockfile do.
+    """
+    if dep_key.startswith("~") or PurePosixPath(dep_key).is_absolute():
+        name = PurePosixPath(dep_key.replace("\\", "/")).name
+    elif PureWindowsPath(dep_key).is_absolute():
+        name = PureWindowsPath(dep_key).name
+    else:
+        return dep_key
+    return f"_local/{name}" if name else dep_key
 
 
 def _strip_source_prefix(source: str) -> str:
@@ -100,7 +122,7 @@ class CommandLogger:
         """Log progress during an operation."""
         _rich_info(message, symbol=symbol)
 
-    def mcp_lookup_heartbeat(self, count: int):
+    def mcp_lookup_heartbeat(self, count: int, registry: str | None = None):
         """Emit a single batch heartbeat before MCP registry validation
         (F4, microsoft/apm#1116).
 
@@ -116,7 +138,8 @@ class CommandLogger:
         if count <= 0:
             return
         noun = "server" if count == 1 else "servers"
-        _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
+        where = f"registry {registry}" if registry else "registry"
+        _rich_info(f"Looking up {count} MCP {noun} in {where}...", symbol="running")
 
     def info(self, message: str, symbol: str = "info", *, soft_wrap: bool = False):
         """Log static advisory / informational context.
@@ -169,7 +192,8 @@ class CommandLogger:
     def stale_cleanup(self, dep_key: str, cleanup: CleanupResult) -> int:
         """Name each deployed path a cleanup pass removed; return how many were named."""
         return self._removed_paths(
-            cleanup.announced_paths, lambda noun: f"stale deployed {noun} for {dep_key}"
+            cleanup.announced_paths,
+            lambda noun: f"stale deployed {noun} for {_dependency_label(dep_key)}",
         )
 
     @staticmethod
@@ -187,7 +211,8 @@ class CommandLogger:
     def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str):
         """Explain that a user-edited managed file was retained."""
         _rich_warning(
-            f"Retained user-edited file {rel_path} from {dep_key}; resolve it and retry.",
+            f"Retained user-edited file {rel_path} from {_dependency_label(dep_key)}; "
+            "resolve it and retry.",
             symbol="warning",
         )
 
@@ -259,6 +284,43 @@ class CommandLogger:
         if self._diagnostics and self._diagnostics.has_diagnostics:
             self._diagnostics.render_summary()
 
+    def nothing_to_prune(self) -> None:
+        """Log the single no-op line of ``apm prune``, whatever apm_modules/ holds (#4460)."""
+        _rich_success("No orphaned packages found. Nothing to prune.", symbol="check")
+
+
+# --- Library output -----------------------------------------------------------
+# Library code below the command layer (MCP client adapters, the safe MCP
+# installer) has no logger parameter. It emits through library_logger(), which
+# returns the logger the running command bound, so its lines share that
+# command's verbosity and rendering (#4089).
+
+_LIBRARY_LOGGER: ContextVar[CommandLogger | None] = ContextVar("apm_library_logger", default=None)
+
+
+@contextmanager
+def library_output(logger: CommandLogger | None) -> Iterator[None]:
+    """Route library output through *logger* for the duration of the block."""
+    token = _LIBRARY_LOGGER.set(logger)
+    try:
+        yield
+    finally:
+        _LIBRARY_LOGGER.reset(token)
+
+
+def library_logger() -> CommandLogger:
+    """Return the logger library code emits through.
+
+    That is the logger the running command bound, else the console-fallback
+    ``NullCommandLogger`` so library code works without a live logger.
+    """
+    bound = _LIBRARY_LOGGER.get()
+    if bound is not None:
+        return bound
+    from apm_cli.core.null_logger import NullCommandLogger
+
+    return NullCommandLogger()
+
 
 class InstallLogger(CommandLogger):
     """Install-specific logger with validation, resolution, and download phases.
@@ -284,7 +346,11 @@ class InstallLogger(CommandLogger):
         self._lockfile_written = False
         # MCP servers this run removed from native config; a change on their own.
         self._mcp_removed: set[str] = set()
+        # The project's own .apm/ content changed on disk; never an APM dependency.
+        self._local_content_updated = False
         self._failed_install_residue_note = ""
+        # Policy banners already shown; the package and MCP phases share them.
+        self._policy_banners: set[tuple[str, ...]] = set()
 
     def failed_install_residue(self, residue: FailedInstallResidue) -> None:
         """List native target output a failed install left behind, with one next step.
@@ -322,6 +388,16 @@ class InstallLogger(CommandLogger):
         self._failed_install_residue_note = (
             f"{total} native target {'item' if total == 1 else 'items'} listed above "
             f"{'remains' if total == 1 else 'remain'} in place."
+        )
+
+    def kept_overwrites(self, kept: int, written: Sequence[str]) -> None:
+        """Name the files an install wrote beside the managed files it kept (#4360)."""
+        if written:
+            self.info(f"This install wrote {len(written)} file(s), recorded in apm.lock.yaml:")
+            for path in written:
+                self.error_detail(f"  {path}")
+        self._failed_install_residue_note = (
+            f"apm.lock.yaml keeps the previous entries of the {kept} kept file(s)."
         )
 
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
@@ -440,6 +516,10 @@ class InstallLogger(CommandLogger):
         """Keep metadata-only persistence out of the unchanged summary."""
         self._lockfile_written = True
 
+    def record_local_content_updated(self) -> None:
+        """Record that the project's own .apm/ content changed deployed files (#4184)."""
+        self._local_content_updated = True
+
     def record_mcp_removed(self, names) -> None:
         """Record MCP servers this install removed, so the summary counts them."""
         self._mcp_removed.update(str(name) for name in names)
@@ -467,7 +547,7 @@ class InstallLogger(CommandLogger):
         else:
             _rich_success("All dependencies are up to date.", symbol="check")
         if lockfile_present and not update_mode:
-            _rich_info("Lockfile already satisfied -- run 'apm update' to resolve latest refs.")
+            _rich_info(f"Lockfile already satisfied -- {LOCKED_REFS_SATISFIED.clause()}.")
 
     # --- Download phase ---
 
@@ -492,8 +572,12 @@ class InstallLogger(CommandLogger):
         Called from the MAIN thread by the resolver/download callback
         BEFORE network work begins; F7's parallel BFS keeps emission
         on the main thread so output ordering is deterministic even
-        when downloads are dispatched to a worker pool.
+        when downloads are dispatched to a worker pool. A ``--dry-run``
+        preview keeps it verbose-only so it lists only what it would install.
         """
+        if self.dry_run:
+            self.verbose_detail(f"Resolving {dep_name}...")
+            return
         _rich_info(f"Resolving {dep_name}...", symbol="running")
 
     def download_complete(
@@ -625,7 +709,7 @@ class InstallLogger(CommandLogger):
             color="dim",
         )
 
-    def materialize_result(self, sparse_applied: bool, consumer_size_bytes: int):
+    def materialize_result(self, dep_name: str, sparse_applied: bool, consumer_size_bytes: int):
         """Log materialization outcome and consumer dir size (verbose only).
 
         ``sparse_applied`` tells the reader whether sparse-cone fired
@@ -639,7 +723,7 @@ class InstallLogger(CommandLogger):
         size_mb = consumer_size_bytes / (1024 * 1024)
         applied = "yes" if sparse_applied else "no"
         _rich_echo(
-            f"    [i] perf: materialize sparse={applied} size={size_mb:.2f} MB",
+            f"    [i] perf: materialize {dep_name} sparse={applied} size={size_mb:.2f} MB",
             color="dim",
         )
 
@@ -677,7 +761,7 @@ class InstallLogger(CommandLogger):
         """Name undeclared packages a frozen install left in place (#3662)."""
         _rich_info(
             "Kept packages no longer in apm.yml because --frozen does not change "
-            f"apm.lock.yaml: {', '.join(dep_keys)}. Run 'apm install' to remove them.",
+            f"apm.lock.yaml: {', '.join(dep_keys)}. {ORPHANED_PACKAGES.sentence()}",
             symbol="info",
         )
 
@@ -707,7 +791,7 @@ class InstallLogger(CommandLogger):
         kept the file and a manual decision is pending.
         """
         _rich_warning(
-            f"  Kept user-edited file {rel_path} (from {dep_key}); "
+            f"  Kept user-edited file {rel_path} (from {_dependency_label(dep_key)}); "
             "delete manually if no longer needed",
             symbol="warning",
         )
@@ -733,6 +817,8 @@ class InstallLogger(CommandLogger):
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
+        if not self._first_policy_banner("resolved", source, enforcement):
+            return
         parts = [f"Policy: {source}"]
         if chain and len(chain) > 1:
             # The leaf is already the source; show its ancestors root first.
@@ -790,6 +876,8 @@ class InstallLogger(CommandLogger):
             hint: Optional discovery diagnostic (``PolicyFetchResult.
                 discovery_hint``), shown with ``absent`` in verbose mode only.
         """
+        if not self._first_policy_banner("miss", outcome, source):
+            return
         err_text = error or "unknown"
 
         if outcome == "absent":
@@ -949,13 +1037,27 @@ class InstallLogger(CommandLogger):
                     err=True,
                 )
 
+    def _first_policy_banner(self, *key: str) -> bool:
+        """Record a policy banner; False when this invocation already showed it.
+
+        The package phase and the MCP phase both route the same policy
+        outcome, so every policy banner is printed once per invocation.
+        """
+        if key in self._policy_banners:
+            return False
+        self._policy_banners.add(key)
+        return True
+
     def policy_disabled(self, reason: str):
         """Log a loud warning that policy enforcement is disabled.
 
         Emitted when ``--no-policy`` or ``APM_POLICY_DISABLE=1`` is
         active.  Always visible (never silenceable) -- matches the
-        ``--allow-insecure`` pattern.
+        ``--allow-insecure`` pattern.  Shown once per invocation even when
+        several install phases check the escape hatch.
         """
+        if not self._first_policy_banner("disabled", reason):
+            return
         _rich_warning(
             f"Policy enforcement disabled by {reason} for this invocation. "
             "This does NOT bypass apm audit --ci. "
@@ -1084,7 +1186,7 @@ class InstallLogger(CommandLogger):
                 noun = "dependency" if apm_count == 1 else "dependencies"
                 _rich_warning(
                     f"Dry run incomplete: {apm_count} locally known APM {noun}. "
-                    "Run 'apm install' without --dry-run to resolve the full plan.",
+                    f"{DRY_RUN_INCOMPLETE.sentence()}",
                     symbol="warning",
                 )
                 return
@@ -1135,6 +1237,8 @@ class InstallLogger(CommandLogger):
             )
         elif parts:
             summary = " and ".join(parts)
+            if self._local_content_updated:
+                summary = f"{summary} and updated local content"
             if errors > 0:
                 _rich_warning(
                     f"Installed {summary}{cleanup_suffix}{timing_suffix} with {errors} error(s).",
@@ -1155,6 +1259,11 @@ class InstallLogger(CommandLogger):
             _rich_error(
                 f"Installation failed with {errors} error(s){timing_suffix}.",
                 symbol="error",
+            )
+        elif self._local_content_updated:
+            _rich_success(
+                f"Updated local content{cleanup_suffix}{timing_suffix}.",
+                symbol="sparkles",
             )
         elif stale_cleaned > 0:
             file_noun = "file" if stale_cleaned == 1 else "files"

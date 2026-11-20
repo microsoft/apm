@@ -245,7 +245,8 @@ def test_frozen_missing_lock_fails_without_durable_writes(
     )
 
     assert result.returncode != 0
-    assert "--frozen requires apm.lock.yaml to exist" in result.stdout
+    # Error lines go to stderr (RA-004).
+    assert "--frozen requires apm.lock.yaml to exist" in result.stdout + result.stderr
     _assert_same_state(before, _snapshot(project))
     assert_unchanged(cache_before, ArtifactSnapshot.capture(isolated.cache_root))
 

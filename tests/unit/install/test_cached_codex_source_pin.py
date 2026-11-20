@@ -143,7 +143,10 @@ def test_frozen_global_install_from_warm_cache_uses_locked_source_pin(
     if os.environ.get(_FRESH_PROCESS_ENV) != "1":
         _rerun_in_fresh_process(request)
         return
-    isolated = IsolatedApmEnvironment.create(tmp_path / "cached-codex", base_env={})
+    # The caller owns executable trust through PATH: GitPython resolves git on
+    # first import, which now happens inside the install, not at CLI startup.
+    native = {k: os.environ[k] for k in ("PATH", "PATHEXT", "SYSTEMROOT") if k in os.environ}
+    isolated = IsolatedApmEnvironment.create(tmp_path / "cached-codex", base_env=native)
     for key in list(os.environ):
         monkeypatch.delenv(key)
     for key, value in isolated.subprocess_env().items():

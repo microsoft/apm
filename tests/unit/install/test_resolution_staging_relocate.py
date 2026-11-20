@@ -175,7 +175,9 @@ def test_relocate_path_reports_disappeared_source(tmp_path: Path) -> None:
     modules.mkdir()
     staging = ResolutionStagingSession(modules)
 
-    with pytest.raises(FileNotFoundError, match="Run 'apm install' again"):
+    with pytest.raises(
+        FileNotFoundError, match="Run 'apm install' to materialize the package again"
+    ):
         staging.relocate_path(modules / "missing", modules / "Missing")
 
 
@@ -317,3 +319,26 @@ def test_prepare_replacement_slot_names_fit_windows_max_path(tmp_path: Path) -> 
     assert old_scheme_root_budget < len(moderate_root) <= root_budget
     assert len(moderate_root) + 1 + nested_len <= 260
     assert len(moderate_root) + 1 + old_scheme_nested_len > 260
+
+
+@pytest.mark.parametrize("child_first", [True, False])
+def test_nested_copies_stage_in_either_order_and_roll_back(
+    tmp_path: Path, child_first: bool
+) -> None:
+    modules = tmp_path / "apm_modules"
+    parent = modules / "owner" / "repo"
+    child = parent / "plugins" / "tool"
+    child.mkdir(parents=True)
+    (parent / "apm.yml").write_text("name: repo\n", encoding="utf-8")
+    (child / "apm.yml").write_text("name: tool\n", encoding="utf-8")
+    staging = ResolutionStagingSession(modules)
+
+    for path in (child, parent) if child_first else (parent, child):
+        staging.prepare_path(path)
+    assert not parent.exists()
+    child.mkdir(parents=True)
+    (child / "apm.yml").write_text("fetched\n", encoding="utf-8")
+
+    assert staging.rollback() == []
+    assert (parent / "apm.yml").read_text(encoding="utf-8") == "name: repo\n"
+    assert (child / "apm.yml").read_text(encoding="utf-8") == "name: tool\n"

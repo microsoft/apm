@@ -39,6 +39,11 @@ from pathlib import Path
 
 import yaml
 
+from apm_cli.core.remediation import (
+    LOCAL_PACKAGE_CONTENT_INVALID,
+    LOCAL_PACKAGE_PATH_MISSING,
+    LOCAL_PACKAGE_UNREADABLE,
+)
 from apm_cli.core.scope import manifest_file
 from apm_cli.deps.virtual_file import materialize_virtual_file_package, virtual_file_subdirectory
 from apm_cli.models.dependency import DependencyReference
@@ -192,17 +197,17 @@ def read_local_package_source(dep_ref: DependencyReference, base_dir: Path) -> L
     except FileNotFoundError as exc:
         raise LocalPackageError(
             f"Local package path does not exist: {dep_ref.local_path}. "
-            "Restore the source or correct the dependency path, then rerun apm install."
+            f"{LOCAL_PACKAGE_PATH_MISSING.sentence()}"
         ) from exc
     except OSError as exc:
         raise LocalPackageError(
             f"Cannot read local package: {dep_ref.local_path}: {exc}. "
-            "Check the source permissions and symlink target, then rerun apm install."
+            f"{LOCAL_PACKAGE_UNREADABLE.sentence()}"
         ) from exc
     except (UnicodeError, yaml.YAMLError) as exc:
         raise LocalPackageError(
             f"Invalid primitive content in {dep_ref.local_path}: {exc}. "
-            "Use UTF-8 Markdown with valid YAML frontmatter, then rerun apm install."
+            f"{LOCAL_PACKAGE_CONTENT_INVALID.sentence()}"
         ) from exc
 
 
@@ -404,3 +409,26 @@ def _copy_local_package(dep_ref, install_path, base_dir, *, project_root, logger
     except LocalPackageError as exc:
         logger.error(str(exc))
         return None
+
+
+def copy_local_dependency(dep_ref, install_path, *, declaring_dir, source_root, user_scope):
+    """Anchor and copy a local dependency; return ``None`` or the failure reason.
+
+    The anchor comes from :func:`apm_cli.deps.path_anchoring.local_dep_base_dir`
+    so a relative path resolves against the package that declared it.
+    """
+    from apm_cli.deps.path_anchoring import USER_SCOPE_RELATIVE_PATH_ERROR, local_dep_base_dir
+
+    base_dir = local_dep_base_dir(
+        dep_ref.local_path,
+        declaring_dir=declaring_dir,
+        source_root=source_root,
+        user_scope=user_scope,
+    )
+    if base_dir is None:
+        return f"{dep_ref.local_path} -- {USER_SCOPE_RELATIVE_PATH_ERROR}"
+    try:
+        materialize_local_package(dep_ref, install_path, base_dir)
+    except LocalPackageError as exc:
+        return str(exc)
+    return None

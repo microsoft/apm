@@ -15,12 +15,12 @@ import pytest
 
 from tests.lifecycle import driver, oracles
 from tests.lifecycle.obligations import ReceiptWitnessPlugin, load_catalog
-from tests.lifecycle.world.fixtures import lifecycle_template, lifecycle_world
+from tests.lifecycle.world.fixtures import _world_dir, lifecycle_template, lifecycle_world
 from tests.quality.taxonomy import directory_marker
 from tests.quality.taxonomy_inventory_plugin import BEHAVIORAL_MARKERS
 from tests.utils.apm_lifecycle_runner import CommandResult
 
-__all__ = ["lifecycle_template", "lifecycle_world"]
+__all__ = ["_world_dir", "lifecycle_template", "lifecycle_world"]
 
 _PLUGIN_NAME = "lifecycle-receipts"
 

@@ -100,7 +100,8 @@ def _author(twin: Twin, tree: Path) -> None:
     for relative, text in twin.files.items():
         path = tree / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="ascii")
+        # LF bytes on every OS, so a twin commit (and a journey's pinned SHA) is identical.
+        path.write_text(text, encoding="ascii", newline="\n")
     if twin.copy_from:
         shutil.copytree(_REPO_ROOT / twin.copy_from, tree / twin.copy_to)
 

@@ -188,6 +188,32 @@ def serialized_lifecycle_unless(
     return decorate
 
 
+def serialized_lifecycle_unless_fresh_preview(
+    preview_argument: str,
+) -> Callable[[Callable[..., _T]], Callable[..., _T]]:
+    """Serialize a callback; a preview serializes once lifecycle lock state exists.
+
+    A preview that stages into ``apm_modules`` must not interleave with a
+    running operation, yet it never creates lock state under ``APM_HOME``
+    (#2549); any operation it could interleave with has created that state.
+    """
+
+    def decorate(run: Callable[..., _T]) -> Callable[..., _T]:
+        signature = inspect.signature(run)
+
+        @wraps(run)
+        def wrapped(*args: Any, **kwargs: Any) -> _T:
+            preview = signature.bind_partial(*args, **kwargs).arguments.get(preview_argument)
+            if preview and not (get_apm_home() / _LIFECYCLE_LOCK_NAME).exists():
+                return run(*args, **kwargs)
+            with lifecycle_operation():
+                return run(*args, **kwargs)
+
+        return wrapped
+
+    return decorate
+
+
 def serialized_lifecycle_when(
     mutating_argument: str,
     *,

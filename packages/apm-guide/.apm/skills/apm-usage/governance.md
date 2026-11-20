@@ -467,13 +467,15 @@ Identity casing compares GitHub and registry owner/repository prefixes case-inse
 
 These checks run without a policy file:
 
-- `lockfile-exists` -- apm.lock.yaml present
+- `lockfile-exists` -- apm.lock.yaml present when APM, MCP or LSP dependencies are declared
 - `ref-consistency` -- dependency refs match lockfile
 - `deployment-ledger-owners` -- every canonical deployment owner and active owner resolves to a current dependency, `.`, or `local-bundle`
 - `deployed-files-present` -- all deployed files exist
 - `no-orphaned-packages` -- no packages in lockfile absent from manifest
+- `lockfile-targets-current` -- no lockfile-recorded files of a target `apm.yml` no longer declares; `apm install --frozen` refuses the same state without writing
 - `skill-subset-consistency` -- selected skill subsets match the lockfile
 - `config-consistency` -- MCP configs match lockfile; servers the executables gate left out pass, and a server the lock admits but `apm.yml` does not approve fails
+- `native-mcp-ownership` -- no unrecorded same-name native MCP entry differs from its self-defined declaration; `apm install --frozen` refuses the same entry
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
 - `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch
 - `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration
@@ -527,7 +529,8 @@ may use. This section covers how that contract is enforced at `apm install` time
 
 ### 2. Discovery and applicability
 
-APM auto-discovers org policy from the project's git remote by checking
+APM auto-discovers org policy from the project's git remote (`origin`, else the
+single remote; several remotes without `origin` stop the install and are named) by checking
 `.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub
 API-compatible hosts. No policy found is silent by default; on github.com, `*.ghe.com` and
 the `GITHUB_HOST` host, `apm policy status`, `--verbose` and the `fetch_failure_default: block`
@@ -676,13 +679,15 @@ $ apm install acme/evil-pkg
 
 One violation line per offending dependency or MCP server; the hint names what to change in apm.yml (for a transitive MCP server, the dependency that brings it in) and cites the check in parentheses.
 
-Transitive MCP server blocked -- APM packages stay installed, MCP configs are not written:
+Transitive MCP server blocked -- the install stops before anything is committed; `apm.lock.yaml`, deployed files and MCP configs are unchanged:
 
 ```shell
 $ apm install
 [>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
-[x] MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
+[x] Policy violation: evil-srv -- denied by pattern: evil-*
+  Blocked by org policy at org:contoso/.github (mcp-denylist) -- remove `acme/carrier` (it brings in `evil-srv`) from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+[x] Install blocked by org policy: 1 check(s) failed
 ```
 
 ### 8. Escape hatches

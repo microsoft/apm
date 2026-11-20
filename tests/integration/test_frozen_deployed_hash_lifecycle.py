@@ -51,7 +51,9 @@ _OLD_RENDERINGS = {
         '[ext](https://example.com/x.md) and [anchor](#top)."\n'
     ),
 }
-_REMEDY = "Rerun 'apm install' without --frozen"
+_KEPT_REMEDY = (
+    "Move it aside, then run 'apm install' to restore it, or 'apm install --force' to overwrite it."
+)
 
 
 def _git(cwd: Path, env: dict[str, str], *args: str) -> str:
@@ -130,19 +132,23 @@ def test_frozen_replay_of_previous_cli_output_fails_closed_and_names_paths(
     text = output(audit)
     assert "render" in text and "apm export-patch" not in text, text
 
-    # Frozen fails closed: every re-rendered path is named with both hashes.
+    # Frozen fails closed and names every re-rendered path. A lockfile hash
+    # never proves APM wrote the committed bytes, so it keeps them (#4360).
     frozen = scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env, expect=1)
     text = output(frozen)
-    assert "do not match the hashes recorded in apm.lock.yaml" in text, text
     for relative, old in _OLD_RENDERINGS.items():
-        observed = compute_file_hash(clone / relative)
-        assert f"{relative}: expected {_sha(old.encode('ascii'))}, observed {observed}" in text
-    assert _REMEDY in text
+        assert f"Kept {relative}: it differs from what APM renders" in text, text
+        assert (clone / relative).read_text(encoding="ascii") == old
+    # Every refusal prints its runnable next step: move the files aside, then install.
+    assert _KEPT_REMEDY in text, text
     assert "Deployed files verified" not in text
     assert (clone / "apm.lock.yaml").read_bytes() == lock_before
     scenario.run("audit", "--ci", "--no-policy", cwd=clone, env=env, expect=1)
 
-    # The documented repair converges: install, then frozen and audit agree.
+    # The documented repair converges: move the files aside, install, then
+    # frozen and audit agree.
+    for relative in _OLD_RENDERINGS:
+        (clone / relative).unlink()
     scenario.run("install", "--no-policy", cwd=clone, env=env)
     assert (clone / "apm.lock.yaml").read_bytes() != lock_before
     verified = scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env)
@@ -234,7 +240,9 @@ def test_frozen_fails_on_edit_of_every_primitive_type(
     frozen = scenario.run("install", "--frozen", "--no-policy", cwd=project, env=env, expect=1)
     text = output(frozen)
     assert f"{relative}: expected sha256:" in text, text
-    assert "nothing was deployed" in text and "apm install --force" in text, text
+    # The tip deletes the edited file first, true for every kind (RA-009).
+    assert "nothing was deployed" in text and "Delete the edited" in text, text
+    assert "apm export-patch" in text, text
     assert edited.read_bytes() == b"Edited.\n"
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
 

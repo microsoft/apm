@@ -1434,6 +1434,7 @@ class GitHubPackageDownloader:
                         sparse_paths=[subdir_path],
                     )
                     _perf_logger.materialize_result(
+                        _dep_display,
                         sparse_applied=sparse_checkout_active(
                             "git",
                             _persistent_checkout,
@@ -1530,6 +1531,7 @@ class GitHubPackageDownloader:
                     ) from e
                 if _perf_logger is not None and getattr(_perf_logger, "verbose", False):
                     _perf_logger.materialize_result(
+                        _dep_display,
                         sparse_applied=sparse_checkout_active(
                             "git",
                             temp_clone_path,

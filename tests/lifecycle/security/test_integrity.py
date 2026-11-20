@@ -276,11 +276,6 @@ def _edit_files(name: str, edit: Callable[[str], str]) -> Callable[[Path], None]
     return change
 
 
-def _pending(phrase: str) -> str:
-    """Reason of a strict expected failure whose tracking issue is maintainer-routed."""
-    return f"S-pending (neutral issue to follow): {phrase}"
-
-
 @dataclass(frozen=True)
 class Tamper:
     """One out-of-band change; ``apply`` may register cleanups on the stack."""
@@ -306,7 +301,7 @@ class Expect:
     policy_fetch: bool | None = None
     # True: the op read the marketplace catalog over the network; False: it did not.
     catalog_fetch: bool | None = None
-    xfail: str | None = None  # _pending(<phrase>) -> strict expected failure
+    xfail: str | None = None  # "#<open issue> <phrase>" -> strict expected failure
     smoke: bool = False
 
 
@@ -378,12 +373,9 @@ _SKILL_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill")
 _DRIFT = r"content-integrity\s*\|\s*1 file\(s\) with hash drift"
 _FROZEN_HASHES = r"--frozen: deployed files do not match the hashes recorded in apm.lock.yaml"
 _RETAINED = r"Uninstall could not remove tracked target files"
-_FAILED_CLOSED_LEAVES_BYTES = (
-    "#4353 install leaves fetched bytes in apm_modules when it fails closed"
-)
-_AUDIT_PASSES_EDITED_COPY = (
-    "#4356 audit --ci passes an edited cached copy that install --frozen refuses"
-)
+# Uninstall refuses before any change when a file lacks deletion evidence (#3701).
+_REFUSED = r"Uninstall refused: deleting these tracked files needs deployment evidence"
+_REFUSAL_NEXT_STEP = r"move each listed file aside or delete it, then rerun 'apm uninstall'"
 
 DEPLOYED_FILE_HASHES = ArtifactSlice(
     packages=("p-skill",),
@@ -413,10 +405,14 @@ DEPLOYED_FILE_HASHES = ArtifactSlice(
         ("frozen", "lock-edited"): Expect(1, (_FROZEN_HASHES,), unchanged=_SKILL_STATE),
         ("frozen", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("frozen", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
-        # Plain install keeps a hand-edited file and warns (drift-detection.md).
+        # Plain install keeps a hand-edited file and warns (drift-detection.md):
+        # the render is unchanged, so the edit is drift, not a blocked upgrade.
         ("install", "disk-or-cache"): Expect(
             0,
-            (r"Kept user-edited file \.agents/skills/p-skill/SKILL\.md",),
+            (
+                r"Kept \.agents/skills/p-skill/SKILL\.md:\s+it\s+was\s+modified\s+since\s+"
+                r"APM\s+deployed\s+it\.\s+Move\s+it\s+aside,\s+then\s+run\s+'apm\s+install'",
+            ),
             unchanged=_SKILL_STATE,
         ),
         # Install re-records the hash of the bytes it deployed.
@@ -430,13 +426,13 @@ DEPLOYED_FILE_HASHES = ArtifactSlice(
         # uninstall.md: a removed package's file is deleted only with evidence
         # that APM wrote its current bytes (a deployment receipt, or byte
         # equality with the locked render); a lockfile hash alone is never
-        # evidence. An edited file is retained and uninstall exits 1; an edited
-        # or missing lock hash does not change the evidence, so cleanup proceeds.
+        # evidence. An edited file makes uninstall refuse before any change
+        # (exit 1); an edited or missing lock hash does not change the
+        # evidence, so cleanup proceeds.
         ("uninstall-prune", "disk-or-cache"): Expect(
             1,
-            (_RETAINED, r"Retained user-edited file"),
-            unchanged=_SKILL_STATE,
-            xfail=_FAILED_CLOSED_LEAVES_BYTES,
+            (_REFUSED, r"Nothing was removed", _REFUSAL_NEXT_STEP),
+            unchanged=(*_SKILL_STATE, "apm_modules"),
         ),
         ("uninstall-prune", "lock-edited"): Expect(0, absent=(SKILL, LOCK), forbids=(_RETAINED,)),
         ("uninstall-prune", "missing-hash"): Expect(0, absent=(SKILL, LOCK), forbids=(_RETAINED,)),
@@ -499,34 +495,23 @@ GIT_CONTENT_HASH = ArtifactSlice(
         "upstream-or-proxy": Tamper(_move_skill_upstream),
     },
     cells={
-        # The drift replay renders the changed copy and reports the deployed file.
-        ("audit-ci", "disk-or-cache"): Expect(
-            1,
-            unchanged=_SKILL_STATE,
-            xfail=_AUDIT_PASSES_EDITED_COPY,
-        ),
+        # I3: the replay reads the same locked source as install --frozen and refuses.
+        ("audit-ci", "disk-or-cache"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
         # I3: audit --ci must agree with install --frozen, which refuses this lock.
         ("audit-ci", "lock-edited"): Expect(1, unchanged=_SKILL_STATE),
         ("audit-ci", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("audit-ci", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
-        ("frozen", "disk-or-cache"): Expect(
-            1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
-        ),
-        ("frozen", "lock-edited"): Expect(
-            1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
-        ),
+        ("frozen", "disk-or-cache"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
+        ("frozen", "lock-edited"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
         # Entries without a content hash are accepted (security.md defaults).
         ("frozen", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("frozen", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
-        ("install", "disk-or-cache"): Expect(
-            1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
-        ),
+        ("install", "disk-or-cache"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
         ("install", "lock-edited"): Expect(
             1,
             (_CONTENT_MISMATCH,),
             unchanged=_SKILL_STATE,
             smoke=True,
-            xfail=_FAILED_CLOSED_LEAVES_BYTES,
         ),
         # Install records the hash of verified bytes again.
         ("install", "missing-hash"): Expect(
@@ -595,26 +580,17 @@ APPROVAL_PINS = ArtifactSlice(
         "upstream-or-proxy": Tamper(_move_hook_upstream),
     },
     cells={
-        # The replay parks the hook, so the deployed one is reported.
-        ("audit-ci", "disk-or-cache"): Expect(
-            1,
-            (r"orphaned: \.github/hooks/p-exec-session\.json",),
-            unchanged=_HOOK_STATE,
-            xfail=_AUDIT_PASSES_EDITED_COPY,
-        ),
+        # I3: the replay reads the same locked source as install --frozen and refuses.
+        ("audit-ci", "disk-or-cache"): Expect(1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE),
         ("audit-ci", "lock-edited"): Expect(
             1, (r"orphaned: \.github/hooks/p-exec-session\.json",), unchanged=_HOOK_STATE
         ),
         ("audit-ci", "upstream-or-proxy"): Expect(0, unchanged=_HOOK_STATE),
-        ("frozen", "disk-or-cache"): Expect(
-            1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
-        ),
+        ("frozen", "disk-or-cache"): Expect(1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE),
         # I3: frozen must agree with audit --ci (exit 1) and keep lock and disk in step.
         ("frozen", "lock-edited"): Expect(1, unchanged=_HOOK_STATE),
         ("frozen", "upstream-or-proxy"): Expect(0, unchanged=_HOOK_STATE),
-        ("install", "disk-or-cache"): Expect(
-            1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE, xfail=_FAILED_CLOSED_LEAVES_BYTES
-        ),
+        ("install", "disk-or-cache"): Expect(1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE),
         # I4: the item no longer matches its pin, so install retires it.
         ("install", "lock-edited"): Expect(0, (_PARKED,), absent=(HOOK,)),
         ("install", "upstream-or-proxy"): Expect(0, unchanged=_HOOK_STATE),
@@ -626,7 +602,6 @@ APPROVAL_PINS = ArtifactSlice(
             1,
             (_EXEC_MISMATCH,),
             unchanged=_HOOK_STATE,
-            xfail="#4363 update exits 1 on a content hash mismatch without an error marker",
         ),
         ("update", "lock-edited"): Expect(
             0, (r"parked pending approval",), absent=(HOOK,), present=(LOCK,)
@@ -700,12 +675,13 @@ PATH_CONTAINMENT = ArtifactSlice(
             1, (r"outside the project tree",), unchanged=(LOCK, MANIFEST), check=_outside_intact
         ),
         ("update", "disk-or-cache"): Expect(0, unchanged=(LOCK, MANIFEST), check=_outside_intact),
+        # A deployed skill member replaced by a symlink: uninstall refuses
+        # before any change, so apm_modules stays byte-identical (#4451).
         ("uninstall-prune", "disk-or-cache"): Expect(
             1,
-            (_RETAINED,),
-            unchanged=(LOCK, MANIFEST),
+            (_REFUSED, r"replaced by a symbolic link", _REFUSAL_NEXT_STEP),
+            unchanged=(LOCK, MANIFEST, "apm_modules", ".agents/skills/p-skill"),
             check=_outside_intact,
-            xfail=_FAILED_CLOSED_LEAVES_BYTES,
         ),
         # The commit pin holds: the moved tag is not fetched.
         ("install", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE, check=_outside_intact),
@@ -918,7 +894,6 @@ def _repack_changed_bundle(world: World, stack: contextlib.ExitStack) -> None:
 
 
 _BUNDLE_PARKED = r"hooks are executable and not approved for this exact bundle content"
-_BUNDLE_RETIRES = _pending("bundle reinstall retires a hook whose approval no longer matches")
 
 BUNDLE_APPROVAL_PINS = _bundle_slice(
     tampers={
@@ -928,14 +903,10 @@ BUNDLE_APPROVAL_PINS = _bundle_slice(
     },
     cells={
         # I4: the deployed hook is no longer approved, so the install removes it.
-        ("bundle-install", "disk-or-cache"): Expect(
-            0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,), xfail=_BUNDLE_RETIRES
-        ),
-        ("bundle-install", "lock-edited"): Expect(
-            0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,), xfail=_BUNDLE_RETIRES
-        ),
+        ("bundle-install", "disk-or-cache"): Expect(0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,)),
+        ("bundle-install", "lock-edited"): Expect(0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,)),
         ("bundle-install", "upstream-or-proxy"): Expect(
-            0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,), xfail=_BUNDLE_RETIRES
+            0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,)
         ),
     },
 )
@@ -1036,7 +1007,6 @@ def _change_upstream_policy(world: World, stack: contextlib.ExitStack) -> None:
     _expire_policy_cache(world)
 
 
-_PIN_CACHE = _pending("policy cache content verified against the pin before use")
 _PIN_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill", ".github")
 
 POLICY_HASH_PIN = ArtifactSlice(
@@ -1053,9 +1023,9 @@ POLICY_HASH_PIN = ArtifactSlice(
     cells={
         # The pin covers the bytes that are evaluated, so a changed cache entry
         # is not evaluated; the verified policy allows p-skill.
-        ("audit-ci", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE, xfail=_PIN_CACHE),
-        ("frozen", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE, xfail=_PIN_CACHE),
-        ("install", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE, xfail=_PIN_CACHE),
+        ("audit-ci", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE),
+        ("frozen", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE),
+        ("install", "disk-or-cache"): Expect(0, unchanged=_PIN_STATE),
         # Not registered: ("bundle-install", "disk-or-cache"). The bundle preflight
         # reads the cache only, and no world bundle carries an approved item a
         # cached-policy edit could change, so the row would not observe the cell.

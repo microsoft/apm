@@ -63,6 +63,8 @@ for _user_root_variable in ("CODEX_HOME", "COPILOT_HOME", "CLAUDE_CONFIG_DIR", "
     os.environ.pop(_user_root_variable, None)
 # A developer's APM_HOME must not redirect user-scope metadata during tests.
 os.environ.pop("APM_HOME", None)
+# A runner's CI makes `apm install` frozen (req-lk-018); tests that need it set it.
+os.environ.pop("CI", None)
 
 
 def _hermetic_home(_cls=Path) -> Path:
@@ -207,6 +209,39 @@ def _reset_config_cache():
 
 
 @pytest.fixture(autouse=True)
+def _reset_marketplace_registry_cache():
+    """Drop the process-wide marketplace registry cache around each test.
+
+    ``marketplace.registry`` caches ``marketplaces.json`` for the process. A
+    test that registers a marketplace under a temporary HOME would otherwise
+    leave that alias visible to later tests on the worker.
+    """
+    from apm_cli.marketplace import registry
+
+    registry._invalidate_cache()
+    yield
+    registry._invalidate_cache()
+
+
+@pytest.fixture(autouse=True)
+def _reset_once_per_process_warnings():
+    """Forget which once-per-process CLI notices were shown (#4242, #4256).
+
+    One CLI process prints each such notice once; a test is one process
+    in production, so a notice seen by an earlier test must not hide it here.
+    """
+    from apm_cli.integration import mcp_config_view
+    from apm_cli.models.dependency import mcp
+
+    shown = (mcp._PASSTHROUGH_WARNED, mcp_config_view._TRUST_NOTICES_SHOWN)
+    for notices in shown:
+        notices.clear()
+    yield
+    for notices in shown:
+        notices.clear()
+
+
+@pytest.fixture(autouse=True)
 def _restore_executable_caches():
     """Restore the process-wide git/gh executable caches after each test.
 
@@ -303,15 +338,109 @@ _LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 
 
 @pytest.hookimpl(tryfirst=True)
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """A ``lifecycle_merge_group`` node is also ``lifecycle_smoke``.
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Imply ``lifecycle_smoke`` and bind OpenAPM req markers to the conformance map.
 
-    The merge-group selection is then a subset of the full lifecycle smoke
-    selection by construction. ``tryfirst`` runs this before ``-m``
-    deselection, so ``-m lifecycle_smoke`` collects merge-group nodes.
+    A ``lifecycle_merge_group`` node is also ``lifecycle_smoke``, so the
+    merge-group selection is a subset of the full lifecycle smoke selection by
+    construction; ``tryfirst`` runs this before ``-m`` deselection. Running
+    first also means environment-dependent skip markers that other conftests
+    add at collection time never change a requirement's recorded status.
     """
     for item in items:
         if item.get_closest_marker(_LIFECYCLE_MERGE_GROUP_MARKER) and not item.get_closest_marker(
             _LIFECYCLE_SMOKE_MARKER
         ):
             item.add_marker(_LIFECYCLE_SMOKE_MARKER)
+
+    # Bounded candidate copies (mutation harnesses) ship no tests/spec_conformance.
+    if not config.getoption("collectonly", False) and not any(
+        item.get_closest_marker("req") for item in items
+    ):
+        return
+    from tests.spec_conformance.coverage_map import record
+
+    record(config, items)
+
+
+_MOCK_GLOBALS_KEY = "apm_mock_bound_module_globals"
+
+# Modules that production code imports lazily and that bind names from a
+# module tests patch at its source (lockfile, scope, marketplace registry,
+# policy discovery, github_host). First imported inside such a patch, each
+# would keep the mock for the rest of the worker; loading them at session
+# start keeps every later patch transient. pytest_sessionfinish below fails
+# the run if another module is captured this way.
+_LAZY_CONSUMERS = (
+    "apm_cli.claude_plugins.registrar",
+    "apm_cli.deps.artifactory_orchestrator",
+    "apm_cli.deps.clone_engine",
+    "apm_cli.deps.download_strategies",
+    "apm_cli.deps.git_reference_resolver",
+    "apm_cli.deps.github_downloader",
+    "apm_cli.install.phases.claude_plugins",
+    "apm_cli.install.phases.codex_plugins",
+    "apm_cli.marketplace.catalog_origin",
+    "apm_cli.policy.install_preflight",
+)
+
+
+def _load_command_tree(group, ctx) -> None:
+    import click
+
+    for name in group.list_commands(ctx):
+        command = group.get_command(ctx, name)
+        if isinstance(command, click.Group):
+            _load_command_tree(command, click.Context(command, parent=ctx, info_name=name))
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Load lazily imported modules before any test can patch their sources.
+
+    The CLI imports each verb's module on first dispatch; loading the command
+    tree here keeps tests that patch a source module and then invoke a verb
+    from leaving that verb's module bound to the mock.
+    """
+    import importlib
+
+    import click
+
+    from apm_cli.cli import cli
+
+    for name in _LAZY_CONSUMERS:
+        importlib.import_module(name)
+    _load_command_tree(cli, click.Context(cli, info_name="apm"))
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Fail the run when an ``apm_cli`` module global is left as a mock.
+
+    xdist workers hand their findings to the controller, which reports them.
+    """
+    from tests.utils import state_leaks
+
+    config = session.config
+    found = set(state_leaks.mock_bound_module_globals())
+    if hasattr(config, "workeroutput"):
+        config.workeroutput[_MOCK_GLOBALS_KEY] = sorted(found)
+        return
+    found |= getattr(config, "_apm_worker_mock_globals", set())
+    if found:
+        reporter = config.pluginmanager.get_plugin("terminalreporter")
+        lines = [
+            "[x] apm_cli module globals left as unittest.mock objects "
+            "(a patch was captured by a module first imported inside it):",
+            *(f"    {name}" for name in sorted(found)),
+        ]
+        if reporter is not None:
+            reporter.write_line("\n".join(lines), red=True)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node, error) -> None:
+    """Collect an xdist worker's mock-bound module globals on the controller."""
+    found = getattr(node, "workeroutput", {}).get(_MOCK_GLOBALS_KEY, [])
+    collected = getattr(node.config, "_apm_worker_mock_globals", set())
+    collected.update(found)
+    node.config._apm_worker_mock_globals = collected

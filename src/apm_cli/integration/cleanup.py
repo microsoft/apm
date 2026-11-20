@@ -45,6 +45,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import (
+    COWORK_SKILLS_DIR_UNDETECTED,
+    UNINSTALL_EVIDENCE_REINSTALL,
+    UNINSTALL_EVIDENCE_REMOVE,
+)
 from apm_cli.security.gate import is_python_bytecode_cache_path
 from apm_cli.utils.paths import SpellingAliasIndex
 
@@ -57,6 +62,8 @@ AUTHORIZED = "authorized"
 EDITED = "edited"
 UNPROVEN = "unproven"
 UNREADABLE = "unreadable"
+# A member of a claimed directory replaced by a symlink: cleanup keeps the directory (#4451).
+SYMLINKED = "symlinked"
 
 
 class DeploymentEvidence:
@@ -80,18 +87,23 @@ class DeploymentEvidence:
         render: Callable[[str | None], Path | None] | None,
         owners: Mapping[str, tuple[str, ...]] | None = None,
         user_scope: bool = False,
+        kept: Iterable[str],
     ) -> None:
         self._deploy_root = deploy_root
         self.user_scope = user_scope
+        self._kept: frozenset[str] = frozenset()
+        self._kept_parents: frozenset[str] = frozenset()
+        self.retain(kept)
         self._receipts = dict(receipts)
         self._render = render
         self._owners = dict(owners or {})
         self._renders: dict[str | None, Path | None] = {}
+        self._rendered_now: dict[str, str] = {}
 
     @classmethod
     def none(cls, deploy_root: Path) -> DeploymentEvidence:
         """Evidence that authorizes nothing: every lockfile-listed file is kept."""
-        return cls(deploy_root=deploy_root, receipts={}, render=None)
+        return cls(deploy_root=deploy_root, receipts={}, render=None, kept=())
 
     @classmethod
     def collect(
@@ -102,12 +114,14 @@ class DeploymentEvidence:
         lockfile: LockFile | None,
         lockfile_root: Path,
         diagnostics,
+        kept: Iterable[str],
     ) -> DeploymentEvidence:
         """Load this installation's receipts and bind a lazy render of *lockfile*.
 
         *lockfile* must be the lock before this transition (the versions whose
         files may be deleted); *lockfile_root* is the directory holding it.
-        Invalid receipt state authorizes nothing and is reported.
+        Invalid receipt state authorizes nothing and is reported. *kept* names
+        the members this install declared but left on disk; they are retained.
         """
         from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
         from apm_cli.core.scope import InstallScope
@@ -120,7 +134,11 @@ class DeploymentEvidence:
             receipts = {}
         if lockfile is None or not lockfile.dependencies:
             return cls(
-                deploy_root=deploy_root, receipts=receipts, render=None, user_scope=user_scope
+                deploy_root=deploy_root,
+                receipts=receipts,
+                render=None,
+                user_scope=user_scope,
+                kept=kept,
             )
         # Freeze the pre-transition lock: callers mutate theirs before rendering.
         locked = copy.deepcopy(lockfile)
@@ -138,7 +156,51 @@ class DeploymentEvidence:
             render=render,
             owners={path: tuple(keys) for path, keys in owners.items()},
             user_scope=user_scope,
+            kept=kept,
         )
+
+    def add_rendered(self, rendered: Mapping[Path, str]) -> None:
+        """Add hashes this install rendered from the source it holds (#4360).
+
+        A local bundle has no locked source to replay; the bytes this install
+        just deployed from it are its render, so a file equal to them is proven.
+        """
+        self._rendered_now.update(
+            {path.resolve().as_posix(): content_hash for path, content_hash in rendered.items()}
+        )
+
+    def _rendered_now_match(self, physical: Path, candidates: Iterable[str | None]) -> bool:
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        for candidate in candidates:
+            path = self._physical(candidate) if candidate else None
+            rendered = self._rendered_now.get(path.resolve().as_posix()) if path else None
+            if rendered is not None and compute_file_hash(physical) == rendered:
+                return True
+        return False
+
+    def retain(self, kept: Iterable[str]) -> None:
+        """Adopt this run's skip set; evidence built before integration learns it late."""
+        values = frozenset(value.replace("\\", "/").rstrip("/") for value in kept)
+        if values == self._kept:
+            return
+        self._kept = values
+        # Every ancestor directory of a kept member, so each lookup stays O(1).
+        self._kept_parents = frozenset(
+            "/".join(parts[:index])
+            for parts in (value.split("/") for value in values)
+            for index in range(1, len(parts))
+        )
+
+    def kept(self, value: str) -> bool:
+        """Return whether this install kept *value*, or a member under that directory."""
+        value = value.replace("\\", "/").rstrip("/")
+        return value in self._kept or value in self._kept_parents
+
+    @property
+    def receipt_hashes(self) -> dict[str, str]:
+        """Map each receipted resolved physical path to the hash APM wrote there."""
+        return dict(self._receipts)
 
     def prepare(self, claims: Iterable[str]) -> None:
         """Render now when any existing candidate file lacks a matching receipt.
@@ -161,6 +223,39 @@ class DeploymentEvidence:
             unproven.append(claim)
         for claim in unproven:
             self._rendered_roots(claim)
+
+    def refusals(self, claims: Iterable[str]) -> list[tuple[str, str]]:
+        """Return ``(claim, verdict)`` for each claimed file deletion would keep.
+
+        Lets a command refuse before it changes anything when a file it would
+        delete has no deployment evidence (#3701). Missing files, directories
+        and final symlinks are skipped; their own rules apply.
+        """
+        claims = list(dict.fromkeys(claims))
+        directories = [
+            claim.rstrip("/")
+            for claim in claims
+            if (physical := self._physical(claim)) is not None
+            and not physical.is_symlink()
+            and physical.is_dir()
+        ]
+        refused: list[tuple[str, str]] = []
+        for claim in claims:
+            physical = self._physical(claim)
+            if physical is None:
+                continue
+            if physical.is_symlink():
+                # Only a member of a claimed directory: managed final symlinks
+                # elsewhere keep their own unlink rule (#4451).
+                if any(claim.startswith(f"{directory}/") for directory in directories):
+                    refused.append((claim, SYMLINKED))
+                continue
+            if not physical.is_file():
+                continue
+            verdict = self.verdict(claim, physical)
+            if verdict != AUTHORIZED:
+                refused.append((claim, verdict))
+        return refused
 
     def _physical(self, claim: str) -> Path | None:
         from .copilot_cowork_paths import (
@@ -239,14 +334,30 @@ class DeploymentEvidence:
         *rendered_as* names where the locked render may place the same member
         instead (skill path migration renders the converged layout).
         """
-        from apm_cli.utils.content_hash import compute_file_hash
-
         try:
             receipt = self._receipt_match(physical)
             if receipt is True:
                 return AUTHORIZED
-            # A stale receipt (the file was later adopted unchanged from a newer
-            # render) does not block the render comparison: receipt OR render.
+        except OSError:
+            return UNREADABLE
+        # A stale receipt (the file was later adopted unchanged from a newer
+        # render) does not block the render comparison: receipt OR render.
+        rendered = self.render_verdict(claim, physical, rendered_as=rendered_as)
+        if rendered == UNPROVEN and receipt is False:
+            return EDITED
+        return rendered
+
+    def render_verdict(self, claim: str, physical: Path, *, rendered_as: str | None) -> str:
+        """Classify *physical* against what this install and the locked versions render.
+
+        Receipts are not consulted: an overwrite takes receipts only from the
+        lock-bound session (#4360).
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        try:
+            if self._rendered_now_match(physical, (claim, rendered_as)):
+                return AUTHORIZED
             claim = claim.replace("\\", "/")
             rendered = [
                 path
@@ -256,7 +367,7 @@ class DeploymentEvidence:
                 if not path.is_symlink() and path.is_file()
             ]
             if not rendered:
-                return EDITED if receipt is False else UNPROVEN
+                return UNPROVEN
             actual = compute_file_hash(physical)
             same = any(compute_file_hash(path) == actual for path in rendered)
         except OSError:
@@ -329,7 +440,10 @@ def _render_locked(
     )
     try:
         snapshot.parent.mkdir()
-        (lockfile if owner is None else _locked_subset(lockfile, owner)).write(snapshot)
+        from apm_cli.deps.lockfile_write_authority import lockfile_scratch_writes
+
+        with lockfile_scratch_writes():
+            (lockfile if owner is None else _locked_subset(lockfile, owner)).write(snapshot)
         with contextlib.redirect_stdout(io.StringIO()):
             with contextlib.redirect_stderr(io.StringIO()):
                 return run_replay(config, CheckLogger(verbose=False))
@@ -352,6 +466,10 @@ class CleanupResult:
     failed: list[str] = field(default_factory=list)
     """Paths that raised during ``unlink``/``rmtree`` and should be
     retained in ``deployed_files`` for retry on the next install."""
+
+    kept: list[str] = field(default_factory=list)
+    """Paths this install still declares but left on disk unwritten (a refused
+    or skipped member); never stale, so their lockfile entries carry forward."""
 
     skipped_user_edit: list[str] = field(default_factory=list)
     """Paths skipped because the on-disk content no longer matches the
@@ -398,7 +516,9 @@ class CleanupResult:
         prefix = "~/" if self.user_scope else ""
         announced: list[str] = []
         for path in sorted(dict.fromkeys(path.rstrip("/") for path in self.deleted)):
-            if any(path.startswith(f"{directory}/") for directory in directories):
+            # Check each ancestor against the set: cost scales with path depth.
+            parts = path.split("/")
+            if any("/".join(parts[:depth]) in directories for depth in range(1, len(parts))):
                 continue
             shown = f"{path}/" if path in directories else path
             announced.append(shown if "://" in shown else prefix + shown)
@@ -413,6 +533,7 @@ class CleanupResult:
         return list(
             dict.fromkeys(
                 [
+                    *self.kept,
                     *self.failed,
                     *self.skipped_user_edit,
                     *self.skipped_unmanaged,
@@ -586,6 +707,30 @@ def _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
         )
 
 
+_REFUSAL_REASONS = {
+    UNPROVEN: "no local deployment receipt or render of the locked package version",
+    EDITED: "edited since APM deployed it",
+    UNREADABLE: "its content could not be read to verify it",
+    SYMLINKED: "replaced by a symbolic link, so its directory cannot be removed",
+}
+
+
+def refusal_reason(verdict: str) -> str:
+    """Name why deployment evidence does not authorize deleting a file."""
+    return _REFUSAL_REASONS.get(verdict, _REFUSAL_REASONS[UNPROVEN])
+
+
+def uninstall_evidence_remedies(*, user_scope: bool) -> tuple[str, str]:
+    """Return the two runnable remedies when uninstall lacks deletion evidence."""
+    remove = UNINSTALL_EVIDENCE_REMOVE
+    reinstall = UNINSTALL_EVIDENCE_REINSTALL
+    if user_scope:
+        reinstall = reinstall.with_command("apm install -g")
+        remove = remove.with_command("apm uninstall -g")
+    reinstall = reinstall.bind(uninstall=remove.command)
+    return reinstall.sentence(), remove.sentence()
+
+
 def _keep_without_evidence(
     result: CleanupResult, diagnostics, stale_path: str, verdict: str, dep_key: str
 ) -> None:
@@ -709,6 +854,10 @@ def remove_stale_deployed_files(
     _cowork_resolve_errors: int = 0
 
     for stale_path in _stale_list:
+        # A member this install declares but did not rewrite is not stale.
+        if evidence.kept(stale_path):
+            result.kept.append(stale_path)
+            continue
         # -- Cowork:// paths ---------------------------------------
         # Handled BEFORE validate_deploy_path because that method
         # hard-rejects cowork:// when the OneDrive root is unavailable
@@ -884,10 +1033,8 @@ def remove_stale_deployed_files(
             (
                 f"Cowork: skipping {_cowork_orphans_skipped} stale lockfile "
                 f"{'entry' if _cowork_orphans_skipped == 1 else 'entries'}"
-                " -- OneDrive path not detected.\n"
-                "Run: apm config set copilot-cowork-skills-dir <path>  "
-                "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
-                "to clean up these entries on the next install/uninstall."
+                f" -- OneDrive path not detected.\n{COWORK_SKILLS_DIR_UNDETECTED.sentence()} "
+                "Alternatively, set APM_COPILOT_COWORK_SKILLS_DIR."
             ),
             package=dep_key,
         )

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.integration._harness_output_kit import HarnessScene, describe
+from tests.integration._harness_output_kit import HarnessScene, describe, flat
 from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [
@@ -122,7 +122,10 @@ def test_hermes_package_uninstall_removes_only_its_entries(scene: HarnessScene) 
     package = factory.create("hermes-mcp-package", mcp_dependencies=_DECLARATIONS)
     scene.write_manifest([], user=True)
     install = ("install", "-g", "--target", "hermes", "--no-policy", "--trust-transitive-mcp")
-    scene.ok(*install, str(package.root))
+    result = scene.ok(*install, str(package.root))
+    # One passthrough warning per server per command, not one per manifest parse (#4242).
+    warning = "MCP dependency 'hermes-stdio': unknown key(s) preserved in extra"
+    assert flat(result.stdout + result.stderr).count(warning) == 1, describe(result)
     servers = _document(scene)["mcp_servers"]
     assert servers["hermes-stdio"]["cwd"] == "/srv/hermes-fixture"
     assert servers["hermes-sse"]["transport"] == "sse"

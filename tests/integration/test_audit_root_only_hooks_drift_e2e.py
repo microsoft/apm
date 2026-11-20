@@ -132,3 +132,44 @@ def test_root_only_hooks_with_hook_dependency_audit_clean_after_install(
     returncode, output = _audit(apm_binary_path, project)
     assert returncode == 1, output
     assert _drifted(output, _SIDECAR), output
+
+
+def test_root_only_hooks_without_dependencies_get_a_lockfile_audit_replays(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4033: merged-only root hooks still produce a lockfile, so audit --ci replays them."""
+    project = tmp_path / "hooks-only"
+    project.mkdir()
+    (project / ".claude").mkdir()
+    (project / "apm.yml").write_text(
+        "name: hooks-only\nversion: 1.0.0\ntargets: [claude]\n", encoding="utf-8"
+    )
+    _write_json(
+        project / ".apm" / "hooks" / "root.json",
+        {"PreToolUse": [{"hooks": [{"type": "command", "command": "echo root"}]}]},
+    )
+    lock_path = project / "apm.lock.yaml"
+
+    install = _run(apm_binary_path, project, "install", "--no-policy")
+    assert install.returncode == 0, install.stderr or install.stdout
+    assert _commands(project, "PreToolUse") == ["echo root"]
+    assert lock_path.is_file(), install.stdout + install.stderr
+
+    # An unchanged reinstall restores a deleted lockfile.
+    lock_path.unlink()
+    install = _run(apm_binary_path, project, "install", "--no-policy")
+    assert install.returncode == 0, install.stderr or install.stdout
+    assert lock_path.is_file(), install.stdout + install.stderr
+
+    returncode, output = _audit(apm_binary_path, project)
+    assert returncode == 0, output
+    assert "no drift detected" in output.lower(), output
+
+    settings_path = project / _SETTINGS
+    settings_path.write_text(
+        settings_path.read_text(encoding="utf-8").replace("echo root", "echo tampered"),
+        encoding="utf-8",
+    )
+    returncode, output = _audit(apm_binary_path, project)
+    assert returncode == 1, output
+    assert _drifted(output, _SETTINGS), output

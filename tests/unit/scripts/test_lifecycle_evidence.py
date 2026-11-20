@@ -1292,10 +1292,34 @@ def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, c
         check_cli_output(args, _cli(args, stdout, stderr, code))
 
 
+@pytest.mark.parametrize("width", [78, 79, 80, 81])
+def test_a_verbose_phase_line_never_joins_a_full_width_banner(width: int) -> None:
+    """A repeated banner of any width still compares equal when Phase: lines follow it."""
+    head = "[!] Policy: org:acme/"
+    banner = head + "x" * (width - len(head) - 1) + "k"
+    assert len(banner) == width
+    stdout = f"{banner}\nPhase: apm\n[+] p\n{banner}\nPhase: mcp\n"
+    args = ("install", "--verbose")
+    with pytest.raises(
+        OutputOracleError, match=r"I9: stdout repeats a diagnostic: '\[!\] Policy: org:acme/"
+    ):
+        check_cli_output(args, _cli(args, stdout), known_cells=())
+
+
 _LOG_TWICE = (
     "DEBUG apm_cli.core.token_manager gh auth token failed for github.com: x\n"
     "DEBUG apm_cli.core.token_manager gh auth token failed for github.com: x\n"
 )
+
+
+def test_logging_records_follow_the_child_env_not_pytest(monkeypatch) -> None:
+    """APM_DEBUG counts only in the command's own environment, both ways."""
+    args = ("install",)
+    monkeypatch.delenv("APM_DEBUG", raising=False)
+    check_cli_output(args, _cli(args, "[+] done\n", _LOG_TWICE), env={"APM_DEBUG": "1"})
+    monkeypatch.setenv("APM_DEBUG", "1")
+    with pytest.raises(OutputOracleError, match=r"I9: stderr repeats a line: 'DEBUG apm_cli"):
+        check_cli_output(args, _cli(args, "[+] done\n", _LOG_TWICE), env={})
 
 
 def test_logging_records_repeat_freely_on_a_verbose_run(monkeypatch) -> None:
@@ -1422,17 +1446,16 @@ def test_known_output_cell_output_shape_narrows_where_it_is_strict() -> None:
         )
 
 
-def test_frozen_parked_mcp_cell_owns_the_transitive_variant() -> None:
+def test_frozen_parked_mcp_transitive_repeat_is_an_i9_failure() -> None:
     park = (
         "[!] Parked MCP server 'srv' from transitive package acme/plugin "
         "(self-defined, not approved)\n"
     )
     stdout = f"{park}[i] Targets: copilot\n{park}+- MCP Servers (1)\n"
     args = ("install", "--frozen")
-    check_cli_output(args, _cli(args, stdout))  # the repeat is owned by the #4299 cell
     check_cli_output(args, _cli(args, f"{park}+- MCP Servers (1)\n"))  # once is correct
     with pytest.raises(OutputOracleError, match=r"I9: stdout repeats a diagnostic"):
-        check_cli_output(args, _cli(args, stdout), known_cells=())
+        check_cli_output(args, _cli(args, stdout))
 
 
 def test_known_output_cells_are_well_formed() -> None:
@@ -1445,6 +1468,16 @@ def test_known_output_cells_are_well_formed() -> None:
         assert re.fullmatch(r"#[1-9][0-9]*", cell.issue), cell.id
         re.compile(cell.message)
         re.compile(cell.output)
+
+
+def test_output_oracle_does_not_join_a_plain_line_after_an_unwrapped_long_line() -> None:
+    # Piped output is not hard-wrapped (RA-010): a line longer than the console
+    # width is whole, so the plain line after it is not its continuation.
+    banner = "[!] Policy off for this invocation; " + "x" * 80
+    result = _cli(("install",), f"{banner}\nPhase: gate\n[i] a\n{banner}\nPhase: mcp\n")
+    assert result.stdout.count(banner) == 2
+    found = [v.message for v in output_violations(("install",), result)]
+    assert found == [f"stdout repeats a diagnostic: {banner!r}"]
 
 
 def test_output_oracle_does_not_join_a_plain_line_after_a_short_status_line() -> None:

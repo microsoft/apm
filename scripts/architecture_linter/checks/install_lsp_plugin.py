@@ -90,7 +90,7 @@ _EXEC_DECISION_CALLERS = {
         }
     ),
     "recorded_exec_status_is_stale": frozenset(
-        {(_EXEC_GATE, "lock_exec_decisions_stale"), (_EXEC_GATE, "for_dependency")}
+        {(_EXEC_GATE, "stale_exec_decisions"), (_EXEC_GATE, "for_dependency")}
     ),
 }
 _MANIFEST_DERIVATION_TOKENS = ('"apm.yml"', "APM_YML_FILENAME")
@@ -195,7 +195,8 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 ),
                 _AUDIT_COMMAND: ("policy_provider=replay_policy",),
                 _LOCAL_BUNDLE: (
-                    "bundle_approval_key = local_bundle_approval_key(",
+                    "bundle_approval_key = _bundle_approval_key(bundle_info, allow_executables)",
+                    "    return local_bundle_approval_key(",
                     "approval_key=bundle_approval_key,",
                     "grants_manifest = scope_manifest_path(project_root, user_scope=user_scope)",
                 ),

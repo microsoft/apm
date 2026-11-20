@@ -19,10 +19,6 @@ _ALL = (
 )
 # Plain files of the plugin survive an executable-level gate change.
 _SKILL = {"project": (".claude/skills/p-native-claude",)}
-_NOT_APPROVABLE = (
-    "#4154 apm approve does not find a Claude plugin installed from a local path, so "
-    "its executables cannot be approved"
-)
 # gate_paths/native_plugin.py: the git-served p-native-claude-bin at user scope; the
 # approved plugin lands whole under ~/.agents/plugins and goes as one unit.
 _PLUGIN = {"home": (".agents/plugins/p-native-claude-bin/.claude-plugin/plugin.json",)}
@@ -34,17 +30,12 @@ _PLUGIN_CHANGES = (
     "policy-dep-deny",
     "revoke-approval",
 )
-_PLUGIN_UNLOCKED = (
-    "#4225 the user lockfile does not record the files a native Claude plugin deployed"
-)
+_USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
 _XFAIL = {
     **{
-        f"G|{path}|{change}|native": _NOT_APPROVABLE
-        for path in ("install", "frozen", "update", "uninstall-prune-rebuild", "audit-ci")
-        for change in _ALL
-        if change != "org-enables-gate"
+        f"G|native-plugin|{change}|native": _USER_ORG
+        for change in ("org-deny", "org-enables-gate", "policy-dep-deny")
     },
-    **{f"G|native-plugin|{change}|native": _PLUGIN_UNLOCKED for change in _PLUGIN_CHANGES},
 }
 _SMOKE = {"G|install|org-enables-gate|native"}
 

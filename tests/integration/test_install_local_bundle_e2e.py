@@ -30,6 +30,7 @@ from click.testing import CliRunner
 from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
 from apm_cli.bundle.packer import pack_bundle
 from apm_cli.cli import cli
+from apm_cli.core.remediation import AGENT_PLUGIN_BUNDLE_ROUTE
 from apm_cli.deps.lockfile import LockFile
 
 # ---------------------------------------------------------------------------
@@ -786,7 +787,7 @@ def test_native_local_bundle_boundary_renders_typed_cli_failure(
     output = " ".join(result.output.split())
     assert "cannot be installed through the imperative" in output
     assert "apm install --target copilot" in output
-    assert "registers it natively with GitHub Copilot" in output
+    assert AGENT_PLUGIN_BUNDLE_ROUTE.sentence() in output
     assert "Error installing dependencies" not in output
     assert "Run with --verbose" not in output
     assert "Install complete" not in output
@@ -1021,7 +1022,9 @@ class TestLocalBundleHashFormatCrossFlow:
             targets=None,
             diagnostics=diagnostics,
             recorded_hashes=deployed_hashes,
-            evidence=DeploymentEvidence(deploy_root=project, receipts=receipts, render=None),
+            evidence=DeploymentEvidence(
+                deploy_root=project, receipts=receipts, render=None, kept=()
+            ),
         )
 
         assert not cleanup_result.skipped_user_edit, (

@@ -52,21 +52,23 @@ from ..agent_plugins.errors import AgentPluginError
 from ..codex_plugins.client import CodexNativeError
 from ..copilot_plugins.settings import CopilotSettingsCollisionError
 from ..deps.egress_route import EgressSurface, is_proxy_only, is_refused
+from ..deps.lockfile_write_authority import after_lockfile_commit, commit_point_seam_for_tests
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
 from ..utils.path_security import PathTraversalError
+from .commit_gate import check_before_lockfile
 from .errors import (
     AuthenticationError,
     DirectDependencyError,
     FrozenInstallError,
     InstallFailureAlreadyRendered,
+    PreviewIncomplete,
     RequiredIntegrationError,
 )
 from .failure_residue import record_install_outcome
 from .finalization import close_pipeline_attempt
-from .integrity import enforce_installed_hash_policy as _enforce_require_hashes
 from .outcome import (
     direct_dependency_failed,
     raise_direct_dependency_failure,
@@ -121,7 +123,10 @@ def _run_phase(name: str, phase, ctx):
 
 def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSession | None:
     """Bound durable ownership reads to integration, before lockfile persistence."""
-    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.deployment_ledger import (
+        DeploymentMaterializationSession,
+        retire_receipts_of_missing_projects,
+    )
     from apm_cli.integration.skill_adoption import locked_skill_sources
 
     from .phases import integrate as _integrate_phase
@@ -135,6 +140,8 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     locked = locked_skill_sources(ctx) if session is not None else None
     if session is not None:
         session.locked_sources = locked
+        session.frozen = bool(getattr(ctx, "frozen", False))
+        retire_receipts_of_missing_projects()
     try:
         with (
             contextlib.nullcontext()
@@ -149,6 +156,40 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
         if locked is not None:
             locked.close()
     return session
+
+
+def _preview_install(ctx: InstallContext, *, run_gates: bool) -> InstallResult:
+    """Stop ``--dry-run`` after the decisions an install makes before writing.
+
+    The preview reuses this pipeline's resolution, policy gate and commit
+    gate, so it reaches the install's own verdicts; the transaction rolls
+    back the resolution staging.
+    """
+    from .commit_gate import check_before_deploy
+    from .phases import policy_gate as _policy_gate_phase
+    from .pipeline_entry import PipelinePreview
+
+    ctx.preview_errors.extend(message for _, message in ctx.transitive_failures)
+    if run_gates:
+        ctx.direct_mcp_deps = ctx.apm_package.get_all_mcp_dependencies()
+        _run_phase("policy_gate", _policy_gate_phase, ctx)
+        check_before_deploy(ctx)
+    graph = ctx.dependency_graph
+    return InstallResult(
+        disposition=InstallDisposition.DRY_RUN,
+        target_decision=ctx.target_decision,
+        preview=PipelinePreview(
+            dependencies=tuple(ctx.deps_to_install),
+            resolved_dependencies=(
+                tuple(graph.flattened_dependencies.get_installation_list())
+                if graph is not None
+                else tuple(ctx.deps_to_install)
+            ),
+            mcp_dependencies=ctx.preview_mcp_dependencies,
+            errors=tuple(ctx.preview_errors),
+            declaration_errors=tuple(ctx.preview_declaration_errors),
+        ),
+    )
 
 
 def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
@@ -387,6 +428,9 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     frozen: bool = False,
     trust_transitive_mcp: bool = False,
     lsp_preflight=None,
+    install_mcp: bool = True,
+    mcp_runtime: str | None = None,
+    dry_run: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -482,7 +526,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         retained_local_work,
     )
 
-    if is_no_work_install(
+    if not dry_run and is_no_work_install(
         all_apm_deps=all_apm_deps,
         root_has_local_primitives=_root_has_local_primitives,
         local_cleanup_pending=(
@@ -508,8 +552,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         from apm_cli.core.target_detection import resolve_effective_target_decision
         from apm_cli.models.apm_package import package_target_selection
 
-        defer_auto_detection = lockfile_only or bool(
-            plan_callback is not None and logger is not None and logger.dry_run
+        defer_auto_detection = (
+            lockfile_only
+            or dry_run
+            or bool(plan_callback is not None and logger is not None and logger.dry_run)
         )
         target_decision = resolve_effective_target_decision(
             project_root,
@@ -527,6 +573,8 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
     ctx = InstallContext(
         trust_transitive_mcp=trust_transitive_mcp,
+        install_mcp=install_mcp,
+        mcp_runtime=mcp_runtime,
         project_root=project_root,
         apm_dir=apm_dir,
         source_root=source_root,
@@ -560,10 +608,12 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         legacy_skill_paths=legacy_skill_paths,
         refresh=refresh,
         lockfile_only=lockfile_only,
+        dry_run=dry_run,
         trust_bin=trust_bin,
         transaction=transaction,
         lsp_preflight=lsp_preflight,
     )
+    transaction.track_created_target_roots(ctx.created_target_roots)
 
     # ------------------------------------------------------------------
     # Workstream B (#1116): one Live region per major phase boundary.
@@ -580,12 +630,18 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     # ------------------------------------------------------------------
     from .phases import resolve as _resolve_phase
 
+    refused = False
     ctx.tui.__enter__()
     try:
         ctx.tui.start_phase("resolve", total=len(all_apm_deps) or 1)
         _run_phase("resolve", _resolve_phase, ctx)
+    except PreviewIncomplete:
+        refused = True  # --dry-run only: the preview reports ctx.preview_errors
     finally:
         ctx.tui.__exit__()
+
+    if dry_run:
+        return _preview_install(ctx, run_gates=not refused)
 
     if (
         not ctx.deps_to_install
@@ -816,6 +872,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             return stop_before_integration(ctx, diagnostics)
 
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
+        transaction.snapshot_deploy_targets(ctx)
         materialization_session = _run_integration_phase(ctx)
 
         # A direct dependency failing integration fails the install; transitive ones continue.
@@ -843,85 +900,19 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
             _run_phase("cleanup", _cleanup_phase, ctx)
 
-        # ------------------------------------------------------------------
-        # Phase: Skill path auto-migration (#737).
-        # Skipped in lockfile_only mode.
-        # ------------------------------------------------------------------
-        if (
-            not ctx.legacy_skill_paths
-            and ctx.existing_lockfile
-            and not ctx.dry_run
-            and not lockfile_only
-        ):
-            from apm_cli.utils.console import _rich_info, _rich_warning
+        # Phase: Skill path auto-migration (#737). Skipped in lockfile_only mode.
+        if not ctx.legacy_skill_paths and ctx.existing_lockfile and not lockfile_only:
+            from .skill_path_migration import run_skill_path_migration
 
-            from .phases.cleanup import deployment_evidence
-            from .skill_path_migration import (
-                COLLISION_HEADER_TEMPLATE,
-                COLLISION_HINT,
-                MIGRATION_SUMMARY_TEMPLATE,
-                check_collisions,
-                detect_legacy_skill_deployments,
-                execute_migration,
-            )
-
-            _migration_plans = detect_legacy_skill_deployments(
-                ctx.existing_lockfile, ctx.project_root
-            )
-            if _migration_plans:
-                _collisions = check_collisions(_migration_plans, ctx.project_root)
-                if _collisions:
-                    # H2: collision is an error, not a warning.
-                    _rich_error(
-                        COLLISION_HEADER_TEMPLATE.format(count=len(_collisions)),
-                        symbol="error",
-                    )
-                    for _c in _collisions:
-                        _rich_error(f"  {_c}", symbol="error")
-                    # H5: actionable next-step hint.
-                    _rich_info(COLLISION_HINT, symbol="info")
-                    # H2: surface via DiagnosticCollector.
-                    if ctx.diagnostics:
-                        for _c in _collisions:
-                            ctx.diagnostics.error(
-                                f"Skill migration collision: {_c}",
-                                package="skill-path-migration",
-                            )
-                else:
-                    _migration_result = execute_migration(
-                        _migration_plans,
-                        ctx.existing_lockfile,
-                        ctx.project_root,
-                        evidence=deployment_evidence(ctx),
-                    )
-                    _total = len(_migration_result.deleted) + len(_migration_result.skipped_no_file)
-                    if _total > 0:
-                        # H3: suppress info when quiet.
-                        if not (ctx.logger and getattr(ctx.logger, "_quiet", False)):
-                            _rich_info(
-                                MIGRATION_SUMMARY_TEMPLATE.format(count=_total),
-                                symbol="info",
-                            )
-                        # H4: enumerate deleted paths when verbose.
-                        if ctx.verbose and _migration_result.deleted:
-                            for _dp in _migration_result.deleted:
-                                _rich_info(f"  removed {_dp}", symbol="info")
-                    if _migration_result.failed:
-                        _rich_warning(
-                            f"  {len(_migration_result.failed)} file(s) could not be deleted (will retry next install)",
-                            symbol="warning",
-                        )
+            run_skill_path_migration(ctx)
 
         # Generate apm.lock for reproducible installs (T4: lockfile generation)
         from .phases.lockfile import LockfileBuilder
 
+        # The lockfile is staged in its writer scope (#4086): the commit gate
+        # checks it before that scope commits it (install/commit_gate.py).
         LockfileBuilder(ctx).build_and_save()
-
-        # Fail-closed integrity gate: when security.integrity.require_hashes is
-        # on, every non-local lockfile entry must carry a content hash. A
-        # missing hash stops the install (the key only asserts hash-presence on
-        # the freshly-built lockfile; it does not add a second hashing pass).
-        _enforce_require_hashes(ctx)
+        check_before_lockfile(ctx, LockFile.read(get_lockfile_path(ctx.apm_dir)))
 
         # ------------------------------------------------------------------
         # Phase: Post-deps local .apm/ content.
@@ -932,8 +923,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
             _run_phase("post_deps_local", _post_deps_local_phase, ctx)
             if materialization_session is not None:
-                materialization_session.bind_committed_claims(
-                    LockFile.read(get_lockfile_path(ctx.apm_dir))
+                after_lockfile_commit(
+                    lambda: materialization_session.bind_committed_claims(
+                        LockFile.read(get_lockfile_path(ctx.apm_dir))
+                    )
                 )
 
         # ------------------------------------------------------------------
@@ -943,10 +936,9 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         if not lockfile_only:
             from .phases import audit as _audit_phase
 
-            try:
-                _run_phase("audit", _audit_phase, ctx)
-            except PolicyViolationError:
-                raise
+            _run_phase("audit", _audit_phase, ctx)
+        commit_point_seam_for_tests()
+        transaction.release_deploy_targets()
 
         # ------------------------------------------------------------------
         # Phase: Native GitHub Copilot Agent Plugin registration (#2703).

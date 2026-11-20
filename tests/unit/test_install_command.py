@@ -736,7 +736,7 @@ class TestValidationFailureReasonMessages:
             # user is already in verbose mode.
             assert "run with --verbose for the full probe log" not in output
 
-    @patch("apm_cli.commands.install._uses_clone_root_probe", return_value=True)
+    @patch("apm_cli.install.repository_access._uses_clone_root_probe", return_value=True)
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_subdir_with_ref_clone_root_probe_omits_probe_chain(self, mock_validate, mock_probe):
         with self._chdir_tmp():
@@ -746,8 +746,8 @@ class TestValidationFailureReasonMessages:
             assert "all probes failed" not in output
             assert "not accessible or doesn't exist" in output
 
-    @patch("apm_cli.commands.install._initial_scheme", return_value="ssh")
-    @patch("apm_cli.commands.install._uses_clone_root_probe", return_value=True)
+    @patch("apm_cli.install.repository_access._initial_scheme", return_value="ssh")
+    @patch("apm_cli.install.repository_access._uses_clone_root_probe", return_value=True)
     @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
     def test_subdir_with_ref_ssh_probe_names_ssh_failure(
         self, mock_validate, mock_probe, mock_scheme
@@ -1901,6 +1901,7 @@ class TestInstallMcpFlag:
                 return_value=["apm", "install", "--mcp", ref],
             ),
             patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator"),
         ):
             result = self.runner.invoke(cli, ["install", "--mcp", ref])
             assert result.exit_code == 0, result.output
@@ -1923,6 +1924,7 @@ class TestInstallMcpFlag:
                 return_value=["apm", "install", "--mcp", ref],
             ),
             patch("apm_cli.install.mcp.command.MCPIntegrator") as mock_integ,
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator", new=mock_integ),
         ):
             mock_integ.install.side_effect = boom
             result = self.runner.invoke(cli, ["install", "--mcp", ref])
@@ -1995,6 +1997,7 @@ class TestInstallMcpFlag:
                 return_value=(["claude"], []),
             ),
             patch("apm_cli.install.mcp.command.MCPIntegrator") as integrator,
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator", new=integrator),
         ):
             result = self.runner.invoke(cli, argv[1:])
 
@@ -2654,6 +2657,7 @@ class TestInstallMcpFlag:
             ),
             patch("apm_cli.commands.install.MCPIntegrator"),
             patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator"),
         ):
             result = self.runner.invoke(
                 cli,
@@ -2683,6 +2687,7 @@ class TestInstallMcpFlag:
             ),
             patch("apm_cli.commands.install.MCPIntegrator"),
             patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator"),
         ):
             result = self.runner.invoke(
                 cli,
@@ -2709,6 +2714,7 @@ class TestInstallMcpFlag:
             ),
             patch("apm_cli.commands.install.MCPIntegrator"),
             patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator"),
         ):
             result = self.runner.invoke(
                 cli,
@@ -2870,6 +2876,7 @@ class TestInstallMcpFlag:
             ),
             patch("apm_cli.commands.install.MCPIntegrator"),
             patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator"),
             patch.dict(os.environ, {"MCP_REGISTRY_URL": "https://env.example.com"}),
         ):
             result = self.runner.invoke(
@@ -2954,6 +2961,7 @@ class TestInstallMcpFlag:
             ),
             patch("apm_cli.commands.install.MCPIntegrator"),
             patch("apm_cli.install.mcp.command.MCPIntegrator"),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator"),
         ):
             result = self.runner.invoke(
                 cli,

@@ -19,7 +19,9 @@ from typing import TYPE_CHECKING, Sequence, cast  # noqa: UP035
 
 from apm_cli.core.scope import manifest_file
 
+from ..core import remediation
 from ..core.deployment_ledger import DEPLOYMENT_OWNER_REMEDIATION
+from ..core.remediation import DEPLOYED_FILES_MISSING, LOCKFILE_MISSING, ORPHANED_PACKAGES
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
 
@@ -40,6 +42,22 @@ _logger = logging.getLogger(__name__)
 
 
 # -- Individual checks ---------------------------------------------
+
+
+def _read_audited_lock(lockfile_path: Path) -> tuple[Any, CheckResult | None]:
+    """Read the audited lockfile; a version this APM cannot read is a failed check."""
+    from ..deps.lockfile import LockFile, UnsupportedLockfileVersionError
+
+    try:
+        return LockFile.read(lockfile_path), None
+    except UnsupportedLockfileVersionError as exc:
+        # A lockfile from a newer APM fails the gate and names both remedies (#4233).
+        return None, CheckResult(
+            name="lockfile-exists",
+            passed=False,
+            message=str(exc),
+            remediations=getattr(exc, "remediations", ()),
+        )
 
 
 def _check_lockfile_exists(
@@ -66,7 +84,9 @@ def _check_lockfile_exists(
             message="No apm.yml found -- nothing to check",
         )
 
-    has_deps = manifest.has_any_apm_dependencies() or bool(manifest.get_all_mcp_dependencies())
+    from ..install.plan import manifest_requires_lockfile
+
+    has_deps = manifest_requires_lockfile(manifest)
     lockfile_path = get_lockfile_path(project_root)
 
     # Local-only repos may declare no remote/MCP deps but still have a
@@ -98,8 +118,9 @@ def _check_lockfile_exists(
     return CheckResult(
         name="lockfile-exists",
         passed=False,
-        message="Lockfile missing -- run 'apm install' to generate apm.lock.yaml",
+        message=f"Lockfile missing -- {LOCKFILE_MISSING.clause()}",
         details=["apm.yml declares dependencies but apm.lock.yaml is absent"],
+        remediations=(LOCKFILE_MISSING,),
     )
 
 
@@ -246,17 +267,18 @@ def _resolve_deployed_file_path(
     return None
 
 
-def _check_deployed_files_present(
+def find_missing_deployed_files(
     project_root: Path,
     lock: LockFile,
     targets: Sequence[TargetProfile] = (),
-) -> CheckResult:
-    """Verify all files listed in lockfile deployed_files exist on disk.
+) -> tuple[list[str], bool]:
+    """Return the recorded deployed files absent from disk, and whether any were gitignored.
 
-    Paths that are gitignored are considered absent by design (the repo owner
-    deliberately chose not to commit them) and are excluded from the missing
-    count.  This prevents false positives on fresh checkouts of repos that
-    gitignore one or more deploy directories.
+    Single owner shared by ``apm audit`` deployed-files-present and the
+    ``apm install --frozen`` post-deploy check, so both give one answer.
+    URI claims are skipped. Paths that are gitignored are absent by design
+    (the repo owner chose not to commit them) and are not reported, which
+    avoids false positives on fresh checkouts that gitignore a deploy directory.
     """
     missing: list[str] = []
     for _dep_key, dep in lock.dependencies.items():
@@ -270,12 +292,19 @@ def _check_deployed_files_present(
                 or (Path(rel_path).is_absolute() and abs_path.is_symlink())
             ):
                 missing.append(rel_path)
+    if not missing:
+        return missing, False
+    filtered = _filter_gitignored(project_root, missing)
+    return filtered, len(filtered) < len(missing)
 
-    gitignored_skipped = False
-    if missing:
-        filtered = _filter_gitignored(project_root, missing)
-        gitignored_skipped = len(filtered) < len(missing)
-        missing = filtered
+
+def _check_deployed_files_present(
+    project_root: Path,
+    lock: LockFile,
+    targets: Sequence[TargetProfile] = (),
+) -> CheckResult:
+    """Verify all files listed in lockfile deployed_files exist on disk."""
+    missing, gitignored_skipped = find_missing_deployed_files(project_root, lock, targets)
 
     if not missing:
         msg = (
@@ -293,8 +322,67 @@ def _check_deployed_files_present(
     return CheckResult(
         name="deployed-files-present",
         passed=False,
-        message=(f"{n} deployed {noun} missing -- run 'apm install' to restore"),
+        message=f"{n} deployed {noun} missing -- {DEPLOYED_FILES_MISSING.clause()}",
         details=missing,
+        remediations=(DEPLOYED_FILES_MISSING,),
+    )
+
+
+def _check_exec_status_current(
+    project_root: Path,
+    lock: LockFile,
+    manifest: APMPackage,
+    targets: Sequence[TargetProfile],
+    *,
+    user_scope: bool,
+    modules_root: Path,
+    policy_provider: Callable[[], Any] | None,
+) -> CheckResult:
+    """Fail when a locked ``exec_status`` is no longer the gate's decision (#4053).
+
+    Routes through the staleness owner ``apm update`` and ``apm install
+    --frozen`` use; audit never re-derives trust here. The gate's decision
+    depends on org policy, so without a *policy_provider* (``--no-policy``)
+    the check is not evaluated. Indeterminate answers (the provider raising
+    ``ExecPolicyUnavailable``, an unreadable package) are not failures.
+    """
+    from ..core.scope import scope_manifest_path
+    from ..install.exec_gate import stale_exec_decisions
+
+    if policy_provider is None:
+        return CheckResult(
+            name="exec-status-current",
+            passed=True,
+            message="Executables decisions not verified: org policy not consulted (--no-policy)",
+        )
+    stale, indeterminate = stale_exec_decisions(
+        lock,
+        modules_root,
+        scope_manifest_path(project_root, user_scope=user_scope),
+        policy_provider=policy_provider,
+        targets=list(targets),
+        fallback_allow_executables=getattr(manifest, "allow_executables", None),
+    )
+    if not stale:
+        return CheckResult(
+            name="exec-status-current",
+            passed=True,
+            message=(
+                "Executables decisions not verified: org policy unavailable or a package unreadable"
+                if indeterminate
+                else "Recorded executables decisions match the executables gate"
+            ),
+        )
+    n = len(stale)
+    noun = "package records" if n == 1 else "packages record"
+    return CheckResult(
+        name="exec-status-current",
+        passed=False,
+        message=(
+            f"{n} {noun} an executables decision the gate no longer makes -- "
+            f"{remediation.FROZEN_EXEC_DECISIONS_STALE.clause()}"
+        ),
+        details=[decision.describe() for decision in stale],
     )
 
 
@@ -327,6 +415,37 @@ def _check_deployment_ledger_owners(lock: LockFile) -> CheckResult:
             f"{DEPLOYMENT_OWNER_REMEDIATION}"
         ),
         details=details,
+    )
+
+
+def _check_lockfile_targets_current(
+    project_root: Path, lock: LockFile, *, user_scope: bool
+) -> CheckResult:
+    """Verify apm.lock.yaml records no files of a target apm.yml dropped (#4517).
+
+    The same dropped-target owner ``apm install --frozen`` refuses through, so
+    audit and frozen agree and share one remedy.
+    """
+    from ..install.manifest_reconcile import dropped_target_files
+
+    dropped = dropped_target_files(project_root, lock, user_scope=user_scope)
+    if not dropped:
+        return CheckResult(
+            name="lockfile-targets-current",
+            passed=True,
+            message="Lockfile records only declared targets",
+        )
+    fix = remediation.FROZEN_TARGET_DROPPED
+    targets = ", ".join(sorted(set(dropped.values())))
+    return CheckResult(
+        name="lockfile-targets-current",
+        passed=False,
+        message=(
+            f"apm.lock.yaml records {len(dropped)} file(s) of target(s) {targets} "
+            f"that apm.yml no longer declares -- {fix.clause()}"
+        ),
+        details=[f"{path} (target {dropped[path]})" for path in sorted(dropped)],
+        remediations=(fix,),
     )
 
 
@@ -366,9 +485,10 @@ def _check_no_orphans(
         name="no-orphaned-packages",
         passed=False,
         message=(
-            f"{len(orphaned)} orphaned package(s) in lockfile -- run 'apm install' to clean up"
+            f"{len(orphaned)} orphaned package(s) in lockfile -- {ORPHANED_PACKAGES.clause()}"
         ),
         details=orphaned,
+        remediations=(ORPHANED_PACKAGES,),
     )
 
 
@@ -651,6 +771,44 @@ def _check_config_consistency(
     )
 
 
+def _check_native_mcp_ownership(
+    project_root: Path,
+    lock: LockFile,
+    targets: Sequence[TargetProfile],
+    *,
+    user_scope: bool,
+) -> CheckResult:
+    """Fail where ``install --frozen`` refuses a differing same-name native MCP entry (#4477)."""
+    from ..install.mcp.native_entry import differing_unrecorded_native_mcp_entries
+
+    pairs = differing_unrecorded_native_mcp_entries(
+        lock,
+        [target.name for target in targets],
+        project_root=project_root,
+        user_scope=user_scope,
+    )
+    if not pairs:
+        return CheckResult(
+            name="native-mcp-ownership",
+            passed=True,
+            message="No unrecorded native MCP entries differ from their declarations",
+        )
+    return CheckResult(
+        name="native-mcp-ownership",
+        passed=False,
+        message=(
+            f"{len(pairs)} existing native MCP entr(ies) differ from their declarations "
+            "and their ownership is not recorded in apm.lock.yaml -- "
+            f"{remediation.NATIVE_MCP_OWNERSHIP_UNRECORDED.clause()}"
+        ),
+        details=[
+            f"MCP server {name!a} target {runtime!a}: the existing entry differs from "
+            "its declaration"
+            for name, runtime in pairs
+        ],
+    )
+
+
 @dataclass(frozen=True)
 class DeployedHashDrift:
     """One deployed file whose on-disk bytes differ from its locked hash envelope."""
@@ -770,6 +928,25 @@ def verify_deployed_file_hashes(
     return hash_mismatches, unresolved_hash_paths
 
 
+def _local_content_drift(project_root: Path, lock: LockFile) -> list[str]:
+    """Name local dependencies whose content differs from the lock, as frozen does."""
+    from ..core.scope import manifest_file
+    from ..install.local_content_verdict import local_content_reasons
+    from ..models.apm_package import APMPackage
+    from ..models.dependency.replacement import project_manifest_dependencies
+    from ..models.manifest_io import InvalidManifestError
+
+    path = manifest_file(project_root)
+    if not path.is_file():
+        return []
+    try:
+        manifest = APMPackage.from_apm_yml(path)
+    except (InvalidManifestError, OSError, ValueError):
+        return []  # The manifest checks report an unreadable apm.yml.
+    reasons = local_content_reasons(manifest, lock, project_manifest_dependencies(manifest))
+    return [reason.strip().removeprefix("- ") for reason in reasons]
+
+
 def _check_content_integrity(
     project_root: Path,
     lock: LockFile,
@@ -840,11 +1017,13 @@ def _check_content_integrity(
         project_root, lock, targets
     )
     staged_drift = lock.staged_hash_drift(project_root)
+    local_drift = _local_content_drift(project_root, lock)
 
     if (
         not critical_files
         and not hash_mismatches
         and not staged_drift
+        and not local_drift
         and not missing_ownership
         and not unresolved_hash_paths
         and not scan.incomplete
@@ -889,6 +1068,7 @@ def _check_content_integrity(
 
     parts: list[str] = []
     remedies: list[str] = []
+    remediations: list = []
     if scan.incomplete:
         parts.append(f"{len(scan.incomplete)} primitive(s) with incomplete prompt coverage")
         remedies.append("review the reported format or file access and rerun audit")
@@ -897,33 +1077,52 @@ def _check_content_integrity(
         remedies.append(
             "review structured prompt fields manually"
             if scan.protected_files.intersection(critical_files)
-            else "'apm audit --strip' to clean Unicode"
+            else remediation.HIDDEN_CHARACTERS_FLAGGED.clause()
         )
     if hash_mismatches:
         parts.append(f"{len(hash_mismatches)} file(s) with hash drift")
         from ..deps.file_provenance import LOCAL_BUNDLE_OWNER
-        from ..install.local_edits import restore_drifted_files_remedy
+        from ..install.local_edits import edited_file_remediations
 
-        owners = {drift.owner == LOCAL_BUNDLE_OWNER for drift in hash_mismatches}
-        remedies.extend(restore_drifted_files_remedy(bundle=bundle) for bundle in sorted(owners))
+        # True per primitive kind (RA-009): see install/local_edits.py.
+        for bundle in sorted({drift.owner == LOCAL_BUNDLE_OWNER for drift in hash_mismatches}):
+            remediations.extend(
+                edited_file_remediations(
+                    (
+                        drift.path
+                        for drift in hash_mismatches
+                        if (drift.owner == LOCAL_BUNDLE_OWNER) is bundle
+                    ),
+                    bundle=bundle,
+                )
+            )
+        remedies.extend(item.clause() for item in remediations)
+    if local_drift:
+        # install --frozen refuses the same local dependencies (#4447).
+        parts.extend(local_drift)
+        remedies.append(
+            "restore the locked local content, or "
+            + remediation.FROZEN_LOCAL_CONTENT_CHANGED.clause()
+        )
     if staged_drift:
         parts.append(f"{len(staged_drift)} staged file(s) with hash drift")
-        remedies.append("'apm install <bundle> --force' to restage drifted files")
+        remedies.append(remediation.STAGED_BUNDLE_DRIFT.clause())
     if missing_ownership:
         parts.append(f"{len(missing_ownership)} file(s) without deployment ownership")
-        remedies.append("'apm install' to repair ownership metadata")
+        remedies.append(remediation.DEPLOYMENT_OWNERSHIP_MISSING.clause())
     if unresolved_hash_paths:
         parts.append(f"{len(unresolved_hash_paths)} unsafe or unresolved deployed path(s)")
-        remedies.append("'apm install' to restore managed paths")
+        remedies.append(remediation.MANAGED_PATHS_UNRESOLVED.clause())
     summary = "; ".join(parts)
-    remedy = " and ".join(remedies)
+    remedy = "; ".join(remedies)
     return CheckResult(
         name="content-integrity",
         passed=False,
-        message=f"{summary} -- run {remedy}",
+        message=f"{summary} -- {remedy}",
         details=details,
         coverage=scan.inventory,
         content_findings=critical_findings,
+        remediations=tuple(remediations),
     )
 
 
@@ -1007,6 +1206,7 @@ def _check_drift(
         run_replay,
     )
     from ..install.errors import PolicyViolationError
+    from ..install.phases.local_content import LocalPackageError
     from ..integration.targets import resolve_audit_targets
 
     logger = CheckLogger(verbose=verbose)
@@ -1052,8 +1252,21 @@ def _check_drift(
                     passed=False,
                     message=(
                         f"drift replay failed: corrupt local dependency graph in the "
-                        f"lockfile ({exc}). Fix the resolved_by chain or re-run 'apm install'."
+                        f"lockfile ({exc}). Fix the resolved_by chain, or "
+                        f"{remediation.LOCAL_DEPENDENCY_GRAPH_CORRUPT.clause()}."
                     ),
+                ),
+                [],
+            )
+        except LocalPackageError as exc:
+            # A failed check, not an uncaught error: JSON and SARIF output
+            # still carry one document with the failure (#4287).
+            return (
+                CheckResult(
+                    name="drift",
+                    passed=False,
+                    message=f"drift replay failed: {exc}",
+                    details=[str(exc)],
                 ),
                 [],
             )
@@ -1064,7 +1277,7 @@ def _check_drift(
                     passed=True,
                     message=(
                         f"{DRIFT_SKIP_PREFIX}: install cache not populated "
-                        "(run 'apm install' first or pass --no-drift)"
+                        f"({remediation.DRIFT_CACHE_UNPOPULATED.clause()}, or pass --no-drift)"
                     ),
                 ),
                 [],
@@ -1186,8 +1399,8 @@ def _check_local_bundle_hooks(
         passed=False,
         message=(
             f"{len(unadmitted)} local bundle(s) have hooks the current executables "
-            "trust does not admit; run 'apm install' to retire them, or approve the "
-            "bundle and rerun 'apm install <bundle>'"
+            f"trust does not admit; {remediation.BUNDLE_HOOKS_UNADMITTED.clause()}, "
+            f"or {remediation.BUNDLE_HOOKS_APPROVED.clause()}"
         ),
         details=[f"{item.slug}: {item.reason}" for item in unadmitted],
     )
@@ -1255,6 +1468,7 @@ def run_baseline_checks(
     prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
     no_policy: bool = False,
+    policy_provider: Callable[[], Any] | None = None,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.
 
@@ -1265,12 +1479,13 @@ def run_baseline_checks(
     anything; otherwise it is an advisory warning only when APM artifacts exist.
     Returns :class:`CIAuditResult` with individual check results.
     """
+    from ..constants import APM_MODULES_DIR
     from ..deps.lockfile import LockFile, get_lockfile_path
     from ._shared import _parse_apm_yml_safe
 
     result = CIAuditResult()
     lockfile_path = get_lockfile_path(project_root)
-    lock = LockFile.read(lockfile_path)
+    lock, unreadable = _read_audited_lock(lockfile_path)
     deployment_root, user_scope, resolved_targets = resolve_audit_scope(project_root, lock)
     apm_yml_path = manifest_file(project_root)
 
@@ -1281,8 +1496,8 @@ def run_baseline_checks(
         if manifest is None:
             return result
 
-    # Check 1: Lockfile exists (manifest already parsed, pass it in)
-    result.checks.append(_check_lockfile_exists(project_root, manifest))
+    # Check 1: Lockfile exists and is readable (manifest already parsed, pass it in)
+    result.checks.append(unreadable or _check_lockfile_exists(project_root, manifest))
 
     # If lockfile doesn't exist or isn't needed, remaining checks can't run
     if not result.checks[0].passed:
@@ -1362,7 +1577,10 @@ def run_baseline_checks(
         return result
 
     # Check 5: No orphaned packages
-    if _run(_check_no_orphans(manifest, lock)):
+    # 5b: no files of a target apm.yml dropped (#4517), as --frozen refuses
+    if _run(_check_no_orphans(manifest, lock)) or _run(
+        _check_lockfile_targets_current(project_root, lock, user_scope=user_scope)
+    ):
         return result
 
     # Check 6: Skill subset consistency (manifest vs lockfile)
@@ -1377,7 +1595,8 @@ def run_baseline_checks(
     ):
         return result
 
-    # Check 7: Config consistency (MCP)
+    # Check 7: Config consistency (MCP); 7b: a differing same-name native MCP
+    # entry --frozen refuses (#4477)
     if _run(
         _check_config_consistency(
             manifest,
@@ -1386,6 +1605,8 @@ def run_baseline_checks(
             prepared_replay_error=prepared_replay_error,
             no_policy=no_policy,
         )
+    ) or _run(
+        _check_native_mcp_ownership(project_root, lock, resolved_targets, user_scope=user_scope)
     ):
         return result
 
@@ -1414,6 +1635,23 @@ def run_baseline_checks(
                 user_scope=user_scope,
                 no_policy=no_policy,
                 prepared_replay=prepared_replay,
+            )
+        )
+        or _run(
+            # 8d: recorded executables decisions are still the gate's (#4053),
+            # after the pins, so audit and --frozen name the same first cause.
+            _check_exec_status_current(
+                project_root,
+                lock,
+                manifest,
+                resolved_targets,
+                user_scope=user_scope,
+                modules_root=(
+                    prepared_replay.modules_root
+                    if prepared_replay is not None
+                    else project_root / APM_MODULES_DIR
+                ),
+                policy_provider=policy_provider,
             )
         )
     ):

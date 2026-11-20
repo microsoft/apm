@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -41,6 +42,12 @@ class InstallResult:
     active_package_keys: frozenset[str] | None = None
     # Dependencies whose Claude servers Claude loads from the native plugin.
     claude_native_keys: frozenset[str] = frozenset()
+    # The commit gate already enforced org policy on the merged MCP set.
+    mcp_policy_enforced: bool = False
+    # --dry-run: the pipeline's plan (install/dry_run_plan.PipelinePreview).
+    preview: object = None
+    # post-install firing deferred to the caller (InstallRequest.post_install_after_services).
+    post_install: Callable[[], object] | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass

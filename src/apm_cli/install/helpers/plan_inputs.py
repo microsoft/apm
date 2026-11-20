@@ -21,10 +21,12 @@ def confirm_update_plan(
 
     Runs the caller's plan confirmation (``apm update``), then refuses an
     unwritable (symlinked) lockfile while the transaction is still a no-op
-    (#3532). An update exists to rewrite the lockfile: even an unchanged
-    dependency plan can change the deployment ledger (for example new
-    targets), so the refusal does not depend on the plan. Returns ``False``
-    when the caller declined the plan.
+    (#3532, #4168). An update exists to rewrite the lockfile: even an
+    unchanged dependency plan can change the deployment ledger (for example
+    new targets), so an update refuses regardless of its plan. An install
+    refuses when it adds or removes a dependency; an unchanged install still
+    reads through it. Returns ``False`` when the caller
+    declined the plan.
     """
     if plan_callback is not None:
         plan = build_resolved_update_plan(ctx, lockfile)
@@ -33,7 +35,7 @@ def confirm_update_plan(
     from apm_cli.install.service import InstallService
 
     if (
-        not (ctx.update_refs and ctx.apm_dir)
+        not ctx.apm_dir
         or InstallService.frozen_disposition(ctx).replay
         or ctx.dry_run
         or ctx.lockfile_only
@@ -41,8 +43,29 @@ def confirm_update_plan(
         return True
     from apm_cli.deps.lockfile import get_lockfile_path, refuse_lockfile_before_mutation
 
-    refuse_lockfile_before_mutation(lockfile, get_lockfile_path(ctx.apm_dir), would_mutate=True)
+    if lockfile is None:
+        return True
+    refuse_lockfile_before_mutation(
+        lockfile,
+        get_lockfile_path(ctx.apm_dir),
+        would_mutate=writes_lockfile(ctx, lockfile, updating=plan_callback is not None),
+    )
     return True
+
+
+def writes_lockfile(ctx: InstallContext, lockfile: LockFile, *, updating: bool) -> bool:
+    """Whether this install rewrites *lockfile* (#4168).
+
+    An update rewrites it (even an unchanged plan can change the deployment
+    ledger). An install without ``--update`` re-resolves locked dependencies
+    to the same rows; adding or removing a dependency changes the lockfile.
+    """
+    if updating or ctx.update_refs:
+        return True
+    return any(
+        entry.action in {"add", "remove"}
+        for entry in build_resolved_update_plan(ctx, lockfile).entries
+    )
 
 
 def build_resolved_update_plan(ctx: InstallContext, lockfile: LockFile | None) -> UpdatePlan:

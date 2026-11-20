@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.integration.base_integrator import kept_edit_message
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.artifact_snapshot import (
@@ -442,6 +443,29 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             cwd=project_root,
             env=environment,
         )
+    elif mutation == "deployed-file":
+        # #4360: a plain install keeps the tampered file and exits 1; the
+        # printed remedy (delete the edited file, then install) restores it.
+        result, kept = runner.run_sequence(
+            (negative_args, tuple(recovery_args)),
+            expected_returncodes=(1, 1),
+            scenario_id=f"{scenario_id}-tamper-kept",
+            cwd=project_root,
+            env=environment,
+        )
+        kept_text = " ".join(kept.stderr.split())
+        assert kept_edit_message(instruction_path, user_scope=False, proven_edit=False) in kept_text
+        assert (project_root / instruction_path).read_text(encoding="utf-8") == (
+            "# Mutated generated deployment\n"
+        )
+        (project_root / instruction_path).unlink()
+        recovery, clean_audit = runner.run_sequence(
+            (tuple(recovery_args), ("audit", "--ci", "--no-policy", "--format", "json")),
+            expected_returncodes=(0, 0),
+            scenario_id=f"{scenario_id}-tamper-repair",
+            cwd=project_root,
+            env=environment,
+        )
     else:
         result, recovery, clean_audit = runner.run_sequence(
             (
@@ -456,16 +480,15 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         )
 
     if mutation == "content-hash":
-        normalized_stdout = " ".join(result.stdout.split())
-        assert "Content hash mismatch" in normalized_stdout
-        assert f"expected sha256:{'0' * 64}" in normalized_stdout
-        assert "This may indicate a supply-chain attack." in normalized_stdout
-        dep_key = normalized_stdout.split("Content hash mismatch for ", 1)[1].split(":", 1)[0]
-        # The hint names the resolved lockfile path, which Rich may wrap.
-        compact = "".join(result.stdout.split())
-        assert f"removethe'{dep_key}'entryfrom" in compact, result.stdout
-        assert "apm.lock.yamlandrun'apminstall'" in compact, result.stdout
-        assert result.stderr == ""
+        # The refusal is an error line, so it goes to stderr (RA-004).
+        normalized_stderr = " ".join(result.stderr.split())
+        assert "Content hash mismatch" in normalized_stderr
+        assert f"expected sha256:{'0' * 64}" in normalized_stderr
+        assert "This may indicate a supply-chain attack." in normalized_stderr
+        dep_key = normalized_stderr.split("Content hash mismatch for ", 1)[1].split(":", 1)[0]
+        compact = "".join(result.stderr.split())
+        assert f"removethe'{dep_key}'entryfrom" in compact, result.stderr
+        assert "apm.lock.yaml,thenrun'apminstall'" in compact, result.stderr
     else:
         payload = json.loads(result.stdout)
         failed_checks = {check["name"]: check for check in payload["checks"] if not check["passed"]}
@@ -476,7 +499,7 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             assert set(failed_checks) == {"content-integrity", "drift"}
             assert instruction_path in failed_checks["content-integrity"]["details"][0]
             assert (
-                "'apm install' after deleting the drifted files"
+                "delete the edited files, then run 'apm install'"
                 in (failed_checks["content-integrity"]["message"])
             )
         elif mutation == "resolved-ref":

@@ -9,6 +9,14 @@ from typing import TYPE_CHECKING
 
 import click
 
+from apm_cli.core.remediation import (
+    COMPILED_OUTPUTS_ORPHANED,
+    ORPHANED_PACKAGES_PRUNE,
+    TARGET_NOT_DEPLOYED,
+    USER_INSTRUCTIONS_MISSING,
+    USER_MANIFEST_INVALID,
+    USER_PACKAGES_MISSING,
+)
 from apm_cli.core.scope import manifest_file
 
 if TYPE_CHECKING:
@@ -26,10 +34,12 @@ from ...core.target_catalog import (
     target_help_fragment,
 )
 from ...core.target_detection import TargetParamType, should_compile_agents_md
+from ...deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from ...install.locking import serialized_lifecycle_unless
 from ...primitives.discovery import clear_discovery_cache, discover_primitives
 from ...utils import perf_stats
 from ...utils.console import (
+    _rich_echo,
     _rich_error,
     _rich_info,
     _rich_panel,
@@ -58,9 +68,9 @@ def _display_single_file_summary(
 
         import os
 
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(
+        table = new_table(
             title="Compilation Summary",
             show_header=True,
             header_style="bold cyan",
@@ -139,9 +149,9 @@ def _display_validation_errors(errors):
     try:
         console = _get_console()
         if console:
-            from rich.table import Table
+            from apm_cli.utils.console import new_table
 
-            error_table = Table(
+            error_table = new_table(
                 title="[x] Primitive Validation Errors",
                 show_header=True,
                 header_style="bold red",
@@ -174,7 +184,7 @@ def _display_validation_errors(errors):
     # Fallback to simple text output
     _rich_error("Validation errors found:")
     for error in errors:
-        click.echo(f"  [x] {error}")
+        _rich_echo(f"  [x] {error}", color="red")
 
 
 def _get_validation_suggestion(error_msg):
@@ -419,8 +429,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
     if not apm_modules.is_dir():
         display_path = _display_user_path(apm_modules)
         logger.error(
-            f"User-scope apm_modules not found: {display_path}. "
-            "Run 'apm install -g <package>' to install packages globally.",
+            f"User-scope apm_modules not found: {display_path}. {USER_PACKAGES_MISSING.sentence()}",
             symbol="error",
         )
         return 1
@@ -434,14 +443,15 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
         display_path = _display_user_path(manifest_file(source_root))
         summary = str(exc).split("\n\nFix with one of:", maxsplit=1)[0]
         logger.error(
-            f"{summary}\n\nFix {display_path} and rerun 'apm compile -g'.",
+            f"{summary}\n\n{USER_MANIFEST_INVALID.bind(path=display_path).sentence()}",
             symbol="error",
         )
         return 1
     except yaml.YAMLError as exc:
         display_path = _display_user_path(manifest_file(source_root))
         logger.error(
-            f"Failed to parse {display_path}: {exc}. Fix the manifest and rerun 'apm compile -g'.",
+            f"Failed to parse {display_path}: {exc}. "
+            f"{USER_MANIFEST_INVALID.bind(path=display_path).sentence()}",
             symbol="error",
         )
         return 1
@@ -452,7 +462,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
         display_path = _display_user_path(manifest_file(source_root))
         logger.error(
             f"Failed to read {display_path}: {exc}. "
-            "Ensure it is a readable YAML file and rerun 'apm compile -g'.",
+            f"{USER_MANIFEST_INVALID.bind(path=display_path).sentence()}",
             symbol="error",
         )
         return 1
@@ -487,8 +497,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
             )
         else:
             message = (
-                "No user-scope targets produced output -- run 'apm install -g <package>' "
-                "to add global instructions."
+                f"No user-scope targets produced output -- {USER_INSTRUCTIONS_MISSING.clause()}."
             )
         logger.info(message, symbol="info")
         return 0
@@ -745,10 +754,7 @@ def _run_watch_mode(
     :func:`_watch_mode`.
     """
     if clean:
-        logger.warning(
-            "--clean is ignored in watch mode; run 'apm compile --clean' "
-            "separately to remove orphaned outputs."
-        )
+        logger.warning(f"--clean is ignored in watch mode; {COMPILED_OUTPUTS_ORPHANED.clause()}.")
     effective_target, _detection_reason, config_target = _resolve_effective_target(
         target, source_root=source_root
     )
@@ -879,14 +885,15 @@ def _report_target_without_compile_output(
     emit_disabled_experimental_target_hint(capability.name, (), logger, create_config=False)
     logger.progress(
         f"{capability.name} has no compile outputs -- skipping. "
-        f"Run 'apm install --target {capability.name}' to deploy to it.",
+        f"{TARGET_NOT_DEPLOYED.bind(target=capability.name).sentence()}",
         symbol="info",
     )
     return True
 
 
 @serialized_lifecycle_unless("dry_run")
-def _run_compilation(
+@lockfile_writer(LockfileWriter.COMPILE)
+def _run_compilation(  # noqa: PLR0912 -- one flow per compile mode
     logger: CommandLogger,
     target: str | list[str] | None,
     output: str,
@@ -912,7 +919,13 @@ def _run_compilation(
     Handles both distributed (default) and single-file (``--single-agents``)
     strategies, emits the canonical target-provenance line, runs the
     compiler, reports results, and hard-fails on critical security findings.
+    Compile reconciles apm.lock.yaml, so like every lockfile writer it refuses
+    a lockfile it may not rewrite before it changes anything.
     """
+    if not dry_run:
+        from ...deps.lockfile_generator import require_current_cli
+
+        require_current_cli(Path.cwd(), command="apm compile")
     _pre_compile_then_validate(logger, verbose, source_root, clean=clean, run=run_scripts)
     from ...core.target_detection import (
         REASON_NO_TARGET_FOLDER,
@@ -1235,7 +1248,7 @@ def _run_compilation(
             )
             for pkg in orphaned_packages:
                 logger.progress(f"  * {pkg}")
-            logger.progress(" Run 'apm prune' to remove orphaned packages")
+            logger.progress(f" {ORPHANED_PACKAGES_PRUNE.sentence()}")
     except Exception:
         pass  # Continue if orphan check fails
 

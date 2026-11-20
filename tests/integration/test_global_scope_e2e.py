@@ -850,15 +850,15 @@ class TestGlobalUninstallLifecycle:
         assert result.returncode != 0, combined
         assert "Uninstall complete" not in combined
         assert ".config/opencode/agents/orphan.md" in combined
-        assert "retry uninstall" in combined
+        assert "rerun 'apm uninstall -g'" in " ".join(combined.split())
         assert removed_file.read_bytes() == edited_bytes
         assert survivor_file.read_bytes() == survivor_before
         assert manifest_path.read_bytes() == manifest_before
         assert lockfile_path.read_bytes() == lockfile_before
         assert survivor_materialized.is_dir()
         assert survivor_source.read_bytes() == survivor_source_before
-        # Package deletion precedes target cleanup; ownership, not content, survives.
-        assert not removed_materialized.exists()
+        # The evidence preflight refuses before package deletion (#3701).
+        assert removed_materialized.exists()
 
         if resolution == "restore":
             removed_file.write_bytes(managed_bytes)

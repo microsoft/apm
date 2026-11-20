@@ -38,7 +38,7 @@ from apm_cli.integration.prompt_integrator import (
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
-from tests.utils.deployment_evidence import receipted_evidence
+from tests.utils.deployment_evidence import prove_overwrites, receipted_evidence
 
 pytestmark = pytest.mark.integration
 
@@ -986,8 +986,9 @@ class TestPromptIntegratorIntegratePackagePrompts:
         assert result.files_adopted >= 1
         assert result.files_integrated == 0
 
-    def test_managed_file_collision_not_skipped(self, tmp_path: Path) -> None:
-        """A pre-existing file in managed_files is overwritten (not a collision)."""
+    def test_managed_file_collision_not_skipped(self, tmp_path: Path, monkeypatch) -> None:
+        """A pre-existing managed file with deployment evidence is overwritten (#4360)."""
+        prove_overwrites(monkeypatch)
         package_dir = tmp_path / "pkg"
         package_dir.mkdir()
         (package_dir / "review.prompt.md").write_text("updated", encoding="utf-8")
@@ -1003,6 +1004,23 @@ class TestPromptIntegratorIntegratePackagePrompts:
             managed_files={".github/prompts/review.prompt.md"},
         )
         assert result.files_integrated == 1
+        assert (prompts_dir / "review.prompt.md").read_text(encoding="utf-8") == "updated"
+
+    def test_managed_file_without_evidence_is_kept(self, tmp_path: Path) -> None:
+        """Without a receipt or locked render a differing managed file is kept (#4360)."""
+        package_dir = tmp_path / "pkg"
+        package_dir.mkdir()
+        (package_dir / "review.prompt.md").write_text("updated", encoding="utf-8")
+        prompts_dir = tmp_path / ".github" / "prompts"
+        prompts_dir.mkdir(parents=True)
+        (prompts_dir / "review.prompt.md").write_text("previous", encoding="utf-8")
+        result = PromptIntegrator().integrate_package_prompts(
+            _make_package_info("test-pkg", package_dir),
+            tmp_path,
+            managed_files={".github/prompts/review.prompt.md"},
+        )
+        assert result.files_integrated == 0
+        assert (prompts_dir / "review.prompt.md").read_text(encoding="utf-8") == "previous"
 
     def test_path_traversal_in_filename_rejected(self, tmp_path: Path) -> None:
         """A traversal filename is rejected by ensure_path_within."""
@@ -1318,6 +1336,7 @@ class TestLocalPathFailureReason:
         assert _local_path_failure_reason(dep_ref) is None
 
     def test_path_does_not_exist(self, tmp_path: Path) -> None:
+        from apm_cli.core.remediation import LOCAL_PACKAGE_PATH_MISSING
         from apm_cli.install.validation import _local_path_failure_reason
 
         dep_ref = MagicMock()
@@ -1326,7 +1345,7 @@ class TestLocalPathFailureReason:
         reason = _local_path_failure_reason(dep_ref)
         assert reason == (
             f"Local package path does not exist: {dep_ref.local_path}. "
-            "Restore the source or correct the dependency path, then rerun apm install."
+            f"{LOCAL_PACKAGE_PATH_MISSING.sentence()}"
         )
 
     def test_path_is_a_file_not_directory(self, tmp_path: Path) -> None:

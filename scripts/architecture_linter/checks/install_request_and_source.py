@@ -506,6 +506,11 @@ def check_primitive_classification(provider: FactsProvider) -> tuple[Violation, 
 
 
 _OUTCOME_OWNER = "src/apm_cli/install/outcome.py"
+# A package becomes installed only through outcome.package_install_count; the
+# fetch signal (``int(self.fetched_this_run)``) is the one permitted input.
+_INSTALLED_PROMOTION = re.compile(
+    r"""\[\s*["']installed["']\s*\]\s*=\s*1\b|["']installed["']\s*:\s*int\((?!self\.fetched_this_run\))"""
+)
 _OUTCOME_ADAPTERS = (
     "src/apm_cli/commands/install.py",
     "src/apm_cli/commands/update.py",
@@ -592,12 +597,28 @@ def check_outcome(provider: FactsProvider) -> tuple[Violation, ...]:
         _present(owner, "def result_from_install_context(")
         and _present(owner, "def finalize_install_result(")
         and _present(owner, "def apply_install_command_outcome(")
+        and _present(owner, "def package_install_count(")
     ):
         findings.append(
             _summary(
                 rule_id,
                 _OUTCOME_OWNER,
-                "Install outcome owner must define result_from_install_context, finalize_install_result, and apply_install_command_outcome",
+                "Install outcome owner must define result_from_install_context, finalize_install_result, apply_install_command_outcome, and package_install_count",
             )
         )
+    # Truthful install counts (#4184): only package_install_count promotes a
+    # package to installed; integration results never count it directly.
+    for path in _python_paths(provider, f"{_SRC_PREFIX}install/"):
+        for number, line in enumerate(_lines(provider.file_facts(path)), start=1):
+            match = _INSTALLED_PROMOTION.search(line)
+            if match and EXEMPT_MARKER not in line:
+                findings.append(
+                    violation(
+                        rule_id,
+                        path,
+                        "Route per-package install counts through outcome.package_install_count",
+                        line=number,
+                        column=match.start() + 1,
+                    )
+                )
     return tuple(findings)
