@@ -5,7 +5,9 @@ once, in the same shape a normal install prints (source: #4195, #4196).
 CELLS: OP=install FROZEN SRC=marketplace(git-subdir, ref main) PRIM=command
 SCOPE=project TGT=claude LOCK=present DEPLOYED=absent (cold cache);
 OP=install FROZEN SRC=self-defined PRIM=mcp SCOPE=project|user TGT=manifest|--target
-LOCK=present DEPLOYED=converged.
+LOCK=present DEPLOYED=converged;
+OP=install FROZEN SRC=local GATE=registries-disabled (registry in $APM_HOME config)
+SCOPE=project LOCK=present (#4175).
 """
 
 from __future__ import annotations
@@ -61,6 +63,7 @@ class _World:
     env: dict[str, str]
     runner: ApmLifecycleRunner
     consumer: LocalPackage
+    packages: LocalPackageFactory
     commit: str
 
     def apm(self, *args: str, expected: int = 0) -> CommandResult:
@@ -84,9 +87,10 @@ def _world(root: Path, binary: Path, *, targets: tuple[str, ...] = (_TARGET,)) -
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
     env = isolated.subprocess_env()
     env["COLUMNS"] = "200"
-    consumer = LocalPackageFactory(isolated.work_root).create("consumer", targets=targets)
+    packages = LocalPackageFactory(isolated.work_root)
+    consumer = packages.create("consumer", targets=targets)
     runner = ApmLifecycleRunner((str(binary),), timeout_seconds=120)
-    return _World(isolated, env, runner, consumer, commit="")
+    return _World(isolated, env, runner, consumer, packages, commit="")
 
 
 def _marketplace_world(root: Path, binary: Path) -> _World:
@@ -189,3 +193,34 @@ def test_frozen_mcp_replay_prints_targeting_line_once(
     assert "|  [>]  fixture-server (self-defined, stdio)" in frozen.stdout
     assert "[*] All servers up to date" in frozen.stdout
     assert _file_bytes(roots) == before
+
+
+def test_frozen_names_user_registry_config_when_registries_disabled(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4175: the refusal names $APM_HOME config, not apm.yml, and its fix runs."""
+    world = _world(tmp_path / "world", apm_binary_path)
+    alpha = world.packages.create("alpha")
+    world.packages.add_skill(alpha, "alpha-skill", "---\nname: alpha-skill\ndescription: d\n---\n")
+    world.packages.add_relative_dependency(world.consumer, alpha)
+    world.apm("experimental", "enable", "registries")
+    world.apm("config", "set", "registry.corp.url", "https://registry.example.invalid/apm")
+    world.apm("install")
+    world.apm("experimental", "disable", "registries")
+    config = world.isolated.config_root / "config.json"
+    before = world.snapshot()
+
+    refused = world.apm("install", "--frozen", expected=1)
+
+    output = " ".join(refused.stdout.split())
+    assert (
+        f"[x] Registry configuration in {config} requires the experimental registries "
+        "feature. Run 'apm experimental enable registries' to enable it." in output
+    ), _evidence(refused)
+    assert "apm.yml" not in output.split("[x]", 1)[1], _evidence(refused)
+    assert world.snapshot() == before
+
+    world.apm("experimental", "enable", "registries")
+    replay = world.apm("install", "--frozen")
+    assert "[i] Deployed files verified against apm.lock.yaml." in replay.stdout
+    assert world.snapshot() == before
