@@ -459,11 +459,12 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         normalized_stdout = " ".join(result.stdout.split())
         assert "Content hash mismatch" in normalized_stdout
         assert f"expected sha256:{'0' * 64}" in normalized_stdout
-        assert "This may indicate a supply-chain attack:" in normalized_stdout
+        assert "This may indicate a supply-chain attack." in normalized_stdout
         dep_key = normalized_stdout.split("Content hash mismatch for ", 1)[1].split(":", 1)[0]
-        assert f"remove the '{dep_key}' entry from apm.lock.yaml and run 'apm install'" in (
-            normalized_stdout
-        )
+        # The hint names the resolved lockfile path, which Rich may wrap.
+        compact = "".join(result.stdout.split())
+        assert f"removethe'{dep_key}'entryfrom" in compact, result.stdout
+        assert "apm.lock.yamlandrun'apminstall'" in compact, result.stdout
         assert result.stderr == ""
     else:
         payload = json.loads(result.stdout)
