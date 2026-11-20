@@ -4133,9 +4133,11 @@
       "failure_modes": ["ownership", "outcome"],
       "properties": ["ownership.preserve_unowned", "outcome.status_matches_state"],
       "regression_tests": [
-        "tests/integration/test_pre036_render_adoption_lifecycle.py::test_c1_unedited_pre036_files_re_render_silently_once",
-        "tests/integration/test_pre036_render_adoption_lifecycle.py::test_c2_one_edited_pre036_file_is_kept_and_named_once",
-        "tests/integration/test_pre036_render_adoption_lifecycle.py::test_c4_frozen_install_of_untouched_pre036_project_writes_nothing"
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c1_unedited_pre036_files_re_render_silently_once",
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c2_one_edited_pre036_file_is_kept_and_named_once",
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c4_frozen_install_of_untouched_pre036_project_writes_nothing",
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre036_file",
+        "tests/integration/test_legacy_lock_upgrade_lifecycle.py::test_c5_unedited_036_project_upgrades_unchanged"
       ]
     },
     {
