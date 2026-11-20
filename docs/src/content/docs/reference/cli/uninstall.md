@@ -190,7 +190,7 @@ manifest removals may already have happened. APM restores the previous
 `apm.lock.yaml`, so it still records the plugins to remove. Repair the reported
 issue, then run `apm install --global` with the original `--target` selection to
 finish. Do not re-add removed package arguments. See
-[native registration and runtime qualification](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
+[native registration and runtime qualification](../../../consumer/install-plugins/#claude-code-plugins-at-user-scope).
 
 A package declared more than once -- in both `dependencies` and
 `devDependencies`, or under two spellings such as `owner/repo` and its HTTPS
