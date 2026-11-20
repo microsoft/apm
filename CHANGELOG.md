@@ -88,6 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - After `apm deny`, `--frozen` names the executables gate, `apm approve` clears the deny and says so, and `apm deny --user` works outside a project. (closes #3957, #3988)
 - `apm targets` lists the targets `apm.yml` declares as active, as install resolves them. (closes #3792, #3988)
 - Messages name `targets:`, `executables.allow` and "marketplace", and generated `apm.yml` headers and target errors no longer list the deprecated `vscode`. (#3988)
+- Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
 
 ### Security
 
