@@ -646,6 +646,21 @@
       ]
     },
     {
+      "issue": 4169,
+      "fixed_in": "Unreleased",
+      "summary": "A lockfile stamped apm_version: unknown kept APM-written entries in the retired .github/mcp.json without a word; a stamp that names no release now heals and reports them like a known pre-0.37 version.",
+      "failure_modes": [
+        "cleanup",
+        "observation"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_mcp_retired_preview_lifecycle.py::test_unknown_generator_version_heals_the_retired_file_like_a_known_one"
+      ]
+    },
+    {
       "issue": 4171,
       "fixed_in": "Unreleased",
       "summary": "Redact credential values in command output: stored tokens render through one owner as a fixed mask with presence reported, and URL userinfo, URL query values and credential flag values are redacted across config reads, diagnostics, SBOM export and registry error messages.",

@@ -99,13 +99,15 @@ def lock_predates_root_mcp_json(apm_version: str | None) -> bool:
 
     Only such lockfiles name entries in the retired files; a newer lock's
     ``copilot`` ownership refers to ``.mcp.json`` and never heals anything.
+    A stamp that names no release (missing, empty, or ``unknown``) proves no
+    newer meaning, so it heals like a known pre-0.37 version (#4169).
     """
     if not isinstance(apm_version, str) or not apm_version:
         return True
     # Stdlib only: ``packaging`` is not a runtime dependency (#3908).
     match = _PEP440_RELEASE_PREFIX.match(apm_version.strip())
     if match is None:
-        return False
+        return True
     release = (int(match.group(1)), int(match.group(2) or 0))
     return release < _FIRST_ROOT_MCP_JSON_RELEASE
 

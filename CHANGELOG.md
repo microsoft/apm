@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A lockfile whose `apm_version` is `unknown` now moves APM-written entries out of the retired `.github/mcp.json` and reports it, like a lockfile from an earlier known version. (#4283)
 - `apm uninstall` of another package exits 0 and reconciles LSP servers when a remaining package declares only LSP servers, whether approved, ungated or denied. (#4283)
 - A package that declares only LSP servers installs from git and marketplace sources, as it already did from a local path. (#4283)
 - Top-level `x-` vendor extension keys in `apm.lock.yaml` are kept when a command rewrites the lockfile. (#4283)
