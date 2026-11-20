@@ -8,6 +8,9 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    MARKETPLACE_JSON_MISSING,
+)
 from apm_cli.core.scope import manifest_file
 
 from ...core.command_logger import CommandLogger
@@ -112,7 +115,7 @@ def init(force, no_gitignore_check, name, owner, verbose):
     # Next steps panel
     next_steps = [
         "Edit the 'marketplace:' block in apm.yml to add your packages",
-        "Run 'apm pack' to generate .claude-plugin/marketplace.json",
+        MARKETPLACE_JSON_MISSING.sentence(),
         "Add 'codex' to marketplace.outputs to also generate .agents/plugins/marketplace.json",
         "Commit apm.yml and the generated marketplace file(s)",
     ]

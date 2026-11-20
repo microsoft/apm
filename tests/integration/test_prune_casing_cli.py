@@ -66,5 +66,5 @@ def test_prune_complete_paths_on_case_sensitive_filesystem(
     assert (project / "apm.yml").read_bytes() == manifest
     if duplicate:
         assert "Found multiple package directories for one dependency:" in " ".join(
-            result.stdout.split()
+            (result.stdout + result.stderr).split()
         )

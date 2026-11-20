@@ -71,8 +71,3 @@ known_cells:
     tracking: "#4199"
     step: 5
     match: "advice 'apm uninstall lifecycle/p-missing' is not printed"
-  - id: J14-verbose-install-failure-printed-twice
-    law: O4
-    tracking: "#4199"
-    step: 5
-    match: "repeats \"fatal: repository 'https://github.com/lifecycle/p-missing.git/' not found\""

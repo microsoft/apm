@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from ..core.remediation import HIDDEN_CHARACTERS_FLAGGED
 from ..utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -230,7 +231,7 @@ class SecurityGate:
                 detail=force_detail
                 or (
                     f"{verdict.critical_count} critical finding(s) -- "
-                    "run 'apm audit --strip' to clean up"
+                    f"{HIDDEN_CHARACTERS_FLAGGED.clause()}"
                 ),
                 severity="critical",
             )
@@ -261,7 +262,8 @@ class SecurityGate:
                 message="Hidden characters in source files",
                 package=package,
                 detail=(
-                    f"{verdict.warning_count} warning(s) -- run 'apm audit --strip' after install"
+                    f"{verdict.warning_count} warning(s) -- after install, "
+                    f"{HIDDEN_CHARACTERS_FLAGGED.clause()}"
                 ),
                 severity="warning",
             )

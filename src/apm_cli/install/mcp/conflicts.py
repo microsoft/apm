@@ -12,6 +12,8 @@ from collections.abc import Mapping, Sequence
 
 import click
 
+from ...core.remediation import MCP_UPDATE_FLAG
+
 # Mapping for E10: which flags require --mcp.  Keyed by attribute-style
 # name so we can read directly from the Click handler locals.
 MCP_REQUIRED_FLAGS: tuple[tuple[str, str], ...] = (
@@ -75,7 +77,7 @@ def validate_mcp_conflicts(
 
     # E3: --only apm conflicts with --mcp.
     if only == "apm":
-        raise click.UsageError("cannot use --only apm with --mcp")
+        raise click.UsageError("--only apm cannot be combined with --mcp")
 
     # E4: transport selection flags do not apply.
     if any_transport_flag:
@@ -86,7 +88,7 @@ def validate_mcp_conflicts(
 
     # E5: --update is for refreshing, not adding.
     if update:
-        raise click.UsageError("use 'apm update' instead to update MCP entries")
+        raise click.UsageError(f"--update does not apply to --mcp; {MCP_UPDATE_FLAG.clause()}")
 
     # E9: --header without --url.
     if headers and not url:

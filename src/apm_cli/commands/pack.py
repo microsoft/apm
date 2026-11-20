@@ -7,6 +7,12 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    AGENT_PLUGIN_BUNDLE_CONSUMER,
+    BUNDLE_TARGET_MISMATCH,
+    DEPLOYMENT_RECORDS_STALE,
+    LEGACY_BUNDLE_FORMAT,
+)
 from apm_cli.core.scope import manifest_file
 
 from ..bundle.formats import BundleFormat, cli_format_choices, resolve_bundle_format
@@ -848,10 +854,7 @@ def _render_bundle_result(
             if fmt == BundleFormat.CLAUDE_PLUGIN:
                 logger.info(f"Share with: apm install {share_arg}")
             elif fmt == BundleFormat.AGENT_PLUGIN:
-                logger.info(
-                    "Share: consumers add the bundle path under dependencies.apm in their "
-                    "apm.yml, then run 'apm install --target copilot'."
-                )
+                logger.info(f"Share: consumers {AGENT_PLUGIN_BUNDLE_CONSUMER.clause()}.")
             else:
                 logger.info(
                     f"Share with: apm unpack {share_arg} (deprecated legacy layout; "
@@ -970,7 +973,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     logger = InstallLogger(verbose=verbose, dry_run=dry_run, command="unpack")
     logger.warning(
         "'apm unpack' is deprecated and will be removed in a future release. "
-        "Repack with the default plugin format and use 'apm install <bundle-path>'.",
+        f"{LEGACY_BUNDLE_FORMAT.sentence()}",
     )
     try:
         logger.start(f"Unpacking {bundle_path} -> {output}")
@@ -1073,7 +1076,8 @@ def _warn_empty(logger, target, result):
         else:
             logger.warning(f"No files to pack for target '{target}'")
             logger.verbose_detail(
-                "    Hint: check that apm.lock.yaml has deployed_files entries (run apm install first)"
+                "    Hint: check that apm.lock.yaml has deployed_files entries "
+                f"({DEPLOYMENT_RECORDS_STALE.clause()})"
             )
     else:
         logger.warning("No deployed files found -- empty bundle created")
@@ -1118,6 +1122,5 @@ def _log_bundle_meta(result, output_dir, logger):
             f"Bundle target '{display_bundle}' differs from project target '{display_project}'"
         )
         logger.verbose_detail(
-            f"    To get a {display_project}-targeted bundle, "
-            f"ask the publisher to declare targets: [{display_project}] in apm.yml and run apm pack"
+            f"    {BUNDLE_TARGET_MISMATCH.bind(target=display_project).sentence()}"
         )

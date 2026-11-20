@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core.remediation import FROZEN_LOCKFILE_WITHHELD
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration._target_compile_kit import Scenario, output, write, write_package
@@ -51,7 +52,7 @@ _OLD_RENDERINGS = {
         '[ext](https://example.com/x.md) and [anchor](#top)."\n'
     ),
 }
-_REMEDY = "Rerun 'apm install' without --frozen"
+_REMEDY = FROZEN_LOCKFILE_WITHHELD.sentence()
 
 
 def _git(cwd: Path, env: dict[str, str], *args: str) -> str:
@@ -234,7 +235,9 @@ def test_frozen_fails_on_edit_of_every_primitive_type(
     frozen = scenario.run("install", "--frozen", "--no-policy", cwd=project, env=env, expect=1)
     text = output(frozen)
     assert f"{relative}: expected sha256:" in text, text
-    assert "nothing was deployed" in text and "apm install --force" in text, text
+    # The tip deletes the edited file first, true for every kind (RA-009).
+    assert "nothing was deployed" in text and "Delete the edited" in text, text
+    assert "apm export-patch" in text, text
     assert edited.read_bytes() == b"Edited.\n"
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
 

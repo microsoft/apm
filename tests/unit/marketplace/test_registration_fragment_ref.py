@@ -28,7 +28,8 @@ def test_registration_source_keeps_hash_in_local_paths(tmp_path):
     parsed = parse_registration_source(f"{tmp_path}/team#1")
 
     assert parsed.kind == "local"
-    assert parsed.url.endswith("/team#1")
+    # Windows keeps native separators in local file:// sources (file://C:\\...).
+    assert parsed.url.replace("\\", "/").endswith("/team#1")
     assert parsed.fragment_ref == ""
 
 

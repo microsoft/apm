@@ -14,6 +14,10 @@ from dataclasses import replace
 
 import click
 
+from apm_cli.core.remediation import (
+    OUTSIDE_CONSTRAINT_RELEASE,
+)
+
 from ..deps.lockfile import LockedDependency
 from ..deps.outdated_row import OutdatedRow
 from ..deps.revision_pins import (
@@ -601,8 +605,7 @@ def outdated(global_, verbose, parallel_checks):
     ]
     # Render the table
     try:
-        from rich.box import ASCII
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
         from ._helpers import _get_console
 
@@ -610,11 +613,10 @@ def outdated(global_, verbose, parallel_checks):
         if console is None:
             raise ImportError("Rich console not available")
 
-        table = Table(
+        table = new_table(
             title="Dependency Status",
             show_header=True,
             header_style="bold cyan",
-            box=ASCII,
         )
         # Minimum widths that overflow the terminal make Rich crop whole rows
         # (the Source column lost "marketplace: <name>" at 80 columns), so
@@ -701,8 +703,8 @@ def outdated(global_, verbose, parallel_checks):
     if has_outside_constraint:
         logger.progress(
             "Registry Latest is published; Wanted respects the manifest constraint. "
-            "'apm update' stays within that constraint. Select a newer version explicitly "
-            "in apm.yml, then run 'apm install' to take an outside-constraint release."
+            "'apm update' stays within that constraint. "
+            f"{OUTSIDE_CONSTRAINT_RELEASE.sentence()}"
         )
     conflicts = [row for row in rows if row.status == "origin-conflict"]
     for row in conflicts:

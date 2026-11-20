@@ -23650,8 +23650,8 @@
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:823",
-    "src/apm_cli/install/services.py:1025"
+    "src/apm_cli/install/services.py:822",
+    "src/apm_cli/install/services.py:1024"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
@@ -23669,8 +23669,8 @@
   },
   "U10": {
    "evidence": [
-    "src/apm_cli/commands/compile/cli.py:684",
-    "src/apm_cli/commands/compile/cli.py:716"
+    "src/apm_cli/commands/compile/cli.py:694",
+    "src/apm_cli/commands/compile/cli.py:728"
    ],
    "text": "compile renders hook/mcp/lsp only; --validate reads MCP declarations"
   },
@@ -23695,35 +23695,35 @@
   },
   "U5": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:162"
+    "src/apm_cli/commands/pack.py:171"
    ],
    "text": "pack -g is a syntactic refusal"
   },
   "U6": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:32",
-    "src/apm_cli/commands/pack.py:33"
+    "src/apm_cli/commands/pack.py:41",
+    "src/apm_cli/commands/pack.py:42"
    ],
    "text": "pack provenance is the dependencies / marketplace block, not SRC"
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:953"
+    "src/apm_cli/commands/install.py:966"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1233",
-    "src/apm_cli/commands/install.py:997",
-    "src/apm_cli/commands/install.py:971",
+    "src/apm_cli/commands/install.py:1245",
+    "src/apm_cli/commands/install.py:1010",
+    "src/apm_cli/commands/install.py:984",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
-    "src/apm_cli/commands/uninstall/engine.py:698",
-    "src/apm_cli/commands/uninstall/engine.py:857",
-    "src/apm_cli/commands/uninstall/engine.py:690",
-    "src/apm_cli/commands/update.py:448",
-    "src/apm_cli/commands/prune.py:199",
+    "src/apm_cli/commands/uninstall/engine.py:734",
+    "src/apm_cli/commands/uninstall/engine.py:881",
+    "src/apm_cli/commands/uninstall/engine.py:726",
+    "src/apm_cli/commands/update.py:456",
+    "src/apm_cli/commands/prune.py:208",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
    "text": "the source decides the command: bundle-install is install of a local bundle (install x local-bundle maps to it; no other source can state it); install --mcp takes an MCP registry name or an inline server (--url, or a command after --), never a package source, and an MCP source delivers only MCP; a package registry delivers whole packages. Parsed-then-refused shapes are refusal cells, one per message class: marketplace add of a source without a catalog, uninstall of an MCP server (a registry name is not found in apm.yml; an inline name is an MCP server), and a local bundle, which writes no manifest entry (uninstall refuses it; update and prune leave it untouched). A native plugin carries no canvas primitive"
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "e4619e739bb75f2dc632ce7482ff5e8b5a4472d5acb9af445d25bb79b3ba7c22"
+ "sha256": "8d4c09ac0751031d193dc96df172bb28eb8cf5001d1f704542d4a45668d40502"
 }

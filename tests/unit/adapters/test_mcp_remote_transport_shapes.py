@@ -155,7 +155,7 @@ def test_unsupported_transport_warns_once_and_writes_nothing(
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     adapter = ClientFactory.create_client(runtime, project_root=tmp_path, user_scope=True)
     info = {"name": "srv", "remotes": [{"type": "sse", "url": "https://sse.example.invalid"}]}
-    with patch("apm_cli.adapters.client._remote_shapes._rich_warning") as warn:
+    with patch("apm_cli.core.null_logger._rich_warning") as warn:
         assert adapter._format_server_config(info) is None
     warn.assert_called_once()
     message = warn.call_args[0][0]
