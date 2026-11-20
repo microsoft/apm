@@ -197,6 +197,7 @@ _APM_REMOTE_CONTROL_ENV_NAMES = frozenset(
         "APM_POLICY_DISABLE",
         "ADO_HOST",
         "APM_TEST_FAIL_LOCK_REPLACE",
+        "APM_TEST_LOCK_COMMIT",
         "APM_TEST_LOOPBACK_PORTS",
         "GITHUB_HOST",
         "GITHUB_URL",

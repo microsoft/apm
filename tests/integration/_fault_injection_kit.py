@@ -75,6 +75,11 @@ class FaultWorld:
     def install(self, *extra: str) -> CommandResult:
         return self.apm(*_INSTALL, *extra)
 
+    def write_package(self, name: str, *, skills: int = 1) -> str:
+        """Write an undeclared local package; return its install argument."""
+        _write_package(self.project / "packages" / name, name, skills, mcp=False)
+        return f"./packages/{name}"
+
     def lockfile_bytes(self) -> bytes | None:
         lock = self.project / "apm.lock.yaml"
         return lock.read_bytes() if lock.exists() else None
