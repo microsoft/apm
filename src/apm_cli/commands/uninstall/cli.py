@@ -1160,9 +1160,11 @@ def _resync_native_registration_after_uninstall(
             # One rollback unit: keep the removed plugins' ownership for the retry.
             lockfile_path.write_bytes(native_before.lock_bytes)
         raise ClaudeNativePluginError(
-            "Package removal may already be complete, but Claude registration did not converge. "
-            f"{exc} Reconcile remaining declarations with 'apm install --global' and the "
-            "original --target selection; do not re-add the removed package."
+            "Package removal may already be complete, but native plugin declarations did not "
+            "converge. "
+            f"{exc} Reconcile remaining declarations with 'apm install' (with --global at "
+            "user scope) and the original --target selection; do not re-add the removed "
+            "package."
         ) from exc
     try:
         from ...agent_plugins.errors import AgentPluginError

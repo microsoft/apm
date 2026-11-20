@@ -15,12 +15,14 @@ from apm_cli.deps.plugin_parser import (
 )
 from apm_cli.models.apm_package import PackageInfo, PackageType
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+from apm_cli.native_plugins.errors import NativePluginError
+from apm_cli.native_plugins.harnesses import CLAUDE, NATIVE_HARNESSES
 from apm_cli.native_plugins.record import is_safe_plugin_name
 from apm_cli.utils.content_hash import compute_native_plugin_hash
 from apm_cli.utils.path_security import PathTraversalError, has_symlink_component
 
 
-class ClaudeNativePluginError(RuntimeError):
+class ClaudeNativePluginError(NativePluginError):
     """Native registration cannot safely honor the requested package."""
 
 
@@ -32,7 +34,9 @@ class ClaudeNativePlugin:
     to Claude either; ``parked`` carries the one diagnostic shown to the user.
     ``warning`` reports an org MCP policy violation under ``enforcement: warn``.
     ``approved_pin`` is the whole-plugin approval that admitted it; the
-    deployed copy must carry exactly that pin.
+    deployed copy must carry exactly that pin. ``harnesses`` are the targets
+    that load it natively: Claude at user scope, and Claude and/or Copilot at
+    project scope (#3921).
     """
 
     dependency_key: str
@@ -42,11 +46,18 @@ class ClaudeNativePlugin:
     parked: str | None = None
     warning: str | None = None
     approved_pin: str | None = None
-    target_name: ClassVar[str] = "claude"
+    harnesses: frozenset[str] = frozenset({CLAUDE})
+    target_name: ClassVar[str] = CLAUDE
 
 
-def fingerprint_native_claude_source(root: Path) -> str:
-    """Translate canonical native fingerprint failures at the Claude boundary."""
+def fingerprint_native_claude_source(root: Path, *, portable: bool = False) -> str:
+    """Translate canonical native fingerprint failures at the Claude boundary.
+
+    *portable* selects the project-scope lock digest: the path-and-bytes pin,
+    because a committed root is checked out on every machine.
+    """
+    if portable:
+        return pin_native_claude_source(root)
     try:
         return compute_native_plugin_hash(root)
     except (OSError, PathTraversalError) as exc:
@@ -166,7 +177,7 @@ class _Ineligible:
 
 
 def _intact_source(
-    root: Path, skill_subset: tuple[str, ...] | None
+    root: Path, skill_subset: tuple[str, ...] | None, *, portable: bool = False
 ) -> _Ineligible | tuple[dict[str, Any], str, str]:
     """Return ``(manifest, name, fingerprint)``, or why the plugin cannot load intact."""
     manifest_path = root / ".claude-plugin/plugin.json"
@@ -195,11 +206,12 @@ def _intact_source(
     name = manifest.get("name")
     if not is_safe_plugin_name(name):
         return _Ineligible(
-            f"its plugin name {name!r} is missing or unsafe (letters, digits, '-' and '_')",
+            f"its plugin name {name!r} is missing or unsafe (letters, digits, '-', '_' and "
+            "inner '.')",
             f"Ask the publisher to fix 'name' in .claude-plugin/plugin.json, {_EXCLUDE_CLAUDE}",
         )
     try:
-        fingerprint = fingerprint_native_claude_source(root)
+        fingerprint = fingerprint_native_claude_source(root, portable=portable)
     except ClaudeNativePluginError:
         return _Ineligible(
             "it contains a symlink or an unreadable file, which an intact copy cannot carry",
@@ -241,6 +253,7 @@ def plan_native_claude_plugin(
     skip_bin: bool,
     policy: Any = None,
     bin_denied: str | None = None,
+    warn: Callable[[str], None] | None = None,
 ) -> ClaudeNativePlugin | None:
     """Admit a complete, approved plugin without altering native selection.
 
@@ -257,11 +270,20 @@ def plan_native_claude_plugin(
     A plugin Claude cannot load intact is parked, never projected loose: the
     install continues and the warning names the package and the next step.
 
+    At project scope (#3921) the harnesses are Claude and Copilot. A plugin
+    without ``.claude-plugin/plugin.json`` keeps its split install silently,
+    and one that cannot load intact for another reason keeps its split install
+    with a *warn* naming why (OpenAPM req-na-006); unapproved, policy-blocked
+    or dependency-declaring plugins are parked as at user scope.
+
     Normalized virtual plugins in older locks can have SKILL_BUNDLE type.
     Only the parser-owned normalization receipt admits that compatibility
     case; an incidental Claude manifest never overrides APM package intent.
     """
-    if not is_user_scope(scope) or not any(t.name == "claude" for t in targets):
+    user = is_user_scope(scope)
+    eligible = {CLAUDE} if user else set(NATIVE_HARNESSES)
+    harnesses = frozenset(t.name for t in targets if t.name in eligible)
+    if not harnesses:
         return None
     root = Path(package_info.install_path)
     package_type = package_info.package_type
@@ -282,14 +304,25 @@ def plan_native_claude_plugin(
             root.resolve(),
             fingerprint,
             parked=f"Parked native plugin {package_name}: {why}\n    {step}",
+            harnesses=harnesses,
         )
 
-    intact = _intact_source(root, skill_subset)
+    def split(why: str) -> None:
+        if warn is not None:
+            warn(f"Installed {package_name} as separate files, not as a native plugin: {why}")
+
+    if not user and not (root / ".claude-plugin/plugin.json").is_file():
+        return None
+    intact = _intact_source(root, skill_subset, portable=not user)
     if isinstance(intact, _Ineligible):
+        if not user:
+            return split(intact.why)
         return park(intact.why, intact.step, intact.name or root.name)
     manifest, name, fingerprint = intact
     unsupported = _unsupported_capability(root, manifest)
     if unsupported is not None:
+        if not user and not manifest.get("dependencies"):
+            return split(unsupported.why)
         return park(unsupported.why, unsupported.step, name, fingerprint)
     violation = _mcp_policy_violation(root, manifest, policy)
     if violation is not None and getattr(policy, "enforcement", None) == "block":
@@ -314,12 +347,17 @@ def plan_native_claude_plugin(
         from apm_cli.security.trust import parked_plugin_message
 
         parked = parked_plugin_message(
-            package_name, str(verdict.reason), verdict.detail, approve_cwd=get_apm_home()
+            package_name,
+            str(verdict.reason),
+            verdict.detail,
+            approve_cwd=get_apm_home() if user else None,
         )
     elif ships_bin and skip_bin:
         return park(
             "its bin/ executables are not trusted in this run",
-            "Re-run: apm install --global --trust-bin",
+            "Re-run: apm install --global --trust-bin"
+            if user
+            else "Re-run: apm install --trust-bin",
             name,
             fingerprint,
         )
@@ -331,6 +369,7 @@ def plan_native_claude_plugin(
         parked=parked,
         warning=warning,
         approved_pin=getattr(verdict, "pin", None) if parked is None else None,
+        harnesses=harnesses,
     )
 
 
@@ -339,13 +378,23 @@ def native_service_runtimes(
 ) -> frozenset[str]:
     """Runtimes that load a dependency's MCP and LSP servers from its native plugin.
 
-    Claude loads an admitted plugin's servers itself, so APM must not also
-    write them into Claude's config; a parked plugin is not deployed, so its
-    servers must not reach Claude loose either. *run_keys* are the plugins
+    A harness loads an admitted plugin's servers itself, so APM must not also
+    write them into that harness's config; a parked plugin is not deployed, so
+    its servers must not reach Claude loose either. *run_keys* are the plugins
     this install routed natively (admitted or parked); the lock's
     ``native_plugin`` record carries the admitted ones to every later reader.
+    At project scope Copilot also reads ``.claude/settings.json``, so both
+    harnesses load every project-scope native plugin.
     """
-    if package_key in run_keys or getattr(locked, "native_plugin", None) is not None:
+    from apm_cli.native_plugins.binding import PROJECT_MARKETPLACE_PATH
+    from apm_cli.native_plugins.harnesses import entry_harnesses
+
+    record = getattr(locked, "native_plugin", None)
+    if record is not None:
+        if record.marketplace_path == PROJECT_MARKETPLACE_PATH:
+            return frozenset(NATIVE_HARNESSES)
+        return entry_harnesses(locked, project=False, configured=())
+    if package_key in run_keys:
         return frozenset({ClaudeNativePlugin.target_name})
     return frozenset()
 

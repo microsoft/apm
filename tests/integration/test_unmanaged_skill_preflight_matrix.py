@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.copilot_plugins.registrar import catalog_path_for
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration.test_unmanaged_skill_preflight_lifecycle import (
     _CHILD_PROVENANCE,
@@ -266,12 +265,12 @@ def test_native_plugin_registration_preserves_same_named_unmanaged_loose_skill(
     assert installed.returncode == 0, installed
     assert local.read_bytes() == before[".agents/skills/review-skill/SKILL.md"]
     assert _tree_bytes(source) == source_before
-    modules = consumer.root / "apm_modules"
-    catalog = json.loads(catalog_path_for(modules).read_text(encoding="utf-8"))
+    profile = consumer.root / ".agents/plugins"
+    catalog = json.loads((profile / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
     (entry,) = catalog["plugins"]
     assert entry["name"] == "review"
-    materialized = modules / entry["source"]
-    assert (materialized / "skills/review-skill/SKILL.md").read_bytes() == (
+    deployed = profile / entry["source"]
+    assert (deployed / "skills/review-skill/SKILL.md").read_bytes() == (
         source / "skills/review-skill/SKILL.md"
     ).read_bytes()
     lock = load_yaml(consumer.root / "apm.lock.yaml")

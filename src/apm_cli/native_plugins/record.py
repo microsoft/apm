@@ -15,7 +15,9 @@ from dataclasses import dataclass
 from typing import Any
 
 PLUGINS_RELATIVE = ".agents/plugins"
-_NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]*")
+# A safe path segment (req-na-002): no leading or trailing dot, so Agent
+# Plugin names such as ``np.agent.plugin`` keep their interior dots.
+_NAME = re.compile(r"[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9_-])?")
 _FINGERPRINT = re.compile(r"sha256:[0-9a-f]{64}")
 
 

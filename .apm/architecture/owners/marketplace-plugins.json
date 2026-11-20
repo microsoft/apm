@@ -182,12 +182,15 @@
     },
     {
       "id": "claude-native-plugin-registration",
-      "decision": "Intact Claude plugin admission, lockfile-derived native ownership (native_plugin records), deployment to ~/.agents/plugins, and settings-only declaration through the shared native settings writer without any vendor CLI",
-      "owner": "claude_plugins/admission.py (plan_native_claude_plugin); claude_plugins/registrar.py (reconcile_claude_plugins, verify_claude_native_cache); native_plugins/ (record, layout, settings)",
+      "decision": "Intact Claude plugin admission, lockfile-derived native ownership (native_plugin records), deployment to .agents/plugins (committed at project scope, ~/.agents/plugins at user scope), and settings-only declaration to Claude and Copilot through the shared native settings writer without any vendor CLI",
+      "owner": "claude_plugins/admission.py (plan_native_claude_plugin); claude_plugins/registrar.py (reconcile_claude_plugins, verify_claude_native_cache); native_plugins/reconcile.py (reconcile_native_plugins) over native_plugins/ (binding, harnesses, record, layout, settings)",
       "selectors": [
         "src/apm_cli/claude_plugins/admission.py",
         "src/apm_cli/claude_plugins/registrar.py",
+        "src/apm_cli/native_plugins/binding.py",
+        "src/apm_cli/native_plugins/harnesses.py",
         "src/apm_cli/native_plugins/layout.py",
+        "src/apm_cli/native_plugins/reconcile.py",
         "src/apm_cli/native_plugins/record.py",
         "src/apm_cli/native_plugins/settings.py"
       ],
@@ -211,12 +214,11 @@
     },
     {
       "id": "copilot-marketplace-ownership",
-      "decision": "APM-owned Copilot marketplace catalog, settings entries, and ownership ledger",
+      "decision": "Retirement of the legacy APM-owned Copilot catalog, settings entries and apm-registration.json ledger; Agent Plugins are declared through the shared native reconcile",
       "owner": "copilot_plugins/registrar.py (synchronize_copilot_plugins, resync_native_plugins)",
       "selectors": [
         "src/apm_cli/copilot_plugins/registrar.py",
-        "src/apm_cli/copilot_plugins/settings.py",
-        "src/apm_cli/copilot_plugins/catalog.py"
+        "src/apm_cli/copilot_plugins/settings.py"
       ],
       "guards": ["marketplace-integrations-copilot-ownership"]
     },

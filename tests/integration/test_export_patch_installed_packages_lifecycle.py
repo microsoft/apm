@@ -57,7 +57,9 @@ def _build_world(tmp_path: Path, binary: Path) -> tuple[MarketplacePackWorld, di
     _, mono_commit = world.publish("mono", mono)
 
     plugin = sources / "rawplug"
-    write(plugin / ".claude-plugin" / "plugin.json", '{"name": "rawplug", "version": "0.4.0"}\n')
+    # A root plugin.json keeps the split install export-patch maps back to
+    # upstream; a .claude-plugin/ manifest installs natively for claude (#3921).
+    write(plugin / "plugin.json", '{"name": "rawplug", "version": "0.4.0"}\n')
     write(plugin / "skills" / "rx" / "SKILL.md", skill_md("rx", "body\n"))
     write(plugin / "agents" / "ra.md", "---\nname: ra\ndescription: agent\n---\n# ra\n")
     _, plugin_commit = world.publish("rawplug", plugin)
@@ -96,7 +98,7 @@ def test_export_patch_subdirectory_package_applies_from_repo_root(
 def test_export_patch_claude_plugin_package_exports_upstream_files(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A marketplace-style Claude plugin (no apm.yml) must export, not report ambiguity."""
+    """A marketplace-style plugin (no apm.yml) must export, not report ambiguity."""
     world, commits = _build_world(tmp_path, apm_binary_path)
     project = world.consumer(
         "consumer-plugin",
@@ -172,8 +174,9 @@ def test_export_patch_keeps_ambiguity_for_authored_apm_plugin_sources(
     world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
     plugin = world.isolated.package_root / "authoredplug"
     body = skill_md("own", "authored\n")
+    # Root plugin.json: split install, as in _build_world.
     write(
-        plugin / ".claude-plugin" / "plugin.json",
+        plugin / "plugin.json",
         '{"name": "authoredplug", "version": "1.0.0", "skills": ["./.apm/skills/own"]}\n',
     )
     write(plugin / ".apm" / "skills" / "own" / "SKILL.md", body)

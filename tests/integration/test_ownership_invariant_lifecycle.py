@@ -612,21 +612,26 @@ def test_legacy_plugin_agent_source_classification_uses_declaration_before_path(
     (agent_root / "guides" / "reference-doc.agent.md").write_bytes(doc_bytes)
     (agent_root / "scripts" / "helper.py").write_bytes(helper_bytes)
     (agent_root / "templates" / "starter.pptx").write_bytes(starter_bytes)
-    _write_claude_plugin_manifest(
-        plugin_root,
-        {
-            "name": "classification-plugin",
-            "version": "1.0.0",
-            "agents": ["./agents/my-agent"],
-        },
+    # A root plugin.json (no .claude-plugin/) keeps the split install whose
+    # agent classification is under test; a .claude-plugin/ manifest would be
+    # installed natively, as one unit, for claude and copilot projects.
+    (plugin_root / "plugin.json").write_text(
+        json.dumps(
+            {"name": "classification-plugin", "version": "1.0.0", "agents": ["./agents/my-agent"]},
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
     )
-    project = scenario.consumers.create(f"agent-consumer-{profile.name}")
+    project = scenario.consumers.create(
+        f"agent-consumer-{profile.name}", dependencies=({"path": str(plugin_root)},)
+    )
     _prepare_target_root(project.root, profile)
 
     result = _run_success(
         scenario,
         project,
-        _direct_install_args(plugin_root, profile.name),
+        ("install", "--target", profile.name, "--no-policy", "--parallel-downloads", "0", "-v"),
         environment=scenario.environment,
         scenario_id=f"agent-classification-{profile.name}-install",
     )

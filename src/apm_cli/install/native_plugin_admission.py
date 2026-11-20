@@ -165,7 +165,52 @@ def finalize_native_plugin(
         return result
 
     result["native_plugin"] = True
+    queue_native_agent_plugin(ctx, package_name, package_info, diagnostics)
     return result
+
+
+def queue_native_agent_plugin(
+    ctx: InstallContext | None,
+    package_name: str,
+    package_info: Any,
+    diagnostics: DiagnosticCollector,
+) -> None:
+    """Hand an admitted Agent Plugin to the shared native reconcile for Copilot.
+
+    Like a Claude plugin, it is deployed to ``.agents/plugins/<plugin>/``,
+    recorded in the lock and declared in Copilot's settings (#3921).
+    """
+    if ctx is None or getattr(ctx, "claude_native_plugins", None) is None:
+        return
+    from pathlib import Path
+
+    from apm_cli.claude_plugins.admission import ClaudeNativePlugin
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.native_plugins.binding import native_fingerprint
+    from apm_cli.native_plugins.errors import NativePluginError
+    from apm_cli.native_plugins.harnesses import COPILOT
+    from apm_cli.native_plugins.record import is_safe_plugin_name
+
+    plugin = getattr(getattr(package_info, "package", None), "agent_plugin", None)
+    name = getattr(getattr(plugin, "identity", None), "name", None)
+    if not is_safe_plugin_name(name):
+        diagnostics.warn(
+            f"Agent Plugin not registered with GitHub Copilot: its name {name!r} cannot "
+            "name a plugin directory. Rename the plugin in plugin.json.",
+            package=package_name,
+        )
+        return
+    root = Path(package_info.install_path)
+    try:
+        fingerprint = native_fingerprint(root, project=not is_user_scope(ctx.scope))
+    except NativePluginError as exc:
+        diagnostics.warn(
+            f"Agent Plugin not registered with GitHub Copilot: {exc}", package=package_name
+        )
+        return
+    ctx.claude_native_plugins[package_name] = ClaudeNativePlugin(
+        package_name, name, root.resolve(), fingerprint, harnesses=frozenset({COPILOT})
+    )
 
 
 def verify_native_plugin_cache(

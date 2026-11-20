@@ -387,25 +387,35 @@ class LockfileBuilder:
                 lockfile.dependencies[dep_key].exec_allowed_types = allowed.get(dep_key, ())
 
     def _attach_native_plugins(self, lockfile: LockFile) -> None:
-        """Record each admitted native Claude plugin as its dependency's ownership.
+        """Record each admitted native plugin as its dependency's ownership.
 
-        A run whose targets exclude Claude did not evaluate Claude admission, so
-        an existing record is carried forward instead of retiring the plugin.
+        A run whose targets include none of a record's harnesses did not
+        evaluate its admission, so that record is carried forward instead of
+        retiring the plugin.
         """
-        from apm_cli.claude_plugins.registrar import marketplace_binding
+        from apm_cli.native_plugins.binding import binding_for
+        from apm_cli.native_plugins.harnesses import NATIVE_HARNESSES, entry_harnesses
         from apm_cli.native_plugins.record import NativePluginRecord
 
-        plugins = getattr(self.ctx, "claude_native_plugins", None) or {}
-        if plugins:
-            name, path = marketplace_binding(self.ctx.apm_modules_dir.parent, self.ctx.project_root)
-        for dep_key, plugin in plugins.items():
-            if dep_key in lockfile.dependencies:
-                lockfile.dependencies[dep_key].native_plugin = NativePluginRecord(
-                    plugin.name, plugin.bundle_hash, name, path
-                )
         existing = getattr(self.ctx, "existing_lockfile", None)
-        if existing is None or any(t.name == "claude" for t in self.ctx.targets or ()):
+        plugins = self._native_claimant_winners(lockfile, existing)
+        if plugins:
+            from apm_cli.install.phases.claude_plugins import manifest_root_of
+
+            binding = binding_for(
+                scope=getattr(self.ctx, "scope", None),
+                modules_dir=self.ctx.apm_modules_dir,
+                deploy_root=self.ctx.project_root,
+                manifest_root=manifest_root_of(self.ctx),
+            )
+        for dep_key, plugin in plugins.items():
+            lockfile.dependencies[dep_key].native_plugin = NativePluginRecord(
+                plugin.name, plugin.bundle_hash, binding.marketplace, binding.path
+            )
+        if existing is None:
             return
+        project = not is_user_scope(getattr(self.ctx, "scope", None))
+        run = {target.name for target in self.ctx.targets or ()}
         for dep_key, locked in lockfile.dependencies.items():
             prior = existing.dependencies.get(dep_key)
             if (
@@ -414,8 +424,41 @@ class LockfileBuilder:
                 and prior.native_plugin is not None
                 and (prior.resolved_commit, prior.content_hash)
                 == (locked.resolved_commit, locked.content_hash)
+                # This run never evaluated a harness that loads it.
+                and not entry_harnesses(prior, project=project, configured=NATIVE_HARNESSES) & run
             ):
                 locked.native_plugin = prior.native_plugin
+
+    def _native_claimant_winners(self, lockfile: LockFile, existing: LockFile | None) -> dict:
+        """Admitted native plugins that win their name under req-tg-013."""
+        from apm_cli.native_plugins.claimants import Claimant, select_claimants
+
+        admitted = {
+            key: plugin
+            for key, plugin in (getattr(self.ctx, "claude_native_plugins", None) or {}).items()
+            if key in lockfile.dependencies
+        }
+        if not admitted:
+            return {}
+        claimants = {
+            key: Claimant(
+                plugin.name,
+                lockfile.dependencies[key].declaring_parent is None
+                and lockfile.dependencies[key].resolved_by is None,
+            )
+            for key, plugin in admitted.items()
+        }
+        prior = {
+            locked.native_plugin.name.casefold(): key
+            for key, locked in (existing.dependencies.items() if existing else ())
+            if locked.native_plugin is not None
+        }
+        winners, notes = select_claimants(claimants, prior)
+        logger = getattr(self.ctx, "logger", None)
+        for note in notes:
+            if logger:
+                logger.warning(note)
+        return {key: plugin for key, plugin in admitted.items() if key in winners}
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
         """Union the CLI ``--skill`` values into lockfile skill_bundle entries.

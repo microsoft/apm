@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
-from apm_cli.claude_plugins import registrar
 from apm_cli.claude_plugins.admission import (
     ClaudeNativePlugin,
     ClaudeNativePluginError,
@@ -225,14 +224,16 @@ def test_failed_settings_commit_restores_replaced_roots_and_settings_bytes(
     before = home.settings.read_bytes()
     home.source("owner/alpha", "alpha", body="v2", commit="b")
     home.source("owner/beta", "beta")
-    real_write = registrar.write_declaration
+    from apm_cli.native_plugins import reconcile as owner
+
+    real_write = owner.write_declaration
 
     def conflicting_write(path, declaration):
         change = real_write(path, declaration)
         change.diagnostics.append(BINDING_CONFLICT)
         return change
 
-    monkeypatch.setattr(registrar, "write_declaration", conflicting_write)
+    monkeypatch.setattr(owner, "write_declaration", conflicting_write)
     with pytest.raises(ClaudeNativePluginError, match="another source"):
         home.reconcile(previous)
     assert fingerprint_native_claude_source(home.plugins / "alpha") == deployed_fingerprint

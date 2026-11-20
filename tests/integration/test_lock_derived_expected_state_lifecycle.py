@@ -247,8 +247,11 @@ _COMMITTED = (".git", "apm_modules")
 
 
 def _claude_plugin(root: Path, name: str) -> Path:
+    # A root plugin.json keeps the split install whose ${CLAUDE_PLUGIN_ROOT}
+    # MCP/LSP rendering is under test; a .claude-plugin/ manifest would install
+    # natively for claude and copilot projects (#3921).
     write(
-        root / ".claude-plugin/plugin.json",
+        root / "plugin.json",
         json.dumps({"name": name, "version": "1.0.0", "description": "plugin root fixture"}),
     )
     write(

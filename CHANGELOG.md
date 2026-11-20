@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenAPM v0.1 adds the native plugin activation profile: which harnesses APM may install plugins into natively, and what APM guarantees when it does (`req-na-001`-`007`). (closes #3919, #3929)
 - `apm approve` lists what each package runs and pins MCP servers, hook files and whole native plugins to their content; changed content is parked until re-approved. (#3918)
 - `targets:` on `dependencies.mcp` entries limits which targets get each server, is never written into native config, and target-scoped installs keep servers declared elsewhere. (closes #2606, #3989)
+- Projects targeting Claude or Copilot install Claude and Agent Plugins intact to committed `.agents/plugins/`; fresh clones load them without APM. (#4056, closes #3921)
 
 ### Changed
 
