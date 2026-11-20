@@ -325,3 +325,68 @@ def test_unpack_refuses_executable_content(tmp_path: Path, apm_binary_path: Path
     ), text
     assert not any((target / ".claude").iterdir())
     assert [p.name for p in target.iterdir()] == [".claude"]
+
+
+def _user_manifest(root: Path, grants: dict, target: str) -> None:
+    dump_yaml(
+        {
+            "name": "user",
+            "version": "0.1.0",
+            "targets": [target],
+            "executables": {"allow": grants},
+        },
+        root / "apm.yml",
+    )
+
+
+def _user_hooks_deployed(home: Path, target: str) -> bool:
+    if target == "claude":
+        return _hooks_deployed(home)
+    hooks = home / ".copilot" / "hooks"
+    return hooks.is_dir() and any(hooks.rglob("*"))
+
+
+@pytest.mark.parametrize("target", ["claude", "copilot"])
+def test_global_bundle_reads_user_scope_from_apm_home_outside_home(
+    tmp_path: Path, apm_binary_path: Path, target: str
+) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    runner = _runner(apm_binary_path)
+    env = world.isolated.subprocess_env()
+    bundle = _packed_hook_bundle(world, runner, env, tmp_path / "out")
+    key = _bundle_key(bundle)
+    home = world.isolated.home
+    apm_home = tmp_path / "elsewhere" / "apm-home"
+    apm_home.mkdir(parents=True)
+    env = {**env, "APM_HOME": str(apm_home)}
+    (home / f".{target}").mkdir(exist_ok=True)
+    # A grant under ~/.apm is not the user scope when APM_HOME points elsewhere.
+    (home / ".apm").mkdir(exist_ok=True)
+    _user_manifest(home / ".apm", {key: {"hooks": True}}, target)
+    _user_manifest(apm_home, {}, target)
+
+    result = run_step(
+        runner,
+        ("install", "-g", str(bundle), "--no-policy"),
+        cwd=world.isolated.work_root,
+        env=env,
+        step="global-bundle-ungranted",
+    )
+
+    assert not _user_hooks_deployed(home, target), output(result)
+    assert (apm_home / "apm.lock.yaml").is_file()
+    assert not (home / ".apm" / "apm.lock.yaml").exists()
+    assert not (home / "apm.lock.yaml").exists()
+
+    # Control: the grant in APM_HOME admits the same bundle's hooks.
+    _user_manifest(apm_home, {key: {"hooks": True}}, target)
+    result = run_step(
+        runner,
+        ("install", "-g", str(bundle), "--no-policy"),
+        cwd=world.isolated.work_root,
+        env=env,
+        step="global-bundle-granted",
+    )
+    assert _user_hooks_deployed(home, target), output(result)
+    lock = load_yaml(apm_home / "apm.lock.yaml")
+    assert any(path.endswith("/x.sh") for path in lock.get("local_deployed_files") or []), lock

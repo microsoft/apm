@@ -893,6 +893,12 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
             "    preflight_survivor_hooks(target_survivor_plan, _allow_executables)\n",
         ),
         (
+            "install-deployment-bundle-user-scope-root",
+            "src/apm_cli/commands/install.py",
+            "                    user_scope=global_,\n",
+            "                    user_scope=False,\n",
+        ),
+        (
             "install-deployment-update-content-integrity",
             "src/apm_cli/install/sources.py",
             "                not update_accepts_new_content(ctx, dep_locked_chk, resolved_commit)\n",
@@ -1569,6 +1575,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="if mapping is not None:",
         new='if target.name == "copilot" and mapping is not None:',
         intent="Local bundle routing branches on target names instead of target primitives.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-bundle-user-scope-root",
+        rule_id="install-deployment-bundle-user-scope-root",
+        path="src/apm_cli/install/local_bundle_handler.py",
+        old="    return get_apm_dir(InstallScope.USER if user_scope else InstallScope.PROJECT)\n",
+        new="    return Path.home() if user_scope else Path.cwd()\n",
+        intent="A -g local bundle keeps its lock under the home directory instead of APM_HOME.",
     ),
     MutationCase(
         guard_id="install-deployment-cleanup-ownership-release",

@@ -7,6 +7,8 @@
 * ``apm update`` keeps the content-hash check for a dependency whose
   resolved commit did not move.
 * ``apm unpack`` refuses executable content before it writes anything.
+* ``apm install -g <bundle>`` keeps its lock, approvals and gate config
+  under ``APM_HOME`` (``core.scope``), never the home directory.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from scripts.architecture_linter.models import Violation
 GUARD_TRUST_POLICY_OUTCOME = "install-deployment-trust-policy-outcome"
 GUARD_UPDATE_CONTENT_INTEGRITY = "install-deployment-update-content-integrity"
 GUARD_UNPACK_EXECUTABLES = "install-deployment-unpack-executable-refusal"
+GUARD_BUNDLE_USER_SCOPE_ROOT = "install-deployment-bundle-user-scope-root"
 
 _OWNER = "src/apm_cli/policy/outcome_routing.py"
 _EXECUTABLES = "src/apm_cli/security/executables.py"
@@ -35,6 +38,7 @@ _SOURCES = "src/apm_cli/install/sources.py"
 _INTEGRATE = "src/apm_cli/install/phases/integrate.py"
 _HELPERS = "src/apm_cli/install/source_helpers.py"
 _UNPACKER = "src/apm_cli/bundle/unpacker.py"
+_INSTALL_COMMAND = "src/apm_cli/commands/install.py"
 
 _DISCOVERY = "discover_policy_with_chain"
 # Every remaining direct discovery call consumes the outcome itself: the
@@ -201,3 +205,45 @@ def check_unpack_executable_refusal(provider: FactsProvider) -> tuple[Violation,
             ),
         )
     return ()
+
+
+def check_bundle_user_scope_root(provider: FactsProvider) -> tuple[Violation, ...]:
+    """A ``-g`` local bundle reads and writes user metadata under ``APM_HOME``."""
+    findings: list[Violation] = []
+    facts, failures = _facts_for(provider, _LOCAL_BUNDLE, GUARD_BUNDLE_USER_SCOPE_ROOT)
+    findings.extend(failures)
+    if not failures:
+        if not _present(
+            facts, "return get_apm_dir(InstallScope.USER if user_scope else InstallScope.PROJECT)"
+        ):
+            findings.append(
+                _summary(
+                    GUARD_BUNDLE_USER_SCOPE_ROOT,
+                    _LOCAL_BUNDLE,
+                    "The bundle lock root must come from core.scope.get_apm_dir",
+                )
+            )
+        for number, line in enumerate(_lines(facts), start=1):
+            if (
+                "get_lockfile_path(project_root)" in line
+                or "migrate_lockfile_if_needed(project_root)" in line
+            ):
+                findings.append(
+                    violation(
+                        GUARD_BUNDLE_USER_SCOPE_ROOT,
+                        _LOCAL_BUNDLE,
+                        "A -g bundle lock lives under APM_HOME; use _bundle_lock_root",
+                        line=number,
+                    )
+                )
+    facts, failures = _facts_for(provider, _INSTALL_COMMAND, GUARD_BUNDLE_USER_SCOPE_ROOT)
+    findings.extend(failures)
+    if not failures and not _present(facts, "user_scope=global_,"):
+        findings.append(
+            _summary(
+                GUARD_BUNDLE_USER_SCOPE_ROOT,
+                _INSTALL_COMMAND,
+                "apm install -g <bundle> must read grants from the user-scope manifest",
+            )
+        )
+    return tuple(findings)

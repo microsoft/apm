@@ -139,9 +139,11 @@ from scripts.architecture_linter.checks.install_skills_root_derivation import (
     check_skills_root_derivation,
 )
 from scripts.architecture_linter.checks.install_trust_integrity import (
+    GUARD_BUNDLE_USER_SCOPE_ROOT,
     GUARD_TRUST_POLICY_OUTCOME,
     GUARD_UNPACK_EXECUTABLES,
     GUARD_UPDATE_CONTENT_INTEGRITY,
+    check_bundle_user_scope_root,
     check_trust_policy_outcome,
     check_unpack_executable_refusal,
     check_update_content_integrity,
@@ -183,6 +185,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_UPDATE_CONTENT_INTEGRITY,
         "apm update keeps the content-hash check for an unchanged commit.",
         check_update_content_integrity,
+    ),
+    _rule(
+        GUARD_BUNDLE_USER_SCOPE_ROOT,
+        "apm install -g <bundle> keeps its lock and grants under APM_HOME.",
+        check_bundle_user_scope_root,
     ),
     _rule(
         GUARD_UNPACK_EXECUTABLES,
