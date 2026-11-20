@@ -276,6 +276,7 @@ class InstallContext:
     # ------------------------------------------------------------------
     old_local_deployed: list[str] = field(default_factory=list)  # pipeline setup
     local_deployed_files: list[str] = field(default_factory=list)  # integrate (root)
+    local_hooks_merged: bool = False  # integrate (root merged hook entries, #4033)
     local_content_errors_before: int = 0  # integrate (pre-root)
 
     # ------------------------------------------------------------------
