@@ -79,8 +79,8 @@ pytestmark = [
 # A clone must stay well under a second; the median pins the steady cost.
 CLONE_BUDGET_SECONDS = 0.25
 _GATED = frozenset({"hook", "mcp", "lsp", "bin", "canvas", "native"})
-# The Claude bin plugin has its own user-scope test (--trust-bin, claude target).
-_APM_GIT_PACKAGES = tuple(name for name in GIT_PUBLISHED if name != "p-native-claude-bin")
+# Native plugins have their own source tests (Claude targets, user-scope bin/).
+_APM_GIT_PACKAGES = tuple(name for name in GIT_PUBLISHED if not name.startswith("p-native-"))
 _TRACK_USER_TRANSITIVE = "#4153"
 _TRACK_NATIVE_APPROVE = "#4154"
 
@@ -303,8 +303,27 @@ def test_user_scope_with_apm_home_outside_home(lifecycle_world: World) -> None:
 # -- sources -----------------------------------------------------------------
 
 
-@pytest.mark.parametrize("scope", ["project", "user"])
-@pytest.mark.parametrize("package", _APM_GIT_PACKAGES)
+# p-lsp declares only LSP servers. Locally its empty .apm/ satisfies package
+# validation; git cannot carry an empty directory, so the served copy is
+# refused ("missing the required .apm/ directory"). Found by the world.
+_LSP_ONLY_REMOTE = "LSP-only package rejected from git/marketplace (no .apm/)"
+_REMOTE_CELLS = [
+    pytest.param(
+        package,
+        scope,
+        marks=(
+            [pytest.mark.xfail(strict=True, reason=_LSP_ONLY_REMOTE, raises=AssertionError)]
+            if package == "p-lsp"
+            else []
+        ),
+        id=f"{package}-{scope}",
+    )
+    for package in _APM_GIT_PACKAGES
+    for scope in ("project", "user")
+]
+
+
+@pytest.mark.parametrize(("package", "scope"), _REMOTE_CELLS)
 def test_git_source_installs_through_the_local_https_server(
     lifecycle_world: World, package: str, scope: str
 ) -> None:
@@ -319,8 +338,7 @@ def test_git_source_installs_through_the_local_https_server(
     assert all(entry["status"] == 200 for entry in requests), requests
 
 
-@pytest.mark.parametrize("scope", ["project", "user"])
-@pytest.mark.parametrize("package", _APM_GIT_PACKAGES)
+@pytest.mark.parametrize(("package", "scope"), _REMOTE_CELLS)
 def test_marketplace_source_installs(lifecycle_world: World, package: str, scope: str) -> None:
     world = lifecycle_world
     _ok(world, ["marketplace", "add", world.services.marketplace_url])
@@ -344,6 +362,28 @@ def test_local_bundle_installs_offline(lifecycle_world: World) -> None:
     assert "Skipped 1 bundle hook file(s) from p-exec" in output
     assert not (world.project / ".github" / "hooks" / "p-exec-session.json").exists()
     assert world.services.egress_log() == []
+
+
+def test_lsp_plugin_bundle_installs_offline(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    bundle = world.packages["p-lsp:bundle"]
+    assert Path(bundle.spec).is_file() and bundle.source == "local-bundle"
+    result = _ok(world, ["install", bundle.spec])
+    assert "Installing local bundle" in " ".join((result.stdout + result.stderr).split())
+    assert world.services.egress_log() == []
+
+
+@pytest.mark.parametrize("source", ["marketplace", "git"])
+def test_native_claude_plugin_installs_from_the_world_sources(
+    lifecycle_world: World, source: str
+) -> None:
+    world = lifecycle_world
+    if source == "marketplace":
+        _ok(world, ["marketplace", "add", world.services.marketplace_url])
+    _set_targets(world, "project", "claude")
+    _install_and_approve(world, f"p-native-claude:{source}", "project")
+    assert "p-native-claude" in _locked(world, "project")
+    _assert_surfaces(world, "p-native-claude", "project")
 
 
 def test_apm_format_bundle_carries_the_hook_and_unpack_refuses_it(
@@ -649,6 +689,7 @@ def test_policy_variant_is_served_and_recorded(lifecycle_world: World, variant: 
         ("deny-lsp", "p-lsp"),
         ("deny-native", "p-native-claude"),
         ("deny-native", "p-native-codex"),
+        ("deny-native", "p-native-claude-bin"),
     ],
 )
 def test_dependency_deny_variant_blocks_its_package(

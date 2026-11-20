@@ -128,7 +128,9 @@ def policy_documents() -> dict[str, dict[str, object]]:
         "deny-native": {
             "name": "deny-native",
             **base,
-            "dependencies": {"deny": ["**/p-native-claude", "**/p-native-codex"]},
+            "dependencies": {
+                "deny": ["**/p-native-claude", "**/p-native-codex", "**/p-native-claude-bin"]
+            },
         },
         "exec-gate-on": {
             "name": "exec-gate-on",
