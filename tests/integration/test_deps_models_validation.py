@@ -928,7 +928,7 @@ class TestTrySparseCheckout:
                 "apm_cli.deps.github_downloader.get_git_executable",
                 return_value=sensitive_path,
             ),
-            patch("apm_cli.deps.github_downloader.subprocess.run", return_value=failed),
+            patch("subprocess.run", return_value=failed),
         ):
             ok = dl._try_sparse_checkout(dep, tmp_path / "clone", "skills/brand", "main")
 

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,6 +39,43 @@ _SKILL_MD = (
 )
 _PIN_ERROR = "Invalid original Codex source pin"
 _CLIENT_REACHED = "stub: Codex client reached after source-pin validation"
+# Set in the child interpreter that actually runs the scenario.
+_FRESH_PROCESS_ENV = "APM_TEST_CODEX_PIN_FRESH_PROCESS"
+_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _rerun_in_fresh_process(request: pytest.FixtureRequest) -> None:
+    """Run this exact test case in a new interpreter.
+
+    The in-process install is sensitive to module state that earlier tests on
+    the same xdist worker leave behind (seen on Windows units after a shard
+    reshuffle). A fresh interpreter gives the scenario a clean process.
+    """
+    env = {**os.environ, _FRESH_PROCESS_ENV: "1"}
+    env.pop("PYTEST_XDIST_WORKER", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "no:randomly",
+            "-p",
+            "no:xdist",
+            "-q",
+            request.node.nodeid,
+        ],
+        cwd=_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout[-6000:] + result.stderr[-2000:]
+    assert "1 passed" in result.stdout, result.stdout[-2000:]
 
 
 def _write_issue_fixture(apm_home: Path, *, locked_commit: str, pin_commit: str | None) -> None:
@@ -93,6 +132,7 @@ def _write_issue_fixture(apm_home: Path, *, locked_commit: str, pin_commit: str 
     ],
 )
 def test_frozen_global_install_from_warm_cache_uses_locked_source_pin(
+    request: pytest.FixtureRequest,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     locked_commit: str,
@@ -100,6 +140,9 @@ def test_frozen_global_install_from_warm_cache_uses_locked_source_pin(
     expected_pin: str,
     expected_error: str,
 ) -> None:
+    if os.environ.get(_FRESH_PROCESS_ENV) != "1":
+        _rerun_in_fresh_process(request)
+        return
     isolated = IsolatedApmEnvironment.create(tmp_path / "cached-codex", base_env={})
     for key in list(os.environ):
         monkeypatch.delenv(key)

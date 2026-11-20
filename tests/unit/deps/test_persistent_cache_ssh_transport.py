@@ -134,7 +134,7 @@ def test_cold_install_of_ssh_non_github_dep_never_uses_https(
         raise AssertionError("cold install must be served by the persistent cache")
 
     with (
-        patch("apm_cli.cache.git_cache.subprocess.run", side_effect=_recording_run),
+        patch("subprocess.run", side_effect=_recording_run),
         patch.object(downloader, "resolve_git_reference", return_value=resolved),
         patch.object(downloader, "_clone_with_fallback", side_effect=_no_fallback_clone),
     ):
