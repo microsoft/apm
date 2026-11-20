@@ -444,15 +444,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=rf"\A(?=.*^\+- MCP Servers)(?=.*^{_FROZEN_MCP_TARGETING})",
     ),
     KnownOutputCell(
-        "uninstall-unattributed-survivor-lines",
-        "I9",
-        "#4219",
-        _runs("uninstall"),
-        r"repeats a (line|diagnostic): '\|-- ",
-        # Survivor tree lines with no package line naming them, one of them repeated.
-        output=r"\A(?!.*^  \[\+\] ).*^  (\|-- [^\n]*)$.*^  \1$",
-    ),
-    KnownOutputCell(
         "pack-dry-run-plugin-notes-twice",
         "I9",
         "#4291",

@@ -223,6 +223,24 @@ class _LocalRefreshLogger:
         )
 
 
+class _SurvivorRebuildLogger:
+    """Logger for the survivor rebuild after an uninstall (#4160, #4219).
+
+    Survivors are redeployed from their recorded selection, so their
+    per-primitive integration lines carry no news and no package header:
+    they are dropped. Warnings and errors pass through unchanged.
+    """
+
+    def __init__(self, logger: CommandLogger) -> None:
+        self._logger = logger
+
+    def tree_item(self, _message: str) -> None:
+        return None
+
+    def __getattr__(self, name: str):
+        return getattr(self._logger, name)
+
+
 class LocalSurvivorRefreshError(RuntimeError):
     """Raised when a shared local install slot cannot preserve its survivors."""
 
@@ -1673,7 +1691,7 @@ def _sync_integrations_after_uninstall(
                     managed_files=None,
                     diagnostics=reintegration_diagnostics,
                     package_name=dep_ref.get_identity(),
-                    logger=logger,
+                    logger=_SurvivorRebuildLogger(logger),
                     scope=_rebuild_scope,
                     skill_subset=selection.skill_subset,
                     skill_pairing=selection.skill_pairing,

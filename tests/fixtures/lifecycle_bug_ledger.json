@@ -2378,6 +2378,16 @@
       ]
     },
     {
+      "issue": 4160,
+      "fixed_in": "Unreleased",
+      "summary": "After apm uninstall, the rebuild of the surviving packages printed their integration lines with no package header, once per surviving package. The rebuild now prints no per-primitive lines for survivors; warnings and errors still show.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_survivor_output_lifecycle.py::test_uninstall_prints_no_unattributed_survivor_lines"
+      ]
+    },
+    {
       "issue": 4171,
       "fixed_in": "Unreleased",
       "summary": "Redact credential values in command output: stored tokens render through one owner as a fixed mask with presence reported, and URL userinfo, URL query values and credential flag values are redacted across config reads, diagnostics, SBOM export and registry error messages.",
@@ -2851,6 +2861,16 @@
       "regression_tests": [
         "tests/integration/test_lock_parked_exec_status_lifecycle.py::test_lock_keeps_parked_exec_status_and_converges",
         "tests/integration/test_executables_gate_integration.py::TestLockfileExecStatusIntegration::test_lock_only_carries_recorded_exec_status_forward"
+      ]
+    },
+    {
+      "issue": 4219,
+      "fixed_in": "Unreleased",
+      "summary": "apm uninstall repeated unattributed survivor integration lines (|-- Skill integrated ...) once per surviving package; each line now appears at most once per cause, as the survivor rebuild prints no tree lines.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_uninstall_survivor_output_lifecycle.py::test_uninstall_prints_no_unattributed_survivor_lines"
       ]
     },
     {
