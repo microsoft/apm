@@ -199,3 +199,30 @@ def test_a_colliding_mcp_install_is_refused_before_any_file_is_written(
     assert world.lockfile_bytes() is None, evidence(result)
     assert not (world.project / ".claude/agents").exists(), evidence(result)
     assert not (world.project / ".codex/config.toml").exists(), evidence(result)
+
+
+def test_dry_run_waits_for_a_running_install(tmp_path: Path, apm_binary_path: Path) -> None:
+    """A dry-run resolves into apm_modules staging, so it serializes with a running install."""
+    world = build_world(tmp_path, apm_binary_path)
+    delta = world.write_package("delta")
+    held = _held_at_commit(
+        world, apm_binary_path, tmp_path / "held", "install", "--no-policy", delta
+    )
+    preview = subprocess.Popen(
+        (str(apm_binary_path), "install", "--dry-run", "--no-policy"),
+        cwd=world.project,
+        env=world.env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        time.sleep(5)
+        assert preview.poll() is None, preview.communicate()[0]
+    finally:
+        os.killpg(held.pid, signal.SIGTERM)
+        held.communicate(timeout=120)
+    output, _ = preview.communicate(timeout=240)
+    assert preview.returncode == 0, output
+    assert "Another APM operation is running" in output, output

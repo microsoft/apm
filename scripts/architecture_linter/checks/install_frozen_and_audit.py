@@ -1023,7 +1023,7 @@ def check_lifecycle_serialization(provider: FactsProvider) -> tuple[Violation, .
             "reset_flags": "serialized_lifecycle",
         },
         "src/apm_cli/commands/init.py": {"init": "serialized_lifecycle_unless"},
-        "src/apm_cli/commands/install.py": {"install": "serialized_lifecycle_unless"},
+        "src/apm_cli/commands/install.py": {"install": "serialized_lifecycle_unless_fresh_preview"},
         "src/apm_cli/commands/lifecycle.py": {
             "lifecycle_init": "serialized_lifecycle",
         },

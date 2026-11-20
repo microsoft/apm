@@ -61,7 +61,7 @@ from apm_cli.install.insecure_policy import (
     _guard_transitive_insecure_dependencies,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _InsecureDependencyInfo,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
 )
-from apm_cli.install.locking import serialized_lifecycle_unless
+from apm_cli.install.locking import serialized_lifecycle_unless_fresh_preview
 from apm_cli.install.lsp.integration import LspPreflight
 from apm_cli.install.manifest_helpers import (
     _build_prospective_package,
@@ -1098,7 +1098,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     ),
 )
 @click.pass_context
-@serialized_lifecycle_unless("dry_run")
+@serialized_lifecycle_unless_fresh_preview("dry_run")
 def install(  # noqa: PLR0913
     ctx,
     packages,
