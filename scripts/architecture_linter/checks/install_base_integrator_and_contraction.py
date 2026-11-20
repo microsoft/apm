@@ -997,7 +997,7 @@ def _skill_lockfile_root_findings(provider: FactsProvider, rule_id: str) -> list
         not re.search(
             r"with \(\s*contextlib\.nullcontext\(\)\s*if ctx\.lockfile_only\s*"
             r'else ctx\.integrators\["skill"\]\.ownership_snapshot\(\s*'
-            r"replay_lockfile=ctx\.existing_lockfile if ctx\.frozen else None,"
+            r"replay_lockfile=InstallService\.frozen_replay_lockfile\(ctx\),"
             r"\s*materialization_session=session,\s*\)\s*\):\s*"
             r'_run_phase\("integrate", _integrate_phase, ctx\)',
             "\n".join(pipeline.lines),
@@ -1421,7 +1421,7 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "receipt_retirements.extend(retired)",
         ),
         "src/apm_cli/install/phases/cleanup.py": (
-            "_run_cleanup(ctx, receipt_retirements)",
+            "_run_cleanup(ctx, receipt_retirements, frozen_disposition=frozen_disposition)",
             "finally:",
             "DeploymentMaterializationSession.retire_removed(",
             "receipt_retirements=receipt_retirements",

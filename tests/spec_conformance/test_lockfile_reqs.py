@@ -229,6 +229,29 @@ def test_frozen_mcp_validation_fails_before_durable_mutation(tmp_path):
 
 
 @pytest.mark.req("req-lk-006")
+def test_frozen_lock_withholding_is_decided_once_and_cannot_be_omitted(tmp_path: Path) -> None:
+    """--frozen never rewrites the lock: one owner decides, and no seam may omit it (#4012)."""
+    from types import SimpleNamespace
+
+    from apm_cli.install.context import InstallContext
+    from apm_cli.install.service import InstallService
+    from apm_cli.install.service_integration import run_service_integrations
+
+    def disposition(**fields):
+        return InstallService.frozen_disposition(
+            InstallContext(project_root=tmp_path, apm_dir=tmp_path, **fields)
+        )
+
+    frozen, normal = disposition(frozen=True), disposition()
+    assert frozen.withhold_lockfile_writes and frozen.retain_package_orphans
+    assert not normal.withhold_lockfile_writes and not normal.retain_package_orphans
+    with pytest.raises(AttributeError):
+        InstallService.frozen_disposition(SimpleNamespace())
+    with pytest.raises(TypeError, match="frozen_disposition"):
+        run_service_integrations(SimpleNamespace())
+
+
+@pytest.mark.req("req-lk-006")
 @pytest.mark.parametrize("development", [False, True])
 def test_cold_dependency_evidence_cannot_defer_direct_mcp_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, development: bool
@@ -444,9 +467,14 @@ def test_lockfile_unknown_hash_algorithm_rejected():
 
 @pytest.mark.req("req-lk-015")
 def test_lockfile_tree_sha256_canonicalisation_invariant():
+    """Amendment 0.1.71: `content_hash` anchors git-source integrity in v0.1."""
     assert_spec_contains(
         "canonical git tree-hash",
         "tree_sha256",
+        "compute and record `content_hash`, a `sha256` envelope over the\npackage tree",
+        "the consumer MUST re-compute `content_hash` from\nthe package tree at `resolved_commit`",
+        "MUST name the entry, the expected envelope, and the observed\nenvelope.",
+        "recorded as `tree_sha256`, is reserved\nfor v0.2.",
     )
 
 
