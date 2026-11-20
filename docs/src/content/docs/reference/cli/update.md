@@ -38,7 +38,7 @@ For a read-only install that pins to whatever is already in `apm.lock.yaml` -- t
 
 On a fresh clone or CI runner without local deployment receipts (for example a scheduled update), `apm update --yes` replaces committed skill files that match what the currently locked version renders, fetched from its locked commit. Lockfile hashes are never that proof. If any of those files was edited locally, the update exits nonzero before writing any deployed file or `apm.lock.yaml`; move the file aside and retry.
 
-`apm update` accepts new package content only for a dependency whose resolved commit moved, and prints each new content hash. A dependency whose commit did not change must still match its locked `content_hash`; a mismatch fails closed and leaves `apm.lock.yaml` untouched.
+`apm update` accepts new package content only for a dependency whose resolved commit moved, and prints each new content hash. A dependency whose commit did not change must still match its locked `content_hash`; a mismatch fails closed and leaves `apm.lock.yaml` untouched. To re-pin deliberately, remove that dependency's entry from `apm.lock.yaml` and run `apm install`.
 
 ## Arguments
 

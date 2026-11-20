@@ -411,27 +411,57 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         negative_args = ("audit", "--ci", "--no-policy", "--format", "json")
 
     recovery_args = ["install", "--target", "copilot"]
-    if mutation in {"content-hash", "resolved-commit", "source-identity"}:
+    if mutation in {"resolved-commit", "source-identity"}:
         recovery_args.append("--update")
-    result, recovery, clean_audit = runner.run_sequence(
-        (
-            negative_args,
-            tuple(recovery_args),
-            ("audit", "--ci", "--no-policy", "--format", "json"),
-        ),
-        expected_returncodes=(1, 0, 0),
-        scenario_id=f"{scenario_id}-tamper-repair",
-        cwd=project_root,
-        env=environment,
-    )
+    if mutation == "content-hash":
+        # An unchanged commit never re-pins new content through an update
+        # (#4027): the deliberate repair drops the entry and installs again.
+        (result,) = runner.run_sequence(
+            (negative_args,),
+            expected_returncodes=(1,),
+            scenario_id=f"{scenario_id}-tamper",
+            cwd=project_root,
+            env=environment,
+        )
+        refused = runner.run_sequence(
+            (("install", "--target", "copilot", "--update"),),
+            expected_returncodes=(1,),
+            scenario_id=f"{scenario_id}-tamper-update",
+            cwd=project_root,
+            env=environment,
+        )[0]
+        assert "Content hash mismatch" in " ".join(refused.stdout.split())
+        assert load_yaml(lock_path)["dependencies"][0]["content_hash"] == f"sha256:{'0' * 64}"
+        tampered = load_yaml(lock_path)
+        tampered["dependencies"] = []
+        dump_yaml(tampered, lock_path)
+        recovery, clean_audit = runner.run_sequence(
+            (tuple(recovery_args), ("audit", "--ci", "--no-policy", "--format", "json")),
+            expected_returncodes=(0, 0),
+            scenario_id=f"{scenario_id}-tamper-repair",
+            cwd=project_root,
+            env=environment,
+        )
+    else:
+        result, recovery, clean_audit = runner.run_sequence(
+            (
+                negative_args,
+                tuple(recovery_args),
+                ("audit", "--ci", "--no-policy", "--format", "json"),
+            ),
+            expected_returncodes=(1, 0, 0),
+            scenario_id=f"{scenario_id}-tamper-repair",
+            cwd=project_root,
+            env=environment,
+        )
 
     if mutation == "content-hash":
         normalized_stdout = " ".join(result.stdout.split())
         assert "Content hash mismatch" in normalized_stdout
         assert f"expected sha256:{'0' * 64}" in normalized_stdout
-        assert "This may indicate a supply-chain attack." in normalized_stdout
+        assert "This may indicate a supply-chain attack:" in normalized_stdout
         dep_key = normalized_stdout.split("Content hash mismatch for ", 1)[1].split(":", 1)[0]
-        assert f"Use 'apm update {dep_key}' to accept new content for this package" in (
+        assert f"remove the '{dep_key}' entry from apm.lock.yaml and run 'apm install'" in (
             normalized_stdout
         )
         assert result.stderr == ""

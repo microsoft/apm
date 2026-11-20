@@ -40,18 +40,7 @@ def supply_chain_mismatch_hint(ctx: Any, dep_key: str) -> str:
     A direct dependency gets the targeted ``apm update <dep_key>``: its key is
     the ``replace:``-projected unique key ``apm update`` matches. A transitive
     one cannot be named on that command line, so it gets the full refresh.
-    During an update only an unchanged commit is checked, so the hint points
-    at the cache instead.
     """
-    if getattr(ctx, "update_refs", False) is True:
-        # Only an unchanged commit is checked during an update, so updating
-        # again cannot accept the new bytes.
-        return (
-            "This may indicate a supply-chain attack: the locked commit did not "
-            "change, so its content must not change either. Run 'apm cache clean' "
-            "and retry; if the mismatch persists, the source is serving altered "
-            "content for this commit."
-        )
     command = lockfile_refresh_command(ctx.scope)
     if dep_key in (getattr(ctx, "declared_direct_refs", None) or {}):
         return (
@@ -61,6 +50,23 @@ def supply_chain_mismatch_hint(ctx: Any, dep_key: str) -> str:
     return (
         f"This may indicate a supply-chain attack. Use '{command}' to accept "
         "new content and update the lockfile."
+    )
+
+
+def content_hash_mismatch_hint(ctx: Any, dep_key: str) -> str:
+    """Explain a same-commit content mismatch and how to re-pin deliberately.
+
+    Only a moved commit may change content, so ``apm update`` cannot accept
+    new bytes for the locked commit (#4027).
+    """
+    from apm_cli.core.scope import InstallScope
+
+    install = "apm install -g" if ctx.scope is InstallScope.USER else "apm install"
+    return (
+        "This may indicate a supply-chain attack: the locked commit now yields "
+        "different content. Run 'apm cache clean' and retry. If you trust the new "
+        f"content, remove the '{dep_key}' entry from apm.lock.yaml and run "
+        f"'{install}' to re-pin it."
     )
 
 

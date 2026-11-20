@@ -40,12 +40,12 @@ from apm_cli.install.registry_wiring import (
     resolver_last_registry_resolution,
 )
 from apm_cli.install.source_helpers import (
+    content_hash_mismatch_hint,
     ensure_carried_licenses_match,
     locked_parent_identity,
     materialized_manifest_snapshot,
     record_carried_package_hash,
     record_package_digests,
-    supply_chain_mismatch_hint,
     update_accepts_new_content,
 )
 from apm_cli.install.source_helpers import (
@@ -899,7 +899,7 @@ class FreshDependencySource(DependencySource):
                             f"Content hash mismatch for {dep_key}: "
                             f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
                             "The downloaded content differs from the lockfile record. "
-                            + supply_chain_mismatch_hint(ctx, dep_key)
+                            + content_hash_mismatch_hint(ctx, dep_key)
                         )
             ensure_carried_licenses_match(ctx, dep_key, install_path, dep_locked_chk)
 
