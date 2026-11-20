@@ -388,13 +388,7 @@ def test_staged_compile_input_drift_routes_through_lockfile_owner(
     [
         (
             "src/apm_cli/policy/ci_checks.py",
-            "except (AgentPluginDeploymentBoundaryError, CodexNativeError) as exc:",
             "except AgentPluginDeploymentBoundaryError as exc:",
-            False,
-        ),
-        (
-            "src/apm_cli/policy/ci_checks.py",
-            "except (AgentPluginDeploymentBoundaryError, CodexNativeError) as exc:",
             "except (AgentPluginDeploymentBoundaryError, Exception) as exc:",
             True,
         ),
@@ -403,7 +397,7 @@ def test_staged_compile_input_drift_routes_through_lockfile_owner(
 def test_native_typed_error_guard_retains_legacy_and_rejects_broad_handlers(
     path: str, original: str, replacement: str, refused: bool
 ) -> None:
-    """Adding the Codex error must not weaken the established portable error contract."""
+    """The portable native error contract refuses a broad exception fallback."""
     source = (ROOT / path).read_text(encoding="utf-8")
     assert original in source
     rule = "marketplace-integrations-projection-boundary"
@@ -418,92 +412,57 @@ def test_native_typed_error_guard_retains_legacy_and_rejects_broad_handlers(
     ("path", "old", "new"),
     [
         (
-            "src/apm_cli/utils/content_hash.py",
-            "_package_files(package_path, native=True)",
-            "_package_files(package_path, native=False)",
-        ),
-        (
-            "src/apm_cli/utils/content_hash.py",
-            "path.stat().st_mode & stat.S_IXUSR",
-            "False",
-        ),
-        (
-            "src/apm_cli/codex_plugins/registrar.py",
-            "def owns_codex_dependency(",
-            "def duplicate_owns_codex_dependency(",
+            "src/apm_cli/install/target_warnings.py",
+            "note_codex_split_install(package_info, targets, ctx)",
+            "None",
         ),
         (
             "src/apm_cli/install/phases/codex_plugins.py",
-            "ctx.package_deployed_files.get(key)",
-            "False",
+            "split_install_message(ctx.codex_split_plugins, ctx.scope)",
+            "''",
         ),
         (
-            "src/apm_cli/integration/mcp_config_view.py",
-            "owns_codex_dependency(",
-            "noncanonical_ownership(",
-        ),
-        (
-            "src/apm_cli/deps/package_validator.py",
-            'getattr(package, "codex_plugin", None) is not None',
-            "False",
-        ),
-        (
-            "src/apm_cli/integration/mcp_config_view.py",
-            "ownership_cache=native_ownership_cache",
-            "ownership_cache=None",
-        ),
-        (
-            "src/apm_cli/codex_plugins/registrar.py",
-            "verify_codex_source_identity(modules_dir, records=records, **item.plugin.source_identity())",
+            "src/apm_cli/install/phases/codex_plugins.py",
+            "retire_legacy_codex_registrations(ctx.apm_modules_dir, ctx.scope)",
             "None",
         ),
         (
-            "src/apm_cli/codex_plugins/registrar.py",
-            "record.source_commit == source_commit",
-            "False",
-        ),
-        (
-            "src/apm_cli/install/sources.py",
-            "is_codex_source_pin(cached_commit)",
-            "bool(cached_commit)",
-        ),
-        (
-            "src/apm_cli/install/sources.py",
-            "verify_marker(self.install_path, cached_commit)",
+            "src/apm_cli/commands/uninstall/cli.py",
+            "retire_legacy_codex_registrations(modules_dir, scope)",
             "None",
         ),
         (
-            "src/apm_cli/install/drift.py",
-            "codex_records = verify_codex_source_identity(",
-            "codex_records = noncanonical_source_check(",
+            "src/apm_cli/codex_plugins/legacy_registrations.py",
+            "adapter.retire_plugin_registrations(registrations)",
+            "rogue_config_edit(registrations)",
         ),
         (
-            "src/apm_cli/install/drift.py",
-            "records=codex_records",
-            "records=None",
+            "src/apm_cli/adapters/client/codex.py",
+            'plain(entry) != {"enabled": False}',
+            "False",
         ),
         (
-            "src/apm_cli/codex_plugins/admission.py",
-            'result["codex_source_identity"] = plugin.source_identity()',
-            "pass",
+            "src/apm_cli/install/phases/codex_plugins.py",
+            "    if ctx.dry_run or ctx.lockfile_only:",
+            '    shutil.which("codex")\n    if ctx.dry_run or ctx.lockfile_only:',
         ),
         (
-            "src/apm_cli/codex_plugins/registrar.py",
-            "record = replace(record, source_commit=item.plugin.source_commit)",
-            "pass",
+            "src/apm_cli/codex_plugins/legacy_registrations.py",
+            "import hashlib\n",
+            "import hashlib\nimport subprocess\n",
         ),
         (
-            "src/apm_cli/policy/ci_checks.py",
-            "except (AgentPluginDeploymentBoundaryError, CodexNativeError) as exc:",
-            "except AgentPluginDeploymentBoundaryError as exc:",
+            "src/apm_cli/codex_plugins/legacy_registrations.py",
+            "def legacy_ledger_path(",
+            "def retire_plugin_registrations():\n    pass\n\n\ndef legacy_ledger_path(",
         ),
     ],
 )
-def test_codex_native_content_and_ownership_gates_cannot_be_bypassed(
+def test_codex_split_install_and_retirement_gates_cannot_be_bypassed(
     path: str, old: str, new: str
 ) -> None:
-    """Native integrity and cold-cache identity use their canonical owners."""
-    rule_id = "marketplace-integrations-codex-native-lifecycle"
+    """Codex is split-installed, never spawned, and retirement keeps its owners (#3920)."""
+    rule_id = "marketplace-integrations-codex-split-install"
     source = (ROOT / path).read_text(encoding="utf-8")
     assert old in source
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
@@ -1847,12 +1806,12 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A rebound marketplace alias resolves without comparing the locked catalog origin.",
     ),
     MutationCase(
-        guard_id="marketplace-integrations-codex-native-lifecycle",
-        rule_id="marketplace-integrations-codex-native-lifecycle",
-        path="src/apm_cli/codex_plugins/client.py",
-        old='"expectedVersion": version',
-        new='"unexpectedVersion": version',
-        intent="Codex native configuration loses its public compare-and-swap no-write control.",
+        guard_id="marketplace-integrations-codex-split-install",
+        rule_id="marketplace-integrations-codex-split-install",
+        path="src/apm_cli/install/phases/codex_plugins.py",
+        old="retire_legacy_codex_registrations(ctx.apm_modules_dir, ctx.scope)",
+        new="None",
+        intent="Registrations from the removed app-server route are never retired.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-copilot-ownership",

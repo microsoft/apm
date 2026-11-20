@@ -315,11 +315,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     ) = deployment_plan.approvals
     _skip_bin = deployment_plan.skip_bin
     _bin_skip_reason_override = deployment_plan.bin_skip_reason
-    from apm_cli.codex_plugins.admission import finalize_codex_native
     from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 
-    codex_native = deployment_plan.codex_native
-    # Compatibility-only Codex data is opaque to every loose target adapter.
     projection_targets = deployment_plan.projection_targets
     source_plan = deployment_plan.source_plan
     if source_plan is None:
@@ -382,21 +379,17 @@ def integrate_package_primitives(  # noqa: PLR0913
     # An unmatched skills: selection fails the package; refuse it before any
     # primitive kind writes so the failed install leaves every file untouched.
     preflight_skill_selection = getattr(integrators.skill, "preflight_skill_selection", None)
-    if (
-        codex_native is None
-        and callable(preflight_skill_selection)
-        and not preflight_skill_selection(
-            package_info,
-            skill_subset=skill_subset,
-            source_plan=source_plan,
-            diagnostics=diagnostics,
-            logger=logger,
-        )
+    if callable(preflight_skill_selection) and not preflight_skill_selection(
+        package_info,
+        skill_subset=skill_subset,
+        source_plan=source_plan,
+        diagnostics=diagnostics,
+        logger=logger,
     ):
         return result
 
     preflight_hooks = getattr(integrators.hook, "preflight_hooks_for_targets", None)
-    if _hooks_approved and callable(preflight_hooks) and codex_native is None:
+    if _hooks_approved and callable(preflight_hooks):
         preflight_hooks(
             package_info,
             project_root,
@@ -419,14 +412,6 @@ def integrate_package_primitives(  # noqa: PLR0913
         )
 
     _reconcile_excluded_targets()
-
-    if codex_native is not None:
-        _rc = (
-            reconcile_package_targets(package_info, project_root, targets)
-            if callable(reconcile_package_targets)
-            else None
-        )
-        return finalize_codex_native(result, codex_native, source_plan, _rc, ctx, scratch_root)
 
     # Aggregate per-primitive across targets so we emit ONE line per kind
     # (per the 1/2/3+ collapse rule), not one per target.

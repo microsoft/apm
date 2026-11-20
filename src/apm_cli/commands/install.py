@@ -1786,6 +1786,13 @@ def _install_apm_packages(ctx, outcome):
                 list(prospective_plan.selected_apm_dependencies),
                 apm_package=apm_package,
             )
+            from apm_cli.install.phases.codex_plugins import report_codex_split_dry_run
+
+            report_codex_split_dry_run(
+                ctx,
+                list(prospective_plan.selected_apm_dependencies),
+                apm_package=apm_package,
+            )
         from apm_cli.policy.install_preflight import run_policy_preflight as _dr_preflight
 
         _dr_preflight(

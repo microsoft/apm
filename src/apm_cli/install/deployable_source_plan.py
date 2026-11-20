@@ -120,7 +120,6 @@ class DeployableSourcePlan:
         skip_bin: bool,
         hook_file_admitted: Callable[[Path], bool] | None = None,
         plugin_bin_deployable: bool = False,
-        native_plugin_root: Path | None = None,
         diagnostics: DiagnosticCollector | None = None,
         package_name: str = "",
     ) -> DeployableSourcePlan:
@@ -137,7 +136,7 @@ class DeployableSourcePlan:
         paths: set[str] = set()
         skill_source_roots: set[str] = set()
         skill_source_files: set[str] = set()
-        discovery_complete = native_plugin_root is None
+        discovery_complete = True
         selected_skill_names: frozenset[str] | None = None
         hook_source_selection = None
         target_primitives = {primitive for target in targets for primitive in target.primitives}
@@ -172,10 +171,6 @@ class DeployableSourcePlan:
             nonlocal discovery_complete
             if safe(path, on_symlink) and path.is_file():
                 relative = portable_relpath(path, source_root)
-                if native_plugin_root is not None and (
-                    relative == MARKER_FILENAME or ".git" in Path(relative).parts
-                ):
-                    return
                 paths.add(relative)
                 if skill_member:
                     skill_source_files.add(relative)
@@ -244,20 +239,6 @@ class DeployableSourcePlan:
             )
             for path in hook_source_selection.files:
                 add_file(path)
-
-        if native_plugin_root is not None:
-            if native_plugin_root != source_root:
-                raise ValueError("Native source plan must use the admitted package root.")
-            for parent, directories, files in BaseIntegrator.walk_source_tree(source_root):
-                for name in (*directories, *files):
-                    path = Path(parent) / name
-                    if not _is_safe_source_path(path, source_root):
-                        raise ValueError(
-                            "Native plugin contains an unsafe path or symlink; "
-                            "a live loader cannot honor partial source exclusions."
-                        )
-                    add_file(path)
-                directories[:] = [name for name in directories if name != ".git"]
 
         if canvas_approved and "canvas" in target_primitives:
             from apm_cli.integration.canvas_integrator import CanvasIntegrator

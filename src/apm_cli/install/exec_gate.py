@@ -198,29 +198,18 @@ def _is_transitive(package_info: Any, ctx: InstallContext | None) -> bool:
 def native_declared_types(package_info: Any) -> tuple[str, ...]:
     """Exec types a native plugin's IR or manifest declares beyond its files."""
     from apm_cli.install.native_plugin_admission import agent_plugin_exec_types
-    from apm_cli.security.executables import EXEC_TYPE_HOOKS, EXEC_TYPE_MCP
 
-    types = list(agent_plugin_exec_types(package_info))
-    manifest = getattr(getattr(package_info, "package", None), "codex_plugin", None)
-    if getattr(manifest, "has_mcp", False):
-        types.append(EXEC_TYPE_MCP)
-    if getattr(manifest, "has_hooks", False):
-        types.append(EXEC_TYPE_HOOKS)
-    return tuple(dict.fromkeys(types))
+    return tuple(dict.fromkeys(agent_plugin_exec_types(package_info)))
 
 
 def native_install(package_info: Any) -> bool:
     """Whether install loads this package intact as a native plugin.
 
-    The same predicates the native paths use: an admitted Copilot Agent
-    Plugin, or a Codex compatibility bundle (which never splits).
+    The same predicate the native path uses: an admitted Copilot Agent Plugin.
+    A Codex compatibility bundle is split-installed like any plugin (#3920).
     """
-    from apm_cli.codex_plugins.manifest import CodexCompatibilityPlugin
     from apm_cli.copilot_plugins.capability import admits_native_plugin
 
-    package = getattr(package_info, "package", None)
-    if isinstance(getattr(package, "codex_plugin", None), CodexCompatibilityPlugin):
-        return True
     return admits_native_plugin(package_info)
 
 

@@ -1,1 +1,1 @@
-"""Version-qualified, native Codex compatibility-plugin consumption."""
+"""Codex plugins: split install plus retirement of the removed app-server route."""

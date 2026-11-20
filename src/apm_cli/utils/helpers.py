@@ -110,7 +110,7 @@ def find_plugin_json(plugin_path: Path, *, include_codex: bool = False) -> Path 
       2. <root>/.github/plugin/plugin.json
       3. <root>/.claude-plugin/plugin.json
       4. <root>/.cursor-plugin/plugin.json
-      5. <root>/.codex-plugin/plugin.json (native consumer opt-in only)
+      5. <root>/.codex-plugin/plugin.json (only when *include_codex* is set)
 
     Args:
         plugin_path: Path to the plugin directory
@@ -125,9 +125,9 @@ def find_plugin_json(plugin_path: Path, *, include_codex: bool = False) -> Path 
         plugin_path / ".cursor-plugin" / "plugin.json",
     ]
     if include_codex:
-        from apm_cli.codex_plugins.manifest import CODEX_COMPAT_MANIFEST
+        from apm_cli.core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
 
-        candidates.append(plugin_path / CODEX_COMPAT_MANIFEST)
+        candidates.append(plugin_path / PLUGIN_ECOSYSTEM_PATHS["codex"])
     for candidate in candidates:
         if candidate.exists():
             return candidate

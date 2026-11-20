@@ -42,83 +42,57 @@ registration does not install its inventory or publish anything. See
 [Live local authoring catalogs](../../reference/cli/marketplace/#live-local-authoring-catalogs)
 for offline and locked-replay rules.
 
-## Codex compatibility bundles through APM
+## Codex plugins through APM
 
-APM recognizes a compatibility-only `.codex-plugin/plugin.json` without
-reducing its bundle to loose skills. This route requires **Codex CLI
-0.163.0 or later on `PATH`, user scope only**. Older or unrecognized
-`codex --version` output is refused with the minimum named; unexpected
-app-server responses fail before any native write:
+APM installs plugins for Codex as a split install. It deploys each plugin's
+skills to `.agents/skills/`, which Codex reads natively, and its agents, hooks
+and MCP servers to `.codex/agents/`, `.codex/hooks.json` and
+`.codex/config.toml`, as it does for any package. This covers a
+`.codex-plugin/plugin.json` bundle and every other plugin format, at project
+and user scope:
 
 ```sh
+apm install <package> --target codex
 apm install -g <package> --target codex
-apm install -g --frozen --target codex
-apm uninstall -g <package>
 ```
 
-Native qualification was measured on Codex CLI 0.163.0 and 0.164.0 on **macOS arm64 only**. Other platforms
-are not qualified by that evidence; APM checks the version and scope, not the OS.
+APM never runs the `codex` binary and does not register the plugin with Codex.
+Codex installs a plugin only through `codex plugin add`, a git marketplace
+upgrade, or its plugin browser; a settings entry alone does not install it.
+That is criterion A3 (declarative enable) of the
+[native plugin activation profile](../../specs/openapm-v01/#req-na-006), which
+Codex does not meet. Every install that split-installs a plugin for Codex says
+so once, and `--dry-run` reports the same decision:
 
-Approve the package's executable types in `allowExecutables` first. APM scans
-and transfers the complete bundle, including sibling assets and referenced MCP
-resources, then uses Codex's public app-server configuration and marketplace
-operations. New registrations are **disabled**. Reinstall, update, and repair
-preserve existing activation, explicit disables, MCP policy, and unrelated
-settings. APM never runs plugin/MCP code or grants native trust or authentication.
+```text
+[i] Codex: split-installed 1 plugin(s) at user scope (example). Codex cannot
+enable a plugin from its settings alone (native activation criterion A3,
+declarative enable), so APM deployed each plugin's skills, agents, hooks and
+MCP servers separately and does not register it with Codex.
+```
 
-The initial contract supports MCP server objects and package-relative JSON
-files containing `mcpServers`. At least one native-discoverable `SKILL.md` must
-provide an unambiguous installed path so APM can verify the complete native
-copy. Symlinks, skill subsets, unsupported MCP shapes, other Codex versions,
-and project-scope registration fail explicitly rather than silently dropping
-resources or claiming native loading. This is a content-discovery contract,
-not evidence that an MCP process can start or authenticate.
+Executable approval works per type, as for any plugin: approve hooks and MCP
+servers in `allowExecutables` or with `apm approve <package>`.
 
-APM keeps its transport snapshots and ownership journal in
-`$APM_HOME/.codex-native/` (normally `~/.apm/.codex-native/`), outside disposable
-`apm_modules/`. Missing or corrupt native copies are restored through a
-selected native marketplace refresh with a new transport generation. Publisher
-bytes, publisher version, and original dependency pins remain unchanged;
-a healthy reinstall does not create a new generation. Keep the ownership
-journal: APM refuses to adopt a matching native registration without it.
-Native fingerprints include publisher `__pycache__` assets and executable
-bits; existing APM lockfile hashes are unchanged. The validated ownership
-journal also identifies native bundles during a cold-cache frozen restore
-alongside unrelated loose MCP declarations. A missing or `0.0.0` native
-version does not authorize rewriting publisher `apm.yml` metadata.
-Running `apm audit --ci` from the APM user directory checks the cached source
-bundle without starting Codex. Native-copy verification happens during install.
-The journal binds each remote bundle's native fingerprint to its original Git
-commit. Changed cache bytes or executable bits at the same commit are refused,
-not adopted as an update. Remove only that dependency's disposable
-`apm_modules/` directory and rerun `apm install -g --frozen --target codex`.
-Local source edits and newly selected Git commits remain valid updates.
-For a legacy remote record without source-pin provenance, save its pinned
-declaration, run `apm uninstall -g <dependency>`, then
-`apm install -g <saved-pinned-dependency> --target codex`. APM does not infer
-missing provenance from the current cache. `apm audit --ci --format json`
-reports native cache refusal as a failed drift check without changing native state.
+### Codex registrations from earlier APM versions
 
-Native registration runs after APM persistence. A late failure can leave the
-acquired package, lockfile, or some native changes in place: pending ownership
-supports retry, not atomic rollback across APM and Codex. Keep the journal,
-resolve the reported native error, then rerun `apm install -g --target codex`.
-Migration also refuses native registration if cleanup retains edited or
-undeletable loose files. Preserve or relocate your edits and resolve that
-cleanup conflict before retrying; APM does not register both copies.
-The error names the dependency and retained paths.
+Earlier APM versions registered `.codex-plugin` bundles by running
+`codex app-server`, and kept an ownership journal in `~/.apm/.codex-native/`.
+The next `apm install -g` or `apm uninstall -g` retires those registrations
+without running Codex, and reports what it did:
 
-Removal fails and retains APM declarations when native ownership has changed,
-another plugin shares the owned marketplace, or the entry contains activation
-or customized MCP settings. Retire that entry explicitly using Codex, then
-retry APM removal. Native removal has no atomic compare-and-swap API; avoid
-concurrent native configuration edits while uninstalling.
+- It removes the `[plugins."<name>@apm-..."]` and `[marketplaces.apm-...]`
+  entries from `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) while
+  they still hold what APM wrote: a disabled plugin and the recorded source.
+  Every other key is kept.
+- It leaves a registration you enabled or changed in place, warns once, and
+  stops managing it. An enabled one loads alongside the split install; remove
+  it in Codex if you do not need it.
+- It deletes its own snapshots and journal. Codex's plugin cache belongs to
+  Codex and is not touched.
 
-Existing eligible `apm.yml`, portable/root `plugin.json`, and
-`.claude-plugin/plugin.json` precedence is unchanged. A co-located Codex
-compatibility overlay does not replace those formats. This route neither
-changes `apm pack` output nor translates Codex data for other targets, and
-does not also generate loose skill or MCP registrations.
+If the journal or `config.toml` cannot be read, nothing changes and the warning
+names the file to fix before you rerun `apm install -g`.
 
 ## What you give up with native installs
 

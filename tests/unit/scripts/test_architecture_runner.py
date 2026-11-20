@@ -699,7 +699,7 @@ marketplace-integrations-bundle-format-authority
 marketplace-integrations-catalog-freshness
 marketplace-integrations-catalog-manifest
 marketplace-integrations-catalog-origin
-marketplace-integrations-codex-native-lifecycle
+marketplace-integrations-codex-split-install
 marketplace-integrations-copilot-ownership
 marketplace-integrations-dependency-confusion
 marketplace-integrations-generated-bundle-lf-writers

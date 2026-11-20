@@ -92,15 +92,42 @@ def test_enable_requires_content_bound_approval():
 
 @pytest.mark.req("req-na-006")
 def test_unqualified_target_gets_explicit_split_install():
+    """Codex fails A3, so a plugin is split-installed with one visible diagnostic (#3920)."""
+    from types import SimpleNamespace
+
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.phases import codex_plugins
+    from apm_cli.install.target_warnings import note_codex_split_install
+    from apm_cli.models.apm_package import PackageType
+    from apm_cli.utils.diagnostics import CATEGORY_INFO, DiagnosticCollector
+
     assert_spec_contains(
         "It MUST NOT split-install a plugin silently",
         "names the target, the scope, and the criterion that is\nunmet or unknown",
         "Split (fails A3",
     )
-    waive(
-        "The explicit split fallback for Codex, which fails A3, is implemented in "
-        "#3920; schema-bearing Agent Plugins v1 dependencies stay opaque under req-tg-011."
+    ctx = SimpleNamespace(
+        codex_split_plugins=set(),
+        dry_run=False,
+        lockfile_only=False,
+        apm_modules_dir=None,
+        scope=InstallScope.USER,
+        diagnostics=DiagnosticCollector(),
+        logger=None,
     )
+    plugin = SimpleNamespace(
+        package=SimpleNamespace(name="example"),
+        package_type=PackageType.MARKETPLACE_PLUGIN,
+        install_path="example",
+    )
+    note_codex_split_install(plugin, [SimpleNamespace(name="codex")], ctx)
+    codex_plugins.run(ctx)
+    (diagnostic,) = ctx.diagnostics.by_category()[CATEGORY_INFO]
+    for fragment in ("Codex", "user scope", "example", "A3"):
+        assert fragment in diagnostic.message
+    preview = codex_plugins.split_install_message({"example"}, InstallScope.USER, dry_run=True)
+    assert "would split-install" in preview
+    assert "A3" in preview
 
 
 @pytest.mark.req("req-na-007")

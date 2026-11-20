@@ -19,7 +19,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apm_cli.codex_plugins.client import CodexNativeError
 from apm_cli.install.errors import AuthenticationError
 from apm_cli.install.pipeline import _preflight_auth_check, _run_phase
 from apm_cli.models.dependency.materialization import MaterializationPathCollisionError
@@ -455,7 +454,7 @@ class TestRunInstallPipelineExceptionContracts:
             with pytest.raises(RuntimeError, match="Failed to resolve APM dependencies"):
                 run_install_pipeline(pkg, target="claude")
 
-    @pytest.mark.parametrize("error_type", [MaterializationPathCollisionError, CodexNativeError])
+    @pytest.mark.parametrize("error_type", [MaterializationPathCollisionError])
     def test_materialization_collision_is_not_double_wrapped(
         self, error_type: type[Exception]
     ) -> None:

@@ -965,7 +965,6 @@ def _check_drift(
     fresh checkout that has never installed.
     """
     from ..agent_plugins.errors import AgentPluginDeploymentBoundaryError
-    from ..codex_plugins.client import CodexNativeError
     from ..core.scope import get_workspace_deploy_root
     from ..deps.lockfile import get_lockfile_path
     from ..deps.path_anchoring import LocalResolutionError
@@ -994,7 +993,7 @@ def _check_drift(
 
         try:
             scratch = run_replay(config, logger)
-        except (AgentPluginDeploymentBoundaryError, CodexNativeError) as exc:
+        except AgentPluginDeploymentBoundaryError as exc:
             return (
                 CheckResult(
                     name="drift",

@@ -17,7 +17,7 @@ Pick the form that matches the author's intent -- APM preserves it.
 | `hooks/*.json` or `.apm/hooks/*.json` only (no apm.yml or SKILL.md) | "I ship a set of harness hooks" | Register hooks and referenced resources for the selected targets |
 | `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
 | `plugin.json` with the recognized Agent Plugins `$schema` | Portable Agent Plugin | Installed whole and registered when the effective targets include Copilot |
-| `.codex-plugin/plugin.json` without higher-precedence package intent | Codex compatibility bundle | Complete native registration with Codex CLI 0.163.0 or later at user scope only |
+| `.codex-plugin/plugin.json` without higher-precedence package intent | Codex plugin | Dissect via plugin artifact mapping, like a Claude plugin collection |
 | Marketplace entry with inline `lspServers` or `mcpServers` | Catalog owns server metadata | Synthesize and validate `apm.yml`, then deploy servers |
 
 When plugin signals coexist with an eligible `apm.yml`, the APM layout wins.
@@ -26,23 +26,14 @@ declares APM or MCP dependencies. To intentionally select a plugin layout,
 omit `apm.yml` or keep it metadata-only, without `.apm/` or dependencies.
 
 Root `plugin.json` and `.claude-plugin/plugin.json` also take precedence
-over a co-located Codex compatibility overlay.
+over a co-located `.codex-plugin/plugin.json`.
 
-## Codex compatibility bundle
+## Codex plugin
 
-Use `apm install -g <package> --target codex` with Codex CLI **0.163.0 or later**
-on `PATH`. APM preserves the full `.codex-plugin/plugin.json` bundle and
-its manifest-referenced MCP resources, without loose skill/MCP registration
-or translation for other targets. Executable approval is required; fresh
-registrations stay disabled and existing native settings are preserved.
-Native qualification was measured on macOS arm64 only.
-
-The qualified shape needs a native-discoverable skill with an unambiguous
-installed path, plus either inline MCP servers or a package-relative JSON
-file containing `mcpServers`. Project scope, other versions, skill subsets,
-symlinks, and unsupported shapes fail explicitly. This does not change
-`apm pack` output or certify MCP execution/authentication. See the
-[native lifecycle and ownership limits](../../consumer/installing-from-marketplaces/#codex-compatibility-bundles-through-apm).
+A `.codex-plugin/plugin.json` bundle is split-installed like any plugin: its
+skills, agents, hooks and MCP servers deploy as separate primitives for every
+selected target, and APM does not run or register anything with Codex. See
+[Codex plugins through APM](../../consumer/installing-from-marketplaces/#codex-plugins-through-apm).
 
 ## APM package (`.apm/` directory)
 

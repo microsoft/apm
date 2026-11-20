@@ -220,6 +220,55 @@ class CodexClientAdapter(MCPClientAdapter):
             self._write_config(config)
         return migrated
 
+    def retire_plugin_registrations(
+        self, registrations: dict[str, tuple[str, list[dict[str, str]]]]
+    ) -> tuple[set[str], set[str]] | None:
+        """Remove plugin registrations the retired app-server route wrote (#3920).
+
+        ``registrations`` maps each APM marketplace name to the plugin name
+        registered under it and the marketplace sources APM wrote. Both entries
+        are removed only while they still hold exactly what APM wrote: a
+        disabled plugin and a recorded source. An enabled or edited plugin, a
+        changed source, or another plugin under the same marketplace is the
+        user's and stays. Returns ``(retired, kept)`` marketplace names, or
+        ``None`` when the config cannot be read safely.
+        """
+        config = self.get_current_config()
+        if config is None:
+            return None
+        plugins = config.get("plugins", {})
+        marketplaces = config.get("marketplaces", {})
+        if not isinstance(plugins, dict) or not isinstance(marketplaces, dict):
+            return None
+
+        def plain(value: object) -> object:
+            return value.unwrap() if isinstance(value, Item) else value
+
+        retired: set[str] = set()
+        kept: set[str] = set()
+        changed = False
+        for marketplace, (plugin, sources) in sorted(registrations.items()):
+            plugin_id = f"{plugin}@{marketplace}"
+            entry = plugins.get(plugin_id)
+            source = marketplaces.get(marketplace)
+            shared = any(key.endswith(f"@{marketplace}") and key != plugin_id for key in plugins)
+            if (
+                shared
+                or (entry is not None and plain(entry) != {"enabled": False})
+                or (source is not None and plain(source) not in sources)
+            ):
+                kept.add(marketplace)
+                continue
+            if entry is not None:
+                del plugins[plugin_id]
+            if source is not None:
+                del marketplaces[marketplace]
+            changed = changed or entry is not None or source is not None
+            retired.add(marketplace)
+        if changed:
+            self._write_config(config)
+        return retired, kept
+
     def matches_managed_server_config(self, native: object, expected: dict) -> bool:
         """Accept the historical empty-ID spelling without accepting foreign identity."""
         if not isinstance(native, dict) or self.get_registry_id(native):
