@@ -944,8 +944,12 @@ def _apply_only_filter(ctx: InstallContext) -> None:
     """Filter ``ctx.deps_to_install`` to the ``--only`` package(s) and their subtrees."""
     from apm_cli.install.package_selection import selected_subtree_dependencies
 
+    locked = ctx.existing_lockfile.dependencies if ctx.existing_lockfile is not None else {}
     ctx.deps_to_install = selected_subtree_dependencies(
-        ctx.only_packages, ctx.dependency_graph.dependency_tree, ctx.deps_to_install
+        ctx.only_packages,
+        ctx.dependency_graph.dependency_tree,
+        ctx.deps_to_install,
+        locked_keys=locked,
     )
 
 

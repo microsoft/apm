@@ -22,6 +22,7 @@ from tests.utils.artifact_snapshot import (
 )
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
+from tests.utils.local_git_repository import LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [
@@ -294,3 +295,84 @@ def test_global_declaration_reports_matching_install_scope(
         {"home": {".apm/apm.yml", ".apm/.apm-lifecycle.lock", *_DEPLOYMENT_ROOT_LOCK_PATHS}},
     )
     assert _declared_local_paths(onboarding.isolated.home / ".apm") == [str(source)]
+
+
+_REMOTE = "https://github.com/acme/tools.git"
+_TOOLS_SKILL = b"---\nname: tools-skill\ndescription: Tools.\n---\n\nUse tools.\n"
+
+
+def _assert_output_oracles(result: CommandResult) -> None:
+    """I6 ASCII and I9 no duplicate status lines per stream."""
+    for stream in (result.stdout, result.stderr):
+        assert stream.isascii(), result.stdout + result.stderr
+        lines = [line.strip() for line in stream.splitlines() if line.lstrip().startswith("[")]
+        assert len(lines) == len(set(lines)), result.stdout + result.stderr
+
+
+def _assert_lock_claims_deployed(root: Path, lock: LockFile) -> None:
+    """I1: every recorded file exists with its recorded hash."""
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    for dependency in lock.dependencies.values():
+        for path, digest in dependency.deployed_file_hashes.items():
+            assert compute_file_hash(root / path) == digest, path
+
+
+def test_install_package_locks_declared_local_dependency_and_reports_adoption(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``apm install <pkg>`` after discovery locks the declared local skill and
+    reports a byte-identical pre-existing skill as adopted (#4198)."""
+    onboarding = _onboarding(tmp_path, apm_binary_path)
+    repositories = LocalGitRepositoryFactory(
+        onboarding.isolated.repository_root, env=onboarding.isolated.subprocess_env()
+    )
+    tools = LocalPackageFactory(onboarding.isolated.package_root).create("tools")
+    skill_source = tools.root / ".apm" / "skills" / "tools-skill" / "SKILL.md"
+    skill_source.parent.mkdir(parents=True)
+    skill_source.write_bytes(_TOOLS_SKILL)
+    repository = repositories.create("tools", source_tree=tools.root)
+    repositories.tag(repository, "v1.0.0", repositories.commit(repository, message="v1"))
+    env = repositories.url_rewrite_subprocess_env(repository, _REMOTE)
+
+    def apm(*args: str) -> CommandResult:
+        result = onboarding.runner.run(args, cwd=onboarding.root, env=env)
+        _assert_output_oracles(result)
+        assert result.returncode == 0, (
+            f"{result.command}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        return result
+
+    apm(*_APPLY)
+    # A hand-copied skill that is byte-identical to what the package installs.
+    copy = onboarding.root / ".claude" / "skills" / "tools-skill" / "SKILL.md"
+    copy.parent.mkdir(parents=True)
+    copy.write_bytes(_TOOLS_SKILL)
+    source = ArtifactSnapshot.capture(onboarding.source)
+
+    installed = apm("install", "acme/tools#v1.0.0", "--target", "claude")
+
+    lines = installed.stdout.splitlines()
+    assert "  |-- 1 skill(s) adopted -> .claude/skills/" in lines, installed.stdout
+    assert not any("skill(s) integrated" in line for line in lines), installed.stdout
+    assert not any(line.lstrip().startswith(("[!]", "[x]")) for line in lines), installed.stdout
+    lock = LockFile.read(onboarding.root / "apm.lock.yaml")
+    local = lock.dependencies[_REFERENCE]
+    assert set(local.deployed_files) == {
+        ".claude/skills/review",
+        ".claude/skills/review/SKILL.md",
+        ".claude/skills/review/resources/sample.bin",
+    }
+    assert ".claude/skills/tools-skill/SKILL.md" in lock.dependencies["acme/tools"].deployed_files
+    _assert_lock_claims_deployed(onboarding.root, lock)
+    assert copy.read_bytes() == _TOOLS_SKILL
+    assert_unchanged(source, ArtifactSnapshot.capture(onboarding.source))
+
+    audit = apm("audit")
+    assert "[+] No drift detected" in audit.stdout + audit.stderr
+    apm("audit", "--ci")
+
+    # I2: a converged install repeats as a byte no-op.
+    converged = onboarding.state()
+    apm("install", "--target", "claude")
+    assert onboarding.state() == converged

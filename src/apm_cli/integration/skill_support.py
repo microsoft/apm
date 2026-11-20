@@ -97,6 +97,8 @@ class SkillIntegrationResult:
     references_copied: int
     links_resolved: int = 0
     sub_skills_promoted: int = 0
+    # Of the promoted skills, those whose identical pre-existing copy was adopted.
+    sub_skills_adopted: int = 0
     bin_deployed: int = 0
     bin_skipped_reason: str | None = None
     target_paths: list[Path] = None
@@ -117,3 +119,17 @@ def skills_integrated(result: SkillIntegrationResult) -> int:
     """
     root_skill = 1 if result.skill_created and result.skill_path is not None else 0
     return root_skill + result.sub_skills_promoted
+
+
+def skill_line_label(result: SkillIntegrationResult, skill_count: int) -> str:
+    """Label one package's skill line, reporting identical pre-existing copies as adopted."""
+    promoted = result.sub_skills_promoted
+    raw_adopted = getattr(result, "sub_skills_adopted", 0)
+    adopted = min(raw_adopted if isinstance(raw_adopted, int) else 0, promoted)
+    if adopted == skill_count:
+        return f"{adopted} skill(s) adopted"
+    integrated = skill_count - adopted
+    if integrated == 1 and not promoted:
+        return "Skill integrated"
+    phrase = f"{integrated} skill(s) integrated"
+    return f"{phrase} ({adopted} adopted)" if adopted else phrase

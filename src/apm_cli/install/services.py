@@ -643,15 +643,11 @@ def integrate_package_primitives(  # noqa: PLR0913
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
     # One tree line per package, whatever mix of root and promoted skills (#4089).
-    from apm_cli.integration.skill_support import skills_integrated
+    from apm_cli.integration.skill_support import skill_line_label, skills_integrated
 
     _skill_count = skills_integrated(skill_result)
     if _skill_count > 0:
-        _skill_label = (
-            "Skill integrated"
-            if _skill_count == 1 and not skill_result.sub_skills_promoted
-            else f"{_skill_count} skill(s) integrated"
-        )
+        _skill_label = skill_line_label(skill_result, _skill_count)
         if _skill_expansion:
             _log_integration(f"  |-- {_skill_label}:")
             for line in _skill_expansion:
