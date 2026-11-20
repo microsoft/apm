@@ -52,8 +52,8 @@ def effective_allow_map(ctx) -> dict | None:
       ``allowExecutables`` alias) read from disk;
     * user consent -- ``~/.apm/config.json`` (lowest authority).
 
-    Returns ``None`` when the gate is disabled (backward-compatible: every
-    executable deploys).
+    Returns an explicit gate-disabled map when no layer opts into the gate
+    (backward-compatible: every executable deploys).
     """
     from apm_cli.security.executables import (
         exec_trust_context_for_project,

@@ -18,7 +18,10 @@ from apm_cli.install.package_selection import (
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
-from apm_cli.security.executables import filter_lsp_by_allow_executables
+from apm_cli.security.executables import (
+    declared_project_exec_map,
+    filter_lsp_by_allow_executables,
+)
 
 if TYPE_CHECKING:
     from apm_cli.install.command_context import InstallContext
@@ -196,13 +199,10 @@ class ProspectiveInstallPlan:
         """Apply executable trust filtering to selected LSP dependencies."""
         if not self.should_install_mcp:
             return self
-        allow_executables = getattr(apm_package, "allow_executables", None)
-        if not isinstance(allow_executables, dict):
-            allow_executables = None
         filtered_lsp = tuple(
             filter_lsp_by_allow_executables(
                 list(self.lsp_dependencies),
-                allow_executables,
+                declared_project_exec_map(getattr(apm_package, "allow_executables", None)),
                 logger,
             )
         )

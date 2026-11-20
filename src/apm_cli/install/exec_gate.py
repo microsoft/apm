@@ -25,26 +25,28 @@ def check_executable_approval(
 ) -> tuple[bool, bool, bool, bool, bool]:
     """Return hook, bin, MCP, canvas, and LSP approval for a package.
 
-    Local project content (``_local``) is always trusted.  Dependency
-    packages are checked against the ``allowExecutables`` block.  When
-    no ``allowExecutables`` block exists (``None``), all executables are
-    considered approved (opt-in enforcement).
+    An adapter over the trust owners: first-party content (``_local``) and a
+    map that explicitly authorizes every executable (gate disabled, or audit
+    replay of already-authorized content) approve everything. Any other map
+    -- including ``None`` -- approves only what the executable-trust owner
+    grants and item admission admits.
 
     When *ctx* is provided and a package is blocked, the declaration is
     recorded on ``ctx.blocked_executables`` for the post-loop prompt.
     """
-    is_local = package_name == "_local"
-    if is_local or allow_executables is None:
-        return True, True, True, True, True
-
     from apm_cli.security.executables import (
         EXEC_TYPE_BIN,
         EXEC_TYPE_CANVAS,
         EXEC_TYPE_HOOKS,
         EXEC_TYPE_LSP,
         EXEC_TYPE_MCP,
-        is_package_approved,
+        FIRST_PARTY_PACKAGE,
+        exec_map_authorizes_all,
+        package_type_approvals,
     )
+
+    if package_name == FIRST_PARTY_PACKAGE or exec_map_authorizes_all(allow_executables):
+        return True, True, True, True, True
 
     # Executable authorization is bound to the resolver-owned dependency
     # identity. Package manifest metadata is display-only and must not become
@@ -66,24 +68,16 @@ def check_executable_approval(
             package_name, package_info, allow_executables, tuple(candidate_keys), pkg_key, ctx
         )
 
+    approved = package_type_approvals(allow_executables, candidate_keys)
     # Pinned hook items admit per file at the source plan (hook_file_admission).
-    hooks_ok = any(
-        is_package_approved(allow_executables, k, EXEC_TYPE_HOOKS) for k in candidate_keys
-    ) or hooks_package_admissible(allow_executables, tuple(candidate_keys))
-    bin_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_BIN) for k in candidate_keys)
-    mcp_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_MCP) for k in candidate_keys)
-    canvas_ok = any(
-        is_package_approved(allow_executables, k, EXEC_TYPE_CANVAS) for k in candidate_keys
+    approved[EXEC_TYPE_HOOKS] = approved[EXEC_TYPE_HOOKS] or hooks_package_admissible(
+        allow_executables, tuple(candidate_keys)
     )
-    lsp_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_LSP) for k in candidate_keys)
-
-    approved = {
-        EXEC_TYPE_HOOKS: hooks_ok,
-        EXEC_TYPE_BIN: bin_ok,
-        EXEC_TYPE_MCP: mcp_ok,
-        EXEC_TYPE_CANVAS: canvas_ok,
-        EXEC_TYPE_LSP: lsp_ok,
-    }
+    hooks_ok = approved[EXEC_TYPE_HOOKS]
+    bin_ok = approved[EXEC_TYPE_BIN]
+    mcp_ok = approved[EXEC_TYPE_MCP]
+    canvas_ok = approved[EXEC_TYPE_CANVAS]
+    lsp_ok = approved[EXEC_TYPE_LSP]
     # Track blocked packages for the post-loop approval prompt, and record the
     # lockfile exec_status for the audit (Gap B) from the same scan.
     blocked = not all(approved.values())
@@ -159,7 +153,7 @@ def _native_approval(
 
     install = Path(package_info.install_path)
     verdict = admit_native_plugin(
-        allow_executables,
+        _closed_if_missing(allow_executables),
         candidate_keys,
         install,
         transitive=_is_transitive(package_info, ctx),
@@ -232,7 +226,9 @@ def plugin_admission(
     ctx: InstallContext | None = None,
 ):
     """The trust owner's verdict for a native install, else ``None``."""
-    if package_name == "_local" or allow_executables is None:
+    from apm_cli.security.executables import FIRST_PARTY_PACKAGE, exec_map_authorizes_all
+
+    if package_name == FIRST_PARTY_PACKAGE or exec_map_authorizes_all(allow_executables):
         return None
     if not native_install(package_info):
         return None
@@ -241,7 +237,7 @@ def plugin_admission(
     pkg_key = resolve_package_key(package_info, package_name)
     keys = tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0])))
     return admit_native_plugin(
-        allow_executables,
+        _closed_if_missing(allow_executables),
         keys,
         Path(package_info.install_path),
         transitive=_is_transitive(package_info, ctx),
@@ -258,13 +254,22 @@ def hook_file_admission(
 
     ``None`` means every hook file follows the package-level decision.
     """
-    if package_name == "_local" or allow_executables is None:
+    from apm_cli.security.executables import FIRST_PARTY_PACKAGE, exec_map_authorizes_all
+
+    if package_name == FIRST_PARTY_PACKAGE or exec_map_authorizes_all(allow_executables):
         return None
     from apm_cli.security.trust import hook_file_filter
 
     pkg_key = resolve_package_key(package_info, package_name)
     keys = tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0])))
     return hook_file_filter(allow_executables, keys, Path(package_info.install_path))
+
+
+def _closed_if_missing(allow_executables: Any) -> Any:
+    """A missing map is an empty grant map: the trust owner admits nothing from it."""
+    from apm_cli.security.executables import EffectiveExecMap
+
+    return EffectiveExecMap() if allow_executables is None else allow_executables
 
 
 def _candidate_keys(pkg_key: str) -> list[str]:
@@ -440,16 +445,12 @@ def resolve_bin_skip(
     bin_approved: bool,
     trust_bin: bool | None,
     *,
-    non_interactive: bool = False,
+    non_interactive: bool,
 ) -> tuple[bool, str | None]:
-    """Combine executable approval with the ``--trust-bin`` posture."""
-    if not bin_approved:
-        return True, "not_approved"
-    if trust_bin is False:
-        return True, "not_trusted"
-    if trust_bin is None and non_interactive:
-        return True, "not_trusted"
-    return False, None
+    """Combine executable approval with the ``--trust-bin`` posture (trust owner)."""
+    from apm_cli.security.executables import compose_trust_bin
+
+    return compose_trust_bin(bin_approved, trust_bin, non_interactive=non_interactive)
 
 
 def plugin_bin_deployable(
@@ -594,7 +595,7 @@ class ReplayExecAllowMap:
         self._user_scope = user_scope
         self._resolved = False
         self._trust_ctx_value: Any = None
-        self._map: builtins.dict[str, builtins.dict[str, bool]] | None = None
+        self._map: builtins.dict[str, builtins.dict[str, bool]] = {}
 
     def _resolve(self) -> None:
         if self._resolved:
@@ -630,20 +631,26 @@ class ReplayExecAllowMap:
 
     def for_dependency(
         self, lock_dep: Any, package_info: Any | None = None
-    ) -> builtins.dict[str, builtins.dict[str, bool]] | None:
-        from apm_cli.security.executables import TRUST_ABSENT, TRUST_DEPLOYED
+    ) -> builtins.dict[str, builtins.dict[str, bool]]:
+        """Return the replay allow-map; already-authorized rows are explicit."""
+        from apm_cli.security.executables import (
+            AUTHORIZED_REPLAY,
+            TRUST_ABSENT,
+            TRUST_DEPLOYED,
+            authorized_exec_map,
+        )
 
         status = getattr(lock_dep, "exec_status", None)
         if status == TRUST_ABSENT:
-            return None
+            return authorized_exec_map(AUTHORIZED_REPLAY)
         if status in (None, TRUST_DEPLOYED):
             # The project's own content is always trusted (see the install gate).
             if package_info is None or getattr(lock_dep, "local_path", None) == ".":
-                return None
+                return authorized_exec_map(AUTHORIZED_REPLAY)
             current, _ = current_exec_decision(
                 self._trust_ctx, package_info, lock_dep.get_unique_key()
             )
             if not recorded_exec_status_is_stale(status, current):
-                return None
+                return authorized_exec_map(AUTHORIZED_REPLAY)
         self._resolve()
         return self._map

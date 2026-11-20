@@ -175,8 +175,10 @@ def install_local_bundle(
             if bundle_info.source_dir is not None
             else []
         )
+        from ..security.executables import exec_map_authorizes_all
+
         bundle_approval_key = None
-        if allow_executables is not None:
+        if not exec_map_authorizes_all(allow_executables):
             from ..security.executables import local_bundle_approval_key
 
             bundle_approval_key = local_bundle_approval_key(
@@ -514,7 +516,7 @@ def effective_bundle_allow_map(
     no_policy: bool,
     logger: Any,
     migrate_user_legacy: bool = True,
-) -> dict[str, dict[str, bool]] | None:
+) -> dict[str, dict[str, bool]]:
     """Resolve local-bundle trust through the canonical project owner."""
     from ..security.executables import effective_exec_map_for_project
 
@@ -545,13 +547,13 @@ def _filter_bundle_executables(
     logger,
 ) -> list[Any]:
     """Apply executable trust to the exact bundle artifact, never its claimed name."""
-    if not dependencies or allow_executables is None:
-        return dependencies
-    from ..security.executables import is_package_approved
+    from ..security.executables import exec_map_authorizes_all, package_type_approved
 
+    if not dependencies or exec_map_authorizes_all(allow_executables):
+        return dependencies
     if approval_key is None:
         raise ValueError("Local bundle executable approval requires an artifact digest")
-    if is_package_approved(allow_executables, approval_key, exec_type):
+    if package_type_approved(allow_executables, (approval_key,), exec_type):
         return dependencies
     noun = "executable" if len(dependencies) == 1 else "executables"
     logger.warning(
