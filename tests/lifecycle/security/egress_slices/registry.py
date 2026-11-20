@@ -8,8 +8,10 @@ to the origin the user config binds the registry name to. No platform PAT
 may reach it. Without the token the install is refused (exit 1) and APM
 sends no credential at all.
 
-Unregistered until the world proxy can script them: the REDIRECT
-same-origin / cross-origin rows and PROXY_ONLY=1.
+PROXY_ONLY=1: the registry the operator configured is the sanctioned route,
+not a bypass (src/apm_cli/registry/client.py, _refuse_direct_egress_when_proxy_only;
+docs/enterprise/registry-proxy.md). ``forbid_direct`` keeps it reachable, and
+the row proves nothing else went direct.
 """
 
 from __future__ import annotations
