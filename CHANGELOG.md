@@ -9,10 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `apm unpack` applies org policy and integrity checks like `apm install <bundle>`, waits for other APM operations, and records deployed files when unpacking into an APM project. (closes #4080, #4157)
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
 - `apm audit --format json` adds a structured `remediation` (the command and the state it clears) to failing CI checks. (#4143)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
+- Internal: test-quality gates block new same-body or same-name duplicate tests, new unclassified or misplaced test modules, and new modules without a promise link. (#4146)
 - Internal: lifecycle tests gain a stable index of the 25 consumer, producer and enterprise journeys, pinned by a schema test. (#4152)
 - Internal: only `InstallService` reads the `--frozen` flag; install phases consume its disposition, enforced by a closed-world architecture guard. No behavior change. (#4016)
 
@@ -21,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
 - `apm audit --ci` and `apm install --frozen` advice for edited files says what install does per file kind; `apm install` warns before overwriting edits. (closes #4090, #4143)
 - `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)
+- `apm update` verifies unchanged registry versions against their locked hash and fails closed on a mismatch. (closes #4125, #4157)
 - Registry archives get the same archive limits for every accepted format, and every entry is validated before anything is written. (closes #4235, #4266)
 - A plugin with a root `skills/` bundle is recorded as `skill_bundle` again, and native Claude plugin files deploy owner-only, without setuid bits. (#4126)
 - `apm prune` removes packages again when target resolution fails during its local bundle hook re-check; it says the hooks were not re-checked and writes no hook files; other re-check failures still fail. (#4141)
@@ -33,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci` and `apm approve` now handle every org policy outcome as `apm install` does; `apm approve` exits 1 when the policy outcome blocks. (#4084, #4151)
 - An org policy field of the wrong type is reported as a malformed policy instead of stopping the command with an internal error. (#4140, #4151)
 - `apm approve`, `--pending`, `--list` and `apm policy explain` now see an Agent Plugin whose only executable is its root `mcp.json`, so it can be approved. (closes #4042, #4058)
+- `apm install --frozen` and `apm audit --ci` now reach the same verdict on hook approval pins, and `apm install` retires hooks whose pin no longer matches. (closes #4188, #4272)
+- A package with `.claude-plugin/plugin.json` (or `plugin.json` without `$schema`) and a root `skills/` directory is detected as a Claude plugin collection (`marketplace_plugin`) on every install pass, as documented in Package types, so `apm install -g --trust-bin` deploys its `bin/` inside the plugin root; locks that recorded `skill_bundle` still replay. (closes #4270, #4276)
 
 ## [0.37.0] - 2026-11-20
 

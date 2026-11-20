@@ -29,6 +29,10 @@ if TYPE_CHECKING:
 
 _LEGACY_PLUGIN_APM_VERSION = "0.28.0"
 _PLUGIN_SKILL_SOURCES_RECEIPT = Path(APM_DIR) / ".plugin-skill-sources.json"
+# Types the parser's generated apm.yml can make a plugin cache look like.
+_PARSER_SHADOWED_TYPES = frozenset(
+    {PackageType.APM_PACKAGE, PackageType.SKILL_BUNDLE, PackageType.HYBRID}
+)
 
 
 def preserve_normalized_marketplace_plugin_type(
@@ -36,7 +40,15 @@ def preserve_normalized_marketplace_plugin_type(
     locked_dependency: LockedDependency | None,
     detected_type: PackageType,
 ) -> PackageType:
-    """Keep parser-normalized plugin caches typed as marketplace plugins."""
+    """Keep parser-normalized plugin caches typed as on their fresh pass.
+
+    Classification is a function of the package tree: a cached pass must give
+    the type a fresh fetch gives. Only the parser writes the receipt, its
+    ``apm.yml`` and ``.apm/``; with those set aside, a tree that carries a
+    plugin manifest is a marketplace plugin on its fresh pass, whatever its
+    root ``skills/`` or ``SKILL.md`` (#4270). A ``skills/`` bundle without a
+    plugin manifest is never normalized, so it keeps ``skill_bundle``.
+    """
     if not has_normalized_plugin_skill_sources_receipt(package_path):
         return detected_type
     if locked_dependency is not None and (
@@ -44,11 +56,10 @@ def preserve_normalized_marketplace_plugin_type(
     ):
         return PackageType.MARKETPLACE_PLUGIN
     # The parser's generated apm.yml/.apm must not masquerade as an
-    # independently authored APM layout on the subsequent cached-source pass.
-    # This also repairs older locks that recorded that second-pass type. A root
-    # skills/ bundle keeps its skill_bundle classification (and its --skill
-    # subset selection): that precedence is the package's, not the parser's.
-    if detected_type is PackageType.APM_PACKAGE:
+    # independently authored APM layout, skill bundle or hybrid on the
+    # subsequent cached-source pass. This also repairs older locks that
+    # recorded that second-pass type.
+    if detected_type in _PARSER_SHADOWED_TYPES:
         evidence = gather_detection_evidence(package_path)
         if evidence.has_plugin_manifest:
             return PackageType.MARKETPLACE_PLUGIN

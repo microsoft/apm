@@ -213,9 +213,13 @@
     {
       "id": "executable-item-admission",
       "decision": "Admission of one dependency-declared executable item (MCP server or hook file): org/user/project deny ladder AND manifest approval AND definition fingerprint match, for install, update, install --frozen, apm audit --ci, apm approve and the install prompt; the lockfile is evidence, never consent (#3902)",
-      "owner": "security/trust.py (admit, McpAdmission, hook_file_filter, pinned_exec_status, record_pins); integration/mcp_config_view.py derive(admission=...) and InstallService._frozen_mcp_reasons consume it",
+      "owner": "security/trust.py (admit, McpAdmission, hook_file_filter, pinned_exec_status, record_pins, recorded_hook_pin_mismatches); integration/mcp_config_view.py derive(admission=...) and InstallService._frozen_mcp_reasons consume it; install --frozen (InstallService.enforce_frozen_hook_pins) and audit --ci (hook-approval-pins) verify locked hook pins through install/exec_gate.py locked_hook_pin_mismatches (#4188)",
       "selectors": ["src/apm_cli/security/trust.py", "src/apm_cli/install/exec_gate.py"],
-      "guards": ["install-deployment-executable-item-admission", "install-deployment-mcp-admission"]
+      "guards": [
+        "install-deployment-executable-item-admission",
+        "install-deployment-hook-pin-frozen-audit-parity",
+        "install-deployment-mcp-admission"
+      ]
     },
     {
       "id": "executable-trust-fingerprint",
@@ -339,13 +343,13 @@
     {
       "id": "locked-copy-validity",
       "decision": "Whether an existing apm_modules package copy holds its locked commit or content, so resolution, pre-download and integrate reuse only lock-matching copies (#3884)",
-      "owner": "drift.py (locked_copy_proof: a readable git HEAD decides, else the verified content hash; the install/cache_pin.py .apm-pin marker counts only with trust_marker for resolution freshness via locked_copy_is_stale behind should_force_ref_recheck, never for deployed bytes); consumers: deps/apm_resolver.py and install/phases/resolve.py via should_force_ref_recheck, install/phases/download.py, install/phases/integrate.py, and the install/cache_pin.py marker writer via locked_copy_is_stale; apm update keeps the install/sources.py fresh-download content-hash check for any dependency whose resolved commit did not move (#4027)",
+      "owner": "drift.py (locked_copy_proof: a readable git HEAD decides, else the verified content hash; the install/cache_pin.py .apm-pin marker counts only with trust_marker for resolution freshness via locked_copy_is_stale behind should_force_ref_recheck, never for deployed bytes); consumers: deps/apm_resolver.py and install/phases/resolve.py via should_force_ref_recheck, install/phases/download.py, install/phases/integrate.py, and the install/cache_pin.py marker writer via locked_copy_is_stale; apm update keeps the install/sources.py fresh-download content-hash check for any dependency whose resolved commit did not move (#4027); every registry download routes through install/source_helpers.py download_registry_package, which verifies an unchanged registry version against its locked resolved_hash (#4125)",
       "selectors": [
         "src/apm_cli/install/cache_pin.py",
         "src/apm_cli/install/phases/_redownload.py",
         "src/apm_cli/install/phases/lockfile_cache_pins.py"
       ],
-      "guards": ["install-deployment-locked-copy-validity", "install-deployment-update-content-integrity"]
+      "guards": ["install-deployment-locked-copy-validity", "install-deployment-update-content-integrity", "install-deployment-update-registry-integrity"]
     },
     {
       "id": "package-content-hash",
@@ -367,6 +371,13 @@
       "owner": "bundle/unpacker.py (_refuse_executable_content before any preview or write)",
       "selectors": ["src/apm_cli/bundle/unpacker.py"],
       "guards": ["install-deployment-unpack-executable-refusal"]
+    },
+    {
+      "id": "bundle-admission-owner",
+      "decision": "Which org policy, integrity check and lockfile record apply when a bundle deploys, for every bundle deploy entry point (#4080)",
+      "owner": "install/bundle_admission.py (admit_bundle runs the install policy preflight and the require_hashes integrity decision; record_unpacked_files records through DeploymentLedgerCodec.record_local_bundle_files); entry points: install/local_bundle_handler.py install_local_bundle, commands/pack.py unpack_cmd",
+      "selectors": ["src/apm_cli/install/bundle_admission.py"],
+      "guards": ["install-deployment-bundle-admission-owner"]
     },
     {
       "id": "local-bundle-hook-trust",

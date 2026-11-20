@@ -41,6 +41,7 @@ from apm_cli.install.registry_wiring import (
 )
 from apm_cli.install.source_helpers import (
     content_hash_mismatch_hint,
+    download_registry_package,
     ensure_carried_licenses_match,
     locked_parent_identity,
     materialized_manifest_snapshot,
@@ -754,9 +755,8 @@ class FreshDependencySource(DependencySource):
                         version=dep_locked_chk.version,
                     )
                 else:
-                    package_info = _registry_resolver.download_package(
-                        download_ref,
-                        install_path,
+                    package_info = download_registry_package(
+                        ctx, download_ref, install_path, dep_locked_chk
                     )
             else:
                 package_info = ctx.downloader.download_package(
