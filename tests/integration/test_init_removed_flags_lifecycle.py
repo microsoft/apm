@@ -25,7 +25,7 @@ pytestmark = [
 
 @pytest.mark.parametrize(
     ("flag", "replacement"),
-    [("--plugin", "apm plugin init"), ("--marketplace", "apm marketplace init")],
+    [("--plugin", "apm plugin init demo --yes"), ("--marketplace", "apm marketplace init")],
 )
 def test_removed_init_flag_exits_2_and_writes_nothing(
     tmp_path, apm_binary_path, flag, replacement

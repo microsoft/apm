@@ -1,6 +1,7 @@
 """APM init command."""
 
 import os
+import shlex
 import shutil
 import sys
 from functools import wraps
@@ -181,7 +182,16 @@ def init(
     Producers: use 'apm plugin init' (plugin scaffold) or
     'apm marketplace init' (marketplace block).
     """
-    _refuse_removed_init_flags(plugin=plugin, marketplace=marketplace_flag)
+    _refuse_removed_init_flags(
+        plugin=plugin,
+        marketplace=marketplace_flag,
+        project_name=project_name,
+        yes=yes,
+        target_flag=target_flag,
+        description=description,
+        version=version,
+        author=author,
+    )
     if write:
         discover_flag = True
     if discover_flag:
@@ -209,19 +219,54 @@ def init(
     )
 
 
-def _refuse_removed_init_flags(*, plugin: bool, marketplace: bool) -> None:
-    """Refuse the flags removed in 0.37, naming the replacement (#4073)."""
-    replacements = (
-        ("--plugin", "apm plugin init", plugin),
-        ("--marketplace", "apm marketplace init", marketplace),
+def _refuse_removed_init_flags(
+    *,
+    plugin: bool,
+    marketplace: bool,
+    project_name: str | None = None,
+    yes: bool = False,
+    target_flag: str | list[str] | None = None,
+    description: str | None = None,
+    version: str | None = None,
+    author: str | None = None,
+) -> None:
+    """Refuse the flags removed in 0.37 with the full replacement command (#4073).
+
+    The ``apm plugin init`` command keeps the arguments the user passed so
+    recovery is one paste. ``apm marketplace init`` runs in the project
+    directory and takes none of them.
+    """
+    if not (plugin or marketplace):
+        return
+    removed = " and ".join(
+        f"'apm init {flag}'"
+        for flag, used in (("--plugin", plugin), ("--marketplace", marketplace))
+        if used
     )
-    for flag, command, used in replacements:
-        if used:
-            click.echo(
-                f"[x] 'apm init {flag}' was removed in 0.37. Run: {command}",
-                err=True,
-            )
-            raise SystemExit(2)
+    verb = "were" if plugin and marketplace else "was"
+    click.echo(f"[x] {removed} {verb} removed in 0.37.", err=True)
+    if plugin:
+        args = ["apm", "plugin", "init"]
+        if project_name:
+            args.append(project_name)
+        if yes:
+            args.append("--yes")
+        if target_flag:
+            targets = target_flag if isinstance(target_flag, str) else ",".join(target_flag)
+            args += ["--target", targets]
+        for option, value in (
+            ("--version", version),
+            ("--author", author),
+            ("--description", description),
+        ):
+            if value is not None:
+                args += [option, value]
+        click.echo(f"    Run: {shlex.join(args)}", err=True)
+    if marketplace:
+        where = f" (inside {project_name}/)" if plugin and project_name else ""
+        prefix = "Then run" if plugin else "Run"
+        click.echo(f"    {prefix}{where}: apm marketplace init", err=True)
+    raise SystemExit(2)
 
 
 def _init_scaffold(
@@ -269,7 +314,7 @@ def _perform_init(
 
     ``source`` controls the "Next steps" hint shape:
       - "init"   -> consumer-focused, teaches the noun-verb namespace
-      - "plugin" -> plugin-author next steps (same as legacy --plugin)
+      - "plugin" -> plugin-author next steps
 
     ``name``/``description``/``version``/``author`` are the optional
     metadata overrides (#2146). They default to ``None`` so callers that

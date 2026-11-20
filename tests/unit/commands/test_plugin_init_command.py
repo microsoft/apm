@@ -1,8 +1,6 @@
-"""Tests for the new ``apm plugin init`` surface and deprecation
-warnings on ``apm init --plugin`` / ``apm init --marketplace``.
-
-Wave 3 v3: noun-verb consolidation. Legacy flags continue to work
-during the deprecation window (removal scheduled for v0.16).
+"""Tests for the ``apm plugin init`` surface and the refusal of the
+``apm init --plugin`` / ``apm init --marketplace`` flags removed in 0.37
+(#4073).
 """
 
 from __future__ import annotations
@@ -360,6 +358,86 @@ class TestRemovedInitFlags:
                 assert plugin["version"] == "2.3.4"
                 assert plugin["description"] == "Says hi"
                 assert "Ada" in json.dumps(plugin["author"])
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_removed_plugin_flag_prints_the_full_replacement_command(self):
+        """The refusal keeps the user's arguments so recovery is one paste."""
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                result = self.runner.invoke(
+                    cli,
+                    [
+                        "init",
+                        "my-skill",
+                        "--plugin",
+                        "--yes",
+                        "--target",
+                        "claude",
+                        "--version",
+                        "2.0.0",
+                        "--author",
+                        "Ada L",
+                    ],
+                )
+                assert result.exit_code == 2, result.output
+                assert (
+                    "Run: apm plugin init my-skill --yes --target claude "
+                    "--version 2.0.0 --author 'Ada L'"
+                ) in result.stderr
+                assert list(Path(tmp).iterdir()) == []
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_both_removed_flags_print_both_replacement_steps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                result = self.runner.invoke(
+                    cli, ["init", "demo", "--plugin", "--marketplace", "--yes"]
+                )
+                assert result.exit_code == 2, result.output
+                assert "'apm init --plugin' and 'apm init --marketplace'" in result.stderr
+                assert "Run: apm plugin init demo --yes" in result.stderr
+                assert "Then run (inside demo/): apm marketplace init" in result.stderr
+                assert list(Path(tmp).iterdir()) == []
+            finally:
+                os.chdir(self.original_dir)
+
+    @pytest.mark.parametrize(
+        ("flags", "expected"),
+        [
+            (
+                ["--version", "2.3.4", "--author", "Ada", "--description", "Says hi"],
+                ("2.3.4", "Ada", "Says hi"),
+            ),
+            (["--author", "Ada", "--description", "Says hi"], ("1.0.0", "Ada", "Says hi")),
+        ],
+    )
+    def test_plugin_init_metadata_flags_seed_interactive_prompts(self, flags, expected):
+        """Outside --yes the flags seed the prompts; the default version stays 1.0.0."""
+        import json
+
+        import yaml
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                # Accept the name, version, description and author defaults, then confirm.
+                result = self.runner.invoke(
+                    cli, ["plugin", "init", "demo", *flags], input="\n\n\n\ny\n"
+                )
+                assert result.exit_code == 0, result.output
+                project = Path(tmp) / "demo"
+                manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+                assert (manifest["version"], manifest["author"], manifest["description"]) == (
+                    expected
+                )
+                plugin = json.loads((project / "plugin.json").read_text(encoding="utf-8"))
+                assert (plugin["version"], plugin["author"]["name"], plugin["description"]) == (
+                    expected
+                )
             finally:
                 os.chdir(self.original_dir)
 
