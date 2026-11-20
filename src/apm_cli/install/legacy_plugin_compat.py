@@ -40,6 +40,8 @@ _PARSER_SHADOWED_TYPES = frozenset(
     {PackageType.APM_PACKAGE, PackageType.SKILL_BUNDLE, PackageType.HYBRID}
 )
 _CODEX_PLUGIN_MANIFEST = Path(".codex-plugin") / "plugin.json"
+_CLAUDE_PLUGIN_KIND = "Claude Plugin"
+_CODEX_PLUGIN_KIND = "Codex plugin"
 
 
 def preserve_normalized_marketplace_plugin_type(
@@ -160,7 +162,10 @@ def matches_retired_codex_route_hash(
     ):
         return False
     _reject_unsafe_cache_paths(
-        package_path, dep_key, (manifest, package_path / APM_YML_FILENAME, package_path / APM_DIR)
+        package_path,
+        dep_key,
+        (manifest, package_path / APM_YML_FILENAME, package_path / APM_DIR),
+        kind=_CODEX_PLUGIN_KIND,
     )
     framed = locked_dependency.content_hash_framed
     fresh = compute_package_digests(package_path, exclude=exclude, legacy=False).framed
@@ -194,7 +199,7 @@ def matches_retired_codex_route_hash(
         raise
     cleanup_issues = staging.rollback()
     if cleanup_issues:
-        raise _staging_cleanup_error(dep_key, cleanup_issues)
+        raise _staging_cleanup_error(dep_key, cleanup_issues, kind=_CODEX_PLUGIN_KIND)
     return matches
 
 
@@ -352,17 +357,19 @@ def _invalid_plugin_error(
 def _staging_cleanup_error(
     dep_key: str,
     cleanup_issues: list[tuple[Path, str]],
+    *,
+    kind: str = _CLAUDE_PLUGIN_KIND,
 ) -> DirectDependencyError:
     details = "; ".join(f"{path}: {message}" for path, message in cleanup_issues)
-    return DirectDependencyError(
-        f"Cached Claude Plugin '{dep_key}' staging cleanup failed: {details}"
-    )
+    return DirectDependencyError(f"Cached {kind} '{dep_key}' staging cleanup failed: {details}")
 
 
 def _reject_unsafe_cache_paths(
     package_path: Path,
     dep_key: str,
     paths: tuple[Path, ...],
+    *,
+    kind: str = _CLAUDE_PLUGIN_KIND,
 ) -> None:
     """Reject metadata paths that could redirect compatibility writes."""
     try:
@@ -374,18 +381,22 @@ def _reject_unsafe_cache_paths(
             ensure_path_within(path, package_path)
     except (OSError, PathTraversalError) as exc:
         raise _unsafe_upgrade_error(
-            dep_key, package_path, f"cache metadata path validation failed: {exc}"
+            dep_key, package_path, f"cache metadata path validation failed: {exc}", kind=kind
         ) from exc
     if unsafe:
-        raise _unsafe_upgrade_error(dep_key, package_path, "cache metadata contains a symlink")
+        raise _unsafe_upgrade_error(
+            dep_key, package_path, "cache metadata contains a symlink", kind=kind
+        )
 
 
 def _unsafe_upgrade_error(
     dep_key: str,
     package_path: Path,
     reason: str,
+    *,
+    kind: str = _CLAUDE_PLUGIN_KIND,
 ) -> DirectDependencyError:
     return DirectDependencyError(
-        f"Cached Claude Plugin '{dep_key}' at '{package_path}' cannot be upgraded safely: "
+        f"Cached {kind} '{dep_key}' at '{package_path}' cannot be upgraded safely: "
         f"{reason}. Remove the cached directory, or {CLAUDE_PLUGIN_CACHE_INVALID.clause()}."
     )
