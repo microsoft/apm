@@ -16,8 +16,9 @@ blocker, unless the release claims to fix it.
 A trust, integrity or credential finding (lens L4, or any approval,
 policy, integrity or credential issue) is never a release-notes known
 issue, even when it reproduces on the previous release. Security
-findings get fixed, not reported: it routes privately and blocks the
-cut until the private fix track decides.
+findings get fixed, not reported: it routes privately to the security
+lead with a failing-before test brief and is fixed before the tag. No
+advisory is published instead of a fix.
 
 ## Cut call (the release-gate row)
 
@@ -25,8 +26,8 @@ cut until the private fix track decides.
 
 - GO: no blocker is open, verified, still-open or changed at the exact
   SHA.
-- A pre-existing security finding counts as an open blocker until the
-  private fix track decides; a pre-existing non-security one does not.
+- A pre-existing security finding counts as an open blocker until it is
+  fixed; a pre-existing non-security one does not.
 - NO-GO: at least one such blocker, listed by id.
 
 The row also lists blockers still awaiting verification and every
