@@ -254,7 +254,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             ),
             Ev(
                 "src/apm_cli/install/mcp/retired_destinations.py",
-                194,
+                195,
                 "def heal_retired_project_mcp_destinations",
             ),
         ),

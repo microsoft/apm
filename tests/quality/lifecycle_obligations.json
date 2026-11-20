@@ -23642,7 +23642,7 @@
   "E2": {
    "evidence": [
     "src/apm_cli/install/mcp/retired_destinations.py:93",
-    "src/apm_cli/install/mcp/retired_destinations.py:194"
+    "src/apm_cli/install/mcp/retired_destinations.py:195"
    ],
    "text": "targets are equivalent except MCP ownership (MCPOWN)"
   },
@@ -23735,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "ed55f7a10a1c738772f1ba993b869c8430dab97e8bd3a43d6af160c905c74625"
+ "sha256": "06e575f3732161530423423e44ee748566d294c648bf753a623320dd07cbc622"
 }
