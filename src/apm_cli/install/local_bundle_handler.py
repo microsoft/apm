@@ -329,6 +329,8 @@ def install_local_bundle(
                 lockfile=lockfile,
                 lockfile_root=lockfile_path.parent,
                 diagnostics=migration_diagnostics,
+                # Not an integrating install: nothing was kept this run.
+                kept=(),
             )
             # The bytes just deployed from this bundle are its render (#4360).
             migration_evidence.add_rendered(

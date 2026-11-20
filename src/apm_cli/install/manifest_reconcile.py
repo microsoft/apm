@@ -1004,6 +1004,7 @@ def reconcile_project_deployed_state(
             lockfile=lockfile,
             lockfile_root=lock_path.parent,
             diagnostics=diagnostics,
+            kept=(),
         ),
         user_scope=user_scope,
     )

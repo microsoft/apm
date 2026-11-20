@@ -292,6 +292,8 @@ def prune(ctx, dry_run):
             lockfile=lockfile,
             lockfile_root=project_root,
             diagnostics=logger.diagnostics,
+            # Not an integrating install: nothing was kept this run.
+            kept=(),
         )
         if lockfile is not None:
             deletion_evidence.prepare(

@@ -134,6 +134,16 @@ def check_cleanup_retains_kept_members(provider: FactsProvider) -> tuple[Violati
             respect_exempt=False,
         )
     )
+    cleanup_facts, cleanup_missing = _facts_for(provider, _CLEANUP, GUARD_KEPT_MEMBERS)
+    failures.extend(cleanup_missing)
+    if not cleanup_missing and _present(cleanup_facts, "kept: Iterable[str] = ("):
+        failures.append(
+            _summary(
+                GUARD_KEPT_MEMBERS,
+                _CLEANUP,
+                "DeploymentEvidence takes kept as a required keyword; a default drops retention",
+            )
+        )
     if not _kept_gate_first(provider):
         failures.append(
             _summary(
