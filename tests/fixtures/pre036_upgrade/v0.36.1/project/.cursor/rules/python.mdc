@@ -1,0 +1,7 @@
+---
+description: Python style
+globs: **/*.py
+---
+
+# Python
+Use type hints.
