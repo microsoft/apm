@@ -200,3 +200,20 @@ def test_project_exclude_unknown_value_warns_and_alias_keeps_exit_code(
         chain.run("install", "--no-policy", "--exclude", v).returncode for v in ("vscode", "VSCode")
     }
     assert len(codes) == 1, codes
+
+
+def test_removing_the_last_mcp_server_is_reported_as_a_change(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The install summary counts an MCP removal; it never says nothing changed (#3989)."""
+    chain = Chain(tmp_path / "project", apm_binary_path, dirs=(".claude",))
+    chain.write_manifest([stdio_server("fetch", "fetch")], targets=["claude"])
+    chain.ok("install", "--no-policy")
+    assert set(chain.servers("claude")) == {"fetch"}
+
+    chain.write_manifest([], targets=["claude"])
+    result = chain.ok("install", "--no-policy")
+    text = result.stdout + result.stderr
+    assert chain.servers("claude") == {}
+    assert "Removed 1 stale MCP server" in text, text
+    assert "No changes" not in text, text

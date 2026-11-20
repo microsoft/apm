@@ -144,6 +144,10 @@ class CommandLogger:
         """Log an error."""
         _rich_error(message, symbol=symbol)
 
+    def refusal(self, message: str) -> None:
+        """Render a refusal on stderr, where click reports errors (#3992)."""
+        _rich_error(message, symbol="error", err=True)
+
     def error_detail(self, message: str):
         """Log supporting error context that must remain visible by default."""
         _rich_echo(message)
@@ -256,6 +260,8 @@ class InstallLogger(CommandLogger):
         self._dry_run_apm_update_count = 0
         self._dry_run_incomplete = False
         self._lockfile_written = False
+        # MCP servers this run removed from native config; a change on their own.
+        self._mcp_removed: set[str] = set()
         self._failed_install_residue_note = ""
 
     def failed_install_residue(self, residue: FailedInstallResidue) -> None:
@@ -411,6 +417,10 @@ class InstallLogger(CommandLogger):
     def record_lockfile_write(self) -> None:
         """Keep metadata-only persistence out of the unchanged summary."""
         self._lockfile_written = True
+
+    def record_mcp_removed(self, names) -> None:
+        """Record MCP servers this install removed, so the summary counts them."""
+        self._mcp_removed.update(str(name) for name in names)
 
     def nothing_to_install(
         self,
@@ -884,7 +894,7 @@ class InstallLogger(CommandLogger):
         )
 
         if severity == "block":
-            _rich_error(f"Policy violation: {dep_ref} -- {reason}", symbol="error")
+            self.refusal(f"Policy violation: {dep_ref} -- {reason}")
             if source:
                 _rich_echo(
                     "  "
@@ -892,6 +902,7 @@ class InstallLogger(CommandLogger):
                         dep_ref, source, remedy=remedy, declared_by=declared_by, rule=rule
                     ),
                     color="dim",
+                    err=True,
                 )
 
     def policy_disabled(self, reason: str):
@@ -1092,6 +1103,13 @@ class InstallLogger(CommandLogger):
             file_noun = "file" if stale_cleaned == 1 else "files"
             _rich_success(
                 f"Cleaned {stale_cleaned} stale {file_noun}{timing_suffix}.",
+                symbol="sparkles",
+            )
+        elif self._mcp_removed:
+            count = len(self._mcp_removed)
+            noun = "server" if count == 1 else "servers"
+            _rich_success(
+                f"Removed {count} stale MCP {noun}{timing_suffix}.",
                 symbol="sparkles",
             )
         elif self._lockfile_written:

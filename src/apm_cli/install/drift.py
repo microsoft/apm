@@ -1025,4 +1025,17 @@ def diff_scratch_against_project(
             findings.append(DriftFinding(path=rel, kind="modified", package=""))
         # else: untracked governed file -- ignore (user authored).
 
+    if local_bundle_paths:
+        # A local bundle has no replay source: its locked hashes are the
+        # baseline. Plain audit and --ci read them through the one verifier
+        # content-integrity and --frozen use (req-lk-017), so both agree.
+        from apm_cli.policy.ci_checks import verify_deployed_file_hashes
+
+        drifted, _unresolved = verify_deployed_file_hashes(project_root, lockfile, targets)
+        findings.extend(
+            DriftFinding(path=item.path, kind="modified", package=item.owner)
+            for item in drifted
+            if item.path in local_bundle_paths
+        )
+
     return findings
