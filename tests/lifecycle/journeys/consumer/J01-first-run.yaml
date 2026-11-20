@@ -76,7 +76,7 @@ steps:
     converged: true
     files: []
     key_lines: ["[*]"]
-    forbidden_lines: [integrated, "[!]"]
+    forbidden_lines: [integrated, adopted, "[!]"]
   - n: 7
     run: ["apm install microsoft/apm/packages/apm-guide#{release}"]
     exit: 0
@@ -107,6 +107,11 @@ known_cells:
     tracking: "#4184"
     step: 6
     match: "forbidden 'integrated' printed"
+  - id: j01-converged-install-reports-adopted
+    law: FORBID
+    tracking: "#4184"
+    step: 6
+    match: "forbidden 'adopted' printed"
   - id: j01-converged-install-repeats-warnings
     law: FORBID
     tracking: "#4184"
