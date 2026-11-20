@@ -402,6 +402,129 @@ def test_command_remediation_clears_the_reported_state(
 # -- W3 deps-compilation proofs --
 # -- end W3 deps-compilation proofs --
 # -- W3 plugins-runtime proofs --
+#
+# A user-owned harness config APM merges into (JetBrains Copilot MCP config,
+# Copilot plugin settings) turns unreadable; the install that reports it names
+# the manual fix and the command. Deleting the file is the fix both name.
+
+_FIXTURE_MCP = {
+    "name": "fixture-mcp",
+    "registry": False,
+    "transport": "stdio",
+    "command": "printf",
+    "args": ["fixture"],
+}
+_COPILOT_SETTINGS = ".github/copilot/settings.local.json"
+# 'intellij' is not an apm.yml targets: value; only --target selects it.
+_INTELLIJ_INSTALL_ARGS = (*_INSTALL_ARGS, "--target", "intellij")
+
+
+def _intellij_dir(scenario: _Scenario) -> Path:
+    environment = scenario.isolated.process_environment
+    return Path(environment["XDG_CONFIG_HOME"]) / "github-copilot" / "intellij"
+
+
+def _intellij_config(world: _World) -> Path:
+    return _intellij_dir(world.scenario) / "mcp.json"
+
+
+def _w3_installed_world(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    publish,
+    *,
+    install_args: tuple[str, ...] = _INSTALL_ARGS,
+    **consumer: object,
+) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = publish(scenario)
+    created = scenario.consumers.create(
+        "w3-consumer", dependencies=(source.dependency,), **consumer
+    )
+    world = _World(scenario=scenario, source=source, consumer=created)
+    _run_success(
+        scenario,
+        created,
+        install_args,
+        environment=source.environment,
+        scenario_id="remediation-w3-install",
+    )
+    return world
+
+
+def _intellij_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    world = _w3_installed_world(
+        tmp_path,
+        apm_binary_path,
+        lambda scenario: _publish(scenario, "advice-kit", instruction="advice"),
+        install_args=_INTELLIJ_INSTALL_ARGS,
+        mcp_dependencies=(_FIXTURE_MCP,),
+    )
+    assert "fixture-mcp" in _intellij_config(world).read_text(encoding="utf-8")
+    return world
+
+
+def _agent_plugin_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    from tests.integration.test_required_lifecycle_state_machine import _publish_agent_plugin
+
+    world = _w3_installed_world(
+        tmp_path,
+        apm_binary_path,
+        lambda scenario: _publish_agent_plugin(scenario, "native-kit", skill="native"),
+        targets=("copilot",),
+    )
+    assert "native-kit" in (world.consumer.root / _COPILOT_SETTINGS).read_text(encoding="utf-8")
+    return world
+
+
+def _malform_intellij_config(world: _World) -> None:
+    _intellij_config(world).write_text("{malformed\n", encoding="ascii")
+
+
+def _intellij_reconciled(world: _World, result) -> None:
+    _expect_ok(world, result)
+    servers = json.loads(_intellij_config(world).read_text(encoding="utf-8"))["servers"]
+    assert "fixture-mcp" in servers, servers
+
+
+def _copilot_registered(world: _World, result) -> None:
+    _expect_ok(world, result)
+    settings = (world.consumer.root / _COPILOT_SETTINGS).read_text(encoding="utf-8")
+    assert isinstance(json.loads(settings), dict)
+    assert "native-kit" in settings, settings
+
+
+W3_PLUGINS_RUNTIME_PROOFS: tuple[_TextProof, ...] = (
+    _TextProof(
+        "jetbrains-mcp-config-unusable",
+        _intellij_world,
+        _malform_intellij_config,
+        lambda _world: _INTELLIJ_INSTALL_ARGS,
+        1,
+        _intellij_reconciled,
+        before=lambda world: _intellij_config(world).unlink(),
+    ),
+    _TextProof(
+        "copilot-settings-invalid",
+        _agent_plugin_world,
+        lambda world: (world.consumer.root / _COPILOT_SETTINGS).write_text(
+            "{malformed\n", encoding="ascii"
+        ),
+        lambda _world: _INSTALL_ARGS,
+        1,
+        _copilot_registered,
+        before=_unlink(_COPILOT_SETTINGS),
+    ),
+)
+
+
+@pytest.mark.parametrize("proof", W3_PLUGINS_RUNTIME_PROOFS, ids=lambda proof: proof.remediation_id)
+def test_w3_plugins_runtime_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _TextProof
+) -> None:
+    test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+
+
 # -- end W3 plugins-runtime proofs --
 # -- W3 core-models proofs --
 # -- end W3 core-models proofs --

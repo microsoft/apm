@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..core.remediation import COPILOT_SETTINGS_INVALID
 from ..core.scope import InstallScope, is_user_scope
 from .constants import (
     APM_MARKETPLACE_NAME,
@@ -112,8 +113,7 @@ def read_settings_document(path: Path) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         error = CopilotSettingsCollisionError(
             f"{path} is not valid JSON, so APM could not register the Agent "
-            "Plugin and no packages were installed. Fix or delete the file, "
-            "then re-run 'apm install'."
+            "Plugin and no packages were installed. " + COPILOT_SETTINGS_INVALID.sentence()
         )
         error.detail = str(exc)
         raise error from exc
