@@ -81,6 +81,26 @@ def _install_command(manifest: Path) -> str:
     return "apm install -g" if is_user_scope_root(manifest.parent) else "apm install"
 
 
+def _canonical_specs(manifest: Path, specs: Sequence[str]) -> tuple[str, ...]:
+    """Resolve every CLI spec to its store identity, or exit 1 before any write."""
+    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..security.executables import ApprovalSpecError, canonical_approval_spec
+
+    lockfile = LockFile.read(get_lockfile_path(manifest.parent))
+    resolved: list[str] = []
+    errors: list[str] = []
+    for spec in specs:
+        try:
+            resolved.append(canonical_approval_spec(spec, lockfile))
+        except ApprovalSpecError as exc:
+            errors.append(str(exc))
+    for error in errors:
+        _rich_error(error)
+    if errors:
+        sys.exit(1)
+    return tuple(resolved)
+
+
 def _load_store(
     manifest: Path, user_scope: bool
 ) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]]]:
@@ -229,6 +249,7 @@ def approve_cmd(
             _rich_error("Specify at least one package, or use --pending / --all / --recommended.")
             sys.exit(1)
 
+        packages = _canonical_specs(manifest, packages)
         _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)
     finally:
         logger.render_summary()
@@ -261,6 +282,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) ->
         apm deny owner/repo
     """
     manifest = _find_manifest(user_scope, global_scope)
+    packages = _canonical_specs(manifest, packages)
     allow, deny = _load_store(manifest, user_scope)
 
     declarations = _scan_installed_packages(manifest)
@@ -274,7 +296,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) ->
 
             deny[pkg] = dict.fromkeys(ALL_EXEC_TYPES, True)
             allow.pop(_find_matching_key(allow, pkg) or pkg, None)
-            _rich_info(f"Denied {pkg} (all executable types)", symbol="info")
+            _rich_info(f"Denied {pkg} (all executable types; not installed)", symbol="info")
             changed += 1
             continue
         deny[decl.package_key] = {t: True for t in decl.exec_types}
@@ -330,6 +352,7 @@ def explain_decision(package: str, *, logger: CommandLogger, global_scope: bool 
         apm policy explain owner/repo
     """
     manifest = _find_manifest(global_scope=global_scope)
+    (package,) = _canonical_specs(manifest, (package,))
     ctx = _effective_trust_context(manifest, logger=logger)
 
     decl = _find_declaration(_scan_installed_packages(manifest), package)
@@ -354,14 +377,40 @@ def explain_decision(package: str, *, logger: CommandLogger, global_scope: bool 
         if verdict.shadowed:
             _rich_echo(f"          shadowed: {', '.join(verdict.shadowed)}")
     if has_block:
-        from ..security.trust import approve_command
+        _explain_next_step(manifest, decl, verdicts.values())
 
-        user_scope = _install_command(manifest).endswith("-g")
+
+def _explain_next_step(manifest: Path, decl: ExecutableDeclaration, verdicts) -> None:
+    """Name how a block was recorded and how to change it, by store identity (#4246)."""
+    from ..security.executables import (
+        LAYER_ORG_DENY,
+        LAYER_ORG_DENY_ALL,
+        LAYER_PROJECT_DENY,
+        LAYER_USER_DENY,
+    )
+    from ..security.trust import approve_command
+
+    identity = _identity(decl)
+    user_scope = _install_command(manifest).endswith("-g")
+    layers = {verdict.layer for verdict in verdicts if not verdict.allowed}
+    if layers & {LAYER_ORG_DENY, LAYER_ORG_DENY_ALL}:
         _rich_info(
-            f"To trust it: `{approve_command(decl.package_name, user_scope=user_scope)}` "
-            f"(or `apm approve --user {decl.package_name}` for this machine only).",
-            symbol="info",
+            "Denied by org policy; approving cannot lift it. Ask the policy owner.", symbol="info"
         )
+        return
+    for layer, store in ((LAYER_PROJECT_DENY, "apm.yml"), (LAYER_USER_DENY, "--user config")):
+        if layer in layers:
+            _rich_info(
+                f"Denied in {store} (the executables.deny entry for {identity}). To lift it, "
+                f"remove that entry, or run '{_lift_deny_hint(layer, identity, user_scope=user_scope)}'.",
+                symbol="info",
+            )
+            return
+    _rich_info(
+        f"To trust it: `{approve_command(identity, user_scope=user_scope)}` "
+        f"(or `apm approve --user {identity}` for this machine only).",
+        symbol="info",
+    )
 
 
 def _verdicts(ctx, decl: ExecutableDeclaration):
@@ -903,13 +952,14 @@ def _still_denied(
     return blocked
 
 
-def _lift_deny_hint(layer: str, identity: str) -> str:
+def _lift_deny_hint(layer: str, identity: str, *, user_scope: bool = False) -> str:
     from ..security.executables import LAYER_PROJECT_DENY, LAYER_USER_DENY
+    from ..security.trust import approve_command
 
     if layer == LAYER_USER_DENY:
         return f"apm approve --user {identity}"
     if layer == LAYER_PROJECT_DENY:
-        return f"apm approve {identity}"
+        return approve_command(identity, user_scope=user_scope)
     return "the org policy denies it; ask its owner to change apm-policy.yml"
 
 

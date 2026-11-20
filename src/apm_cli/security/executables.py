@@ -609,6 +609,42 @@ def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
     return tuple(dict.fromkeys((approval.identity, approval.key)))
 
 
+class ApprovalSpecError(ValueError):
+    """A CLI spec names no single installed package, so no store key is derived."""
+
+
+def canonical_approval_spec(spec: str, lockfile: Any) -> str:
+    """Return the approval-store identity a CLI spec names (#4189, #4245).
+
+    ``apm approve``, ``apm deny`` and ``apm policy explain`` accept the spec a
+    package was installed with. A marketplace spec (``plugin@marketplace``,
+    optionally ``#ref``) resolves through the lockfile's recorded provenance
+    to the locked identity, the key the install gate checks. Any other form
+    is already an identity spelling and is returned unchanged.
+
+    Raises:
+        ApprovalSpecError: The marketplace spec names no installed package or
+            more than one, so no store key may be written for it.
+    """
+    from apm_cli.marketplace.resolver import parse_marketplace_ref
+
+    try:
+        parsed = parse_marketplace_ref(spec)
+    except ValueError as exc:
+        raise ApprovalSpecError(f"{spec}: {exc}") from exc
+    if parsed is None:
+        return spec
+    plugin, marketplace, _ref = parsed
+    rows = lockfile.marketplace_rows(marketplace, plugin) if lockfile is not None else []
+    if len(rows) != 1:
+        why = "no installed package came from" if not rows else "several installed packages match"
+        raise ApprovalSpecError(
+            f"{spec}: {why} {plugin}@{marketplace}. Name the package as "
+            "'apm approve --pending' lists it."
+        )
+    return _strip_version(locked_dependency_approval(rows[0]).identity)
+
+
 def dependency_approval_key(dependency_ref: Any) -> str:
     """Return the trust key for a resolved dependency reference.
 
