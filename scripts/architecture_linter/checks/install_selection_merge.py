@@ -113,7 +113,7 @@ def check_selection_merge(provider: FactsProvider) -> tuple[Violation, ...]:
             "return union_selection_names(persisted_subset, cli_subset)",
             'pairing = getattr(dep_ref, "subset_pairings", None)',
         ),
-        "src/apm_cli/install/service.py": ("recorded = locked.selection()",),
+        "src/apm_cli/install/frozen_selection.py": ("recorded = locked.selection()",),
         "src/apm_cli/install/phases/integrate.py": ("InstallService.enforce_frozen_selections(",),
     }
     for path, fragments in required.items():
