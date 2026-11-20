@@ -72,18 +72,32 @@ def _install_command(manifest: Path) -> str:
 
 
 def _canonical_specs(manifest: Path, specs: Sequence[str]) -> tuple[str, ...]:
-    """Resolve every CLI spec to its store identity, or exit 1 before any write."""
+    """Resolve every CLI spec to its store identity, or exit 1 before any write.
+
+    The dependency selector ``apm uninstall`` and ``apm audit PACKAGE`` use
+    picks the lock row; ``canonical_approval_spec`` names its store identity.
+    """
     from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..models.dependency.manifest_host import manifest_host_scope_for
+    from ..models.manifest_io import load_manifest
     from ..security.executables import ApprovalSpecError, canonical_approval_spec
+    from .uninstall.engine import select_installed_lock_key
 
     lockfile = LockFile.read(get_lockfile_path(manifest.parent))
     resolved: list[str] = []
     errors: list[str] = []
-    for spec in specs:
-        try:
-            resolved.append(canonical_approval_spec(spec, lockfile))
-        except ApprovalSpecError as exc:
-            errors.append(str(exc))
+    try:
+        data = load_manifest(manifest) if manifest.is_file() else None
+        with manifest_host_scope_for(data):
+            for spec in specs:
+                try:
+                    selection = select_installed_lock_key(spec, data, lockfile)
+                    key = selection.key if selection is not None else None
+                    resolved.append(canonical_approval_spec(spec, lockfile, selected_key=key))
+                except (ApprovalSpecError, ValueError) as exc:
+                    errors.append(str(exc) if str(exc).startswith(spec) else f"{spec}: {exc}")
+    except ValueError as exc:
+        errors.append(str(exc))
     for error in errors:
         _rich_error(error)
     if errors:
@@ -94,17 +108,31 @@ def _canonical_specs(manifest: Path, specs: Sequence[str]) -> tuple[str, ...]:
 def _load_store(
     manifest: Path, user_scope: bool
 ) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]]]:
-    """Load the (allow, deny) grant maps from the selected store."""
-    from ..security.executables import load_project_executables, load_user_executables
+    """Load the (allow, deny) grant maps from the selected store.
+
+    Keys an older APM wrote as an install spec are rewritten under the
+    package identity when this store is next saved (#4189).
+    """
+    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..security.executables import (
+        canonicalize_store_keys,
+        load_project_executables,
+        load_user_executables,
+    )
 
     if user_scope:
-        return load_user_executables()
-    allow, deny, used_alias = load_project_executables(manifest)
-    if used_alias:
-        from ..security.executables import warn_allow_executables_alias_once
+        allow, deny = load_user_executables()
+    else:
+        allow, deny, used_alias = load_project_executables(manifest)
+        if used_alias:
+            from ..security.executables import warn_allow_executables_alias_once
 
-        warn_allow_executables_alias_once()
-    return allow, deny
+            warn_allow_executables_alias_once()
+    lockfile = LockFile.read(get_lockfile_path(manifest.parent))
+    return (
+        canonicalize_store_keys(allow, lockfile, store="executables.allow", drop_raw=True),
+        canonicalize_store_keys(deny, lockfile, store="executables.deny", drop_raw=True),
+    )
 
 
 def _save_store(

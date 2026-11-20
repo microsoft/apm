@@ -143,18 +143,23 @@ def check_approval_store_identity(provider: FactsProvider) -> tuple[Violation, .
     """Approval stores are keyed by the identity a CLI spec resolves to (#4189).
 
     Closed world over ``commands/approve.py``: every spec entry point resolves
-    specs through ``_canonical_specs`` (which calls the owner
-    ``canonical_approval_spec``), and a store keyed by a spec variable is
-    written only inside such an entry point.
+    specs through ``_canonical_specs`` (the dependency selector
+    ``select_installed_lock_key`` plus the owner ``canonical_approval_spec``),
+    ``_load_store`` folds install-spec keys onto identities, and a store keyed
+    by a spec variable is written only inside such an entry point.
     """
     facts, failures = checked_facts(provider, APPROVE, STORE_RULE, require_python=True)
     findings = list(failures)
     if facts is None or facts.tree_index is None:
         return tuple(findings)
     helper = facts.tree_index.function("_canonical_specs")
-    if helper is None or not _calls(helper, "canonical_approval_spec"):
+    for owner in ("select_installed_lock_key", "canonical_approval_spec"):
+        if helper is None or not _calls(helper, owner):
+            findings.append(_summary(STORE_RULE, APPROVE, f"_canonical_specs must call {owner}"))
+    loader = facts.tree_index.function("_load_store")
+    if loader is None or not _calls(loader, "canonicalize_store_keys"):
         findings.append(
-            _summary(STORE_RULE, APPROVE, "_canonical_specs must call canonical_approval_spec")
+            _summary(STORE_RULE, APPROVE, "_load_store must canonicalize store keys on read")
         )
     for name in _SPEC_ENTRY_POINTS:
         function = facts.tree_index.function(name)
