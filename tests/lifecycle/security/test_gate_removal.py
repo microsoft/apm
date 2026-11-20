@@ -704,12 +704,8 @@ def test_approve_by_marketplace_install_spec_approves_or_refuses(lifecycle_world
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#4246 apm policy explain suggests approving a package the user denied",
-)
 def test_policy_explain_of_a_denied_package_does_not_suggest_approving_it(lifecycle_world) -> None:
+    """A user deny explains as blocked; the only approve mention is the lift remedy (#4275)."""
     world = lifecycle_world
     _marketplace_exec_deployed(world)
     denied = driver.run(world, ("deny", f"{ORG}/p-exec"), scope="user")
@@ -718,8 +714,17 @@ def test_policy_explain_of_a_denied_package_does_not_suggest_approving_it(lifecy
     explained = runner.run(
         ("policy", "explain", f"{ORG}/p-exec"), cwd=world.apm_home, env=world.env
     )
-    assert "verdict: blocked" in explained.stdout, explained.stdout
-    assert "apm approve" not in explained.stdout, explained.stdout
+    out = explained.stdout
+    assert explained.returncode == 0, out + explained.stderr
+    assert "verdict: blocked" in out, out
+    assert "(layer: user-deny)" in out, out
+    assert "not approved" not in out, out
+    approve_lines = [line for line in out.splitlines() if "apm approve" in line]
+    assert len(approve_lines) == 1, out
+    lift = approve_lines[0]
+    assert "executables.deny entry" in lift and "To lift it" in lift, lift
+    assert lift.index("To lift it") < lift.index("apm approve"), lift
+    assert not any(line.lstrip().startswith("Approve:") for line in out.splitlines()), out
 
 
 # -- local trust controls at user scope (-g) -----------------------------------
