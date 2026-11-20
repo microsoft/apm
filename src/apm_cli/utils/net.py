@@ -75,7 +75,14 @@ def is_local_network_host(host: str | None) -> bool:
     """
     if is_loopback_host(host):
         return True
-    addr = parse_host_address(host)
+    if not host:
+        return False
+    # Strict literal parsing only: integer, hex and leading-zero forms are
+    # read differently by socket resolvers, so they never count as private.
+    try:
+        addr = ipaddress.ip_address(host.strip().removesuffix("."))
+    except ValueError:
+        return False
     return isinstance(addr, ipaddress.IPv4Address) and any(
         addr in network for network in _RFC1918_NETWORKS
     )
