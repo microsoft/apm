@@ -1516,6 +1516,7 @@ class TestFrozenInstallNeverWritesLockfile:
         adopted.write_bytes(b"user content\n")
 
         request = MagicMock()
+        request.scope = None  # unscoped: the lock sits beside this apm.yml
         request.apm_package.package_path = tmp_path / "apm.yml"
         produced = _lock([".claude/skills/recorded/SKILL.md", ".claude/skills/adopted/SKILL.md"])
         with suppress_lockfile_writes() as withheld:
