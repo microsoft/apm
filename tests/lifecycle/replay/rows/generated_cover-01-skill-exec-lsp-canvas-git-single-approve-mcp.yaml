@@ -186,7 +186,6 @@ given:
   - pair|PRIM=bin|GATE=unapproved-exec
   - pair|PRIM=bin|LOCK=absent
   - pair|PRIM=bin|NET=online
-  - pair|PRIM=bin|SCOPE=project
   - pair|PRIM=bin|SELECT=on
   - pair|PRIM=bin|TGT=single-unchanged
   - pair|PRIM=canvas|DEPLOYED=absent

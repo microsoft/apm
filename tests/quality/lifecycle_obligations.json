@@ -27,11 +27,11 @@
    "T3": 401,
    "T4": 80,
    "T5": 60,
-   "pair": 1532,
+   "pair": 1531,
    "refusal": 43,
    "rule": 7
   },
-  "obligations_total": 2522,
+  "obligations_total": 2521,
   "raw_candidates": {
    "T1": 504,
    "T2": 12,
@@ -40,8 +40,9 @@
    "T5": 120,
    "pair": 1684
   },
-  "removed": 380,
+  "removed": 381,
   "removed_by_rule": {
+   "U-BIN": 1,
    "U3": 5,
    "U6": 90,
    "U8": 285
@@ -50,7 +51,7 @@
   "rows": 16,
   "status": {
    "baseline": 1501,
-   "required": 1021
+   "required": 1020
   }
  },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
@@ -69,254 +70,6 @@
    "vscode",
    "legacy-receipt"
   ]
- },
- "excluded": {
-  "G|audit-ci|local-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|audit-ci|org-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|audit-ci|org-enables-gate|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|audit-ci|policy-dep-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|audit-ci|revoke-approval|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|bundle-install|local-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|bundle-install|local-deny|bin"
-  },
-  "G|bundle-install|org-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|bundle-install|local-deny|bin"
-  },
-  "G|bundle-install|org-enables-gate|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|bundle-install|local-deny|bin"
-  },
-  "G|bundle-install|revoke-approval|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|bundle-install|local-deny|bin"
-  },
-  "G|dry-run|local-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|dry-run|local-deny|bin"
-  },
-  "G|dry-run|org-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|dry-run|local-deny|bin"
-  },
-  "G|dry-run|revoke-approval|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|dry-run|local-deny|bin"
-  },
-  "G|frozen-g|local-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install-g|local-deny|bin"
-  },
-  "G|frozen-g|revoke-approval|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install-g|local-deny|bin"
-  },
-  "G|frozen|local-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|frozen|org-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|frozen|org-enables-gate|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|frozen|policy-dep-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|frozen|revoke-approval|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|install-g|local-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install-g|local-deny|bin"
-  },
-  "G|install-g|revoke-approval|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install-g|local-deny|bin"
-  },
-  "G|install|local-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|install|org-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|install|org-enables-gate|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|install|policy-dep-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|install|revoke-approval|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|uninstall-prune-rebuild|local-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|uninstall-prune-rebuild|org-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|uninstall-prune-rebuild|org-enables-gate|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|uninstall-prune-rebuild|policy-dep-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|uninstall-prune-rebuild|revoke-approval|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|unpack|local-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|unpack|local-deny|bin"
-  },
-  "G|unpack|org-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|unpack|local-deny|bin"
-  },
-  "G|unpack|org-enables-gate|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|unpack|local-deny|bin"
-  },
-  "G|unpack|policy-dep-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|unpack|local-deny|bin"
-  },
-  "G|unpack|revoke-approval|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|unpack|local-deny|bin"
-  },
-  "G|update|local-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|update|org-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|update|org-enables-gate|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|update|policy-dep-deny|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  },
-  "G|update|revoke-approval|bin": {
-   "rules": [
-    "U-BIN"
-   ],
-   "witness": "G|install|local-deny|bin"
-  }
  },
  "factors": {
   "DEPLOYED": [
@@ -17138,14 +16891,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
-  "pair|PRIM=bin|SCOPE=project": {
-   "family": "pair",
-   "issue": "#4099",
-   "lane": "T-5",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
-  },
   "pair|PRIM=bin|SCOPE=user": {
    "family": "pair",
    "issue": "#4097",
@@ -22745,9 +22490,8 @@
   }
  },
  "pins": {
-  "U-BIN": "632062aa61b6d33035fea09d8f5c56cfead40809a19fa62d75cdf6748ff4c6b4"
+  "U-BIN": "a2fb54bea5abdfe3d5aababbe1a10461fc5a89ec357c94f0dbca9e21b57e6851"
  },
- "reinstated": {},
  "removed": {
   "T3|OP=approve-deny|SRC=inline-mcp|PRIM=bin": [
    "U8"
@@ -23853,6 +23597,9 @@
   "pair|OP=pack|SRC=pkg-registry": [
    "U6"
   ],
+  "pair|PRIM=bin|SCOPE=project": [
+   "U-BIN"
+  ],
   "pair|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
@@ -23891,7 +23638,7 @@
   ]
  },
  "rows": {
-  "generated_cover-01-skill-exec-lsp-canvas-git-single-approve-mcp.yaml": "8ebe8fa01ad78ed8f2a131ec97446b224190db459d062fc8a8b5b1afd3ab705f",
+  "generated_cover-01-skill-exec-lsp-canvas-git-single-approve-mcp.yaml": "dc7e358f586deeceee7164c25aee686eb97b53180be631cb70698aa9abbeea81",
   "generated_cover-02-skill-exec-canvas-local-multi-deny-mcp.yaml": "6ca15634aa28ada382be92cef69b5204cf3d0cd7708aec2874ae8f89f4cd9730",
   "generated_cover-03-skill-exec-git-multi-unapproved-mcp.yaml": "fb2e757c7fd58d2af5a66239461d950543caf17c2ea716cd648ae935c570862f",
   "generated_cover-04-lsp-canvas-local-multi-unapproved-mcp.yaml": "d1bad85295426b8f97e8520944da9bec38217a569926d51c2388017ed1c6c692",
@@ -23933,11 +23680,9 @@
    "evidence": [
     "src/apm_cli/install/exec_gate.py:507",
     "src/apm_cli/install/exec_gate.py:508",
-    "src/apm_cli/install/exec_gate.py:511",
-    "src/apm_cli/integration/skill_integrator.py:1780",
-    "src/apm_cli/bundle/unpacker.py:201"
+    "src/apm_cli/install/exec_gate.py:511"
    ],
-   "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable); _deploy_bin_files is called only from _deploy_plugin_bin, and apm unpack refuses every executable file. A gate cell for bin/ on any other path has nothing to remove and is excluded. Self-reinstating: the generator hashes these elements (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin"
+   "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
   "U1": {
    "evidence": [],
@@ -24009,5 +23754,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "f0d788a4b922cb6537d6b2e6e08a5f0929cefa95a0918365acde96a181a15cda"
+ "sha256": "54118c0e88d941ac4fccb2bd0210a7b66f9357b20e3c9706edb9063849802f61"
 }

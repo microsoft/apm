@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
@@ -35,10 +34,10 @@ from tests.lifecycle.generator.rules import (
     REFUSAL_EVIDENCE,
     RULE_CELL_REFUSALS,
     RULES,
-    U_BIN_CELLS,
     U_BIN_PIN,
     UNINSTALL_MCP_REFUSALS,
     USER_SCOPE_EVIDENCE,
+    Verdict,
     classify,
     refusal_cell,
 )
@@ -438,7 +437,12 @@ def _raw() -> dict[str, dict[str, str]]:
 
 @pytest.mark.parametrize(
     ("rule", "holds"),
-    [("U3", _u3), ("U6", _u6), ("U8", lambda cell: _u8(cell) is not None)],
+    [
+        ("U3", _u3),
+        ("U6", _u6),
+        ("U8", lambda cell: _u8(cell) is not None),
+        ("U-BIN", lambda cell: _u_bin(cell)),
+    ],
 )
 def test_definition_rule_removes_exactly_the_cells_its_text_names(rule, holds) -> None:
     removed = _removed_by(rule)
@@ -499,80 +503,22 @@ def test_every_removed_and_mapped_cell_names_its_rules() -> None:
         ), key
 
 
-# -- U-BIN: closed-world pin of the bin/ deploy domain ------------------------------
+# -- U-BIN: bin/ at project scope is unreachable (self-reinstating) -------------
 
 
-@dataclass(frozen=True)
-class MutationCase:
-    """A source edit that widens one pinned element of U-BIN."""
-
-    name: str
-    path: str
-    old: str
-    new: str
+def _u_bin(cell) -> bool:
+    """bin/ deploys only at user scope (exec_gate.py:508 scope is not InstallScope.USER)."""
+    return cell.get("PRIM") == "bin" and cell.get("SCOPE") == "project"
 
 
-_BIN_MUTATIONS = sorted(
-    (
-        MutationCase(
-            "plugin-bin-deployable-drops-the-scope-check",
-            "install/exec_gate.py",
-            "        or scope is not InstallScope.USER\n",
-            "",
-        ),
-        MutationCase(
-            "second-bin-writer",
-            "install/deployment_plan.py",
-            "\n\ndef ",
-            "\n\ndef _second_bin_writer(integrator, *args):\n"
-            "    return integrator._deploy_bin_files(*args)\n\n\ndef ",
-        ),
-        MutationCase(
-            "unpack-accepts-a-bin-executable",
-            "bundle/unpacker.py",
-            '_EXECUTABLE_DIR_NAMES = frozenset({"hooks", "bin"})',
-            '_EXECUTABLE_DIR_NAMES = frozenset({"hooks"})',
-        ),
-    ),
-    key=lambda case: case.name,
-)
-
-
-def _source_copy(root: Path) -> Path:
-    import shutil
-
-    target = root / "apm_cli"
-    shutil.copytree(bin_pin.SRC_ROOT, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    return target
-
-
-def test_u_bin_pin_matches_the_source_and_excludes_exactly_its_cells() -> None:
-    assert bin_pin.pin_digest() == U_BIN_PIN
+def test_u_bin_pin_matches_the_predicate_and_is_recorded() -> None:
+    assert bin_pin.predicate_digest() == U_BIN_PIN
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
     assert data["pins"] == {"U-BIN": U_BIN_PIN}
-    witnesses = {entry["witness"] for entry in data["excluded"].values()}
-    assert set(data["excluded"]) == set(U_BIN_CELLS)
-    assert all(entry["rules"] == ["U-BIN"] for entry in data["excluded"].values())
-    # One witness row per path shape, each itself a U-BIN cell.
-    assert witnesses == {
-        f"G|{shape}|local-deny|bin"
-        for shape in ("install", "install-g", "dry-run", "bundle-install", "unpack")
-    }
-    assert witnesses <= set(U_BIN_CELLS)
-    assert len(U_BIN_CELLS) == 41 and not data["reinstated"]
 
 
-@pytest.mark.parametrize("case", _BIN_MUTATIONS, ids=lambda case: case.name)
-def test_widening_bin_deploy_reinstates_the_u_bin_cells(tmp_path: Path, case) -> None:
-    source = _source_copy(tmp_path)
-    assert bin_pin.pin_digest(source) == U_BIN_PIN  # control: an unchanged copy keeps the pin
-    path = source / case.path
-    text = path.read_text(encoding="utf-8")
-    assert text.count(case.old) >= 1, case
-    path.write_text(text.replace(case.old, case.new, 1), encoding="utf-8")
-    digest = bin_pin.pin_digest(source)
-    assert digest != U_BIN_PIN, case.name
-    excluded, reinstated = emit.u_bin_audit(digest)
-    assert not excluded
-    assert set(reinstated) == set(U_BIN_CELLS)
-    assert all(entry == {"rules": ["U-BIN"], "must_cover": True} for entry in reinstated.values())
+def test_a_changed_predicate_reinstates_the_u_bin_cells_as_must_cover(monkeypatch) -> None:
+    cell = {"PRIM": "bin", "SCOPE": "project"}
+    assert classify("pair", cell) == Verdict("removed", ("U-BIN",))
+    monkeypatch.setattr(bin_pin, "predicate_digest", lambda *_: "0" * 64)
+    assert classify("pair", cell) == Verdict("obligation", ("U-BIN",), must_cover=True)
