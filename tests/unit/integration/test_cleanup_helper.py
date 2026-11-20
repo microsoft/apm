@@ -333,18 +333,13 @@ def test_orphan_loop_uses_manifest_intent_not_integration_outcome():
 
     from apm_cli.install.phases import cleanup as cleanup_mod
 
-    src = inspect.getsource(cleanup_mod)
-    orphan_marker = "# Orphan cleanup: remove deployed files for packages that were"
-    assert orphan_marker in src, "Orphan cleanup block not found -- update marker."
-    block_start = src.index(orphan_marker)
-    block_end = src.index("# Stale-file cleanup:", block_start)
-    orphan_block = src[block_start:block_end]
-    # Strip comments so the banned-phrase check doesn't trip on the
-    # cautionary comment that explains the bug we're guarding against.
-    code_only_lines = [ln for ln in orphan_block.splitlines() if not ln.lstrip().startswith("#")]
-    code_only = "\n".join(code_only_lines)
+    # The orphan block asks the owner with the intent _run_cleanup builds.
+    owner_call = inspect.getsource(cleanup_mod._orphan_decision)
+    assert "intended=desired_owners" in owner_call
+    src = inspect.getsource(cleanup_mod._run_cleanup)
+    code_only = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
     # Must consult manifest intent.
-    assert "intended_dep_keys" in code_only, (
+    assert "frozenset(intended_dep_keys" in code_only, (
         "Orphan loop must use intended_dep_keys (manifest intent). "
         "Using package_deployed_files.keys() (integration outcome) re-introduces "
         "silent deletion of files for still-declared packages on transient errors."

@@ -140,6 +140,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm init` lists `apm config set target` in its target precedence comment, `apm plugin init --target claude` advertises only formats that pack, and `apm outdated` never crops columns at 80 characters. (closes #3994, #4004)
 - `apm audit --ci` matches `dependencies.require` entries, and checks `registry_source`, against the package a root `replace:` selects, as `apm install` does. (#4069)
 - `apm install -g <bundle>` rows in `~/.apm/apm.lock.yaml` record `scope: user` and keep it when another global install rewrites the lock. (closes #3995, #4024)
+- Orphan previews in `apm install --dry-run` and `apm uninstall --dry-run` now match the real run; every command's orphan removal comes from one owner. (#4021)
 
 ### Security
 
