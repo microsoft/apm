@@ -38,6 +38,7 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 pytestmark = [
+    pytest.mark.promise("P-LAW-auth.credentials_isolated", "P-LAW-outcome.status_matches_state"),
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX git shim"),

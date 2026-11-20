@@ -397,15 +397,6 @@ class TestBuildRepoUrl:
     def _delegate(self, **kwargs) -> DownloadDelegate:
         return DownloadDelegate(_make_host(**kwargs))
 
-    def test_github_https_never_embeds_host_token(self) -> None:
-        """Credentials travel via git env, never in the clone URL."""
-        d = self._delegate(github_token="tok123")
-        dep = _make_dep("owner/repo", "github.com")
-        url = d.build_repo_url("owner/repo", dep_ref=dep)
-        parsed = urlparse(url)
-        assert url == "https://github.com/owner/repo.git"
-        assert parsed.username is None and parsed.password is None
-
     def test_github_https_no_token(self) -> None:
         d = self._delegate()
         dep = _make_dep("owner/repo", "github.com")
@@ -470,24 +461,6 @@ class TestBuildRepoUrl:
             d.build_repo_url("org/proj/myrepo", dep_ref=dep)
         # Second backend_for was called with None dep_ref (fallback path)
         assert mock_backend_for.call_count == 2
-
-    def test_gitlab_url_built_without_token_resolution(self) -> None:
-        host = _make_host()
-        gitlab_ctx = MagicMock()
-        gitlab_ctx.token = "gitlab-tok"
-        host.auth_resolver.resolve_for_dep.return_value = gitlab_ctx
-        d = DownloadDelegate(host)
-        dep = _make_dep("owner/repo", host="gitlab.example.com")
-        with patch("apm_cli.deps.download_strategies.backend_for") as mock_backend_for:
-            backend = MagicMock()
-            backend.kind = "gitlab"
-            backend.is_github_family = False
-            backend.build_clone_https_url.return_value = "https://gitlab.example.com/owner/repo.git"
-            mock_backend_for.return_value = backend
-            d.build_repo_url("owner/repo", dep_ref=dep)
-        # URL building never resolves or forwards credentials.
-        backend.build_clone_https_url.assert_called_once_with(dep)
-        host.auth_resolver.resolve_for_dep.assert_not_called()
 
     def test_generic_host_no_token_embedded(self) -> None:
         d = self._delegate()

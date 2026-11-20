@@ -43,6 +43,7 @@ from tests.utils.local_github_https_fixture import (
 )
 
 pytestmark = [
+    pytest.mark.promise("P-LAW-outcome.status_matches_state", "P-OWN-apm-home-resolution"),
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,

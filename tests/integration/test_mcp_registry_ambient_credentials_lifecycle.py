@@ -19,6 +19,7 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_mcp_registry import LocalMcpRegistryFactory
 
 pytestmark = [
+    pytest.mark.promise("P-LAW-auth.credentials_isolated", "P-OWN-credential-origin-scope"),
     pytest.mark.integration,
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
