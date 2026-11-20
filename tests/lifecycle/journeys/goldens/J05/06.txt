@@ -1,0 +1,17 @@
+# apm journey golden v1: J05 step 6
+$ rm -rf apm_modules .claude
+[exit 0]
+--- stdout
+--- stderr
+$ apm install --frozen
+[exit 0]
+--- stdout
+[>] Installing dependencies from apm.yml...
+[>] Resolving claude-plugins-official-commit-commands...
+[i] Targets: claude  (source: apm.yml)
+  [+] github.com/anthropics/claude-plugins-official/plugins/commit-commands#main #<SHA40> @<SHA8>
+  |-- 3 commands integrated -> .claude/commands/
+
+[*] Installed 1 APM dependency in <DUR>.
+[i] Deployed files verified against apm.lock.yaml.
+--- stderr

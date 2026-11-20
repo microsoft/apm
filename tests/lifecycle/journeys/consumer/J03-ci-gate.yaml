@@ -1,0 +1,83 @@
+# J03 CI gate: --frozen and audit --ci, green and red; golden, PR tier (#4110).
+# Schema: test_journeys.py. The edited primitive kind K is a skill here; the
+# other kinds the index lists are open work for the nightly tier.
+schema: 1
+id: J03
+persona: consumer
+title: "CI gate: --frozen and audit --ci, green and red"
+docs: [consumer/run-in-ci.mdx, enterprise/enforce-in-ci.mdx, reference/cli/install.md, reference/cli/audit.md]
+world:
+  from: J02
+steps:
+  - n: 1
+    run: [apm install --help]
+    exit: 0
+    help_docs: reference/cli/install.md
+    key_lines: [--frozen]
+    forbidden_lines: [Use 'apm audit' for on-disk integrity]
+  - n: 2
+    run: [apm install --frozen]
+    exit: 0
+    docs:
+      page: consumer/run-in-ci.mdx
+      commands: [apm install --frozen]
+    key_lines: ["[i] Deployed files verified against apm.lock.yaml."]
+  - n: 3
+    run: [apm audit --ci -f sarif -o apm.sarif]
+    exit: 0
+    docs:
+      page: consumer/run-in-ci.mdx
+      commands: [apm audit --ci -f sarif -o apm.sarif]
+    files: [apm.sarif]
+    key_lines: ["[*] CI audit report written to apm.sarif"]
+  - n: 4
+    edit:
+      - {append: .agents/skills/style-checker/SKILL.md, text: "\nA local edit.\n"}
+    run: [apm install --frozen]
+    exit: 1
+    drift: true
+    files: []
+    key_lines:
+      - "[x] --frozen: deployed files do not match the hashes recorded in apm.lock.yaml."
+      - ".agents/skills/style-checker/SKILL.md: expected sha256:<H>"
+    forbidden_lines: [Run 'apm install' to re-sync]
+    remediate:
+      - {delete: '^\s+- (\S+): expected sha256:'}
+      - {advice: apm install}
+  - n: 5
+    run: [apm audit --ci]
+    exit: 1
+    drift: true
+    key_lines: [hash drift, .agents/skills/style-checker/SKILL.md]
+    remediate:
+      - {delete: 'hash-drift: (\S+) \(dep='}
+      - {advice: apm install}
+  - n: 6
+    remediate_from: 4
+    run: [apm install --frozen, apm audit --ci]
+    exit: 0
+    note: the step-4 advice (delete the listed files, rerun 'apm install') runs first, in place
+  - n: 7
+    edit:
+      - replace: apm.yml
+        old: "    - microsoft/apm-sample-package#v1.0.0\n"
+        new: "    - microsoft/apm-sample-package#v1.0.0\n    - microsoft/apm/packages/apm-guide#{release}\n"
+    run: [apm install --frozen]
+    exit: 1
+    files: []
+    key_lines: ["[x]", apm.lock.yaml]
+    remediate:
+      - {advice: apm install}
+  - n: 8
+    edit:
+      - replace: apm.yml
+        old: "    - microsoft/apm/packages/apm-guide#{release}\n"
+        new: ""
+    run: [apm install --frozen, apm audit --ci]
+    exit: 0
+    note: the step-7 edit is reverted; the GitHub Actions job of the docs then runs as written
+    docs:
+      page: consumer/run-in-ci.mdx
+      fence: .github/workflows/apm.yml
+      commands: [apm install --frozen, apm audit --ci]
+      pins: true

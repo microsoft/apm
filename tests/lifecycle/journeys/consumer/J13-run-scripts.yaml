@@ -1,0 +1,51 @@
+# J13 Run scripts (experimental): list the scripts in apm.yml, preview one with
+# a parameter, run it with a stub runtime, then ask for a script that does not
+# exist (#4110). Schema: test_journeys.py. The stub runtime is `cat`, on PATH
+# everywhere: the script prints its compiled prompt and never calls a model.
+schema: 1
+id: J13
+persona: consumer
+title: Run scripts (experimental)
+docs: [reference/cli/run.md, reference/cli/preview.md]
+world:
+  setup:
+    - "python -c \"from pathlib import Path as P; m = P('apm.yml'); m.write_text(m.read_text() + 'scripts:\\n  start: cat review.prompt.md\\n  review: cat review.prompt.md\\n'); P('review.prompt.md').write_text('---\\ndescription: Review a file\\n---\\n\\nReview ${input:target} for bugs.\\n')\""
+steps:
+  - n: 1
+    run: [apm list]
+    exit: 0
+    key_lines: [Available Scripts, "| review       | cat review.prompt.md |"]
+  - n: 2
+    run: [apm preview review --param target=src/auth.py]
+    exit: 0
+    files: [.apm/compiled/review.txt]
+    key_lines:
+      - "[>] Previewing script: review"
+      - "| cat .apm/compiled/review.txt"
+      - "[*] Preview complete! Execute with: apm run review --param target=src/auth.py"
+    forbidden_lines: ["[!]", "[x]"]
+  - n: 3
+    run: [apm run review --param target=src/auth.py]
+    exit: 0
+    files: [.apm/compiled/review.txt]
+    key_lines:
+      - "[>] Running script: review"
+      - Review src/auth.py for bugs.
+      - "[+] Shell script execution completed successfully"
+    forbidden_lines: ["${input:target}", "[x]"]
+  - n: 4
+    run: [apm run missing]
+    exit: 1
+    files: []
+    key_lines:
+      - "[x] Script execution error: Script or prompt 'missing' not found."
+      - "Available scripts in apm.yml: start, review"
+    remediate:
+      - {advice: apm list}
+    rerun: [apm run review --param target=src/auth.py]
+known_cells:
+  - id: J13-run-unknown-script-prints-no-next-command
+    law: O8
+    tracking: "#4205"
+    step: 4
+    match: "advice 'apm list' is not printed"
