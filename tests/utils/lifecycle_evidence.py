@@ -407,10 +407,23 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "#4249",
         _runs("install"),
         r"\[!\] Policy: org:",
-        output=(
-            r"\A(?=.*^\[!\] Policy: org:)"
-            r".*^  \[\+\] .*(^  \[x\] \d+ dependenc\w* blocked by org policy|^\+- MCP Servers)"
-        ),
+        output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^\+- MCP Servers",
+    ),
+    KnownOutputCell(
+        "install-org-policy-banner-when-mcp-blocked",
+        "I9",
+        "#4267",
+        _runs("install"),
+        r"\[!\] Policy: org:",
+        output=r"\A(?=.*^\[!\] Policy: org:).*^  \[\+\] .*^  \[x\] \d+ dependenc\w* blocked by org policy",
+    ),
+    KnownOutputCell(
+        "approve-org-policy-warning-twice",
+        "I9",
+        "#4178",
+        _runs("approve"),
+        r"\[!\] (Org policy not applied|Using stale cached org policy)",
+        output=r"^\[!\] (Org policy not applied|Using stale cached org policy)",
     ),
     KnownOutputCell(
         "install-frozen-mcp-targeting-twice",
@@ -484,7 +497,7 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "#4290",
         _runs("install", "--verbose"),
         r"Auth-only attempt for ado host|credential fill|Without a credential",
-        output=r"^  \[i\] Auth-only attempt for ado host",
+        output=r"^  \[i\] Auth-only attempt for ado host \S+ \(no credential\)",
     ),
     KnownOutputCell(
         "install-frozen-trust-notice-repeats",
