@@ -53,10 +53,10 @@ steps:
       - {advice: apm experimental enable registries}
     rerun: [apm install --frozen]
 known_cells:
-  # Credential values shown in config output. S-12 (pending neutral issue).
+  # Credential values shown in config output.
   - id: e06-config-get-credential-value-shown
     law: FORBID
-    tracking: "#0"
+    tracking: "#4171"
     step: 4
     match: "registry\\.corp-main\\.token: e06-registry-token-555"
   # With registries disabled, '--frozen' blames apm.yml (which has no
