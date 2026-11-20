@@ -88,6 +88,8 @@ _SURFACES: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
     ("user", "lsp", "copilot"): (".copilot/lsp-config.json", '"{pkg}-server"'),
     ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
+    # A Claude plugin approved at user scope lands whole under ~/.agents/plugins.
+    ("user", "native", "claude"): ".agents/plugins/{pkg}/.claude-plugin/plugin.json",
 }
 # HOME prefixes a project command may write: receipts, bookkeeping, script
 # trust and logs, the marketplace cache.
@@ -321,9 +323,9 @@ class GateReplay(RowReplay):
                 args.append(self.world.packages[arg[len(_WORLD_TOKEN) :]].spec)
             elif ref is None:
                 args.append(arg)
-            elif raw[0] == "approve" and ref.source == "marketplace":
-                # approve names a marketplace package by owner/name; the spec form
-                # is not found. Only approve maps this way.
+            elif raw[0] == "approve" and ref.source in ("marketplace", "git"):
+                # approve names a marketplace or git package by owner/name; the spec
+                # form is not found. Only approve maps this way.
                 args.append(f"{ORG}/{ref.name}")
             else:
                 args.append(ref.spec)
