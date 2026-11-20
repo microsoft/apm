@@ -32,6 +32,7 @@ _COMMIT_SITE_BASELINE = frozenset(
         ("src/apm_cli/install/phases/lockfile.py", "_write_if_changed"),
         ("src/apm_cli/install/phases/post_deps_local.py", "run"),
         ("src/apm_cli/integration/lsp_integrator.py", "update_lockfile"),
+        ("src/apm_cli/integration/cleanup.py", "_render_locked"),
         ("src/apm_cli/integration/mcp_integrator.py", "update_lockfile"),
     }
 )
