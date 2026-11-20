@@ -80,3 +80,18 @@ def preflight_survivor_hooks(
         HookIntegrator.select_deployable_hook_sources(
             source_root, hook_targets, hook_files=hook_files
         ).require_deployable(package_info, _HOOK_EVENT_MAP)
+
+
+def merged_hook_state(project_root: Path, targets: Iterable[Any]) -> dict[Path, bytes | None]:
+    """Snapshot the merged hook configs and ownership sidecars a reconcile rewrites."""
+    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, native_hook_config
+
+    state: dict[Path, bytes | None] = {}
+    for target in targets:
+        config = native_hook_config(target.name)
+        if config is None:
+            continue
+        native = project_root / target.root_dir / config.config_filename
+        for path in (native, native.parent / _APM_HOOKS_SIDECAR):
+            state[path] = path.read_bytes() if path.is_file() else None
+    return state

@@ -419,7 +419,7 @@ def prune(ctx, dry_run):
                         "dependency(ies) -- some hook entries may be stale. "
                         "Run 'apm install' to rebuild hook configuration."
                     )
-                else:
+                elif hook_stats.get("merged_hooks_changed"):
                     logger.progress("Reconciled merged hook ownership for pruned package(s)")
             except Exception as e:
                 logger.warning(
