@@ -464,6 +464,15 @@ def test_update_accepts_a_new_registry_version(tmp_path: Path, apm_binary_path: 
     with world.serve() as proxy:
         env = world.install(proxy)
         locked = world.locked()
+
+        # An unchanged version whose bytes match the lock re-downloads and is accepted.
+        shutil.rmtree(world.project / "apm_modules")
+        world.run(env, "cache", "clean", "--yes", step="cold-cache")
+        state_before, files_before = world.snapshot()
+        world.run(env, "update", "--yes", step="update-same-version-intact")
+        assert world.snapshot() == (state_before, files_before)
+        assert world.locked()["resolved_hash"] == locked["resolved_hash"]
+
         world.archives["1.1.0"] = _registry_archive("1.1.0", "two")
         state_before, files_before = world.snapshot()
 
@@ -799,8 +808,8 @@ def _packed_skill_bundle(
     return next(out.iterdir())
 
 
-def _unpack_target(world: PolicyScopeWorld, **kwargs) -> Path:
-    target = world.consumer("target", targets=("claude",), **kwargs)
+def _unpack_target(world: PolicyScopeWorld, name: str = "target", **kwargs) -> Path:
+    target = world.consumer(name, targets=("claude",), **kwargs)
     (target / ".claude").mkdir()
     return target
 
@@ -845,6 +854,28 @@ def test_unpack_applies_org_dependency_policy(tmp_path: Path, apm_binary_path: P
         assert (target / _SKILL).is_file(), output(result)
 
 
+def test_unpack_applies_org_target_policy(tmp_path: Path, apm_binary_path: Path) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_package("pkg-a")
+    world.publish_policy({**_POLICY, "compilation": {"target": {"allow": ["copilot"]}}})
+    runner = _runner(apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+        target = _unpack_target(world)
+        before = tree_snapshot(target)
+
+        result = run_step(
+            runner, _unpack(bundle, target), cwd=target, env=env, step="target", expected=1
+        )
+
+    text = _ascii_output(result)
+    assert "[x]" in text, text
+    assert "claude" in text, text
+    assert tree_snapshot(target) == before, text
+
+
 def test_unpack_reports_warn_policy_violations_and_deploys(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -878,6 +909,14 @@ def test_unpack_refuses_altered_bytes_when_policy_requires_hashes(
     with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
         env = fx.child_environment(world.git_env())
         bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+
+        # The intact bundle deploys and records its hashes.
+        intact = _unpack_target(world, "intact")
+        run_step(runner, _unpack(bundle, intact), cwd=intact, env=env, step="intact")
+        assert (intact / _SKILL).read_bytes() == (bundle / _SKILL).read_bytes()
+        hashes = load_yaml(intact / "apm.lock.yaml")["local_deployed_file_hashes"]
+        assert set(hashes) == {_SKILL}, hashes
+
         (bundle / _SKILL).write_text("# altered\n", encoding="utf-8")
         target = _unpack_target(world)
         before = tree_snapshot(target)
@@ -934,22 +973,29 @@ def test_unpack_records_deployed_files_in_the_project_lockfile(
 ) -> None:
     world = PolicyScopeWorld(tmp_path, dict(os.environ))
     world.publish_package("pkg-a")
+    kept = world.publish_package("pkg-b")
     world.publish_policy(_POLICY)
     runner = _runner(apm_binary_path)
 
     with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
         env = fx.child_environment(world.git_env())
         bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
-        project = _unpack_target(world)
+        project = _unpack_target(world, dependencies=[f"{kept.slug}#v1.0.0"])
+        run_step(runner, ("install",), cwd=project, env=env, step="install-kept")
+        kept_skill = ".claude/skills/pkg-b-skill/SKILL.md"
+        assert (project / kept_skill).is_file()
+        locked_deps = load_yaml(project / "apm.lock.yaml")["dependencies"]
         before = tree_snapshot(project)
 
         result = run_step(runner, _unpack(bundle, project), cwd=project, env=env, step="unpack")
 
         _ascii_output(result)
         after = tree_snapshot(project)
-        assert set(after) - set(before) == {_SKILL, "apm.lock.yaml"}
-        assert {k: v for k, v in after.items() if k in before} == before
+        assert set(after) - set(before) == {_SKILL}
+        assert {k for k in before if after.get(k) != before[k]} == {"apm.lock.yaml"}
         lock = load_yaml(project / "apm.lock.yaml")
+        # Existing lock entries survive; the bundle files are added beside them.
+        assert lock["dependencies"] == locked_deps
         assert lock["local_deployed_files"] == [_SKILL]
         assert lock["local_deployed_file_hashes"][_SKILL].startswith("sha256:")
 
@@ -961,6 +1007,8 @@ def test_unpack_records_deployed_files_in_the_project_lockfile(
         run_step(runner, ("install",), cwd=project, env=env, step="install")
         assert (project / _SKILL).read_bytes() == (bundle / _SKILL).read_bytes()
         assert load_yaml(project / "apm.lock.yaml")["local_deployed_files"] == [_SKILL]
+        assert (project / kept_skill).is_file()
+        assert load_yaml(project / "apm.lock.yaml")["dependencies"] == locked_deps
 
         # The record is what audit reads: altered bytes are reported.
         audit = ("audit", "--ci", "--no-drift")
