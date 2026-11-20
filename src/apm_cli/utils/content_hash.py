@@ -322,4 +322,15 @@ def verify_package_hash(
     Returns:
         True if hash matches, False if mismatch.
     """
-    return compute_package_hash(package_path, exclude=exclude, framed=framed) == expected_hash
+    return same_package_digest(
+        compute_package_hash(package_path, exclude=exclude, framed=framed), expected_hash
+    )
+
+
+def same_package_digest(left: str, right: str) -> bool:
+    """Compare two SHA-256 digests, accepting bare hex and the ``sha256:`` envelope alike."""
+
+    def _hex(value: str) -> str:
+        return value.strip().lower().removeprefix("sha256:")
+
+    return bool(left) and bool(right) and _hex(left) == _hex(right)
