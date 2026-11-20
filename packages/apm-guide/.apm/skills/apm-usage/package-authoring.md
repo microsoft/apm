@@ -1021,8 +1021,8 @@ Anthropic-compliant `.claude-plugin/marketplace.json`. Both files are committed.
 
 `apm marketplace init` appends a `marketplace:` block to the project's
 `apm.yml`, scaffolding `apm.yml` if it is missing. It does NOT scaffold a
-standalone `marketplace.yml`. `apm init --marketplace` is deprecated; use
-`apm marketplace init` for a brand-new marketplace project too.
+standalone `marketplace.yml`. `apm init --marketplace` was removed in 0.37;
+use `apm marketplace init` for a brand-new marketplace project too.
 
 ### apm.yml `marketplace:` block
 
