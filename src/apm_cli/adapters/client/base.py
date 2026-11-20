@@ -272,6 +272,21 @@ _SYMLINKED_MCP_CONFIG = (
 )
 
 
+# Config paths already reported unreadable in this process (#4332): one install
+# reads a client config more than once, but the user needs one warning per file.
+_UNREADABLE_CONFIGS_WARNED: set[str] = set()
+
+
+def warn_unreadable_config_once(logger, config_path: Path, exc: Exception) -> None:
+    """Log ``Could not read <path>: <exc>`` once per config path per process."""
+    key = str(config_path)
+    if key in _UNREADABLE_CONFIGS_WARNED:
+        logger.debug("Could not read %s: %s", config_path, exc)
+        return
+    _UNREADABLE_CONFIGS_WARNED.add(key)
+    logger.warning("Could not read %s: %s", config_path, exc)
+
+
 def _warn_symlinked_mcp_config(config_path: Path) -> None:
     library_logger().warning(_SYMLINKED_MCP_CONFIG.format(path=config_path), symbol="warning")
 

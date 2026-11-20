@@ -33,6 +33,7 @@ from pathlib import Path
 from ...core.command_logger import library_logger
 from ...mcp_transport import canonical_remote_transport
 from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
+from .base import warn_unreadable_config_once
 from .copilot import CopilotClientAdapter
 
 logger = logging.getLogger(__name__)
@@ -118,7 +119,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
             with open(config_path, encoding="utf-8") as f:
                 return json.load(f)
         except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Could not read %s: %s", config_path, exc)
+            warn_unreadable_config_once(logger, config_path, exc)
             return {}
 
     def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):

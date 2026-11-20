@@ -1128,17 +1128,7 @@
       "tests/integration/test_silent_adopt_existing_files_e2e.py": 1,
       "tests/integration/test_version_provenance.py": 1,
       "tests/lifecycle/machines/test_m_gate.py": 1,
-      "tests/lifecycle/machines/test_m_scope_lock.py": 1,
-      "tests/lifecycle/machines/test_m_source.py": 1,
       "tests/lifecycle/machines/test_m_spine.py": 1,
-      "tests/lifecycle/replay/test_covering_replay.py": 1,
-      "tests/lifecycle/scenarios/test_cache_presence.py": 1,
-      "tests/lifecycle/scenarios/test_failure_phase.py": 1,
-      "tests/lifecycle/scenarios/test_graph_version.py": 1,
-      "tests/lifecycle/scenarios/test_history_upgrade.py": 1,
-      "tests/lifecycle/scenarios/test_ownership_siblings.py": 1,
-      "tests/lifecycle/scenarios/test_platform.py": 1,
-      "tests/lifecycle/test_absorbed_rows.py": 1,
       "tests/spec_conformance/test_frozen_materialization_receipt_reqs.py": 1
     }
   },
