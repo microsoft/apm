@@ -589,18 +589,17 @@ def _approve_packages(
 
 def _report_not_found(declarations, pkg: str, manifest: Path) -> None:
     """Explain why *pkg* matched nothing and name the command that works."""
+    from ..security.trust import approve_command
+
     base = pkg.split("#", 1)[0]
     decl = _find_declaration(declarations, base) if base != pkg else None
-    scope_flag = "-g " if _install_command(manifest).endswith("-g") else ""
+    user_scope = _install_command(manifest).endswith("-g")
     if decl is not None:
-        _rich_error(
-            f"{pkg}: approve the installed package by identity, not a ref: "
-            f"apm approve {scope_flag}{_identity(decl)}"
-        )
+        command = approve_command(_identity(decl), user_scope=user_scope)
+        _rich_error(f"{pkg}: approve the installed package by identity, not a ref: {command}")
         return
-    _rich_error(
-        f"{pkg}: not found in installed packages. Review: apm approve {scope_flag}--pending"
-    )
+    review = approve_command("--pending", user_scope=user_scope)
+    _rich_error(f"{pkg}: not found in installed packages. Review: {review}")
 
 
 def _identity(decl: ExecutableDeclaration) -> str:

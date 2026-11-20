@@ -1387,6 +1387,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Agent adoption compares the raw source instead of the rendered text (#3722).",
     ),
     MutationCase(
+        guard_id="install-deployment-approve-command",
+        rule_id="install-deployment-approve-command",
+        path="src/apm_cli/integration/mcp_config_view.py",
+        old="    approve = approve_command(package, user_scope=user_scope)",
+        new='    approve = f"apm approve {package}"',
+        intent="A user-scope parked MCP notice prints an approve command that cannot work there.",
+    ),
+    MutationCase(
         guard_id="install-deployment-audit-replay",
         rule_id="install-deployment-audit-replay",
         path="src/apm_cli/install/audit_replay.py",

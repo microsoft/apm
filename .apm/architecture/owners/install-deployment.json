@@ -201,10 +201,11 @@
     },
     {
       "id": "executable-trust-context",
-      "decision": "Executable trust context and per-package approval",
-      "owner": "security/executables.py (exec_trust_context_for_project, resolve_project_exec_allow_map, resolve_exec_decision)",
+      "decision": "Executable trust context and per-package approval, including the approve command parked notices print",
+      "owner": "security/executables.py (exec_trust_context_for_project, resolve_project_exec_allow_map, resolve_exec_decision) + security/trust.py approve_command (the approve hint names the install's scope: apm approve -g at user scope) and approval_scan_dir (approve reads the unit the install gate parked)",
       "selectors": ["src/apm_cli/security/executables.py"],
-      "guards": ["install-deployment-executable-trust-context"]
+      "guards": ["install-deployment-approve-command",
+        "install-deployment-executable-trust-context"]
     },
     {
       "id": "executable-item-admission",
