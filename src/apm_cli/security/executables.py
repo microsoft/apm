@@ -656,6 +656,20 @@ def canonical_approval_spec(spec: str, lockfile: Any, *, selected_key: str | Non
 _CANONICALIZED_KEYS_NOTED: set[tuple[str, str]] = set()
 
 
+def _readable_lockfile(root: Path) -> Any:
+    """The scope's lockfile for store-key migration, or None when unreadable.
+
+    The lockfile's own reader reports a malformed or conflicted file to the
+    command that needs it; migration simply does not apply then.
+    """
+    from apm_cli.deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+
+    try:
+        return LockFile.read(get_lockfile_path(root))
+    except (LockfileFormatError, OSError):
+        return None
+
+
 def canonicalize_store_keys(
     grants: dict[str, Any], lockfile: Any, *, store: str, drop_raw: bool = False
 ) -> dict[str, Any]:
@@ -1343,14 +1357,12 @@ def exec_trust_context_for_project(
                 warn_allow_executables_alias_once(logger)
     if project_data is None and isinstance(fallback_allow_executables, dict):
         project_data = {"allowExecutables": fallback_allow_executables}
-    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-
     ctx = build_exec_trust_context(
         policy=policy,
         project_data=project_data,
         migrate_user_legacy=migrate_user_legacy,
         include_user=include_user,
-        lockfile=LockFile.read(get_lockfile_path(manifest_path.parent)),
+        lockfile=_readable_lockfile(manifest_path.parent),
     )
     if logger is not None:
         from .trust import warn_content_blind_grants_once

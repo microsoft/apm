@@ -113,8 +113,8 @@ def _load_store(
     Keys an older APM wrote as an install spec are rewritten under the
     package identity when this store is next saved (#4189).
     """
-    from ..deps.lockfile import LockFile, get_lockfile_path
     from ..security.executables import (
+        _readable_lockfile,
         canonicalize_store_keys,
         load_project_executables,
         load_user_executables,
@@ -128,7 +128,7 @@ def _load_store(
             from ..security.executables import warn_allow_executables_alias_once
 
             warn_allow_executables_alias_once()
-    lockfile = LockFile.read(get_lockfile_path(manifest.parent))
+    lockfile = _readable_lockfile(manifest.parent)
     return (
         canonicalize_store_keys(allow, lockfile, store="executables.allow", drop_raw=True),
         canonicalize_store_keys(deny, lockfile, store="executables.deny", drop_raw=True),
