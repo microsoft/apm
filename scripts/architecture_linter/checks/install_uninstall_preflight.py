@@ -1,10 +1,10 @@
 """Guard: uninstall refuses before its first write (#4185, #4162).
 
 ``commands/uninstall/cli.py::uninstall`` runs ``_preflight_uninstall_writes``
-before it removes anything. The preflight validates every recorded path the
-command removes through ``BaseIntegrator.validate_deploy_path`` and resolves
-the survivors' executables trust, so a refusal leaves apm.yml, the lockfile
-and deployed files untouched; the survivor rebuild reuses that trust.
+before it removes anything. The preflight refuses out-of-project paths before
+any change (``BaseIntegrator.validate_deploy_path``) and resolves the
+survivors' executables trust, so a refusal leaves apm.yml, the lockfile and
+deployed files untouched; the survivor rebuild reuses that trust.
 """
 
 from __future__ import annotations
