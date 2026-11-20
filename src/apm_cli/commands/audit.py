@@ -38,6 +38,7 @@ from ..utils.console import (
     _rich_error,
     _rich_success,
     _rich_warning,
+    ascii_safe,
 )
 from ..utils.diagnostics import printable_ascii_text
 
@@ -939,11 +940,13 @@ def _audit_ci_gate(
 
             click.echo("")
             click.echo(
-                render_drift_text(
-                    drift_findings,
-                    verbose=cfg.verbose,
-                    lockfile=lockfile,
-                    project_root=cfg.project_root,
+                ascii_safe(
+                    render_drift_text(
+                        drift_findings,
+                        verbose=cfg.verbose,
+                        lockfile=lockfile,
+                        project_root=cfg.project_root,
+                    )
                 )
             )
 
@@ -1351,12 +1354,14 @@ def _audit_content_scan(
 
             click.echo("")
             click.echo(
-                render_drift_text(
-                    drift_findings,
-                    verbose=cfg.verbose,
-                    lockfile=lockfile,
-                    project_root=cfg.project_root,
-                    advisory=not drift_gates,
+                ascii_safe(
+                    render_drift_text(
+                        drift_findings,
+                        verbose=cfg.verbose,
+                        lockfile=lockfile,
+                        project_root=cfg.project_root,
+                        advisory=not drift_gates,
+                    )
                 )
             )
     elif effective_format == "markdown":
