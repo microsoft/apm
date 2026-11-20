@@ -1880,6 +1880,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A command reads APM_POLICY_DISABLE directly instead of the single helper.",
     ),
     MutationCase(
+        guard_id="install-deployment-policy-field-types",
+        rule_id="install-deployment-policy-field-types",
+        path="src/apm_cli/policy/parser.py",
+        old="        if not isinstance(value, str) or value not in valid:\n",
+        new="        if value not in valid:\n",
+        intent="A list-valued enum field reaches the membership test and crashes the parser.",
+    ),
+    MutationCase(
         guard_id="install-deployment-policy-mcp-transport-projection",
         rule_id="install-deployment-policy-mcp-transport-projection",
         path="src/apm_cli/policy/policy_checks.py",
@@ -1891,8 +1899,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-policy-outcome-routing",
         rule_id="install-deployment-policy-outcome-routing",
         path="src/apm_cli/commands/audit.py",
-        old="        elif route.blocks:\n",
-        new='        elif route.blocks or fetch_result.outcome in ("malformed", "empty"):\n',
+        old="    elif route.blocks:\n",
+        new='    elif route.blocks or fetch_result.outcome in ("malformed", "empty"):\n',
         intent="audit --ci classifies policy outcomes with its own list beside the routing owner.",
     ),
     MutationCase(

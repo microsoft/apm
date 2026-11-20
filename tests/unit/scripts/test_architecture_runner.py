@@ -674,6 +674,7 @@ install-deployment-outcome
 install-deployment-package-target-authorization
 install-deployment-plugin-bin-eligibility
 install-deployment-policy-disable-switch-owner
+install-deployment-policy-field-types
 install-deployment-policy-mcp-transport-projection
 install-deployment-policy-outcome-routing
 install-deployment-policy-remote-origin-owner

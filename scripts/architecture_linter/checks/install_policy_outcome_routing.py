@@ -200,3 +200,75 @@ def check_policy_outcome_routing(provider: FactsProvider) -> tuple[Violation, ..
                 )
             )
     return tuple(findings)
+
+
+GUARD_POLICY_FIELD_TYPES = "install-deployment-policy-field-types"
+
+_PARSER = "src/apm_cli/policy/parser.py"
+_ENUM_CHECKER = "_check_enums"
+_PARSER_NEEDLES = (
+    "        if not isinstance(value, str) or value not in valid:",
+    "    _check_mappings(data, errors)",
+    "    _check_enums(data, errors)",
+    "    _check_scalars(data, errors)",
+    "    _check_str_lists(data, errors)",
+    "    except (TypeError, AttributeError, ValueError) as exc:",
+)
+
+
+def check_policy_field_types(provider: FactsProvider) -> tuple[Violation, ...]:
+    """A wrongly typed policy field is a malformed policy, never a parser crash (#4140).
+
+    Enum membership runs only in ``_check_enums`` after a string check, every
+    ``_VALID_*`` set is a typed enum field, and ``load_policy`` turns any shape
+    the checks missed into a validation error.
+    """
+    rule = GUARD_POLICY_FIELD_TYPES
+    facts, failures = _facts_for(provider, _PARSER, rule)
+    if failures:
+        return tuple(failures)
+    findings = [
+        _summary(rule, _PARSER, f"The policy parser type checks lost: {needle.strip()}")
+        for needle in _PARSER_NEEDLES
+        if not _present(facts, needle)
+    ]
+    index = facts.tree_index
+    if index is None:
+        return tuple(findings)
+    enum_sets = {
+        node.targets[0].id
+        for node in index.module_children()
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id.startswith("_VALID_")
+    }
+    typed = {
+        item.id
+        for node in index.module_children()
+        if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", None) == "_ENUM_FIELDS"
+        for item in ast.walk(node)
+        if isinstance(item, ast.Name)
+    }
+    findings.extend(
+        _summary(rule, _PARSER, f"{name} must be checked as a typed enum field in _ENUM_FIELDS")
+        for name in sorted(enum_sets - typed)
+    )
+    for node in index.nodes:
+        if not isinstance(node, ast.Compare) or not any(
+            isinstance(op, (ast.In, ast.NotIn)) for op in node.ops
+        ):
+            continue
+        names = {getattr(c, "id", "") for c in node.comparators}
+        if any(name.startswith("_VALID_") or name == "valid" for name in names) and (
+            _scope_of(index, node.lineno) != _ENUM_CHECKER
+        ):
+            findings.append(
+                violation(
+                    rule,
+                    _PARSER,
+                    "Enum membership outside _check_enums can see an unhashable value",
+                    line=node.lineno,
+                )
+            )
+    return tuple(findings)
