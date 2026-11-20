@@ -125,4 +125,4 @@ def test_unmatched_require_fails_both_presence_checks(installed, entry: str) -> 
         assert not checks[name]["passed"], checks[name]
         assert checks[name]["details"] == [entry]
         if entry == _PACKAGE:
-            assert f"'{_PACKAGE}' as '{_QUALIFIED}'" in checks[name]["message"], checks[name]
+            assert f"change the policy require entry to '{_QUALIFIED}'" in checks[name]["message"]

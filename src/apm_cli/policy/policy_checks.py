@@ -252,34 +252,41 @@ def _check_required_packages(
 def _unresolved_required_subject(index: DependencyPolicyIndex, pkg_name: str) -> PolicySubject:
     """Explain a ``require`` entry that identifies no declared dependency.
 
-    When the same package is declared on another host, name the entry form
-    that would match it; otherwise the package must be added to apm.yml.
+    When the same package is declared on another host, name both fixes;
+    otherwise the package must be added to apm.yml.
     """
-    expected = index.expected_entry(pkg_name)
-    if expected is not None:
-        return PolicySubject(
-            pkg_name,
-            f"required by org policy, but declared on another host -- write the "
-            f"require entry as '{expected}'",
-            remedy=None,
-        )
+    fix = _wrong_host_fix(index, pkg_name)
+    if fix is not None:
+        return PolicySubject(pkg_name, f"required by org policy, but {fix}", remedy=None)
     return PolicySubject(pkg_name, "required by org policy but not declared", PolicyRemedy.ADD)
 
 
+def _wrong_host_fix(index: DependencyPolicyIndex, pkg_name: str) -> str | None:
+    """Describe a same-path package declared on another host, manifest fix first.
+
+    The declared host is not trusted by default: it may be a typosquat, so the
+    policy rewrite is offered only for a host the reader trusts.
+    """
+    mismatch = index.host_mismatch(pkg_name)
+    if mismatch is None:
+        return None
+    wanted, declared = mismatch
+    where = declared.host or "a local path"
+    return (
+        f"'{pkg_name}' is declared on {where}, not {wanted} -- declare it on {wanted}, "
+        f"or, if {where} is trusted, change the policy require entry to "
+        f"'{declared.require_entry}'"
+    )
+
+
 def _wrong_host_hint(index: DependencyPolicyIndex, subjects: Iterable[PolicySubject]) -> str:
-    """Name the entry to write for each subject declared on another host.
+    """Append the wrong-host fixes to a check message.
 
     ``apm audit --ci`` prints the message and details, not subject reasons, so
-    the expected form must be in the message to reach the user.
+    the fix must be in the message to reach the user.
     """
-    fixes = [
-        f"'{subject.ref}' as '{expected}'"
-        for subject in subjects
-        if (expected := index.expected_entry(subject.ref)) is not None
-    ]
-    if not fixes:
-        return ""
-    return f" Declared on another host -- write {', '.join(fixes)}."
+    fixes = [fix for subject in subjects if (fix := _wrong_host_fix(index, subject.ref))]
+    return f" {'; '.join(fixes)}." if fixes else ""
 
 
 def _check_required_packages_deployed(
@@ -385,7 +392,7 @@ def _check_required_executable_untrusted(
         pkg_name = req.split("#", 1)[0]
         match = index.find(pkg_name)
         if match is None:
-            if index.expected_entry(pkg_name) is not None:
+            if index.host_mismatch(pkg_name) is not None:
                 misnamed.append(_unresolved_required_subject(index, pkg_name))
             continue  # undeclared: presence is audited by required-packages / -deployed
         locked = match.locked_in(lock)
@@ -461,8 +468,8 @@ def _check_required_package_version(
 
         # Without a manifest dependency there is no host/source authority from
         # which to derive casing: an undeclared name keeps the legacy raw lock
-        # lookup (check 3 reports it absent). A same-path package declared on
-        # another host is never compared; check 3 names the entry to write.
+        # lookup (checks 3 and 4 report it unmatched). A same-path package
+        # declared on another host is never compared; check 3 names the fix.
         match = index.find_or_undeclared(pkg_name)
         locked = match.locked_in(lock) if match is not None else None
         if locked is not None:

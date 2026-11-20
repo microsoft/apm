@@ -75,8 +75,12 @@ def test_reporter_repro_hostless_entry_fails_both_with_expected_form() -> None:
         assert not result.passed
         assert result.details == [HOSTLESS]
         assert f"'{QUALIFIED}'" in result.subjects[0].reason
-        # `apm audit --ci` prints the message, not subject reasons.
-        assert f"'{HOSTLESS}' as '{QUALIFIED}'" in result.message
+        # `apm audit --ci` prints the message, not subject reasons. The
+        # manifest fix comes first: the declared host may be a typosquat.
+        assert f"declared on {HOST}, not github.com -- declare it on github.com" in result.message
+        assert f"if {HOST} is trusted, change the policy require entry to '{QUALIFIED}'" in (
+            result.message
+        )
     assert manifest.subjects[0].remedy is None
     assert "absent from the lockfile" not in deployed.message
     executables = _check_required_executable_untrusted(

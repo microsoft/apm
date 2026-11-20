@@ -134,17 +134,21 @@ class DependencyPolicyIndex:
         host returns ``None``, so its lock row is never read for this entry.
         """
         match = self.find(policy_name)
-        if match is not None or self.expected_entry(policy_name) is not None:
+        if match is not None or self.host_mismatch(policy_name) is not None:
             return match
         return RequiredPackageMatch(0, policy_name.split("#", 1)[0], None)
 
-    def expected_entry(self, policy_name: str) -> str | None:
-        """Return the ``require`` spelling of a same-path dependency on another host."""
+    def host_mismatch(self, policy_name: str) -> tuple[str | None, RequiredPackageMatch] | None:
+        """Return ``(entry_host, declared)`` when the entry's path is declared on another host.
+
+        ``entry_host`` is the host the entry names (the default host when
+        hostless); ``declared`` is the same-path dependency it did not match.
+        """
         if self._legacy:
             return None
-        _hosts, path = required_package_policy_hosts(policy_name)
-        match = self._first(path, None)
-        return match.require_entry if match is not None else None
+        hosts, path = required_package_policy_hosts(policy_name)
+        declared = self._first(path, None)
+        return (hosts[0], declared) if declared is not None else None
 
     def _first(
         self, path: str, hosts: tuple[str | None, ...] | None

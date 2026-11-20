@@ -123,7 +123,9 @@ entry (`contoso/baseline`) names the default host only; write other hosts
 in full (`gitlab.example.com/group/sub/pkg`). `required-packages` (apm.yml)
 and `required-packages-deployed` (apm.lock.yaml) compare that same
 identity; an entry matching no declared package fails both, and the
-message names the entry form when the package is declared on another host.
+message names the other host and the entry that would match it (for a
+trusted host). An explicit proxy path (`host/artifactory/...`) is identified
+by the proxy host; prefer `PROXY_REGISTRY_URL` with plain shorthand.
 A project `default_host:` never rebinds a hostless entry, and `GITHUB_HOST`
 varies per machine, so org-wide policies should host-qualify every entry.
 
