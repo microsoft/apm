@@ -96,9 +96,9 @@ class ArtifactoryRouter:
         backward compatibility for the deprecated ``ARTIFACTORY_ONLY``
         alias.
         """
-        from .registry_proxy import is_enforce_only
+        from .egress_route import EgressSurface, is_proxy_only
 
-        return is_enforce_only()
+        return is_proxy_only(EgressSurface.SOURCE_ARCHIVE)
 
     @classmethod
     def should_use_proxy(cls, dep_ref: DependencyReference) -> bool:

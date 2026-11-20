@@ -19,6 +19,8 @@ from apm_cli.utils.archive import (
     write_zip_archive,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _zip_bytes(entries: dict[str, bytes]) -> bytes:
     buf = io.BytesIO()
@@ -220,6 +222,7 @@ def test_write_zip_archive_excludes_symlinks(tmp_path: Path) -> None:
 
     write_zip_archive(bundle_dir, archive_path)
 
+    assert archive_path.is_file()
     with zipfile.ZipFile(archive_path, "r") as zf:
         assert zf.namelist() == ["bundle/plugin.json"]
 

@@ -5,6 +5,8 @@ from pathlib import Path, PureWindowsPath
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+import pytest
+
 from apm_cli.marketplace.errors import BuildError, PluginNotFoundError
 from apm_cli.marketplace.models import parse_marketplace_json
 from apm_cli.marketplace.resolver import MarketplacePluginResolution
@@ -18,6 +20,8 @@ from src.apm_cli.deps.dependency_graph import (
     FlatDependencyMap,
 )
 from src.apm_cli.models.apm_package import APMPackage, DependencyReference
+
+pytestmark = pytest.mark.component
 
 
 class TestAPMDependencyResolver(unittest.TestCase):

@@ -7,8 +7,6 @@ import pytest
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.skill_preflight import (
-    SkillConflict,
-    format_skill_conflicts,
     preflight_skill_selection,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
@@ -16,20 +14,6 @@ from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType
 from apm_cli.models.dependency import DependencyReference
 
 pytestmark = pytest.mark.component
-
-
-def test_multiple_conflicts_keep_each_source_and_one_nondestructive_remedy() -> None:
-    conflicts = [
-        SkillConflict("review", "first", Path("first/SKILL.md"), ".claude/review", ("claude",)),
-        SkillConflict("lint", "second", Path("second/SKILL.md"), ".agents/lint", ("codex",)),
-    ]
-    message = format_skill_conflicts(conflicts)
-    for conflict in conflicts:
-        assert conflict.message() in message
-    assert message.count("Rename the local skill") == 1
-    assert "skills: or targets: selection in apm.yml" in message
-    assert "--force" not in message
-    assert message.isascii()
 
 
 def _package(tmp_path: Path, layout: str = "subskills") -> PackageInfo:

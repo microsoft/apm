@@ -460,6 +460,22 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A(?!.*^  \[\+\] ).*^  (\|-- [^\n]*)$.*^  \1$",
     ),
     KnownOutputCell(
+        "pack-dry-run-plugin-notes-twice",
+        "I9",
+        "#4291",
+        _runs("pack", "--dry-run"),
+        r"Left out of the plugin|Would write plugin manifest",
+        output=r"^\[!\] Left out of the plugin: ",
+    ),
+    KnownOutputCell(
+        "install-frozen-parked-mcp-notice-per-phase",
+        "I9",
+        "#4299",
+        _runs("install", "--frozen"),
+        r"Parked MCP server .*: denied",
+        output=r"^\[!\] Parked MCP server .*: denied.*^\+- MCP Servers",
+    ),
+    KnownOutputCell(
         "install-hook-line-per-target",
         "I9",
         "#4243",
@@ -544,12 +560,15 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\[\*\] Running installer\.\.\.\n\x1b\[",
     ),
     KnownOutputCell(
-        "install-echoes-non-ascii-path",
+        "command-echoes-non-ascii-path",
         "I6",
         "#4330",
-        _runs("install"),
+        # Any command that echoes a user path (install, deps list, export-patch, ...).
+        lambda _args, _scenario: True,
         r"stdout has characters outside printable ASCII",
-        output=r"[^\x00-\x7f]",
+        # A path (after a separator) with a non-ASCII character the test's own
+        # working directory does not explain; the cwd echo itself passes I6.
+        output=r"[/\\][^\n]*?[^\x00-\x7f]",
     ),
     KnownOutputCell(
         "uninstall-duplicate-declaration-lines",
@@ -818,6 +837,11 @@ def owned_duplicate_lines(result: Any, scenario_id: str = "") -> frozenset[str]:
     return frozenset(owned)
 
 
+def _without_echoed_non_ascii(stdout: str, echoed: str) -> str:
+    """*stdout* without the non-ASCII characters of the test's own path (they pass I6)."""
+    return stdout.translate({ord(c): None for c in echoed if not " " <= c <= "~"})
+
+
 def check_cli_output(
     args: Sequence[str],
     result: Any,
@@ -832,9 +856,10 @@ def check_cli_output(
         return
     expected = _EXPECTED_VIOLATIONS.get()
     violations = [v for v in output_violations(args, result) if v.law not in expected]
+    cell_stdout = _without_echoed_non_ascii(result.stdout, str(getattr(result, "cwd", "")))
     problems: list[str] = []
     for cell in KNOWN_OUTPUT_CELLS if known_cells is None else known_cells:
-        if cell.law in expected or not cell.covers(args, scenario_id, result.stdout):
+        if cell.law in expected or not cell.covers(args, scenario_id, cell_stdout):
             continue
         owned = [v for v in violations if v.law == cell.law and re.search(cell.message, v.message)]
         if not owned:

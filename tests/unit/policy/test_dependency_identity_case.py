@@ -24,6 +24,8 @@ from apm_cli.policy.schema import (
     RegistrySourcePolicy,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _lock_dependency(
     repo_url: str,

@@ -9,6 +9,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.formats import PREFERRED_PLUGIN_FORMAT, BundleFormat
 from ..bundle.plugin_layout import find_plugin_root_sources
 from ..constants import APM_YML_FILENAME
@@ -401,8 +403,8 @@ def _perform_init(
             sys.exit(1)
 
         # Check for existing generated files
-        apm_yml_exists = Path(APM_YML_FILENAME).exists()
-        generated_paths = [Path(APM_YML_FILENAME)]
+        apm_yml_exists = manifest_file(Path(".")).exists()
+        generated_paths = [manifest_file(Path("."))]
         if plugin:
             generated_paths.append(Path("plugin.json"))
             if effective_plugin_mode == "agent":
@@ -412,7 +414,7 @@ def _perform_init(
         # Handle existing generated files in brownfield projects
         if existing_generated_paths:
             rendered_paths = ", ".join(path.as_posix() for path in existing_generated_paths)
-            if existing_generated_paths == [Path(APM_YML_FILENAME)]:
+            if existing_generated_paths == [manifest_file(Path("."))]:
                 logger.warning("apm.yml already exists")
             else:
                 logger.warning(f"Generated files already exist: {rendered_paths}")
@@ -624,7 +626,7 @@ def _write_and_validate_agent_plugin_scaffold(project_root: Path, config: dict) 
     mcp_document = {"$schema": MCP_SCHEMA_ID, "mcpServers": {}}
     with tempfile.TemporaryDirectory(prefix=".apm-plugin-init-", dir=project_root) as stage:
         staged_root = Path(stage)
-        staged_manifest = staged_root / APM_YML_FILENAME
+        staged_manifest = manifest_file(staged_root)
         _create_minimal_apm_yml(config, plugin=True, target_path=staged_manifest)
         _create_plugin_json(config, mode="agent", target_path=staged_root / "plugin.json")
         (staged_root / "mcp.json").write_text(
@@ -903,7 +905,7 @@ def _read_existing_targets(project_root: Path) -> list[str]:
     from ..models.manifest_io import load_manifest
     from ..models.manifest_targets import ManifestTargetDeclaration
 
-    apm_yml_path = project_root / APM_YML_FILENAME
+    apm_yml_path = manifest_file(project_root)
     try:
         data = load_manifest(apm_yml_path) if apm_yml_path.is_file() else None
     except InvalidManifestError:

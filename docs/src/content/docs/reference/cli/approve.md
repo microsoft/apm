@@ -39,7 +39,7 @@ content (the root `.apm/` directory) is always trusted.
 | Type | Gated | Notes |
 |------|-------|-------|
 | Hooks (`.apm/hooks/`, `hooks/`) | Yes | Auto-fire in IDE on lifecycle events |
-| Bin executables (`bin/`) | Yes | Deployed to agent PATH via symlinks |
+| Bin executables (`bin/`) | Yes | Deployed only for a marketplace plugin installed at user scope (`-g`) with the Claude target; copied into the plugin folder on Claude Code's PATH |
 | MCP servers (self-defined) | Yes | `registry: false` servers write to IDE MCP config |
 | LSP servers | Yes | Supported runtimes may start generated server commands automatically |
 | Canvas extensions (`.apm/extensions/`) | Yes | Deploys executable Node.js to IDE extensions |

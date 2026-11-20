@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from apm_cli.core.scope import manifest_file
+
 from .executables import (
     EXEC_TYPE_BIN,
     EXEC_TYPE_HOOKS,
@@ -292,17 +294,15 @@ class McpAdmission:
     ) -> McpAdmission:
         """Resolve org, project and (optionally) user layers for *project_root*.
 
-        Org policy is discovered from *project_root*; the grants are read from
-        the scope's manifest (``$APM_HOME/apm.yml`` at user scope).
+        Org policy and the grants both come from the scope's manifest root
+        (``$APM_HOME`` at user scope).
         """
         if trust_context is not None:
             return cls(trust_context, one_off=one_off)
-        from apm_cli.core.scope import manifest_root
+        from apm_cli.core.scope import manifest_root, scope_manifest_path
 
-        from .executables import project_manifest_path
-
-        # Grants come from the scope's manifest file; policy stays at project_root.
-        grants_manifest = project_manifest_path(manifest_root(project_root, user_scope=user_scope))
+        grants_manifest = scope_manifest_path(project_root, user_scope=user_scope)
+        policy_root = manifest_root(project_root, user_scope=user_scope)
         admission: McpAdmission
 
         def resolve() -> ExecTrustContext:
@@ -312,7 +312,7 @@ class McpAdmission:
             if not no_policy:
                 from apm_cli.policy.outcome_routing import classify_project_policy
 
-                route = classify_project_policy(project_root)
+                route = classify_project_policy(policy_root)
                 policy = route.policy
                 if policy is None and (route.blocks or route.unresolved):
                     admission.policy_unavailable = route.outcome
@@ -903,7 +903,7 @@ def package_mcp_declarations(install_path: Path) -> list[Any]:
     from apm_cli.models.dependency.mcp import MCPDependency
     from apm_cli.utils.yaml_io import load_yaml
 
-    manifest = install_path / "apm.yml"
+    manifest = manifest_file(install_path)
     try:
         data = load_yaml(manifest) if manifest.is_file() and not manifest.is_symlink() else {}
     except Exception:
@@ -1439,7 +1439,9 @@ def approval_scan_dir(source_dir: Path, installed_dir: Path) -> Path:
     normalized copy whose synthesized manifest carries the plugin's MCP
     servers, so approve reads that same copy (#4154).
     """
-    if not (source_dir / "apm.yml").is_file() and (installed_dir / "apm.yml").is_file():
+    from apm_cli.core.scope import manifest_file
+
+    if not manifest_file(source_dir).is_file() and manifest_file(installed_dir).is_file():
         return installed_dir
     return source_dir
 

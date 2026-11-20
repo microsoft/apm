@@ -11,18 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm unpack` applies org policy and integrity checks like `apm install <bundle>`, waits for other APM operations, and records deployed files when unpacking into an APM project. (closes #4080, #4157)
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
+- User-scope (`-g`) policy behavior aligned with the docs: policy settings come from the user manifest in `$APM_HOME`, user scope discovers no org policy from a git remote, and `apm policy status -g` shows the source. (#4158)
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
 - Internal: test-quality gates block new same-body or same-name duplicate tests, new unclassified or misplaced test modules, and new modules without a promise link. (#4146)
 - Internal: the lifecycle test family gains a shared model, driver and oracle whose receipts are the only credit toward its promise obligations. (#4142)
 - Internal: lifecycle tests share one hermetic world: nine fixture packages, local git, marketplace, MCP registry and policy services, cloned per test in milliseconds. (#4142)
+- Internal: lifecycle tests add source and scope-lock state machines, a generated covering-replay obligation set and seven scenario suites. (#4227)
 - Internal: lifecycle tests gain a stable index of the 25 consumer, producer and enterprise journeys, pinned by a schema test. (#4152)
+- Internal: lifecycle tests add security tables and all 25 documented user journeys, each credited only through oracle receipts. (#4156)
 - Internal: only `InstallService` reads the `--frozen` flag; install phases consume its disposition, enforced by a closed-world architecture guard. No behavior change. (#4016)
 
 ### Fixed
 
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` accept the `plugin@marketplace` install spec; `apm deny` with it now retires the package's executables. (#4275)
+- With `PROXY_REGISTRY_ONLY=1`, `apm update` probes no source host, the automatic update check is skipped, and the direct org policy fetch is announced. (closes #4088, #4158)
+- MCP registry requests send only the credentials APM is configured with, through credential-scoped HTTP sessions. (#4158)
 - `apm update` verifies unchanged registry versions against their locked hash and fails closed on a mismatch. (closes #4125, #4157)
 - Registry archives get the same archive limits for every accepted format, and every entry is validated before anything is written. (closes #4235, #4266)
 - A plugin with a root `skills/` bundle is recorded as `skill_bundle` again, and native Claude plugin files deploy owner-only, without setuid bits. (#4126)

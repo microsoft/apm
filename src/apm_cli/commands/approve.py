@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 import click
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import serialized_lifecycle
 
 from ..core.command_logger import CommandLogger
@@ -55,7 +56,7 @@ def _find_manifest(user_scope: bool = False, global_scope: bool = False) -> Path
             return manifest
         _rich_error("No user-scope apm.yml found. Install packages with 'apm install -g' first.")
         sys.exit(1)
-    manifest = Path.cwd() / "apm.yml"
+    manifest = manifest_file(Path.cwd())
     if manifest.is_file():
         return manifest
     if user_scope:
@@ -1198,7 +1199,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 continue
             name = locked.name or package_dir.name
             version = str(locked.version or "")
-            package_manifest = package_dir / "apm.yml"
+            package_manifest = manifest_file(package_dir)
             manifest_data = None
             if package_manifest.is_symlink():
                 manifest_data = {}
@@ -1244,7 +1245,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
             if pkg_dir.name == "_local":
                 _scan_dir(pkg_dir)
                 continue
-            pkg_yml = pkg_dir / "apm.yml"
+            pkg_yml = manifest_file(pkg_dir)
             name = pkg_dir.name
             version = ""
             manifest_data = None

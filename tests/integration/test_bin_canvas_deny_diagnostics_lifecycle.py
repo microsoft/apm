@@ -12,14 +12,13 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.yaml_io import dump_yaml
-from tests.integration._policy_scope_kit import ORG, PolicyScopeWorld, output, run_step
+from tests.integration._policy_scope_kit import PolicyScopeWorld, output, run_step
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.local_github_https_fixture import (
     local_github_https_fixture,
@@ -77,16 +76,16 @@ def _bin_plugin(root: Path) -> None:
 
 
 @pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI not available")
-def test_native_bin_plugin_denied_by_org_policy_names_the_deny(
+def test_native_bin_plugin_denied_at_user_scope_names_the_deny(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """Control: a Claude plugin with bin/ at -g is loaded natively (#3290).
 
     Its deny is reported by the native-plugin owner, which already points to
-    ``apm policy explain``; this passes before and after #4052.
+    ``apm policy explain``; this passes before and after #4052. User scope is
+    not governed by org policy (#4087), so the deny comes from the user store.
     """
     world = PolicyScopeWorld(tmp_path, dict(os.environ))
-    world.publish_policy(_BASE_POLICY)
     isolated = world.isolated
     plugin = isolated.work_root / "tool"
     _bin_plugin(plugin)
@@ -101,14 +100,7 @@ def test_native_bin_plugin_denied_by_org_policy_names_the_deny(
         },
         isolated.config_root / "apm.yml",
     )
-    # User-scope org policy is discovered from the deploy root ($HOME).
     (isolated.home / ".claude").mkdir(parents=True, exist_ok=True)
-    git_env = isolated.subprocess_env()
-    for args in (
-        ["git", "init", "-q", "--initial-branch=main"],
-        ["git", "remote", "add", "origin", f"https://github.com/{ORG}/home.git"],
-    ):
-        subprocess.run(args, cwd=isolated.home, env=git_env, check=True)
     runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=900)
 
     with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
@@ -122,9 +114,8 @@ def test_native_bin_plugin_denied_by_org_policy_names_the_deny(
         first = apm("install", "-g", "--trust-bin", step="1-install")
         assert "native Claude plugin(s) declared and enabled" in first, first
 
-        world.publish_policy(_DENY_ALL)
-        world.clear_policy_cache()
-        denied = apm("install", "-g", "--trust-bin", step="2-install-denied")
+        apm("deny", "--user", package, step="2-deny")
+        denied = apm("install", "-g", "--trust-bin", step="3-install-denied")
         assert f"Parked native plugin {package}: denied" in denied, denied
         # A user-scope hint names the -g form, which works from any directory (#4154).
         assert f"apm policy explain -g {package}" in denied, denied

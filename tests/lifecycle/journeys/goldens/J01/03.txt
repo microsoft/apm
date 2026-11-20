@@ -1,0 +1,22 @@
+# apm journey golden v1: J01 step 3
+$ apm init -y --target copilot,claude
+[exit 0]
+--- stdout
+[i] Targets set: claude, copilot (via --target flag)
+[>] Initializing APM project: project
+[*] APM project initialized successfully!
+           Created Files
++---------------------------------+
+| File    | Description           |
+|---------+-----------------------|
+| apm.yml | Project configuration |
++---------------------------------+
+
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------  Next Steps -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| * Install a package:               apm install <owner>/<repo>                                                                                                                                                                                                                                                                                                                                                |
+| * Build a plugin? Scaffold one:    apm plugin init                                                                                                                                                                                                                                                                                                                                                           |
+| * Publishing a marketplace?:       apm marketplace init                                                                                                                                                                                                                                                                                                                                                      |
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+[i] Tip: Use agentrc to generate tailored agent instructions from your codebase. https://github.com/microsoft/agentrc
+  Docs: https://microsoft.github.io/apm  |  Star: https://github.com/microsoft/apm
+--- stderr

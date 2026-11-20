@@ -787,6 +787,7 @@ registry_delegation.policy_target_projection
 registry_delegation.process_interrupt_signals
 registry_delegation.root_cli_output_mode
 registry_delegation.runtime_descriptors
+registry_delegation.scope_manifest_path
 registry_delegation.target_vocabulary
 registry_delegation.user_invocable_resolution
 registry_delegation.version_rendering
@@ -800,6 +801,7 @@ transport-platform-clone-connect-retry
 transport-platform-credential-origin-scope
 transport-platform-credential-report-owner
 transport-platform-credential-value-rendering
+transport-platform-egress-route-policy
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight
@@ -807,6 +809,7 @@ transport-platform-github-throttle
 transport-platform-gitlab-sparse-plan
 transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
+transport-platform-http-session-construction
 transport-platform-ls-remote-tag-commits
 transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
@@ -820,6 +823,7 @@ transport-platform-self-update-resolution
 transport-platform-sparse-symlink-validation
 transport-platform-tls-trust-injection
 transport-platform-unix-install-ownership
+transport-platform-url-builder-credential-free
 transport-platform-url-path-security
 transport-platform-windows-stable-path
 """

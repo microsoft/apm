@@ -22,6 +22,8 @@ from apm_cli.install.mcp.args import (
     parse_kv_pairs,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestParseKvPairs:
     """Tests for parse_kv_pairs()."""

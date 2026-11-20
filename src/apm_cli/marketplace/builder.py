@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import requests
 
+from apm_cli.core.scope import manifest_file
+
 if TYPE_CHECKING:
     from ..core.auth import AuthContext, HostInfo
 
@@ -1149,7 +1151,7 @@ class MarketplaceBuilder:
             package_root = ensure_path_within(project_root / pkg.subdir, project_root)
             if package_root == project_root:
                 return None
-            file_path = package_root / "apm.yml"
+            file_path = manifest_file(package_root)
             if not file_path.is_file():
                 return None
             metadata_path = ensure_path_within(file_path, project_root)

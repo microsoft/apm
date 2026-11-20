@@ -16,6 +16,8 @@ from apm_cli.models.apm_package import APMPackage, DependencyReference
 from apm_cli.models.validation import validate_apm_package
 from apm_cli.utils.content_hash import compute_package_hash
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

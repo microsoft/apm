@@ -14,7 +14,11 @@ import sys
 import unittest
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.utils.subprocess_env import external_process_env
+
+pytestmark = pytest.mark.unit
 
 
 class TestExternalProcessEnvNotFrozen(unittest.TestCase):

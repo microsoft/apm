@@ -12,6 +12,8 @@ from apm_cli.models.apm_package import (
     clear_apm_yml_cache,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _write_apm_yml(tmp_path: Path, data: dict) -> Path:
     """Write an apm.yml file and return its path."""
