@@ -607,6 +607,31 @@
         "tests/unit/registry/test_extractor.py::test_unsafe_entry_after_valid_ones_leaves_nothing_written",
         "tests/integration/test_registry_archive_limits_lifecycle.py::test_registry_archive_over_the_limits_is_refused_without_writing"
       ]
+    },
+    {
+      "issue": 4252,
+      "fixed_in": "Unreleased",
+      "summary": "registries.<name> entries handled unknown keys differently per manifest contract: a mistyped key was accepted under the OpenAPM v0.1 contract and an x- vendor key was rejected under the default contract. Both contracts now reject a mistyped key, naming it and the registry, and ignore x- keys.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/unit/test_apm_yml_registries.py::TestRegistryEntryKeys::test_mistyped_key_is_rejected_naming_key_and_registry",
+        "tests/unit/test_apm_yml_registries.py::TestRegistryEntryKeys::test_extension_key_is_accepted",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_registry_entry_rejects_typos_but_keeps_vendor_keys"
+      ]
+    },
+    {
+      "issue": 4286,
+      "fixed_in": "Unreleased",
+      "summary": "Registry URLs are validated against the spec scheme rules (req-sc-006) under both manifest contracts through one owner: a plain http URL is a parse error that names the registry and writes nothing, unless the host is loopback or RFC 1918 private or the entry sets insecure: true.",
+      "failure_modes": ["outcome", "transaction"],
+      "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_registry_url_scheme_lifecycle.py::test_http_registry_to_public_host_is_refused_with_nothing_written",
+        "tests/integration/test_registry_url_scheme_lifecycle.py::test_loopback_or_insecure_http_registry_is_accepted",
+        "tests/unit/test_apm_yml_registries.py::TestRegistryUrlScheme::test_http_to_public_host_is_a_parse_error",
+        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_http_registry_url_needs_local_host_or_insecure"
+      ]
     }
   ],
   "lifecycle_contracts": [

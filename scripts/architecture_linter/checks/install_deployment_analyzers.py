@@ -112,6 +112,10 @@ from scripts.architecture_linter.checks.install_policy_outcome_routing import (
 from scripts.architecture_linter.checks.install_portable_trust import (
     RULES as PORTABLE_TRUST_RULES,
 )
+from scripts.architecture_linter.checks.install_registry_url_scheme import (
+    GUARD_REGISTRY_URL_SCHEME,
+    check_registry_url_scheme,
+)
 from scripts.architecture_linter.checks.install_request_and_source import (
     _GUARD_INSTALL_SCOPE,
     _GUARD_OUTCOME,
@@ -197,6 +201,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_POLICY_FIELD_TYPES,
         "A wrongly typed policy field is a malformed policy, never a parser crash.",
         check_policy_field_types,
+    ),
+    _rule(
+        GUARD_REGISTRY_URL_SCHEME,
+        "Registry URL scheme acceptance stays owned by deps/registry/url_scheme.py.",
+        check_registry_url_scheme,
     ),
     _rule(
         GUARD_TRUST_POLICY_OUTCOME,

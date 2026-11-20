@@ -2159,6 +2159,19 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Prune stops reconciling deployment provenance through the state owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-registry-url-scheme",
+        rule_id="install-deployment-registry-url-scheme",
+        path="src/apm_cli/models/apm_package.py",
+        old=(
+            '        error = registry_url_error(name, url, insecure=body.get("insecure"))\n'
+            "        if error is not None:\n"
+            '            raise ValueError(f"{error} (in {apm_yml_path})")\n'
+            "        registries_map[name] = url.strip()\n"
+        ),
+        new="        registries_map[name] = url.strip()\n",
+        intent="The default-contract registries parse accepts any URL without the scheme owner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-request-defaults",
         rule_id="install-deployment-request-defaults",
         path="src/apm_cli/install/request.py",

@@ -19,10 +19,12 @@ def _load_yaml_registries(yaml_path: Path) -> dict[str, str]:
     """Return {name: url} from a YAML file's top-level ``registries:`` block.
 
     Silently returns an empty dict on any parse error so a broken
-    workspace file never blocks a project install.
+    workspace file never blocks a project install. An entry whose URL the
+    scheme owner does not accept is left out.
     """
     try:
         from ...utils.yaml_io import load_yaml
+        from .url_scheme import registry_url_error
 
         data = load_yaml(yaml_path) or {}
         if not isinstance(data, dict):
@@ -36,7 +38,7 @@ def _load_yaml_registries(yaml_path: Path) -> dict[str, str]:
                 continue
             if isinstance(body, dict):
                 url = body.get("url")
-                if isinstance(url, str) and url.strip():
+                if registry_url_error(name, url, insecure=body.get("insecure")) is None:
                     result[name] = url.strip()
         return result
     except Exception:
