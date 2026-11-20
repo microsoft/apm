@@ -1174,3 +1174,23 @@ def _sanitize_url(value: str) -> str:
     from ..utils.git_env import redact_git_diagnostic
 
     return redact_git_diagnostic(value)
+
+
+def attach_persistent_git_cache(downloader: object, *, refresh: bool = False) -> GitCache | None:
+    """Attach the one persistent cross-run git cache to *downloader*.
+
+    ``apm install`` (including ``--frozen`` and ``apm update``), the ``apm
+    audit --ci`` replay and ``apm outdated`` read locked git sources through
+    this same cache, so they recompute ``content_hash`` over the same bytes.
+    ``APM_NO_CACHE`` disables it; an unusable cache root degrades to no cache.
+    """
+    if os.environ.get("APM_NO_CACHE"):
+        return None
+    from .paths import get_cache_root
+
+    try:
+        cache = GitCache(get_cache_root(), refresh=refresh)
+    except (OSError, ValueError):
+        return None
+    downloader.persistent_git_cache = cache  # type: ignore[attr-defined]
+    return cache

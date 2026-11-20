@@ -1007,7 +1007,7 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
         (
             "install-deployment-local-bundle-hook-trust",
             "src/apm_cli/install/local_bundle_hook_trust.py",
-            "            _retire_per_file(project_root, targets, item)\n",
+            '    _retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))\n',
             "",
         ),
         (
@@ -1415,6 +1415,43 @@ def test_failed_direct_dependency_stops_before_integration() -> None:
 def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) -> None:
     """Approval pins leave the exec bit out and come from one owner."""
     rule_id = "install-deployment-trust-fingerprint"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/core/deployment_ledger.py",
+            "if self._trusted_hash(path, targets, self._write_locator) is not None:",
+            "if self.lockfile_hash_matches(path, self._claims):",
+            id="lockfile-hash-authorizes",
+        ),
+        pytest.param(
+            "src/apm_cli/core/deployment_ledger.py",
+            "    integrator._overwrite_gate = OverwriteGate(",
+            "    integrator._unused_gate = OverwriteGate(",
+            id="gate-not-bound",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/prompt_integrator.py",
+            "skip, adopted = self._check_adopt_or_skip(",
+            "skip, adopted = self._adopt_without_evidence(",
+            id="writer-bypasses-owner",
+        ),
+    ],
+)
+def test_overwrite_evidence_guard_is_closed_world(path: str, old: str, new: str) -> None:
+    """No write path replaces a managed file without receipt or render evidence (#4360)."""
+    rule_id = "install-deployment-overwrite-evidence"
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
     mutated = source.replace(old, new)
@@ -1919,6 +1956,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="BaseIntegrator drops a mandatory file-level deploy/sync/cleanup method.",
     ),
     MutationCase(
+        guard_id="install-deployment-overwrite-evidence",
+        rule_id="install-deployment-overwrite-evidence",
+        path="src/apm_cli/integration/base_integrator.py",
+        old="(gate and gate.authorizes(target_path, rel_path))",
+        new="(gate is not None)",
+        intent="A managed file is overwritten without asking the install-bound evidence gate.",
+    ),
+    MutationCase(
         guard_id="install-deployment-bundle-admission-owner",
         rule_id="install-deployment-bundle-admission-owner",
         path="src/apm_cli/commands/pack.py",
@@ -1957,6 +2002,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="release = user_content_only and not failed_path_retained",
         new="release = user_content_only",
         intent="A skill directory left only for user content pins its removed owner again.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-cleanup-retains-kept-members",
+        rule_id="install-deployment-cleanup-retains-kept-members",
+        path="src/apm_cli/install/phases/cleanup.py",
+        old="                stale -= set(kept)\n",
+        new="                stale -= set()\n",
+        intent="Cleanup drops the integrate phase's skip set and deletes a kept member.",
     ),
     MutationCase(
         guard_id="install-deployment-cleanup-target-roots",
@@ -2095,6 +2148,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Config mutation stops routing through the canonical lifecycle lock.",
     ),
     MutationCase(
+        guard_id="install-deployment-local-bundle-hook-retirement",
+        rule_id="install-deployment-local-bundle-hook-retirement",
+        path="src/apm_cli/install/local_bundle_hooks.py",
+        old="        retire_merged_bundle_entries(project_root, targets, slug)\n",
+        new="        HookIntegrator().retire_local_bundle_hooks(slug, project_root, targets)\n",
+        intent="A bundle reinstall retires merged hook entries outside the hook trust owner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-local-bundle-hook-trust",
         rule_id="install-deployment-local-bundle-hook-trust",
         path="src/apm_cli/install/local_bundle_hook_trust.py",
@@ -2129,6 +2190,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="else locked_copy_proof(locked_dep, install_path)",
         new="else _should_skip_redownload(locked_dep, install_path) or None",
         intent="Integrate re-derives apm_modules copy validity outside drift.locked_copy_proof.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-locked-source-cache",
+        rule_id="install-deployment-locked-source-cache",
+        path="src/apm_cli/install/drift.py",
+        old="        attach_persistent_git_cache(downloader)\n",
+        new="",
+        intent="The audit --ci replay reads locked git sources outside install's git cache.",
     ),
     MutationCase(
         guard_id="install-deployment-lockfile-required",
@@ -2344,6 +2413,24 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="apm install stops collecting receipts whose project root is gone.",
     ),
     MutationCase(
+        guard_id="install-deployment-registry-url-scheme",
+        rule_id="install-deployment-registry-url-scheme",
+        path="src/apm_cli/models/apm_package.py",
+        old=(
+            '        error = registry_url_error(name, url, insecure=body.get("insecure"))\n'
+            "        if error is not None:\n"
+            '            raise ValueError(f"{error} (in {apm_yml_path})")\n'
+            "        registries_map[name] = url.strip()\n"
+        ),
+        new=(
+            "        error = None\n"
+            "        if error is not None:\n"
+            '            raise ValueError(f"{error} (in {apm_yml_path})")\n'
+            "        registries_map[name] = url.strip()\n"
+        ),
+        intent="The default-contract registries parse accepts any URL without the scheme owner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-request-defaults",
         rule_id="install-deployment-request-defaults",
         path="src/apm_cli/install/request.py",
@@ -2388,6 +2475,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    if ctx.existing_lockfile is None or ctx.downloader is None:\n        return None",
         new="    if not ctx.update_refs or ctx.existing_lockfile is None:\n        return None",
         intent="Plain install after an apm.yml ref change loses the locked-source baseline.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-skill-adoption-trusted-receipt",
+        rule_id="install-deployment-skill-adoption-trusted-receipt",
+        path="src/apm_cli/integration/skill_adoption.py",
+        old="    if all_files_receipted(destination, session.receipt_held):\n",
+        new='    if session.receipt_held(destination / "SKILL.md"):\n',
+        intent="Adoption bails on another checkout's receipt and refuses unchanged skill bytes.",
     ),
     MutationCase(
         guard_id="install-deployment-skill-layout",
@@ -2492,6 +2587,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old='    return bool(commit not in (None, "", "cached") and commit == locked_commit)\n',
         new="    return False\n",
         intent="apm update treats every locked commit as moved and skips the content-hash check.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-update-marketplace-provenance",
+        rule_id="install-deployment-update-marketplace-provenance",
+        path="src/apm_cli/commands/update.py",
+        old="    _existing_lock = _reverified_lock(LockFile.read(_lock_path), _lock_path, logger, dry_run)\n",
+        new="    _existing_lock = LockFile.read(_lock_path)\n",
+        intent="apm update carries locked marketplace provenance forward without re-verifying it.",
     ),
     MutationCase(
         guard_id="install-deployment-update-registry-integrity",
@@ -2687,6 +2790,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="structural_errors: tuple[str, ...] = ()",
         new="structural_errors: tuple[str, ...] = ('placeholder',)",
         intent="Raw structural diagnostics stop originating empty in the model owner.",
+    ),
+    MutationCase(
+        guard_id="marketplace-integrations-ref-pin-commit",
+        rule_id="marketplace-integrations-ref-pin-commit",
+        path="src/apm_cli/install/transaction.py",
+        old="            try:\n                self._ref_pins.discard()\n                try:",
+        new="            try:\n                try:",
+        intent="A rolled-back install keeps its staged ref pins for a later commit.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-source-admission",
@@ -3336,6 +3447,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="            return origin_bounded_request(\n                self._session,\n",
         new="            return self._session.request(\n",
         intent="Registry requests bypass the origin-bounded redirect owner.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-proxy-http-token",
+        rule_id="transport-platform-proxy-http-token",
+        path="src/apm_cli/deps/registry_proxy.py",
+        old="        if token and not http_token_allowed(parsed.scheme, host):",
+        new="        if False and token and not http_token_allowed(parsed.scheme, host):",
+        intent="The proxy token is attached over http to any host without the owner's verdict.",
     ),
     MutationCase(
         guard_id="transport-platform-ref-freshness",

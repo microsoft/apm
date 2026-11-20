@@ -54,7 +54,7 @@ known_cells:
     law: FORBID
     tracking: "#4183"
     step: 2
-    match: "forbidden '\\[!\\]' printed: '\\[!\\] 1 dependency unpinned"
+    match: "forbidden '\\[!\\]' printed: .*dependency unpinned"
   - id: j02-frozen-warnings-beyond-the-docs-block
     law: O2
     tracking: "#4182"

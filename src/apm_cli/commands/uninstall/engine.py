@@ -628,7 +628,10 @@ def _resolve_marketplace_packages(
                     ):
                         require_locked_row_origin(locked, marketplace_name=marketplace_name)
                     resolution = resolve_marketplace_plugin(
-                        plugin_name, marketplace_name, auth_resolver=auth_resolver
+                        plugin_name,
+                        marketplace_name,
+                        auth_resolver=auth_resolver,
+                        enforce_ref_pins=False,
                     )
                     canonical = resolution.canonical
                     # Supply-chain guard: refuse registry canonicals not present in lockfile

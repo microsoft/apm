@@ -29,6 +29,7 @@ import click
 
 from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
 from ..bundle.formats import BundleFormat
+from .deployed_paths import log_bundle_deployed
 
 if TYPE_CHECKING:
     from apm_cli.models.dependency.mcp import MCPDependency
@@ -174,18 +175,15 @@ def install_local_bundle(
             if bundle_info.source_dir is not None
             else []
         )
-        from ..security.executables import exec_map_authorizes_all
-
-        bundle_approval_key = None
-        if not exec_map_authorizes_all(allow_executables):
-            from ..security.executables import local_bundle_approval_key
-
-            bundle_approval_key = local_bundle_approval_key(
-                bundle_info.package_id,
-                str(bundle_info.plugin_json.get("version") or ""),
-                bundle_info.source_dir,
-                bundle_info.lockfile,
-            )
+        bundle_approval_key = _bundle_approval_key(bundle_info, allow_executables)
+        _record_parked_bundle_executables(
+            bundle_info,
+            str(alias or bundle_info.package_id),
+            bundle_approval_key,
+            (bundle_mcp_deps, bundle_lsp_deps),
+            allow_executables,
+            scope_dir=None if dry_run else _bundle_lock_root(global_),
+        )
         bundle_mcp_deps = _filter_bundle_executables(
             bundle_mcp_deps,
             bundle_info=bundle_info,
@@ -332,6 +330,13 @@ def install_local_bundle(
                 lockfile_root=lockfile_path.parent,
                 diagnostics=migration_diagnostics,
             )
+            # The bytes just deployed from this bundle are its render (#4360).
+            migration_evidence.add_rendered(
+                {
+                    Path(record) if Path(record).is_absolute() else project_root / record: value
+                    for record, value in deployed_hashes.items()
+                }
+            )
             DeploymentLedgerCodec.record_local_bundle_files(
                 lockfile,
                 deployed,
@@ -342,72 +347,22 @@ def install_local_bundle(
                 staged_fallback_hashes=staged_fallbacks,
             )
 
-            # Auto-migrate legacy per-client skill paths (#737).
-            # After deploying new .agents/skills/ files, detect and clean up
-            # any legacy paths (e.g. .github/skills/) still recorded in the
-            # lockfile from a previous --legacy-skill-paths install.
-            if not legacy_skill_paths:
-                from ..utils.console import _rich_error, _rich_info
-                from .skill_path_migration import (
-                    COLLISION_DETAIL_TEMPLATE,
-                    COLLISION_HEADER_TEMPLATE,
-                    COLLISION_HINT,
-                    MIGRATION_SUMMARY_TEMPLATE,
+            _kept_legacy = (
+                []
+                if legacy_skill_paths
+                else _migrate_legacy_skills(
+                    lockfile, project_root, migration_evidence, migration_diagnostics, logger
                 )
-                from .skill_path_migration import (
-                    check_collisions as _check_coll,
-                )
-                from .skill_path_migration import (
-                    detect_legacy_skill_deployments as _detect_legacy,
-                )
-                from .skill_path_migration import (
-                    execute_migration as _exec_mig,
-                )
-
-                _plans = _detect_legacy(lockfile, project_root)
-                if _plans:
-                    _colls = _check_coll(_plans, project_root)
-                    if _colls:
-                        # H2: collision is an error.
-                        _rich_error(
-                            COLLISION_HEADER_TEMPLATE.format(count=len(_colls)),
-                            symbol="error",
-                        )
-                        # M2: enumerate each collision (parity with pipeline).
-                        for _plan in _plans:
-                            for _cd in _colls:
-                                if _plan.dst_path in _cd:
-                                    _rich_error(
-                                        COLLISION_DETAIL_TEMPLATE.format(
-                                            dst_path=_plan.dst_path,
-                                            src_path=_plan.src_path,
-                                            dep_name=_plan.dep_name,
-                                        ),
-                                        symbol="error",
-                                    )
-                                    break
-                        _rich_info(COLLISION_HINT, symbol="info")
-                    else:
-                        _mig_result = _exec_mig(
-                            _plans, lockfile, project_root, evidence=migration_evidence
-                        )
-                        migration_diagnostics.render_summary()
-                        _total = len(_mig_result.deleted) + len(_mig_result.skipped_no_file)
-                        if _total:
-                            _rich_info(
-                                MIGRATION_SUMMARY_TEMPLATE.format(count=_total),
-                                symbol="info",
-                            )
-                        if getattr(logger, "verbose", False) and _mig_result.deleted:
-                            for _dp in _mig_result.deleted:
-                                _rich_info(f"  removed {_dp}", symbol="info")
+            )
 
             lockfile.write(lockfile_path)
+            if _kept_legacy:
+                _refuse_unproven_legacy(_kept_legacy, logger, user_scope=global_)
 
         msg = f"Installed {len(deployed) + len(staged_instructions)} file(s) from local bundle"
         if skipped:
             msg += f" ({skipped} skipped)"
-        logger.success(msg)
+        log_bundle_deployed(logger, msg, deployed, targets)
 
         # Issue #1207 D2.b: post-install compile hint for staged instructions.
         if staged_instructions and not dry_run:
@@ -430,6 +385,92 @@ def install_local_bundle(
         # Tarball cleanup (caller-owned per LocalBundleInfo contract).
         if bundle_info.temp_dir is not None and bundle_info.temp_dir.exists():
             shutil.rmtree(bundle_info.temp_dir, ignore_errors=True)
+
+
+def _migrate_legacy_skills(
+    lockfile, project_root: Path, migration_evidence, migration_diagnostics, logger
+) -> list[str]:
+    """Auto-migrate legacy per-client skill paths (#737); return the kept ones (#4360).
+
+    After deploying new .agents/skills/ files, detect and clean up any legacy
+    paths (e.g. .github/skills/) still recorded in the lockfile from a
+    previous --legacy-skill-paths install.
+    """
+    from ..utils.console import _rich_error, _rich_info
+    from .skill_path_migration import (
+        COLLISION_DETAIL_TEMPLATE,
+        COLLISION_HEADER_TEMPLATE,
+        COLLISION_HINT,
+        MIGRATION_SUMMARY_TEMPLATE,
+    )
+    from .skill_path_migration import (
+        check_collisions as _check_coll,
+    )
+    from .skill_path_migration import (
+        detect_legacy_skill_deployments as _detect_legacy,
+    )
+    from .skill_path_migration import (
+        execute_migration as _exec_mig,
+    )
+
+    _plans = _detect_legacy(lockfile, project_root)
+    if _plans:
+        _colls = _check_coll(_plans, project_root)
+        if _colls:
+            # H2: collision is an error.
+            _rich_error(
+                COLLISION_HEADER_TEMPLATE.format(count=len(_colls)),
+                symbol="error",
+            )
+            # M2: enumerate each collision (parity with pipeline).
+            for _plan in _plans:
+                for _cd in _colls:
+                    if _plan.dst_path in _cd:
+                        _rich_error(
+                            COLLISION_DETAIL_TEMPLATE.format(
+                                dst_path=_plan.dst_path,
+                                src_path=_plan.src_path,
+                                dep_name=_plan.dep_name,
+                            ),
+                            symbol="error",
+                        )
+                        break
+            _rich_info(COLLISION_HINT, symbol="info")
+            # A legacy copy unlike this bundle's render may hold edits (#4360).
+            return [
+                _plan.src_path
+                for _plan in _plans
+                if any(_plan.dst_path in _cd for _cd in _colls)
+                and not migration_evidence.authorizes(_plan.src_path, project_root / _plan.src_path)
+            ]
+        else:
+            _mig_result = _exec_mig(_plans, lockfile, project_root, evidence=migration_evidence)
+            migration_diagnostics.render_summary()
+            _total = len(_mig_result.deleted) + len(_mig_result.skipped_no_file)
+            if _total:
+                _rich_info(
+                    MIGRATION_SUMMARY_TEMPLATE.format(count=_total),
+                    symbol="info",
+                )
+            if getattr(logger, "verbose", False) and _mig_result.deleted:
+                for _dp in _mig_result.deleted:
+                    _rich_info(f"  removed {_dp}", symbol="info")
+            return _mig_result.failed
+
+    return []
+
+
+def _refuse_unproven_legacy(kept: list[str], logger, *, user_scope: bool) -> None:
+    """Fail on legacy skill files no evidence proves APM deployed (#4360).
+
+    The lockfile keeps their rows; the files stay on disk for the user.
+    """
+    from ..integration.base_integrator import unproven_overwrite_message
+    from .errors import InstallFailureAlreadyRendered
+
+    for path in kept:
+        logger.error(unproven_overwrite_message(path, user_scope=user_scope))
+    raise InstallFailureAlreadyRendered(f"{len(kept)} legacy skill file(s) kept")
 
 
 def _parse_legacy_bundle_mcp_servers(
@@ -574,6 +615,66 @@ def _filter_bundle_executables(
         + local_bundle_approval_hint(approval_key, exec_type, user_scope=user_scope)
     )
     return []
+
+
+def _bundle_approval_key(bundle_info, allow_executables) -> str | None:
+    """The exact-content approval key, or None when the gate admits everything."""
+    from ..security.executables import exec_map_authorizes_all, local_bundle_approval_key
+
+    if exec_map_authorizes_all(allow_executables):
+        return None
+    return local_bundle_approval_key(
+        bundle_info.package_id,
+        str(bundle_info.plugin_json.get("version") or ""),
+        bundle_info.source_dir,
+        bundle_info.lockfile,
+    )
+
+
+def _declared_bundle_exec_types(bundle_info, mcp_deps: list, lsp_deps: list) -> tuple[str, ...]:
+    """Executable types the bundle ships, before trust filters them."""
+    from .local_bundle_paths import bundle_pack_files, is_plugin_hook_path
+
+    files = list(bundle_pack_files(bundle_info))
+    if not files and bundle_info.source_dir is not None:
+        root = Path(bundle_info.source_dir)
+        files = [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()]
+    declared = []
+    if any(is_plugin_hook_path(path) for path in files):
+        declared.append("hooks")
+    if mcp_deps:
+        declared.append("mcp")
+    if lsp_deps:
+        declared.append("lsp")
+    return tuple(declared)
+
+
+def _record_parked_bundle_executables(
+    bundle_info,
+    slug: str,
+    approval_key: str | None,
+    service_deps: tuple[list, list],
+    allow_executables,
+    *,
+    scope_dir: Path | None,
+) -> None:
+    """Record which declared executable types this install parks (#4221); not on dry runs."""
+    from ..security.executables import package_type_approved
+    from .local_bundle_pending import record_parked_executables
+
+    if scope_dir is None:
+        return
+    declared = _declared_bundle_exec_types(bundle_info, *service_deps)
+    parked = (
+        []
+        if approval_key is None
+        else [
+            exec_type
+            for exec_type in declared
+            if not package_type_approved(allow_executables, (approval_key,), exec_type)
+        ]
+    )
+    record_parked_executables(scope_dir, slug, approval_key, parked)
 
 
 def _bundle_owner_key(bundle_info) -> str:

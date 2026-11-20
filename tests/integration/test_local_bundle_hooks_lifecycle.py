@@ -192,7 +192,7 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     world.apm(consumer, "install", str(dep), "--no-policy")
     unapproved, _ = _repack(world, producer, tmp_path, "1.0.1", "#!/bin/sh\necho v2\n")
     text = output(world.apm(consumer, "install", str(unapproved), "--no-policy"))
-    assert "Skipped 2 bundle hook file(s) from hookpkg" in text, text
+    assert "Retired hooks from local bundle 'hookpkg'" in text, text  # #4216
     assert _hook_entries(consumer) == {"PreToolUse": ["Write"]}
     world.apm(consumer, "install", str(bundle), "--no-policy")
     assert _hook_entries(consumer) == {"PreToolUse": ["Write", "Bash"]}
@@ -251,3 +251,30 @@ def test_bundle_hooks_register_for_copilot_and_user_scope(
     hookless, _ = _repack(world, producer, tmp_path, "1.0.2", None)
     world.apm(world.isolated.work_root, "install", "-g", str(hookless), "--no-policy")
     assert _hook_entries(home) == {}
+
+
+def test_approve_pending_lists_parked_bundle_executables(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4221: parked bundle hooks are pending, with the key the install printed."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("pending-consumer", targets=("claude",))
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {}
+    dump_yaml(manifest, consumer / "apm.yml")
+    installed = " ".join(output(world.apm(consumer, "install", str(bundle))).split())
+    assert f'"{key}"' in installed, installed
+
+    pending = " ".join(output(world.apm(consumer, "approve", "--pending")).split())
+    assert "All packages with executables are approved" not in pending, pending
+    assert "local bundle 'hookpkg'" in pending, pending
+    assert key in pending, pending
+    assert "hooks" in pending, pending
+
+    # Approving the exact key and reinstalling deploys the hooks; nothing stays pending.
+    _allow(consumer, key)
+    world.apm(consumer, "install", str(bundle))
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+    pending = output(world.apm(consumer, "approve", "--pending"))
+    assert "All packages with executables are approved." in pending, pending

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
 from types import SimpleNamespace
 
 import pytest
@@ -179,26 +178,36 @@ def test_mask_known_values_masks_longest_first() -> None:
 
 
 def test_proxy_plaintext_warning_drops_url_userinfo(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apm_cli.deps import registry_proxy
+
     monkeypatch.setenv("PROXY_REGISTRY_URL", f"http://alice:{_SECRET}@proxy.invalid/art/apm")
     monkeypatch.setenv("PROXY_REGISTRY_TOKEN", _SECRET)
     monkeypatch.delenv("PROXY_REGISTRY_ALLOW_HTTP", raising=False)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        RegistryConfig.from_env()
-    messages = [str(item.message) for item in caught]
+    registry_proxy._emitted_warnings.clear()
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "apm_cli.utils.console._rich_warning", lambda message, *a, **k: messages.append(message)
+    )
+    RegistryConfig.from_env()
     assert any("http://proxy.invalid/art/apm" in message for message in messages), messages
     assert not any(_SECRET in message for message in messages)
 
 
 def test_proxy_plaintext_warning_masks_query_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apm_cli.deps import registry_proxy
+
     monkeypatch.setenv("PROXY_REGISTRY_URL", f"http://proxy.invalid/art/apm?token={_SECRET}")
     monkeypatch.setenv("PROXY_REGISTRY_TOKEN", _SECRET)
     monkeypatch.delenv("PROXY_REGISTRY_ALLOW_HTTP", raising=False)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        RegistryConfig.from_env()
-    messages = [str(item.message) for item in caught]
-    assert any("http://proxy.invalid/art/apm?token=********" in m for m in messages), messages
+    registry_proxy._emitted_warnings.clear()
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "apm_cli.utils.console._rich_warning", lambda message, *a, **k: messages.append(message)
+    )
+    RegistryConfig.from_env()
+    assert any("http://proxy.invalid/art/apm?token=********" in message for message in messages), (
+        messages
+    )
     assert not any(_SECRET in message for message in messages)
 
 

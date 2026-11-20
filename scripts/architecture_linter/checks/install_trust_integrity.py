@@ -15,9 +15,14 @@
 * Every bundle deploy entry point admits the bundle through
   ``install/bundle_admission.py`` (org policy and integrity) and records what
   it deployed through the shared local-bundle lockfile owner (#4080).
+* A bundle reinstall retires the hooks it deployed earlier through
+  ``install/local_bundle_hook_trust.py`` (#4216): closed world, only that
+  owner calls ``HookIntegrator.retire_local_bundle_hooks``.
 """
 
 from __future__ import annotations
+
+import re
 
 from scripts.architecture_linter.checks.install_deployment_shared import (
     _facts_for,
@@ -33,10 +38,12 @@ from scripts.architecture_linter.models import Violation
 
 GUARD_TRUST_POLICY_OUTCOME = "install-deployment-trust-policy-outcome"
 GUARD_UPDATE_CONTENT_INTEGRITY = "install-deployment-update-content-integrity"
+GUARD_UPDATE_MARKETPLACE_PROVENANCE = "install-deployment-update-marketplace-provenance"
 GUARD_UPDATE_REGISTRY_INTEGRITY = "install-deployment-update-registry-integrity"
 GUARD_UNPACK_EXECUTABLES = "install-deployment-unpack-executable-refusal"
 GUARD_BUNDLE_USER_SCOPE_ROOT = "install-deployment-bundle-user-scope-root"
 GUARD_LOCAL_BUNDLE_HOOK_TRUST = "install-deployment-local-bundle-hook-trust"
+GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT = "install-deployment-local-bundle-hook-retirement"
 GUARD_BUNDLE_ADMISSION = "install-deployment-bundle-admission-owner"
 
 _OWNER = "src/apm_cli/policy/outcome_routing.py"
@@ -359,9 +366,10 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         "parse_local_bundle_hook_source(",
         "package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS)",
         "if None in keys:",
-        "HookIntegrator().retire_local_bundle_hooks(item.slug, project_root, hook_targets)",
-        "_retire_per_file(project_root, targets, item)",
-        "_drop_lock_rows(lock_dir, retired_files)",
+        "HookIntegrator().retire_local_bundle_hooks(slug, project_root, hook_targets)",
+        '_retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))',
+        "_drop_lock_rows(lock_dir, rows)",
+        "            retire_bundle_hooks(",
     ),
     _INSTALL_COMMAND: ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/update.py": ("reconcile_scope_bundle_hooks(",),
@@ -532,5 +540,93 @@ def check_bundle_admission_owner(provider: FactsProvider) -> tuple[Violation, ..
                 _PACK_COMMAND,
                 "apm unpack must hold the lifecycle lock (serialized_lifecycle_unless)",
             )
+        )
+    return tuple(findings)
+
+
+_UPDATE = "src/apm_cli/commands/update.py"
+_CATALOG_ORIGIN = "src/apm_cli/marketplace/catalog_origin.py"
+_PROVENANCE_REQUIRED = {
+    _UPDATE: ("_existing_lock = _reverified_lock(LockFile.read(_lock_path)",),
+    _CATALOG_ORIGIN: (
+        "def reverify_locked_provenance(",
+        "require_locked_row_origin(dep)",
+        "resolution = resolve_marketplace_plugin(plugin, alias)",
+    ),
+}
+# Lock catalog provenance is written by the lockfile phase and the origin owner only.
+_PROVENANCE_WRITERS = frozenset({"src/apm_cli/install/phases/lockfile.py", _CATALOG_ORIGIN})
+_PROVENANCE_WRITE = re.compile(r"\.(source_url|source_digest) = ")
+
+
+def check_update_marketplace_provenance(provider: FactsProvider) -> tuple[Violation, ...]:
+    """``apm update`` re-verifies locked marketplace provenance through one owner (#4228)."""
+    findings: list[Violation] = []
+    for path, needles in _PROVENANCE_REQUIRED.items():
+        facts, failures = _facts_for(provider, path, GUARD_UPDATE_MARKETPLACE_PROVENANCE)
+        findings.extend(failures)
+        if failures:
+            continue
+        missing = [needle for needle in needles if not _present(facts, needle)]
+        if missing:
+            findings.append(
+                _summary(
+                    GUARD_UPDATE_MARKETPLACE_PROVENANCE,
+                    path,
+                    "Marketplace provenance re-verification is missing: " + ", ".join(missing),
+                )
+            )
+    for path in _python_paths(provider, "src/apm_cli/"):
+        if path in _PROVENANCE_WRITERS:
+            continue
+        facts, failures = _facts_for(provider, path, GUARD_UPDATE_MARKETPLACE_PROVENANCE)
+        if failures:
+            continue
+        findings.extend(
+            violation(
+                GUARD_UPDATE_MARKETPLACE_PROVENANCE,
+                path,
+                "Write lock source_url/source_digest through marketplace.catalog_origin",
+                line=number,
+            )
+            for number, line in enumerate(_lines(facts), start=1)
+            if _PROVENANCE_WRITE.search(line)
+        )
+    return tuple(findings)
+
+
+_RETIRE_CALL = ".retire_local_bundle_hooks("
+_BUNDLE_HOOKS = "src/apm_cli/install/local_bundle_hooks.py"
+
+
+def check_local_bundle_hook_retirement(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Bundle hook retirement has one owner; the reinstall path routes through it."""
+    findings: list[Violation] = []
+    facts, failures = _facts_for(provider, _BUNDLE_HOOKS, GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT)
+    findings.extend(failures)
+    if not failures and not _present(facts, "return retire_bundle_hooks("):
+        findings.append(
+            _summary(
+                GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT,
+                _BUNDLE_HOOKS,
+                "A bundle reinstall must retire earlier hooks through retire_bundle_hooks",
+            )
+        )
+    for path in _python_paths(provider, "src/apm_cli/"):
+        if path in {_BUNDLE_HOOK_TRUST, _HOOK_INTEGRATOR}:
+            continue
+        facts, failures = _facts_for(provider, path, GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT)
+        if failures:
+            continue
+        findings.extend(
+            violation(
+                GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT,
+                path,
+                "Retire local-bundle hooks through install.local_bundle_hook_trust, "
+                "which also removes hook files, scripts and lock rows",
+                line=number,
+            )
+            for number, line in enumerate(_lines(facts), start=1)
+            if _RETIRE_CALL in line
         )
     return tuple(findings)

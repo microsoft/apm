@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import acquire_lifecycle_lock
 from apm_cli.install.resolution_staging import ResolutionStagingSession
+from apm_cli.marketplace.version_pins import open_ref_pin_stage
 from apm_cli.models.results import InstallDisposition, InstallResult
 
 if TYPE_CHECKING:
@@ -119,6 +120,8 @@ class InstallTransaction:
             self._manifest_existed = manifest_path.exists()
             self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
             self._resolution = ResolutionStagingSession(apm_modules_dir)
+            # Marketplace ref pins resolved by this attempt; written on commit only.
+            self._ref_pins = open_ref_pin_stage()
         except BaseException:
             self._release_workspace_lock()
             raise
@@ -158,6 +161,7 @@ class InstallTransaction:
                     self.release_deploy_targets()
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
+                    self._ref_pins.commit()
                     self._completed = True
                     cleanup_issues.extend(self._resolution.remove_abandoned_roots())
                     self._report_resolution_cleanup_issues(cleanup_issues)
@@ -197,6 +201,7 @@ class InstallTransaction:
                     return result
                 try:
                     self.release_deploy_targets()
+                    self._ref_pins.discard()
                     cleanup_issues = self._resolution.rollback() or []
                     self._report_resolution_cleanup_issues(cleanup_issues)
                     self._completed = True
@@ -266,6 +271,7 @@ class InstallTransaction:
             if self.committed or self._rolled_back:
                 return
             try:
+                self._ref_pins.discard()
                 try:
                     self._restore_deploy_targets()
                     self._remove_created_target_roots()
@@ -365,3 +371,15 @@ def transactional_pipeline(
         return result
 
     return wrapped
+
+
+def stage_existing_copy(ctx: Any, path: Path, *, skip: bool = False) -> None:
+    """Preserve an existing ``apm_modules`` copy before a re-fetch replaces it.
+
+    The install transaction restores it byte for byte when the attempt is
+    refused (for example on a content hash mismatch) and discards it once the
+    attempt completes, so a refused install leaves ``apm_modules`` as it was.
+    *skip* marks a copy this attempt already fetched (it is staged already).
+    """
+    if not skip and (path.exists() or path.is_symlink()):
+        resolution_for_context(ctx).prepare_path(path)

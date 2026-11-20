@@ -641,10 +641,12 @@ install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cleanup-ownership-release
 install-deployment-cleanup-target-roots
+install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
 install-deployment-codex-agent-link-resolution
 install-deployment-agent-render-then-adopt
 install-deployment-command-render-then-adopt
+install-deployment-overwrite-evidence
 install-deployment-consumer-manifest-rewrite
 install-deployment-dependency-winner-selection
 install-deployment-deployment-frame-projection
@@ -667,11 +669,13 @@ install-deployment-lock-parent-placement
 install-deployment-locked-content-verdict
 install-deployment-locked-copy-validity
 install-deployment-lockfile-required
+install-deployment-locked-source-cache
 install-deployment-package-content-hash
 install-deployment-receipt-collection
 install-deployment-skill-layout
 install-deployment-skill-preflight
 install-deployment-skill-adoption-baseline
+install-deployment-skill-adoption-trusted-receipt
 install-deployment-selection-merge
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-capability-gate
@@ -703,6 +707,7 @@ install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
 install-deployment-immutable-requirements
 install-deployment-registry-dependency-intent
+install-deployment-registry-url-scheme
 install-deployment-request-defaults
 install-deployment-require-hashes-enforcement
 install-deployment-resolution-replacement
@@ -716,11 +721,13 @@ install-deployment-trust-fingerprint
 install-deployment-trust-policy-outcome
 install-deployment-local-bundle-hook-trust
 install-deployment-uninstall-preflight
+install-deployment-local-bundle-hook-retirement
 install-deployment-uninstall-reachability
 install-deployment-uninstall-selection
 install-deployment-unpack-executable-refusal
 install-deployment-update-content-integrity
 install-deployment-update-registry-integrity
+install-deployment-update-marketplace-provenance
 install-deployment-update-plan-ref-annotation
 marketplace-integrations-agent-plugin-contract
 marketplace-integrations-authoring-source
@@ -748,6 +755,7 @@ marketplace-integrations-package-projection
 marketplace-integrations-producer-admission
 marketplace-integrations-projection-boundary
 marketplace-integrations-raw-diagnostics
+marketplace-integrations-ref-pin-commit
 marketplace-integrations-removed-plugin-lifecycle
 marketplace-integrations-source-admission
 marketplace-integrations-source-parsing
@@ -829,6 +837,7 @@ transport-platform-ls-remote-tag-commits
 transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
 transport-platform-origin-bounded-redirect
+transport-platform-proxy-http-token
 transport-platform-ref-freshness
 transport-platform-release-metadata-discovery
 transport-platform-revision-pin-lock-consistency

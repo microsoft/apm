@@ -13,7 +13,7 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
@@ -441,19 +441,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\[!\] Left out of the plugin: ",
     ),
     KnownOutputCell(
-        "install-hook-line-per-target",
-        "I9",
-        "#4243",
-        _runs("install"),
-        r"repeats a (line|diagnostic): '\|   ",
-        # One hook integrated into two targets that render it the same way (Claude
-        # and Windsurf, or a hook file) is listed once per target, back to back.
-        output=(
-            r"^  \|-- 2 hook\(s\) integrated -> \.claude/settings\.json, \.windsurf/hooks\.json$"
-            r"|^  \|-- 2 hook\(s\) integrated -> [^,\n]+, [^,\n]+\n  \|   Hook file integrated: "
-        ),
-    ),
-    KnownOutputCell(
         "install-registry-lookup-per-registry",
         "I9",
         "#4244",
@@ -542,14 +529,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _runs("uninstall"),
         r"repeats a (line|diagnostic): '\[(\+|i)\] .*(found in apm\.yml|from dependencies\.apm in apm\.yml)",
         output=r"^\s*(\[(?:\+|i)\] [^\n]*(?:found in apm\.yml|from dependencies\.apm in apm\.yml))$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "update-deny-all-lifecycle-notice-repeats",
-        "I9",
-        "#4333",
-        _runs("update"),
-        r"Lifecycle scripts suppressed by org policy",
-        output=r"^\s*(\[!\] Lifecycle scripts suppressed by org policy[^\n]*)$.*^\s*\1$",
     ),
     KnownOutputCell(
         "install-verbose-diagnostics-repeat",
@@ -727,8 +706,14 @@ def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
     return found
 
 
-def output_violations(args: Sequence[str], result: Any) -> list[OutputViolation]:
-    """Every I6, I8 and I9 violation in one APM command result."""
+def output_violations(
+    args: Sequence[str], result: Any, env: Mapping[str, str] | None = None
+) -> list[OutputViolation]:
+    """Every I6, I8 and I9 violation in one APM command result.
+
+    *env* is the environment the command ran with; ``None`` falls back to this
+    process's environment.
+    """
     found: list[OutputViolation] = []
     # A path-corner world puts non-ASCII characters in the test's own paths;
     # echoing a user path back is not APM output, so its characters pass.
@@ -746,7 +731,7 @@ def output_violations(args: Sequence[str], result: Any) -> list[OutputViolation]
             OutputViolation("I8", f"exit code {result.returncode} is outside {sorted(contract)}")
         )
     for stream, text in (("stdout", result.stdout), ("stderr", result.stderr)):
-        if stream == "stderr" and _diagnostic_run(args):
+        if stream == "stderr" and _diagnostic_run(args, env):
             # A verbose or debug run asked for Python logging records; they are
             # diagnostics, not user output, so I9 does not judge their repeats.
             text = "\n".join(line for line in text.splitlines() if not _LOG_RECORD.match(line))
@@ -758,9 +743,10 @@ def output_violations(args: Sequence[str], result: Any) -> list[OutputViolation]
 _LOG_RECORD = re.compile(r"^(?:DEBUG|INFO) [A-Za-z_][\w.]* ")
 
 
-def _diagnostic_run(args: Sequence[str]) -> bool:
-    """True when the run itself enabled verbose or debug output."""
-    return bool({"-v", "--verbose"} & set(args)) or bool(os.environ.get("APM_DEBUG"))
+def _diagnostic_run(args: Sequence[str], env: Mapping[str, str] | None) -> bool:
+    """True when the run itself enabled verbose or debug output (its own env, not pytest's)."""
+    environment = os.environ if env is None else env
+    return bool({"-v", "--verbose"} & set(args)) or bool(environment.get("APM_DEBUG"))
 
 
 def apm_args(command: Sequence[str]) -> tuple[str, ...]:
@@ -803,6 +789,7 @@ def check_cli_output(
     *,
     scenario_id: str = "single-command",
     known_cells: Sequence[KnownOutputCell] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> None:
     """Fail on any unowned output violation of an APM command; non-APM commands pass."""
     args = tuple(args)
@@ -810,7 +797,7 @@ def check_cli_output(
     if not is_apm_entry_point(prefix):
         return
     expected = _EXPECTED_VIOLATIONS.get()
-    violations = [v for v in output_violations(args, result) if v.law not in expected]
+    violations = [v for v in output_violations(args, result, env) if v.law not in expected]
     cell_stdout = _without_echoed_non_ascii(result.stdout, str(getattr(result, "cwd", "")))
     problems: list[str] = []
     for cell in KNOWN_OUTPUT_CELLS if known_cells is None else known_cells:

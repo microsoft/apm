@@ -44,6 +44,7 @@ from apm_cli.install.source_helpers import (
     content_hash_mismatch_hint,
     download_registry_package,
     ensure_carried_licenses_match,
+    header_ref,
     locked_content_mismatch,
     locked_content_mismatch_line,
     locked_parent_identity,
@@ -399,7 +400,7 @@ class CachedDependencySource(DependencySource):
         display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
         _rref = getattr(dep_ref, "resolved_reference", None)
         if _rref and getattr(_rref, "ref_name", None):
-            _ref = _rref.ref_name
+            _ref = header_ref(_rref, dep_ref, dep_locked_chk)
         elif dep_locked_chk and getattr(dep_locked_chk, "resolved_ref", None):
             _ref = dep_locked_chk.resolved_ref
         elif dep_ref.source == "registry":
@@ -649,6 +650,7 @@ class FreshDependencySource(DependencySource):
             extensions_from_resolved_package,
         )
         from apm_cli.drift import build_download_ref
+        from apm_cli.install.transaction import stage_existing_copy
         from apm_cli.utils.path_security import safe_rmtree
 
         ctx = self.ctx
@@ -665,11 +667,8 @@ class FreshDependencySource(DependencySource):
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             short_name = display_name.split("/")[-1] if "/" in display_name else display_name
 
-            # Workstream B (#1116): per-dep progress is owned by the
-            # shared InstallTui ``ctx.tui``; legacy local Progress is
-            # only wired when integrate is invoked outside the install
-            # pipeline (no callers do this today, but the parameter is
-            # kept for back-compat).
+            # Workstream B (#1116): the shared InstallTui ``ctx.tui`` owns per-dep
+            # progress; legacy local Progress is kept only for back-compat.
             task_id = None
             if progress is not None:
                 task_id = progress.add_task(
@@ -686,6 +685,7 @@ class FreshDependencySource(DependencySource):
                 ref_changed=ref_changed,
             )
 
+            stage_existing_copy(ctx, install_path, skip=dep_key in ctx.pre_download_results)
             if dep_key in ctx.pre_download_results:
                 package_info = ctx.pre_download_results[dep_key]
             elif dep_ref.source == "registry":
@@ -768,13 +768,10 @@ class FreshDependencySource(DependencySource):
             deltas: dict[str, int] = {"installed": 1}
 
             resolved = getattr(package_info, "resolved_reference", None)
+            _ref = header_ref(resolved, dep_ref, dep_locked_chk)
             if logger:
-                _ref = ""
-                _sha = ""
-                if resolved:
-                    _ref = resolved.ref_name if resolved.ref_name else ""
-                    # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
-                    _sha = format_short_sha(resolved.resolved_commit)
+                # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
+                _sha = format_short_sha(resolved.resolved_commit) if resolved else ""
                 logger.download_complete(display_name, ref=_ref, sha=_sha)
                 # Only emit the per-package git auth diagnostic for git deps.
                 # Registry-sourced deps don't talk to git hosts; resolving
@@ -795,7 +792,7 @@ class FreshDependencySource(DependencySource):
             else:
                 _ref_suffix = ""
                 if resolved:
-                    _r = resolved.ref_name if resolved.ref_name else ""
+                    _r = _ref
                     _s = format_short_sha(resolved.resolved_commit)
                     if _r and _s:
                         _ref_suffix = f" #{_r} @{_s}"

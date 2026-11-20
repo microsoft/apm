@@ -77,10 +77,10 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 1023, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 458, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 468, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 489, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 516, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 475, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 485, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 506, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 533, '"--target"'),
     ),
     "uninstall": (
         Ev("src/apm_cli/commands/uninstall/cli.py", 676, 'argument("packages"'),
@@ -90,16 +90,16 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/prune.py", 77, '"--dry-run"'),
         Ev("src/apm_cli/commands/prune.py", 84, "def prune(ctx, dry_run)"),
     ),
-    "compile": (Ev(_COMPILE, 1279, '"--target"'), Ev(_COMPILE, 1289, '"--dry-run"')),
+    "compile": (Ev(_COMPILE, 1282, '"--target"'), Ev(_COMPILE, 1292, '"--dry-run"')),
     "lock": (
         Ev("src/apm_cli/commands/lock.py", 110, '"--update"'),
         Ev("src/apm_cli/commands/lock.py", 117, '"--no-policy"'),
         Ev("src/apm_cli/commands/lock.py", 123, '"--target"'),
     ),
     "pack": (
-        Ev(_PACK, 187, '"--target"'),
-        Ev(_PACK, 223, '"--dry-run"'),
-        Ev(_PACK, 226, '"--force"'),
+        Ev(_PACK, 191, '"--target"'),
+        Ev(_PACK, 227, '"--dry-run"'),
+        Ev(_PACK, 230, '"--force"'),
     ),
     "bundle-install": (Ev(_INSTALL, 1239, "detect_local_bundle"),),
     "mcp-install": (Ev(_INSTALL, 959, '"--mcp"'), Ev(_INSTALL, 891, '"--target"')),
@@ -108,9 +108,9 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_APPROVE, 296, 'argument("packages"'),
     ),
     "audit": (
-        Ev("src/apm_cli/commands/audit.py", 1371, 'argument("package"'),
-        Ev("src/apm_cli/commands/audit.py", 1390, '"--dry-run"'),
-        Ev("src/apm_cli/commands/audit.py", 1428, '"--no-policy"'),
+        Ev("src/apm_cli/commands/audit.py", 1374, 'argument("package"'),
+        Ev("src/apm_cli/commands/audit.py", 1393, '"--dry-run"'),
+        Ev("src/apm_cli/commands/audit.py", 1431, '"--no-policy"'),
     ),
     "marketplace": (
         Ev("src/apm_cli/commands/marketplace/__init__.py", 351, "def add(source, name"),
@@ -146,15 +146,15 @@ USER_SCOPE_OPS = frozenset(
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 923, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 481, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 498, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 684, '"--global"'),
-    "compile": Ev(_COMPILE, 1388, '"--global"'),
+    "compile": Ev(_COMPILE, 1391, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 102, '"--global"'),
     "approve-deny": Ev(_APPROVE, 216, '"--user"'),
     # U5: pack has no --global (options 163-301).
-    "pack": Ev(_PACK, 166, '@click.command(name="pack"'),
+    "pack": Ev(_PACK, 170, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 84, "def prune(ctx, dry_run)"),
-    "audit": Ev("src/apm_cli/commands/audit.py", 1492, "def audit("),
+    "audit": Ev("src/apm_cli/commands/audit.py", 1495, "def audit("),
     "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 351, "def add(source, name"),
 }
 
@@ -172,7 +172,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U3": (
         "edited is defined relative to a receipt; present with unknown provenance has no lock",
-        (Ev("src/apm_cli/core/deployment_ledger.py", 672, "class DeploymentLedgerCodec"),),
+        (Ev("src/apm_cli/core/deployment_ledger.py", 772, "class DeploymentLedgerCodec"),),
     ),
     "U4": (
         "a declared target change without a receipt is reachable; only receipt-backed "
@@ -185,7 +185,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             ),
         ),
     ),
-    "U5": ("pack -g is a syntactic refusal", (Ev(_PACK, 166, '@click.command(name="pack"'),)),
+    "U5": ("pack -g is a syntactic refusal", (Ev(_PACK, 170, '@click.command(name="pack"'),)),
     "U6": (
         "pack provenance is the dependencies / marketplace block, not SRC",
         (Ev(_PACK, 36, "dependencies: block"), Ev(_PACK, 37, "marketplace: block")),
@@ -210,9 +210,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev(_INSTALL, 977, '"--url"'),
             Ev("src/apm_cli/models/dependency/reference.py", 860, '"registry" in entry'),
             Ev("src/apm_cli/marketplace/registration.py", 45, "No marketplace.json found"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 698, "is an MCP server, not a package"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 857, "was not found in apm.yml"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 690, "cannot remove local-bundle"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 701, "is an MCP server, not a package"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 855, "was not found in apm.yml"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 693, "cannot remove local-bundle"),
             Ev("src/apm_cli/commands/update.py", 450, "No APM dependencies to update"),
             Ev("src/apm_cli/commands/prune.py", 210, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
@@ -254,7 +254,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             ),
             Ev(
                 "src/apm_cli/install/mcp/retired_destinations.py",
-                163,
+                165,
                 "def heal_retired_project_mcp_destinations",
             ),
         ),
@@ -262,8 +262,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     "E3": (
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
-            Ev("src/apm_cli/install/services.py", 850, "staged_files"),
-            Ev("src/apm_cli/install/services.py", 1052, '"instructions" not in target.primitives'),
+            Ev("src/apm_cli/install/services.py", 823, "staged_files"),
+            Ev("src/apm_cli/install/services.py", 1025, '"instructions" not in target.primitives'),
         ),
     ),
 }

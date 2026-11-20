@@ -117,8 +117,7 @@ class ScriptRunner:
         error_msg += f"\nTo find available prompts, check:\n"  # noqa: F541
         error_msg += f"  - Local: .apm/prompts/, .github/prompts/, or project root\n"  # noqa: F541
         error_msg += f"  - Dependencies: apm_modules/*/.apm/prompts/\n"  # noqa: F541
-        error_msg += f"\nOr install a prompt package:\n"  # noqa: F541
-        error_msg += f"  apm install <owner>/<repo>/path/to/prompt.prompt.md\n"  # noqa: F541
+        error_msg += "\nRun 'apm list' to see each script and its command.\n"
 
         raise RuntimeError(error_msg)
 

@@ -1,6 +1,8 @@
 """Console utility functions for formatting and output."""
 
+import os
 import re
+import sys
 import threading
 from contextlib import contextmanager
 from typing import Any
@@ -76,6 +78,24 @@ def _ascii_ellipsis(segment: Any) -> Any:
     return segment._replace(text=dotted)
 
 
+def _piped_windows_width(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Keep the full width when a Windows console writes to a pipe or file (#4409).
+
+    Rich treats any stream without VT support as a legacy Windows console and
+    renders one column narrower, which only prevents an auto-wrap on an
+    interactive old conhost. Rich keeps its own detection for a terminal.
+    """
+    if os.name != "nt" or "legacy_windows" in kwargs:
+        return kwargs
+    stream = kwargs.get("file") or (sys.stderr if kwargs.get("stderr") else sys.stdout)
+    isatty = getattr(stream, "isatty", None)
+    try:
+        interactive = bool(isatty and isatty())
+    except (OSError, ValueError):
+        interactive = False
+    return kwargs if interactive else {**kwargs, "legacy_windows": False}
+
+
 def _ascii_console(base: Any, **kwargs: Any) -> Any:
     """Build *base* so boxes, rules, and trees render in printable ASCII.
 
@@ -85,6 +105,7 @@ def _ascii_console(base: Any, **kwargs: Any) -> Any:
     """
     if not isinstance(base, type):
         return base(**kwargs)
+    kwargs = _piped_windows_width(kwargs)
     cls = _ascii_console_classes.get(base)
     if cls is None:
 

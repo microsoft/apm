@@ -13,6 +13,8 @@ For TLS-specific failures see [SSL / TLS issues](../ssl-issues/). For the full f
 
 Symptom: `403`, `401`, "authentication required", or "Repository not found" on a repo you can clone manually with `git`.
 
+The error names the host and the credential source APM tried (for example `credential tried: GITHUB_APM_PAT_ACME`, or the sources it checked when none held a token), never the token value. A host that answers "not found" is reported as `Repository <owner/repo> not found on <host>`, not as a network error: check the name, or that the credential can read a private repository. For a dependency declared in `apm.yml`, the error ends with `Run 'apm uninstall <owner/repo>'` to drop it.
+
 ### GitHub precedence chain
 
 APM resolves a token per host class. For `github.com`, GHE Cloud, and GHES the order is:

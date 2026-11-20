@@ -35,6 +35,12 @@ from scripts.architecture_linter.checks.install_bundle_compile_staging import (
 from scripts.architecture_linter.checks.install_bundle_compile_staging import (
     check_bundle_compile_staging,
 )
+from scripts.architecture_linter.checks.install_checkout_skill_trust import (
+    GUARD_KEPT_MEMBERS,
+    GUARD_TRUSTED_RECEIPT,
+    check_cleanup_retains_kept_members,
+    check_skill_adoption_trusted_receipt,
+)
 from scripts.architecture_linter.checks.install_cleanup_target_roots import (
     GUARD_CLEANUP_TARGET_ROOTS,
     check_cleanup_target_roots,
@@ -88,6 +94,12 @@ from scripts.architecture_linter.checks.install_locked_copy_validity import (
 from scripts.architecture_linter.checks.install_locked_copy_validity import (
     check_locked_copy_validity,
 )
+from scripts.architecture_linter.checks.install_locked_source_cache import (
+    GUARD as _GUARD_LOCKED_SOURCE_CACHE,
+)
+from scripts.architecture_linter.checks.install_locked_source_cache import (
+    check_locked_source_cache,
+)
 from scripts.architecture_linter.checks.install_lockfile_preflight import (
     GUARD_INSTALL_LOCKFILE_PREFLIGHT,
     check_install_lockfile_preflight,
@@ -118,6 +130,10 @@ from scripts.architecture_linter.checks.install_orphan_removal import (
     GUARD_ORPHAN_SELECTION,
     check_orphan_selection,
 )
+from scripts.architecture_linter.checks.install_overwrite_evidence import (
+    GUARD_OVERWRITE_EVIDENCE,
+    check_overwrite_evidence,
+)
 from scripts.architecture_linter.checks.install_package_content_hash import (
     GUARD as _GUARD_PACKAGE_CONTENT_HASH,
 )
@@ -141,6 +157,10 @@ from scripts.architecture_linter.checks.install_portable_trust import (
 from scripts.architecture_linter.checks.install_receipt_collection import (
     GUARD_RECEIPT_COLLECTION,
     check_receipt_collection,
+)
+from scripts.architecture_linter.checks.install_registry_url_scheme import (
+    GUARD_REGISTRY_URL_SCHEME,
+    check_registry_url_scheme,
 )
 from scripts.architecture_linter.checks.install_request_and_source import (
     _GUARD_INSTALL_SCOPE,
@@ -183,17 +203,21 @@ from scripts.architecture_linter.checks.install_skills_root_derivation import (
 from scripts.architecture_linter.checks.install_trust_integrity import (
     GUARD_BUNDLE_ADMISSION,
     GUARD_BUNDLE_USER_SCOPE_ROOT,
+    GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT,
     GUARD_LOCAL_BUNDLE_HOOK_TRUST,
     GUARD_TRUST_POLICY_OUTCOME,
     GUARD_UNPACK_EXECUTABLES,
     GUARD_UPDATE_CONTENT_INTEGRITY,
+    GUARD_UPDATE_MARKETPLACE_PROVENANCE,
     GUARD_UPDATE_REGISTRY_INTEGRITY,
     check_bundle_admission_owner,
     check_bundle_user_scope_root,
+    check_local_bundle_hook_retirement,
     check_local_bundle_hook_trust,
     check_trust_policy_outcome,
     check_unpack_executable_refusal,
     check_update_content_integrity,
+    check_update_marketplace_provenance,
     check_update_registry_integrity,
 )
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
@@ -252,6 +276,11 @@ RULES: tuple[Rule, ...] = (
         check_locked_copy_validity,
     ),
     _rule(
+        _GUARD_LOCKED_SOURCE_CACHE,
+        "Install, update and audit --ci replay read locked git sources through one cache.",
+        check_locked_source_cache,
+    ),
+    _rule(
         _GUARD_PACKAGE_CONTENT_HASH,
         "Package content hashing, its lockfile stream and promotion stay owned by utils/content_hash.py.",
         check_package_content_hash,
@@ -265,6 +294,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_POLICY_FIELD_TYPES,
         "A wrongly typed policy field is a malformed policy, never a parser crash.",
         check_policy_field_types,
+    ),
+    _rule(
+        GUARD_REGISTRY_URL_SCHEME,
+        "Registry URL scheme acceptance stays owned by deps/registry/url_scheme.py.",
+        check_registry_url_scheme,
     ),
     _rule(
         GUARD_TRUST_POLICY_OUTCOME,
@@ -282,6 +316,11 @@ RULES: tuple[Rule, ...] = (
         check_update_registry_integrity,
     ),
     _rule(
+        GUARD_UPDATE_MARKETPLACE_PROVENANCE,
+        "apm update re-verifies locked marketplace provenance against its catalog.",
+        check_update_marketplace_provenance,
+    ),
+    _rule(
         GUARD_BUNDLE_USER_SCOPE_ROOT,
         "apm install -g <bundle> keeps its lock and grants under APM_HOME.",
         check_bundle_user_scope_root,
@@ -290,6 +329,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_LOCAL_BUNDLE_HOOK_TRUST,
         "Local-bundle hooks are re-checked against their recorded approval on every command.",
         check_local_bundle_hook_trust,
+    ),
+    _rule(
+        GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT,
+        "A bundle reinstall retires earlier hooks through the local-bundle hook trust owner.",
+        check_local_bundle_hook_retirement,
     ),
     _rule(
         GUARD_UNPACK_EXECUTABLES,
@@ -397,6 +441,16 @@ RULES: tuple[Rule, ...] = (
         check_skill_adoption_baseline,
     ),
     _rule(
+        GUARD_TRUSTED_RECEIPT,
+        "Skill adoption bails only when every file still holds its receipted bytes.",
+        check_skill_adoption_trusted_receipt,
+    ),
+    _rule(
+        GUARD_KEPT_MEMBERS,
+        "Cleanup retains every member the install declared but left unwritten.",
+        check_cleanup_retains_kept_members,
+    ),
+    _rule(
         GUARD_SELECTION_MERGE,
         "Every resolver edge reaches the single dependency selection-merge owner.",
         check_selection_merge,
@@ -440,6 +494,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_COMMAND_RENDER_ADOPT,
         "Command adoption compares the rendered command via _check_adopt_or_skip.",
         check_command_render_then_adopt,
+    ),
+    _rule(
+        GUARD_OVERWRITE_EVIDENCE,
+        "Managed files are replaced only with a deployment receipt or locked-render evidence.",
+        check_overwrite_evidence,
     ),
     _rule(
         GUARD_CONSUMER_MANIFEST_REWRITE,

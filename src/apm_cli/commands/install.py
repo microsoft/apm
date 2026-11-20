@@ -30,6 +30,7 @@ from apm_cli.deps.lockfile_generator import (
     refusal_exit,
 )
 from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
+from apm_cli.deps.registry.feature_gate import UserRegistryConfigDisabledError
 from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
 from apm_cli.install.argv import (
     _get_invocation_argv,
@@ -111,6 +112,8 @@ from apm_cli.install.phases.local_content import (
 # test pinned in #762 (test_hash_deployed_is_module_level_and_works) keep
 # working via "apm_cli.commands.install._hash_deployed".
 from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed  # noqa: F401
+from apm_cli.install.pipeline_entry import pipeline_preview
+from apm_cli.install.repository_access import inaccessible_package_reason
 
 # Re-export DI-seam helpers from the install services module so that test
 # patches against ``apm_cli.commands.install._integrate_*`` keep working.
@@ -507,9 +510,7 @@ def _resolve_package_references(
                     if not verbose:
                         reason += " (run with --verbose for the git output)"
                 else:
-                    reason = "not accessible or doesn't exist"
-                    if not verbose:
-                        reason += " -- run with --verbose for auth details"
+                    reason = inaccessible_package_reason(dep_ref, package, auth_resolver, verbose)
             invalid_outcomes.append((package, reason))
             if logger:
                 logger.validation_fail(package, reason)
@@ -1479,8 +1480,6 @@ def install(  # noqa: PLR0913
             apm_modules_dir=get_modules_dir(scope),
             validation=None,
             logger=logger,
-            # A preview never creates lifecycle lock state (#2549); its
-            # resolution staging rolls back when the transaction completes.
             acquire_lock=not dry_run,
         )
 
@@ -1613,7 +1612,11 @@ def install(  # noqa: PLR0913
             )
             summary_rendered = True
 
-            if frozen and apm_count > 0:
+            if (
+                frozen
+                and apm_count > 0
+                and getattr(command_result, "disposition", None) is not InstallDisposition.FAILED
+            ):
                 # --frozen verified lockfile structure and deployed hashes (req-lk-017).
                 logger.info(
                     "Deployed files verified against apm.lock.yaml.",
@@ -1736,6 +1739,9 @@ def _install_apm_packages(ctx, outcome):
             apm_package = outcome.prospective_package
     except click.UsageError:
         raise
+    except UserRegistryConfigDisabledError as e:
+        logger.error(str(e))
+        raise InstallFailureAlreadyRendered("Registry configuration needs registries") from e
     except Exception as e:
         logger.error(f"Failed to parse {ctx.manifest_display}: {e}")
         raise InstallFailureAlreadyRendered("Failed to parse install manifest") from e
@@ -1789,7 +1795,6 @@ def _install_apm_packages(ctx, outcome):
             scope=ctx.scope,
         )
 
-    # Every package install and its --dry-run preview enter one pipeline (#4085).
     pipeline_options = dict(
         force=ctx.force,
         parallel_downloads=ctx.parallel_downloads,
@@ -1799,9 +1804,7 @@ def _install_apm_packages(ctx, outcome):
         target=ctx.target or ctx.runtime,
         allow_insecure=ctx.allow_insecure,
         allow_insecure_hosts=ctx.allow_insecure_hosts,
-        marketplace_provenance=(
-            outcome.marketplace_provenance if ctx.packages and outcome else None
-        ),
+        marketplace_provenance=outcome.marketplace_provenance if ctx.packages and outcome else None,
         protocol_pref=ctx.protocol_pref,
         allow_protocol_fallback=ctx.allow_protocol_fallback,
         no_policy=ctx.no_policy,
@@ -1821,8 +1824,6 @@ def _install_apm_packages(ctx, outcome):
     )
 
     if ctx.dry_run:
-        from apm_cli.install.pipeline_entry import pipeline_preview
-
         preview = None
         if should_install_apm and has_any_apm_deps and APM_DEPS_AVAILABLE:
             preview = pipeline_preview(

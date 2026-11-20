@@ -96,10 +96,23 @@ jobs:
       - name: Install frozen development dependencies
         run: uv sync --frozen --extra dev
 
+      # The one job that runs the Codex native plugin cell for real (#4154):
+      # pinned to the production floor (MINIMUM_CODEX_VERSION) and required
+      # through APM_REQUIRE_CODEX, so a missing Codex fails instead of skipping.
+      - name: Cache the pinned Codex CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: npm-openai-codex-0.163.0-${{ runner.os }}
+
+      - name: Install the pinned Codex CLI
+        run: npm install -g @openai/codex@0.163.0
+
       # The journeys job above covers tests/lifecycle/journeys on every OS.
       - name: Run the full lifecycle suite
         env:
           APM_E2E_TESTS: "1"
+          APM_REQUIRE_CODEX: "1"
         run: |
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
             -n 4 --dist loadgroup --durations=20 -m "not live" \

@@ -54,18 +54,21 @@ def integrate_local_bundle_hooks(
     retire = not dry_run and bundle_slug_validation_error(slug) is None
     if not hook_paths:
         if retire:
-            _retire_bundle_hooks(project_root, targets, slug)
+            _retire_bundle_hooks(project_root, targets, slug, scope=scope)
         return result
     if not hooks_approved:
         result.skipped = len(hook_paths)
-        if retire:
-            _retire_bundle_hooks(project_root, targets, slug)
+        retired = retire and _retire_bundle_hooks(project_root, targets, slug, scope=scope)
         from ..core.scope import InstallScope
         from ..security.executables import local_bundle_approval_hint
 
+        lead = (
+            f"Retired hooks from local bundle '{slug}'"
+            if retired
+            else f"Skipped {len(hook_paths)} bundle hook file(s) from {slug}"
+        )
         _warn(
-            f"Skipped {len(hook_paths)} bundle hook file(s) from {slug}: hooks are "
-            "executable and not approved for this exact bundle content. "
+            f"{lead}: hooks are executable and not approved for this exact bundle content. "
             + local_bundle_approval_hint(
                 str(approval_key), "hooks", user_scope=scope == InstallScope.USER
             ),
@@ -82,7 +85,7 @@ def integrate_local_bundle_hooks(
     if not verified_files:
         result.skipped = len(hook_paths)
         if retire:
-            _retire_bundle_hooks(project_root, targets, slug)
+            _retire_bundle_hooks(project_root, targets, slug, scope=scope)
         _warn(
             f"Skipped {len(hook_paths)} bundle hook file(s) from {slug}: the bundle has "
             "no integrity manifest. Repack it with 'apm pack' to register its hooks.",
@@ -116,7 +119,9 @@ def integrate_local_bundle_hooks(
         package_info = _bundle_hook_package(bundle_info, verified_files, Path(tmp) / slug, slug)
         package_info.local_bundle_approval = approval_key
         # Entries recorded under an earlier key are replaced, never kept beside.
-        _retire_bundle_hooks(project_root, targets, slug)
+        from .local_bundle_hook_trust import retire_merged_bundle_entries
+
+        retire_merged_bundle_entries(project_root, targets, slug)
         integrator = HookIntegrator()
         for target in hook_targets:
             outcome = integrator.integrate_hooks_for_target(
@@ -182,12 +187,25 @@ def _bundle_hook_package(bundle_info: Any, verified_files: dict[str, str], stage
     )
 
 
-def _retire_bundle_hooks(project_root: Path, targets: Any, slug: str) -> None:
-    """Remove this bundle's merged hook entries from every hook-capable target."""
-    from ..integration.hook_integrator import HookIntegrator
+def _retire_bundle_hooks(
+    project_root: Path,
+    targets: Any,
+    slug: str,
+    *,
+    scope: Any,
+) -> bool:
+    """Retire what this bundle deployed earlier through the hook trust owner (#4216)."""
+    from ..core.scope import InstallScope, get_apm_dir
+    from .local_bundle_hook_trust import retire_bundle_hooks
 
-    hook_targets = [target for target in targets if target.supports("hooks")]
-    HookIntegrator().retire_local_bundle_hooks(slug, project_root, hook_targets)
+    user_scope = scope == InstallScope.USER
+    return retire_bundle_hooks(
+        project_root,
+        targets,
+        slug,
+        lock_dir=get_apm_dir(InstallScope.USER) if user_scope else project_root,
+        reason=None,
+    )
 
 
 def _prior_bundle_claims(project_root: Path, *, user_scope: bool = False) -> set[str]:

@@ -80,13 +80,22 @@ class DeploymentEvidence:
         render: Callable[[str | None], Path | None] | None,
         owners: Mapping[str, tuple[str, ...]] | None = None,
         user_scope: bool = False,
+        kept: Iterable[str] = (),
     ) -> None:
         self._deploy_root = deploy_root
         self.user_scope = user_scope
+        self._kept = frozenset(value.replace("\\", "/").rstrip("/") for value in kept)
+        # Every ancestor directory of a kept member, so each lookup stays O(1).
+        self._kept_parents = frozenset(
+            "/".join(parts[:index])
+            for parts in (value.split("/") for value in self._kept)
+            for index in range(1, len(parts))
+        )
         self._receipts = dict(receipts)
         self._render = render
         self._owners = dict(owners or {})
         self._renders: dict[str | None, Path | None] = {}
+        self._rendered_now: dict[str, str] = {}
 
     @classmethod
     def none(cls, deploy_root: Path) -> DeploymentEvidence:
@@ -102,12 +111,14 @@ class DeploymentEvidence:
         lockfile: LockFile | None,
         lockfile_root: Path,
         diagnostics,
+        kept: Iterable[str] = (),
     ) -> DeploymentEvidence:
         """Load this installation's receipts and bind a lazy render of *lockfile*.
 
         *lockfile* must be the lock before this transition (the versions whose
         files may be deleted); *lockfile_root* is the directory holding it.
-        Invalid receipt state authorizes nothing and is reported.
+        Invalid receipt state authorizes nothing and is reported. *kept* names
+        the members this install declared but left on disk; they are retained.
         """
         from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
         from apm_cli.core.scope import InstallScope
@@ -120,7 +131,11 @@ class DeploymentEvidence:
             receipts = {}
         if lockfile is None or not lockfile.dependencies:
             return cls(
-                deploy_root=deploy_root, receipts=receipts, render=None, user_scope=user_scope
+                deploy_root=deploy_root,
+                receipts=receipts,
+                render=None,
+                user_scope=user_scope,
+                kept=kept,
             )
         # Freeze the pre-transition lock: callers mutate theirs before rendering.
         locked = copy.deepcopy(lockfile)
@@ -138,7 +153,33 @@ class DeploymentEvidence:
             render=render,
             owners={path: tuple(keys) for path, keys in owners.items()},
             user_scope=user_scope,
+            kept=kept,
         )
+
+    def add_rendered(self, rendered: Mapping[Path, str]) -> None:
+        """Add hashes this install rendered from the source it holds (#4360).
+
+        A local bundle has no locked source to replay; the bytes this install
+        just deployed from it are its render, so a file equal to them is proven.
+        """
+        self._rendered_now.update(
+            {path.resolve().as_posix(): content_hash for path, content_hash in rendered.items()}
+        )
+
+    def _rendered_now_match(self, physical: Path, candidates: Iterable[str | None]) -> bool:
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        for candidate in candidates:
+            path = self._physical(candidate) if candidate else None
+            rendered = self._rendered_now.get(path.resolve().as_posix()) if path else None
+            if rendered is not None and compute_file_hash(physical) == rendered:
+                return True
+        return False
+
+    def kept(self, value: str) -> bool:
+        """Return whether this install kept *value*, or a member under that directory."""
+        value = value.replace("\\", "/").rstrip("/")
+        return value in self._kept or value in self._kept_parents
 
     def prepare(self, claims: Iterable[str]) -> None:
         """Render now when any existing candidate file lacks a matching receipt.
@@ -243,7 +284,7 @@ class DeploymentEvidence:
 
         try:
             receipt = self._receipt_match(physical)
-            if receipt is True:
+            if receipt is True or self._rendered_now_match(physical, (claim, rendered_as)):
                 return AUTHORIZED
             # A stale receipt (the file was later adopted unchanged from a newer
             # render) does not block the render comparison: receipt OR render.
@@ -356,6 +397,10 @@ class CleanupResult:
     """Paths that raised during ``unlink``/``rmtree`` and should be
     retained in ``deployed_files`` for retry on the next install."""
 
+    kept: list[str] = field(default_factory=list)
+    """Paths this install still declares but left on disk unwritten (a refused
+    or skipped member); never stale, so their lockfile entries carry forward."""
+
     skipped_user_edit: list[str] = field(default_factory=list)
     """Paths skipped because the on-disk content no longer matches the
     hash APM recorded at deploy time -- treated as user-edited."""
@@ -384,6 +429,29 @@ class CleanupResult:
     case- or normalization-insensitive filesystem; renamed to the live
     spelling instead of deleted, and no longer owned."""
 
+    deleted_directories: list[str] = field(default_factory=list)
+    """Entries of ``deleted`` that were whole skill directories."""
+
+    user_scope: bool = False
+    """Whether paths are relative to the user's home (shown with ``~/``)."""
+
+    @property
+    def announced_paths(self) -> list[str]:
+        """Return the deleted entries a user is told about, each named once.
+
+        A deleted directory is named with a trailing ``/`` and stands for the
+        members deleted with it, so the count matches the listed paths.
+        """
+        directories = {path.rstrip("/") for path in self.deleted_directories}
+        prefix = "~/" if self.user_scope else ""
+        announced: list[str] = []
+        for path in sorted(dict.fromkeys(path.rstrip("/") for path in self.deleted)):
+            if any(path.startswith(f"{directory}/") for directory in directories):
+                continue
+            shown = f"{path}/" if path in directories else path
+            announced.append(shown if "://" in shown else prefix + shown)
+        return announced
+
     @property
     def retained(self) -> list[str]:
         """Return unique paths that were deliberately left on disk.
@@ -393,6 +461,7 @@ class CleanupResult:
         return list(
             dict.fromkeys(
                 [
+                    *self.kept,
                     *self.failed,
                     *self.skipped_user_edit,
                     *self.skipped_unmanaged,
@@ -472,6 +541,7 @@ def _safe_remove_skill_directory(
             skill_dir.rmdir()
             result.deleted.append(rel_path)
             result.deleted_targets.append(skill_dir)
+            result.deleted_directories.append(rel_path)
         except OSError as exc:
             result.failed.append(rel_path)
             _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
@@ -537,6 +607,7 @@ def _safe_remove_skill_directory(
         shutil.rmtree(skill_dir)
         result.deleted.append(rel_path)
         result.deleted_targets.append(skill_dir)
+        result.deleted_directories.append(rel_path)
     except OSError as exc:
         result.failed.append(rel_path)
         _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
@@ -654,11 +725,11 @@ def remove_stale_deployed_files(
         ``deleted_targets``, calling
         :meth:`InstallLogger.cleanup_skipped_user_edit` for each entry
         in ``skipped_user_edit`` so the inline yellow warning renders,
-        and reporting ``deleted`` count to the user via
-        :meth:`InstallLogger.stale_cleanup` /
+        and naming ``announced_paths`` to the user via
+        :meth:`CommandLogger.stale_cleanup` /
         :meth:`InstallLogger.orphan_cleanup`).
     """
-    result = CleanupResult()
+    result = CleanupResult(user_scope=user_scope)
     # Callers may key hashes with native Windows separators; lookups are POSIX.
     recorded_hashes = {
         path.replace("\\", "/"): content_hash
@@ -687,6 +758,10 @@ def remove_stale_deployed_files(
     _cowork_resolve_errors: int = 0
 
     for stale_path in _stale_list:
+        # A member this install declares but did not rewrite is not stale.
+        if evidence.kept(stale_path):
+            result.kept.append(stale_path)
+            continue
         # -- Cowork:// paths ---------------------------------------
         # Handled BEFORE validate_deploy_path because that method
         # hard-rejects cowork:// when the OneDrive root is unavailable
