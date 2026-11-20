@@ -586,6 +586,7 @@ requirements:
     keyword: MUST
     section: "10.5"
     conformance_class: consumer
+    notes: "Amendment 0.1.70, adopted 2026-11-20 (issue #4234): tar.gz and zip are both accepted, every other container is rejected, and every archive limit applies identically to both"
   - id: req-sc-005
     keyword: MUST
     section: "10.3"
