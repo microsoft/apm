@@ -201,17 +201,31 @@ def _persist_lock_then_resync_native(
         remove_lockfile(lockfile_path)
 
 
-def _resolve_survivor_trust(surviving_deps, deploy_root, manifest_path, scope, logger, *, dry_run):
-    """Resolve the survivors' executables trust before the first write (#4185).
+def _preflight_uninstall_writes(
+    surviving_deps,
+    deploy_root,
+    manifest_path,
+    scope,
+    logger,
+    *,
+    dry_run,
+    lockfile,
+    removed_keys,
+):
+    """Refuse before the first write; return the survivors' trust context (#4185).
 
-    Survivor re-integration needs the org-policy trust map; a policy that
-    refuses must stop the command while apm.yml, the lockfile and deployed
-    files are still untouched.
+    Every recorded path the command removes must pass the deploy-path gate,
+    and survivor re-integration needs the org-policy trust map. Either
+    refusal stops the command while apm.yml, the lockfile and deployed files
+    are still untouched.
     """
     from ...core.scope import InstallScope
     from ...security.executables import resolve_project_exec_allow_map
 
-    if dry_run or not surviving_deps:
+    if dry_run:
+        return (None, False)
+    _refuse_unvalidated_paths(lockfile, removed_keys, deploy_root, scope, logger)
+    if not surviving_deps:
         return (None, False)
     try:
         apm_package = APMPackage.from_apm_yml(manifest_path)
@@ -226,6 +240,44 @@ def _resolve_survivor_trust(surviving_deps, deploy_root, manifest_path, scope, l
         logger.progress("Resolve the org policy issue above and retry; no APM writes were made.")
         sys.exit(1)
     return (allow_map, True)
+
+
+def _refuse_unvalidated_paths(lockfile, dependency_keys, deploy_root, scope, logger) -> None:
+    """Validate every recorded path this uninstall removes before changing state.
+
+    Each path goes through the deploy-path gate the cleanup uses; one that
+    fails stops the command while apm.yml, the lockfile and deployed files are
+    untouched.
+    """
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...core.scope import InstallScope
+    from ...integration.base_integrator import BaseIntegrator
+    from ...integration.copilot_cowork_paths import COWORK_URI_SCHEME
+
+    if lockfile is None or not dependency_keys:
+        return
+    paths = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys).paths
+    rejected = sorted(
+        path
+        for path in paths
+        if not path.startswith(COWORK_URI_SCHEME)
+        and not BaseIntegrator.validate_deploy_path(
+            path,
+            deploy_root,
+            user_scope=scope is InstallScope.USER,
+            allow_final_symlink=True,
+        )
+    )
+    if not rejected:
+        return
+    logger.error("Uninstall stopped: apm.lock.yaml records paths APM does not manage:")
+    for path in rejected:
+        logger.error(f"  - {path}")
+    logger.progress(
+        "Restore apm.lock.yaml from version control or run 'apm install' to repair it, "
+        "then retry; no APM writes were made."
+    )
+    sys.exit(1)
 
 
 def _sync_integrations_for_manifest(
@@ -836,8 +888,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             excluded_keys=removed_keys | builtins.set(projected_orphans),
             source_root=manifest_path.parent,
         )
-        survivor_trust = _resolve_survivor_trust(
-            surviving_deps, deploy_root, manifest_path, scope, logger, dry_run=dry_run
+        survivor_trust = _preflight_uninstall_writes(
+            surviving_deps,
+            deploy_root,
+            manifest_path,
+            scope,
+            logger,
+            dry_run=dry_run,
+            lockfile=lockfile,
+            removed_keys=removed_keys | builtins.set(projected_orphans) | profile_keys,
         )
         if not dry_run:
             staged_local_refreshes = _stage_shared_local_survivors(

@@ -43,3 +43,42 @@ def test_policy_refusal_mid_uninstall_changes_nothing(
     diff = before.diff(world.snapshot("."))
     assert not (diff.added | diff.removed | diff.changed), diff
     world.assert_user_file_intact()
+
+
+def test_uninstall_validates_every_recorded_path_before_changing_state(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A recorded path outside the project stops uninstall before any write."""
+    from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+
+    world = build_world(tmp_path, apm_binary_path, packages=("alpha", "beta"))
+    outside = world.isolated.root / "outside.md"
+    outside.write_text("not APM's\n", encoding="ascii")
+    lock_path = world.project / "apm.lock.yaml"
+    lock = load_yaml(lock_path)
+    escape = "../../outside.md"
+    owner = next(dep for dep in lock["dependencies"] if "alpha" in dep["local_path"])
+    owner["deployed_files"].append(escape)
+    lock["deployments"].append(
+        {
+            "kind": "project-relative",
+            "target": "copilot",
+            "value": escape,
+            "runtime": None,
+            "scope": "project",
+            "owners": [owner["local_path"]],
+            "active_owner": owner["local_path"],
+            "content_hash": "sha256:" + "0" * 64,
+        }
+    )
+    dump_yaml(lock, lock_path)
+    before = world.snapshot(".")
+
+    refused = world.apm("uninstall", "./packages/alpha")
+
+    assert refused.returncode == 1, evidence(refused)
+    assert escape in refused.stdout + refused.stderr, evidence(refused)
+    diff = before.diff(world.snapshot("."))
+    assert not (diff.added | diff.removed | diff.changed), diff
+    assert outside.read_text(encoding="ascii") == "not APM's\n"
+    world.assert_user_file_intact()
