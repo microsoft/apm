@@ -608,8 +608,9 @@ def test_archive_container_size_and_entry_count_capped():
         "MUST reject any other\narchive container in v0.1",
         "100 MB",
         "10,000",
-        "Every limit on\nregistry archive extraction applies identically to both containers",
-        "A limit enforced for one container and\nnot the other does not conform.",
+        "counted as\nentries are read",
+        "any symbolic or hard\nlink, and any duplicate entry path",
+        "The same limit set, (b) through (d),\napplies identically to `tar.gz` and `zip`.",
     )
 
 
