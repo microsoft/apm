@@ -53,8 +53,8 @@ RATCHET_SCALING_CHECK = "Architecture Scaling (Linux)"
 ARCHITECTURE_SCALING_TARGETS = (
     "tests/perf/test_architecture_linter_scaling.py::"
     "test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction",
-    "tests/perf/test_architecture_linter_scaling.py::"
-    "test_session_cached_mutation_matrix_scales_within_2_2x_from_n_to_2n",
+    # The session-cache 2.2x wall-clock ratio stays off CI (timing asserts
+    # flake); the deterministic parse-once guard gates the cache instead.
 )
 ALLOW_PROVISIONAL_KEY = "APM_ALLOW_PROVISIONAL_BASELINES"
 DRAFT_PROVISIONAL_GUARD = (
