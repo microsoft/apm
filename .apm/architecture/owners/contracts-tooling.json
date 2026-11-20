@@ -122,7 +122,10 @@
       "decision": "Whether a discovered lifecycle script may fire (APM_NO_SCRIPTS, org executables.deny_all, project script trust)",
       "owner": "core/lifecycle_scripts.py (build_runner_from_context is the only LifecycleScriptRunner constructor)",
       "selectors": ["src/apm_cli/core/lifecycle_scripts.py"],
-      "guards": ["contracts-tooling-lifecycle-script-gate"]
+      "guards": [
+        "contracts-tooling-lifecycle-script-gate",
+        "contracts-tooling-lifecycle-policy-errors"
+      ]
     },
     {
       "id": "lockfile-generator-compatibility",

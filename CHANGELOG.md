@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal: unit tests no longer inherit console routing, config or environment left by an earlier test on the same worker; a per-test leak detector fails the test that leaks. (#4226)
 - `apm uninstall` (including `-g`) removes a package's LSP servers from target configs and the lockfile when no MCP servers are installed, instead of exiting 1. (closes #4045, #3768, #4057)
 - `apm uninstall` cleans LSP servers on the targets `apm.lock.yaml` recorded, no longer failing with "No harness detected" or moving survivors to the saved target. (closes #4059, #4068)
+- `apm audit --ci` drift replay and lifecycle scripts now apply org policy outcomes as `apm install` does. (#4079, #4151)
+- `apm audit --ci` and `apm approve` now handle every org policy outcome as `apm install` does; `apm approve` exits 1 when the policy outcome blocks. (#4084, #4151)
+- An org policy field of the wrong type is reported as a malformed policy instead of stopping the command with an internal error. (#4140, #4151)
 
 ## [0.37.0] - 2026-11-20
 
