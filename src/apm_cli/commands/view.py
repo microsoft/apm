@@ -11,6 +11,9 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    DEPENDENCIES_NOT_INSTALLED,
+)
 from apm_cli.core.scope import manifest_file
 
 from ..constants import APM_MODULES_DIR, SKILL_MD_FILENAME
@@ -446,12 +449,10 @@ def _display_registry_versions(
         return
 
     try:
-        from rich.table import Table
-
-        from apm_cli.utils.console import new_console
+        from apm_cli.utils.console import new_console, new_table
 
         console = new_console()
-        table = Table(
+        table = new_table(
             title=f"Available versions: {package}",
             show_header=True,
             header_style="bold cyan",
@@ -634,12 +635,10 @@ def display_versions(
 
     # -- render with Rich table (fallback to plain text) ---------------
     try:
-        from rich.table import Table
-
-        from apm_cli.utils.console import new_console
+        from apm_cli.utils.console import new_console, new_table
 
         console = new_console()
-        table = Table(
+        table = new_table(
             title=f"Available versions: {package}",
             show_header=True,
             header_style="bold cyan",
@@ -790,7 +789,7 @@ def view(
 
     if not apm_modules_path.exists():
         logger.error("No apm_modules/ directory found")
-        logger.progress("Run 'apm install' to install dependencies first")
+        logger.progress(DEPENDENCIES_NOT_INSTALLED.sentence())
         sys.exit(1)
 
     package_path = resolve_package_path(package, apm_modules_path, logger)

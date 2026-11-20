@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User-scope (`-g`) policy behavior aligned with the docs: policy settings come from the user manifest in `$APM_HOME`, user scope discovers no org policy from a git remote, and `apm policy status -g` shows the source. (#4158)
 - Internal: CI runs the same tests on a faster layout: PR unit shards use every CPU, lifecycle smoke 4 shards, Windows units 3, macOS arm64 units split. (#4032)
 - Internal: PR checks run the full Windows unit suite (3 shards), the same selection main push runs. (closes #4115, #4150)
+- `apm audit --format json` adds a structured `remediation` (the command and the state it clears) to failing CI checks. (#4143)
 - Internal: lifecycle tests add a GATE state machine for approve, deny, revoke and policy tightening, checked by a cross-cutting oracle after every step. (#4040)
 - Each command writes `apm.lock.yaml` at most once, and `apm compile` refuses a lockfile written by a newer APM before changing files. (closes #4086, #4255)
 - Internal: `apm install --mcp` and `apm mcp install` install and record their server through the same MCP stage as `apm install`. (#4255)
@@ -38,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm update` names each local bundle whose executables are parked, with the approval next step, instead of reporting nothing. (closes #4441, #4471)
+- `apm update` with nothing to change applies org policy like `apm install`: a denied dependency exits 1 and nothing is written. (closes #4458, #4482)
 - `apm install` blocked by org policy ends with a runnable next step: remove or replace the blocked dependencies, check `apm policy status`, then re-run. (closes #4404, #4418)
 - `apm uninstall` resolves the remaining packages' org-policy trust before changing state, so that refusal leaves `apm.yml`, the lockfile and deployed files unchanged, and uninstall refuses out-of-project paths before any change. (closes #4185, #4255)
 - `apm uninstall` keeps your own files inside a removed package's skill directory and succeeds, as `apm prune` does. (closes #4162, #4255)
@@ -102,6 +104,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `install.sh` prints color codes only on a terminal and honors `NO_COLOR`, so piped and `apm self-update` output is plain text. (closes #4308, #4429)
 - `apm update` and `apm approve` print an org-policy block as an `[x]` error line, like every other refusal. (closes #4403, #4427)
 - `apm install --dry-run` previews the org policy block that the real install applies when policy cannot be resolved under `fetch_failure_default: block`. (closes #4455, #4466)
+- `apm install` and `apm install --frozen` accept a user's Codex MCP entry that equals the declared server, including one switched off with `enabled = false`, and leave it unowned. (#4470)
+- `apm update` restores a marketplace lock row to the alias `apm.yml` declares when the row records that alias's registered origin. (#4475)
+- Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
+- `apm audit --ci` and `apm install --frozen` advice for edited files says what install does per file kind; `apm install` warns before overwriting edits. (closes #4090, #4143)
+- `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - Registry transport errors render operating-system error text in printable ASCII, so a TLS failure on macOS no longer prints curly quotes. (#4369)

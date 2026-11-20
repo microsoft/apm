@@ -610,7 +610,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
         compile_mock.assert_not_called()
         error = " ".join("".join(capsys.readouterr()).split()).lower()
         assert "failed to parse" in error
-        assert "fix the manifest and rerun 'apm compile -g'" in error
+        assert "then run 'apm compile -g' to compile the user scope" in error
 
     @pytest.mark.windows_compat
     def test_invalid_target_name_has_global_manifest_recovery(self, tmp_path):
@@ -635,7 +635,7 @@ class TestGlobalCompileHonorsDeclaredTargets:
         error = logger.error.call_args.args[0].lower()
         assert "unknown target 'not-a-harness'" in error
         assert str(source_root / "apm.yml").lower() in error
-        assert "rerun 'apm compile -g'" in error
+        assert "then run 'apm compile -g' to compile the user scope" in error
         assert "apm install" not in error
 
     def test_unreadable_manifest_fails_closed_without_compiling(self, tmp_path, capsys):
@@ -664,8 +664,8 @@ class TestGlobalCompileHonorsDeclaredTargets:
         error = " ".join("".join(capsys.readouterr()).split()).lower()
         assert "failed to read" in error
         assert "permission denied" in error
-        assert "ensure it is a readable yaml file" in error
-        assert "rerun 'apm compile -g'" in error
+        assert "then run 'apm compile -g' to compile the user scope" in error
+        assert "then run 'apm compile -g' to compile the user scope" in error
 
     def test_non_mapping_manifest_fails_closed_without_compiling(self, tmp_path, capsys):
         """A YAML sequence parses cleanly but is not a usable manifest."""

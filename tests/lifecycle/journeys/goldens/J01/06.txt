@@ -11,7 +11,7 @@ $ apm install
   |-- 2 agents adopted -> .claude/agents/, .github/agents/
   |-- 2 commands adopted -> .claude/commands/
   |-- 2 instruction(s) adopted -> .claude/rules/, .github/instructions/
-  |-- 1 skill(s) integrated -> .agents/skills/, .claude/skills/
-  [!] 1 dependency unpinned: github/awesome-copilot -- apm.lock.yaml pins the resolved commit; to track releases on update, add a semver range in apm.yml such as #^1.0.0 (a tag like #v1.0.0 stays put)
-[*] Installed 1 APM dependency in <DUR>.
+  |-- (files unchanged)
+
+[i] No changes -- install state already up to date in <DUR>.
 --- stderr

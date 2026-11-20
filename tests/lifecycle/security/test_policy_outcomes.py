@@ -893,7 +893,6 @@ SITE_SLICES["install-dry-run-preflight"] = SiteSlice(
 )
 
 # commands/update.py -- the re-gate short circuit of an update with nothing to change.
-_SHORTCIRCUIT = "#4458 update and install exit agreement under policy"
 SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
     arrange=_installed_parked_exec,
     command=lambda world: "apm update",
@@ -907,7 +906,7 @@ SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
         "no_git_remote/warn": Expect(0, present=(SKILL,)),
         "empty/block": Expect(1, (KNOB_BLOCK,)),
         "empty/warn": Expect(0, present=(SKILL,)),
-        "found": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
+        "found": Expect(1, (DENIED,)),
         "disabled": Expect(0, present=(SKILL,)),
         "malformed/block": Expect(1, (KNOB_BLOCK,), present=(SKILL,)),
         "malformed/warn": Expect(0, (r"is malformed",), present=(SKILL,)),
@@ -915,12 +914,11 @@ SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
         "garbage_response/warn": Expect(0, (r"is not valid YAML",), present=(SKILL,)),
         "incomplete_chain": Expect(1, (r"inheritance chain is incomplete",), present=(SKILL,)),
         "cached_stale/org-block": Expect(1, (r"fetch_failure=block",)),
-        "cached_stale/warn": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
-        "cache=cold": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
-        "cache=warm-fresh": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
-        # A stale cache under 7 days is applied as a fresh one (#4456), so it
-        # meets the same update short-circuit defect.
-        "cache=stale<7d": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
+        "cached_stale/warn": Expect(1, (DENIED,)),
+        "cache=cold": Expect(1, (DENIED,)),
+        "cache=warm-fresh": Expect(1, (DENIED,)),
+        # A stale cache under 7 days is applied as a fresh one (#4456).
+        "cache=stale<7d": Expect(1, (DENIED,)),
         "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), present=(SKILL,)),
     },
 )
