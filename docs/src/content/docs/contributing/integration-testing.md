@@ -38,7 +38,7 @@ APM uses a tiered approach to integration testing:
 - **Purpose**: Promote a stable, hermetic slice of Consume/Produce/Govern lifecycle contracts onto the PR-time critical path, so regressions in install, lock, deployment ownership, compile, pack, prune, uninstall, audit, and repair fail the PR.
 - **Scope**: the family contains a static authority guard plus content-hash, policy, hook, virtual-package, audit, auth, and installed-console rows. Real subprocess cases use the uv-installed `apm` command and local Git. This is not frozen PyInstaller coverage.
 - **Prerequisites**: the pytest step sets `APM_E2E_TESTS=1` so subprocess rows execute. `APM_RUN_INTEGRATION_TESTS` remains unset, the socket guard denies network sockets, and the job binds no credentials.
-- **Duration**: three shards each retain a hard 10-minute timeout, including setup and cleanup, with four `loadgroup` workers. Hosted job results are authoritative; a printed pytest summary does not override a job timeout.
+- **Duration**: four shards each retain a hard 10-minute timeout, including setup and cleanup, with four `loadgroup` workers. Hosted job results are authoritative; a printed pytest summary does not override a job timeout.
 - **Trigger**: every pull request and merge queue run. The required `Lifecycle Smoke (Linux)` aggregate checks every shard result independently and fails if any is missing, skipped, cancelled, or failed.
 - **Selection mechanism**: `pytest --strict-markers -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration` -- declarative, not a file/node-id list. No central count or membership list is maintained.
 - **Sharding**: `scripts.ci_sharding` balances the shards by the measured durations in `.github/ci-durations/linux-x86_64.json` while keeping each module and composite `xdist_group` intact. The shards are disjoint and their union is the unchanged required selection.
@@ -602,13 +602,13 @@ pytest collection; they are not lists of tests to run.
 - **Network lane** (Linux x86_64): `requires_github_token or
   requires_network_integration`, re-running only failed tests up to twice.
 - **Windows**: `scripts/windows/test-integration.ps1`.
-- **macOS**: still one job per architecture. Apple Silicon runs the unit suite
-  plus `lifecycle_smoke or windows_compat or platform_sensitive`; Intel runs
-  `windows_compat or platform_sensitive`. Mark OS-, filesystem- or
+- **macOS**: Intel is one job running `windows_compat or platform_sensitive`.
+  Apple Silicon runs the unit suite in its own job, in parallel with the build
+  job that runs `lifecycle_smoke or windows_compat or platform_sensitive`. Mark OS-, filesystem- or
   shell-sensitive integration tests `platform_sensitive`.
 
 `create-release` requires a pushed tag and every release-bound lane. Only a
-promoted tag may skip integration.
+promoted tag may skip integration and the Apple Silicon unit job.
 
 The existing unprivileged `PR Binary Smoke (Linux)` job also runs
 `tests/integration/test_audit_workspace_identity_lifecycle.py` against its built
