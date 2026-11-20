@@ -187,18 +187,26 @@ def _committed_kit_project(world: _World, ref: str) -> None:
 _KIT_ROOTS = (".agents/skills", ".github/instructions")
 
 
+@pytest.mark.parametrize("apm_home", ["fresh", "shared"])
 def test_new_worktree_adopts_committed_link_rewritten_skill(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, apm_home: str
 ) -> None:
-    """A worktree with a fresh APM_HOME installs over committed output unchanged."""
+    """A second worktree, with its own or the shared APM_HOME, installs over committed output.
+
+    Receipts are keyed per checkout root, so the shared store never vouches across
+    worktrees (negative control for #4230).
+    """
     world = _new_world(tmp_path, apm_binary_path)
     v1, _v2, _v3 = _publish_kit(world)
     _committed_kit_project(world, v1)
     worktree = world.isolated.work_root / "consumer-b"
     world.git("worktree", "add", "-q", "-b", "b", str(worktree))
-    env = dict(world.env, APM_HOME=str(world.isolated.root / "apm-home-b"))
-    Path(env["APM_HOME"]).mkdir()
-    assert not list(Path(env["APM_HOME"]).rglob("deployment-receipts*/*.json"))
+    if apm_home == "fresh":
+        env = dict(world.env, APM_HOME=str(world.isolated.root / "apm-home-b"))
+        Path(env["APM_HOME"]).mkdir()
+        assert not list(Path(env["APM_HOME"]).rglob("deployment-receipts*/*.json"))
+    else:
+        env = world.env
     before = _tree(worktree, *_KIT_ROOTS)
     lock_before = (worktree / "apm.lock.yaml").read_bytes()
 
@@ -406,7 +414,11 @@ def test_branch_switch_then_source_edit_never_deletes_skill_members(
 def test_discarded_deploy_then_source_edit_installs(
     tmp_path: Path, apm_binary_path: Path, discard: str
 ) -> None:
-    """R5/R6: a member restored by git matches its render, so the next edit deploys."""
+    """R5/R6, the primary #4230 trigger in one checkout (no branch switch, no #4229 receipt).
+
+    Install, edit a.md, install, discard with git, edit SKILL.md, install: the
+    git-restored a.md equals its render, so it is neither refused nor cleaned.
+    """
     world = _new_world(tmp_path, apm_binary_path)
     _committed_local_project(world)
     _write(world.project / ".apm/skills/x/references/a.md", "reference a v2\n")
@@ -477,8 +489,9 @@ def _user_world(tmp_path: Path, apm_binary_path: Path) -> tuple[_World, Path]:
     return world, package
 
 
+@pytest.mark.parametrize("variant", ["clean", "dirty"])
 def test_user_scope_branch_switch_then_source_edit_never_deletes_skill_members(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, variant: str
 ) -> None:
     """-g: the #4230 sequence on a HOME under git keeps every member and lock row."""
     world, package = _user_world(tmp_path, apm_binary_path)
@@ -491,9 +504,18 @@ def test_user_scope_branch_switch_then_source_edit_never_deletes_skill_members(
     _write(package / ".apm/skills/x/SKILL.md", _LOCAL_SKILL + "Read a (B).\n")
     _write(package / ".apm/skills/x/references/a.md", "reference a, version B\n")
     assert world.apm("install", "-g", cwd=home).returncode == 0
-    _commit_all(world, "B: edit and redeploy", root=home)
+    if variant == "clean":
+        _commit_all(world, "B: edit and redeploy", root=home)
+    else:
+        world.git("add", "pkgs", cwd=home)
+        world.git("commit", "-q", "-m", "B: edit sources only", cwd=home)
     for branch in ("main", "B", "main"):
-        world.git("checkout", "-q", branch, cwd=home)
+        if branch == "main" and world.git("status", "--porcelain", cwd=home):
+            world.git("stash", "-q", "-u", cwd=home)
+            world.git("checkout", "-q", branch, cwd=home)
+            world.git("stash", "drop", "-q", cwd=home)
+        else:
+            world.git("checkout", "-q", branch, cwd=home)
         before = _tree(home, _X)
         result = world.apm("install", "-g", cwd=home)
         _assert_nothing_deleted(before, home)
@@ -553,3 +575,34 @@ def test_member_skipped_as_modified_is_never_stale(
         assert edited.read_text(encoding="ascii").endswith("USER EDIT\n")
         assert (root / _X / "references/a.md").read_bytes() == sibling
         assert lock.read_bytes() == lock_before
+
+
+_USER_EDIT = "USER EDIT\n"
+
+
+@pytest.mark.parametrize("case", ["R1", "R2", "R3", "R4"])
+def test_user_edit_variants_never_lose_bytes(
+    tmp_path: Path, apm_binary_path: Path, case: str
+) -> None:
+    """No-loss controls beside the R5 trigger: a deployed user edit is kept, nothing is cleaned."""
+    world = _new_world(tmp_path, apm_binary_path)
+    _committed_local_project(world)
+    deployed = world.project / _X / "SKILL.md"
+    deployed.write_text(deployed.read_text(encoding="ascii") + _USER_EDIT, encoding="ascii")
+    if case in ("R1", "R4"):
+        _write(world.project / ".apm/skills/x/references/a.md", "reference a v2\n")
+    if case in ("R2", "R4"):
+        _write(world.project / ".apm/skills/x/SKILL.md", _LOCAL_SKILL + "source edit\n")
+    before = _tree(world.project, _X)
+
+    result = world.apm("install")
+    output = _output(result)
+    _assert_nothing_deleted(before, world.project)
+    assert result.returncode == 0, output
+    assert _MODIFIED in output, output
+    assert "Cleaned" not in output and "Kept user-edited file" not in output, output
+    assert deployed.read_text(encoding="ascii").endswith(_USER_EDIT)
+    expected_a = "reference a v2\n" if case in ("R1", "R4") else "reference a, version A\n"
+    assert (world.project / _X / "references/a.md").read_text(encoding="ascii") == expected_a
+    missing = sorted(p for p in _locked_files(world.project) if not (world.project / p).exists())
+    assert not missing, missing

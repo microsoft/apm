@@ -6074,3 +6074,40 @@ def test_package_content_hash_guard_rejects_second_streams_and_hashers(
     report = run_selected_rules(ROOT, (rule,), source_overrides={path: source.replace(old, new, 1)})
     assert report.failures == ()
     assert any(violation.rule_id == rule for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
+            "src/apm_cli/install/phases/post_deps_local.py",
+            "        retained_values=frozenset(_kept),\n",
+            "        retained_values=frozenset(),\n",
+            id="local-content-deleter",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/lockfile.py",
+            "                retained_values=frozenset(kept_prior_values(self.ctx, prior_files)),\n",
+            "                retained_values=frozenset(),\n",
+            id="lock-persistence-deleter",
+        ),
+        pytest.param(
+            "src/apm_cli/core/deployment_state.py",
+            "        if not intent.authoritative_targets or record.locator.value in intent.retained_values:\n",
+            "        if not intent.authoritative_targets:\n",
+            id="reconciler-stale-rule",
+        ),
+    ],
+)
+def test_every_stale_deleter_consumes_the_skip_set(
+    path: str, original: str, replacement: str
+) -> None:
+    """No deleter computes staleness without the run's skip set (#4230)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "install-deployment-cleanup-retains-kept-members"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)

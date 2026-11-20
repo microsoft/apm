@@ -109,7 +109,15 @@ def check_cleanup_retains_kept_members(provider: FactsProvider) -> tuple[Violati
             ),
             "src/apm_cli/install/phases/post_deps_local.py": (
                 "_kept = kept_prior_values(ctx, list(_persist_lock.local_deployed_files))",
-                "_current_files = sorted({*ctx.local_deployed_files, *_kept})",
+                "retained_values=frozenset(_kept),",
+            ),
+            "src/apm_cli/install/phases/lockfile.py": (
+                "retained_values=frozenset(kept_prior_values(self.ctx, prior_files)),",
+            ),
+            "src/apm_cli/install/manifest_reconcile.py": ("retained_values=retained_values,",),
+            "src/apm_cli/core/deployment_state.py": (
+                "if not intent.authoritative_targets or record.locator.value in intent.retained_values:",
+                "- intent.retained_values",
             ),
         },
         "Cleanup consumes the integrate phase's skip set before computing stale files",
