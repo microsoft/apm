@@ -217,22 +217,10 @@ class TestListRemoteRefsGitHub:
         mock_git = MockGitCmd.return_value
         mock_git.ls_remote.side_effect = GitCommandError("ls-remote", 128)
 
-        with pytest.raises(RuntimeError, match="Failed to list remote refs") as raised:
+        with pytest.raises(RuntimeError, match="Failed to list remote refs"):
             dl.list_remote_refs(dep)
 
-        # Diagnostic for an order-dependent CI failure: name the branch taken.
-        import sys as _sys
-
-        resolver_module = _sys.modules.get("apm_cli.deps.git_reference_resolver")
-        assert dl.auth_resolver.build_error_context.call_count == 1, (
-            f"message={raised.value}; "
-            f"anonymous_first_calls={dl.auth_resolver.uses_public_github_anonymous_first.mock_calls}; "
-            f"git_cmd={type(MockGitCmd.return_value).__module__}; "
-            f"ls_remote_calls={MockGitCmd.return_value.ls_remote.mock_calls}; "
-            f"refs_type={type(dl._refs).__module__}.{type(dl._refs).__qualname__}; "
-            f"resolver_module_same={type(dl._refs).__module__ in _sys.modules and _sys.modules[type(dl._refs).__module__] is resolver_module}; "
-            f"downloader_module_same={_sys.modules.get(type(dl).__module__) is _sys.modules.get('apm_cli.deps.github_downloader')}"
-        )
+        dl.auth_resolver.build_error_context.assert_called_once()
 
     @patch("apm_cli.deps.github_downloader.git.cmd.Git")
     def test_deref_tags_use_commit_sha(self, MockGitCmd):
