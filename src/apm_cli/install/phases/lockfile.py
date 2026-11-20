@@ -316,6 +316,7 @@ class LockfileBuilder:
         #1716). See :mod:`apm_cli.install.manifest_reconcile`.
         """
         from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+        from apm_cli.install.phases.cleanup import deployment_evidence
         from apm_cli.install.phases.targets import declared_target_profiles
 
         existing = self.ctx.existing_lockfile
@@ -358,9 +359,12 @@ class LockfileBuilder:
         # not removed, so a "Repaired inactive-target entries" report would be
         # misleading.
         lockfile_only = getattr(self.ctx, "lockfile_only", False)
+        from apm_cli.install.service import InstallService
+
+        frozen_disposition = InstallService.frozen_disposition(self.ctx)
         completed_reintegrations = (
             {}
-            if lockfile_only or getattr(self.ctx, "frozen", False)
+            if lockfile_only or frozen_disposition.withhold_lockfile_writes
             else getattr(self.ctx, "package_completed_reintegrations", {})
         )
         canonical_records = {}
@@ -398,6 +402,7 @@ class LockfileBuilder:
                 active_targets=self.ctx.targets,
                 declared_targets=declared,
                 diagnostics=diagnostics,
+                evidence=deployment_evidence(self.ctx),
                 on_ghost_drop=None if lockfile_only else _log_ghost_drop,
                 prior_ledger=prior_ledger,
                 cleanup_retained_hashes=retained_hashes,
@@ -919,6 +924,7 @@ class LockfileBuilder:
         from apm_cli.core.scope import InstallScope
         from apm_cli.deps.lockfile import get_lockfile_path
         from apm_cli.install.manifest_reconcile import reconcile_target_deployed_files
+        from apm_cli.install.phases.cleanup import deployment_evidence
         from apm_cli.install.phases.targets import declared_target_profiles
 
         declared = declared_target_profiles(self.ctx)
@@ -929,6 +935,7 @@ class LockfileBuilder:
             active_targets=self.ctx.targets,
             declared_targets=declared,
             diagnostics=self.ctx.diagnostics,
+            evidence=deployment_evidence(self.ctx),
             user_scope=is_user,
             logger=getattr(self.ctx, "logger", None),
         )

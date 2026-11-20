@@ -107,6 +107,8 @@ script's stdout.
 
 ### Phase 2 -- pick the bump (B10 CHECKPOINT 1)
 
+Before picking the bump, read the latest `release-acceptance` report for this candidate (its release-gate row must be GO; see `../release-acceptance/SKILL.md`).
+
 Load `assets/semver-rubric.md`. Walk every PR from Phase 1
 against the rubric. The rubric outputs PATCH, MINOR, or
 ESCALATE-TO-MAJOR.
