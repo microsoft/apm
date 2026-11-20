@@ -630,7 +630,9 @@
       ],
       "regression_tests": [
         "tests/integration/test_approval_identity_lifecycle.py::test_approve_and_deny_by_install_spec_reach_the_installed_package",
-        "tests/integration/test_approval_identity_lifecycle.py::test_unresolvable_install_spec_exits_1_without_writing"
+        "tests/integration/test_approval_identity_lifecycle.py::test_unresolvable_install_spec_exits_1_without_writing",
+        "tests/integration/test_approval_identity_lifecycle.py::test_deny_by_install_spec_stays_retired_through_update_and_frozen",
+        "tests/integration/test_approval_identity_lifecycle.py::test_install_spec_deny_from_an_older_apm_is_honored_after_upgrade"
       ]
     },
     {
