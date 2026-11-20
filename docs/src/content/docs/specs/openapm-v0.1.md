@@ -666,7 +666,7 @@ offending path.
 
 The OPTIONAL `dependencies.mcp` list declares MCP servers. Each entry
 is either a registry string or an object. Object-form fields are
-defined in [`manifest-schema.md` Section 4.2](../../reference/manifest-schema/#42-dependenciesmcp----listmcpdependency).
+defined in [`manifest-schema.md` Section 4.2](../../reference/manifest-schema/#42-dependenciesmcp--listmcpdependency).
 
 <a id="req-mf-012"></a>
 **[req-mf-012]** A conforming **consumer** implementation MUST reject

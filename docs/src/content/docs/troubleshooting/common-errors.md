@@ -167,7 +167,7 @@ Cause: an org-level policy (compilation target, dependency allowlist, security b
 
 Fix: read the violations above the summary line, remove or replace the offending packages, or update org policy if the rule is wrong.
 
-See also: [Policy debugging](../policy-debugging/)
+See also: [Policy debugging](../../enterprise/apm-policy/#debug-a-policy-failure)
 
 ### `from unapproved host(s): <host>`
 
@@ -181,7 +181,7 @@ Cause: a transitive dependency uses an `http://` URL on a host you have not appr
 
 Fix: switch the dependency to HTTPS, or, if you trust the host, re-run with `--allow-insecure-host <host>` (repeat per host). Do not bypass this check in CI.
 
-See also: [Policy debugging](../policy-debugging/)
+See also: [Policy debugging](../../enterprise/apm-policy/#debug-a-policy-failure)
 
 ### `Race condition: concurrent checkout failed integrity for <url> @ <sha>`
 
@@ -282,7 +282,7 @@ Cause: no primitives in the project (or filtered subset) match the active target
 
 Fix: run `apm compile --dry-run --verbose` to see what was discovered and why each primitive was skipped.
 
-See also: [Compile zero-output warning](../compile-zero-output-warning/), [`apm compile` reference](../../reference/cli/compile/)
+See also: [`apm compile` reference](../../reference/cli/compile/)
 
 Target-resolution errors print with `Error:` or `[x]` in front, depending on the command.
 
@@ -330,9 +330,9 @@ See also: [`apm targets` reference](../../reference/cli/targets/), [Targets matr
 
 Cause: a dependency failed an org policy check during install or audit. The reason field names the rule.
 
-Fix: see [Policy debugging](../policy-debugging/) for resolving each rule type. For audit-only reporting, use `apm audit --format sarif` or `--format json` to feed the findings into your code-scanning pipeline.
+Fix: see [Policy debugging](../../enterprise/apm-policy/#debug-a-policy-failure) for resolving each rule type. For audit-only reporting, use `apm audit --format sarif` or `--format json` to feed the findings into your code-scanning pipeline.
 
-See also: [Policy debugging](../policy-debugging/), [`apm audit` reference](../../reference/cli/audit/)
+See also: [Policy debugging](../../enterprise/apm-policy/#debug-a-policy-failure), [`apm audit` reference](../../reference/cli/audit/)
 
 ### `Policy hash mismatch from <source>: expected <a>, got <b>`
 
@@ -340,7 +340,7 @@ Cause: the org policy file fetched from the configured source does not match the
 
 Fix: confirm the upstream change is legitimate, then update `policy.hash` in `apm.yml` to the new hash.
 
-See also: [Policy debugging](../policy-debugging/)
+See also: [Policy debugging](../../enterprise/apm-policy/#debug-a-policy-failure)
 
 ## Run
 
@@ -367,7 +367,7 @@ Cause: standard Click error. The subcommand does not exist, or you are on an old
 
 Fix: run `apm --help` for the current command list. Upgrade APM if the command was added in a newer release.
 
-See also: [Reference](../../reference/), [Troubleshooting migration](../migration/)
+See also: [Reference](../../reference/), [Troubleshooting migration](../../getting-started/coming-from/)
 
 ## Auth and network
 
