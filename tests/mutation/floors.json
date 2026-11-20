@@ -59,7 +59,28 @@
     },
     "credential-origin-scope": {
       "architecture_owner": "credential-origin-scope",
-      "equivalents": [],
+      "equivalents": [
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.http_credentials._comparable_paths__mutmut_27",
+          "reason": "Prepending '/' to an already rooted path only adds a leading empty segment, which _remove_dot_segments and _collapse_slashes both absorb (checked exhaustively over '', '.', '..' and name segments up to depth 5)."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.http_credentials.origin_bound_refusal__mutmut_3",
+          "reason": "urlsplit sets username to a string (possibly empty) whenever the netloc contains '@', so the username test alone already refuses every userinfo URL; regrouping or dropping the password and '@' clauses cannot change the result."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.http_credentials.origin_bound_refusal__mutmut_4",
+          "reason": "urlsplit sets username to a string (possibly empty) whenever the netloc contains '@', so the username test alone already refuses every userinfo URL; regrouping or dropping the password and '@' clauses cannot change the result."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.http_credentials.origin_bound_refusal__mutmut_7",
+          "reason": "urlsplit sets username to a string (possibly empty) whenever the netloc contains '@', so the username test alone already refuses every userinfo URL; regrouping or dropping the password and '@' clauses cannot change the result."
+        }
+      ],
       "floor": 0.0,
       "measured": {
         "equivalent": 0,
@@ -335,7 +356,7 @@
         {
           "functions": [
             "_is_skill_directory_entry",
-            "remove_stale_deployed_files"
+            "_strip_sha256_prefix"
           ],
           "source": "src/apm_cli/integration/cleanup.py"
         }

@@ -113,8 +113,12 @@ class TestGetApmDir:
         monkeypatch.setattr(scope, "_STARTUP_CWD", None)
         monkeypatch.setenv("APM_HOME", "metadata")
 
-        with pytest.raises(ValueError, match="absolute APM_HOME"):
+        with pytest.raises(ValueError) as caught:
             get_apm_home()
+        assert str(caught.value) == (
+            "APM_HOME='metadata' is relative, but the starting directory is unavailable. "
+            "Set an absolute APM_HOME or start APM from an existing directory."
+        )
 
     def test_apm_home_expands_leading_tilde(self, tmp_path, monkeypatch):
         monkeypatch.setenv("APM_HOME", "~/isolated-apm")

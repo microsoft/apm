@@ -374,3 +374,26 @@ def test_unfollowed_redirect_request_never_follows_a_same_path_redirect(suffix: 
 
     assert response.status_code == 302
     assert len(origin.seen) == 1
+
+
+def test_comparable_paths_roots_empty_and_relative_paths() -> None:
+    from apm_cli.utils.http_credentials import _comparable_paths
+
+    assert _comparable_paths("") == ("/", "/")
+    assert _comparable_paths("a/b") == ("/a/b", "/a/b")
+    # A relative path must be rooted before dot segments are removed, so
+    # ``..`` can never climb above the root.
+    assert _comparable_paths("a/../..") == ("/", "/")
+
+
+def test_base_path_keeps_trailing_characters_other_than_slash() -> None:
+    from apm_cli.utils.http_credentials import (
+        REFUSED_OUTSIDE_BASE_PATH,
+        origin_bound_refusal,
+    )
+
+    assert (
+        origin_bound_refusal("https://h.example/api/v", base_url="https://h.example/apiX")
+        == REFUSED_OUTSIDE_BASE_PATH
+    )
+    assert origin_bound_refusal("https://h.example/apiX/v", base_url="https://h.example/apiX/") is None

@@ -6,6 +6,7 @@ Covers:
 - Integration with DependencyReference.parse / parse_from_dict / get_install_path
 """
 
+import os
 import shutil  # noqa: F401
 from pathlib import Path
 from urllib.parse import urlparse
@@ -480,3 +481,46 @@ class TestGetInstallPathContainment:
         # Path(".").name is "" which is in our reject set
         with pytest.raises(PathTraversalError):
             dep.get_install_path(base)
+
+
+def test_decode_url_path_segments_names_its_context_in_errors() -> None:
+    from apm_cli.utils.path_security import decode_url_path_segments
+
+    with pytest.raises(PathTraversalError) as default:
+        decode_url_path_segments("a//b")
+    assert str(default.value) == "Invalid URL path: path segments must not be empty"
+
+    with pytest.raises(PathTraversalError) as custom:
+        decode_url_path_segments("a//b", context="registry URL")
+    assert str(custom.value) == "Invalid registry URL: path segments must not be empty"
+
+
+class TestHasSymlinkComponentFailsClosed:
+    def test_outside_base_counts_as_linked(self, tmp_path: Path) -> None:
+        from apm_cli.utils.path_security import has_symlink_component
+
+        assert has_symlink_component(tmp_path / "base", tmp_path / "other") is True
+
+    def test_access_error_counts_as_linked_unless_asked_to_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.utils.path_security import has_symlink_component
+
+        def _denied(self: Path) -> None:
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(Path, "lstat", _denied)
+
+        assert has_symlink_component(tmp_path, tmp_path / "a") is True
+        with pytest.raises(PermissionError):
+            has_symlink_component(tmp_path, tmp_path / "a", raise_on_error=True)
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges")
+    def test_detects_linked_component(self, tmp_path: Path) -> None:
+        from apm_cli.utils.path_security import has_symlink_component
+
+        (tmp_path / "real").mkdir()
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+
+        assert has_symlink_component(tmp_path, tmp_path / "link" / "x") is True
+        assert has_symlink_component(tmp_path, tmp_path / "real" / "x") is False
