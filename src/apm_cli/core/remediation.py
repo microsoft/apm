@@ -500,8 +500,8 @@ AGENT_PLUGIN_OUTPUT_EMPTY = _entry(
 )
 PLUGIN_MCP_OWNERSHIP_UNKNOWN = _entry(
     "plugin-mcp-ownership-unknown",
-    "apm pack",
-    "include the root .mcp.json in the plugin",
+    "apm pack --force",
+    "regenerate the plugin with the root .mcp.json",
     before="fix or delete apm.lock.yaml and run 'apm install'",
 )
 IMMUTABLE_REFS_CONFLICT = _entry(
