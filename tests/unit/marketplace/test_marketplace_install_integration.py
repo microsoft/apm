@@ -4,6 +4,8 @@ import json
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
+import pytest
+
 from apm_cli.marketplace.models import MarketplacePlugin, MarketplaceSource
 from apm_cli.marketplace.resolver import (
     MarketplacePluginResolution,
@@ -20,25 +22,14 @@ class TestInstallMarketplacePreParse:
         result = parse_marketplace_ref("security-checks@acme-tools")
         assert result == ("security-checks", "acme-tools", None)
 
-    def test_owner_repo_not_intercepted(self):
-        """owner/repo should NOT be intercepted."""
-        result = parse_marketplace_ref("owner/repo")
-        assert result is None
-
-    def test_owner_repo_at_alias_not_intercepted(self):
-        """owner/repo@alias should NOT be intercepted (has slash)."""
-        result = parse_marketplace_ref("owner/repo@alias")
-        assert result is None
-
-    def test_bare_name_not_intercepted(self):
-        """Just a name without @ should NOT be intercepted."""
-        result = parse_marketplace_ref("just-a-name")
-        assert result is None
-
-    def test_ssh_not_intercepted(self):
-        """SSH URLs should NOT be intercepted (has colon)."""
-        result = parse_marketplace_ref("git@github.com:o/r")
-        assert result is None
+    @pytest.mark.parametrize(
+        "raw",
+        ["owner/repo", "owner/repo@alias", "just-a-name", "git@github.com:o/r"],
+        ids=["owner-repo", "owner-repo-at-alias", "bare-name", "ssh"],
+    )
+    def test_non_marketplace_ref_not_intercepted(self, raw):
+        """owner/repo, slash- or colon-bearing refs and bare names are not marketplace refs."""
+        assert parse_marketplace_ref(raw) is None
 
 
 class TestValidationOutcomeProvenance:

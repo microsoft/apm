@@ -705,45 +705,41 @@ class TestAuditCompilationTargetFromManifest:
 
 
 class TestCompilationStrategy:
-    def test_pass_no_enforce(self):
-        result = _check_compilation_strategy(
-            {"compilation": {"strategy": "distributed"}}, CompilationPolicy()
+    @pytest.mark.parametrize(
+        ("manifest", "enforce", "passed"),
+        [
+            ({"compilation": {"strategy": "distributed"}}, None, True),
+            ({"compilation": {"strategy": "distributed"}}, "distributed", True),
+            ({"compilation": {"strategy": "distributed"}}, "single-file", False),
+            ({}, "distributed", True),
+        ],
+        ids=["pass-no-enforce", "pass-enforce-match", "fail-enforce-mismatch", "pass-no-strategy"],
+    )
+    def test_strategy_enforcement(self, manifest, enforce, passed):
+        policy = (
+            CompilationPolicy()
+            if enforce is None
+            else CompilationPolicy(strategy=CompilationStrategyPolicy(enforce=enforce))
         )
-        assert result.passed
-
-    def test_pass_enforce_match(self):
-        policy = CompilationPolicy(strategy=CompilationStrategyPolicy(enforce="distributed"))
-        result = _check_compilation_strategy({"compilation": {"strategy": "distributed"}}, policy)
-        assert result.passed
-
-    def test_fail_enforce_mismatch(self):
-        policy = CompilationPolicy(strategy=CompilationStrategyPolicy(enforce="single-file"))
-        result = _check_compilation_strategy({"compilation": {"strategy": "distributed"}}, policy)
-        assert not result.passed
-
-    def test_pass_no_strategy_in_manifest(self):
-        policy = CompilationPolicy(strategy=CompilationStrategyPolicy(enforce="distributed"))
-        result = _check_compilation_strategy({}, policy)
-        assert result.passed
+        assert _check_compilation_strategy(manifest, policy).passed is passed
 
 
 # -- Check 13: source-attribution -----------------------------------
 
 
 class TestSourceAttribution:
-    def test_pass_not_required(self):
-        result = _check_source_attribution({}, CompilationPolicy())
-        assert result.passed
-
-    def test_pass_enabled(self):
-        policy = CompilationPolicy(source_attribution=True)
-        result = _check_source_attribution({"compilation": {"source_attribution": True}}, policy)
-        assert result.passed
-
-    def test_fail_not_enabled(self):
-        policy = CompilationPolicy(source_attribution=True)
-        result = _check_source_attribution({}, policy)
-        assert not result.passed
+    @pytest.mark.parametrize(
+        ("manifest", "required", "passed"),
+        [
+            ({}, False, True),
+            ({"compilation": {"source_attribution": True}}, True, True),
+            ({}, True, False),
+        ],
+        ids=["pass-not-required", "pass-enabled", "fail-not-enabled"],
+    )
+    def test_source_attribution_requirement(self, manifest, required, passed):
+        policy = CompilationPolicy(source_attribution=True) if required else CompilationPolicy()
+        assert _check_source_attribution(manifest, policy).passed is passed
 
 
 # -- Check 14: required-manifest-fields -----------------------------
@@ -1501,10 +1497,16 @@ class TestLoadRawApmYml:
         assert result is None
         assert "not a YAML mapping" in caplog.text
 
-    def test_missing_file_returns_none_silently(self, tmp_path: Path) -> None:
+    def test_missing_file_returns_none_silently(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Missing apm.yml returns None without raising or logging."""
-        result = _load_raw_apm_yml(tmp_path)
+        import logging
+
+        with caplog.at_level(logging.DEBUG, logger="apm_cli.policy.policy_checks"):
+            result = _load_raw_apm_yml(tmp_path)
         assert result is None
+        assert caplog.records == []
 
     def test_valid_yaml_returns_dict(self, tmp_path: Path) -> None:
         """Valid YAML mapping is returned as a dict unchanged."""

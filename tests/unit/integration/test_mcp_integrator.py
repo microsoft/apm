@@ -44,27 +44,23 @@ def _make_self_defined(name, transport="stdio", command=None, url=None, **kwargs
 
 
 class TestIsVscodeAvailable:
-    def test_returns_true_when_code_on_path(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("code_path", "has_vscode_dir", "expected"),
+        [
+            ("/usr/bin/code", False, True),
+            (None, True, True),
+            (None, False, False),
+        ],
+        ids=["code-on-path", "vscode-dir-exists", "neither-available"],
+    )
+    def test_availability_from_cwd(self, tmp_path, code_path, has_vscode_dir, expected):
+        if has_vscode_dir:
+            (tmp_path / ".vscode").mkdir()
         with (
-            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value="/usr/bin/code"),
+            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=code_path),
             patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
         ):
-            assert _is_vscode_available() is True
-
-    def test_returns_true_when_vscode_dir_exists(self, tmp_path):
-        (tmp_path / ".vscode").mkdir()
-        with (
-            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None),
-            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
-        ):
-            assert _is_vscode_available() is True
-
-    def test_returns_false_when_neither_available(self, tmp_path):
-        with (
-            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None),
-            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
-        ):
-            assert _is_vscode_available() is False
+            assert _is_vscode_available() is expected
 
     def test_code_on_path_takes_precedence_over_missing_dir(self, tmp_path):
         missing_root = tmp_path / "no-such-project"
@@ -85,13 +81,10 @@ class TestIsVscodeAvailable:
 
 
 class TestDeduplicate:
-    def test_empty_list(self):
-        assert MCPIntegrator.deduplicate([]) == []
-
-    def test_no_duplicates(self):
-        deps = [_make_dep("a"), _make_dep("b"), _make_dep("c")]
-        result = MCPIntegrator.deduplicate(deps)
-        assert [d.name for d in result] == ["a", "b", "c"]
+    @pytest.mark.parametrize("names", [[], ["a", "b", "c"]], ids=["empty", "distinct"])
+    def test_no_duplicates(self, names):
+        result = MCPIntegrator.deduplicate([_make_dep(name) for name in names])
+        assert [d.name for d in result] == names
 
     def test_first_occurrence_wins(self):
         dep_a1 = _make_dep("server", transport="stdio")
@@ -146,12 +139,10 @@ class TestDeduplicate:
 
 
 class TestGetServerNames:
-    def test_empty(self):
-        assert MCPIntegrator.get_server_names([]) == set()
-
-    def test_dep_objects(self):
-        deps = [_make_dep("alpha"), _make_dep("beta")]
-        assert MCPIntegrator.get_server_names(deps) == {"alpha", "beta"}
+    @pytest.mark.parametrize("names", [[], ["alpha", "beta"]], ids=["empty", "dep-objects"])
+    def test_dep_objects(self, names):
+        deps = [_make_dep(name) for name in names]
+        assert MCPIntegrator.get_server_names(deps) == set(names)
 
     def test_plain_strings(self):
         assert MCPIntegrator.get_server_names(["foo", "bar"]) == {"foo", "bar"}
@@ -303,9 +294,6 @@ class TestDetectMcpConfigDrift:
 
 
 class TestDetectRuntimes:
-    def test_empty_scripts(self):
-        assert MCPIntegrator._detect_runtimes({}) == []
-
     def test_detects_copilot(self):
         runtimes = MCPIntegrator._detect_runtimes({"run": "apm run copilot"})
         assert "copilot" in runtimes
@@ -328,9 +316,11 @@ class TestDetectRuntimes:
         runtimes = MCPIntegrator._detect_runtimes(scripts)
         assert set(runtimes) >= {"copilot", "codex"}
 
-    def test_no_false_positives(self):
-        runtimes = MCPIntegrator._detect_runtimes({"run": "python main.py"})
-        assert runtimes == []
+    @pytest.mark.parametrize(
+        "scripts", [{}, {"run": "python main.py"}], ids=["empty", "no-runtime-words"]
+    )
+    def test_no_false_positives(self, scripts):
+        assert MCPIntegrator._detect_runtimes(scripts) == []
 
 
 # ===========================================================================
