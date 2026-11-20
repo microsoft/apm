@@ -1184,6 +1184,21 @@
       ]
     },
     {
+      "issue": 4261,
+      "fixed_in": "Unreleased",
+      "summary": "Top-level x- vendor extension keys in apm.lock.yaml were dropped when a command rewrote the lockfile; every rewrite now keeps them.",
+      "failure_modes": [
+        "ownership"
+      ],
+      "properties": [
+        "ownership.preserve_unowned"
+      ],
+      "regression_tests": [
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_rewrite_keeps_top_level_vendor_keys",
+        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lock_top_level_vendor_keys_survive_rewrite"
+      ]
+    },
+    {
       "issue": 4270,
       "fixed_in": "Unreleased",
       "summary": "A cached install pass classifies a package with a plugin manifest and a root skills/ directory as its fresh fetch does (marketplace_plugin), so an approved Claude plugin installed with -g --trust-bin deploys bin/ inside its native plugin root instead of silently projecting only its skill.",

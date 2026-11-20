@@ -19,6 +19,7 @@ from tests.utils.hermetic_packaged_sample import (
     HermeticPackagedSample,
     create_hermetic_packaged_sample,
 )
+from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [pytest.mark.e2e, pytest.mark.requires_apm_binary]
 
@@ -124,3 +125,34 @@ def test_install_under_ci_defaults_to_frozen(tmp_path: Path, apm_binary_path: Pa
     assert "--frozen requires apm.lock.yaml" in output
     assert not (project / "apm.lock.yaml").exists()
     assert not (project / "apm_modules").exists()
+
+
+# --- req-lk-014: top-level vendor keys survive a rewrite ------------------------
+
+
+@pytest.mark.req("req-lk-014")
+def test_install_rewrite_keeps_top_level_vendor_keys(tmp_path: Path, apm_binary_path: Path) -> None:
+    """#4261: an install that rewrites the lockfile keeps its top-level x- keys."""
+    sample = _installed(tmp_path, apm_binary_path)
+    lock_path = sample.project.root / "apm.lock.yaml"
+    lock_path.write_text(
+        lock_path.read_text(encoding="utf-8") + "x-acme-build-id: ci-12345\n", encoding="utf-8"
+    )
+    # A second dependency makes the next install rewrite the lockfile.
+    project = sample.project.root
+    LocalPackageFactory(project / "packages").create("local-dep", targets=("copilot",))
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["dependencies"]["apm"].append("./packages/local-dep")
+    (project / "apm.yml").write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+    result = sample.run(("install",), scenario_id="lk-014-rewrite")
+    assert result.returncode == 0, _text(result)
+    rewritten = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    assert any("local-dep" in str(dep.get("repo_url")) for dep in rewritten["dependencies"])
+    assert rewritten["x-acme-build-id"] == "ci-12345", rewritten
+
+    # Paired probe: both verifiers accept the rewritten lockfile.
+    for name, args in sorted(_VERIFY.items()):
+        verified = sample.run(args, scenario_id=f"lk-014-{name}")
+        assert verified.returncode == 0, _text(verified)
+    assert yaml.safe_load(lock_path.read_text(encoding="utf-8"))["x-acme-build-id"] == "ci-12345"

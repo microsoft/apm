@@ -287,9 +287,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lock_top_level_vendor_keys_survive_rewrite",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_rewrite_keeps_top_level_vendor_keys",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_unknown_hash_algorithm_rejected"
       ]
     },

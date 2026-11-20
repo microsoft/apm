@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Top-level `x-` vendor extension keys in `apm.lock.yaml` are kept when a command rewrites the lockfile. (#4283)
 - `apm approve --pending` lists local bundle executables that an install parked, with the exact approval key to add. (#4283)
 - Reinstalling a local bundle re-evaluates the hooks it deployed earlier against current approvals, deny lists and org policy, and retires the ones no longer admitted, with their scripts and lock rows. (#4283)
 - `apm update` verifies unchanged registry versions against their locked hash and fails closed on a mismatch. (closes #4125, #4157)

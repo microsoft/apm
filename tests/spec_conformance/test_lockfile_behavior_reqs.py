@@ -206,7 +206,6 @@ def test_lock_entry_vendor_keys_survive_rewrite(tmp_path: Path) -> None:
 
 
 @pytest.mark.req("req-lk-014", "req-ext-001")
-@pytest.mark.xfail(strict=True, reason="#4261: top-level x- keys are dropped on lock rewrite")
 def test_lock_top_level_vendor_keys_survive_rewrite(tmp_path: Path) -> None:
     rewritten = _rewrite(tmp_path)
     assert rewritten["x-acme-build-id"] == "ci-12345"

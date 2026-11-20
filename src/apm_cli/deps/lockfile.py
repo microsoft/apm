@@ -43,6 +43,7 @@ from ..models.dependency.replacement import (
 from ..models.dependency.subsets import SkillTargetSelection, canonical_target_subset
 from ..native_plugins.record import NativePluginRecord, NativePluginRecordError
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
+from .lockfile_extensions import carry_vendor_extensions, vendor_extensions
 
 logger = logging.getLogger(__name__)
 
@@ -1258,6 +1259,7 @@ class LockFile:
     _mcp_target_servers_present: bool = field(default=False, repr=False, compare=False)
     _lsp_target_servers_present: bool = field(default=False, repr=False, compare=False)
     _apm_version_null: bool = field(default=False, repr=False, compare=False)
+    _extensions: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     # Root replacement rules (issue #3180).  Stores the full normalized rule
     # table including dormant rules so frozen validation can compare declared
@@ -1601,6 +1603,7 @@ class LockFile:
                 )
             if self.replacements is not None:
                 data["replacements"] = self.replacements
+            data.update(sorted(self._extensions.items()))
             from ..utils.yaml_io import yaml_to_str
 
             return yaml_to_str(data)
@@ -1673,6 +1676,7 @@ class LockFile:
             framed_content_hashes=data.get("lockfile_version") == FRAMED_CONTENT_HASH_VERSION,
         )
         lock._apm_version_null = "apm_version" in data and data["apm_version"] is None
+        lock._extensions = vendor_extensions(data)
         for dep_data in data.get("dependencies", []):
             lock.add_dependency(LockedDependency.from_dict(dep_data))
         lock.mcp_servers = list(data.get("mcp_servers", []))
@@ -1789,6 +1793,8 @@ class LockFile:
             existing = None
         else:
             existing = existing_lockfile
+        if existing is not None:
+            carry_vendor_extensions(self, existing)
         unchanged = existing is not None and self.is_semantically_equivalent(existing)
         if existing is not None and existing.generated_at is not None:
             if unchanged:
