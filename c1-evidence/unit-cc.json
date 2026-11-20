@@ -5,7 +5,8 @@
   1,
   2,
   3,
-  4
+  4,
+  5
  ],
  "folds": {
   "tests/unit/commands/test_pack_phase3.py::TestPackCmdFlags::test_help_text_includes_all_key_flags": "tests/unit/commands/test_pack_cli_surface.py::TestPackCmdFlags::test_help_text_includes_all_key_flags",
@@ -60,7 +61,8 @@
   "step5 lane split: pure AgentsCompiler classes TestCompilationConfigPostInit and TestLogDelegation -> test_compile_cli_surface.py, TestFinalizeBuildId -> test_build_id.py (both unit)",
   "step5 lane split: pure marketplace plugin helper tests (_resolve_ref from test_marketplace_plugin.py and test_marketplace_coverage.py merged into one TestResolveRef class, plus TestParseTags and TestVerifySource) -> new tests/unit/commands/test_marketplace_plugin_refs.py marked unit with promise P-OWN-marketplace-entry-ref-verification (owner commands/marketplace/plugin)",
   "ratchets: test_test_taxonomy passes with the two new promise-carrying modules; test_quality_baselines fails until the integrator remeasures (pre-existing growth outside scope, AQ003 growth from step 3 lane marking, AQ004 occurrences that moved with verbatim classes; scope AQ004 total 257 -> 217, AQ001 2 -> 0)",
-  "step5 output rewrites: tests that asserted on MagicMock logger calls now drive a real CommandLogger and assert on captured stdout+stderr (the console stream is process-global and earlier tests may route it to stderr); verified stable across repeated -n 4 runs"
+  "step5 output rewrites: tests that asserted on MagicMock logger calls now drive a real CommandLogger and assert on captured stdout+stderr (the console stream is process-global and earlier tests may route it to stderr); verified stable across repeated -n 4 runs",
+  "step5 remaining: 790 AQ003 findings left (AQ001 0, AQ002 0). They assert return values of pure helpers or read-only filesystem analysis inside component modules; no output, exit code or durable state exists to assert without padding. Reducing them further needs module splits into new unit modules, which need promise ids with a real owner fit; only self-update and marketplace plugin refs had one"
  ],
  "counts_left": {
   "same_body_groups": 0,
