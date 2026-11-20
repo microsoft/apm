@@ -748,7 +748,7 @@
       ],
       "regression_tests": [
         "tests/integration/test_brownfield_lifecycle.py::test_install_package_locks_declared_local_dependency_and_reports_adoption",
-        "tests/unit/install/test_dry_run_graph.py::test_selected_subtree_adds_unlocked_direct_local_dependencies"
+        "tests/unit/install/test_dry_run_graph.py::test_unlocked_local_dependencies_complete_a_partial_install"
       ]
     },
     {

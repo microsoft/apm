@@ -64,7 +64,6 @@ def test_only_filter_preserves_structured_versioned_path_and_descendants() -> No
     }
     ctx = SimpleNamespace(
         only_packages=["acme/catalog/plugins/tool-1.2.3#release"],
-        existing_lockfile=None,
         deps_to_install=[selected, child, unselected],
         dependency_graph=SimpleNamespace(dependency_tree=SimpleNamespace(nodes=nodes)),
     )
