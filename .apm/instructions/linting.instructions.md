@@ -26,8 +26,16 @@ The `Lint` job runs (see `.github/workflows/ci.yml`):
    --min-similarity-lines=10 --fail-on=R0801 src/apm_cli/ \
    scripts/lint_architecture_boundaries.py scripts/architecture_linter/`
 7. Auth-protocol boundary check: `bash scripts/lint-auth-signals.sh`
+8. **Complexity ratchet (Stage 2 limits):**
+   `uv run --extra dev python scripts/check_complexity_ratchet.py \
+   --base-ref origin/main` (CI passes `--base-ref <base sha>`; without
+   it the baseline-growth check is skipped). New and changed functions must stay
+   within max-statements 120, max-branches 40, max-complexity 35,
+   max-args 12 and max-returns 8. Existing violators are grandfathered in
+   `tests/quality/complexity_baseline.json`, keyed by file and function
+   qualname (no line numbers); `# noqa` does not exempt a function.
 
-All seven must succeed. CI evaluates these on the **PR merge commit**
+All eight must succeed. CI evaluates these on the **PR merge commit**
 (HEAD merged with current `main`), so duplication introduced by a
 recent main commit can fail your PR even if your own diff is clean.
 Always merge `main` locally before running the mirror.
@@ -47,7 +55,9 @@ Always merge `main` locally before running the mirror.
     && uv run --extra dev python -m pylint --disable=all --enable=R0801 \
        --min-similarity-lines=10 --fail-on=R0801 src/apm_cli/ \
        scripts/lint_architecture_boundaries.py scripts/architecture_linter/ \
-    && bash scripts/lint-auth-signals.sh
+    && bash scripts/lint-auth-signals.sh \
+    && uv run --extra dev python scripts/check_complexity_ratchet.py \
+       --base-ref origin/main
   ```
   (The YAML, file-length, and `relative_to` guards are pure-grep one-liners
   from `ci.yml`; run them directly if you have touched those surfaces.)
@@ -67,6 +77,14 @@ fails on any remaining diagnostic.
 - `I001` -- import sort order (auto-fixable).
 - `R0801` -- 10+ identical lines across two files. Extract the shared
   block into a base class / helper module instead of disabling.
+- `new complexity violation` -- a function outside the baseline exceeds
+  a Stage 2 limit. Split it; never add it to the baseline (CI rejects
+  baseline growth against the base branch). Renaming a grandfathered
+  function, or moving it to another file or class, makes it new code.
+  After fixing a grandfathered
+  function, prune its entry with
+  `uv run --extra dev python scripts/check_complexity_ratchet.py --update-baseline`
+  (the check fails while a fixed entry stays listed).
 
 ## Lifecycle binding
 
