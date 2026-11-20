@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm audit --ci`, `apm install --frozen` and `apm update` read locked git sources through one cache and reach one verdict; a refused install leaves `apm_modules` unchanged. (closes #4356, #4353, #4363, #<PR>)
+- `apm audit --ci`, `apm install --frozen` and `apm update` read locked git sources through one cache and reach one verdict; a refused install leaves `apm_modules` unchanged. (closes #4356, #4353, #4363, #4385)
 - With `PROXY_REGISTRY_ONLY=1`, `apm update` probes no source host, the automatic update check is skipped, and the direct org policy fetch is announced. (closes #4088, #4158)
 - MCP registry requests send only the credentials APM is configured with, through credential-scoped HTTP sessions. (#4158)
 - `apm update` verifies unchanged registry versions against their locked hash and fails closed on a mismatch. (closes #4125, #4157)
