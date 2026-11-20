@@ -370,11 +370,6 @@ def _scenario(*ids: str) -> Callable[[tuple[str, ...], str], bool]:
     return lambda _args, scenario_id: scenario_id in ids
 
 
-def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], bool]:
-    """Cell predicate: *command* runs inside one of the lifecycle scenarios *ids*."""
-    return lambda args, scenario_id: _command_name(args) == command and scenario_id in ids
-
-
 # Product defects the oracle observes on main; each one names its issue and
 # is keyed by the surface family (command, flags, output shape) it occurs in.
 KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
@@ -392,7 +387,10 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "#4241",
         _runs("install"),
         r"\[!\] Policy: org:",
-        output=r"^  \[\+\] .*^  \[x\] \d+ dependenc\w* blocked by org policy",
+        output=(
+            r"\A(?=.*^\[!\] Policy: org:)"
+            r".*^  \[\+\] .*(^  \[x\] \d+ dependenc\w* blocked by org policy|^\+- MCP Servers)"
+        ),
     ),
     KnownOutputCell(
         "install-frozen-mcp-targeting-twice",
@@ -406,10 +404,10 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "uninstall-unattributed-survivor-lines",
         "I9",
         "#4219",
-        _scenario_runs("uninstall", "diamond-uninstall-root-a", "diamond-uninstall-root-b"),
-        r"\(files unchanged\)",
-        # Two or more survivor tree lines with no package line naming them.
-        output=r"\A(?!.*^  \[\+\] )(?=(?:.*^  \|-- ){2})",
+        _runs("uninstall"),
+        r"repeats a diagnostic: '\|-- ",
+        # Survivor tree lines with no package line naming them, one of them repeated.
+        output=r"\A(?!.*^  \[\+\] ).*^  (\|-- [^\n]*)$.*^  \1$",
     ),
     KnownOutputCell(
         "install-hook-line-per-target",
@@ -441,7 +439,7 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         "install-frozen-trust-notice-repeats",
         "I9",
         "#4256",
-        _runs("install", "--frozen", "--trust-transitive-mcp"),
+        _runs("install", "--frozen"),
         r"Trusting direct dependency MCP",
         output=r"^\[i\] Trusting direct dependency MCP",
     ),
@@ -495,6 +493,9 @@ def _command_name(args: Sequence[str]) -> str:
 
 
 def _json_mode(args: Sequence[str]) -> bool:
+    """True when the JSON document goes to stdout (``--output FILE`` sends it to a file)."""
+    if any(a in {"-o", "--output"} or a.startswith("--output=") for a in args):
+        return False
     return (
         "--json" in args
         or "--format=json" in args
