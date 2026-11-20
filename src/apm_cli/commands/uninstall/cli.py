@@ -252,7 +252,6 @@ def _refuse_unvalidated_paths(lockfile, dependency_keys, deploy_root, scope, log
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...core.scope import InstallScope
     from ...integration.base_integrator import BaseIntegrator
-    from ...integration.copilot_cowork_paths import COWORK_URI_SCHEME
 
     if lockfile is None or not dependency_keys:
         return
@@ -260,7 +259,8 @@ def _refuse_unvalidated_paths(lockfile, dependency_keys, deploy_root, scope, log
     rejected = sorted(
         path
         for path in paths
-        if not path.startswith(COWORK_URI_SCHEME)
+        # URI rows (cowork://, copilot-app-db://) have their own owners.
+        if "://" not in path
         and not BaseIntegrator.validate_deploy_path(
             path,
             deploy_root,

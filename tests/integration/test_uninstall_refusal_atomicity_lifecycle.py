@@ -82,3 +82,24 @@ def test_uninstall_validates_every_recorded_path_before_changing_state(
     assert not (diff.added | diff.removed | diff.changed), diff
     assert outside.read_text(encoding="ascii") == "not APM's\n"
     world.assert_user_file_intact()
+
+
+def test_uninstall_releases_a_skill_directory_holding_user_content(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A user file in a deployed skill directory is kept and the uninstall succeeds (#4162)."""
+    world = build_world(tmp_path, apm_binary_path, packages=("alpha", "beta"))
+    skill_dirs = sorted(path.parent for path in world.project.glob("**/alpha-skill-0/SKILL.md"))
+    assert skill_dirs, "fixture must deploy the alpha skill"
+    notes = skill_dirs[0] / "NOTES.md"
+    notes.write_text("my notes\n", encoding="ascii")
+
+    removed = world.apm("uninstall", "./packages/alpha")
+
+    assert removed.returncode == 0, evidence(removed)
+    assert notes.read_text(encoding="ascii") == "my notes\n"
+    assert not (skill_dirs[0] / "SKILL.md").exists()
+    assert "alpha" not in (world.project / "apm.yml").read_text(encoding="ascii")
+    assert "packages/alpha" not in (world.project / "apm.lock.yaml").read_text(encoding="ascii")
+    assert world.apm("audit", "--ci").returncode == 0
+    world.assert_user_file_intact()
