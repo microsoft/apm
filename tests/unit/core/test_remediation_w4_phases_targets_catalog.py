@@ -65,8 +65,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "skill-path-migration-conflict": _LEGACY_SKILLS,
     "skill-path-migration-legacy": _LEGACY_SKILLS,
     "content-hash-cache-clean": _HASH,
-    "content-hash-repin": _HASH,
-    "content-hash-repin-global": _HASH,
+    "content-hash-lock-restore": _HASH,
+    "content-hash-lock-restore-global": _HASH,
     "materialized-manifest-invalid": "needs an acquired package whose apm.yml turns invalid "
     "after resolution",
     "hook-reconcile-incomplete": _FAULT,

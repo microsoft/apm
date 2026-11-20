@@ -1443,21 +1443,23 @@ SKILL_PATH_MIGRATION_LEGACY = _entry(
 )
 CONTENT_HASH_CACHE_CLEAN = _entry(
     "content-hash-cache-clean",
-    "apm cache clean",
+    "apm cache clean --yes",
     "discard the cached package copies",
     then="retry",
 )
-CONTENT_HASH_REPIN = _entry(
-    "content-hash-repin",
+# The refusal cannot tell a changed copy from a changed lock, so it offers a
+# restore path for each; the lock is restored whole, never edited (#4385).
+CONTENT_HASH_LOCK_RESTORE = _entry(
+    "content-hash-lock-restore",
     "apm install",
-    "re-pin the dependency to the new content",
-    before="remove the '{dep_key}' entry from {lockfile}",
+    "verify the dependency against the committed lockfile",
+    before="restore {lockfile} from version control (for example 'git checkout -- {lockfile}')",
 )
-CONTENT_HASH_REPIN_GLOBAL = _entry(
-    "content-hash-repin-global",
+CONTENT_HASH_LOCK_RESTORE_GLOBAL = _entry(
+    "content-hash-lock-restore-global",
     "apm install -g",
-    "re-pin the dependency to the new content",
-    before="remove the '{dep_key}' entry from {lockfile}",
+    "verify the dependency against the saved lockfile",
+    before="restore {lockfile} from your backup",
 )
 MATERIALIZED_MANIFEST_INVALID = _entry(
     "materialized-manifest-invalid",
