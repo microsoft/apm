@@ -113,6 +113,26 @@ class TestCheckMarketplaceRef:
 
     @patch("apm_cli.marketplace.client.fetch_or_cache")
     @patch("apm_cli.marketplace.registry.get_marketplace_by_name")
+    def test_denied_catalog_is_an_error_row_not_a_git_fallback(self, mock_get_mkt, mock_fetch):
+        """A 401/403 catalog never falls back to a Git-derived answer (#3300)."""
+        from apm_cli.marketplace.errors import MarketplaceAccessDeniedError
+
+        mock_get_mkt.return_value = _source()
+        mock_fetch.side_effect = MarketplaceAccessDeniedError(
+            "acme-tools",
+            "Access to marketplace 'acme-tools' was denied (HTTP 401): no credential is "
+            "set. Set APM_MARKETPLACE_TOKEN_ACME_TOOLS (Bearer token).",
+            status=401,
+        )
+
+        result = _check_marketplace_ref(_marketplace_dep(), verbose=False)
+
+        assert result is not None
+        assert result.status == "access-denied"
+        assert "APM_MARKETPLACE_TOKEN_ACME_TOOLS" in result.error
+
+    @patch("apm_cli.marketplace.client.fetch_or_cache")
+    @patch("apm_cli.marketplace.registry.get_marketplace_by_name")
     def test_plugin_not_in_manifest(self, mock_get_mkt, mock_fetch):
         """Plugin removed from marketplace returns None."""
         mock_get_mkt.return_value = _source()
