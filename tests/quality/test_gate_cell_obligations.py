@@ -1,6 +1,6 @@
 """The GATE obligation list is well formed and the visited GATE cells cover it (#4031).
 
-The session hook in tests/integration/conftest.py writes the cells a run
+The session hook in tests/lifecycle/machines/conftest.py writes the cells a run
 visited to ``build/gate-cells/visited-<worker>.json`` (or
 ``$APM_GATE_CELLS_DIR``). For every scope whose mandatory GATE spine completed
 in that run, the visited cells must cover that scope's obligations. With
@@ -16,8 +16,8 @@ import os
 import re
 from pathlib import Path
 
-from tests.integration._gate_machine_kit import KINDS, KNOWN_CELLS, SCOPES, GateMachine
-from tests.utils.lifecycle_oracle import ORACLE_LAWS, ledger_property_ids
+from tests.lifecycle.machines._gate_kit import KINDS, KNOWN_CELLS, SCOPES, GateMachine
+from tests.lifecycle.oracles import ORACLE_LAWS, ledger_property_ids
 
 _ROOT = Path(__file__).parents[2]
 _OBLIGATIONS = Path(__file__).with_name("gate_cell_obligations.json")

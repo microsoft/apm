@@ -401,7 +401,8 @@ jobs:
           tests/quality/test_lifecycle_bug_ledger.py \
           tests/quality/test_ci_topology.py \
           tests/quality/test_promise_obligations.py \
-          tests/quality/test_journey_index.py
+          tests/quality/test_journey_index.py \
+          tests/quality/test_cli_docs_surface.py
 
   test-architecture-scaling:
     name: Architecture Scaling (Linux)
