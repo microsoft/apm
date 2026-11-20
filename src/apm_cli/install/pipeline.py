@@ -628,8 +628,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
     # ------------------------------------------------------------------
     # Phase 1: Resolve dependencies
     # ------------------------------------------------------------------
+    from .commit_gate import check_before_resolve
     from .phases import resolve as _resolve_phase
 
+    check_before_resolve(ctx, _early_lockfile)
     refused = False
     ctx.tui.__enter__()
     try:

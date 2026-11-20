@@ -1533,11 +1533,19 @@ def test_frozen_and_audit_refuse_alike_a_git_row_without_content_hash_under_requ
             expected=1,
         )
         assert tree_snapshot(project) == before, "I7: refused frozen install wrote"
+        # Refused before resolution: no package is reported as acquired (RA-001).
+        assert "[+]" not in frozen.stdout, frozen.stdout
 
+    # The row is named by its dependency key, never a redacted URL (RA-002).
+    sentence = (
+        "security.integrity.require_hashes is enabled but these locked dependencies "
+        f"have no content hash (fail-closed): {pkg.slug}."
+    )
+    # Both readers refuse on stderr; stdout never carries the refusal.
     for result in (audit, frozen):
-        text = " ".join(output(result).split())
-        assert "require_hashes" in text, text
-        assert pkg.slug in text, text
+        assert sentence in " ".join(result.stderr.split()), result.stderr
+        assert sentence not in " ".join(result.stdout.split()), result.stdout
+        assert "redacted" not in output(result), output(result)
 
 
 def test_frozen_and_audit_agree_on_a_git_row_without_content_hash_by_default(
