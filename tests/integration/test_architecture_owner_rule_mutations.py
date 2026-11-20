@@ -653,6 +653,18 @@ def test_preview_cannot_bypass_pipeline_graph_authority(path: str, old: str, new
             "                    pass\n",
             id="commit-order-rollback-skips-restore",
         ),
+        pytest.param(
+            "src/apm_cli/install/pipeline.py",
+            "    transaction.track_created_target_roots(ctx.created_target_roots)\n",
+            "",
+            id="commit-order-created-roots-untracked",
+        ),
+        pytest.param(
+            "src/apm_cli/install/transaction.py",
+            "                    self._remove_created_target_roots()\n",
+            "                    pass\n",
+            id="commit-order-rollback-keeps-created-roots",
+        ),
     ],
 )
 def test_audit_gated_deploy_snapshot_is_owned_by_the_transaction(

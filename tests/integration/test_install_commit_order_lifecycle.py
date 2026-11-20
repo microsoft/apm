@@ -305,3 +305,23 @@ def test_direct_mcp_entry_reaches_the_install_policy_verdict(
         direct_text,
         declared_text,
     )
+
+
+def test_failed_install_removes_the_target_root_it_created(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4159: a failed install leaves no empty target root it created itself."""
+    chain = Chain(tmp_path / "created-root", apm_binary_path)
+    chain.seed_org_policy(_DENY_POLICY)
+    chain.write_manifest([], apm=["./pkg"])
+    _write_package(chain, revision="v1", mcp=[stdio_server("evil-srv", "srv")])
+    before = _tree_state(chain.project)
+    assert not (chain.project / ".github").exists()
+
+    result = chain.run("install", "--trust-transitive-mcp", *_TARGET)
+    text = result.stdout + result.stderr
+    assert result.returncode == 1, text
+    assert "evil-srv" in text, text
+    assert not (chain.project / ".github").exists(), text
+    assert _tree_state(chain.project) == before, text
+    assert not (chain.project / "apm.lock.yaml").exists(), text

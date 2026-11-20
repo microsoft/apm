@@ -12,7 +12,8 @@ pipeline; ``install --mcp`` judges policy through the commit gate;
 ``InstallTransaction`` has one definition. While the install-time
 audit can block after deploy, only the transaction snapshots the deploy
 targets: before the integrate phase, released only after the audit, and
-restored by its rollback.
+restored by its rollback. Every rollback also removes the target roots the
+attempt created and left empty (#4159).
 """
 
 from __future__ import annotations
@@ -177,12 +178,18 @@ def _deploy_snapshot_violations(provider: FactsProvider, loaded: dict) -> list[V
         and _ordered(
             pipeline, "transaction.release_deploy_targets()", '_run_phase("copilot_plugins"'
         )
+        and _ordered(
+            pipeline,
+            "transaction.track_created_target_roots(ctx.created_target_roots)",
+            '_run_phase("targets"',
+        )
     ):
         found.append(
             _summary(
                 rule_id,
                 _PIPELINE,
-                "the transaction snapshots deploy targets before the integrate phase "
+                "the transaction tracks created target roots before the targets phase, "
+                "snapshots deploy targets before the integrate phase "
                 "and releases them only after the install-time audit",
             )
         )
@@ -192,6 +199,7 @@ def _deploy_snapshot_violations(provider: FactsProvider, loaded: dict) -> list[V
         for needle in (
             "self._deploy_snapshot = capture_audit_gated_snapshot(ctx)",
             "self._restore_deploy_targets()",
+            "self._remove_created_target_roots()",
         )
     ):
         found.append(

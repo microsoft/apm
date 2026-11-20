@@ -89,6 +89,8 @@ class InstallTransaction:
     install-time audit can block: :meth:`snapshot_deploy_targets` then
     captures their paths before integration, rollback restores them, and
     :meth:`release_deploy_targets` discards the copy once the audit passed.
+    On every rollback, target roots the attempt created
+    (:meth:`track_created_target_roots`) are removed when left empty.
     """
 
     def __init__(
@@ -121,6 +123,7 @@ class InstallTransaction:
             raise
         self._lock = threading.RLock()
         self._deploy_snapshot: DeployTargetSnapshot | None = None
+        self._created_target_roots: list[Path] = []
         self.committed = False
         self._completed = False
         self._rolled_back = False
@@ -216,6 +219,16 @@ class InstallTransaction:
             if self._deploy_snapshot is None and not (self.committed or self._rolled_back):
                 self._deploy_snapshot = capture_audit_gated_snapshot(ctx)
 
+    def track_created_target_roots(self, roots: list[Path]) -> None:
+        """Follow the target roots this attempt creates; rollback removes empty ones."""
+        self._created_target_roots = roots
+
+    def _remove_created_target_roots(self) -> None:
+        """Remove target roots this attempt created that a failure left empty (#4159)."""
+        from apm_cli.install.deploy_snapshot import remove_empty_directories
+
+        remove_empty_directories(self._created_target_roots)
+
     @property
     def restores_deploy_targets(self) -> bool:
         """Whether rollback will restore the snapshotted deploy paths."""
@@ -254,6 +267,7 @@ class InstallTransaction:
             try:
                 try:
                     self._restore_deploy_targets()
+                    self._remove_created_target_roots()
                 finally:
                     try:
                         cleanup_issues = self._resolution.rollback() or []

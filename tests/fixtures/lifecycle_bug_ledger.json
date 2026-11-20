@@ -634,6 +634,22 @@
       ]
     },
     {
+      "issue": 4159,
+      "fixed_in": "0.37.0",
+      "summary": "A failed install left an empty target root such as .github/ that the same install had created in the project.",
+      "failure_modes": [
+        "transaction"
+      ],
+      "properties": [
+        "transaction.failed_command_preserves_state",
+        "ownership.preserve_unowned"
+      ],
+      "regression_tests": [
+        "tests/integration/test_install_commit_order_lifecycle.py::test_failed_install_removes_the_target_root_it_created",
+        "tests/unit/install/test_deploy_snapshot.py::test_rollback_removes_only_empty_target_roots_the_attempt_created"
+      ]
+    },
+    {
       "issue": 4162,
       "fixed_in": "0.37.0",
       "summary": "apm uninstall exited 1 after removing the package files and rewriting the lockfile when a user file sat inside the package's deployed skill directory.",

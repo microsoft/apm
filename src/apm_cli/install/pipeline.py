@@ -611,6 +611,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         transaction=transaction,
         lsp_preflight=lsp_preflight,
     )
+    transaction.track_created_target_roots(ctx.created_target_roots)
 
     # ------------------------------------------------------------------
     # Workstream B (#1116): one Live region per major phase boundary.
