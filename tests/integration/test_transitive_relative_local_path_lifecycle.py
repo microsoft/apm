@@ -20,7 +20,12 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
-pytestmark = [pytest.mark.integration, pytest.mark.e2e, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-LAW-outcome.status_matches_state"),
+]
 
 _TARGET = "copilot"
 

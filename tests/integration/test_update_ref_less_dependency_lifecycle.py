@@ -23,7 +23,12 @@ from tests.integration.test_required_lifecycle_state_machine import (
 )
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
-pytestmark = [pytest.mark.integration, pytest.mark.e2e, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-INV-I2", "P-LAW-outcome.status_matches_state"),
+]
 
 
 def _ref_less_world(scenario, shape: str):
