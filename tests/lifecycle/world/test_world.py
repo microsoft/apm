@@ -18,6 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import requests
 import yaml
 
 from apm_cli.deps.lockfile import LockFile
@@ -528,6 +529,48 @@ def test_ado_policy_is_read_through_the_items_api(lifecycle_world: World) -> Non
         if e["host"] == ADO_HOST and "/_apis/git/repositories/apm-policy/items" in e["path"]
     ]
     assert items and items[0]["status"] == 200, world.services.egress_log()
+
+
+# -- GHE Cloud /api/v3 ------------------------------------------------------------
+
+
+def _get(world: World, url: str, accept: str = "application/vnd.github+json"):
+    return requests.get(
+        url,
+        headers={"Accept": accept},
+        proxies={"https": world.services.proxy_url},
+        verify=str(world.services.ca_path),
+        timeout=30,
+    )
+
+
+def test_ghe_cloud_serves_contents_and_commits_under_api_v3(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    base = f"https://{HOST_ALIASES['ghe'][0]}/api/v3/repos/{ORG}/p-skill"
+    contents = _get(world, f"{base}/contents/apm.yml?ref=v1.0.0")
+    assert contents.status_code == 200, contents.text
+    assert b"p-skill" in base64.b64decode(contents.json()["content"])
+    commit = _get(world, f"{base}/commits/v1.0.0")
+    assert commit.status_code == 200 and len(commit.json()["sha"]) == 40, commit.text
+    sha = _get(world, f"{base}/commits/v1.0.0", accept="application/vnd.github.sha")
+    assert sha.text == commit.json()["sha"]
+    assert _get(world, f"{base}/contents/missing.md").status_code == 404
+
+
+def test_ghe_cloud_policy_is_read_through_api_v3(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    use_policy(world, "deny-pkg", host="ghe")
+    result = driver.run(world, ["install", world.packages["p-exec"].spec])
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, output
+    assert "denied by pattern" in output, output
+    served = f"/api/v3/repos/{policy_org('deny-pkg')}/.github/contents/apm-policy.yml"
+    statuses = [
+        e["status"]
+        for e in world.services.egress_log()
+        if e["host"] == HOST_ALIASES["ghe"][0] and e["path"] == served
+    ]
+    assert 200 in statuses, world.services.egress_log()
 
 
 _POLICY_EXIT = {
