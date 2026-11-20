@@ -2995,6 +2995,20 @@
         "tests/integration/test_pack_credential_files_lifecycle.py::test_pack_refuses_credential_files_naming_each_path",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files"
       ]
+    },
+    {
+      "issue": 4484,
+      "fixed_in": "Unreleased",
+      "summary": "apm update --dry-run re-verifies locked marketplace provenance read-only: catalogs are read but not persisted to the marketplace cache, so nothing under APM_HOME changes.",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/lifecycle/world/test_world.py::test_marketplace_update_dry_run_writes_nothing_under_apm_home"
+      ]
     }
   ],
   "lifecycle_contracts": [

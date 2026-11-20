@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm uninstall` prints each output line at most once per cause when packages survive the removal. (#4219, #4338)
 - `apm update` re-verifies each marketplace dependency's recorded provenance against its registered catalog: it restores the catalog origin and digest, and refuses a lockfile whose provenance no longer matches. (#4338)
 - `apm update` restores a marketplace lock row to the alias `apm.yml` declares when the row records that alias's registered origin. (#4475)
+- `apm update --dry-run` no longer writes the marketplace catalog cache while it re-verifies locked provenance. (#4475)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - `apm approve`, `apm deny` and `apm policy explain` resolve a `plugin@marketplace` install spec to the installed package; a spec that matches no installed package exits 1. (#4275)
 - With `PROXY_REGISTRY_ONLY=1`, `apm update` probes no source host, the automatic update check is skipped, and the direct org policy fetch is announced. (closes #4088, #4158)

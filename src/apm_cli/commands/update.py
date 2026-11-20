@@ -468,10 +468,13 @@ def _explain_local_bundles(scope: Any, apm_package: Any, logger: InstallLogger) 
 def _reverified_lock(lockfile, lock_path: Path, logger, dry_run: bool):
     """Re-verify locked marketplace provenance before planning; fail closed (#4228)."""
     from apm_cli.marketplace.catalog_origin import reverify_locked_provenance
+    from apm_cli.marketplace.client import catalog_cache_read_only
     from apm_cli.marketplace.errors import MarketplaceError
 
     try:
-        restored = reverify_locked_provenance(lockfile, manifest_file(lock_path.parent))
+        # A dry run reads catalogs but persists nothing (#4484).
+        with catalog_cache_read_only(dry_run):
+            restored = reverify_locked_provenance(lockfile, manifest_file(lock_path.parent))
     except MarketplaceError as exc:
         _rich_error(str(exc), symbol="error")
         sys.exit(1)
