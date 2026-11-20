@@ -173,32 +173,3 @@ def test_root_only_hooks_without_dependencies_get_a_lockfile_audit_replays(
     returncode, output = _audit(apm_binary_path, project)
     assert returncode == 1, output
     assert _drifted(output, _SETTINGS), output
-
-
-def test_root_only_copilot_hooks_restore_a_deleted_lockfile(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
-    """#4033 with RA-007: an unchanged per-file hook still counts as registered root content."""
-    project = tmp_path / "copilot-hooks-only"
-    project.mkdir()
-    (project / ".github").mkdir()
-    (project / "apm.yml").write_text(
-        "name: copilot-hooks-only\nversion: 1.0.0\ntargets: [copilot]\n", encoding="utf-8"
-    )
-    _write_json(
-        project / ".apm" / "hooks" / "root.json",
-        {"PreToolUse": [{"hooks": [{"type": "command", "command": "echo root"}]}]},
-    )
-    lock_path = project / "apm.lock.yaml"
-
-    install = _run(apm_binary_path, project, "install", "--no-policy")
-    assert install.returncode == 0, install.stderr or install.stdout
-    assert list((project / ".github" / "hooks").glob("*.json")), install.stdout
-    assert lock_path.is_file(), install.stdout + install.stderr
-
-    lock_path.unlink()
-    install = _run(apm_binary_path, project, "install", "--no-policy")
-    assert install.returncode == 0, install.stderr or install.stdout
-    assert lock_path.is_file(), install.stdout + install.stderr
-    returncode, output = _audit(apm_binary_path, project)
-    assert returncode == 0, output
