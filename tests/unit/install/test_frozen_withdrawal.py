@@ -13,11 +13,9 @@ from pathlib import Path
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.install import frozen_withdrawal
 from apm_cli.install.frozen_withdrawal import (
-    WithheldWrites,
     WriteJournal,
-    refuse_unrecorded_deployments,
+    kept_lines,
     withdraw_unrecorded_deployments,
 )
 from apm_cli.utils.content_hash import compute_file_hash
@@ -120,9 +118,6 @@ def frozenset_of_dirs(root: Path, rels: tuple[str, ...]) -> frozenset[str]:
 def test_each_kept_reason_is_named_with_a_next_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / "apm.yml").write_text("name: t\nversion: 1.0.0\n", encoding="ascii")
-    committed = _lock()
-    committed.write(tmp_path / "apm.lock.yaml")
     adopted = _write(tmp_path, ".claude/skills/adopted/SKILL.md")
     edited = _write(tmp_path, ".claude/skills/edited/SKILL.md")
     stuck = _write(tmp_path, ".claude/skills/stuck/SKILL.md")
@@ -132,7 +127,6 @@ def test_each_kept_reason_is_named_with_a_next_step(
         edited.resolve().as_posix(): "sha256:" + "0" * 64,  # written, then edited
         **_receipt(stuck),
     }
-    monkeypatch.setattr(frozen_withdrawal, "_receipts", lambda *args, **kwargs: after)
     real_unlink = Path.unlink
 
     def _unlink(path: Path, *args, **kwargs) -> None:
@@ -141,13 +135,16 @@ def test_each_kept_reason_is_named_with_a_next_step(
         real_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", _unlink)
-    withheld = WithheldWrites([_lock(*sorted(claims)).to_yaml()])
-    withheld.journal = WriteJournal(receipts=_receipt(adopted), directories=frozenset())
 
-    error = refuse_unrecorded_deployments(withheld, claims, committed, tmp_path)
+    outcome = _withdraw(
+        tmp_path,
+        _lock(*sorted(claims)),
+        claims,
+        journal=WriteJournal(receipts=_receipt(adopted), directories=frozenset()),
+        receipts_after=after,
+    )
 
-    kept = [reason for reason in error.reasons if reason.startswith("  - kept ")]
-    assert kept == [
+    assert kept_lines(outcome.kept) == [
         "  - kept .claude/skills/adopted/SKILL.md: already on disk before this install "
         "(not written by it); delete or move it aside if it is not yours to keep, then "
         "rerun 'apm install --frozen'",
@@ -157,4 +154,3 @@ def test_each_kept_reason_is_named_with_a_next_step(
         "rerun 'apm install --frozen'",
     ]
     assert adopted.is_file() and edited.is_file() and stuck.is_file()
-    assert "the other unrecorded files were removed again" in error.tip
