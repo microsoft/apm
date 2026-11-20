@@ -485,6 +485,7 @@ class TestOutdatedMissingVersionRange:
 
         mock_entry = MagicMock()
         mock_entry.name = "no-version-pkg"
+        mock_entry.is_local = False
         mock_entry.ref = None
         mock_entry.version = None  # forces the empty-version path
         mock_entry.source = "acme-org/no-version-pkg"
