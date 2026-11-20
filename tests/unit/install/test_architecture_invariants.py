@@ -60,6 +60,8 @@ KNOWN_LARGE_MODULES = {
     # and local bundle hash drift through the deployed-hash verifier (#3989).
     # Cleanup evidence renders recorded targets too (#3701).
     "drift.py": 1044,
+    # The resolver takes its frozen pin mode from InstallService (#4012).
+    "phases/resolve.py": 1001,
 }
 
 

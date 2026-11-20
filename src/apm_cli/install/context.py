@@ -230,7 +230,8 @@ class InstallContext:
     # #1873 executable-trust: the resolved trust context (built once per
     # install) and the per-dependency lockfile exec_status computed at the gate.
     exec_trust_ctx: ExecTrustContext | None = None  # lazily built in template
-    exec_allow_map: dict[str, dict[str, bool]] | None = None  # None means gate disabled
+    # Unresolved until effective_allow_map(); a disabled gate is an explicit map.
+    exec_allow_map: dict[str, dict[str, bool]] | None = None
     package_exec_status: dict[str, str] = field(default_factory=dict)  # dep_key -> exec_status
     # dep_key -> types a partially gated package deployed (#3991)
     package_exec_allowed_types: dict[str, tuple[str, ...]] = field(default_factory=dict)

@@ -89,10 +89,14 @@
     },
     {
       "id": "frozen-install-mutation-eligibility",
-      "decision": "Frozen install mutation eligibility and post-deploy deployed-hash re-verification (req-lk-017)",
-      "owner": "install/service.py (InstallService); install/plan.py (manifest_requires_lockfile) decides whether a missing lockfile is converged, for frozen install and audit lockfile-exists; deployed-hash verification shared with audit content-integrity through policy/ci_checks.py (verify_deployed_file_hashes)",
+      "decision": "Frozen install mutation eligibility, the only read of the install frozen flag, and post-deploy deployed-hash re-verification (req-lk-017)",
+      "owner": "install/service.py (InstallService; frozen_disposition is the single frozen-flag reader and its FrozenDisposition is what cleanup, lockfile and service integration consume); install/plan.py (manifest_requires_lockfile) decides whether a missing lockfile is converged, for frozen install and audit lockfile-exists; deployed-hash verification shared with audit content-integrity through policy/ci_checks.py (verify_deployed_file_hashes)",
       "selectors": ["src/apm_cli/install/service.py"],
-      "guards": ["install-deployment-frozen-mutation-eligibility", "install-deployment-lockfile-required"]
+      "guards": [
+        "install-deployment-frozen-mutation-eligibility",
+        "install-deployment-frozen-flag-reader",
+        "install-deployment-lockfile-required"
+      ]
     },
     {
       "id": "materialized-manifest-evidence",
@@ -217,7 +221,7 @@
     {
       "id": "executable-trust-context",
       "decision": "Executable trust context and per-package approval",
-      "owner": "security/executables.py (exec_trust_context_for_project, resolve_project_exec_allow_map, resolve_exec_decision)",
+      "owner": "security/executables.py (exec_trust_context_for_project, resolve_project_exec_allow_map, resolve_exec_decision, authorized_exec_map, package_type_approved, compose_trust_bin); install/exec_gate.py adapters consume it and never treat a missing map as authorization; every deploy-path allow-map consumer receives an owner-produced map (#4018)",
       "selectors": ["src/apm_cli/security/executables.py"],
       "guards": ["install-deployment-executable-trust-context"]
     },

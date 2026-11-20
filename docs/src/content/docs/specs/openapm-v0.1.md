@@ -1294,10 +1294,6 @@ record) or which merge-hook targets exist; it binds only the
 preserve-or-remove decision once ownership is determinate.
 
 <a id="req-lk-024"></a>
-> **PROPOSED amendment 0.1.69** (issue #3701). Provisional number; pending
-> editor decision. Inclusion in this working draft or its conformance tests
-> is not evidence of adoption.
-
 **[req-lk-024]** When a conforming **consumer** implementation deletes a
 deployed file because the lockfile lists it (cleanup of paths a dependency
 no longer deploys, of dependencies no longer declared, or of paths an
@@ -1669,7 +1665,7 @@ This section's normative statements are:
   [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
   [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
   [req-lk-023](#req-lk-023) (proposed staged-replacement capability),
-  [req-lk-024](#req-lk-024) (proposed).
+  [req-lk-024](#req-lk-024).
 - Consumer (SHOULD): [req-lk-007](#req-lk-007),
   [req-lk-018](#req-lk-018).
 
@@ -4392,13 +4388,19 @@ In addition:
 <a id="req-sc-004"></a>
 **[req-sc-004]** A conforming **consumer** implementation MUST
 constrain registry archive extraction so that (a) the archive
-content-type is `application/gzip` over a tar payload (`tar.gz`);
-implementations MUST reject `application/zip` and any other
+content-type is `application/gzip` over a tar payload (`tar.gz`) or
+`application/zip` (`zip`); implementations MUST reject any other
 archive container in v0.1; (b) the uncompressed archive size MUST
 NOT exceed a configurable cap whose default value is **100 MB**;
-and (c) the number of entries in the archive MUST NOT exceed a
-configurable cap whose default value is **10,000**. Violations MUST
-fail closed before extraction proceeds.
+(c) the number of entries in the archive MUST NOT exceed a
+configurable cap whose default value is **10,000**, counted as
+entries are read rather than taken from any declared count; and
+(d) extraction MUST refuse any entry whose path would traverse
+outside the destination, any absolute path, any symbolic or hard
+link, and any duplicate entry path (see also
+[req-sc-002](#req-sc-002)). The same limit set, (b) through (d),
+applies identically to `tar.gz` and `zip`. Violations MUST fail
+closed, and no entry of a violating archive may remain extracted.
 
 ### 10.6 Malicious package execution at install time
 
@@ -4428,7 +4430,7 @@ detection MUST scope per-dependency, not globally.
 For supported dependency aliases, [req-mf-025](#req-mf-025) constrains
 destinations and records canonical placement for later cleanup. Containment
 alone does not establish ownership or authorize deletion of existing content.
-The proposed [req-lk-024](#req-lk-024) requires deployment evidence, not a
+[req-lk-024](#req-lk-024) requires deployment evidence, not a
 lockfile hash alone, before a lockfile-driven deletion.
 
 ### 10.8 Policy bypass via crafted manifest
@@ -4502,7 +4504,7 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 4 | Lockfile tampering                          | [req-lk-012](#req-lk-012), [req-lk-013](#req-lk-013), [req-lk-016](#req-lk-016), [req-lk-017](#req-lk-017), [req-sc-001](#req-sc-001); [req-rs-018](#req-rs-018) for subset-selection scope (re-derived outside frozen mode, rejected under frozen install) | Consumer-default  |
 | 5 | Registry impersonation                      | [req-lk-013](#req-lk-013), [req-rs-009](#req-rs-009), [req-sc-004](#req-sc-004); v0.2 TLS-only deferred | Consumer-default  |
 | 6 | Malicious package execution at install time | No install-time execution path; [req-pl-006](#req-pl-006) defence  | Consumer-default  |
-| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021), [req-lk-024](#req-lk-024) (proposed), [req-lk-023](#req-lk-023) when staged replacement is provided; [req-mf-025](#req-mf-025) for supported aliases; self-entry isolation | Consumer-default  |
+| 7 | Unverified content cleanup                  | [req-tg-002](#req-tg-002), [req-lk-020](#req-lk-020), [req-lk-021](#req-lk-021), [req-lk-024](#req-lk-024), [req-lk-023](#req-lk-023) when staged replacement is provided; [req-mf-025](#req-mf-025) for supported aliases; self-entry isolation | Consumer-default  |
 | 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010), [req-pl-018](#req-pl-018) | Governance-only   |
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
@@ -4847,7 +4849,7 @@ conformance statement identifying:
 [req-lk-019](#req-lk-019), [req-lk-020](#req-lk-020),
 [req-lk-021](#req-lk-021), [req-lk-022](#req-lk-022),
 [req-lk-023](#req-lk-023) (proposed staged-replacement capability),
-[req-lk-024](#req-lk-024) (proposed),
+[req-lk-024](#req-lk-024),
 [req-rs-001](#req-rs-001), [req-rs-002](#req-rs-002),
 [req-rs-003](#req-rs-003), [req-rs-004](#req-rs-004),
 [req-rs-005](#req-rs-005), [req-rs-006](#req-rs-006),
@@ -5264,8 +5266,9 @@ the trust-anchor expectation in [req-rg-001](#req-rg-001).
 Reserved for inclusion in v0.2 (sketch only, non-normative in
 v0.1):
 
-- Archive container binding (`application/gzip` over `tar`; reject
-  `application/zip`; see also [req-sc-004](#req-sc-004)).
+- Archive container binding on the registry wire (`application/gzip`
+  over `tar`, or `application/zip`, under the identical limits of
+  [req-sc-004](#req-sc-004)).
 - Publisher attestation envelope (in-toto / SLSA; binds version to
   publisher identity; see
   [Section 10.12](#1012-publisher-provenance-and-attestations-reserved-for-v02)).
@@ -5510,14 +5513,17 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.66 (proposed) | 2026-11-19 | Amendment for the portable native-plugin approval pin (issue #3919 follow-up, PR #3290; implementation in PR #3989). Revised [req-na-005](#req-na-005) in place: the approval that permits native activation is bound to the plugin root's approval digest, which is the [req-na-002](#req-na-002) root digest construction over the same file set, order and encoding with the executable-bit byte omitted, so one approval covers the same paths and bytes on operating systems whose file systems do not carry that bit; the approval digest is distinct from the root digest the lock records. The [req-na-002](#req-na-002) root digest keeps the bit and still gates integrity between the materialized source, the deployed root and the lock. Revised the [req-na-002](#req-na-002) file-set exclusion clause in place: a root `apm.yml` and a root `.apm/` are excluded whether or not the consumer generated them, so they are neither digested nor deployed under the profile root, and a plugin whose manifest references them is not natively activated. Added the `native_plugin` row to Section 5.2, documenting the lock data that [req-na-002](#req-na-002) and [req-na-004](#req-na-004) already require; both now cross-reference it. Under Section 9.2 this changes verdicts: a consumer that binds the approval to the executable-bit-including root digest, or that digests or deploys an author-shipped root `apm.yml` or `.apm/`, no longer conforms. Approvals recorded against the earlier root digest no longer match, so the plugin is withheld with the [req-na-005](#req-na-005) diagnostic until it is re-approved; a lock entry whose root digest was computed under the earlier exclusion reading is reported as drift under [Section 5.5](#55-drift-and-integrity-model). The reference implementation behaves this way. The root digest is not portable across file systems with different executable-bit semantics; the [req-na-002](#req-na-002) editorial note records this limitation pending the project-scope route (#3921). Sections 5.2, 8.5.11 and 10.18 are updated; schema bytes are unchanged. No requirement ID, keyword or statement count changes. Statement count: 148 (143 MUST, 5 SHOULD). |
 | 0.1.67 (proposed) | 2026-11-19 | Amendment for accepted issue #3993. Revised [req-pl-018](#req-pl-018) (Section 6.3.1, governance MUST) in place. Clause (g) now binds a `dependencies.require` entry to one host with the same effective host and ASCII mapping as `allow` and `deny`: a host-qualified entry identifies a dependency only on the named host, and a hostless entry only on the implementation-default host of the evaluating implementation (never rebound by a consumer manifest `default_host:`); local paths still match hostless entries, dependencies on dotless hosts other than the implementation-default host cannot be identified at this revision, and the first identified dependency in the order the check evaluates dependencies (declaration order within one manifest) is the one identified. Every check evaluating a `require` entry MUST resolve it to that dependency on the manifest and lockfile side, reading the lock entry by the dependency's own lockfile identity, and MUST treat an entry that identifies no dependency as a violation routed through `enforcement`, never skipping it. Clause (g) also states that a dependency written without a host takes the `default_host:` of its declaring manifest as its effective host when declared, matching resolution under [req-mf-019](#req-mf-019); because clause (g) defines one effective host for every pattern field, this also applies to host-qualified `allow` and `deny` patterns: for a manifest declaring a non-default `default_host:`, a host-qualified pattern naming that host newly matches the manifest's shorthand dependencies and one naming the implementation-default host no longer does (the reference implementation already behaved this way). Clause (a), the Section 6.3.1 table and the Section 10.8 note were aligned. Under Section 9.2 this changes an evaluation already defined by req-pl-018 and is not behavior-neutral errata: a host-qualified entry can newly pass on any host, including one naming the implementation-default host; a hostless entry for a dependency on any other host newly fails; and an entry naming no dependency newly fails a check that verifies the entry in the lockfile. Policy authors migrate by host-qualifying `require` entries for packages off the implementation-default host; the diagnostic names the entry to write. Source replacement under [req-rpl-002](#req-rpl-002) is unchanged. The concurrent 0.1.66 proposal is independent; this amendment does not adopt it. No new normative statement; count unchanged at 148 (143 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel and comment window. |
 | 0.1.68 (proposed) | 2026-11-19 | Amendment for accepted issue #4000 (hash framing hardening). Revised [req-lk-016](#req-lk-016) (Section 5.2, consumer MUST) in place: the byte stream a package `content_hash` digests is named by `lockfile_version`. A new version `"4"` digests, per file in ascending byte-wise POSIX path order, the UTF-8 relative path, one NUL byte and the raw SHA-256 of the file bytes (the [Section 8.5.11](#8511-native-plugin-activation-profile) root-digest framing without its executable-bit byte); versions `"1"` to `"3"` keep the implementation's legacy tree stream. Values keep the `sha256:<hex>` envelope; no new prefix is introduced. A consumer verifies each `content_hash` with the stream its version names; a writable install MAY promote a version `"1"` to `"3"` lockfile to `"4"` only by re-hashing every package row from verified or freshly accepted bytes, and otherwise keeps the version and every recorded value; a frozen install, `apm audit` and any operation that does not otherwise write the lockfile never promote or rewrite. Section 5.4 now names version `"4"`, which admits every earlier field including version `"3"` replacement state; a consumer that does not recognise it refuses the lockfile under [req-lk-004](#req-lk-004). Appendix A selects a new lockfile resource, `lockfile-v0.1.68.schema.json`, that adds `"4"` to the `lockfile_version` enum; the 0.1.60 resource keeps its ID and bytes. Under Section 9.2 this changes recorded values for promoted lockfiles: a consumer that does not recognise `"4"` now refuses them instead of verifying them. Lockfiles that stay at `"1"` to `"3"` verify unchanged. Keyword, section and conformance class are unchanged, so the Appendix C row is unchanged; the requirements manifest notes and conformance coverage are updated. No new normative statement; count unchanged at 148 (143 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel and comment window. |
-| 0.1.69 (proposed) | 2026-11-20 | Provisional amendment for accepted issue #3701 (deletion requires deployment evidence); the number and counts are recomputed when it merges. Adds [req-lk-024](#req-lk-024) (Section 5.2, consumer MUST): a lockfile-driven deletion of a deployed file needs a matching local deployment record or byte equality, over the [req-lk-012](#req-lk-012) canonical domain, with the locked version's render; a lockfile hash alone never authorizes it; without evidence, or on a mismatch, the file is kept with a diagnostic naming it and the manual resolution; the render is established before the dependency's source is removed; managed final symbolic links are out of scope. Under Section 9.2 this defines cleanup behavior no earlier statement specified, not behavior-neutral errata: a consumer that deletes a file on the strength of a lockfile hash alone no longer conforms. Sections 1.3, 5.7, 10.7, 10.11, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes and `lockfile_version` are unchanged. Section 9.3 review and public comment remain pending. Adds one MUST. Statement count: 148 -> 149 (144 MUST, 5 SHOULD). |
+| 0.1.69  | 2026-11-20 | Amendment for issue #3701 (deletion requires deployment evidence). Added [req-lk-024](#req-lk-024) (Section 5.2, consumer MUST): a lockfile-driven deletion of a deployed file needs a matching local deployment record or byte equality, over the [req-lk-012](#req-lk-012) canonical domain, with the locked version's render; a lockfile hash alone never authorizes it; without evidence, or on a mismatch, the file is kept with a diagnostic naming it and the manual resolution; the render is established before the dependency's source is removed; managed final symbolic links are out of scope. Under Section 9.2 this defines cleanup behavior no earlier statement specified, not behavior-neutral errata: a consumer that deletes a file on the strength of a lockfile hash alone no longer conforms. Sections 1.3, 5.7, 10.7, 10.11, 11.3.2, Appendix C, the requirements manifest and conformance coverage are updated; schema bytes and `lockfile_version` are unchanged. Proposed 2026-11-20; adopted 2026-11-20 in this Working Draft by editor decision relayed in PR #4049 (https://github.com/microsoft/apm/pull/4049#issuecomment-7035970110), without the Section 9.3 reviewer-panel approval and public comment period. Adds one MUST. Statement count: 148 -> 149 (144 MUST, 5 SHOULD). |
+| 0.1.70  | 2026-11-20 | Amendment for issue #4234 (zip registry archives). Revised [req-sc-004](#req-sc-004) (Section 10.5, consumer MUST) in place: clause (a) admits `application/zip` alongside `tar.gz` and rejects every other container; (c) counts entries as they are read; a new clause (d) refuses path traversal, absolute paths, symbolic and hard links and duplicate entry paths; and the limit set (b) through (d) applies identically to both containers. A violation fails closed and leaves no entry of the archive extracted. Under Section 9.2 this changes evaluations defined by a normative statement, so it is an amendment, not errata. The reserved Appendix B archive-container item is aligned. Proposed and adopted 2026-11-20 in this Working Draft by editor decision recorded in issue #4234, without the Section 9.3 reviewer-panel approval and public comment period. No statement added; the count remains 149 (144 MUST, 5 SHOULD). |
 
-In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63 and 0.1.65 that is the adoption date, and each of those rows states its proposal date.
+In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63, 0.1.65 and 0.1.69 that is the adoption date, and each of those rows states its proposal date.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals, the adopted 0.1.63 amendment and the 0.1.64 and 0.1.69 proposals each add one MUST; 0.1.54 adds four; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, and the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place; none adds a statement. Together, this
+0.1.60 proposals, the adopted 0.1.63 and 0.1.69 amendments and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, and the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place; none adds a statement. Together, this
 working draft
 contains 149 statements (144 MUST, 5 SHOULD). Combining the proposals does not establish
-Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), and amendment 0.1.65 on the same date by editor decision (issue #3919), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.
+Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), amendment 0.1.65 on the same date by editor decision (issue #3919), and amendment 0.1.69 on 2026-11-20 by editor decision (issue #3701), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.
+
+Amendment 0.1.70 was adopted on 2026-11-20 by editor decision (issue #4234); its Date is the adoption date. It revises [req-sc-004](#req-sc-004) in place and adds no statement.
 
 Errata:
 
