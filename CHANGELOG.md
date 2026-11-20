@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking changes and upgrade notes
 
 - `apm install` keeps a managed file it cannot prove it deployed (no receipt, not render-equal), names it and exits 1. Files committed by APM 0.35.x or earlier (for example cursor rules, codex agents) may be refused once: move them aside and rerun `apm install`. (#4382)
+- After upgrading, `apm uninstall` needs deployment evidence for each file it deletes; without it, it changes nothing and names each file. If the source is unreachable, see the uninstall reference. (#3701)
 
 ### Changed
 
