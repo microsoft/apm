@@ -677,12 +677,20 @@ def replay_spine(machine: SourceMachine) -> None:
             machine.declare(choice, False)
     for form in ("plugin-at-mkt", "bundle", "registry"):
         machine.declare(_BY_FORM[form], True)
-    for form in ("shorthand", "git-object", "marketplace-object"):
+    remote_forms = ("shorthand", "git-object", "marketplace-object")
+    for form in remote_forms:
         machine.declare(_BY_FORM[form], False)
         for op in ("install", "update", "prune", "compile", "lock"):
             machine.reconcile(op, True)
+    # p-lsp still survives: the strict known cell #4214 fails this uninstall.
+    machine.uninstall("remote-skill", False)
+    for slot in ("remote-exec", "p-lsp"):
+        machine.uninstall(slot, True)
+    for form in remote_forms:
+        machine.declare(_BY_FORM[form], False)
+        machine.reconcile("install", False)
         machine.uninstall("remote-skill", True)
-    for slot in ("remote-exec", "p-parent", "p-lsp", "p-canvas", "p-native-claude"):
+    for slot in ("p-parent", "p-canvas", "p-native-claude"):
         machine.uninstall(slot, True)
     machine.undeclare("p-registry")
     machine.reconcile("prune", False)
