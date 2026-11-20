@@ -30,12 +30,7 @@ _XFAIL = {
     "G|dry-run|revoke-approval|hook": _DRY_RUN,
 }
 _BUNDLE_KEEPS = "S-pending (neutral issue to follow): reinstalling a local bundle keeps hook files the gate no longer allows"
-_XFAIL.update(
-    {
-        f"G|bundle-install|{change}|hook": _BUNDLE_KEEPS
-        for change in ("local-deny", "org-deny", "revoke-approval")
-    }
-)
+_XFAIL.update({f"G|bundle-install|{change}|hook": _BUNDLE_KEEPS for change in _BUNDLE})
 _SMOKE = {"G|install|revoke-approval|hook", "G|frozen|local-deny|hook"}
 
 # G path -> (changes with a row, surface files)

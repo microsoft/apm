@@ -1154,7 +1154,7 @@ def _rebound_to_catalog(world: World) -> None:
 
 
 _MK_STATE = (LOCK, MANIFEST, ".agents/skills/p-skill")
-_REPLAY_ONLY = {"audit-ci", "frozen", "install"}
+_REPLAY_ONLY = ("audit-ci", "frozen", "install")
 _MK_CELLS: dict[tuple[str, str], Expect] = {}
 for _tamper in ("disk-or-cache", "lock-edited", "missing-hash", "upstream-or-proxy"):
     for _op in _REPLAY_ONLY:

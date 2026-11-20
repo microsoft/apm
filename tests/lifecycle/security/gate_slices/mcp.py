@@ -32,16 +32,19 @@ _XFAIL = {
     **{f"G|uninstall-prune-rebuild|{change}|mcp": _UNINSTALL_SIBLING for change in _ALL},
     **{
         f"G|dry-run|{change}|mcp": _DRY_RUN
-        for change in ("local-deny", "org-deny", "revoke-approval")
+        for change in ("local-deny", "org-deny", "org-enables-gate", "revoke-approval")
     },
 }
 _BUNDLE_KEEPS = "S-pending (neutral issue to follow): reinstalling a local bundle keeps hook files the gate no longer allows"
 _XFAIL.update(
     {
         f"G|bundle-install|{change}|mcp": _BUNDLE_KEEPS
-        for change in ("local-deny", "org-deny", "revoke-approval")
+        for change in ("local-deny", "org-deny", "org-enables-gate", "revoke-approval")
     }
 )
+# A bundle approval pins the whole bundle digest: a changed definition reads as
+# a bundle that is not approved yet.
+_ANNOUNCE = {"G|bundle-install|definition-changed|mcp": r"not approved for this exact bundle"}
 _SMOKE = {"G|update|local-deny|mcp"}
 
 # G path -> (changes with a row, (surface files, other-scope prefixes))
@@ -67,6 +70,7 @@ SLICE = GateSlice(
             f"G|{path}|{change}|mcp",
             surface=surface,
             shared=True,
+            announce=_ANNOUNCE.get(f"G|{path}|{change}|mcp"),
             unchanged=unchanged,
             smoke=f"G|{path}|{change}|mcp" in _SMOKE,
             xfail=_XFAIL.get(f"G|{path}|{change}|mcp", ""),
