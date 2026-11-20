@@ -809,6 +809,11 @@ jobs:
           -n 4 --dist loadgroup --durations=20 \
           -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
 
+    # The M-GATE spine writes its visited cells (build/gate-cells/); every
+    # scope whose spine ran in this shard must cover the GATE obligation list.
+    - name: Check GATE cell coverage
+      run: uv run --extra dev python -m pytest -p no:cacheprovider -q tests/quality/test_gate_cell_obligations.py
+
   lifecycle-smoke-shard-2:
     name: Lifecycle Smoke Shard 2 (Linux)
     runs-on: ubuntu-24.04
