@@ -236,6 +236,7 @@
     "tests/integration/test_cold_skill_receipt_preservation.py",
     "tests/integration/test_cold_update_transitive_plugin_lifecycle.py",
     "tests/integration/test_command_integrator_hermetic.py",
+    "tests/integration/test_command_output_owner_e2e.py",
     "tests/integration/test_commands_auth_flow.py",
     "tests/integration/test_commands_config_coverage.py",
     "tests/integration/test_commands_deep_coverage.py",

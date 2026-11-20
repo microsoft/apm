@@ -27,7 +27,10 @@ BEHAVIORAL_MARKERS = frozenset(EXPECTED_MARKERS)
 INVENTORY_PLUGIN = "tests.quality.taxonomy_inventory_plugin"
 TAXONOMY_BASELINE = REPO_ROOT / "tests" / "quality" / "test_taxonomy_baseline.json"
 PROMISE_CATALOG = REPO_ROOT / "tests" / "quality" / "promise-catalog.json"
-PROMISE_ID = re.compile(r"^(req-[a-z]{2,3}-[0-9]{3}|owner:[a-z0-9][a-z0-9-]*)$")
+SPEC_REQUIREMENT_ID = re.compile(r"^req-[a-z]{2,3}-[0-9]{3}$")
+SPEC_FAMILY = "req"
+P_FAMILY_ID = re.compile(r"^(P-[A-Z]+)-([A-Za-z0-9][A-Za-z0-9_.-]*)$")
+LIFECYCLE_LEDGER = REPO_ROOT / "tests" / "fixtures" / "lifecycle_bug_ledger.json"
 BASELINE_LISTS = ("misplaced_modules", "promise_exempt_modules", "unclassified_modules")
 AUTHORITY_PROSE = "Module-level `pytestmark` is the sole behavioral classification authority."
 
@@ -309,17 +312,84 @@ def _load_taxonomy_baseline(path: Path) -> dict[str, frozenset[str]]:
     return lists
 
 
-def _load_promise_catalog(path: Path) -> frozenset[str]:
-    """Load promise ids from the catalog, validating their shape."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    assert set(data) == {"doc", "promises", "schema_version"}, sorted(data)
-    assert data["schema_version"] == 1
+def _promise_family(promise_id: str) -> str | None:
+    """Return the family of a promise id, or None when its prefix is unknown."""
+    if SPEC_REQUIREMENT_ID.match(promise_id):
+        return SPEC_FAMILY
+    match = P_FAMILY_ID.match(promise_id)
+    return match.group(1) if match else None
+
+
+def _catalog_violations(data: object) -> list[str]:
+    """Return every reason a promise catalog payload is invalid."""
+    catalog_name = PROMISE_CATALOG.relative_to(REPO_ROOT).as_posix()
+    if not isinstance(data, dict) or set(data) != {
+        "doc",
+        "families",
+        "promises",
+        "schema_version",
+    }:
+        return [f"{catalog_name}: keys must be doc, families, promises, schema_version"]
+    violations: list[str] = []
+    families = data["families"]
+    if data["schema_version"] != 1:
+        violations.append(f"{catalog_name}: schema_version must be 1")
+    if not isinstance(families, dict) or not all(
+        isinstance(name, str)
+        and (name == SPEC_FAMILY or re.fullmatch(r"P-[A-Z]+", name))
+        and isinstance(doc, str)
+        and doc
+        for name, doc in families.items()
+    ):
+        return [*violations, f"{catalog_name}: families must map P-<FAMILY> (or req) to a doc"]
     promises = data["promises"]
-    assert isinstance(promises, dict) and promises
-    for promise_id, source in promises.items():
-        assert PROMISE_ID.match(promise_id), f"malformed promise id {promise_id!r}"
-        assert isinstance(source, str) and source, promise_id
-    return frozenset(promises)
+    if not isinstance(promises, dict) or not promises:
+        return [*violations, f"{catalog_name}: promises must be a non-empty object"]
+    for promise_id, source in sorted(promises.items()):
+        family = _promise_family(promise_id)
+        if family is None:
+            violations.append(
+                f"{catalog_name}: promise id {promise_id!r} has an unknown prefix. Fix: use "
+                "P-<FAMILY>-<id> with a declared family, or a spec requirement id "
+                "(req-xx-NNN) as written in CONFORMANCE.json."
+            )
+        elif family not in families:
+            violations.append(
+                f"{catalog_name}: promise id {promise_id!r} uses undeclared family "
+                f"{family!r}. Fix: declare {family!r} in the catalog's families, or use "
+                f"a declared family ({', '.join(sorted(families))})."
+            )
+        if not isinstance(source, str) or not source:
+            violations.append(f"{catalog_name}: promise id {promise_id!r} needs a description")
+    return violations
+
+
+def _law_violations(catalog: frozenset[str], ledger: dict[str, object]) -> list[str]:
+    """Return drift between lifecycle ledger laws and P-LAW catalog ids."""
+    catalog_name = PROMISE_CATALOG.relative_to(REPO_ROOT).as_posix()
+    rows = ledger["property_catalog"]
+    assert isinstance(rows, list) and rows, "lifecycle property_catalog must be non-empty"
+    laws = {f"P-LAW-{row['id']}" for row in rows}
+    violations = [
+        f"{catalog_name}: lifecycle law {law[len('P-LAW-') :]!r} has no promise id. "
+        f"Fix: add {law!r} to the catalog."
+        for law in sorted(laws - catalog)
+    ]
+    violations += [
+        f"{catalog_name}: {promise_id!r} names no lifecycle law. Fix: remove it, or add "
+        "the law to tests/fixtures/lifecycle_bug_ledger.json property_catalog."
+        for promise_id in sorted(catalog)
+        if promise_id.startswith("P-LAW-") and promise_id not in laws
+    ]
+    return violations
+
+
+def _load_promise_catalog(path: Path) -> frozenset[str]:
+    """Load promise ids from the catalog, failing on any invalid id or family."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    violations = _catalog_violations(data)
+    assert not violations, "\n".join(f"[x] {violation}" for violation in violations)
+    return frozenset(data["promises"])
 
 
 def _moves(entries: frozenset[str], collected: dict[str, tuple[str, ...]]) -> dict[str, str]:
@@ -430,6 +500,52 @@ def test_tm006_taxonomy_ratchets_do_not_grow(
         print(f"[i] stale taxonomy baseline entry (may be pruned): {entry}")
 
 
+def test_tm011_every_lifecycle_law_has_a_promise_id() -> None:
+    catalog = _load_promise_catalog(PROMISE_CATALOG)
+    ledger = json.loads(LIFECYCLE_LEDGER.read_text(encoding="utf-8"))
+    violations = _law_violations(catalog, ledger)
+    assert not violations, "\n".join(f"[x] {violation}" for violation in violations)
+
+
+def _seeded_catalog(*extra_ids: str) -> dict[str, object]:
+    return {
+        "doc": "seed",
+        "families": {"P-OWN": "owners", "req": "spec"},
+        "promises": {"P-OWN-seed": "seed", "req-mf-001": "seed", **dict.fromkeys(extra_ids, "x")},
+        "schema_version": 1,
+    }
+
+
+def test_tm012_unknown_promise_prefix_fails() -> None:
+    assert _catalog_violations(_seeded_catalog()) == []
+    assert _catalog_violations(_seeded_catalog("owner:seed")) == [
+        "tests/quality/promise-catalog.json: promise id 'owner:seed' has an unknown prefix. "
+        "Fix: use P-<FAMILY>-<id> with a declared family, or a spec requirement id "
+        "(req-xx-NNN) as written in CONFORMANCE.json."
+    ]
+
+
+def test_tm012_undeclared_promise_family_fails() -> None:
+    assert _catalog_violations(_seeded_catalog("P-DOC-001")) == [
+        "tests/quality/promise-catalog.json: promise id 'P-DOC-001' uses undeclared family "
+        "'P-DOC'. Fix: declare 'P-DOC' in the catalog's families, or use a declared family "
+        "(P-OWN, req)."
+    ]
+
+
+def test_tm012_missing_lifecycle_law_promise_fails() -> None:
+    ledger = {"property_catalog": [{"id": "outcome.status_matches_state"}, {"id": "new.law"}]}
+    assert _law_violations(
+        frozenset({"P-LAW-outcome.status_matches_state", "P-LAW-gone.law"}), ledger
+    ) == [
+        "tests/quality/promise-catalog.json: lifecycle law 'new.law' has no promise id. "
+        "Fix: add 'P-LAW-new.law' to the catalog.",
+        "tests/quality/promise-catalog.json: 'P-LAW-gone.law' names no lifecycle law. "
+        "Fix: remove it, or add the law to tests/fixtures/lifecycle_bug_ledger.json "
+        "property_catalog.",
+    ]
+
+
 def test_tm006_ratchet_files_are_canonical_json() -> None:
     for path in (TAXONOMY_BASELINE, PROMISE_CATALOG):
         text = path.read_text(encoding="utf-8")
@@ -449,27 +565,27 @@ _SEEDED_MODULES = {
     "tests/unit/test_legacy.py": "def test_legacy():\n    assert True\n",
     "tests/integration/test_moved.py": "def test_moved():\n    assert True\n",
     "tests/unit/test_new_unclassified.py": (
-        'import pytest\n\npytestmark = pytest.mark.promise("owner:seed")\n\n'
+        'import pytest\n\npytestmark = pytest.mark.promise("P-OWN-seed")\n\n'
         "def test_value():\n    assert True\n"
     ),
     "tests/integration/test_new_unit.py": (
-        'import pytest\n\npytestmark = [pytest.mark.unit, pytest.mark.promise("owner:seed")]\n\n'
+        'import pytest\n\npytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-seed")]\n\n'
         "def test_value():\n    assert True\n"
     ),
     "tests/unit/test_new_spawn.py": (
         "import subprocess\n\nimport pytest\n\n"
-        'pytestmark = [pytest.mark.unit, pytest.mark.promise("owner:seed")]\n\n'
+        'pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-seed")]\n\n'
         'def test_value():\n    subprocess.run(["true"], check=False)\n'
     ),
     "tests/unit/test_new_promiseless.py": (
         "import pytest\n\npytestmark = pytest.mark.unit\n\ndef test_value():\n    assert True\n"
     ),
     "tests/unit/test_new_unknown_promise.py": (
-        'import pytest\n\npytestmark = [pytest.mark.unit, pytest.mark.promise("owner:nope")]\n\n'
+        'import pytest\n\npytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-nope")]\n\n'
         "def test_value():\n    assert True\n"
     ),
     "tests/unit/test_new_compliant.py": (
-        'import pytest\n\npytestmark = [pytest.mark.unit, pytest.mark.promise("owner:seed")]\n\n'
+        'import pytest\n\npytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-seed")]\n\n'
         "def test_value():\n    assert True\n"
     ),
 }
@@ -496,7 +612,7 @@ def seeded_findings(
             {"tests/unit/test_legacy.py", "tests/unit/test_moved.py", "tests/unit/test_removed.py"}
         ),
     }
-    return _taxonomy_ratchet_findings(inventory, baseline, frozenset({"owner:seed"}))
+    return _taxonomy_ratchet_findings(inventory, baseline, frozenset({"P-OWN-seed"}))
 
 
 def _failures_for(findings: tuple[list[str], list[str]], module: str) -> list[str]:
@@ -542,7 +658,7 @@ def test_tm009_unknown_promise_id_fails(
 ) -> None:
     failures = _failures_for(seeded_findings, "tests/unit/test_new_unknown_promise.py")
     assert failures == [
-        "tests/unit/test_new_unknown_promise.py: unknown promise id(s) ['owner:nope']. "
+        "tests/unit/test_new_unknown_promise.py: unknown promise id(s) ['P-OWN-nope']. "
         "Fix: use ids listed in tests/quality/promise-catalog.json, or add the promise "
         "to the catalog."
     ]

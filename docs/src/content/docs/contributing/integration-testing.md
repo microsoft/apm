@@ -236,12 +236,14 @@ with one entry per line; entries may only be removed.
    marker, or move the module.
 3. **Promise links** (same contract and baseline). Every new test module
    names the promises it protects in its module-level `pytestmark`, using ids
-   from `tests/quality/promise-catalog.json` (OpenAPM `req-*` ids and
-   `owner:<id>` architecture owners). Add a missing promise to the catalog in
-   the same pull request.
+   from `tests/quality/promise-catalog.json`: OpenAPM `req-*` ids,
+   `P-OWN-<owner id>` architecture owners, `P-INV-I1`..`P-INV-I9` lifecycle
+   invariants and `P-LAW-<id>` lifecycle laws. Add a missing promise to the
+   catalog in the same pull request. A new id family (`P-<FAMILY>-<id>`) must
+   first be declared in the catalog's `families`; undeclared families fail.
 
 ```python
-pytestmark = [pytest.mark.unit, pytest.mark.promise("owner:accepted-target-vocabulary")]
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-accepted-target-vocabulary")]
 ```
 
 Moving a listed test or module to another directory under the same name keeps
