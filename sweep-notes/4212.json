@@ -1,0 +1,24 @@
+{
+  "changelog": "`apm install --dry-run plugin@marketplace` no longer writes the marketplace ref-pin file under APM_HOME (#4217)",
+  "ledger_row": {
+    "issue": 4212,
+    "fixed_in": "Unreleased",
+    "summary": "The marketplace resolver recorded the plugin ref in APM_HOME cache/marketplace/version-pins.json on every resolution, so install --dry-run (and read-only apm view) wrote user-scope state.",
+    "failure_modes": [
+      "transaction",
+      "cache"
+    ],
+    "properties": [
+      "transaction.failed_command_preserves_state",
+      "outcome.status_matches_state"
+    ],
+    "regression_tests": [
+      "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_install_dry_run_of_marketplace_plugin_writes_no_ref_pin",
+      "tests/unit/install/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
+    ]
+  },
+  "red": "APM_E2E_TESTS=1 APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_marketplace_ref_pin_lifecycle.py -n 0 -p no:cacheprovider -q -> FAILED test_install_dry_run_of_marketplace_plugin_writes_no_ref_pin: `assert not world.pins.exists()` (assert not True; .../home/.apm/cache/marketplace/version-pins.json)",
+  "green": "APM_E2E_TESTS=1 APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_marketplace_ref_pin_lifecycle.py -n 0 -p no:cacheprovider -q -> 2 passed",
+  "owner": "src/apm_cli/install/transaction.py (InstallTransaction commit/rollback/dry-run completion) + src/apm_cli/marketplace/version_pins.py (RefPinStage, stage_ref_pin)",
+  "notes": "One owner-level fix for #4212 and #4194: resolver.py now only stages the pin (stage_ref_pin); InstallTransaction opens one RefPinStage per attempt, writes it in commit() and discards it on rollback and dry-run completion. Commands with no install transaction (apm view, uninstall registry fallback) now check pins but never write them. Ref-swap warning behaviour is unchanged. The real install in the same test asserts the pin is still recorded (positive control)."
+}

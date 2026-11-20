@@ -159,6 +159,44 @@ def test_dry_run_completion_preserves_auto_created_manifest(tmp_path: Path) -> N
     assert not package.exists()
 
 
+@pytest.mark.parametrize(
+    ("disposition", "expected_pins"),
+    [
+        (InstallDisposition.SUCCESS, {"mkt/plug/1.0.0": "v1"}),
+        (InstallDisposition.DRY_RUN, None),
+        (InstallDisposition.FAILED, None),
+        (InstallDisposition.VALIDATION_FAILED, None),
+        (InstallDisposition.CANCELLED, None),
+    ],
+)
+def test_marketplace_ref_pins_are_written_only_on_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    disposition: InstallDisposition,
+    expected_pins: dict[str, str] | None,
+) -> None:
+    """#4212/#4194: a staged ref pin reaches APM_HOME only when the attempt commits."""
+    import json
+
+    from apm_cli.marketplace.version_pins import stage_ref_pin
+
+    apm_home = tmp_path / "apm-home"
+    monkeypatch.setattr("apm_cli.config.CONFIG_DIR", str(apm_home))
+    pins = apm_home / "cache" / "marketplace" / "version-pins.json"
+    project = tmp_path / "project"
+    project.mkdir()
+    transaction = _transaction(project)
+
+    stage_ref_pin("mkt", "plug", "v1", version="1.0.0")
+    transaction.complete(InstallResult(disposition=disposition))
+    stage_ref_pin("mkt", "late", "v2")
+
+    if expected_pins is None:
+        assert not pins.exists()
+    else:
+        assert json.loads(pins.read_text(encoding="utf-8")) == expected_pins
+
+
 def test_success_commit_finalizes_resolution(tmp_path: Path) -> None:
     """A successful install finalizes the resolution journal."""
     transaction = _transaction(tmp_path)
