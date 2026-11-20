@@ -587,15 +587,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
     ),
     KnownOutputCell(
-        "install-hook-summary-line-twice",
-        "I9",
-        "#4336",
-        _runs("install"),
-        r"repeats a line: '\|   \w+: runs ",
-        # The same hook summary line printed twice back to back in one package block.
-        output=r"^  (\|   \w+: runs [^\n]*)\n  \1$",
-    ),
-    KnownOutputCell(
         "pack-plugin-manifest-notes-twice",
         "I9",
         "#4291",
