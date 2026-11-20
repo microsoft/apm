@@ -1140,6 +1140,14 @@ FROZEN_HOOK_PINS_STALE = _entry(
     "retire the hooks their approval no longer admits (without --frozen)",
     then="commit apm.yml and apm.lock.yaml",
 )
+# The way out of an org-enforced fail-closed block; never advertise a bypass.
+# {source} binds to " (<source>)" when discovery named the source it tried, else "".
+POLICY_FETCH_FAILURE_BLOCKED = _entry(
+    "policy-fetch-failure-blocked",
+    "apm policy status",
+    "check that the org policy source{source} is reachable",
+    then="retry, or ask your org admin",
+)
 # -- end W4 frozen-policy --
 # -- W4 drift-trust --
 # Advice printed by install/ drift replay, audit replay, cache pins, executable
