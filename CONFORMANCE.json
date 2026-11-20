@@ -484,8 +484,9 @@
       "conformance_class": "consumer",
       "id": "req-lk-018",
       "keyword": "SHOULD",
+      "partial": "default frozen in CI when a lockfile exists; without a lockfile, resolve normally",
       "section": "5.5",
-      "status": "active",
+      "status": "partial",
       "test_count": 10,
       "tests": [
         "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[1]",
@@ -3208,7 +3209,8 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 99,
+      "active": 98,
+      "partial": 1,
       "skipped": 3,
       "text-only": 5,
       "unbound": 0,
@@ -3216,6 +3218,7 @@
     },
     "governance": {
       "active": 19,
+      "partial": 0,
       "skipped": 0,
       "text-only": 1,
       "unbound": 0,
@@ -3223,6 +3226,7 @@
     },
     "producer": {
       "active": 6,
+      "partial": 0,
       "skipped": 0,
       "text-only": 4,
       "unbound": 0,
@@ -3230,6 +3234,7 @@
     },
     "registry": {
       "active": 0,
+      "partial": 0,
       "skipped": 0,
       "text-only": 1,
       "unbound": 0,
