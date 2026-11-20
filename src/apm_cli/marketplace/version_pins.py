@@ -49,8 +49,8 @@ class RefPinMismatchError(MarketplaceError):
         super().__init__(
             f"Plugin {plugin}@{marketplace} ref changed: was '{previous_ref}', now "
             f"'{current_ref}'. This may indicate a ref swap attack; refusing to install. "
-            f"If the publisher re-tagged this version on purpose, remove the '{key}' entry "
-            f"from {_pins_path()} and install again."
+            "If the publisher moved this version on purpose, run 'apm update' to accept "
+            f"the new ref (pin '{key}')."
         )
 
 

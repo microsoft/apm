@@ -3,7 +3,7 @@
 A committed install records the plugin's ref. When the catalog later points
 the same plugin version at another ref, every install refuses (exit 1),
 names both refs, and leaves the recorded pin and the project unchanged, at
-project scope and with ``-g``.
+project scope and with ``-g``. An explicit ``apm update`` accepts the new ref.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ class _SwapWorld:
         packages = LocalPackageFactory(self._repository.worktree / "plugins")
         package = packages.create(_PLUGIN, targets=("codex",))
         packages.add_skill(package, _PLUGIN, f"---\nname: {_PLUGIN}\ndescription: d\n---\nBody\n")
-        self._published = self._publish("main")
+        self._publish("main")
         self.env = self._repositories.url_rewrite_subprocess_env(self._repository, _REMOTE)
         self.apm_home = isolated.config_root
         self.pins = isolated.config_root / "cache" / "marketplace" / "version-pins.json"
@@ -73,8 +73,11 @@ class _SwapWorld:
         return self._repositories.commit(self._repository, message=f"publish {ref}").sha
 
     def swap_ref(self) -> str:
-        """Point the catalog's plugin entry at the published commit SHA."""
-        head = self._published
+        """Point the catalog's plugin entry at a new commit with changed content."""
+        skill = self._repository.worktree / "plugins" / _PLUGIN
+        for path in skill.rglob("SKILL.md"):
+            path.write_text(path.read_text(encoding="utf-8") + "Swapped\n", encoding="utf-8")
+        head = self._repositories.commit(self._repository, message="swap content").sha
         self._publish(head)
         self.apm("marketplace", "update", _ALIAS)
         return head
@@ -104,6 +107,10 @@ def test_swapped_marketplace_ref_is_refused_every_time(
         output = " ".join((refused.stdout + refused.stderr).split())
         assert f"ref changed: was 'main', now '{swapped}'" in output, _evidence(refused)
         assert "refusing to install" in output, _evidence(refused)
-        assert f"'{_PIN_KEY}'" in output, _evidence(refused)
+        assert "run 'apm update' to accept the new ref" in output, _evidence(refused)
         assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: "main"}
         assert world.snapshot() == before, "I7: a refused install changed durable state"
+
+    world.apm("update", *scope, "--yes", *_FLAGS)
+    assert json.loads(world.pins.read_text(encoding="utf-8")) == {_PIN_KEY: swapped}
+    world.apm("install", *scope, f"{_PLUGIN}@{_ALIAS}", *_FLAGS)
