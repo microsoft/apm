@@ -32,7 +32,7 @@ steps:
   - n: 3
     run: [apm marketplace add lifecycle/marketplace]
     exit: 0
-    key_lines: ["[+] Marketplace 'lifecycle-market' registered (2 plugins)"]
+    key_lines: ["[+] Marketplace 'lifecycle-market' registered (3 plugins)"]
   - n: 4
     run: [apm update --yes]
     exit: 0
@@ -65,11 +65,3 @@ known_cells:
     tracking: "#4172"
     step: 5
     match: "'apm install --frozen' exited 1, step expects 0"
-  # RUNNER GAP, not a CLI defect: 'apm marketplace add' registers the catalog in
-  # $APM_HOME (marketplaces.json, cache/marketplace/) by design, but the runner
-  # gives project-scope commands an empty HOME write set.
-  - id: e03-runner-gap-marketplace-home-writes
-    law: I5
-    tracking: "#0"
-    step: 3
-    match: 'marketplace wrote home:\[.*\.apm/marketplaces\.(json|lock)'

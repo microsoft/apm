@@ -2041,8 +2041,8 @@ journeys:
     kind: apm
     exit: 0
     key_lines:
-    - '[+] dependency-allowlist'
-    - '[*] All <N> check(s) passed'
+    - '[!] dependency-allowlist (enforcement: warn)'
+    - '<N> check(s) passed; 1 reports violations under ''enforcement: warn'''
     forbidden_lines:
     - non-ASCII box
     files: []
@@ -2085,7 +2085,8 @@ journeys:
     kind: edit
     exit: 1
     key_lines:
-    - '[x] policy could not be fetched'
+    - '[x] Install blocked: no enforceable org policy was resolved'
+    - '[x] Policy fetch failed'
     forbidden_lines: []
     files: []
     oracles:

@@ -67,12 +67,3 @@ known_cells:
     tracking: "#4203"
     step: 2
     match: "No 'license:' field in apm.yml"
-  # Runner gap, not a CLI defect: "chdir" applies after the step runs and the
-  # runner diffs the directory the step ends in against the one it started in,
-  # so a step that moves to the consumer sees the two trees' difference. Remove
-  # when the runner gains a before-run "cwd" step key (see the K-2 producer report).
-  - id: runner-chdir-delta-crosses-directories
-    law: O6
-    tracking: "#0"
-    step: 3
-    match: "changed but no output line announces it"

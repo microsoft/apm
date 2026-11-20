@@ -588,7 +588,11 @@ ORIGIN_ROWS: dict[str, _OriginExpect] = {
         0, unchanged=_ORIGIN_STATE, keeps_origin=False
     ),
     "M|transitive marketplace dep|lock-row-edited": _OriginExpect(0, present=(_ORIGIN_SKILL,)),
-    "M|update|lock-row-edited": _OriginExpect(0, present=(_ORIGIN_SKILL,)),
+    "M|update|lock-row-edited": _OriginExpect(
+        0,
+        present=(_ORIGIN_SKILL,),
+        xfail=_origin_pending("update restores the recorded marketplace provenance"),
+    ),
 }
 
 

@@ -321,18 +321,90 @@ def _aged(seconds: int) -> Callable[[World, RowReplay], None]:
     def setup(world: World, replay: RowReplay) -> None:
         _warm(world, replay)
         _set_knob(world, "warn")
-        metas = [
-            path for path in world.root.rglob("*.meta.json") if "cached_at" in path.read_text()
-        ]
-        assert metas, "no policy cache entry to age"
-        for meta in metas:
-            data = json.loads(meta.read_text(encoding="utf-8"))
-            data["cached_at"] = time.time() - seconds
-            meta.write_text(json.dumps(data), encoding="utf-8")
+        _age_cache(world, seconds)
         for key in [key for key in world.env if key.lower() in _PROXY_KEYS]:
             world.env[key] = _DEAD_PROXY
 
     return setup
+
+
+def _serve_policy(world: World, org: str, document: bytes) -> None:
+    """Serve *document* as ``<org>/.github`` for this test (``WorldServices.serve``)."""
+    root = world.root / "t7b-policies" / org
+    tree = root / f"src{len(list(root.glob('src*')))}" if root.exists() else root / "src0"
+    tree.mkdir(parents=True)
+    (tree / "apm-policy.yml").write_bytes(document)
+    bare = tree.with_suffix(".git")
+    git = ("git", "-c", "user.name=lifecycle", "-c", "user.email=lifecycle@example.invalid")
+    for args in (
+        ("-C", str(tree), "init", "-q", "--initial-branch=main"),
+        ("-C", str(tree), "add", "-A"),
+        ("-C", str(tree), "commit", "-qm", "policy"),
+        ("clone", "-q", "--bare", str(tree), str(bare)),
+    ):
+        subprocess.run((*git, *args), env=world.env, check=True, capture_output=True)
+    world.services.serve(f"{org}/.github", bare)
+
+
+def _point_remote(world: World, org: str) -> None:
+    git = ("git", "-C", str(world.project))
+    if not (world.project / ".git").exists():
+        subprocess.run((*git, "init", "-q", "--initial-branch=main"), env=world.env, check=True)
+    remote = f"https://github.com/{org}/consumer.git"
+    existing = subprocess.run(
+        (*git, "remote"), env=world.env, capture_output=True, text=True, check=True
+    ).stdout.split()
+    verb = "set-url" if "origin" in existing else "add"
+    subprocess.run((*git, "remote", verb, "origin", remote), env=world.env, check=True)
+
+
+def _document(**fields: object) -> bytes:
+    return yaml.safe_dump(
+        {"name": "t7b", "version": "1.0", "enforcement": "block", **fields}
+    ).encode()
+
+
+# Test-local policy documents (the world serves none of these outcomes).
+MALFORMED_POLICY = b"name: t7b\nversion: '1.0'\nenforcement: sometimes\n"
+GARBAGE_POLICY = b"- not\n- a mapping\n"
+DENY_EXEC = {"dependencies": {"deny": ["**/p-exec", f"{ORG}/p-exec"]}}
+MISSING_PARENT = "policy-t7b-missing/.github"
+
+
+def _local(org: str, document: bytes, knob: str) -> Callable[[World, RowReplay], None]:
+    def setup(world: World, replay: RowReplay) -> None:
+        del replay
+        _serve_policy(world, org, document)
+        _point_remote(world, org)
+        _set_knob(world, knob)
+
+    return setup
+
+
+def _cached_stale(fetch_failure: str, knob: str) -> Callable[[World, RowReplay], None]:
+    """A cached deny policy past its TTL whose refresh now returns a non-mapping body."""
+    org = f"policy-t7b-stale-{fetch_failure}"
+
+    def setup(world: World, replay: RowReplay) -> None:
+        del replay
+        _serve_policy(world, org, _document(fetch_failure=fetch_failure, **DENY_EXEC))
+        _point_remote(world, org)
+        warmed = driver.run(world, ["policy", "status"])
+        assert warmed.returncode == 0, warmed.stdout + warmed.stderr
+        _age_cache(world, 2 * _HOUR)
+        _serve_policy(world, org, GARBAGE_POLICY)
+        _set_knob(world, knob)
+
+    return setup
+
+
+def _age_cache(world: World, seconds: int) -> None:
+    metas = [path for path in world.root.rglob("*.meta.json") if "cached_at" in path.read_text()]
+    assert metas, "no policy cache entry to age"
+    for meta in metas:
+        data = json.loads(meta.read_text(encoding="utf-8"))
+        data["cached_at"] = time.time() - seconds
+        meta.write_text(json.dumps(data), encoding="utf-8")
 
 
 _PROXY_KEYS = ("https_proxy", "http_proxy", "all_proxy")
@@ -340,6 +412,13 @@ _DEAD_PROXY = "http://127.0.0.1:9"
 _HOUR, _DAY = 3600, 24 * 3600
 
 CLASS_SETUPS: Mapping[str, Callable[[World, RowReplay], None]] = {
+    "malformed/block": _local("policy-t7b-malformed", MALFORMED_POLICY, "block"),
+    "malformed/warn": _local("policy-t7b-malformed", MALFORMED_POLICY, "warn"),
+    "garbage_response/block": _local("policy-t7b-garbage", GARBAGE_POLICY, "block"),
+    "garbage_response/warn": _local("policy-t7b-garbage", GARBAGE_POLICY, "warn"),
+    "incomplete_chain": _local("policy-t7b-chain", _document(extends=MISSING_PARENT), "warn"),
+    "cached_stale/warn": _cached_stale("warn", "block"),
+    "cached_stale/org-block": _cached_stale("block", "warn"),
     "cache=stale<7d": _aged(2 * _HOUR),
     "cache=stale>7d-or-expired": _aged(8 * _DAY),
     "found": _variant("deny-pkg", "block"),
@@ -397,6 +476,8 @@ TRUST_BLOCK = r"Blocked by org policy: "
 SKILL = ".agents/skills/p-skill/SKILL.md"
 HOOK = ".github/hooks/p-exec-session.json"
 
+_OFFLINE = "S-pending (neutral issue to follow): offline use of cached policy"
+
 # The decision sites, keyed by the obligation site name.
 SITE_SLICES: dict[str, SiteSlice] = {}
 
@@ -415,7 +496,7 @@ SITE_SLICES["install-pipeline"] = SiteSlice(
             1,
             (DENIED, r"(?i)stale"),
             absent=(SKILL, HOOK),
-            xfail="S-pending (neutral issue to follow): offline use of cached policy",
+            xfail=_OFFLINE,
         ),
         "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), present=(SKILL,)),
     },
@@ -571,6 +652,19 @@ SITE_SLICES["policy-status"] = SiteSlice(
         "empty/warn": _status("empty"),
         "found": _status("found"),
         "disabled": _status("disabled"),
+        "malformed/block": _status("malformed"),
+        "malformed/warn": _status("malformed"),
+        "garbage_response/block": _status("garbage_response"),
+        "garbage_response/warn": _status("garbage_response"),
+        "incomplete_chain": _status("incomplete_chain"),
+        "cached_stale/org-block": _status("cached_stale"),
+        "cached_stale/warn": _status("cached_stale"),
+        "cache=cold": _status("found"),
+        "cache=warm-fresh": _status("found"),
+        "cache=stale<7d": Expect(
+            0, (r"Outcome\s*\|\s*cached_stale\s",), unchanged=("*",), xfail=_OFFLINE
+        ),
+        "cache=stale>7d-or-expired": _status("cache_miss_fetch_fail"),
     },
 )
 
@@ -610,6 +704,30 @@ SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
         "found": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
         "disabled": Expect(0, present=(SKILL,)),
     },
+)
+
+
+def _installed_approved_exec(world: World, replay: RowReplay) -> None:
+    """p-skill and an approved p-exec deployed (hook and MCP server), under ``allow``."""
+    use_policy(world, "allow")
+    replay.step("apm install p-skill p-exec")
+    replay.step("apm approve p-exec")
+    replay.step("apm install")
+
+
+# security/trust.py McpAdmission -- audit's MCP consent check admits or refuses a
+# deployed server against the org policy it resolves itself.
+SITE_SLICES["mcp-admission(trust.py)"] = SiteSlice(
+    arrange=_installed_approved_exec,
+    command=lambda world: "apm audit --ci",
+    classes={},
+)
+
+# install/local_bundle_handler.py preflight (cache_only) -- a local bundle install.
+SITE_SLICES["bundle-install-preflight(cache_only)"] = SiteSlice(
+    arrange=_nothing,
+    command=lambda world: f"apm install {world.packages['p-exec:bundle'].spec}",
+    classes={},
 )
 
 

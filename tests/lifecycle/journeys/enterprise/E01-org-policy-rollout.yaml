@@ -125,16 +125,16 @@ steps:
 known_cells:
   - id: e01-sarif-audit-fails-without-an-error-line
     law: O5
-    tracking: "#0"
+    tracking: "#4224"
     step: 4
     match: "exited 1 without an \\[x\\] or error line"
   - id: e01-sarif-audit-prints-no-advice
     law: O8
-    tracking: "#0"
+    tracking: "#4224"
     step: 4
     match: "prints no 'apm ...' advice"
   - id: e01-fetch-failure-notice-contradicts-the-block
     law: FORBID
-    tracking: "#0"
+    tracking: "#4180"
     step: 6
     match: "forbidden 'proceeding without policy enforcement' printed"

@@ -68,8 +68,10 @@ known_cells:
     tracking: "#4196"
     step: 4
     match: "repeats .*Targeting declared targets from apm.yml"
-  - id: runner-gap-o1-non-golden
+  # No O1 golden until the defect is fixed: the targeting and MCP configure
+  # lines print twice (O4), so regen_goldens refuses the transcript.
+  - id: frozen-mcp-targets-line-twice-golden
     law: O1
-    tracking: "#0"
+    tracking: "#4196"
     step: 4
-    match: "no golden tests/lifecycle/journeys/goldens/J06/04.txt"
+    match: "no golden tests/lifecycle/journeys/goldens/J06/04\\.txt"

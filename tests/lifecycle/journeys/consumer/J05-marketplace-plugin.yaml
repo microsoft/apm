@@ -83,16 +83,6 @@ known_cells:
     tracking: "#4195"
     step: 6
     match: "#main #<SHA40>"
-  - id: runner-gap-marketplace-home-writes-add
-    law: I5
-    tracking: "#0"
-    step: 1
-    match: "marketplace wrote home:.*\\.apm/marketplaces\\.(json|lock)"
-  - id: runner-gap-marketplace-home-writes-browse
-    law: I5
-    tracking: "#0"
-    step: 2
-    match: "marketplace wrote home:.*\\.apm/cache/marketplace"
   - id: runner-gap-marketplace-home-writes-install
     law: I5
     tracking: "#0"
@@ -103,8 +93,3 @@ known_cells:
     tracking: "#4194"
     step: 5
     match: "install wrote home:.*\\.apm/cache/marketplace/version-pins\\.json"
-  - id: runner-gap-o1-non-golden
-    law: O1
-    tracking: "#0"
-    step: 6
-    match: "no golden tests/lifecycle/journeys/goldens/J05/06.txt"

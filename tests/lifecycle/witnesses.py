@@ -7,7 +7,8 @@ A strict expected failure whose reason starts with a public issue reference
 (``#<n>``) is a known-failing cell (it discharges the obligation and earns no
 receipt); any other strict expected failure stays in the baseline. Every
 other row becomes a required witness, which the receipt plugin then holds to
-an oracle receipt for its id.
+an oracle receipt for its id. Journey ids (``J|...``) come from
+``journey_witnesses()`` in ``tests/lifecycle/journeys/test_journeys.py``.
 
 Usage::
 
@@ -76,6 +77,14 @@ def witnesses(
 def main(argv: list[str]) -> int:
     paths = [arg for arg in argv if not arg.startswith("--")] or list(TABLE_PATHS)
     required, known = witnesses(collect(paths), generated_obligations())
+    # Journeys: one node credits many J ids, decided statically from the journey files.
+    from tests.lifecycle.journeys.test_journeys import journey_witnesses
+
+    journey_required, journey_known = journey_witnesses()
+    clash = (set(required) | set(known)) & (set(journey_required) | set(journey_known))
+    assert not clash, f"ids with two witnesses: {sorted(clash)}"
+    required = dict(sorted({**required, **journey_required}.items()))
+    known = dict(sorted({**known, **journey_known}.items()))
     data = json.loads(GENERATED_PATH.read_text(encoding="ascii"))
     current = (data.get("required", {}), data.get("known_failing", {}))
     if "--write" in argv:

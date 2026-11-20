@@ -62,8 +62,3 @@ known_cells:
     tracking: "#0"
     step: 4
     match: "(lifecycle|install) wrote home:\\['.apm/(scripts-trust.json|logs)'"
-  - id: runner-home-allowlist-scripts-trust-json-untrust
-    law: I5
-    tracking: "#0"
-    step: 5
-    match: "lifecycle wrote home:\\['.apm/scripts-trust.json'"

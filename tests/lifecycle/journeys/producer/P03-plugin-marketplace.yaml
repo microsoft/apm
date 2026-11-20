@@ -108,20 +108,3 @@ known_cells:
     tracking: "#0"
     step: 6
     match: "no hermetic implementation"
-  # Runner model gap, not a CLI defect: "apm marketplace add" registers the
-  # catalog per machine in $APM_HOME/marketplaces.json, as documented; the
-  # runner's HOME allow-list does not declare it.
-  - id: runner-home-allowlist-marketplaces-json
-    law: I5
-    tracking: "#0"
-    step: 8
-    match: "marketplace wrote home:\\[.*\\.apm/marketplaces\\.(json|lock)"
-  # Runner gap, not a CLI defect: "chdir" applies after the step runs and the
-  # runner diffs the directory the step ends in against the one it started in,
-  # so a step that moves to the consumer sees the two trees' difference. Remove
-  # when the runner gains a before-run "cwd" step key (see the K-2 producer report).
-  - id: runner-chdir-delta-crosses-directories
-    law: O9
-    tracking: "#0"
-    step: 7
-    match: "unexpected change"
