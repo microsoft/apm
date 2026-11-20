@@ -1407,6 +1407,7 @@ class TestRunBaselineChecks:
             "deployment-ledger-owners",
             "deployed-files-present",
             "no-orphaned-packages",
+            "lockfile-targets-current",
             "skill-subset-consistency",
             "config-consistency",
             "native-mcp-ownership",

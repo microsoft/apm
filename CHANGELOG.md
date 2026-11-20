@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` and `apm update` run `post-install` scripts after MCP and LSP reconciliation, so scripts see the final lockfile and it is written once. (#4486)
 - `apm install --dry-run` after `apm deny`, a revoked approval or an org executables deny names each hook, MCP server, LSP server and bin/ the next install retires, and writes nothing. (#4478)
 - A failed `apm install <bundle>` no longer leaves a pending-executables record behind; `apm approve --pending` lists only bundles whose install completed. (closes #4492, #4505)
+- `apm install --frozen` no longer deletes a dropped target's files and then fails: it refuses with no writes, and `apm audit --ci` fails the same state. (#4517, #4519)
 - `apm update` names each local bundle whose executables are parked, with the approval next step, instead of reporting nothing. (closes #4441, #4471)
 - `apm update` with nothing to change applies org policy like `apm install`: a denied dependency exits 1 and nothing is written. (closes #4458, #4482)
 - `apm install` blocked by org policy ends with a runnable next step: remove or replace the blocked dependencies, check `apm policy status`, then re-run. (closes #4404, #4418)

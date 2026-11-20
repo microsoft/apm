@@ -38,6 +38,7 @@ first failure to skip expensive I/O.
 | `deployed-files-present` | block | `ci_checks.py` | yes |
 | `exec-status-current` | block | `ci_checks.py` | yes |
 | `no-orphaned-packages` | block | `ci_checks.py` | yes |
+| `lockfile-targets-current` | block | `ci_checks.py` | yes |
 | `skill-subset-consistency` | block | `ci_checks.py` | yes |
 | `config-consistency` | block | `ci_checks.py` | yes |
 | `native-mcp-ownership` | block | `ci_checks.py` | yes |
@@ -144,6 +145,12 @@ the [policy schema](../policy-schema/).
   orphan detection.
 - **Remediation.** Run `apm install` to prune the orphan, then commit `apm.lock.yaml`.
 
+### `lockfile-targets-current`
+
+- **What it verifies.** That `apm.lock.yaml` records no deployed file of a target `apm.yml` no longer declares in `targets:`. Projects that declare no targets (auto-detect) always pass.
+- **Fails when.** `apm.yml` dropped a target but the lockfile still records that target's files. `apm install --frozen` refuses the same state, with no writes.
+- **Remediation.** Run `apm install` (without `--frozen`) to retire the dropped target and update `apm.lock.yaml`, then commit it.
+
 ### `skill-subset-consistency`
 
 - **What it verifies.** That each locked dependency's `skill_subset`, `target_subset` and `subset_pairings` equal the merge of every `skills:`/`targets:` declaration in `apm.yml` and the installed dependency manifests, and that every recorded skill path exists in the resolved package tree. When CI audit has prepared a lock-pinned scratch replay, this check uses its dependency tree instead of checkout-local `apm_modules/`; no checkout install is required.
@@ -196,7 +203,7 @@ the [policy schema](../policy-schema/).
 
 ## Run order and fail-fast
 
-The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `local-bundle-hooks`, `hook-approval-pins`, `exec-status-current`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
+The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `lockfile-targets-current`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `local-bundle-hooks`, `hook-approval-pins`, `exec-status-current`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
 
 With fail-fast on (the default), the runner stops at the first failing check. `apm audit --ci --no-fail-fast` evaluates every check so the report lists every problem at once.
 
