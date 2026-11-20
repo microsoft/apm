@@ -897,6 +897,25 @@ def verify_deployed_file_hashes(
     return hash_mismatches, unresolved_hash_paths
 
 
+def _local_content_drift(project_root: Path, lock: LockFile) -> list[str]:
+    """Name local dependencies whose content differs from the lock, as frozen does."""
+    from ..core.scope import manifest_file
+    from ..install.local_content_verdict import local_content_reasons
+    from ..models.apm_package import APMPackage
+    from ..models.dependency.replacement import project_manifest_dependencies
+    from ..models.manifest_io import InvalidManifestError
+
+    path = manifest_file(project_root)
+    if not path.is_file():
+        return []
+    try:
+        manifest = APMPackage.from_apm_yml(path)
+    except (InvalidManifestError, OSError, ValueError):
+        return []  # The manifest checks report an unreadable apm.yml.
+    reasons = local_content_reasons(manifest, lock, project_manifest_dependencies(manifest))
+    return [reason.strip().removeprefix("- ") for reason in reasons]
+
+
 def _check_content_integrity(
     project_root: Path,
     lock: LockFile,
@@ -967,11 +986,13 @@ def _check_content_integrity(
         project_root, lock, targets
     )
     staged_drift = lock.staged_hash_drift(project_root)
+    local_drift = _local_content_drift(project_root, lock)
 
     if (
         not critical_files
         and not hash_mismatches
         and not staged_drift
+        and not local_drift
         and not missing_ownership
         and not unresolved_hash_paths
         and not scan.incomplete
@@ -1045,6 +1066,13 @@ def _check_content_integrity(
                 )
             )
         remedies.extend(item.clause() for item in remediations)
+    if local_drift:
+        # install --frozen refuses the same local dependencies (#4447).
+        parts.extend(local_drift)
+        remedies.append(
+            "restore the locked local content, or "
+            + remediation.FROZEN_LOCAL_CONTENT_CHANGED.clause()
+        )
     if staged_drift:
         parts.append(f"{len(staged_drift)} staged file(s) with hash drift")
         remedies.append(remediation.STAGED_BUNDLE_DRIFT.clause())

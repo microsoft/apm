@@ -122,6 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Install and init print each event once, without third-party tips or absolute paths; retired experimental flags in config are ignored with one verbose note. (closes #4089, #4143)
 - `apm audit --ci` and `apm install --frozen` advice for edited files says what install does per file kind; `apm install` warns before overwriting edits. (closes #4090, #4143)
 - `apm --version`, `apm --help` and flag reads no longer create `~/.apm/config.json`; only `apm config set` and `apm experimental` write it. (#4143)
+- `apm audit --ci` names a local dependency whose content changed since the lock, as `apm install --frozen` does. (closes #4447, #4474)
 - `apm audit --ci` fails and names a user's MCP entry that differs from a declared server with the same name, matching `apm install --frozen`. (#4493)
 - `apm audit --ci` names locked git and registry entries that carry no content hash and points at `security.integrity.require_hashes`, without changing the exit code. (closes #4453, #4495)
 - `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)

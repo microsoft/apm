@@ -30,10 +30,6 @@ _UNINSTALL_KEEPS_GATED = (
     "#4446 apm uninstall of another package leaves a native Claude plugin deployed after "
     "it is no longer allowed"
 )
-_AUDIT_FROZEN_LOCAL_DRIFT = (
-    "#4447 audit --ci passes a local dependency whose content changed since the lock, "
-    "which install --frozen refuses"
-)
 # gate_paths/native_plugin.py: the git-served p-native-claude-bin at user scope; the
 # approved plugin lands whole under ~/.agents/plugins and goes as one unit.
 _PLUGIN = {"home": (".agents/plugins/p-native-claude-bin/.claude-plugin/plugin.json",)}
@@ -50,7 +46,6 @@ _XFAIL = {
     "G|update|definition-changed|native": _UPDATE_KEEPS_CHANGED,
     "G|update|policy-dep-deny|native": _UPDATE_IGNORES_DENY,
     **{f"G|uninstall-prune-rebuild|{change}|native": _UNINSTALL_KEEPS_GATED for change in _ALL},
-    "G|audit-ci|definition-changed|native": _AUDIT_FROZEN_LOCAL_DRIFT,
     **{
         f"G|native-plugin|{change}|native": _USER_ORG
         for change in ("org-deny", "org-enables-gate", "policy-dep-deny")

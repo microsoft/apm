@@ -4205,6 +4205,22 @@
       ]
     },
     {
+      "issue": 4447,
+      "fixed_in": "Unreleased",
+      "summary": "audit --ci names a local dependency whose content differs from its locked snapshot, through the same verdict install --frozen applies.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_local_dependency_content_parity_lifecycle.py::test_audit_ci_and_frozen_refuse_alike_a_changed_local_dependency",
+        "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
+      ]
+    },
+    {
       "issue": 4449,
       "fixed_in": "Unreleased",
       "summary": "A user's own MCP entry equal to a self-defined declaration, on Codex including one switched off with enabled = false, is no conflict: install, --frozen replay and audit agree, leave it unowned and change no byte; a different command still fails closed.",
