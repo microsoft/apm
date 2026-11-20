@@ -126,14 +126,42 @@ def locked_content_mismatch(
     )
 
 
-def locked_content_failure(dep_key: str, project_root: Path) -> str:
+def locked_content_mismatch_line(dep_key: str, expected: str, observed: str) -> str:
+    """The one diagnostic line for bytes that contradict a locked ``content_hash``.
+
+    ``apm install`` (with or without ``--frozen``) and the ``apm audit --ci``
+    replay name the entry, the locked value and the observed value the same way.
+    """
+    return f"Content hash mismatch for {dep_key}: expected {expected}, got {observed}."
+
+
+def observed_package_hash(locked_dep: Any, package_path: Path, *, package_info: Any = None) -> str:
+    """Digest *package_path* in the stream and exclusions *locked_dep* was recorded with."""
+    from apm_cli.deps.carried_license import carried_license_paths
+    from apm_cli.utils.content_hash import compute_package_hash
+
+    source = package_info if package_info is not None else locked_dep
+    exclude = carried_license_paths(getattr(source, "carried_licenses", None) or ())
+    framed = getattr(locked_dep, "content_hash_framed", True)
+    return compute_package_hash(package_path, exclude=exclude, framed=framed)
+
+
+def locked_content_failure(
+    dep_key: str,
+    project_root: Path,
+    locked_dep: Any,
+    package_path: Path,
+    *,
+    package_info: Any = None,
+) -> str:
     """Error for replayed bytes that contradict the lock, with install's remediation."""
     from apm_cli.core.scope import get_workspace_deploy_root
 
     user_scope = get_workspace_deploy_root(project_root) != project_root.resolve()
+    observed = observed_package_hash(locked_dep, package_path, package_info=package_info)
     return (
-        f"Content hash mismatch for {dep_key}: the content at the locked commit differs "
-        "from the lockfile record. "
+        locked_content_mismatch_line(dep_key, locked_dep.content_hash, observed)
+        + " The content at the locked commit differs from the lockfile record. "
         + locked_content_remediation(dep_key, user_scope=user_scope, apm_dir=project_root)
     )
 

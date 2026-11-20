@@ -14,6 +14,7 @@ lockfile. Restoring the recorded hash makes every command pass again.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,13 @@ def _assert_output_oracles(result: CommandResult) -> None:
         assert stream.isascii(), _evidence(result)
         lines = [line.strip() for line in stream.splitlines() if line.lstrip().startswith("[")]
         assert len(lines) == len(set(lines)), _evidence(result)
+
+
+def _mismatch_line_count(result: CommandResult, expected: str, observed: str) -> int:
+    """Count the shared entry/expected/observed diagnostic line, whatever the wrapping."""
+    text = re.sub(r"\s+", " ", result.stdout + result.stderr)
+    line = f"Content hash mismatch for test/pkg: expected {expected}, got {observed}."
+    return text.count(line)
 
 
 def _set_locked_content_hash(project: Path, value: str) -> str:
@@ -94,11 +102,13 @@ def test_audit_ci_and_frozen_install_agree_on_locked_content_hash(
     # I3 paired probe: both readers of the same lock state refuse it.
     audit = apm("audit", "--ci", cwd=project)
     assert audit.returncode != 0, _evidence(audit)
-    assert "test/pkg" in audit.stdout + audit.stderr, _evidence(audit)
     assert _state(project) == before, "I5: audit --ci changed durable state"
     frozen = apm("install", "--frozen", cwd=project)
     assert frozen.returncode != 0, _evidence(frozen)
     assert _state(project) == before, "I7: refused frozen install changed durable state"
+    # One diagnostic for one state: the entry, the locked value and the observed value.
+    for refused in (audit, frozen):
+        assert _mismatch_line_count(refused, _OTHER_HASH, recorded) >= 1, _evidence(refused)
 
     plain = apm("install", cwd=project)
     assert plain.returncode != 0, _evidence(plain)

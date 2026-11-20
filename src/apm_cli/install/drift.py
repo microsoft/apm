@@ -394,7 +394,11 @@ def _materialize_install_path(
     if locked_content_mismatch(
         dep_key, lock_dep, candidate, lockfile=lockfile, package_info=package_info
     ):
-        raise DirectDependencyError(locked_content_failure(dep_key, project_root))
+        raise DirectDependencyError(
+            locked_content_failure(
+                dep_key, project_root, lock_dep, candidate, package_info=package_info
+            )
+        )
     return candidate
 
 

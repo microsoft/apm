@@ -43,6 +43,7 @@ from apm_cli.install.source_helpers import (
     content_hash_mismatch_hint,
     ensure_carried_licenses_match,
     locked_content_mismatch,
+    locked_content_mismatch_line,
     locked_parent_identity,
     materialized_manifest_snapshot,
     record_carried_package_hash,
@@ -892,9 +893,10 @@ class FreshDependencySource(DependencySource):
                 ):
                     safe_rmtree(install_path, ctx.apm_modules_dir)
                     raise DirectDependencyError(
-                        f"Content hash mismatch for {dep_key}: "
-                        f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
-                        "The downloaded content differs from the lockfile record. "
+                        locked_content_mismatch_line(
+                            dep_key, dep_locked_chk.content_hash, _fresh_hash
+                        )
+                        + " The downloaded content differs from the lockfile record. "
                         + content_hash_mismatch_hint(ctx, dep_key)
                     )
             ensure_carried_licenses_match(
