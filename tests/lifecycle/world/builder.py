@@ -32,6 +32,7 @@ from pathlib import Path
 
 import yaml
 
+from tests.lifecycle.world import registry
 from tests.lifecycle.world.contract import PackageRef, World
 from tests.lifecycle.world.packages import GIT_PUBLISHED, author_packages
 from tests.lifecycle.world.services import (
@@ -187,6 +188,24 @@ def _pack_apm_bundle(source: Path, output: Path, env: dict[str, str]) -> Path:
     return bundle
 
 
+def _publish_registry(services: WorldServices, authored, scratch: Path) -> None:
+    """Publish the registry packages; later versions carry a changed skill body."""
+    for name, versions in registry.REGISTRY_PUBLISHED.items():
+        source = authored[name].root
+        for index, version in enumerate(versions):
+            tree = source
+            if index:
+                tree = scratch / f"{name}-{version}"
+                shutil.copytree(source, tree)
+                manifest = yaml.safe_load((tree / "apm.yml").read_text(encoding="utf-8"))
+                manifest["version"] = version
+                (tree / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+                for skill in tree.rglob("SKILL.md"):
+                    text = skill.read_text(encoding="utf-8")
+                    skill.write_text(f"{text}\nRegistry release {version}.\n", encoding="ascii")
+            services.package_registry.publish(f"{ORG}/{name}", version, registry.zip_tree(tree))
+
+
 def build_template(base: Path) -> World:
     """Author the template world under *base* (which must not exist yet) and start services."""
     base = base.parent.resolve() / base.name
@@ -196,6 +215,7 @@ def build_template(base: Path) -> World:
     authored = author_packages(isolated.package_root)
     repositories = _publish(shared, isolated.subprocess_env(), authored)
     services = WorldServices(repositories).start(shared / "services")
+    _publish_registry(services, authored, shared / "registry-trees")
 
     env = isolated.subprocess_env()
     env["APM_NON_INTERACTIVE"] = "1"
@@ -203,6 +223,7 @@ def build_template(base: Path) -> World:
     env["COLUMNS"] = "400"
     env["CLAUDE_CONFIG_DIR"] = str(isolated.home / ".claude")
     env["CODEX_HOME"] = str(isolated.home / ".codex")
+    env[registry.TOKEN_ENV] = registry.TOKEN
     azure_config = isolated.home / ".azure"
     env = shim_environment(env, base, azure_config, install_shims(base, azure_config))
     env = services.child_environment(env)
@@ -219,6 +240,11 @@ def build_template(base: Path) -> World:
         enabled = _engine(("experimental", "enable", "canvas"), user_cwd, env)
         if enabled.returncode != 0:
             raise RuntimeError(f"enabling canvas failed: {enabled.stdout}{enabled.stderr}")
+        # The package registry is experimental too; the user binds its token to
+        # the registry origin, as APM requires before presenting a credential.
+        _checked(_engine(("experimental", "enable", "registries"), user_cwd, env), "registries")
+        bind = ("config", "set", f"registry.{registry.NAME}.url", registry.URL)
+        _checked(_engine(bind, user_cwd, env), "apm config set registry url")
         bundle = _pack_bundle(authored["p-exec"].root, base / "bundles", env)
         # ``apm unpack`` reads only the legacy APM bundle layout.
         apm_bundle = _pack_apm_bundle(authored["p-exec"].root, base / "bundles-apm", env)
@@ -240,6 +266,11 @@ def build_template(base: Path) -> World:
         packages[f"{name}:git"] = PackageRef(name, f"{ORG}/{name}#{TAG}", kinds, "git")
         packages[f"{name}:marketplace"] = PackageRef(
             name, f"{name}@{MARKETPLACE_NAME}", kinds, "marketplace"
+        )
+    for name in registry.REGISTRY_PUBLISHED:
+        version = registry.REGISTRY_PUBLISHED[name][0]
+        packages[f"{name}:registry"] = PackageRef(
+            name, f"{ORG}/{name}#{version}", authored[name].kinds, "registry"
         )
     packages["p-exec:bundle"] = PackageRef(
         "p-exec", str(bundle), authored["p-exec"].kinds, "local-bundle"

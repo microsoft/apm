@@ -11,7 +11,8 @@ so ``egress_log`` sees all of it. The proxy terminates TLS for these origins:
   metadata, commits and the Contents API, read from the same repositories --
   policy discovery and marketplace catalogs use it;
 - ``raw.githubusercontent.com``;
-- a local MCP registry (``/v0.1/servers``).
+- a local MCP registry (``/v0.1/servers``);
+- a private APM package registry (``registry.py``).
 
 Policy variants live in one org per variant: the project's ``origin`` remote
 selects the org, as it does for a real user (``use_policy`` in
@@ -30,6 +31,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+from tests.lifecycle.world import registry as package_registry
 from tests.utils.local_scripted_https_proxy import (
     Handler,
     ScriptedHttpsProxy,
@@ -148,9 +150,12 @@ class WorldServices:
     marketplace_url = f"https://{GITHUB_HOST}/{ORG}/{MARKETPLACE_REPO}"
     mcp_registry_url = f"https://{REGISTRY_HOST}"
 
+    package_registry_url = package_registry.URL
+
     def __init__(self, repositories: Mapping[str, Path]) -> None:
         self._repositories = dict(repositories)
         self._proxy: ScriptedHttpsProxy | None = None
+        self.package_registry = package_registry.PackageRegistry()
 
     @property
     def proxy(self) -> ScriptedHttpsProxy:
@@ -231,6 +236,7 @@ class WorldServices:
     def handlers(self) -> dict[str, Handler]:
         handlers: dict[str, Handler] = {GITHUB_HOST: self._git, RAW_HOST: self._raw}
         handlers[REGISTRY_HOST] = self._registry
+        handlers[package_registry.HOST] = self.package_registry.handle
         for host in _API_HOSTS:
             handlers[host] = self._api
         for host, _prefix in HOST_ALIASES.values():

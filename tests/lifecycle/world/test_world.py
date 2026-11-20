@@ -13,6 +13,7 @@ import shutil
 import statistics
 import subprocess
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,14 @@ import yaml
 
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
-from tests.lifecycle.world import World, apm_home_outside_home, clone, use_policy
+from tests.lifecycle.world import (
+    World,
+    apm_home_outside_home,
+    clone,
+    registry,
+    use_policy,
+    use_registry,
+)
 from tests.lifecycle.world.packages import GIT_PUBLISHED, LSP_SERVER, MCP_SERVER, PACKAGE_NAMES
 from tests.lifecycle.world.services import (
     API_HOST,
@@ -401,6 +409,53 @@ def test_azure_cli_is_the_hermetic_world_stub(lifecycle_world: World) -> None:
     calls = (config / AZ_CALL_LOG).read_text(encoding="utf-8").splitlines()
     assert json.loads(calls[-1])[:2] == ["account", "get-access-token"]
     assert world.services.egress_log() == []
+
+
+# -- package registry ----------------------------------------------------------
+
+
+def _locked_entry(world: World, scope: str, name: str) -> dict:
+    lock = yaml.safe_load((_manifest_root(world, scope) / "apm.lock.yaml").read_text("utf-8"))
+    entries = [d for d in lock["dependencies"] if str(d.get("repo_url", "")).endswith(name)]
+    assert len(entries) == 1, lock["dependencies"]
+    return entries[0]
+
+
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_registry_source_installs_and_locks_the_archive_hash(
+    lifecycle_world: World, scope: str
+) -> None:
+    world = lifecycle_world
+    use_registry(world, scope)
+    _ok(world, ["install", world.packages["p-skill:registry"].spec], scope)
+    _assert_surfaces(world, "p-skill", scope)
+    archive = world.services.package_registry.archives[f"{ORG}/p-skill"]["1.0.0"]
+    assert _locked_entry(world, scope, "p-skill")["resolved_hash"] == registry.digest(archive)
+    assert _hosts(world) == {registry.HOST}, world.services.egress_log()
+    assert world.services.proxy.hosts_receiving(registry.TOKEN) == {registry.HOST}
+
+
+def test_registry_serves_a_newer_version(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    use_registry(world)
+    _ok(world, ["install", f"{ORG}/p-skill#1.1.0"])
+    skill = world.project / ".agents/skills/p-skill/SKILL.md"
+    assert "Registry release 1.1.0." in skill.read_text(encoding="utf-8")
+    archive = world.services.package_registry.archives[f"{ORG}/p-skill"]["1.1.0"]
+    assert _locked_entry(world, "project", "p-skill")["resolved_hash"] == registry.digest(archive)
+
+
+def test_registry_refuses_a_request_without_its_token(lifecycle_world: World) -> None:
+    world = lifecycle_world
+    use_registry(world)
+    env = {k: v for k, v in world.env.items() if k != registry.TOKEN_ENV}
+    result = driver.run(
+        replace(world, env=env), ["install", world.packages["p-skill:registry"].spec]
+    )
+    assert result.returncode != 0, result.stdout
+    statuses = {e["status"] for e in world.services.egress_log() if e["host"] == registry.HOST}
+    assert statuses == {401}, world.services.egress_log()
+    assert not (world.project / ".agents/skills/p-skill").exists()
 
 
 _POLICY_EXIT = {

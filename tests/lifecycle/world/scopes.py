@@ -13,6 +13,7 @@ from dataclasses import replace
 
 import yaml
 
+from tests.lifecycle.world import registry
 from tests.lifecycle.world.contract import World
 from tests.lifecycle.world.services import policy_org
 
@@ -46,3 +47,16 @@ def use_policy(world: World, variant: str) -> None:
         data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
         data["policy"] = {"hash": WRONG_POLICY_HASH}
         manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def use_registry(world: World, scope: str = "project") -> None:
+    """Make the world package registry the default registry of *scope*'s manifest.
+
+    Shorthand specs such as ``lifecycle/p-skill#1.0.0`` (``packages["p-skill:registry"]``)
+    then resolve through it; the token and origin binding are already in the world.
+    """
+    root = world.project if scope == "project" else world.apm_home
+    manifest = root / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data["registries"] = {registry.NAME: {"url": registry.URL}, "default": registry.NAME}
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
