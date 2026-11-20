@@ -151,15 +151,43 @@ def _code_lines(facts: object) -> list[str]:
 
 
 def _callee(node: ast.Call, aliases: dict[str, str]) -> str | None:
+    """Return ``name`` for a function call, ``Class.name`` for ``Class.name(...)``."""
     func = node.func
-    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-    return aliases.get(name, name) if name else None
+    if isinstance(func, ast.Name):
+        return aliases.get(func.id, func.id)
+    if isinstance(func, ast.Attribute):
+        if isinstance(func.value, ast.Name):
+            return f"{aliases.get(func.value.id, func.value.id)}.{func.attr}"
+        return func.attr
+    return None
+
+
+def _bare(name: str | None) -> str:
+    return str(name).rsplit(".", 1)[-1]
+
+
+def _method_owners(tree: ast.AST) -> dict[int, str]:
+    return {
+        id(item): node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef)
+        for item in node.body
+    }
+
+
+def _signature_key(owners: dict[int, str], node: ast.AST) -> str:
+    owner = owners.get(id(node))
+    return f"{owner}.{node.name}" if owner else node.name
 
 
 def _approval_signatures(trees: dict[str, ast.AST]) -> dict[str, frozenset[str]]:
-    """Map every inventory function that takes an approval input to those inputs."""
+    """Map every inventory function that takes an approval input to those inputs.
+
+    Methods are keyed ``Class.method`` so an unrelated ``x.method()`` never matches.
+    """
     signatures: dict[str, frozenset[str]] = {}
     for tree in trees.values():
+        owners = _method_owners(tree)
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -171,8 +199,19 @@ def _approval_signatures(trees: dict[str, ast.AST]) -> dict[str, frozenset[str]]
             if inputs:
                 if _HOOK_ITEMS in names:
                     inputs.add(_HOOK_ITEMS)
-                signatures[node.name] = signatures.get(node.name, frozenset()) | frozenset(inputs)
+                key = _signature_key(owners, node)
+                signatures[key] = signatures.get(key, frozenset()) | frozenset(inputs)
     return signatures
+
+
+def _signature_inputs(signatures, name: str | None) -> frozenset[str] | None:
+    """Inputs for a callee spelled ``Class.method``, ``name`` or ``module.name``."""
+    if not name:
+        return None
+    if name in signatures:
+        return signatures[name]
+    bare = _bare(name)
+    return signatures.get(bare)
 
 
 def _approval_input_findings(path: str, tree: ast.AST, signatures) -> list[Violation]:
@@ -185,9 +224,10 @@ def _approval_input_findings(path: str, tree: ast.AST, signatures) -> list[Viola
         for alias in node.names
         if alias.asname
     }
+    owners = _method_owners(tree)
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            inputs = set(signatures.get(node.name, ())) - {_HOOK_ITEMS}
+            inputs = set(signatures.get(_signature_key(owners, node), ())) - {_HOOK_ITEMS}
             required = {
                 arg.arg
                 for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults, strict=True)
@@ -205,7 +245,7 @@ def _approval_input_findings(path: str, tree: ast.AST, signatures) -> list[Viola
                 )
         elif isinstance(node, ast.Call):
             name = _callee(node, aliases)
-            inputs = signatures.get(name or "")
+            inputs = _signature_inputs(signatures, name)
             if not inputs or any(keyword.arg is None for keyword in node.keywords):
                 continue
             passed = {keyword.arg: keyword.value for keyword in node.keywords}
@@ -232,9 +272,7 @@ def _routing_findings(path: str, tree: ast.AST) -> list[Violation]:
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        calls = {_callee(item, {}) for item in ast.walk(node) if isinstance(item, ast.Call)} - {
-            None
-        }
+        calls = {_bare(_callee(item, {})) for item in ast.walk(node) if isinstance(item, ast.Call)}
         if _PACKAGE_APPROVALS in calls:
             skipped = [name for name in _ITEM_ADMISSION_CALLS if name not in calls]
             if skipped:
@@ -249,7 +287,7 @@ def _routing_findings(path: str, tree: ast.AST) -> list[Violation]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        name = _callee(node, {})
+        name = _bare(_callee(node, {}))
         if name == _NATIVE_STATUS and not any(k.arg == "native" for k in node.keywords):
             findings.append(
                 _summary(
@@ -274,11 +312,12 @@ def _inventory_findings(provider: FactsProvider) -> list[Violation]:
     """Closed-world approval checks over every inventory file outside security/."""
     findings: list[Violation] = []
     trees: dict[str, ast.AST] = {}
+    code_by_path: dict[str, list[str]] = {}
     for path in _python_paths(provider, _SRC):
         facts, failures = _facts_for(provider, path, GUARD_ITEM_ADMISSION)
         if failures:
             continue
-        code = _code_lines(facts)
+        code = code_by_path[path] = _code_lines(facts)
         if not path.startswith(_SECURITY):
             found = [token for token in _APPROVAL_LOOKUPS if any(token in line for line in code)]
             if any(_MAP_NONE_TEST.search(line) for line in code):
@@ -298,6 +337,13 @@ def _inventory_findings(provider: FactsProvider) -> list[Violation]:
             if index is not None and index.root is not None:
                 trees[path] = index.root
     signatures = _approval_signatures(trees)
+    # Every file that can name an approval-taking callee is checked, not a caller list.
+    callee_tokens = {key.split(".", 1)[0] for key in signatures}
+    for path, code in code_by_path.items():
+        if path not in trees and any(token in line for line in code for token in callee_tokens):
+            index = provider.tree_index(path)
+            if index is not None and index.root is not None:
+                trees[path] = index.root
     for path, tree in trees.items():
         findings.extend(_approval_input_findings(path, tree, signatures))
         if not path.startswith(_SECURITY):
