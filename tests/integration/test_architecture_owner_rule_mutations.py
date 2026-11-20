@@ -563,23 +563,18 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
     [
         (
             "src/apm_cli/install/dry_run_plan.py",
-            "read_only=True,",
-            "read_only=False,",
+            "resolved_apm_dependencies=preview.resolved_dependencies,",
+            "resolved_apm_dependencies=self.all_apm_dependencies,",
         ),
         (
             "src/apm_cli/install/dry_run_plan.py",
-            "graph.flattened_dependencies.get_installation_list()",
-            "apm_package.get_apm_dependencies()",
+            "plan = plan.with_pipeline_preview(preview, lockfile_dir=ctx.apm_dir)",
+            "plan = plan",
         ),
         (
             "src/apm_cli/install/phases/resolve.py",
             "ctx.deps_to_install = selected_subtree_dependencies(",
             "ctx.deps_to_install = alternate_subtree_dependencies(",
-        ),
-        (
-            "src/apm_cli/install/dry_run_plan.py",
-            "selected_subtree_dependencies(",
-            "alternate_subtree_dependencies(",
         ),
         (
             "src/apm_cli/install/presentation/dry_run.py",
@@ -588,7 +583,7 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
         ),
     ],
 )
-def test_preview_cannot_bypass_offline_graph_authority(path: str, old: str, new: str) -> None:
+def test_preview_cannot_bypass_pipeline_graph_authority(path: str, old: str, new: str) -> None:
     """An alternate root-only preview or incomplete-removal claim fails the guard."""
     rule_id = "install-deployment-prospective-dry-run-plan"
     source = (ROOT / path).read_text(encoding="utf-8")
@@ -1712,6 +1707,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="requirements.add(node)",
         new="requirements.add_unchecked(node)",
         intent="Resolver skips canonical immutable admission before selecting a winner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-install-commit-order",
+        rule_id="install-deployment-install-commit-order",
+        path="src/apm_cli/install/phases/integrate.py",
+        old="        check_before_deploy(ctx)\n",
+        new="        pass\n",
+        intent="Integration deploys before the commit gate checks the install.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-install-entry-routing",
+        rule_id="install-deployment-install-entry-routing",
+        path="src/apm_cli/commands/install.py",
+        old="            preview = pipeline_preview(",
+        new="            preview = offline_preview(",
+        intent="install --dry-run previews without the install pipeline.",
     ),
     MutationCase(
         guard_id="install-deployment-install-scope-selection",

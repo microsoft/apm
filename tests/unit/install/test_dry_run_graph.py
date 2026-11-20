@@ -16,9 +16,10 @@ from unittest.mock import Mock
 import pytest
 
 from apm_cli.deps.apm_resolver import APMDependencyResolver
-from apm_cli.install.dry_run_plan import ProspectiveInstallPlan, pipeline_preview
+from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 from apm_cli.install.package_selection import selected_subtree_dependencies
 from apm_cli.install.phases.resolve import _apply_only_filter
+from apm_cli.install.pipeline_entry import pipeline_preview
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency import DependencyReference
 from tests.utils.artifact_snapshot import ArtifactSnapshot

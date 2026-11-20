@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import is_user_scope
 from apm_cli.deps.lockfile_write_authority import lockfile_exists
-from apm_cli.install.errors import PolicyViolationError
 from apm_cli.install.package_resolution import effective_dependency_selection
 from apm_cli.utils.content_hash import compute_file_hash
 
@@ -156,9 +155,6 @@ class LockfileBuilder:
             # dependency leaves installed_packages empty, but the lockfile
             # must still be pruned to match apm.yml (see
             # ``_has_orphan_lockfile_entries``).
-            from apm_cli.install.commit_gate import check_before_lockfile
-
-            check_before_lockfile(self.ctx, self.ctx.existing_lockfile)
             self._reconcile_target_deployed_files(self.ctx.existing_lockfile)
             self._sync_cache_pin_markers_from_disk()
             return
@@ -226,9 +222,6 @@ class LockfileBuilder:
             # before the semantic comparison (#3433).
             lockfile.sync_lockfile_version()
 
-            from apm_cli.install.commit_gate import check_before_lockfile
-
-            check_before_lockfile(self.ctx, lockfile)
             # Only write when the semantic content has actually changed
             # (avoids generated_at churn in version control).
             self._write_if_changed(lockfile, lockfile_path, _LF)
@@ -249,8 +242,6 @@ class LockfileBuilder:
             # _write_if_changed is a no-op, but markers must still be
             # written so the next `apm audit` drift replay succeeds.
             self._sync_cache_pin_markers(lockfile)
-        except PolicyViolationError:
-            raise
         except Exception as e:
             self._handle_failure(e)
 

@@ -679,6 +679,8 @@ install-deployment-policy-remote-origin-owner
 install-deployment-policy-violation-subjects
 install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan
+install-deployment-install-entry-routing
+install-deployment-install-commit-order
 install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
 install-deployment-immutable-requirements

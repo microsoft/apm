@@ -1813,7 +1813,7 @@ def _install_apm_packages(ctx, outcome):
     )
 
     if ctx.dry_run:
-        from apm_cli.install.dry_run_plan import pipeline_preview
+        from apm_cli.install.pipeline_entry import pipeline_preview
 
         preview = None
         if should_install_apm and has_any_apm_deps and APM_DEPS_AVAILABLE:

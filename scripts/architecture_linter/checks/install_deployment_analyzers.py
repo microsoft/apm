@@ -38,6 +38,12 @@ from scripts.architecture_linter.checks.install_codex_agent_links import (
     check_codex_agent_link_resolution,
 )
 from scripts.architecture_linter.checks.install_deployment_shared import _rule
+from scripts.architecture_linter.checks.install_entry_and_commit import (
+    GUARD_COMMIT_ORDER,
+    GUARD_ENTRY_ROUTING,
+    check_install_commit_order,
+    check_install_entry_routing,
+)
 from scripts.architecture_linter.checks.install_dry_run_plan import (
     _GUARD_DRY_RUN_PLAN,
     check_prospective_dry_run_plan,
@@ -264,6 +270,16 @@ RULES: tuple[Rule, ...] = (
         _GUARD_DRY_RUN_PLAN,
         "Prospective dry-run state and selection stay owned by ProspectiveInstallPlan.",
         check_prospective_dry_run_plan,
+    ),
+    _rule(
+        GUARD_ENTRY_ROUTING,
+        "Every package install and its dry-run preview enter one install pipeline.",
+        check_install_entry_routing,
+    ),
+    _rule(
+        GUARD_COMMIT_ORDER,
+        "Every install check completes before the lockfile and deployed files commit.",
+        check_install_commit_order,
     ),
     _rule(
         _GUARD_SOURCE_PLAN,

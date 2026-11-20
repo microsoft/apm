@@ -107,9 +107,23 @@
     {
       "id": "prospective-dry-run-install-plan",
       "decision": "Prospective dry-run install plan and interpreted package selection",
-      "owner": "install/dry_run_plan.py (ProspectiveInstallPlan) delegates selector identity and subtree filtering to install/package_selection.py and offline dependency closure to deps/apm_resolver.py",
+      "owner": "install/dry_run_plan.py (ProspectiveInstallPlan) projects the install pipeline's own dry-run plan (PipelinePreview from run_install_pipeline(dry_run=True)) and delegates selector identity to install/package_selection.py; it runs no second resolver",
       "selectors": ["src/apm_cli/install/dry_run_plan.py", "src/apm_cli/install/package_selection.py"],
       "guards": ["install-deployment-prospective-dry-run-plan"]
+    },
+    {
+      "id": "install-entry-routing",
+      "decision": "Every install entry (package install and --dry-run) goes through run_install_pipeline; dry-run derives its preview from the pipeline plan",
+      "owner": "install/pipeline_entry.py (pipeline_preview, PipelinePreview, record_preview_resolution): run_install_pipeline is entered only through install/service.py InstallService, from a closed list of _install_apm_dependencies callers (commands/install.py, update.py, lock.py, deps/cli.py); dry_run=True stops before the first write and the preview projects its plan",
+      "selectors": ["src/apm_cli/install/pipeline_entry.py"],
+      "guards": ["install-deployment-install-entry-routing"]
+    },
+    {
+      "id": "install-commit-order",
+      "decision": "Every install check completes before the lockfile and deployed files are committed; a failing check leaves no committed state (req-pl-002)",
+      "owner": "install/commit_gate.py (check_before_deploy before the first integrator write in phases/integrate.py; check_before_lockfile on the staged lockfile in install/pipeline.py before its writer scope commits it (#4086); merged MCP policy via enforce_mcp_policy from a closed list of preflight sites); the frozen pre-deploy hash check runs in InstallService.run before the pipeline; install/transaction.py (InstallTransaction) owns completion and rollback of the attempt",
+      "selectors": ["src/apm_cli/install/commit_gate.py", "src/apm_cli/install/transaction.py"],
+      "guards": ["install-deployment-install-commit-order"]
     },
     {
       "id": "authorized-deployable-source-paths",

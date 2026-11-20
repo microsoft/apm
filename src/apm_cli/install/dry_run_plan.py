@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.drift import locked_marketplace_row
 from apm_cli.install.package_selection import selected_dependency_identity
+from apm_cli.install.pipeline_entry import PipelinePreview
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
@@ -31,56 +32,6 @@ def _resolved_key(
     return (locked or dependency).get_unique_key()
 
 
-def record_preview_resolution(ctx: Any, graph: Any) -> None:
-    """Record ``--dry-run`` resolution gaps; stop where install would refuse."""
-    from apm_cli.install.errors import PreviewIncomplete
-
-    ctx.preview_errors.extend(graph.resolution_errors)
-    ctx.preview_errors.extend(graph.dependency_tree.unavailable_subtrees)
-    ctx.preview_declaration_errors.extend(graph.declaration_errors)
-    if graph.circular_dependencies:
-        ctx.preview_errors.append("Circular dependencies prevent a complete install preview")
-    if graph.resolution_errors or graph.circular_dependencies:
-        raise PreviewIncomplete()
-
-
-def pipeline_preview(run_pipeline: Any, logger: Any) -> PipelinePreview | None:
-    """Return the install pipeline's ``--dry-run`` plan, or None when none was built.
-
-    A source the preview cannot reach is reported as an incomplete preview,
-    not a failure, so ``--dry-run`` keeps its exit code.
-    """
-    import click
-
-    from apm_cli.install.errors import (
-        AuthenticationError,
-        FrozenInstallError,
-        InstallFailureAlreadyRendered,
-        PolicyViolationError,
-    )
-    from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
-
-    try:
-        result = run_pipeline()
-    except (
-        AuthenticationError,
-        FrozenInstallError,
-        InsecureDependencyPolicyError,
-        InstallFailureAlreadyRendered,
-        PolicyViolationError,
-        click.UsageError,
-    ):
-        raise
-    except Exception as exc:  # unreachable source, network, or resolver failure
-        message = str(exc) or type(exc).__name__
-        logger.verbose_detail(f"Dry-run resolution stopped: {message}")
-        return PipelinePreview(
-            dependencies=(), resolved_dependencies=(), mcp_dependencies=None, errors=(message,)
-        )
-    preview = getattr(result, "preview", None)
-    return preview if isinstance(preview, PipelinePreview) else None
-
-
 class _SilentLogger:
     """Discard the MCP resolver's progress lines while dry-run previews its choice."""
 
@@ -88,18 +39,6 @@ class _SilentLogger:
 
     def __getattr__(self, _name: str) -> Any:
         return lambda *_args, **_kwargs: None
-
-
-@dataclass(frozen=True)
-class PipelinePreview:
-    """What ``run_install_pipeline(dry_run=True)`` resolved and decided."""
-
-    dependencies: tuple[DependencyReference, ...]
-    resolved_dependencies: tuple[DependencyReference, ...]
-    # The commit gate's merged direct + transitive MCP set; None when not collected.
-    mcp_dependencies: tuple[Any, ...] | None
-    errors: tuple[str, ...] = ()
-    declaration_errors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

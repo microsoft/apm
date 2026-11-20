@@ -56,6 +56,7 @@ from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
 from ..utils.path_security import PathTraversalError
+from .commit_gate import check_before_lockfile
 from .errors import (
     AuthenticationError,
     DirectDependencyError,
@@ -157,8 +158,8 @@ def _preview_install(ctx: InstallContext, *, run_gates: bool) -> InstallResult:
     back the resolution staging.
     """
     from .commit_gate import check_before_deploy
-    from .dry_run_plan import PipelinePreview
     from .phases import policy_gate as _policy_gate_phase
+    from .pipeline_entry import PipelinePreview
 
     ctx.preview_errors.extend(message for _, message in ctx.transitive_failures)
     if run_gates:
@@ -899,9 +900,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         # Generate apm.lock for reproducible installs (T4: lockfile generation)
         from .phases.lockfile import LockfileBuilder
 
-        # The commit gate checks the built lockfile (require_hashes) before
-        # this writes it; see install/commit_gate.py.
+        # The lockfile is staged in its writer scope (#4086): the commit gate
+        # checks it before that scope commits it (install/commit_gate.py).
         LockfileBuilder(ctx).build_and_save()
+        check_before_lockfile(ctx, LockFile.read(get_lockfile_path(ctx.apm_dir)))
 
         # ------------------------------------------------------------------
         # Phase: Post-deps local .apm/ content.

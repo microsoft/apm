@@ -127,14 +127,10 @@ def check_prospective_dry_run_plan(provider: FactsProvider) -> tuple[Violation, 
             "mcp_deps=list(prospective_plan.selected_mcp_dependencies) or None",
         )
         and _present(command, "prospective_plan.dependency_counts")
-        and _present(owner, "return plan.with_resolved_dependencies(")
-        and _present(owner, "resolver = APMDependencyResolver(")
-        and _present(owner, "read_only=True,")
-        and _present(owner, "resolver.resolve_dependencies(project_root, root_package=apm_package)")
-        and _present(owner, "graph.flattened_dependencies.get_installation_list()")
-        and _present(owner, "self.only_packages, graph.dependency_tree, resolved_dependencies")
+        and _present(owner, "plan = plan.with_pipeline_preview(preview, lockfile_dir=ctx.apm_dir)")
+        and _present(owner, "resolved_apm_dependencies=preview.resolved_dependencies,")
+        and not _present(owner, "APMDependencyResolver(")
         and _present(resolve, "ctx.deps_to_install = selected_subtree_dependencies(")
-        and _present(owner, "selected_subtree_dependencies(")
         and _present(owner, "self.resolved_apm_dependencies")
         and _present(resolver, "if not self._read_only:")
         and _present(

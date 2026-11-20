@@ -11,7 +11,6 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from apm_cli.install.dry_run_plan import record_preview_resolution
 from apm_cli.install.helpers.ref_reuse import (
     annotate_update_plan_refs,
 )
@@ -22,6 +21,7 @@ from apm_cli.install.helpers.ref_reuse import (
     requires_remote_ref_resolution as _requires_remote_ref_resolution,
 )
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
+from apm_cli.install.pipeline_entry import record_preview_resolution
 from apm_cli.install.presentation.resolution import report_resolved_dependencies
 from apm_cli.install.source_helpers import with_preserved_install_hint
 from apm_cli.install.transaction import resolution_for_context
