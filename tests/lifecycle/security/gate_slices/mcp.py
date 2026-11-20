@@ -49,7 +49,7 @@ _SMOKE = {"G|update|local-deny|mcp"}
 
 # G path -> (changes with a row, (surface files, other-scope prefixes))
 _MARKETPLACE = tuple(change for change in _ALL if change != "definition-changed")
-_DENY_BY_SPEC = "S-pending (neutral issue to follow): deny by install spec and installed identity"
+_DENY_BY_SPEC = "#4189 deny by install spec and installed identity"
 _XFAIL["G|marketplace-install|local-deny|mcp"] = _DENY_BY_SPEC
 _USER_ORG = "S-pending (neutral issue to follow): org policy for user-scope installs"
 _XFAIL.update(
