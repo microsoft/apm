@@ -160,6 +160,57 @@ def native_comparison_clients(
     return clients
 
 
+def differing_unrecorded_native_mcp_entries(
+    lockfile: Any,
+    target_runtimes: list[str],
+    *,
+    project_root: Any,
+    user_scope: bool,
+) -> list[tuple[str, str]]:
+    """Return ``(server, runtime)`` pairs ``install --frozen`` refuses for a differing entry.
+
+    A self-defined server whose ownership the lock does not record on a
+    runtime that compares native connections, while that runtime already
+    holds a same-name entry that differs from the declaration. ``apm audit
+    --ci`` reads this so it reaches the same verdict as ``--frozen`` (#4477).
+    """
+    ownership = {
+        runtime: set(names) for runtime, names in (lockfile.mcp_target_servers or {}).items()
+    }
+    migrate_legacy_project_target_servers(
+        ownership, active_runtimes=set(target_runtimes), user_scope=user_scope
+    )
+    clients = native_comparison_clients(
+        list(target_runtimes), project_root=project_root, user_scope=user_scope
+    )
+    pairs: list[tuple[str, str]] = []
+    for runtime in sorted(clients):
+        recorded = ownership.get(runtime, set())
+        for name, stored in sorted((lockfile.mcp_configs or {}).items()):
+            if name in recorded or not isinstance(stored, dict):
+                continue
+            if stored.get("registry") is not False:
+                continue
+            if not native_mcp_entry_present(
+                runtime,
+                name,
+                stored_config=stored,
+                project_root=project_root,
+                user_scope=user_scope,
+            ):
+                continue
+            if native_mcp_entry_matches_declaration(
+                runtime,
+                name,
+                stored_config=stored,
+                project_root=project_root,
+                user_scope=user_scope,
+            ):
+                continue
+            pairs.append((name, runtime))
+    return pairs
+
+
 def mcp_native_hash(native: dict) -> str:
     """Fingerprint a written native entry without retaining its resolved secrets."""
     encoded = json.dumps(native, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
