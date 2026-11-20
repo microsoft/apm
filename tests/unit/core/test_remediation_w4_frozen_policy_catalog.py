@@ -57,6 +57,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "deployment-ownership-missing": _FAULT,
     "drift-cache-unpopulated": "audit replay re-fetches a missing remote package; only a "
     "missing local source misses, and install cannot restore that",
+    "frozen-target-dropped": "executed by test_frozen_dropped_target_lifecycle::"
+    "test_frozen_refuses_a_dropped_target_with_zero_writes_and_its_remedy_runs (#4519)",
     "frozen-local-content-changed": "needs a frozen local-path dependency; covered by the "
     "frozen local content unit tests",
     "frozen-hook-pins-stale": "covered by the hook approval pin parity lifecycle test, "
