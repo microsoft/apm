@@ -851,19 +851,17 @@ def test_denied_messages_point_at_policy_explain_not_approve() -> None:
         assert "apm approve" not in message
 
 
-def test_user_scope_plugin_hint_names_the_approve_directory(tmp_path: Path) -> None:
+def test_user_scope_plugin_hint_names_the_user_scope_command() -> None:
+    """A user-scope plugin's hint works from any directory: apm approve -g (#4154)."""
     from apm_cli.security.trust import parked_plugin_message
 
     reason = "unapproved-executables"
     assert parked_plugin_message(PKG, reason).endswith(
         f"Review: apm approve --pending  |  Re-approve: apm approve {PKG}"
     )
-    home = parked_plugin_message(PKG, reason, approve_cwd=Path.home() / ".apm")
-    assert home.endswith(
-        f"Review: cd ~/.apm && apm approve --pending  |  Re-approve: cd ~/.apm && apm approve {PKG}"
+    assert parked_plugin_message(PKG, reason, user_scope=True).endswith(
+        f"Review: apm approve -g --pending  |  Re-approve: apm approve -g {PKG}"
     )
-    elsewhere = parked_plugin_message(PKG, reason, approve_cwd=tmp_path)
-    assert f"cd {tmp_path} && apm approve --pending" in elsewhere
 
 
 def _monitor_plugin(root: Path) -> Path:
