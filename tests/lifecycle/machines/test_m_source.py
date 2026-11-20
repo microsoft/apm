@@ -267,29 +267,6 @@ def _mcp_servers(observation: Observation) -> frozenset[str]:
     return frozenset(json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {})
 
 
-def _pins_written(before: Observation, after: Observation) -> bool:
-    difference = before.artifacts.snapshot("home").diff(after.artifacts.snapshot("home"))
-    return _PINS in difference.added | difference.changed
-
-
-def _dry_run_pins(machine, op, before, after, result) -> bool:
-    del machine
-    return result is not None and "DRYRUN" in op.modifiers and _pins_written(before, after)
-
-
-def _gated_rows(observation: Observation) -> bool:
-    lock = observation.lock
-    return lock is not None and any(
-        dependency.to_dict().get("exec_status") == "gated_pending_approval"
-        for dependency in lock.get_package_dependencies()
-    )
-
-
-def _lock_drops_exec_status(machine, op, before, after, result) -> bool:
-    del after
-    return result is not None and op.name == "lock" and machine.converged and _gated_rows(before)
-
-
 def _lsp_survivor(machine, op, before=None, after=None, result=None) -> bool:
     """#4214: uninstall with a surviving LSP-only local package fails its cleanup."""
     del before, after
@@ -310,20 +287,6 @@ KNOWN_CELLS = (
         r"^failed uninstall (changed (the manifest|the lockfile|deployed surfaces|durable files: .*)"
         r"|exited 1 without announcing why)$",
         _lsp_survivor,
-    ),
-    KnownCell(
-        "lock-drops-exec-status",
-        "I2",
-        "#4213",
-        r"^lock or manifest semantics changed on a converged state$",
-        _lock_drops_exec_status,
-    ),
-    KnownCell(
-        "dry-run-writes-ref-pin",
-        "I5",
-        "#4212",
-        r"wrote home:\['\.apm/cache/marketplace/version-pins\.json'\]$",
-        _dry_run_pins,
     ),
 )
 
@@ -442,8 +405,6 @@ class SourceMachine(MachineBase):
             self.credit(step, op, choices, preview)
             self.model = requested
             self.converged = op not in _KEEPING or self.converged
-            if op == "lock" and _gated_rows(step.before):
-                self.converged = False  # #4213: the rewritten lock is not install-converged
         return step
 
     def preview(
@@ -460,10 +421,7 @@ class SourceMachine(MachineBase):
         self.egress(step)
         if step.result.returncode != 0:
             return None
-        pinned = _pins_written(step.before, step.after)
         for cell in self.cells(op, "dry-run", choices):
-            if pinned and ("marketplace" in cell or "plugin-at-mkt" in cell):
-                continue  # strict known cell #4212: this preview wrote the ref pin
             if cell.startswith("T5|"):
                 check_obligation(
                     cell,
