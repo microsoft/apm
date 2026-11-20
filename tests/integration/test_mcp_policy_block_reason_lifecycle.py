@@ -71,5 +71,15 @@ def test_unfetchable_policy_block_prints_the_reason(apm_binary_path: Path, tmp_p
 
     text = output(blocked)
     assert "Error installing dependencies: 1" not in text, text
-    assert "fetch_failure_default=block" in blocked.stderr, text
+    refusal = next(
+        (line for line in blocked.stderr.splitlines() if "fetch_failure_default=block" in line),
+        "",
+    )
+    assert refusal.startswith("[x] "), text
+    # The way out of an org-enforced block never advertises a bypass.
+    assert (
+        "Check that the org policy source is reachable (apm policy status) "
+        "and retry, or ask your org admin." in refusal
+    ), text
+    assert "--no-policy" not in refusal, text
     assert (project / "apm.yml").read_bytes() == manifest

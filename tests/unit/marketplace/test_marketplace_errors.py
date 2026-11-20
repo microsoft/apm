@@ -1,5 +1,8 @@
 """Tests for marketplace error hierarchy."""
 
+import re
+from urllib.parse import urlparse
+
 import pytest
 
 from apm_cli.core.remediation import (
@@ -42,8 +45,11 @@ class TestMarketplaceErrors:
         # Round 4 panel (devx-ux required): GHES users copying the URL must
         # land on a host that works for them, not the public-cloud default.
         err = MarketplaceNotFoundError("acme", host="github.example.corp")
-        assert "https://github.example.corp/<owner>/<repo>" in str(err)
-        assert "https://github.com/" not in str(err)
+        urls = [urlparse(u) for u in re.findall(r"https?://[^\s']+", str(err))]
+        assert [(u.scheme, u.hostname, u.path) for u in urls] == [
+            ("https", "github.example.corp", "/<owner>/<repo>")
+        ]
+        assert all(u.hostname != "github.com" for u in urls)
         assert err.host == "github.example.corp"
 
     def test_plugin_not_found_message(self):
