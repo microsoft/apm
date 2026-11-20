@@ -246,7 +246,7 @@ def test_replacement_upstream_local_fork_upstream_owns_one_slot(
     assert local_entry["replacement"]["source"] == {"path": "../local-base"}
     assert not local_entry.get("resolved_commit")
     locked = load_yaml(fixture.consumer.root / "apm.lock.yaml")
-    assert locked["lockfile_version"] == "3"
+    assert locked["lockfile_version"] == "4"  # package hashes select 4 over 3
     assert parse_replace_block(locked["replacements"]) == parse_replace_block(
         load_yaml(fixture.consumer.manifest_path)["replace"]
     )

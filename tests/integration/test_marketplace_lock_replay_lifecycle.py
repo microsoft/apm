@@ -249,6 +249,37 @@ def test_catalog_defined_servers_replay_warm_and_reresolve_cold(
     assert server_config.read_bytes() == deployed_config
 
 
+@pytest.mark.parametrize("pin", ["tag", "commit"])
+def test_catalog_repin_of_a_server_owning_package_needs_update(
+    tmp_path: Path, apm_binary_path: Path, pin: str
+) -> None:
+    """A cold copy reads the catalog only for server metadata: a catalog that now
+    pins another commit is refused, never silently re-pinned (#3989)."""
+    world = _world(tmp_path, apm_binary_path, servers=("mcpServers", _MCP_SERVERS))
+    lock_bytes = world.lock_bytes
+    locked_commit = world.locked_row()["resolved_commit"]
+
+    world.select("v2.0.0" if pin == "tag" else world.second.sha)
+    world.run("marketplace", "update", _CATALOG)
+    world.remove_materialized()
+    failed = world.run(*_INSTALL, expected=1)
+    output = " ".join((failed.stdout + failed.stderr).split())
+    assert "apm.lock.yaml pins" in output, output
+    assert f"apm update {_NAME}@{_CATALOG}" in output, output
+    assert world.lock_bytes == lock_bytes
+    assert not world.deployed.exists()
+    modules = world.root / "apm_modules"
+    assert not any(
+        path.read_text(encoding="utf-8") == _skill("two") for path in modules.rglob("SKILL.md")
+    )
+
+    # The explicit update follows the catalog and re-pins the lock.
+    world.run("update", f"{_NAME}@{_CATALOG}", "--yes", "--target", _TARGET)
+    updated = world.locked_row()
+    assert updated["resolved_commit"] == world.second.sha != locked_commit
+    assert world.deployed.read_text(encoding="utf-8") == _skill("two")
+
+
 def test_transitive_marketplace_entry_replays_cold_and_frozen_refuses_unlocked(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

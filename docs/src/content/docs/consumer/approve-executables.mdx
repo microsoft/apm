@@ -1,0 +1,178 @@
+---
+title: Approve hooks and MCP servers
+description: Review the hooks, MCP servers, LSP servers and bin/ executables a package would run, approve them for the team, and know what changes park them again.
+---
+
+import { Steps, Badge } from '@astrojs/starlight/components';
+
+Use this page before a package's code runs on your team's machines. Most
+primitives are text: skills, instructions, agents. Some packages also ship
+**executables**, things a harness (the agent tool, such as Claude Code or
+GitHub Copilot) runs or starts for you:
+
+- **hooks**: scripts the harness runs on events, such as after every edit;
+- **MCP servers** and **LSP servers**: processes the harness starts;
+- **`bin/` executables**: programs put on the agent's path.
+
+An approval records, in `apm.yml`, that your project accepts a package's
+executables. It is consent to deploy, not a review by APM and not a sandbox:
+once deployed, the harness runs them with its own permissions.
+
+## When approval applies
+
+By default, APM deploys executables. The approval gate turns on when any of
+these is true:
+
+- your `apm.yml` has an `executables:` block, even an empty `executables: {}`
+  (older projects may still use the deprecated `allowExecutables:` name);
+- your organization's policy sets `executables:` rules;
+- you recorded a personal deny with `apm deny --user`.
+
+With the gate on, an unapproved executable is **parked**: `apm install`
+succeeds, skips it and says so. If the block does not exist yet, `apm approve`
+creates it and lists every other package that will be parked from then on.
+
+Two cases are held back even without the gate: an MCP server that comes from
+a transitive package and defines its own command, registry or overrides, and
+`bin/` executables in non-interactive runs such as CI.
+
+## Review and approve
+
+Here a package, `agent-kit`, ships one hook and one MCP server.
+
+<Steps>
+
+1. **List what is waiting.** This grants nothing.
+
+   ```bash frame="terminal"
+   apm approve --pending
+   ```
+
+   ```text frame="none"
+   1 package(s) with unapproved or changed executables:
+     ./packages/agent-kit: 1 hook(s), 1 MCP server(s)
+         hooks  .apm/hooks/lint-on-save.json  bash ./scripts/lint.sh  3dd57379  [not approved]
+         mcp    kit-docs                      stdio  node ./server.js  4dccbf68  [not approved]
+   ```
+
+   Each line shows the type, the file or server name, what it runs and the
+   start of its fingerprint.
+
+2. **Review the definitions.** Read the hook file and the scripts it calls,
+   and the server command and environment, in `apm_modules/` or upstream.
+
+3. **Approve the package.**
+
+   ```bash frame="terminal"
+   apm approve ./packages/agent-kit
+   ```
+
+   ```text frame="none"
+   [i] ./packages/agent-kit declares:
+         hooks  .apm/hooks/lint-on-save.json  bash ./scripts/lint.sh  3dd57379
+         mcp    kit-docs                      stdio  node ./server.js  4dccbf68
+   [+] Approved ./packages/agent-kit at these exact definitions (1 hook file, 1 MCP server)
+   [i] Updated apm.yml (1 approved). Run 'apm install' to deploy; commit apm.yml to share.
+   [i] Teammates need APM 0.37 or later to read pinned approvals.
+   ```
+
+4. **Deploy.**
+
+   ```bash frame="terminal"
+   apm install
+   ```
+
+5. **Share the decision.** Commit `apm.yml`; teammates and CI inherit it.
+
+   ```bash frame="terminal"
+   git commit -am "Approve agent-kit executables"
+   ```
+
+</Steps>
+
+## Pinned approvals
+
+<Badge text="New in 0.37" variant="note" />
+
+In 0.36 and earlier, `apm approve` records a grant per type (`hooks: true`):
+any later content from that package deploys. From 0.37 it pins each item to
+its content:
+
+```yaml title="apm.yml"
+executables:
+  allow:
+    ./packages/agent-kit:
+      hooks:
+        .apm/hooks/lint-on-save.json: sha256:3dd57379...
+      mcp:
+        kit-docs: sha256:4dccbf68...
+```
+
+- **Hook files** are pinned with the scripts they reference; **MCP servers**
+  with their command, arguments, environment, URL and headers. A plugin that
+  the harness loads whole gets one fingerprint over its entire folder: file paths
+  and bytes, not file modes, so the same pin works on every operating system. The
+  installed copy is still checked, modes included.
+- **Changed content is parked** until you approve it again:
+
+  ```text frame="none"
+  [!] Parked MCP server 'kit-docs' (./packages/agent-kit): definition changed since approval
+    Review: apm approve --pending  |  Re-approve: apm approve ./packages/agent-kit
+  ```
+
+- **The lockfile cannot grant permission.** `apm audit --ci` fails an MCP
+  server the lockfile admits but `apm.yml` does not approve.
+- **Every machine needs 0.37.** Older APM rejects pinned entries and fails
+  closed.
+- Existing `hooks: true` and `mcp: true` grants still deploy, with a warning.
+  Run `apm approve <package>` to pin them.
+
+Hook pins are keyed on the publisher's file, such as a plugin's `hooks/hooks.json`,
+so approving a Claude Code plugin's hooks takes effect on the next install. A Claude
+Code plugin installed whole at user scope gets one `plugin:` pin in `~/.apm/apm.yml`;
+run `apm approve` from `~/.apm` ([details](../install-plugins/#claude-code-plugins-at-user-scope)).
+
+A pin covers the files APM copies. Code a hook downloads when it runs
+(`npx`, `curl`) is not covered.
+
+## Deny a package
+
+```bash frame="terminal"
+apm deny contoso/review-kit
+```
+
+A deny wins over every approval. The next `apm install` removes executables
+that package already deployed.
+
+## Personal or project approvals
+
+`apm approve` and `apm deny` write the project `apm.yml` by default, so the
+whole team shares the decision. `--user` writes your personal APM config
+(`~/.apm/config.json`) instead: it applies to your machine alone, cannot
+override an organization or project deny. A personal approval never turns the gate on;
+a personal deny (`apm deny --user`) does, so other unapproved executables park on your
+machine too.
+`apm audit --ci` ignores personal approvals when it checks MCP servers.
+
+If your organization publishes a recommended set, accept it with
+`apm approve --recommended`. `--recommended` and `--all` skip any package that a
+project, user or organization layer denies, and write no approval for it.
+
+## Verify
+
+```bash frame="terminal"
+apm approve --list
+```
+
+```text frame="none"
+[i] 1 package(s) with executables (2 allowed type(s), 0 blocked type(s)).
+  ./packages/agent-kit#1.0.0: hooks[+:project-allow, pinned] mcp[+:project-allow, pinned]
+```
+
+`apm policy explain <package>` shows which layer (organization, project or
+personal) decided each type.
+
+:::tip[Other options]
+Set approval rules for every repository: [Control executables](../../enterprise/control-executables/).
+Every flag: [`apm approve`](../../reference/cli/approve/) and [`apm deny`](../../reference/cli/deny/).
+:::

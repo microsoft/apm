@@ -195,8 +195,14 @@ class TestNonInteractiveExecutablePromptIntegration:
         logger.info.assert_called_once()
         remedy = logger.info.call_args.args[0]
         assert "apm policy explain owner/repo" in remedy
-        # M4 (#1873): non-interactive remedy leads with the bulk one-liner.
-        assert "apm approve --recommended" in remedy
+        # The bulk one-liner appears only with an org recommend set (#3994).
+        assert "apm approve --recommended" not in remedy
+
+        logger.reset_mock()
+        policy = SimpleNamespace(executables=SimpleNamespace(recommend=("owner/repo",)))
+        ctx.policy_fetch = SimpleNamespace(policy=policy)
+        _run_executable_approval_prompt(ctx)
+        assert "apm approve --recommended" in logger.info.call_args.args[0]
 
     def test_interactive_decline_surfaces_parked_remedy(self, monkeypatch) -> None:
         # M3 (#1873): declining at the interactive prompt must still print a
@@ -383,13 +389,19 @@ class TestCheckExecutableApprovalIntegration:
         assert hooks_ok is True
         assert bin_ok is True
 
-    def test_none_allow_executables_means_all_approved(self, tmp_path: Path) -> None:
+    def test_gate_disabled_map_means_all_approved(self, tmp_path: Path) -> None:
+        from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
+
         pkg_info = self._make_pkg_info(tmp_path, "any-pkg", "1.0")
         hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
-            "any-pkg", pkg_info, None
+            "any-pkg", pkg_info, authorized_exec_map(AUTHORIZED_GATE_DISABLED)
         )
         assert hooks_ok is True
         assert bin_ok is True
+
+    def test_missing_allow_executables_approves_nothing(self, tmp_path: Path) -> None:
+        pkg_info = self._make_pkg_info(tmp_path, "any-pkg", "1.0")
+        assert check_executable_approval("any-pkg", pkg_info, None) == (False,) * 5
 
     def test_empty_allow_executables_blocks_all(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")

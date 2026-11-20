@@ -558,10 +558,11 @@ class MCPServerOperations:
 
         try:
             # Try to use Rich for better prompts
-            from rich.console import Console
             from rich.prompt import Prompt
 
-            console = Console()
+            from apm_cli.utils.console import new_console
+
+            console = new_console()
             console.print(
                 "Registry runtime variables needed:"
                 if prompt_defaults

@@ -121,6 +121,21 @@ def adoptable_skill_members(
     return frozenset(expected)
 
 
+def tree_equals_install_output(
+    integrator: Any, source: Path, destination: Path, ignore: Callable[[str, list[str]], list[str]]
+) -> bool:
+    """Return whether *destination* already holds exactly what this install writes."""
+    return bool(
+        adoptable_skill_members(
+            source,
+            destination,
+            walk_source=integrator.walk_source_tree,
+            ignore=ignore,
+            resolve_links=integrator.resolve_links,
+        )
+    )
+
+
 def adoption_baselines(
     source: Path,
     destination: Path,

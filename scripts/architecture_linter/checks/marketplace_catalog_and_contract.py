@@ -744,7 +744,7 @@ def _check_package_format_precedence(provider: FactsProvider) -> tuple[Violation
             "src/apm_cli/install/phases/resolve.py",
             (
                 "update_keys=update_keys,",
-                "content_hash = compute_package_hash(candidate_path)",
+                "content_hash = compute_package_hash(candidate_path, framed=True)",
                 "selected_dependency_keys(ctx.only_packages, ctx.all_apm_deps)",
             ),
         ),
@@ -756,7 +756,7 @@ def _check_package_format_precedence(provider: FactsProvider) -> tuple[Violation
             "src/apm_cli/install/phases/integrate.py",
             (
                 "receipt[0] == install_path.resolve()",
-                "if verify_package_hash(install_path, receipt[1]):",
+                "if verify_package_hash(install_path, receipt[1], framed=True):",
                 "and (update_refs or ctx.refresh)",
             ),
         ),

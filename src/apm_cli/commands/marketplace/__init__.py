@@ -25,6 +25,8 @@ from ...marketplace.errors import (
     BuildError,
     GitLsRemoteError,
     HeadNotAllowedError,
+    MarketplaceEgressRefusedError,
+    MarketplaceFetchError,
     MarketplaceNotFoundError,
     MarketplaceYmlError,
     NoMatchingVersionError,
@@ -506,6 +508,17 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
         except (MarketplaceManifestNotFoundError, MarketplaceCatalogPathError) as exc:
             logger.error(str(exc), symbol="error")
             sys.exit(1)
+        except MarketplaceFetchError as exc:
+            if isinstance(exc, MarketplaceEgressRefusedError):
+                raise
+            # Nothing is registered yet, so 'apm marketplace update' cannot retry (#3994).
+            detail = f": {exc.reason}" if exc.reason else ""
+            logger.error(
+                f"Failed to fetch marketplace '{probe_name}'{detail}. It was not "
+                "registered; fix the cause, then rerun this 'apm marketplace add' command.",
+                symbol="error",
+            )
+            sys.exit(1)
         detected_path = fetch_source.path
         plugin_count = len(manifest.plugins)
 
@@ -558,7 +571,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
         add_marketplace(final_source)
 
         logger.success(
-            f"Marketplace '{display_name}' registered ({plugin_count} plugins)",
+            f"Marketplace '{display_name}' registered ({plugin_count} plugin{'' if plugin_count == 1 else 's'})",
             symbol="check",
         )
         if manifest.structural_errors:
@@ -775,36 +788,19 @@ def browse(name, verbose, offline=False):
             logger.warning(f"Marketplace '{name}' has no plugins")
             return
 
-        console = _get_console()
-        if not console:
-            # Colorama fallback
-            logger.success(f"{len(manifest.plugins)} plugin(s) in '{name}':", symbol="check")
-            for p in manifest.plugins:
-                desc = f" -- {p.description}" if p.description else ""
-                logger.tree_item(f"  {p.name}{desc}")
-            logger.progress(f"Install: apm install <plugin-name>@{name}", symbol="info")
-            return
+        # A list, not a table: install names run long, and a table squeezed
+        # to the terminal width truncates exactly the text users copy.
+        import shutil
+        import textwrap
 
-        from rich.table import Table
-
-        table = Table(
-            title=f"Plugins in '{name}'",
-            show_header=True,
-            header_style="bold cyan",
-            border_style="cyan",
-        )
-        table.add_column("Plugin", style="bold white", no_wrap=True)
-        table.add_column("Description", style="white", ratio=1)
-        table.add_column("Version", style="cyan", justify="center")
-        table.add_column("Install", style="green")
-
+        width = max(40, shutil.get_terminal_size((80, 24)).columns)
+        logger.success(f"{len(manifest.plugins)} plugin(s) in '{name}':", symbol="check")
         for p in manifest.plugins:
-            desc = p.description or "--"
-            ver = p.version or "--"
-            table.add_row(p.name, desc, ver, f"{p.name}@{name}")
-
-        console.print()
-        console.print(table)
+            version = f"  ({p.version})" if p.version else ""
+            click.echo(f"  {p.name}@{name}{version}")
+            if p.description:
+                for line in textwrap.wrap(p.description, width=width - 6):
+                    click.echo(f"      {line}")
         logger.progress(
             f"Install a plugin: apm install <plugin-name>@{name}",
             symbol="info",
@@ -847,7 +843,7 @@ def update(name, verbose):
             logger.start(f"Refreshing marketplace '{name}'...", symbol="gear")
             manifest = fetch_marketplace(source, require_fresh=True)
             logger.success(
-                f"Marketplace '{name}' updated ({len(manifest.plugins)} plugins)",
+                f"Marketplace '{name}' updated ({len(manifest.plugins)} plugin{'' if len(manifest.plugins) == 1 else 's'})",
                 symbol="check",
             )
             return
@@ -861,7 +857,9 @@ def update(name, verbose):
         for s in sources:
             try:
                 manifest = fetch_marketplace(s, require_fresh=True)
-                logger.tree_item(f"  {s.name} ({len(manifest.plugins)} plugins)")
+                logger.tree_item(
+                    f"  {s.name} ({len(manifest.plugins)} plugin{'' if len(manifest.plugins) == 1 else 's'})"
+                )
             except Exception as exc:
                 failed.append(s.name)
                 logger.error(f"  {s.name}: {exc}", symbol="error")

@@ -421,7 +421,7 @@ class PreparedLspIntegration:
             require_lsp_capable_target(self.target_runtimes)
 
 
-def prepare_lsp_integration(
+def prepare_lsp_integration(  # noqa: PLR0913
     *,
     apm_package: "APMPackage",
     apm_modules_path: Path,
@@ -438,6 +438,7 @@ def prepare_lsp_integration(
     diagnostics: "DiagnosticCollector | None" = None,
     executable_context: tuple[dict[str, dict[str, bool]] | None, bool] = (None, False),
     no_policy: bool = False,
+    claude_native_keys: frozenset[str] = frozenset(),
 ) -> PreparedLspIntegration:
     """Collect trusted declarations once before native-service reconciliation."""
     from apm_cli.integration.lsp_integrator import LSPIntegrator
@@ -456,6 +457,7 @@ def prepare_lsp_integration(
             apm_modules_path,
             lock_path,
             diagnostics=diagnostics,
+            claude_native_keys=claude_native_keys,
         )
         if transitive_lsp:
             logger.verbose_detail(f"Collected {len(transitive_lsp)} transitive LSP dependency(ies)")

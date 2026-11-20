@@ -28,6 +28,8 @@ from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_err
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
 from .project_package import build_project_local_package_info
+from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
+from .target_warnings import log_canvas_skip as _log_canvas_skip
 
 if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
@@ -123,62 +125,38 @@ def _emit_integration_hints(prim_name: str, info: dict, log_integration) -> None
         log_integration("  |-- reload the Copilot session (/clear) or restart to load the canvas")
 
 
-def _log_canvas_skip(
-    package_name: str,
-    package_info: Any,
-    logger: InstallLogger | None,
-    ctx: InstallContext | None = None,
-) -> None:
-    """Warn about skipped canvas extensions when the package ships them."""
-    _install = Path(package_info.install_path)
-    extensions_root = _install / ".apm" / "extensions"
-    try:
-        has_canvas = extensions_root.is_dir() and any(
-            (d / "extension.mjs").is_file() for d in extensions_root.iterdir() if d.is_dir()
-        )
-    except OSError:
-        has_canvas = False
-    if not has_canvas:
-        return
-    _pkg_label = package_name or getattr(package_info, "name", "unknown")
-    if logger:
-        from apm_cli.install.exec_gate import executable_skip_reason
-        from apm_cli.security.executables import EXEC_TYPE_CANVAS
-
-        reason = executable_skip_reason(
-            ctx, package_name, _pkg_label, EXEC_TYPE_CANVAS, "canvas extension(s)"
-        )
-        logger.warning(f"{_pkg_label}: {reason}", symbol="warning")
-
-
-def _warn_target_reconcile_failure(
-    diagnostics: DiagnosticCollector,
-    package_name: str,
-    reconcile_stats: dict,
-    message: str = "Could not fully reconcile hooks excluded by target restrictions",
-) -> None:
-    if not reconcile_stats.get("errors", 0):
-        return
-    failed_targets = reconcile_stats.get("failed_targets") or ["unknown"]
-    failed_paths = reconcile_stats.get("failed_paths") or ["unknown"]
-    if not isinstance(failed_targets, list):
-        failed_targets = ["unknown"]
-    if not isinstance(failed_paths, list):
-        failed_paths = ["unknown"]
-    diagnostics.warn(
-        message,
-        package=package_name,
-        detail=(
-            f"targets: [{', '.join(failed_targets)}]; "
-            f"configs: [{', '.join(failed_paths)}]; run apm install again"
-        ),
-    )
-
-
 def _targets_explicitly_requested(ctx: InstallContext | None) -> bool:
     """Return True only when the active targets came from ``--target``."""
     decision = getattr(ctx, "target_decision", None)
     return getattr(decision, "source", None) == "--target flag"
+
+
+def _check_native_claude_transition(
+    reconcile_package_targets: Any,
+    package_info: Any,
+    project_root: Path,
+    targets: list[Any],
+    package: str,
+) -> None:
+    """Refuse native activation over retained or unreadable loose hook state."""
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+
+    if not callable(reconcile_package_targets):
+        return
+    reconcile_stats = reconcile_package_targets(
+        package_info,
+        project_root,
+        targets,
+        dry_run=True,
+    )
+    if reconcile_stats.get("errors") or reconcile_stats.get("files_removed"):
+        failed = ", ".join(reconcile_stats.get("failed_paths", []))
+        recovery = f"Repair unreadable hook settings or ownership. Inspect: {failed}"
+        if not reconcile_stats.get("errors"):
+            recovery = f"Run: apm uninstall --global {package} && apm install --global {package}"
+        raise ClaudeNativePluginError(
+            f"Cannot switch {package} to native Claude. Hook settings were preserved. {recovery}"
+        )
 
 
 def integrate_package_primitives(  # noqa: PLR0913
@@ -203,6 +181,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     dep_target_subset: list[str] | None = None,
     trust_bin: bool | None = None,
     bin_skip_reason_override: str | None = None,
+    native_claude_user_scope: bool = False,
     deployment_plan: PackageDeploymentPlan | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
@@ -288,6 +267,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         trust_bin=trust_bin,
         bin_skip_reason_override=bin_skip_reason_override,
         read_only=scratch_root is not None,
+        native_claude_user_scope=native_claude_user_scope,
     )
     target_selection = deployment_plan.target_selection
     targets = list(target_selection.targets)
@@ -327,6 +307,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 
     codex_native = deployment_plan.codex_native
+    native_claude_plugin = deployment_plan.claude_native
+    native_target_names = {native_claude_plugin.target_name} if native_claude_plugin else set()
     # Compatibility-only Codex data is opaque to every loose target adapter.
     projection_targets = deployment_plan.projection_targets
     source_plan = deployment_plan.source_plan
@@ -369,7 +351,14 @@ def integrate_package_primitives(  # noqa: PLR0913
 
     from apm_cli.install.target_warnings import warn_unsupported_primitives
 
-    warn_unsupported_primitives(package_info, package_name, targets, ctx, diagnostics, logger)
+    warn_unsupported_primitives(
+        package_info,
+        package_name,
+        projection_targets,
+        ctx,
+        diagnostics,
+        logger,
+    )
 
     def _log_integration(msg):
         if logger:
@@ -427,6 +416,21 @@ def integrate_package_primitives(  # noqa: PLR0913
         )
 
     _reconcile_excluded_targets()
+    if native_claude_plugin is not None:
+        result["native_plugin"] = True
+        result["native_claude_plugin"] = True
+        _check_native_claude_transition(
+            reconcile_package_targets,
+            package_info,
+            project_root,
+            [target for target in targets if target.name in native_target_names],
+            package_name,
+        )
+        if not projection_targets:
+            from apm_cli.claude_plugins.admission import queue_native_claude
+
+            queue_native_claude(ctx, package_name, native_claude_plugin, diagnostics)
+            return result
 
     if codex_native is not None:
         _rc = (
@@ -594,12 +598,13 @@ def integrate_package_primitives(  # noqa: PLR0913
         # still appears and the count is truthful.
         _files = _info["files"]
         _adopted = _info["adopted"]
+        _noun = _info["label"].removesuffix("s") if (_files or _adopted) == 1 else _info["label"]
         if _files > 0:
-            _verb_phrase = f"{_files} {_info['label']} integrated"
+            _verb_phrase = f"{_files} {_noun} integrated"
             if _adopted > 0:
                 _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
         else:
-            _verb_phrase = f"{_adopted} {_info['label']} adopted"
+            _verb_phrase = f"{_adopted} {_noun} adopted"
         if _expansion:
             _log_integration(f"  |-- {_verb_phrase}:")
             for line in _expansion:
@@ -695,6 +700,9 @@ def integrate_package_primitives(  # noqa: PLR0913
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 
+    from apm_cli.claude_plugins.admission import queue_native_claude
+
+    queue_native_claude(ctx, package_name, native_claude_plugin, diagnostics)
     return result
 
 
@@ -946,16 +954,15 @@ def integrate_local_bundle(
             if _canvas_enabled:
                 # Canvas feature on but not approved: block and surface message.
                 skipped += len(_blocked)
+                from ..security.executables import local_bundle_approval_hint
+
                 _msg = (
                     f"Blocked {len(_blocked)} canvas extension file(s) from bundle "
                     f"'{slug}': canvas extensions are executable extension.mjs code "
                     "and are not approved for this exact bundle content. "
-                    "Add this to apm.yml:\n"
-                    "executables:\n"
-                    "  allow:\n"
-                    f'    "{approval_key}":\n'
-                    "      canvas: true\n"
-                    "Then rerun the install."
+                    + local_bundle_approval_hint(
+                        str(approval_key), "canvas", user_scope=scope is InstallScope.USER
+                    )
                 )
                 if diagnostics is not None:
                     diagnostics.warn(message=_msg, package=str(slug))

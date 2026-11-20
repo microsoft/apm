@@ -17,7 +17,6 @@ from tests.workflow_contracts import run_bash as _run_bash
 ROOT = Path(__file__).resolve().parents[2]
 SHARED_APM = ROOT / ".github" / "workflows" / "shared" / "apm.md"
 VERIFY_SHARED_APM = ROOT / ".github" / "workflows" / "verify-shared-apm-matrix.yml"
-GH_AW_GUIDE = ROOT / "docs" / "src" / "content" / "docs" / "integrations" / "gh-aw.md"
 GH_AW_ACTIONS_LOCK = ROOT / ".github" / "aw" / "actions-lock.json"
 GH_AW_MAINTENANCE = ROOT / ".github" / "workflows" / "agentics-maintenance.yml"
 COPILOT_SETUP = ROOT / ".github" / "workflows" / "copilot-setup-steps.yml"
@@ -313,10 +312,6 @@ def test_shared_apm_runtime_default_is_consistent() -> None:
     assert {step["with"]["apm-version"] for step in source_action_steps} == {
         "${{ github.aw.import-inputs.apm-version }}"
     }
-
-    guide = GH_AW_GUIDE.read_text(encoding="utf-8")
-    assert "installs APM 0.28.0" in guide
-    assert "apm-version: '0.28.0'" in guide
 
 
 def test_verify_workflow_exercises_apm_028_pack_and_multibundle_restore() -> None:

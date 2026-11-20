@@ -68,7 +68,7 @@ The `apm compile` command. Aggregates instructions from your package and
 NOT per-harness deployment. `apm install` writes primitives into harness
 directories (`.github/`, `.claude/`, `.cursor/`, etc.).
 
-See: [Compilation guide](/apm/producer/compile/).
+See: [Compilation guide](/apm/consumer/choose-harnesses/#compiled-outputs).
 Source: `src/apm_cli/commands/compile/`.
 
 ### dev-only primitive
@@ -95,7 +95,7 @@ NOT a separate token type. It is a standard GitHub PAT; the
 `GITHUB_APM_PAT` name exists so APM-scoped tokens do not collide with
 other tooling.
 
-See: [Authentication](/apm/consumer/authentication/).
+See: [Authentication](/apm/getting-started/authentication/).
 Source: `src/apm_cli/core/auth.py`.
 
 ### harness
@@ -115,7 +115,7 @@ Source: `src/apm_cli/integration/targets.py` (see `KNOWN_TARGETS`).
 A primitive type whose contents run at a defined lifecycle event in the
 host harness (for example `PreToolUse`). Supported on every harness
 except Grok Build, OpenCode, Hermes, and Grok Bot -- see the matrix in
-[primitives and targets](/apm/concepts/primitives-and-targets/).
+[primitives and targets](/apm/concepts/how-apm-works/).
 
 NOT an APM CLI lifecycle event. Hooks fire inside the agent runtime,
 not inside `apm install` or `apm compile`.
@@ -195,7 +195,7 @@ standard pipeline.
 NOT a different thing from a package at runtime. Plugin format is the
 input shape; once detected, APM handles plugins exactly like packages.
 
-See: [Plugins guide](/apm/producer/author-primitives/).
+See: [Plugins guide](/apm/producer/write-primitives/).
 Source: `src/apm_cli/bundle/local_bundle.py`,
 `src/apm_cli/commands/install.py`.
 
@@ -209,7 +209,7 @@ file is written to disk, including for transitive MCP servers.
 NOT the same as `audit`. Policy enforces at install time; audit reports
 after the fact.
 
-See: [Governance guide](/apm/enterprise/governance-guide/).
+See: [Governance guide](/apm/enterprise/security/).
 Source: `src/apm_cli/policy/`.
 
 ### primitive
@@ -223,7 +223,7 @@ NOT every file in a package. Only files matching the primitive layout
 under recognised directories (`agents/`, `skills/`, `prompts/`,
 `instructions/`, `hooks/`, `commands/`, `extensions/`) are deployed.
 
-See: [Primitives and targets](/apm/concepts/primitives-and-targets/).
+See: [Primitives and targets](/apm/concepts/how-apm-works/).
 Source: `src/apm_cli/integration/`.
 
 ### registry
@@ -262,7 +262,7 @@ which directories receive output during `apm install` and `apm compile`.
 NOT the harness itself. Target is the declaration; the harness is the
 runtime that consumes the compiled output.
 
-See: [Primitives and targets](/apm/concepts/primitives-and-targets/).
+See: [Primitives and targets](/apm/concepts/how-apm-works/).
 Source: `src/apm_cli/integration/targets.py`,
 `src/apm_cli/core/target_detection.py`.
 

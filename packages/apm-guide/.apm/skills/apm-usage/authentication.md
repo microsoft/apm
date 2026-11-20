@@ -301,7 +301,7 @@ and an executed effective HTTPS attempt matching the API's normalized
 scheme/host/port. HTTP is not upgraded; HTTPS rewritten to SSH/local does
 not qualify. Opt-in alternate protocol reuses the declared custom port and
 warns, without mapping SSH aliases to web hostnames. See the
-[GitLab fetch policy](https://microsoft.github.io/apm/consumer/authentication/#gitlab-saas-or-self-managed)
+[GitLab fetch policy](https://microsoft.github.io/apm/getting-started/authentication/#gitlab-saas-and-self-managed)
 and [GitLab hosts](#gitlab-hosts) for token trust.
 
 ## GHE Cloud data residency (*.ghe.com)
@@ -335,7 +335,10 @@ proxy token. The deprecated `ARTIFACTORY_APM_TOKEN` is ignored (with one
 warning) when no proxy URL is configured.
 
 When `PROXY_REGISTRY_ONLY=1`, APM routes all traffic through the proxy and
-never contacts GitHub directly. APM fetches exact versions only and does not
+never contacts GitHub directly. It also refuses marketplace catalogs the proxy
+cannot serve (Azure DevOps, generic git, URL, or no `PROXY_REGISTRY_URL`) and
+lookups in the default MCP registry (set `MCP_REGISTRY_URL` to a proxied
+registry). The policy fetch stays direct: it is the governance channel. APM fetches exact versions only and does not
 list versions through the proxy, so semver ranges (`#^1.2.0`) and
 `apm view <pkg> versions` fail with an actionable error and `apm outdated`
 reports git deps as unknown. Pin the exact upstream tag (`#v1.2.3`) and commit

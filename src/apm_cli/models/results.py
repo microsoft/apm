@@ -39,6 +39,8 @@ class InstallResult:
     exec_allow_resolved: bool = False
     # None is unavailable graph evidence; an empty set is a resolved empty graph.
     active_package_keys: frozenset[str] | None = None
+    # Dependencies whose Claude servers Claude loads from the native plugin.
+    claude_native_keys: frozenset[str] = frozenset()
 
 
 @dataclass

@@ -49,9 +49,9 @@ from .identity import (
     build_canonical_dependency_string,
     build_dependency_unique_key,
     case_insensitive_identity_prefix_segments,
+    effective_policy_host,
     is_case_insensitive_package_identity,
     normalize_package_repo_url,
-    normalize_policy_host,
 )
 from .manifest_host import manifest_host_strips, qualify_manifest_shorthand
 from .materialization import build_materialization_path
@@ -197,14 +197,8 @@ class DependencyReference(ProviderCoordinateMixin):
 
     @property
     def policy_host(self) -> str | None:
-        """Return the effective host compared by host-qualified policy patterns.
-
-        A reference without an explicit host resolves to the configured default
-        host (``GITHUB_HOST`` or ``github.com``). Local paths have no host.
-        """
-        if self.is_local:
-            return None
-        return normalize_policy_host(self.host or default_host())
+        """Return the effective host compared by host-qualified policy patterns."""
+        return effective_policy_host(self.host, is_local=self.is_local)
 
     @property
     def ref_kind(self) -> str | None:
@@ -590,7 +584,7 @@ class DependencyReference(ProviderCoordinateMixin):
             f"Shorthand '@alias' is not supported in '{preview}'. "
             f"Use object form with 'git:', optional 'path:', and 'alias:' "
             f"fields to install a dependency under a custom directory name. "
-            f"See: https://microsoft.github.io/apm/consumer/manage-dependencies/#reference-formats"
+            f"See: https://microsoft.github.io/apm/consumer/install-packages/#reference-formats"
         )
 
     @staticmethod
@@ -773,7 +767,7 @@ class DependencyReference(ProviderCoordinateMixin):
             "Use the `path:` key instead: "
             "`git: <repo-url>` + `path: <primitive>/<name>` "
             "(or the shorthand `org/repo/<primitive>/<name>`). "
-            "See https://microsoft.github.io/apm/consumer/manage-dependencies/"
+            "See https://microsoft.github.io/apm/consumer/install-packages/"
         )
 
     @classmethod
@@ -1017,7 +1011,7 @@ class DependencyReference(ProviderCoordinateMixin):
                 f".collection.yml is no longer supported. "
                 f"Convert '{virtual_path}' to an apm.yml with a "
                 f"'dependencies' section. "
-                f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                f"See: https://microsoft.github.io/apm/consumer/install-packages/"
             )
 
     @classmethod
@@ -1328,7 +1322,7 @@ class DependencyReference(ProviderCoordinateMixin):
                     f".collection.yml is no longer supported. "
                     f"Convert '{virtual_path}' to an apm.yml with a "
                     f"'dependencies' section. "
-                    f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                    f"See: https://microsoft.github.io/apm/consumer/install-packages/"
                 )
 
             # Accept any path ending in a recognised virtual file
@@ -1621,7 +1615,7 @@ class DependencyReference(ProviderCoordinateMixin):
                         f".collection.yml is no longer supported. "
                         f"Convert '{ado_virtual}' to an apm.yml with a "
                         f"'dependencies' section. "
-                        f"See: https://microsoft.github.io/apm/guides/dependencies/"
+                        f"See: https://microsoft.github.io/apm/consumer/install-packages/"
                     )
 
                 # Accept any recognised virtual file extension; reject other

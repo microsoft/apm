@@ -51,7 +51,9 @@ KNOWN_LARGE_MODULES = {
     # drift.py crossed 1000 when replay target-root claim scoping (#2655)
     # merged atop main's replay growth. Decomposition tracked as follow-up.
     # Replay builds the project's own package through the install builder (#3151).
-    "drift.py": 1025,
+    # Root-only hook replay (#3600), native Claude cache verification (#3290)
+    # and local bundle hash drift through the deployed-hash verifier (#3989).
+    "drift.py": 1041,
 }
 
 

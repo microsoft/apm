@@ -298,7 +298,8 @@ def _authored_manifest_mcp_servers(project_root: Path) -> dict[str, dict]:
     Values come from ``apm.yml`` itself, never from the copy ``apm install``
     renders into ``.mcp.json``, so pack output is identical before and after
     install. Registry-resolved declarations need network resolution and are
-    not projected. Credential-bearing keys are removed later by
+    not projected, nor are servers whose ``targets:`` exclude Claude, the
+    only ecosystem that embeds them. Credential-bearing keys are removed later by
     :func:`_sanitize_mcp_servers`.
     """
     from ..constants import APM_YML_FILENAME
@@ -311,9 +312,12 @@ def _authored_manifest_mcp_servers(project_root: Path) -> dict[str, dict]:
         dependencies = APMPackage.from_apm_yml(manifest).get_mcp_dependencies()
     except (OSError, ValueError):
         return {}
+    from ..integration.mcp_integrator_install import mcp_dependency_runtimes
+
     servers: dict[str, dict] = {}
     for dep in dependencies:
-        if not dep.is_self_defined:
+        # A server whose `targets:` leave out Claude is not Claude's to ship (#2606).
+        if not dep.is_self_defined or not mcp_dependency_runtimes(dep, ["claude"]):
             continue
         transport = (dep.transport or "stdio").lower()
         entry: dict[str, Any] = {"type": "http" if transport == "streamable-http" else transport}

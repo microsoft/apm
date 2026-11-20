@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from ...utils.atomic_io import atomic_write_text
-from ...utils.console import _rich_error, _rich_success, _rich_warning
+from ...utils.console import _rich_error, _rich_warning
 from ...utils.path_security import PathTraversalError, validate_path_segments
 from ._remote_shapes import remote_shape_row
 from .base import _ENV_VAR_RE, _translate_env_placeholder
@@ -651,9 +651,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             self.written_mcp_hashes[server_url] = fingerprint
             self._record_env_diagnostics(config_key, server_config, previously_baked)
 
-            _rich_success(
-                f"Successfully configured MCP server '{config_key}' for {self._client_label}"
-            )
+            # The integrator's install tree reports success once (#3994).
             return True
 
         except Exception:

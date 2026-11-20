@@ -128,9 +128,9 @@ def check_executable_approval(
         ):
             ctx.blocked_executables.append(_decl)
         if _decl.has_executables and needs_status:
-            from apm_cli.security.trust import package_exec_status
+            from apm_cli.security.trust import package_exec_decision
 
-            status = package_exec_status(
+            status, allowed_types = package_exec_decision(
                 ctx.exec_trust_ctx,
                 tuple(candidate_keys),
                 _install,
@@ -139,6 +139,8 @@ def check_executable_approval(
             )
             if status is not None:
                 ctx.package_exec_status[package_name] = status
+            if allowed_types:
+                ctx.package_exec_allowed_types[package_name] = allowed_types
 
     return hooks_ok, bin_ok, mcp_ok, canvas_ok, lsp_ok
 
@@ -170,6 +172,7 @@ def _native_approval(
         install,
         transitive=_is_transitive(package_info, ctx),
         extra_types=native_declared_types(package_info),
+        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),
     )
     if ctx is not None:
         if not verdict.allowed:
@@ -237,24 +240,60 @@ def plugin_admission(
     *,
     ctx: InstallContext | None = None,
 ):
-    """The trust owner's verdict for a native install, else ``None``."""
-    from apm_cli.security.executables import FIRST_PARTY_PACKAGE, exec_map_authorizes_all
+    """The trust owner's verdict for a native install, else ``None`` (gate off)."""
+    from apm_cli.security.executables import exec_map_authorizes_all
 
-    if package_name == FIRST_PARTY_PACKAGE or exec_map_authorizes_all(allow_executables):
+    if not native_install(package_info) or exec_map_authorizes_all(allow_executables):
         return None
-    if not native_install(package_info):
+    return native_plugin_verdict(package_name, package_info, allow_executables, ctx=ctx)
+
+
+def native_plugin_verdict(
+    package_name: str,
+    package_info: Any,
+    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
+    *,
+    ctx: InstallContext | None = None,
+):
+    """Whole-plugin verdict on the ``apm_modules`` source, else ``None`` (local).
+
+    Claude's user-scope route (#3290) asks this directly: whether that route
+    applies depends on targets and scope, which :func:`native_install` cannot see.
+    With the gate off the trust owner still refuses a transitive plugin with
+    MCP servers unless ``--trust-transitive-mcp`` is set, as it refuses a
+    loose transitive server.
+    """
+    from apm_cli.security.executables import (
+        AUTHORIZED_GATE_DISABLED,
+        FIRST_PARTY_PACKAGE,
+        closed_exec_map,
+        exec_map_authorizes_all,
+    )
+
+    if package_name == FIRST_PARTY_PACKAGE:
         return None
-    from apm_cli.security.executables import closed_exec_map
     from apm_cli.security.trust import admit_native_plugin
+
+    # A gate-off map still asks the owner (transitive MCP needs trust); replay
+    # of already-authorized content has no context; a missing map admits nothing.
+    if exec_map_authorizes_all(allow_executables):
+        source = (
+            getattr(ctx, "exec_trust_ctx", None)
+            if getattr(allow_executables, "authorized_by", None) == AUTHORIZED_GATE_DISABLED
+            else None
+        )
+    else:
+        source = closed_exec_map(allow_executables)
 
     pkg_key = resolve_package_key(package_info, package_name)
     keys = tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0])))
     return admit_native_plugin(
-        closed_exec_map(allow_executables),
+        source,
         keys,
         Path(package_info.install_path),
         transitive=_is_transitive(package_info, ctx),
         extra_types=native_declared_types(package_info),
+        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),
     )
 
 
@@ -290,20 +329,20 @@ class ExecPolicyUnavailable(Exception):
 
 def current_exec_decision(
     trust_ctx_provider: Callable[[], Any], package_info: Any, package_name: str
-) -> tuple[str | None, bool]:
-    """Return ``(exec_status, mixed)`` the install gate would decide now.
+) -> tuple[str | None, tuple[str, ...]]:
+    """Return ``(exec_status, allowed_types)`` the install gate would decide now.
 
     Scans the materialized package and resolves its declared executable
     types through the trust owner (:func:`package_type_verdicts`), as
     :func:`check_executable_approval` does during install; a native
     install gates on the native union of types. ``exec_status`` is
     ``None`` when the package declares no executables or the gate is
-    disabled. ``mixed`` is true when some declared types are allowed and
-    others are not, which one aggregate status cannot track.
+    disabled. ``allowed_types`` names the types still allowed when others
+    are not, as the lock records them (``exec_allowed_types``, #3991).
     *trust_ctx_provider* is called only for a package that declares some.
     """
-    from apm_cli.security.executables import more_severe_exec_status, scan_package_executables
-    from apm_cli.security.trust import native_plugin_exec_types, package_type_verdicts
+    from apm_cli.security.executables import scan_package_executables
+    from apm_cli.security.trust import native_plugin_exec_types, package_exec_decision
 
     pkg_key = resolve_package_key(package_info, package_name)
     install = Path(package_info.install_path)
@@ -315,38 +354,34 @@ def current_exec_decision(
             install, package_name, "", approval_identity=pkg_key
         ).exec_types
     if not exec_types:
-        return None, False
-    trust_ctx = trust_ctx_provider()
-    if trust_ctx is None or not trust_ctx.gate_enabled:
-        return None, False
-    verdicts = package_type_verdicts(
-        trust_ctx, tuple(_candidate_keys(pkg_key)), install, exec_types, native=native
-    ).values()
-    status: str | None = None
-    for verdict in verdicts:
-        status = more_severe_exec_status(status, "deployed" if verdict.allowed else verdict.state)
-    allowed = {verdict.allowed for verdict in verdicts}
-    return status, len(allowed) > 1
+        return None, ()
+    return package_exec_decision(
+        trust_ctx_provider(), tuple(_candidate_keys(pkg_key)), install, exec_types, native=native
+    )
 
 
 def recorded_exec_status_is_stale(
-    recorded: str | None, current: str | None, *, mixed: bool = False
+    recorded: str | None,
+    current: str | None,
+    *,
+    recorded_allowed: tuple[str, ...] = (),
+    current_allowed: tuple[str, ...] = (),
 ) -> bool:
     """Return whether a lock row's executables decision may no longer hold.
 
     A row recorded as gated or denied, or one that is now gated or denied,
     must be re-integrated so install deploys or retires its executables.
-    Unrecorded and deployed rows are both ungated, so they agree. A denied
-    row whose types are now *mixed* is re-integrated too: ``denied`` hides
-    whether a type it had deployed was denied since. It converges once every
-    declared type is disallowed.
+    Unrecorded and deployed rows are both ungated, so they agree. A partial
+    package also compares the types it deployed (``exec_allowed_types``) with
+    the types allowed now: its worst-case status hides an approval removed or
+    added for one type (#3991). Once install records the new set it converges.
     """
-    from apm_cli.security.executables import TRUST_DENIED, TRUST_DEPLOYED
+    from apm_cli.security.executables import TRUST_DEPLOYED
 
     ungated = {None, TRUST_DEPLOYED}
-    if mixed and recorded == TRUST_DENIED:
-        return True
-    return recorded != current and not (recorded in ungated and current in ungated)
+    if recorded in ungated and current in ungated:
+        return False
+    return recorded != current or tuple(recorded_allowed) != tuple(current_allowed)
 
 
 def lock_exec_decisions_stale(
@@ -361,11 +396,12 @@ def lock_exec_decisions_stale(
     """Return whether any lock row's executables decision may no longer hold.
 
     ``apm update`` short-circuits when no ref moved; this tells it that an
-    ``apm approve`` / ``apm deny`` (or a policy change for a package the gate
-    recorded) still needs the install gate to deploy or retire executables
-    and rewrite the lock. With no recorded status and the gate off locally,
-    org policy is not fetched; ``apm install`` applies a newly enabled gate.
-    Packages are read the way audit replay reads them, under the *targets*'
+    ``apm approve`` / ``apm deny`` or an org policy change still needs the
+    install gate to deploy or retire executables and rewrite the lock. A row
+    recorded while the gate was off is compared against the effective gate,
+    org policy included, so a policy that newly gates executables re-gates
+    it as ``apm install`` does (#3990). Org policy is fetched only when a
+    locked package declares executables. Packages are read the way audit replay reads them, under the *targets*'
     native registration capability. Trust (and *policy_provider*) resolve
     only when a package declares executables. An unreadable package or a
     provider raising :class:`ExecPolicyUnavailable` fails toward running
@@ -394,17 +430,6 @@ def lock_exec_decisions_stale(
         for key, dep in (getattr(lockfile, "dependencies", None) or {}).items()
         if key != "." and dep.exec_status != TRUST_ABSENT
     ]
-    # A gate on at install recorded a status. With none recorded and the
-    # local layers leaving the gate off, skip the org policy fetch.
-    if not any(dep.exec_status for dep in rows) and not (
-        exec_trust_context_for_project(
-            manifest_path,
-            policy=None,
-            fallback_allow_executables=fallback_allow_executables,
-            migrate_user_legacy=False,
-        ).gate_enabled
-    ):
-        return False
     with native_registration_scope(targets):
         for dep in rows:
             install_path = dep.to_dependency_ref().get_install_path(modules_dir)
@@ -412,7 +437,7 @@ def lock_exec_decisions_stale(
                 continue
             try:
                 package_info = _build_package_info(dep, install_path)
-                status, mixed = current_exec_decision(
+                status, allowed_types = current_exec_decision(
                     _trust_ctx, package_info, dep.get_unique_key()
                 )
             except ExecPolicyUnavailable:
@@ -420,7 +445,12 @@ def lock_exec_decisions_stale(
             except (OSError, ValueError):
                 # An unreadable package: let install, which reports it, decide.
                 return True
-            if recorded_exec_status_is_stale(dep.exec_status, status, mixed=mixed):
+            if recorded_exec_status_is_stale(
+                dep.exec_status,
+                status,
+                recorded_allowed=dep.exec_allowed_types,
+                current_allowed=allowed_types,
+            ):
                 return True
     return False
 
@@ -471,7 +501,6 @@ def plugin_bin_deployable(
     """Return whether approved marketplace plugin bin files can reach a target."""
     from apm_cli.core.scope import InstallScope
     from apm_cli.models.apm_package import PackageType
-    from apm_cli.security.executables import normalize_bin_deploy_deny_key
 
     if (
         skip_bin
@@ -486,14 +515,21 @@ def plugin_bin_deployable(
         )
     ):
         return False
+    return bin_deploy_denial(package_info, policy) is None
+
+
+def bin_deploy_denial(package_info: Any, policy: Any) -> str | None:
+    """Name the org ``bin_deploy`` rule that blocks this package's bin/, else ``None``."""
+    from apm_cli.security.executables import normalize_bin_deploy_deny_key
+
     bin_policy = getattr(policy, "bin_deploy", None)
     if bin_policy is None:
-        return True
+        return None
     if bin_policy.deny_all:
-        return False
+        return "bin_deploy.deny_all"
     package_key = normalize_bin_deploy_deny_key(package_info.get_canonical_dependency_string())
     denied = {normalize_bin_deploy_deny_key(item) for item in bin_policy.deny}
-    return package_key not in denied
+    return "bin_deploy.deny" if package_key in denied else None
 
 
 def executable_skip_reason(
@@ -628,9 +664,10 @@ class ReplayExecAllowMap:
         if self._policy_provider is not None:
             policy = self._policy_provider()
         else:
-            from apm_cli.policy.discovery import discover_policy_with_chain
+            from apm_cli.policy.outcome_routing import resolve_trust_policy
 
-            policy = getattr(discover_policy_with_chain(self._project_root), "policy", None)
+            # The replaying command reports the policy outcome itself.
+            policy = resolve_trust_policy(self._project_root, announce=False)
         # Audit is read-only: never migrate legacy user consent here.
         # Grants come from the scope's manifest (APM_HOME/apm.yml under -g,
         # #3954); policy stays anchored at the deploy root.
