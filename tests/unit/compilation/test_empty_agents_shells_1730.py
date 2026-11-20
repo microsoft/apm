@@ -503,9 +503,7 @@ class TestCleanRemovesEmptyShells:
             "global.instructions.md: No 'applyTo' pattern specified" in warning
             for warning in result.warnings
         )
-        assert all(
-            "run 'apm compile --clean' to remove" not in warning for warning in result.warnings
-        )
+        assert all("'apm compile --clean' to remove" not in warning for warning in result.warnings)
 
     @pytest.mark.windows_compat
     def test_plain_compile_reports_managed_orphan_retention(self, project_with_stale_shell) -> None:
@@ -540,9 +538,7 @@ class TestCleanRemovesEmptyShells:
             "global.instructions.md: No 'applyTo' pattern specified" in warning
             for warning in result.warnings
         )
-        assert all(
-            "run 'apm compile --clean' to remove" not in warning for warning in result.warnings
-        )
+        assert all("'apm compile --clean' to remove" not in warning for warning in result.warnings)
 
 
 # ---------------------------------------------------------------------------

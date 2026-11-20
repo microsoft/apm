@@ -10,6 +10,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple  # noqa: UP035
 
+from ..core.remediation import (
+    AGENTS_FILES_DISTRIBUTED,
+    HAND_AUTHORED_OUTPUT_PROTECTED,
+    NESTED_REPOSITORY_SKIPPED,
+)
 from ..core.target_catalog import accepted_target_values, get_target_capability
 from ..core.target_detection import (
     CompileTargetType,
@@ -1580,9 +1585,10 @@ class AgentsCompiler:
             rel_path = portable_relpath(output_path, self.base_dir)
             result.warnings.append(
                 f"Skipped {rel_path}: hand-authored file will not be overwritten. "
-                "To regenerate, either delete or rename it, or prepend the line "
-                f"'{AGENTS_MD_GENERATED_MARKER}' to the top of the file. "
-                "Then re-run 'apm compile'."
+                + HAND_AUTHORED_OUTPUT_PROTECTED.bind(
+                    fix="delete or rename it, or prepend the line "
+                    f"'{AGENTS_MD_GENERATED_MARKER}' to the top of the file"
+                ).sentence()
             )
             # The file was never compared to new content; record as
             # 'skipped', not 'unchanged'. Also reset 'generated' since no
@@ -1848,7 +1854,7 @@ class AgentsCompiler:
             self.warnings.append(
                 f"Skipping AGENTS.md at {agents_rel}: nested Git repository "
                 f"{root_rel} belongs to a separate repository. "
-                f"Run apm compile from {nested_root} to compile it separately"
+                + NESTED_REPOSITORY_SKIPPED.bind(root=nested_root).sentence()
             )
             return None
         if (
@@ -2056,7 +2062,7 @@ class AgentsCompiler:
                 f"Total instructions: {distributed_result.stats.get('total_instructions_placed', 0)}",
                 f"Total patterns: {distributed_result.stats.get('total_patterns_covered', 0)}",
                 "",
-                "Use 'apm compile --single-agents' for traditional single-file compilation.",
+                AGENTS_FILES_DISTRIBUTED.sentence(),
             ]
         )
 
