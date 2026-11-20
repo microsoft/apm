@@ -1,0 +1,17 @@
+{
+  "changelog": "`apm install --frozen` and cold lockfile replays print the package header as `<name> #<ref> @<sha>`, without repeating the locked commit (#4217)",
+  "ledger_row": {
+    "issue": 4195,
+    "fixed_in": "Unreleased",
+    "summary": "A cold lockfile replay printed the package header with the locked full commit as the ref, so a frozen install showed '<name>#main #<SHA40> @<SHA8>' instead of the install shape '<name> #main @<SHA8>'.",
+    "failure_modes": ["observation"],
+    "properties": ["outcome.status_matches_state"],
+    "regression_tests": [
+      "tests/integration/test_frozen_replay_output_lifecycle.py::test_cold_frozen_replay_header_matches_install_shape"
+    ]
+  },
+  "red": "APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_frozen_replay_output_lifecycle.py::test_cold_frozen_replay_header_matches_install_shape -n 0 -p no:cacheprovider -q -> E At index 0 diff: '  [+] git.example.invalid/acme/plugins-official/plugins/commit-commands#main #17c561a017b5eb2ef7828523aac17a22e848013a @17c561a0' != '  [+] git.example.invalid/acme/plugins-official/plugins/commit-commands #main @17c561a0'",
+  "green": "same command -> 1 passed",
+  "owner": "src/apm_cli/install/source_helpers.py (header_ref), consumed by CachedDependencySource and FreshDependencySource in src/apm_cli/install/sources.py",
+  "notes": "Applies to every cold lockfile replay (plain install with a lock and an empty apm_modules too), not only --frozen: build_download_ref pins the download to the locked commit, so the downloader reported the commit as the ref. Flips J05 s6 known cell frozen-header-repeats-ref (PR #4156)."
+}

@@ -42,6 +42,7 @@ from apm_cli.install.registry_wiring import (
 from apm_cli.install.source_helpers import (
     content_hash_mismatch_hint,
     ensure_carried_licenses_match,
+    header_ref,
     locked_parent_identity,
     materialized_manifest_snapshot,
     record_carried_package_hash,
@@ -411,7 +412,7 @@ class CachedDependencySource(DependencySource):
         display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
         _rref = getattr(dep_ref, "resolved_reference", None)
         if _rref and getattr(_rref, "ref_name", None):
-            _ref = _rref.ref_name
+            _ref = header_ref(_rref, dep_ref, dep_locked_chk)
         elif dep_locked_chk and getattr(dep_locked_chk, "resolved_ref", None):
             _ref = dep_locked_chk.resolved_ref
         elif dep_ref.source == "registry":
@@ -781,13 +782,10 @@ class FreshDependencySource(DependencySource):
             deltas: dict[str, int] = {"installed": 1}
 
             resolved = getattr(package_info, "resolved_reference", None)
+            _ref = header_ref(resolved, dep_ref, dep_locked_chk)
             if logger:
-                _ref = ""
-                _sha = ""
-                if resolved:
-                    _ref = resolved.ref_name if resolved.ref_name else ""
-                    # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
-                    _sha = format_short_sha(resolved.resolved_commit)
+                # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
+                _sha = format_short_sha(resolved.resolved_commit) if resolved else ""
                 logger.download_complete(display_name, ref=_ref, sha=_sha)
                 # Only emit the per-package git auth diagnostic for git deps.
                 # Registry-sourced deps don't talk to git hosts; resolving
@@ -808,7 +806,7 @@ class FreshDependencySource(DependencySource):
             else:
                 _ref_suffix = ""
                 if resolved:
-                    _r = resolved.ref_name if resolved.ref_name else ""
+                    _r = _ref
                     _s = format_short_sha(resolved.resolved_commit)
                     if _r and _s:
                         _ref_suffix = f" #{_r} @{_s}"
