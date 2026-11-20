@@ -261,7 +261,8 @@ def test_install_serializes_other_lifecycle_commands(
                 process.kill()
                 process.wait()
 
-    expected_install_exit = 1 if "--frozen" in install_args else 0
+    # The fixture declares no dependency, so --frozen is a converged no-op (#4050).
+    expected_install_exit = 0
     assert install.returncode == expected_install_exit, (install_stdout, install_stderr)
     assert contender.returncode in {0, 1}, (contender_stdout, contender_stderr)
     if contender_args[0] == "deny":

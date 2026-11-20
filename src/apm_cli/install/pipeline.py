@@ -51,7 +51,7 @@ from apm_cli.install.helpers.plan_inputs import confirm_update_plan
 from ..agent_plugins.errors import AgentPluginError
 from ..codex_plugins.client import CodexNativeError
 from ..copilot_plugins.settings import CopilotSettingsCollisionError
-from ..deps.lockfile_write_authority import commit_point_seam_for_tests
+from ..deps.lockfile_write_authority import after_lockfile_commit, commit_point_seam_for_tests
 from ..models.dependency.materialization import MaterializationPathCollisionError
 from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
@@ -129,6 +129,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     from apm_cli.integration.skill_adoption import locked_skill_sources
 
     from .phases import integrate as _integrate_phase
+    from .service import InstallService
 
     session = (
         None
@@ -144,7 +145,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
             contextlib.nullcontext()
             if ctx.lockfile_only
             else ctx.integrators["skill"].ownership_snapshot(
-                replay_lockfile=ctx.existing_lockfile if ctx.frozen else None,
+                replay_lockfile=InstallService.frozen_replay_lockfile(ctx),
                 materialization_session=session,
             )
         ):
@@ -611,6 +612,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         transaction=transaction,
         lsp_preflight=lsp_preflight,
     )
+    transaction.track_created_target_roots(ctx.created_target_roots)
 
     # ------------------------------------------------------------------
     # Workstream B (#1116): one Live region per major phase boundary.
@@ -920,8 +922,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
             _run_phase("post_deps_local", _post_deps_local_phase, ctx)
             if materialization_session is not None:
-                materialization_session.bind_committed_claims(
-                    LockFile.read(get_lockfile_path(ctx.apm_dir))
+                after_lockfile_commit(
+                    lambda: materialization_session.bind_committed_claims(
+                        LockFile.read(get_lockfile_path(ctx.apm_dir))
+                    )
                 )
 
         # ------------------------------------------------------------------

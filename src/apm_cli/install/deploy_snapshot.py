@@ -7,6 +7,8 @@ captures every path the integrate, cleanup, lockfile and post-deps-local
 phases can write, before the first of them runs. A failure before the audit
 passes restores those paths byte for byte and removes the ones that did not
 exist; a pass discards the copy. When the audit is off nothing is captured.
+:func:`remove_empty_directories` also lets the transaction remove target roots
+a failed install created and left empty, at no copy cost (#4159).
 
 Only the transaction may call :func:`capture_audit_gated_snapshot`.
 """
@@ -17,6 +19,7 @@ import contextlib
 import os
 import shutil
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -50,6 +53,14 @@ def _absent_ancestors(path: Path) -> tuple[Path, ...]:
     return tuple(missing)
 
 
+def remove_empty_directories(directories: Iterable[Path]) -> None:
+    """Remove each directory that is empty, deepest first; keep anything else."""
+    for directory in sorted(set(directories), key=lambda p: len(p.parts), reverse=True):
+        with contextlib.suppress(OSError):
+            if directory.is_dir() and not directory.is_symlink():
+                directory.rmdir()
+
+
 def _remove(path: Path) -> None:
     if path.is_symlink() or path.is_file():
         path.unlink()
@@ -62,22 +73,13 @@ def _remove(path: Path) -> None:
 class DeployTargetSnapshot:
     """Byte-exact copy of a fixed set of deploy paths, kept outside them."""
 
-    def __init__(
-        self, store: Path, units: tuple[_Unit, ...], created: tuple[Path, ...] = ()
-    ) -> None:
+    def __init__(self, store: Path, units: tuple[_Unit, ...]) -> None:
         self.store = store
         self.units = units
-        self.created = created
 
     @classmethod
-    def capture(
-        cls, paths: list[Path], store_parent: Path, created: list[Path] | None = None
-    ) -> DeployTargetSnapshot:
-        """Copy every path in *paths* (and record the absent ones) under a new store.
-
-        *created* names directories this install already created (target
-        roots); restore removes them again when they are left empty.
-        """
+    def capture(cls, paths: list[Path], store_parent: Path) -> DeployTargetSnapshot:
+        """Copy every path in *paths* (and record the absent ones) under a new store."""
         store_parent.mkdir(parents=True, exist_ok=True)
         store = Path(tempfile.mkdtemp(prefix="deploy-", dir=store_parent))
         units: list[_Unit] = []
@@ -98,7 +100,7 @@ class DeployTargetSnapshot:
         except BaseException:
             shutil.rmtree(store, ignore_errors=True)
             raise
-        return cls(store, tuple(units), tuple(created or ()))
+        return cls(store, tuple(units))
 
     def restore(self) -> list[tuple[Path, str]]:
         """Put every captured path back; return the paths that could not be restored."""
@@ -108,12 +110,7 @@ class DeployTargetSnapshot:
                 self._restore_unit(unit)
             except OSError as exc:
                 issues.append((unit.path, f"could not restore: {exc}"))
-        empty_candidates = {a for unit in self.units for a in unit.absent_ancestors}
-        empty_candidates.update(self.created)
-        for directory in sorted(empty_candidates, key=lambda p: len(p.parts), reverse=True):
-            with contextlib.suppress(OSError):
-                if directory.is_dir() and not directory.is_symlink():
-                    directory.rmdir()
+        remove_empty_directories(a for unit in self.units for a in unit.absent_ancestors)
         if issues:
             issues.append((self.store, "pre-install copies retained here for recovery"))
         else:
@@ -244,6 +241,4 @@ def capture_audit_gated_snapshot(ctx: InstallContext) -> DeployTargetSnapshot | 
     from apm_cli.core.scope import get_apm_home
 
     store_parent = get_apm_home() / "install-snapshots"
-    return DeployTargetSnapshot.capture(
-        audit_gated_paths(ctx, store_parent), store_parent, list(ctx.created_target_roots)
-    )
+    return DeployTargetSnapshot.capture(audit_gated_paths(ctx, store_parent), store_parent)

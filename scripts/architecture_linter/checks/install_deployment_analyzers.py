@@ -61,11 +61,13 @@ from scripts.architecture_linter.checks.install_entry_and_commit import (
 from scripts.architecture_linter.checks.install_frozen_and_audit import (
     _GUARD_AUDIT_REPLAY,
     _GUARD_FROZEN,
+    _GUARD_FROZEN_FLAG_READER,
     _GUARD_LIFECYCLE_SERIALIZATION,
     _GUARD_MCP_OWNERSHIP,
     _GUARD_UNINSTALL_REACHABILITY,
     check_audit_replay,
     check_frozen,
+    check_frozen_flag_reader,
     check_lifecycle_serialization,
     check_mcp_ownership_migration,
     check_uninstall_reachability,
@@ -307,6 +309,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_FROZEN,
         "Frozen install mutation eligibility routes through InstallService before mutation.",
         check_frozen,
+    ),
+    _rule(
+        _GUARD_FROZEN_FLAG_READER,
+        "Only InstallService reads the install frozen flag; phases consume its disposition.",
+        check_frozen_flag_reader,
     ),
     _rule(
         GUARD_MANIFEST_SNAPSHOT,

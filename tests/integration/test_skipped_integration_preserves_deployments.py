@@ -47,6 +47,7 @@ def test_skipped_integration_preserves_prior_files_and_lock_claims(
     current.add_dependency(LockedDependency(repo_url=dep_key, resolved_commit=current_commit))
     diagnostics = DiagnosticCollector()
     ctx = SimpleNamespace(
+        frozen=False,
         existing_lockfile=previous,
         only_packages=False,
         intended_dep_keys={dep_key},
@@ -55,6 +56,7 @@ def test_skipped_integration_preserves_prior_files_and_lock_claims(
         package_cleanup_retained={},
         package_hashes={dep_key: current_content_hash},
         project_root=tmp_path,
+        apm_dir=tmp_path,
         targets=[],
         diagnostics=diagnostics,
         logger=None,

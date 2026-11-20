@@ -389,8 +389,7 @@
     },
     "src/apm_cli/install/mcp/command.py": {
       "run_mcp_install": [
-        "PLR0913",
-        "PLR0915"
+        "PLR0913"
       ]
     },
     "src/apm_cli/install/mcp/conflicts.py": {

@@ -183,6 +183,21 @@ def _deployed_agent(chain: Chain) -> Path:
     return found[0]
 
 
+def _assert_lock_matches_disk(project: Path) -> None:
+    """Every deployed path the on-disk lockfile records is present on disk."""
+    lock_path = project / "apm.lock.yaml"
+    if not lock_path.exists():
+        return
+    lock = yaml.safe_load(lock_path.read_text(encoding="utf-8")) or {}
+    claims = {
+        path for dep in lock.get("dependencies") or [] for path in dep.get("deployed_files") or []
+    }
+    claims.update(path for path in lock.get("local_deployed_files") or [])
+    claims.update(row["value"] for row in lock.get("deployments") or [])
+    missing = sorted(path for path in claims if not (project / path).exists())
+    assert missing == [], f"lockfile claims files not on disk: {missing}"
+
+
 def _assert_audit_block_commits_nothing(chain: Chain, before: dict[str, str]) -> str:
     apm_home = Path(chain.env["APM_HOME"])
     receipts = _tree_state_of(apm_home / "deployment-receipts")
@@ -195,6 +210,7 @@ def _assert_audit_block_commits_nothing(chain: Chain, before: dict[str, str]) ->
     assert not (apm_home / "install-snapshots").exists(), text
     assert "Deployed files restored to their previous state." in text, text
     assert "native target" not in text, text
+    _assert_lock_matches_disk(chain.project)
     text.encode("ascii")
     return text
 
@@ -289,3 +305,23 @@ def test_direct_mcp_entry_reaches_the_install_policy_verdict(
         direct_text,
         declared_text,
     )
+
+
+def test_failed_install_removes_the_target_root_it_created(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4159: a failed install leaves no empty target root it created itself."""
+    chain = Chain(tmp_path / "created-root", apm_binary_path)
+    chain.seed_org_policy(_DENY_POLICY)
+    chain.write_manifest([], apm=["./pkg"])
+    _write_package(chain, revision="v1", mcp=[stdio_server("evil-srv", "srv")])
+    before = _tree_state(chain.project)
+    assert not (chain.project / ".github").exists()
+
+    result = chain.run("install", "--trust-transitive-mcp", *_TARGET)
+    text = result.stdout + result.stderr
+    assert result.returncode == 1, text
+    assert "evil-srv" in text, text
+    assert not (chain.project / ".github").exists(), text
+    assert _tree_state(chain.project) == before, text
+    assert not (chain.project / "apm.lock.yaml").exists(), text

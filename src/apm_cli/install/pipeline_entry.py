@@ -48,6 +48,7 @@ def pipeline_preview(run_pipeline: Any, logger: Any) -> PipelinePreview | None:
     """
     import click
 
+    from apm_cli.config import config_creation_suppressed
     from apm_cli.install.errors import (
         AuthenticationError,
         FrozenInstallError,
@@ -57,7 +58,8 @@ def pipeline_preview(run_pipeline: Any, logger: Any) -> PipelinePreview | None:
     from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
 
     try:
-        result = run_pipeline()
+        with config_creation_suppressed():
+            result = run_pipeline()
     except (
         AuthenticationError,
         FrozenInstallError,
@@ -75,3 +77,17 @@ def pipeline_preview(run_pipeline: Any, logger: Any) -> PipelinePreview | None:
         )
     preview = getattr(result, "preview", None)
     return preview if isinstance(preview, PipelinePreview) else None
+
+
+def preview_declared_policy(ctx: Any, plan: Any, logger: Any) -> None:
+    """Preview org policy on the declared dependencies when no pipeline ran."""
+    from apm_cli.policy.install_preflight import run_policy_preflight
+
+    run_policy_preflight(
+        project_root=ctx.project_root,
+        apm_deps=list(plan.selected_apm_dependencies),
+        mcp_deps=list(plan.selected_mcp_dependencies) or None,
+        no_policy=ctx.no_policy,
+        logger=logger,
+        dry_run=True,
+    )

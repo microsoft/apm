@@ -161,13 +161,6 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         match=r"^audit --ci exited 1 but install --frozen exited 0$",
         scopes=("project",),
     ),
-    KnownCell(
-        "gate-cell-d",
-        "R",
-        "#4044",
-        _hook_parked_with_wrong_reason,
-        match=r"^a denied hook is reported as merely unapproved$",
-    ),
 )
 
 

@@ -1445,19 +1445,21 @@ def _sync_integrations_after_uninstall(
 
     # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
     # their known-good merged settings (#3226).
-    from ...security.executables import resolve_project_exec_allow_map
+    from ...security.executables import closed_exec_map, resolve_project_exec_allow_map
 
     # Trust is resolved only when survivors are rebuilt; nothing else consumes it.
-    _allow_executables = None
-    if target_survivor_plan:
-        # The command resolved survivor trust before its first write (#4185).
-        _allow_executables = resolve_project_exec_allow_map(
+    # The command resolved survivor trust before its first write (#4185).
+    _allow_executables = (
+        resolve_project_exec_allow_map(
             project_root,
             apm_package,
             user_scope=user_scope,
             executable_context=executable_context,
             logger=logger,
         )
+        if target_survivor_plan
+        else closed_exec_map(None)
+    )
     preflight_survivor_hooks(target_survivor_plan, _allow_executables)
 
     # An empty lockfile inventory still authorizes no file removal. Only

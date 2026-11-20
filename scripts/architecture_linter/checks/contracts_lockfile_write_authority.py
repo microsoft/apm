@@ -79,6 +79,9 @@ _SCOPE_OPENERS = frozenset({"lockfile_writer", "lockfile_write_scope"})
 _WRITE_METHODS = frozenset({"write", "save"})
 _ENUM_MEMBER = re.compile(r"^    ([A-Z_]+) = \"[a-z-]+\"$", re.MULTILINE)
 _DECORATOR_REACH = 12
+# Deployment-receipt claims bind to the committed lockfile, never a staged one.
+_CLAIM_BINDING = "bind_committed_claims"
+_BINDING_REACH = 3
 _RAW_REMOVAL = re.compile(
     r"\b(lockfile_path|lock_path|_lock_path)\.(unlink|write_bytes|write_text)\("
 )
@@ -168,6 +171,19 @@ def _registered_opener(facts, path: str, call) -> bool:
     return False
 
 
+def _binds_after_commit(facts, call) -> bool:
+    """Whether a claim binding runs after the lockfile it binds to is on disk."""
+    window = "\n".join(facts.lines[max(call.line - _BINDING_REACH, 0) : call.line])
+    if "after_lockfile_commit(" in window:
+        return True
+    return any(
+        other.scope == call.scope
+        and other.line < call.line
+        and other.qualname.rpartition(".")[2] == "flush_lockfile_writes"
+        for other in facts.calls
+    )
+
+
 def _check_sources(provider: FactsProvider) -> list[Violation]:
     findings: list[Violation] = []
     for path in inventory_paths(provider, prefixes=("src/apm_cli/",)):
@@ -190,6 +206,18 @@ def _check_sources(provider: FactsProvider) -> list[Violation]:
                             line=call.line,
                         )
                     )
+                continue
+            if (method or call.qualname) == _CLAIM_BINDING and not _binds_after_commit(facts, call):
+                findings.append(
+                    violation(
+                        RULE_ID,
+                        path,
+                        f"{call.scope or '<module>'} binds deployment claims before the "
+                        "lockfile commits; run it through after_lockfile_commit",
+                        line=call.line,
+                        column=call.column,
+                    )
+                )
                 continue
             if not head or method not in _WRITE_METHODS:
                 continue
@@ -222,7 +250,7 @@ def _check_sources(provider: FactsProvider) -> list[Violation]:
 
 
 def _check(provider: FactsProvider) -> tuple[Violation, ...]:
-    """Keep lockfile writers, commit sites and persistence closed-world."""
+    """Keep lockfile writers, commit sites, persistence and claim binding closed-world."""
     return tuple(
         [
             *_check_vocabulary(provider),

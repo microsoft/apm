@@ -44,7 +44,7 @@ def test_fetch_local_bare_repo_via_git_show(tmp_path: Path) -> None:
     completed = subprocess.CompletedProcess(
         args=[], returncode=0, stdout=json.dumps(manifest).encode(), stderr=b""
     )
-    with patch("apm_cli.marketplace.client.subprocess.run", return_value=completed) as run_mock:
+    with patch("subprocess.run", return_value=completed) as run_mock:
         result = _fetch_local(_local_source("acme", bare), "marketplace.json")
 
     assert result == manifest
@@ -138,7 +138,7 @@ def test_fetch_local_git_show_returns_none_when_path_missing(tmp_path: Path) -> 
         stdout=b"",
         stderr=b"fatal: path 'marketplace.json' does not exist in 'main'",
     )
-    with patch("apm_cli.marketplace.client.subprocess.run", return_value=completed):
+    with patch("subprocess.run", return_value=completed):
         result = _fetch_local(_local_source("acme", bare), "marketplace.json")
 
     assert result is None

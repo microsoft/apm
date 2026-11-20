@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.mcp.entry_integration import McpEntryRequest
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency.mcp import MCPDependency
@@ -332,6 +333,7 @@ def run_mcp_integration(  # noqa: PLR0913
     frozen: bool = False,
     claude_native_keys: frozenset[str] = frozenset(),
     policy_enforced: bool = False,
+    mcp_entry: "McpEntryRequest | None" = None,
 ) -> tuple[int, dict]:
     """Run MCP server integration after APM package installation.
 
@@ -372,6 +374,9 @@ def run_mcp_integration(  # noqa: PLR0913
             running version, so retired-destination heal eligibility is read
             from this snapshot.
         frozen: ``--frozen`` replay; recorded pre-#3825 plugin roots are kept.
+        mcp_entry: The server ``apm install --mcp`` adds (#4085). Only it is
+            installed and re-targeted; the commit gate judged it before
+            apm.yml was written, and every other recorded server is kept.
 
     Returns:
         Tuple of ``(mcp_count, mcp_apm_config)``. ``mcp_apm_config`` is the
@@ -398,6 +403,24 @@ def run_mcp_integration(  # noqa: PLR0913
         split_mcp_claims,
     )
     from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    if mcp_entry is not None and should_install:
+        from apm_cli.install.mcp.entry_integration import integrate_mcp_entry
+
+        mcp_count = integrate_mcp_entry(
+            mcp_entry,
+            lock_path=lock_path,
+            project_root=project_root,
+            user_scope=user_scope,
+            scope=scope,
+            runtime=runtime,
+            exclude=exclude,
+            verbose=verbose,
+            explicit_target=explicit_target,
+            target_decision=target_decision,
+            logger=logger,
+        )
+        return mcp_count, {"scripts": apm_package.scripts or {}}
 
     previous_lock = LockFile.read(lock_path) if lockfile_exists(lock_path) else None
     native_hashes = DeploymentLedgerCodec.mcp_native_hashes(previous_lock) if previous_lock else {}

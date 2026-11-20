@@ -74,6 +74,19 @@ _SUB_CHECK_MUTATIONS = (
         "                    lockfile_path.unlink(missing_ok=True)\n",
         "remove or restore lockfiles through remove_lockfile",
     ),
+    (
+        "6-claim-binding-after-commit",
+        "src/apm_cli/install/pipeline.py",
+        "                after_lockfile_commit(\n"
+        "                    lambda: materialization_session.bind_committed_claims(\n"
+        "                        LockFile.read(get_lockfile_path(ctx.apm_dir))\n"
+        "                    )\n"
+        "                )\n",
+        "                materialization_session.bind_committed_claims(\n"
+        "                    LockFile.read(get_lockfile_path(ctx.apm_dir))\n"
+        "                )\n",
+        "binds deployment claims before the lockfile commits",
+    ),
 )
 
 

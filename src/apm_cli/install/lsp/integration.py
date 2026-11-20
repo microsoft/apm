@@ -135,7 +135,10 @@ def _graph_declares_trusted_lsp(ctx: "InstallContext") -> bool:
         if graph is not None
         else ctx.deps_to_install
     )
-    allow_map = None
+    from apm_cli.security.executables import closed_exec_map
+
+    # Resolved once, on the first package that declares LSP servers.
+    allow_map = closed_exec_map(None)
     allow_resolved = False
     for dep_ref in dependencies:
         manifest = dep_ref.get_install_path(ctx.apm_modules_dir) / "apm.yml"

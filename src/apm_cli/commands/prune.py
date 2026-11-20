@@ -111,11 +111,34 @@ def prune(ctx, dry_run):
 
         try:
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
-            from ..install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
+        except Exception as e:
+            logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
+            sys.exit(1)
 
+        # Runs before the lockfile is read: retiring a revoked bundle's hooks
+        # rewrites apm.lock.yaml, and prune must not write a stale copy back.
+        # A re-check that cannot resolve targets writes nothing; package
+        # removal still proceeds, as with hook reconciliation below. Any other
+        # re-check failure (policy, lockfile, integrator) fails closed.
+        from ..install.local_bundle_hook_trust import (
+            BundleHookTargetsUnresolved,
+            reconcile_scope_bundle_hooks,
+        )
+
+        try:
             reconcile_scope_bundle_hooks(
                 InstallScope.PROJECT, apm_package, logger=logger, dry_run=dry_run
             )
+        except BundleHookTargetsUnresolved as e:
+            logger.warning(
+                f"Local bundle hooks were NOT re-checked: target resolution failed ({e}). "
+                "Run 'apm install' to re-check them."
+            )
+        except Exception as e:
+            logger.error(f"Local bundle hook re-check failed: {e}")
+            sys.exit(1)
+
+        try:
             declared_deps = apm_package.get_all_apm_dependencies()
             project_root = Path.cwd()
             lockfile_path = get_lockfile_path(project_root)

@@ -52,6 +52,7 @@ def _deploy_then_edit(root: Path, path: Path, edited: str = "user edit"):
 def _ctx(*, package_deployed_files, existing_lockfile, targets, project_root):
     # Files present when the context is built carry deployment receipts (#3701).
     return SimpleNamespace(
+        frozen=False,
         package_deployed_files=package_deployed_files,
         existing_lockfile=existing_lockfile,
         targets=targets,
@@ -161,6 +162,7 @@ class TestAttachDeployedFilesUnion:
         )
         lockfile = LockFile()
         ctx = SimpleNamespace(
+            frozen=False,
             existing_lockfile=prior,
             only_packages=None,
             intended_dep_keys=set(),
@@ -1427,6 +1429,7 @@ class TestInactiveTargetGhostDrop:
         new.add_dependency(LockedDependency(repo_url=key))
 
         ctx = SimpleNamespace(
+            frozen=False,
             package_deployed_files={key: [active_file]},
             existing_lockfile=prior,
             targets=[_known("claude"), _known("copilot")],
@@ -1572,6 +1575,7 @@ class TestLockModeDefersDiskDeletion:
         new = LockFile()
         new.add_dependency(LockedDependency(repo_url=key))
         ctx = SimpleNamespace(
+            frozen=False,
             package_deployed_files={key: [active_file]},
             existing_lockfile=prior,
             targets=[_known("claude")],

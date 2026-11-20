@@ -116,16 +116,13 @@ def check_prospective_dry_run_plan(provider: FactsProvider) -> tuple[Violation, 
         and _present(owner, "lsp_dependencies=tuple(apm_package.get_lsp_dependencies())")
         and _present(command, "ProspectiveInstallPlan.from_install_context(")
         and _present(owner, "plan = cls.from_apm_package(")
-        and _present(owner, ").with_allowed_lsp_dependencies(apm_package, ctx.logger)")
+        and _present(owner, ").with_allowed_lsp_dependencies(ctx, apm_package)")
         and sum(
             "prospective_plan.selected_apm_dependencies" in line
             for line in getattr(command, "lines", ())
         )
-        >= 3
-        and _present(
-            command,
-            "mcp_deps=list(prospective_plan.selected_mcp_dependencies) or None",
-        )
+        >= 2
+        and _present(command, "preview_declared_policy(ctx, prospective_plan, logger)")
         and _present(command, "prospective_plan.dependency_counts")
         and _present(owner, "plan = plan.with_pipeline_preview(preview, lockfile_dir=ctx.apm_dir)")
         and _present(owner, "resolved_apm_dependencies=preview.resolved_dependencies,")

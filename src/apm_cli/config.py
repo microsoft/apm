@@ -45,6 +45,25 @@ def ensure_config_exists():
             os.chmod(CONFIG_FILE, 0o600)
 
 
+_CONFIG_CREATION_SUPPRESSED = False
+
+
+@contextlib.contextmanager
+def config_creation_suppressed():
+    """Never create ``config.json`` inside this block (``install --dry-run``).
+
+    Process-wide rather than per-thread: dependency resolution reads manifests
+    on worker threads.
+    """
+    global _CONFIG_CREATION_SUPPRESSED
+    previous = _CONFIG_CREATION_SUPPRESSED
+    _CONFIG_CREATION_SUPPRESSED = True
+    try:
+        yield
+    finally:
+        _CONFIG_CREATION_SUPPRESSED = previous
+
+
 def get_config(*, create: bool = True):
     """Get the current configuration.
 
@@ -60,7 +79,7 @@ def get_config(*, create: bool = True):
     global _config_cache
     if _config_cache is not None:
         return _config_cache
-    if create:
+    if create and not _CONFIG_CREATION_SUPPRESSED:
         ensure_config_exists()
     elif not os.path.exists(CONFIG_FILE):
         return {}
