@@ -239,3 +239,49 @@ def test_approve_under_unreachable_policy_follows_fetch_failure_default(
         assert approve.returncode == 0, output
         assert after != before
         assert "executables:" in after.decode("utf-8")
+
+
+# Wrongly typed policy fields (#4140): each is a malformed policy, routed like
+# any other malformed policy, never a crash.
+_WRONGLY_TYPED = {
+    "enforcement-list": "enforcement: [block]\n",
+    "fetch_failure-list": "fetch_failure: [block]\n",
+    "require_resolution-list": "dependencies:\n  require_resolution: [block]\n",
+    "self_defined-mapping": "mcp:\n  self_defined: {deny: true}\n",
+    "scripts-list": "manifest:\n  scripts: [deny]\n",
+    "unmanaged_action-list": "unmanaged_files:\n  action: [deny]\n",
+    "on_install-list": "security:\n  audit:\n    on_install: [block]\n",
+    "mcp_deny-mapping": "mcp:\n  deny: {evil: true}\n",
+    "executables_deny-list-of-maps": "executables:\n  deny:\n    - {pkg: evil}\n",
+    "extends-list": "extends: [org]\n",
+}
+
+
+@pytest.mark.parametrize("fetch_failure_default", ["warn", "block"])
+@pytest.mark.parametrize("field_case", sorted(_WRONGLY_TYPED))
+def test_wrongly_typed_policy_field_routes_as_malformed(
+    tmp_path: Path, apm_binary_path: Path, field_case: str, fetch_failure_default: str
+) -> None:
+    """A wrongly typed field never crashes a command; it is a malformed policy."""
+    policy = "name: company\n" + _WRONGLY_TYPED[field_case]
+    spec = _Outcome(
+        {_COMPANY: policy},
+        blocks=fetch_failure_default == "block",
+        fetch_failure_default=fetch_failure_default,
+    )
+    project = _Project(tmp_path, apm_binary_path, field_case, spec)
+    with local_gitlab_policy_fixture(tmp_path / "certs") as fixture:
+        fixture.publish(spec.projects)
+        status = project.run(fixture, "policy", "status", "--json", scenario="status")
+        install = project.run(fixture, "install", "--target", "copilot", scenario="install")
+        project.ensure_lockfile(fixture)
+        audit = project.run(fixture, "audit", "--ci", "--no-drift", scenario="audit")
+
+    results = {"status": status, "install": install, "audit": audit}
+    for name, result in results.items():
+        output = result.stdout + result.stderr
+        assert "Traceback" not in output, f"{name}: {output}"
+        assert "unhashable" not in output, f"{name}: {output}"
+    assert json.loads(status.stdout)["outcome"] == "malformed", status.stdout
+    assert _blocked(install) is spec.blocks, install.stdout + install.stderr
+    assert _blocked(audit) is spec.blocks, audit.stdout + audit.stderr
