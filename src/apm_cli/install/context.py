@@ -135,6 +135,8 @@ class InstallContext:
     # ------------------------------------------------------------------
     pre_download_results: dict[str, Any] = field(default_factory=dict)  # download
     pre_downloaded_keys: set[str] = field(default_factory=set)  # download
+    # Packages whose cache/lock content-hash mismatch was already reported (#4351).
+    cache_mismatch_reported: set[str] = field(default_factory=set)  # download
 
     # ------------------------------------------------------------------
     # Pre-integrate inputs (populated by caller before integrate phase)

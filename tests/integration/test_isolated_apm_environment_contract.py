@@ -352,6 +352,8 @@ def test_bounded_apm_git_environment_contract(tmp_path: Path) -> None:
         "GIT_COMMITTER_EMAIL",
         "GIT_AUTHOR_DATE",
         "GIT_COMMITTER_DATE",
+        "GH_TELEMETRY",
+        "DO_NOT_TRACK",
         "PYTHONPATH",
     )
     git_state_names = (
@@ -493,6 +495,8 @@ def test_bounded_apm_git_environment_contract(tmp_path: Path) -> None:
         "GIT_COMMITTER_EMAIL": "apm-test@example.invalid",
         "GIT_AUTHOR_DATE": "2000-01-01T00:00:00+00:00",
         "GIT_COMMITTER_DATE": "2000-01-01T00:00:00+00:00",
+        "GH_TELEMETRY": "0",
+        "DO_NOT_TRACK": "1",
         "PYTHONPATH": str(isolated.root / "network_guard"),
     }
     assert len(environment) == len(normalized_environment_names)
