@@ -4135,6 +4135,16 @@
       ]
     },
     {
+      "issue": 4439,
+      "fixed_in": "Unreleased",
+      "summary": "A refused apm install --frozen that keeps an adopted file names a remedy (move it aside, then rerun apm install --frozen); following it now withdraws the rewritten file instead of keeping it as adopted again, because a deployment receipt only proves an earlier write while its file is still on disk.",
+      "failure_modes": ["transaction"],
+      "properties": ["transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_frozen_no_rewrite_e2e.py::test_frozen_install_kept_file_remedy_runs_to_a_clean_refusal"
+      ]
+    },
+    {
       "issue": 4449,
       "fixed_in": "Unreleased",
       "summary": "A user's own MCP entry equal to a self-defined declaration, on Codex including one switched off with enabled = false, is no conflict: install, --frozen replay and audit agree, leave it unowned and change no byte; a different command still fails closed.",
