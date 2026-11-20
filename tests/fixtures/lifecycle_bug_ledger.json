@@ -3019,6 +3019,17 @@
       ]
     },
     {
+      "issue": 4225,
+      "fixed_in": "Unreleased",
+      "summary": "apm install --frozen --global verifies each locked native plugin root against its recorded fingerprint before any write and exits 1 naming the plugin, both digests and 'apm install --global', as apm audit --ci does; a plain install that restores a changed root says so.",
+      "failure_modes": ["transaction", "outcome"],
+      "properties": ["lockfile.frozen_preserves_bytes", "transaction.failed_command_preserves_state", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_claude_native_hook_lifecycle.py::test_frozen_install_verifies_native_plugin_files_like_audit",
+        "tests/lifecycle/machines/test_m_gate.py::test_i1_fails_a_native_plugin_root_that_differs_from_its_record"
+      ]
+    },
+    {
       "issue": 4228,
       "fixed_in": "Unreleased",
       "summary": "apm update carried a marketplace dependency's recorded provenance forward on the lockfile's word: a tampered or cleared discovered_via, marketplace_plugin_name, source_url or source_digest survived a no-change update. Update now re-verifies every marketplace row against its registered catalog, restores the catalog origin and digest, and fails closed on an unknown alias, missing plugin, rebound origin or incomplete provenance.",

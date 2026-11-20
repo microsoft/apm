@@ -298,6 +298,7 @@ class GateReplay(RowReplay):
             deploy_root=root,
             lock=LockFile.read(workspace / "apm.lock.yaml"),
             managed_paths=frozenset(managed),
+            user_scope=user,
         )
 
     def check_then(self) -> None:

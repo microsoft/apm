@@ -850,6 +850,7 @@ class InstallService:
         deployment it catches an APM upgrade that renders a locked file
         differently (#3654).
         """
+        from apm_cli.claude_plugins.registrar import native_deployed_drift
         from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.local_edits import restore_locked_content_hint
@@ -867,7 +868,9 @@ class InstallService:
 
             stale = unedited_apm_output(deploy_root, user_scope, committed, targets, drifted)
             drifted = [drift for drift in drifted if drift.path not in stale]
-        if not drifted and not unresolved:
+        # Native plugin roots are verified before the pipeline replaces them.
+        native = [] if deployed else native_deployed_drift(deploy_root, committed)
+        if not drifted and not unresolved and not native:
             return
         if deployed:
             tip = (
@@ -880,6 +883,8 @@ class InstallService:
                 f"{restore_locked_content_hint('the listed files')}. To keep local "
                 "edits, run 'apm export-patch' or move them aside first."
             )
+            if native:
+                tip += " Run 'apm install --global' to restore the native plugin(s)."
         raise FrozenInstallError(
             "--frozen: deployed files do not match the hashes recorded in apm.lock.yaml.",
             reasons=[
@@ -888,6 +893,10 @@ class InstallService:
                     for drift in sorted(drifted, key=lambda drift: drift.path)
                 ),
                 *(f"  - {path}: unsafe or unresolved deployed path" for path in sorted(unresolved)),
+                *(
+                    f"  - native plugin '{name}' ({root}): expected {expected}, observed {observed}"
+                    for name, root, expected, observed in native
+                ),
             ],
             tip=tip,
         )
