@@ -356,6 +356,7 @@ def install_local_bundle(
                 lockfile,
                 deployed,
                 deployed_hashes,
+                scope=scope,
                 staged=staged_instructions,
                 staged_hashes=result.get("staged_file_hashes", {}),
                 staged_fallback_hashes=staged_fallbacks,

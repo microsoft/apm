@@ -82,7 +82,9 @@ def matches_fresh_legacy_plugin_hash(
     try:
         shutil.copytree(package_path, replacement, symlinks=True)
         (replacement / _PLUGIN_SKILL_SOURCES_RECEIPT).unlink()
-        legacy_hash = compute_package_hash(replacement, exclude=exclude)
+        legacy_hash = compute_package_hash(
+            replacement, exclude=exclude, framed=locked_dependency.content_hash_framed
+        )
     except BaseException:
         staging.rollback()
         raise
@@ -154,7 +156,7 @@ def validate_cached_legacy_plugin(
         raise _unsafe_upgrade_error(
             dep_key, package_path, "the legacy lock entry has no content hash"
         )
-    actual_hash = compute_package_hash(package_path)
+    actual_hash = compute_package_hash(package_path, framed=locked_dependency.content_hash_framed)
     if actual_hash != expected_hash:
         raise _unsafe_upgrade_error(
             dep_key,

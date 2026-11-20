@@ -244,7 +244,7 @@ def _resolve_download_strategy(
     if _already_resolved_sha_match and receipt and receipt[0] == install_path.resolve():
         from apm_cli.utils.content_hash import verify_package_hash
 
-        if verify_package_hash(install_path, receipt[1]):
+        if verify_package_hash(install_path, receipt[1], framed=True):
             content_hash_already_verified = True
             ctx.content_hash_verified_deps.add(dep_key)
 
@@ -264,6 +264,7 @@ def _resolve_download_strategy(
             install_path,
             _dep_locked_chk.content_hash,
             _dep_locked_chk.carried_licenses or carried_licenses_for(ctx, dep_key, _dep_locked_chk),
+            framed=_dep_locked_chk.content_hash_framed,
         ):
             _hash_msg = f"Content hash mismatch for {dep_ref.get_unique_key()} -- re-downloading"
             diagnostics.warn(_hash_msg, package=dep_ref.get_unique_key())

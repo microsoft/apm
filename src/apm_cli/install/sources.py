@@ -44,6 +44,7 @@ from apm_cli.install.source_helpers import (
     locked_parent_identity,
     materialized_manifest_snapshot,
     record_carried_package_hash,
+    record_package_digests,
     supply_chain_mismatch_hint,
 )
 from apm_cli.install.source_helpers import (
@@ -140,7 +141,7 @@ class LocalDependencySource(DependencySource):
             ResolvedReference,
         )
         from apm_cli.models.validation import validate_apm_package
-        from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
+        from apm_cli.utils.content_hash import compute_package_digests
 
         ctx = self.ctx
         dep_ref = self.dep_ref
@@ -220,9 +221,8 @@ class LocalDependencySource(DependencySource):
         if logger:
             logger.download_complete(dep_ref.local_path, ref_suffix="local")
 
-        # Capture the validated copy before manifest synthesis or integration
-        # transforms it. Frozen preflight hashes this same materialization.
-        local_content_hash = _compute_hash(install_path)
+        # Hash the validated copy before synthesis or integration, as frozen preflight does.
+        local_digests = compute_package_digests(install_path)
         materialize_marketplace_manifest(dep_ref, install_path)
         validation = validate_apm_package(
             install_path,
@@ -284,7 +284,7 @@ class LocalDependencySource(DependencySource):
             )
         )
         if install_path.is_dir():
-            ctx.package_hashes[dep_key] = local_content_hash
+            record_package_digests(ctx, dep_key, local_digests)
 
         if local_info.package_type:
             ctx.package_types[dep_key] = local_info.package_type.value

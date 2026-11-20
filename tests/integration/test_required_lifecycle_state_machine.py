@@ -2237,10 +2237,12 @@ def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
     receipt = cached_package / ".apm" / ".plugin-skill-sources.json"
     assert receipt.is_file()
     receipt.unlink()
-    # APM 0.28 used the same tree-hash algorithm but did not write the
+    # APM 0.28 wrote lockfile version 1 with the legacy tree stream and no
     # parser-owned receipt, so hashing this receipt-less cache is its exact hash.
-    legacy_content_hash = compute_package_hash(cached_package)
+    legacy_content_hash = compute_package_hash(cached_package, framed=False)
     assert legacy_content_hash != current_content_hash
+    assert lock_document["lockfile_version"] == "4"
+    lock_document["lockfile_version"] = "1"
     lock_document["apm_version"] = "0.28.0"
     locked_dependency["content_hash"] = legacy_content_hash
     locked_dependency["package_type"] = "marketplace_plugin"
@@ -2278,6 +2280,7 @@ def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
         == installed.file(".agents/skills/legacy-hash/SKILL.md").content
     )
     assert upgraded_dependency.content_hash == current_content_hash
+    assert load_yaml(lock_path)["lockfile_version"] == "4"
     assert upgraded_dependency.package_type == "marketplace_plugin"
     assert upgraded_dependency.deployed_files == prior_deployed_files
     assert upgraded_dependency.deployed_file_hashes == prior_deployed_hashes

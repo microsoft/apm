@@ -161,6 +161,21 @@ def carried_licenses_for(ctx: Any, dep_key: str, locked_dep: Any) -> tuple:
     return tuple(getattr(locked_dep, "carried_licenses", ()) or ())
 
 
+def record_package_digests(ctx: Any, dep_key: str, digests: Any) -> str:
+    """Record one package's digests in the stream the existing lockfile uses.
+
+    *digests* is a :class:`~apm_cli.utils.content_hash.PackageDigests` of the
+    bytes this run accepted. The framed digest is kept beside it so the
+    lockfile phase can promote the lock to version 4 without re-reading.
+    """
+    from apm_cli.deps.lockfile import records_framed_content_hashes
+
+    framed = records_framed_content_hashes(getattr(ctx, "existing_lockfile", None))
+    ctx.package_hashes[dep_key] = digests.select(framed=framed)
+    ctx.package_framed_hashes[dep_key] = digests.framed
+    return ctx.package_hashes[dep_key]
+
+
 def record_carried_package_hash(
     ctx: Any,
     dep_key: str,
@@ -187,8 +202,8 @@ def record_carried_package_hash(
     ctx.package_carried_licenses[dep_key] = carried
     excluded = carried_license_paths(carried)
     if install_path.is_dir():
-        ctx.package_hashes[dep_key] = content_hash.compute_package_hash(
-            install_path, exclude=excluded
+        record_package_digests(
+            ctx, dep_key, content_hash.compute_package_digests(install_path, exclude=excluded)
         )
     return excluded
 

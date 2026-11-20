@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes and upgrade notes
 
+- **BREAKING:** Hostless `dependencies.require` entries name only the default host (`GITHUB_HOST`, else `github.com`); host-qualify others or `enforcement: block` fails `apm install` and `apm audit --ci`. (closes #3993, #4008)
+- Hash framing hardening: `apm install` moves `apm.lock.yaml` to `lockfile_version: "4"`, which older APM refuses; update CI to APM 0.37 before committing it. (closes #4000, #4026)
 - **BREAKING:** Copilot project MCP servers move from `.github/mcp.json` and `.vscode/mcp.json` to root `.mcp.json`; run `apm install`, review static `env:` values, and commit the result. (#3875)
 - `.mcp.json` is shared with Claude Code, so Copilot's `tools` allow-list does not restrict Claude; users of VS Code's deprecated Local mode should switch to the Copilot harness. (#3875)
 - Replace the deprecated `vscode` target with `copilot`; lockfiles that recorded `vscode` still install. (#3875)
@@ -149,6 +151,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Install and run output say things once: one success line per MCP server and per script run, and singular counts read `1 agent integrated` and `(1 plugin)`. (closes #3994, #4004)
 - `apm pack` shares each bundle format with the command that accepts it (`apm unpack` for `--format apm`), and `apm unpack` names a plugin-format bundle and points to `apm install` instead of reporting missing files. (closes #3994, #4004)
 - `apm mcp show` offers `apm install --mcp <name>` instead of a "coming soon" step and no longer claims GitHub toolsets for any `io.github.*` server; `apm run` passes `exec` once for the documented `codex exec` script and never passes a literal `<` to `llm`. (closes #3994, #4004)
+- `apm install -g <bundle>` rows in `~/.apm/apm.lock.yaml` record `scope: user` and keep it when another global install rewrites the lock. (closes #3995, #4024)
 
 ### Security
 

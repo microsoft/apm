@@ -41,12 +41,15 @@ def confirm_update_plan(
 def build_resolved_update_plan(ctx: InstallContext, lockfile: LockFile | None) -> UpdatePlan:
     """Supply validated, staged local replacement hashes to the pure plan owner."""
     from apm_cli.install.plan import build_update_plan
-    from apm_cli.utils.content_hash import compute_package_hash
+    from apm_cli.install.source_helpers import record_package_digests
+    from apm_cli.utils.content_hash import compute_package_digests
 
     for dependency in ctx.deps_to_install:
         if dependency.replacement is not None and dependency.is_local:
-            ctx.package_hashes[dependency.get_unique_key()] = compute_package_hash(
-                dependency.get_install_path(ctx.apm_modules_dir)
+            record_package_digests(
+                ctx,
+                dependency.get_unique_key(),
+                compute_package_digests(dependency.get_install_path(ctx.apm_modules_dir)),
             )
     return build_update_plan(
         lockfile,

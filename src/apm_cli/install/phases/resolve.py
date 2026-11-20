@@ -170,7 +170,7 @@ def _activate_validated_candidate(
     """Publish one accepted candidate, then expose its download metadata."""
     from apm_cli.utils.content_hash import compute_package_hash
 
-    content_hash = compute_package_hash(candidate_path)
+    content_hash = compute_package_hash(candidate_path, framed=True)
     live_path = staging_session.publish_replacement(candidate_path)
     with callback_lock:
         pending = pending_downloads.pop(candidate_path, None)

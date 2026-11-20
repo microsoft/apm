@@ -1586,7 +1586,7 @@ class TestContentHashFallback:
             (pkg_dir / "file.txt").write_text("hello")
             content_hash = compute_package_hash(pkg_dir)
 
-            assert verify_package_hash(pkg_dir, content_hash) is True
+            assert verify_package_hash(pkg_dir, content_hash, framed=True) is True
 
     def test_hash_mismatch_triggers_redownload(self):
         """Mismatched content hash on real files returns False."""
@@ -1597,7 +1597,7 @@ class TestContentHashFallback:
             pkg_dir.mkdir()
             (pkg_dir / "file.txt").write_text("original")
 
-            assert verify_package_hash(pkg_dir, "sha256:badhash") is False
+            assert verify_package_hash(pkg_dir, "sha256:badhash", framed=True) is False
 
     def test_should_skip_redownload_true_when_hash_matches_and_dir_exists(self):
         """Production helper returns True when content_hash matches an existing dir."""

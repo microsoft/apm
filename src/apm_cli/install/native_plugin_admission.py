@@ -192,7 +192,7 @@ def verify_native_plugin_cache(
     ensure_path_within(candidate, live_modules)
     if lock_dep.is_local_source:
         ensure_path_within(replay_path, scratch_root)
-        expected_hash = compute_package_hash(replay_path)
+        expected_hash = compute_package_hash(replay_path, framed=lock_dep.content_hash_framed)
     else:
         expected_hash = lock_dep.content_hash
         # Cold-cache CI has already materialized the pinned unit in scratch.
@@ -204,7 +204,9 @@ def verify_native_plugin_cache(
                 "run 'apm install' to regenerate its integrity baseline"
             )
     carried = () if lock_dep.is_local_source else lock_dep.carried_licenses
-    if not candidate.is_dir() or not verify_locked_package(candidate, expected_hash, carried):
+    if not candidate.is_dir() or not verify_locked_package(
+        candidate, expected_hash, carried, framed=lock_dep.content_hash_framed
+    ):
         raise AgentPluginDeploymentBoundaryError(
             f"Native Agent Plugin cache differs from its replay baseline: {candidate}; "
             "run 'apm install' to restore the package"

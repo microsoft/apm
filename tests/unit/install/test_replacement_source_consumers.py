@@ -46,7 +46,7 @@ from apm_cli.models.dependency.replacement import (
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 from apm_cli.policy.policy_checks import _check_dependency_allowlist, _check_dependency_denylist
 from apm_cli.policy.schema import DependencyPolicy
-from apm_cli.utils.content_hash import compute_package_hash
+from apm_cli.utils.content_hash import compute_package_digests, compute_package_hash
 
 pytestmark = pytest.mark.component
 
@@ -98,7 +98,7 @@ def test_plan_inputs_hash_staged_local_replacement_before_canonical_plan(
 
     with (
         patch(
-            "apm_cli.utils.content_hash.compute_package_hash", wraps=compute_package_hash
+            "apm_cli.utils.content_hash.compute_package_digests", wraps=compute_package_digests
         ) as hashing,
         patch("apm_cli.install.plan.build_update_plan", wraps=build_update_plan) as planning,
     ):

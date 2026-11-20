@@ -40,10 +40,14 @@ def test_native_replay_owner_rules_pass() -> None:
         ),
         (
             ADMISSION,
-            "expected_hash = compute_package_hash(replay_path)",
-            "expected_hash = compute_package_hash(source)",
+            "expected_hash = compute_package_hash(replay_path, framed=lock_dep.content_hash_framed)",
+            "expected_hash = compute_package_hash(source, framed=lock_dep.content_hash_framed)",
         ),
-        (ADMISSION, "verify_locked_package(candidate, expected_hash, carried)", "True"),
+        (
+            ADMISSION,
+            "candidate, expected_hash, carried, framed=lock_dep.content_hash_framed",
+            "candidate, source, carried, framed=lock_dep.content_hash_framed",
+        ),
     ],
 )
 def test_native_replay_owner_bypass_is_rejected(path: str, before: str, after: str) -> None:

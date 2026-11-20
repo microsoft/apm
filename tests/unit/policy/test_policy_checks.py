@@ -234,13 +234,14 @@ class TestRequiredPackagesDeployed:
         assert "org/pkg" in result.details[0]
         assert "--no-policy" in result.message
 
-    def test_skip_if_not_in_manifest(self):
-        """Required package not in manifest -- check 3 handles that."""
+    def test_fail_if_not_in_manifest(self):
+        """An entry naming no declared package is not skipped (#3993)."""
         deps = _make_dep_refs(["other/pkg"])
         lock = _make_lockfile([{"repo_url": "other/pkg", "deployed_files": ["x.md"]}])
         policy = DependencyPolicy(require=["org/missing"])
         result = _check_required_packages_deployed(deps, lock, policy)
-        assert result.passed
+        assert not result.passed
+        assert result.details == ["org/missing"]
 
 
 # -- Check 4b: required-executable-untrusted ------------------------

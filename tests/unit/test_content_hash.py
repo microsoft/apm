@@ -194,14 +194,14 @@ class TestVerifyPackageHash:
         """Verification passes when content matches."""
         (tmp_path / "a.txt").write_text("hello")
         expected = compute_package_hash(tmp_path)
-        assert verify_package_hash(tmp_path, expected) is True
+        assert verify_package_hash(tmp_path, expected, framed=True) is True
 
     def test_mismatched_hash(self, tmp_path):
         """Verification fails when content changed."""
         (tmp_path / "a.txt").write_text("original")
         expected = compute_package_hash(tmp_path)
         (tmp_path / "a.txt").write_text("tampered")
-        assert verify_package_hash(tmp_path, expected) is False
+        assert verify_package_hash(tmp_path, expected, framed=True) is False
 
     def test_missing_file_fails(self, tmp_path):
         """Verification fails when file is deleted."""
@@ -209,14 +209,14 @@ class TestVerifyPackageHash:
         (tmp_path / "b.txt").write_text("more")
         expected = compute_package_hash(tmp_path)
         (tmp_path / "b.txt").unlink()
-        assert verify_package_hash(tmp_path, expected) is False
+        assert verify_package_hash(tmp_path, expected, framed=True) is False
 
     def test_added_file_fails(self, tmp_path):
         """Verification fails when an extra file is added."""
         (tmp_path / "a.txt").write_text("data")
         expected = compute_package_hash(tmp_path)
         (tmp_path / "extra.txt").write_text("injected")
-        assert verify_package_hash(tmp_path, expected) is False
+        assert verify_package_hash(tmp_path, expected, framed=True) is False
 
 
 # ---------------------------------------------------------------------------
@@ -364,3 +364,57 @@ class TestLockfileContentHash:
         loaded_dep = loaded.get_dependency("owner/repo")
         assert loaded_dep is not None
         assert loaded_dep.content_hash == "sha256:deadbeef"
+
+
+# ---------------------------------------------------------------------------
+# Lockfile content-hash streams (#4000): framed in version 4, legacy in 1-3
+# ---------------------------------------------------------------------------
+
+
+def _layout(root, files):
+    for name, payload in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+    return root
+
+
+class TestFramedPackageStream:
+    def test_layouts_equal_under_legacy_stream_differ_when_framed(self, tmp_path):
+        """Two distinct layouts share one legacy stream but not one framed stream."""
+        first = _layout(tmp_path / "first", {"alpha": b"beta"})
+        second = _layout(tmp_path / "second", {"alph": b"abeta"})
+
+        assert compute_package_hash(first, framed=False) == compute_package_hash(
+            second, framed=False
+        )
+        assert compute_package_hash(first) != compute_package_hash(second)
+
+    def test_framed_stream_matches_its_published_definition(self, tmp_path):
+        """Path, NUL, raw file digest per file in byte-wise path order (req-lk-016)."""
+        import hashlib
+
+        root = _layout(tmp_path / "pkg", {"b.txt": b"two", "a/x.md": b"one"})
+        stream = b"".join(
+            name.encode("utf-8") + b"\0" + hashlib.sha256(payload).digest()
+            for name, payload in sorted({"a/x.md": b"one", "b.txt": b"two"}.items())
+        )
+
+        assert compute_package_hash(root) == "sha256:" + hashlib.sha256(stream).hexdigest()
+
+    def test_one_read_yields_both_streams(self, tmp_path):
+        from apm_cli.utils.content_hash import compute_package_digests
+
+        root = _layout(tmp_path / "pkg", {"a.txt": b"one", "LICENSE": b"carried"})
+        digests = compute_package_digests(root, exclude={"LICENSE"})
+
+        assert digests.legacy == compute_package_hash(root, exclude={"LICENSE"}, framed=False)
+        assert digests.framed == compute_package_hash(root, exclude={"LICENSE"})
+        assert digests.legacy != digests.framed
+
+    def test_verify_uses_only_the_named_stream(self, tmp_path):
+        root = _layout(tmp_path / "pkg", {"a.txt": b"one"})
+        legacy = compute_package_hash(root, framed=False)
+
+        assert verify_package_hash(root, legacy, framed=False) is True
+        assert verify_package_hash(root, legacy, framed=True) is False

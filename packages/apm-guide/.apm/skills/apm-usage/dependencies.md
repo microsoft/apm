@@ -532,6 +532,12 @@ their lockfile entry, and the lockfile is promoted to
 git-source semver resolution fields (`constraint` / `resolved_at`) or a
 revision-pin tag annotation (`resolved_tag`).
 
+From APM 0.37 a writable `apm install` promotes `apm.lock.yaml` to
+`lockfile_version: "4"` (hash framing hardening) when every package verifies;
+otherwise the version stays. Older lockfiles still verify; `--frozen` and
+`apm audit` never rewrite them. APM 0.36 and earlier refuse version `"4"`:
+update CI to 0.37 before committing.
+
 The `acme/foo@registry-name#version` shorthand is **not supported** (deferred
 to v2) -- the `@` collides with npm/cargo/pip version syntax, with
 `git@host`, and with marketplace plugin shorthand. Use the object form.
