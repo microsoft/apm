@@ -361,3 +361,86 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     from tests.spec_conformance.coverage_map import record
 
     record(config, items)
+
+
+_MOCK_GLOBALS_KEY = "apm_mock_bound_module_globals"
+
+# Modules that production code imports lazily and that bind names from a
+# module tests patch at its source (lockfile, scope, marketplace registry,
+# policy discovery, github_host). First imported inside such a patch, each
+# would keep the mock for the rest of the worker; loading them at session
+# start keeps every later patch transient. pytest_sessionfinish below fails
+# the run if another module is captured this way.
+_LAZY_CONSUMERS = (
+    "apm_cli.claude_plugins.registrar",
+    "apm_cli.deps.artifactory_orchestrator",
+    "apm_cli.deps.clone_engine",
+    "apm_cli.deps.download_strategies",
+    "apm_cli.deps.git_reference_resolver",
+    "apm_cli.deps.github_downloader",
+    "apm_cli.install.phases.claude_plugins",
+    "apm_cli.install.phases.codex_plugins",
+    "apm_cli.marketplace.catalog_origin",
+    "apm_cli.policy.install_preflight",
+)
+
+
+def _load_command_tree(group, ctx) -> None:
+    import click
+
+    for name in group.list_commands(ctx):
+        command = group.get_command(ctx, name)
+        if isinstance(command, click.Group):
+            _load_command_tree(command, click.Context(command, parent=ctx, info_name=name))
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Load lazily imported modules before any test can patch their sources.
+
+    The CLI imports each verb's module on first dispatch; loading the command
+    tree here keeps tests that patch a source module and then invoke a verb
+    from leaving that verb's module bound to the mock.
+    """
+    import importlib
+
+    import click
+
+    from apm_cli.cli import cli
+
+    for name in _LAZY_CONSUMERS:
+        importlib.import_module(name)
+    _load_command_tree(cli, click.Context(cli, info_name="apm"))
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Fail the run when an ``apm_cli`` module global is left as a mock.
+
+    xdist workers hand their findings to the controller, which reports them.
+    """
+    from tests.utils import state_leaks
+
+    config = session.config
+    found = set(state_leaks.mock_bound_module_globals())
+    if hasattr(config, "workeroutput"):
+        config.workeroutput[_MOCK_GLOBALS_KEY] = sorted(found)
+        return
+    found |= getattr(config, "_apm_worker_mock_globals", set())
+    if found:
+        reporter = config.pluginmanager.get_plugin("terminalreporter")
+        lines = [
+            "[x] apm_cli module globals left as unittest.mock objects "
+            "(a patch was captured by a module first imported inside it):",
+            *(f"    {name}" for name in sorted(found)),
+        ]
+        if reporter is not None:
+            reporter.write_line("\n".join(lines), red=True)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node, error) -> None:
+    """Collect an xdist worker's mock-bound module globals on the controller."""
+    found = getattr(node, "workeroutput", {}).get(_MOCK_GLOBALS_KEY, [])
+    collected = getattr(node.config, "_apm_worker_mock_globals", set())
+    collected.update(found)
+    node.config._apm_worker_mock_globals = collected

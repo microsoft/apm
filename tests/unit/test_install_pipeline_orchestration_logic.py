@@ -6,11 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# GitHubPackageDownloader imports git_reference_resolver lazily, on first
-# construction. Load it now: first imported inside a test below, it would bind
-# the patched ``is_github_hostname`` (returns False) for the rest of the worker.
-import apm_cli.deps.git_reference_resolver  # noqa: F401
-
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-deployment-provenance-state")]
 
 # ---------------------------------------------------------------------------
