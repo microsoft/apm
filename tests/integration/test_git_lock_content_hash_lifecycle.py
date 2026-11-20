@@ -30,7 +30,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
-    pytest.mark.promise("P-OWN-package-content-hash"),
+    pytest.mark.promise("P-OWN-package-content-hash", "req-lk-015", "req-lk-016", "P-INV-I3"),
 ]
 
 _SKILL = "---\nname: {name}\ndescription: {name} skill\n---\n# {name}\n"
