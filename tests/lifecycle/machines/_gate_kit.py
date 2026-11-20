@@ -546,8 +546,9 @@ class GateMachine(RuleBasedStateMachine):
             if result is None:
                 return []
             # The outcome comes first: a plain install or update on local
-            # packages succeeds; --frozen refuses only without a lockfile (#4133).
-            expected = 1 if mode == "frozen" and before.lock is None else 0
+            # packages succeeds; --frozen refuses only without a lockfile (#4133),
+            # unless nothing is declared: then it is a converged no-op (#4050).
+            expected = 1 if mode == "frozen" and before.lock is None and self.declared else 0
             if result.returncode != expected:
                 return [f"{name} exited {result.returncode}, expected {expected}"]
             if result.returncode != 0 or mode != "plain":
