@@ -227,3 +227,51 @@ def test_audit_and_update_honor_the_current_executables_decision(
     assert _hook_residue(project) == []
     apm("audit", "--ci", "--no-policy")
     assert "already at their latest" in apm("update", "--yes")
+
+
+@pytest.mark.parametrize("target", ["copilot", "claude", "cursor"])
+def test_deny_names_each_retired_hook_file_and_never_reports_it_retained(
+    tmp_path: Path, apm_binary_path: Path, target: str
+) -> None:
+    """After ``apm deny``, install names every hook file it deletes (#4173)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = isolated.subprocess_env(overrides={"COLUMNS": "200"})
+    _hook_package(isolated.work_root / "hooky")
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    manifest = {
+        "name": "consumer",
+        "version": "0.1.0",
+        "targets": [target],
+        "dependencies": {"apm": ["../hooky"]},
+    }
+    dump_yaml(manifest, project / "apm.yml")
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    def apm(*args: str) -> str:
+        result = runner.run(args, cwd=project, env=env)
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, f"apm {' '.join(args)}\n{output}"
+        assert output.isascii(), output
+        status = [line for line in result.stdout.splitlines() if line.startswith("[")]
+        assert len(status) == len(set(status)), output
+        return output
+
+    apm("install")
+    apm("deny", "../hooky")
+    before = {path.relative_to(project).as_posix() for path in _project_files(project)}
+
+    output = apm("install", "--verbose")
+
+    after = {path.relative_to(project).as_posix() for path in _project_files(project)}
+    # apm-hooks.json is APM's ownership sidecar for merged configs, not a hook file.
+    removed = sorted(path for path in before - after if not path.endswith("/apm-hooks.json"))
+    assert removed, "the denied package's hook files must be deleted"
+    assert _hook_residue(project) == []
+    listed = [line[len("  - ") :] for line in output.splitlines() if line.startswith("  - ")]
+    for path in removed:
+        assert any(path == item or path.startswith(item) for item in listed), (
+            f"{path} was deleted but not named\n{output}"
+        )
+    assert "Historical dependency claims retained" not in output, output
+    assert _exec_status(project) == "denied"
