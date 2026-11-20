@@ -1444,6 +1444,7 @@ def run_dependency_policy_checks(
     direct_dep_keys: set[str] | None = None,
     source_deps: Iterable[DependencyReference] | None = None,
     declared_refs: Mapping[str, Sequence[DependencyReference]] | None = None,
+    require_locked_presence: bool = True,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -1552,7 +1553,9 @@ def run_dependency_policy_checks(
         dep_names = _required_policy_index(deps_list, None)
     if _run(_check_required_packages(deps_list, policy.dependencies, dep_names=dep_names)):
         return result
-    if _run(
+    # An install that resolves the required packages records them; only a
+    # replay (audit, --frozen) requires them already locked.
+    if require_locked_presence and _run(
         _check_required_packages_deployed(
             deps_list, lockfile, policy.dependencies, dep_names=dep_names
         )

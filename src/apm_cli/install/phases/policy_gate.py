@@ -118,6 +118,7 @@ def run(ctx: InstallContext) -> None:
         fail_fast=(enforcement == "block"),
         direct_dep_keys={d.get_unique_key() for d in getattr(ctx, "all_apm_deps", []) or []},
         declared_refs=getattr(ctx, "declared_direct_refs", None) or None,
+        require_locked_presence=bool(getattr(ctx, "frozen", False)),
         **extra_kwargs,
     )
 

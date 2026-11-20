@@ -205,14 +205,15 @@ class TestRequiredPackagesDeployed:
 
     def test_fail_absent_from_lockfile(self):
         """A required package in the manifest but absent from the lockfile is a
-        genuine presence failure and includes the --no-policy recovery hint."""
+        genuine presence failure; the hint is a plain install, never a bypass."""
         deps = _make_dep_refs(["org/pkg"])
         lock = _make_lockfile([{"repo_url": "other/pkg", "deployed_files": ["x.md"]}])
         policy = DependencyPolicy(require=["org/pkg"])
         result = _check_required_packages_deployed(deps, lock, policy)
         assert not result.passed
         assert "org/pkg" in result.details[0]
-        assert "--no-policy" in result.message
+        assert "apm install" in result.message
+        assert "--no-policy" not in result.message
 
     def test_fail_if_not_in_manifest(self):
         """An entry naming no declared package is not skipped (#3993)."""

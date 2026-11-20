@@ -42,9 +42,7 @@ def run(ctx: InstallContext) -> None:
     cli_override = getattr(ctx, "audit_override", None)
     if cli_override == "off" and decision.mode != "off" and logger is not None:
         logger.warning(
-            f"Policy overrides --no-audit to '{decision.mode}' "
-            f"(set by {decision.source}). "
-            f"Use '--no-policy' to skip the policy floor."
+            f"Policy overrides --no-audit to '{decision.mode}' (set by {decision.source})."
         )
     project_root = ctx.project_root
 
@@ -113,11 +111,6 @@ def run(ctx: InstallContext) -> None:
         advice = either(HIDDEN_CHARACTERS_FLAGGED, INSTALL_AUDIT_FORCE)
         raise PolicyViolationError(
             f"Install-time audit blocked: {summary}. {advice[:1].upper()}{advice[1:]}"
-            + (
-                ", or '--no-policy' to skip the policy floor"
-                if "policy" in decision.source.lower()
-                else ""
-            )
             + f" (mode set by {decision.source})."
         )
 

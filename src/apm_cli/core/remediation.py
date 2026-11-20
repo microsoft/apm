@@ -1189,9 +1189,8 @@ BUNDLE_HOOKS_APPROVED = _entry(
 )
 REQUIRED_PACKAGE_UNLOCKED = _entry(
     "required-package-unlocked",
-    "apm install --no-policy",
+    "apm install",
     "record the required packages in the lockfile",
-    then="reinstall normally",
 )
 UNMANAGED_FILE_TRACK = _entry("unmanaged-file-track", "apm install <ref>", "track a flagged file")
 CONTENT_HASHES_MISSING = _entry(
