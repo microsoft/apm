@@ -395,6 +395,8 @@ def _integrate_root_project(
         DeploymentLedgerCodec.replace_context_local_files(
             ctx, _root_result.get("deployed_files", [])
         )
+        # Merged hook entries deploy no standalone file, yet audit replays them (#4033).
+        ctx.local_hooks_merged = _root_result.get("hooks_contributed", 0) > 0
 
         _local_changed = integration_changed_files(_root_result)
         if _local_changed > 0 and logger:

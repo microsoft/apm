@@ -669,6 +669,9 @@ def integrate_package_primitives(  # noqa: PLR0913
     _total_integrated += _skill_count
     _total_integrated += int(skill_result.bin_deployed)
     result["files_changed"] = _total_integrated
+    # Merged hook entries this package contributes, written or unchanged (#4033).
+    _hooks = _per_kind.get("hooks", {})
+    result["hooks_contributed"] = _hooks.get("files", 0) + _hooks.get("adopted", 0)
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 

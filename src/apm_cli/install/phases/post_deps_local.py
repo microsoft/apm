@@ -50,8 +50,10 @@ def run(ctx: InstallContext) -> None:
     if ctx.scope is not InstallScope.PROJECT:
         return
 
-    # Skip if there is no local content (current or previous).
-    if not ctx.local_deployed_files and not ctx.old_local_deployed:
+    # Skip if there is no local content (current or previous). Root hooks that
+    # only merge into shared configs still need a lockfile so that
+    # `apm audit --ci` replays them (#4033).
+    if not ctx.local_deployed_files and not ctx.old_local_deployed and not ctx.local_hooks_merged:
         return
 
     diagnostics = ctx.diagnostics
