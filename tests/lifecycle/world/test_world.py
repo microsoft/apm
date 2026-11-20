@@ -50,6 +50,7 @@ pytestmark = [
         "P-OWN-host-reference-coordinates",
         "P-OWN-marketplace-catalog-origin",
         "P-OWN-local-bundle-hook-trust",
+        "P-OWN-unpack-executable-refusal",
         "P-OWN-policy-remote-origin-reader",
         "P-OWN-policy-content-hash",
         "P-OWN-mcp-registry-url-resolution",
@@ -327,14 +328,20 @@ def test_local_bundle_installs_offline(lifecycle_world: World) -> None:
     assert world.services.egress_log() == []
 
 
-def test_apm_format_bundle_unpacks(lifecycle_world: World, tmp_path: Path) -> None:
+def test_apm_format_bundle_carries_the_hook_and_unpack_refuses_it(
+    lifecycle_world: World, tmp_path: Path
+) -> None:
     world = lifecycle_world
     bundle = world.packages["p-exec:apm-bundle"]
     assert Path(bundle.spec).is_file() and bundle.spec != world.packages["p-exec:bundle"].spec
     dest = tmp_path / "unpacked"
-    result = driver.run(world, ["unpack", bundle.spec, "-o", str(dest), "--dry-run"])
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "p-exec" in " ".join((result.stdout + result.stderr).split())
+    result = driver.run(world, ["unpack", bundle.spec, "-o", str(dest)])
+    output = " ".join((result.stdout + result.stderr).split())
+    # unpack cannot apply the executables gate, so it refuses the bundled hook.
+    assert result.returncode == 1, output
+    assert "Refusing to unpack 1 executable file(s)" in output, output
+    assert ".github/hooks/p-exec-session.json (hook resource)" in output, output
+    assert not dest.exists(), "a refused unpack wrote files"
     assert world.services.egress_log() == []
 
 
