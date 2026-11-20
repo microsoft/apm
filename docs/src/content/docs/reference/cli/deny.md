@@ -28,13 +28,15 @@ executable types covered by the gate, see
 
 | Argument or flag | Description |
 |---|---|
-| `PACKAGES...` | One or more package references, such as `owner/repo`. Required. |
+| `PACKAGES...` | One or more installed packages, by identity (`owner/repo`), install spec (`plugin@marketplace`) or local path. Required. |
 | `--user` | Record the deny in `$APM_HOME/config.json` (default `~/.apm/config.json`) instead of `apm.yml`. |
+| `-g`, `--global` | Deny packages `apm install -g` installed, from any directory. |
 
-For an installed package that declares executable types, APM records those
-types. When no executable declaration is found -- because the package is not
-installed or declares no executables -- APM blocks all supported executable
-types for that reference. Writing a deny also removes a matching allow from the
+Every reference resolves to the installed package's identity, the key the
+deny is recorded under. A reference that matches no installed package exits 1
+and writes nothing. For an installed package that declares executable types,
+APM records those types; one that declares none yet gets all supported
+executable types blocked. Writing a deny also removes a matching allow from the
 selected store. To lift a deny, run `apm approve <pkg>` against the same store
 (add `--user` for a `--user` deny).
 
