@@ -2032,7 +2032,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-locked-source-cache",
         rule_id="install-deployment-locked-source-cache",
         path="src/apm_cli/install/drift.py",
-        old="        attach_persistent_git_cache(downloader)\n",
+        old="        attach_persistent_git_cache(downloader, read_only=True)\n",
         new="",
         intent="The audit --ci replay reads locked git sources outside install's git cache.",
     ),
