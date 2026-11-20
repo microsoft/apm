@@ -23,6 +23,7 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
 )
 from apm_cli.utils.diagnostics import CATEGORY_ERROR, CATEGORY_WARNING, DiagnosticCollector
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _make_package_info(
@@ -723,6 +724,7 @@ def test_kiro_agents_sync_removes_managed_file(tmp_path: Path) -> None:
         pkg,
         tmp_path,
         managed_files=managed_files,
+        evidence=receipted_evidence(tmp_path),
     )
 
     assert result["files_removed"] == 1
@@ -882,6 +884,7 @@ def test_kiro_agents_stale_managed_file_removed_when_tools_become_incompatible(
         pkg,
         tmp_path,
         managed_files={".kiro/agents/prev.md"},
+        evidence=receipted_evidence(tmp_path),
     )
     assert sync_result["files_removed"] == 1, (
         "sync_for_target must remove the stale APM-managed file"
@@ -970,6 +973,7 @@ def test_kiro_prompts_sync_removes_managed_file(tmp_path: Path) -> None:
         pkg,
         tmp_path,
         managed_files=managed_files,
+        evidence=receipted_evidence(tmp_path),
     )
 
     assert result["files_removed"] == 1

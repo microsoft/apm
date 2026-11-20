@@ -9,7 +9,9 @@ copy must carry exactly the fingerprint recorded in ``apm.lock.yaml``.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import stat
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -103,6 +105,22 @@ class Deployment:
     replaced: Path | None = None
 
 
+def _owner_only(plugin_root: Path) -> None:
+    """Strip group, other and special bits from every file (#1620).
+
+    The fingerprint records only the owner-execute bit, which this keeps, so
+    a deployed root's fingerprint is unchanged. Symlinks are never followed.
+    """
+    for directory, _dirs, files in os.walk(plugin_root, followlinks=False):
+        for file_name in files:
+            path = Path(directory) / file_name
+            if path.is_symlink():
+                continue
+            mode = stat.S_IMODE(path.stat().st_mode)
+            if mode & ~0o700:
+                path.chmod(mode & 0o700)
+
+
 def deploy_plugin(
     root: Path,
     name: str,
@@ -121,6 +139,9 @@ def deploy_plugin(
     """
     destination = _checked(root, root / name)
     if destination.is_dir() and fingerprint_of(destination) == fingerprint:
+        # An unchanged root still meets the permission postcondition, so an
+        # upgrade from a copy deployed before #1620's guard is tightened.
+        _owner_only(destination)
         return Deployment(False)
     root.mkdir(parents=True, exist_ok=True)
     staging = _checked(root, root / f"{_STAGING}{name}-{uuid.uuid4().hex}")
@@ -130,6 +151,7 @@ def deploy_plugin(
             target = staging / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_root / relative, target)
+        _owner_only(staging)
         if fingerprint_of(staging) != fingerprint:
             raise NativeLayoutError(
                 f"The copy of {name} does not match its approved fingerprint. Its source in "

@@ -12,6 +12,9 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _python_paths,
     _summary,
 )
+from scripts.architecture_linter.checks.install_exec_provenance import (
+    check_allow_map_provenance,
+)
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import violation
 from scripts.architecture_linter.models import Violation
@@ -64,6 +67,8 @@ _TRUST_OWNER_CALLERS = frozenset(
         (_EXEC_GATE, "_trust_ctx"),
         (_EXEC_GATE, "_resolve"),
         (_EXECUTABLES, "effective_exec_map_for_project"),
+        # The offline dry-run preview reads the same layers, policy-free (#4018).
+        ("src/apm_cli/install/dry_run_plan.py", "with_allowed_lsp_dependencies"),
         # ``apm install <bundle>`` reads grants from the scope manifest, never
         # the working directory's apm.yml under -g (#3989 M2).
         (_LOCAL_BUNDLE, "effective_bundle_allow_map"),
@@ -143,6 +148,10 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                     'owner = getattr(dependency, "resolved_by", None)',
                     'approval_keys = getattr(dependency, "approval_keys", ())',
                     "def denied_exec_types(",
+                    "def authorized_exec_map(",
+                    "def exec_map_authorizes_all(",
+                    "def package_type_approved(",
+                    "def compose_trust_bin(",
                 ),
                 _APPROVE_COMMAND: (
                     "approval = locked_dependency_approval(locked",
@@ -152,7 +161,10 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 ),
                 _EXEC_GATE: (
                     "return dependency_approval_key(dep_ref)",
-                    "denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
+                    "denied |= denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
+                    # A pinned item the item owner denies is reported as denied (#4044).
+                    "denied = frozenset(t for t, status in pinned_status.items() "
+                    "if status == TRUST_DENIED)",
                     "self._trust_ctx_value = exec_trust_context_for_project(",
                 ),
                 # Audit replay withholds what the install gate withheld, under
@@ -179,8 +191,10 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 _LSP_PIPELINE: ("effective_allow_executables = resolve_project_exec_allow_map(",),
                 _MCP_PIPELINE: ("admission = McpAdmission.for_project(",),
                 _MCP_VIEW: ("approval_keys = locked_dependency_approval_keys(dependency)",),
-                _UNINSTALL_ENGINE: ("_allow_executables = resolve_project_exec_allow_map(",),
-                _HOOK_INTEGRATOR: ("allow_map = resolve_project_exec_allow_map(",),
+                _UNINSTALL_ENGINE: ("        resolve_project_exec_allow_map(",),
+                _HOOK_INTEGRATOR: (
+                    "resolve_project_exec_allow_map(project_root, apm_package, user_scope",
+                ),
                 _AUDIT_COMMAND: ("policy_provider=replay_policy",),
                 _LOCAL_BUNDLE: (
                     "bundle_approval_key = local_bundle_approval_key(",
@@ -189,8 +203,10 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                     "user_scope=user_scope))",
                 ),
                 _INSTALL_SERVICES: (
-                    "is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)",
-                    "_is_approved(allow_executables, approval_key, EXEC_TYPE_HOOKS)",
+                    # Bundle hooks and canvas are approved for the exact bundle content.
+                    "_bundle_keys = () if approval_key is None else (approval_key,)",
+                    "package_type_approved(allow_executables, _bundle_keys, EXEC_TYPE_HOOKS)",
+                    "allow_executables, _bundle_keys, EXEC_TYPE_CANVAS",
                     # A gated package's hooks retire through the hook owner (#3924).
                     "reconcile_package_targets(package_info, project_root, targets),",
                 ),
@@ -198,6 +214,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
         )
     )
     findings.extend(_trust_owner_closed_world(provider))
+    findings.extend(check_allow_map_provenance(provider, GUARD_EXECUTABLE_TRUST))
     findings.extend(_bundle_trust_scope_findings(provider))
     # A second locked-row trust derivation beside the owner is a split authority.
     facts, failures = _facts_for(provider, _APPROVE_COMMAND, GUARD_EXECUTABLE_TRUST)
@@ -527,6 +544,8 @@ def check_lsp_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
                     "transitive_lsp = filter_lsp_by_allow_executables(",
                     "lsp_deps = LSPIntegrator.deduplicate(lsp_deps + transitive_lsp)",
                     "def reconcile_lsp_after_uninstall(",
+                    # Uninstall keeps survivors on the recorded targets (#4059).
+                    "recorded_targets=recorded_lsp_targets(lockfile),",
                     "lsp_target_servers=new_targets",
                     "managed_target_servers=old_lsp_targets",
                 ),

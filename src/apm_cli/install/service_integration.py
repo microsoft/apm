@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.service import FrozenDisposition
 
 
 class ServiceCommandContext(Protocol):
@@ -30,7 +31,6 @@ class ServiceCommandContext(Protocol):
     force: bool
     exec_allow_map: dict[str, dict[str, bool]] | None
     exec_allow_resolved: bool
-    frozen: bool
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,7 @@ class ServiceIntegrationResult:
     target_decision: EffectiveTargetDecision | None
 
 
-def run_service_integrations(
+def run_service_integrations(  # noqa: PLR0913
     ctx: ServiceCommandContext,
     *,
     apm_package: Any,
@@ -59,6 +59,7 @@ def run_service_integrations(
     target_decision: EffectiveTargetDecision | None,
     active_package_keys: frozenset[str] | None = None,
     claude_native_keys: frozenset[str] = frozenset(),
+    frozen_disposition: FrozenDisposition,
 ) -> ServiceIntegrationResult:
     """Resolve once, then reconcile package-declared MCP and LSP services."""
     from apm_cli.core.scope import InstallScope, get_modules_dir
@@ -113,7 +114,7 @@ def run_service_integrations(
     prepared_lsp.require_capable_target()
     prepared_mcp = None
     frozen_unrecorded: frozenset[tuple[str, str]] = frozenset()
-    if getattr(ctx, "frozen", False) is True:
+    if frozen_disposition.withhold_lockfile_writes:
         from apm_cli.install.mcp.integration import prepare_mcp_integration
         from apm_cli.install.service import InstallService
         from apm_cli.integration.lsp_integrator import LSPIntegrator
@@ -217,7 +218,7 @@ def run_service_integrations(
             claude_native_keys=claude_native_keys,
             executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
             pre_install_lock=existing_lock,
-            frozen=getattr(ctx, "frozen", False) is True,
+            frozen=frozen_disposition.withhold_lockfile_writes,
         )
     lsp_count = run_lsp_integration(
         apm_package=apm_package,

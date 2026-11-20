@@ -67,7 +67,13 @@ _SURFACE_GLOBS: Mapping[tuple[str, str], str | tuple[str, str]] = {
     ("canvas", "copilot"): ".github/extensions/{pkg}/extension.mjs",
 }
 # HOME paths a project command may write: receipts and bookkeeping only.
-_PROJECT_HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
+_PROJECT_HOME_ALLOWED = (
+    ".apm/deployment-receipts",
+    ".apm/logs",
+    ".apm-local",
+    ".local/state/gh",
+    ".cache/apm",
+)
 _RECONCILING = frozenset({"install", "update"})
 
 
@@ -266,7 +272,7 @@ class RowReplay:
         return result
 
     def _advance(self, op: Operation, requested: ModelState, result: CommandResult) -> None:
-        if result.returncode != 0:
+        if result.returncode != 0 or "DRYRUN" in op.modifiers:
             return
         if op.command in _RECONCILING and "FROZEN" not in op.modifiers:
             self.model = requested.installed()
