@@ -250,7 +250,23 @@
     },
     "deterministic-atomic-text-writes": {
       "architecture_owner": "deterministic-atomic-text-writes",
-      "equivalents": [],
+      "equivalents": [
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.atomic_io.atomic_write_text__mutmut_29",
+          "reason": "fd_wrapped is only read as 'not fd_wrapped'; None and False are both falsy, so the initial None changes no branch."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.atomic_io.atomic_write_text__mutmut_57",
+          "reason": "Python codec names are case-insensitive, so 'UTF-8' and 'utf-8' select the same codec and write identical bytes."
+        },
+        {
+          "class": "semantic-equivalent",
+          "mutant": "apm_cli.utils.atomic_io.write_text_lf__mutmut_9",
+          "reason": "Python codec names are case-insensitive, so 'UTF-8' and 'utf-8' select the same codec and write identical bytes."
+        }
+      ],
       "floor": 0.0,
       "measured": {
         "equivalent": 0,
