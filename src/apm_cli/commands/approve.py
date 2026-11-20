@@ -324,10 +324,15 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) ->
 
     declarations = _scan_installed_packages(manifest)
     installed = _installed_identities(manifest)
+    from ..security.executables import _is_content_bound_key
+
+    # A content-bound bundle key is the exact grant key apm install printed.
     unmatched = [
         pkg
         for pkg in packages
-        if _find_declaration(declarations, pkg) is None and pkg not in installed
+        if _find_declaration(declarations, pkg) is None
+        and pkg not in installed
+        and not _is_content_bound_key(pkg)
     ]
     if unmatched:
         # Never record a deny that matches no installed package (#4189).
