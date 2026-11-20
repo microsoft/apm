@@ -43,6 +43,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm approve`, `--pending`, `--list` and `apm policy explain` now see an Agent Plugin whose only executable is its root `mcp.json`, so it can be approved. (closes #4042, #4058)
 - `apm install --frozen` and `apm audit --ci` now reach the same verdict on hook approval pins, and `apm install` retires hooks whose pin no longer matches. (closes #4188, #4272)
 - A package with `.claude-plugin/plugin.json` (or `plugin.json` without `$schema`) and a root `skills/` directory is detected as a Claude plugin collection (`marketplace_plugin`) on every install pass, as documented in Package types, so `apm install -g --trust-bin` deploys its `bin/` inside the plugin root; locks that recorded `skill_bundle` still replay. (closes #4270, #4276)
+- `apm install` names the runtime in each MCP failure line instead of repeating one identical line per runtime. (closes #4288, #PR)
+- `apm install` warns once about a legacy MCP entry left in a config file that two targets share. (closes #4289, #PR)
+- `apm install --verbose` reports each Azure DevOps auth step once per command, not once per clone attempt. (closes #4290, #PR)
+- `apm pack` shows each plugin-manifest note once per command. (closes #4291, #PR)
+- `apm install` lists a missing required package once in the policy warning block, and the count matches. (closes #4307, #PR)
+- `apm install` no longer prints a bare `CI environment detected` line for each registry MCP server. (closes #4320, #PR)
 
 ## [0.37.0] - 2026-11-20
 

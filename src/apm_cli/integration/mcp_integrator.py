@@ -26,6 +26,7 @@ import tomlkit
 import yaml
 from tomlkit.exceptions import TOMLKitError
 
+from apm_cli.adapters.client._remote_shapes import harness_label
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import (
     LockFile,
@@ -1429,7 +1430,8 @@ class MCPIntegrator:
                         managed_fields=managed_fields,
                     )
                     if result["failed"]:
-                        logger.error(f"  Failed to install {dep}")
+                        # Name the runtime: one dependency fails once per runtime (#4288).
+                        logger.error(f"  Failed to install {dep} for {harness_label(runtime)}")
                         all_ok = False
                     elif result.get("installed") and installed_servers is not None:
                         installed_servers.add(dep)
@@ -1452,7 +1454,9 @@ class MCPIntegrator:
                         runtime,
                         exc_info=True,
                     )
-                    logger.error(f"  Failed to install {dep}: {install_error}")
+                    logger.error(
+                        f"  Failed to install {dep} for {harness_label(runtime)}: {install_error}"
+                    )
                     all_ok = False
 
             # Emit aggregated post-install diagnostics for runtimes that

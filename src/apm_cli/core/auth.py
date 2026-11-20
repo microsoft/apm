@@ -236,6 +236,10 @@ class AuthResolver:
         # F5 #852: pre-init the per-host dedup set so callers do not need
         # the prior hasattr() guard.
         self._verbose_auth_logged_hosts: set = set()
+        # Auth-chain trace lines already shown this command: a chain re-run by a
+        # later clone attempt reports the same steps once (#4290).
+        self._emitted_auth_traces: set[str] = set()
+        self._auth_trace_lock = threading.Lock()
         # #1212 follow-up: with preflight + list_remote_refs + clone all
         # routing through the ADO auth chain, a single ADO host
         # in an install plan can trigger emit_stale_pat_diagnostic up to
@@ -285,8 +289,15 @@ class AuthResolver:
         line: str,
         verbose_callback: Callable[[str], None] | None,
     ) -> None:
-        """Send one auth-chain step to the caller's or the wired verbose channel."""
+        """Send one auth-chain step to the caller's or the wired verbose channel.
+
+        An identical step line is sent once per resolver (per command).
+        """
         safe = sanitize_diagnostic_detail(line) or line
+        with self._auth_trace_lock:
+            if safe in self._emitted_auth_traces:
+                return
+            self._emitted_auth_traces.add(safe)
         if verbose_callback is not None:
             verbose_callback(safe)
             return

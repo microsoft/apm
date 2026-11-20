@@ -549,11 +549,6 @@ class MCPServerOperations:
                         # For other variables, use empty string or reasonable default
                         env_vars[var_name] = ""
 
-            if is_e2e_tests:
-                print("E2E test mode detected")
-            else:
-                print("CI environment detected")
-
             return env_vars
 
         try:

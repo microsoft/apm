@@ -207,17 +207,21 @@ class DiagnosticCollector:
         detail: str = "",
         severity: str = "warning",
     ) -> None:
-        """Record a policy violation (blocked dep, denied source, etc.)."""
+        """Record a policy violation (blocked dep, denied source, etc.).
+
+        A violation reported again by a later phase of the same command (the
+        same package, message and severity) is recorded once (#4307).
+        """
+        diagnostic = Diagnostic(
+            message=message,
+            category=CATEGORY_POLICY,
+            package=package,
+            detail=detail,
+            severity=severity,
+        )
         with self._lock:
-            self._diagnostics.append(
-                Diagnostic(
-                    message=message,
-                    category=CATEGORY_POLICY,
-                    package=package,
-                    detail=detail,
-                    severity=severity,
-                )
-            )
+            if diagnostic not in self._diagnostics:
+                self._diagnostics.append(diagnostic)
 
     def auth(self, message: str, package: str = "", detail: str = "") -> None:
         """Record an authentication diagnostic (credential resolution, fallback, EMU detection)."""

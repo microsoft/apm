@@ -453,14 +453,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         output=r"\A(?!.*^  \[\+\] ).*^  (\|-- [^\n]*)$.*^  \1$",
     ),
     KnownOutputCell(
-        "pack-dry-run-plugin-notes-twice",
-        "I9",
-        "#4291",
-        _runs("pack", "--dry-run"),
-        r"Left out of the plugin|Would write plugin manifest",
-        output=r"^\[!\] Left out of the plugin: ",
-    ),
-    KnownOutputCell(
         "install-frozen-parked-mcp-notice-per-phase",
         "I9",
         "#4299",
@@ -499,49 +491,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
             r"^\+- MCP Servers.*'hermes-stdio': unknown key"
             r"|^\[\*\] Validating 1 package.*'hermes-stdio': unknown key"
         ),
-    ),
-    KnownOutputCell(
-        "install-mcp-failure-line-per-runtime",
-        "I9",
-        "#4288",
-        _runs("install"),
-        r"Failed to install ",
-        output=r"^\|\s+\S+\s+-- failed for [^,\n]+, ",
-    ),
-    KnownOutputCell(
-        "install-left-existing-server-per-shared-file",
-        "I9",
-        "#4289",
-        _runs("install"),
-        r"Left existing MCP server",
-        # Claude Code and Copilot CLI share .mcp.json; each warns about it.
-        output=r"Configuring for [^\n]*Claude Code[^\n]*Copilot CLI.*^\[!\] Left existing MCP server",
-    ),
-    KnownOutputCell(
-        "install-verbose-ado-auth-attempt-repeats",
-        "I9",
-        "#4290",
-        _runs("install", "--verbose"),
-        r"Auth-only attempt for ado host|credential fill|Without a credential",
-        output=r"^  \[i\] Auth-only attempt for ado host \S+ \(no credential\)",
-    ),
-    KnownOutputCell(
-        "registry-environment-notice-per-server",
-        "I9",
-        "#4320",
-        _runs_any("install", "update"),
-        r"repeats a line: '(E2E test mode|CI environment) detected'",
-        # Two registry lookups back to back each print the bare environment notice.
-        output=r"^((?:E2E test mode|CI environment) detected)\n\1$",
-    ),
-    KnownOutputCell(
-        "install-missing-required-package-warning-twice",
-        "I9",
-        "#4307",
-        _runs("install"),
-        r"required by org policy but not declared",
-        # The warning block lists one missing required package back to back.
-        output=r"^(    \+- \[[^\]\n]+\] required by org policy but not declared)\n\1$",
     ),
     KnownOutputCell(
         "self-update-installer-color-codes",
@@ -586,14 +535,6 @@ KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
         _runs("install", "--verbose"),
         r"repeats a (line|diagnostic): '(Package target restriction|\[i\] perf: )",
         output=r"^\s*((?:Package target restriction|\[i\] perf: )[^\n]*)$.*^\s*\1$",
-    ),
-    KnownOutputCell(
-        "pack-plugin-manifest-notes-twice",
-        "I9",
-        "#4291",
-        _runs("pack"),
-        r"repeats a diagnostic: '(\[i\]'|\[!\] Secrets withheld from plugin\.json)",
-        output=r"^\s*(\[i\]|\[!\] Secrets withheld from plugin\.json[^\n]*)\s*$.*^\s*\1\s*$",
     ),
     KnownOutputCell(
         "install-frozen-trust-notice-repeats",

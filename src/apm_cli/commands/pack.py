@@ -19,6 +19,7 @@ from ..core.build_orchestrator import (
     OutputKind,
 )
 from ..core.command_logger import CommandLogger
+from ..core.plugin_manifest import plugin_manifest_notes_once
 from ..core.target_detection import TargetParamType
 from ..install.locking import serialized_lifecycle_unless
 
@@ -426,7 +427,8 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
     )
 
     try:
-        result = BuildOrchestrator().run(options, logger=logger)
+        with plugin_manifest_notes_once():
+            result = BuildOrchestrator().run(options, logger=logger)
     except MetadataEnrichmentError as exc:
         if json_output:
             from ..marketplace.builder import BuildReport

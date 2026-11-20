@@ -2428,6 +2428,67 @@
         "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
         "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
       ]
+    },
+    {
+      "issue": 4288,
+      "fixed_in": "Unreleased",
+      "summary": "An MCP server that fails for two runtimes prints one failure line per runtime, each naming the runtime, instead of identical lines.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_failure_line_runtime_lifecycle.py::test_mcp_failure_line_names_each_runtime"
+      ]
+    },
+    {
+      "issue": 4289,
+      "fixed_in": "Unreleased",
+      "summary": "A legacy MCP entry left in a config file that two targets share (Claude Code and Copilot CLI read .mcp.json) is reported once per file.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_slashed_server_cleanup_lifecycle.py::test_removing_slashed_server_keeps_user_and_declared_short_name_entries"
+      ]
+    },
+    {
+      "issue": 4290,
+      "fixed_in": "Unreleased",
+      "summary": "install --verbose reports each Azure DevOps auth-chain step once per command, not once per clone attempt.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_ado_verbose_auth_trace_lifecycle.py::test_verbose_ado_auth_steps_print_once"
+      ]
+    },
+    {
+      "issue": 4291,
+      "fixed_in": "Unreleased",
+      "summary": "apm pack shows each plugin-manifest note (servers left out, secrets withheld) once per command, not once per manifest it builds.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_pack_mcp_ownership_lifecycle.py::test_pack_output_is_identical_before_and_after_install"
+      ]
+    },
+    {
+      "issue": 4307,
+      "fixed_in": "Unreleased",
+      "summary": "install lists a policy violation reported by two phases once, and the warning count counts distinct violations.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_policy_install_enforcement_lifecycle.py::test_warn_policy_installs_and_reports_every_violation"
+      ]
+    },
+    {
+      "issue": 4320,
+      "fixed_in": "Unreleased",
+      "summary": "A registry MCP install in CI or E2E mode prints no bare 'environment detected' line per server.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_registry_install_ci_notice_lifecycle.py::test_registry_install_prints_no_bare_environment_notice",
+        "tests/unit/install/test_mcp_optional_inputs.py::test_noninteractive_registry_defaults_print_no_bare_environment_notice"
+      ]
     }
   ],
   "lifecycle_contracts": [
