@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
+- `apm approve`, `apm deny` and `apm policy explain` accept the `plugin@marketplace` install spec; `apm deny` with it now retires the package's executables. (#4275)
 - A plugin with a root `skills/` bundle is recorded as `skill_bundle` again, and native Claude plugin files deploy owner-only, without setuid bits. (#4126)
 - `apm prune` removes packages again when target resolution fails during its local bundle hook re-check; it says the hooks were not re-checked and writes no hook files; other re-check failures still fail. (#4141)
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
@@ -81,7 +83,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm approve -g` approves native plugins that `apm install -g` parked, using the printed command; approving an uninstalled package exits 1. (#4275)
 - Global `apm audit --ci` passes after `apm install -g` when `APM_HOME` is outside `HOME` or a local native plugin is installed. (closes #3901, #3946)
 - Kiro agents with current tool IDs or `@server` selectors deploy; an unsupported tool skips only that agent with a warning. (closes #2671, #3947)
 - `apm uninstall plugin@marketplace`, `apm install --dry-run` and `apm prune` handle object-form `{name, marketplace}` entries; uninstall works offline. (closes #3928, #3960, #3933, #3988)
