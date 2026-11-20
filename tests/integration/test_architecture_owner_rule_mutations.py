@@ -2451,6 +2451,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Effective marketplace output path loses its single resolver.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-pack-credential-files",
+        rule_id="marketplace-integrations-pack-credential-files",
+        path="src/apm_cli/bundle/plugin_exporter.py",
+        old="    refuse_credential_files(file_map)\n",
+        new="",
+        intent="The plugin bundle format packs files without the credential-file refusal.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-pack-plugin-manifests",
         rule_id="marketplace-integrations-pack-plugin-manifests",
         path="src/apm_cli/core/build_orchestrator.py",

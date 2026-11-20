@@ -724,6 +724,7 @@ marketplace-integrations-locked-evidence
 marketplace-integrations-metadata-enrichment
 marketplace-integrations-native-registration
 marketplace-integrations-output-path
+marketplace-integrations-pack-credential-files
 marketplace-integrations-pack-plugin-manifests
 marketplace-integrations-package-construction
 marketplace-integrations-package-format-precedence

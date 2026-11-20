@@ -337,7 +337,6 @@ def test_insecure_opt_in_admits_a_public_plaintext_registry_url(
 
 
 @pytest.mark.req("req-sc-007")
-@pytest.mark.xfail(strict=True, reason="S-pending")
 @pytest.mark.parametrize("name", [".env", "server.pem", "id_ed25519"])
 def test_pack_refuses_credential_files(tmp_path: Path, name: str) -> None:
     deployed = [".github/instructions/rules.md", f".github/skills/tool/{name}"]

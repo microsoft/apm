@@ -687,6 +687,17 @@
         "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
         "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
       ]
+    },
+    {
+      "issue": 4323,
+      "fixed_in": "Unreleased",
+      "summary": "apm pack refuses, in every bundle format and under --dry-run, to pack a file whose name matches the credential-file patterns (.env, .env.*, *.pem, *.key, id_rsa, id_ed25519), naming each path and writing no bundle.",
+      "failure_modes": ["auth", "transaction"],
+      "properties": ["auth.credentials_isolated", "transaction.failed_command_preserves_state"],
+      "regression_tests": [
+        "tests/integration/test_pack_credential_files_lifecycle.py::test_pack_refuses_credential_files_naming_each_path",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_pack_refuses_credential_files"
+      ]
     }
   ],
   "lifecycle_contracts": [

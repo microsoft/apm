@@ -35,6 +35,7 @@ from ..utils.archive import (
 from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_warning
 from ..utils.path_security import ensure_path_within, safe_rmtree
+from .credential_files import refuse_credential_files
 from .export_common import (
     _cache_would_contribute_hooks_or_mcp,
     _cache_would_contribute_primitives,
@@ -458,6 +459,7 @@ def export_agent_plugin_bundle(
         else:
             _rich_warning(msg)
 
+    refuse_credential_files(file_map)
     output_files = sorted(file_map.keys())
     output_files.append("mcp.json")
     output_files.append("plugin.json")
