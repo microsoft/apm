@@ -7,7 +7,7 @@
   "required": ["lockfile_version", "dependencies"],
   "properties": {
     "lockfile_version": {
-      "$comment": "Version 4 changes only the byte stream package content_hash values digest (req-lk-016); its content_hash values carry the sha256: envelope.",
+      "$comment": "Version 4 changes only the byte stream package content_hash values digest (req-lk-016).",
       "enum": ["1", "2", "4"]
     },
     "generated_at": { "type": "string" },
@@ -30,14 +30,6 @@
     "^x-[a-z][a-z0-9-]*$": {}
   },
   "additionalProperties": true,
-  "if": { "properties": { "lockfile_version": { "const": "4" } }, "required": ["lockfile_version"] },
-  "then": {
-    "properties": {
-      "dependencies": {
-        "items": { "properties": { "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" } } }
-      }
-    }
-  },
   "$defs": {
     "hashEnvelope": {
       "type": "string",

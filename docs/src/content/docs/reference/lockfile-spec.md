@@ -20,8 +20,8 @@ APM keeps using the recorded commits until you run `apm update`, `apm lock
 
 ## Purpose
 
-This is a **Working Draft**. A lockfile whose packages record a `content_hash`
-uses version `"4"`; otherwise ordinary projects use `"1"` (plain Git projects)
+This is a **Working Draft**. A new or promoted lockfile whose packages record a
+`content_hash` uses version `"4"`; otherwise ordinary projects use `"1"` (plain Git projects)
 or `"2"` (projects with at least one registry-sourced dependency or Git
 semver-resolved dependency). The bump is opportunistic; see
 [Version bumping](#version-bumping). Registry-sourced dependencies require the
@@ -29,7 +29,7 @@ experimental registries feature (`apm experimental enable registries`) before
 install or replay.
 
 The explicit, unratified [root source replacement candidate](#root-source-replacement-evidence-candidate)
-uses version `"3"`. It does not change the version chosen for ordinary projects.
+uses version `"3"` unless a package `content_hash` selects `"4"`.
 
 The lockfile gives APM four things:
 
@@ -176,7 +176,7 @@ deployments:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `lockfile_version` | string | yes | `"4"` once any package records a `content_hash`; otherwise `"1"` for plain Git projects, `"2"` for registry/Git semver evidence, and candidate `"3"` when a root replacement table is present. |
+| `lockfile_version` | string | yes | `"4"` once a new or promoted lockfile records any `content_hash`; otherwise `"1"` for plain Git projects, `"2"` for registry/Git semver evidence, and candidate `"3"` when a root replacement table is present. |
 | _(Deprecated)_ `generated_at` | ISO 8601 string | no | Legacy write timestamp. New lockfiles omit it; when an existing lockfile carries it, APM refreshes it on substantive writes. Ignored by equivalence checks. |
 | `apm_version` | string | no | APM CLI version that last changed the file; every command that rewrites it records itself. An older APM refuses to install, update, uninstall, prune, lock, audit or pack against it, and read-only commands warn; see [Lockfile written by a newer APM](../../troubleshooting/install-failures/#lockfile-written-by-a-newer-apm). Missing or `unknown` values are accepted; a duplicate or invalid value is refused. Otherwise it is diagnostic except for a narrow compatibility path: exact APM 0.28 metadata, a locked `marketplace_plugin` type, and a matching content hash together authorize the receipt-less cached-plugin upgrade. It never overrides canonical `apm.yml` precedence or applies to freshly fetched dependencies. A lockfile written before 0.37 that records `copilot` or `vscode` MCP entries keeps its `apm_version` until an install moves those entries to `.mcp.json`. |
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
@@ -430,7 +430,7 @@ The bump is **content-driven**. A package `content_hash` selects `"4"`;
 otherwise replacement rules select `"3"`, registry dependencies or Git semver
 evidence select `"2"`, and the writer uses `"1"`.
 Removing the `replace` block and running a normal install restores that ordinary
-selection. Keeping `replace: []` retains the candidate opt-in and version `"3"`.
+selection. Keeping `replace: []` retains the candidate opt-in.
 
 For the registry workflow this enables, see the [Registries guide](../registries/).
 
@@ -528,7 +528,7 @@ documented under [`apm prune`](../cli/prune/#canonical-deployment-ownership).
 
 `lockfile_version` is the schema version of the file format itself.
 
-- Ordinary projects use `"1"` and `"2"`; version `"2"` is emitted for registry-sourced or git-semver-resolved dependencies. Version `"3"` is an unratified candidate written only when a root replacement table is present; see [Root source replacement evidence](#root-source-replacement-evidence-candidate).
+- The [Version bumping](#version-bumping) table defines when each version is written. Version `"3"` is an unratified candidate; see [Root source replacement evidence](#root-source-replacement-evidence-candidate).
 - Version `"4"` keeps every earlier field and changes only how `content_hash` is computed (hash framing hardening). APM 0.37 verifies a version `"1"` to `"3"` lockfile as written. A writable `apm install` records `"4"` once every package re-hashes from verified bytes; otherwise the version stays and `--verbose` names the package to reinstall. `apm install --frozen`, `apm audit` and read-only commands never promote or rewrite it. APM 0.36 and earlier refuse version `"4"`, so update CI to APM 0.37 before committing a lockfile it wrote.
 - APM additively extends entries within each version - new optional fields
   may appear without bumping the version. Older APM clients ignore unknown

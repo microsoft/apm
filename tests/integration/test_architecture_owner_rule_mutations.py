@@ -1814,22 +1814,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The shared tree framing drops the NUL that terminates each path.",
     ),
     MutationCase(
-        guard_id="install-deployment-package-content-hash",
-        rule_id="install-deployment-package-content-hash",
-        path="src/apm_cli/install/phases/integrate.py",
-        old="framed=_dep_locked_chk.content_hash_framed",
-        new="framed=True",
-        intent="Integrate verifies a lock row outside the stream its lockfile version names.",
-    ),
-    MutationCase(
-        guard_id="install-deployment-package-content-hash",
-        rule_id="install-deployment-package-content-hash",
-        path="src/apm_cli/install/sources.py",
-        old="record_package_digests(ctx, dep_key, local_digests)",
-        new="ctx.package_hashes[dep_key] = local_digests.framed",
-        intent="A local source records its package hash outside the canonical recorder.",
-    ),
-    MutationCase(
         guard_id="install-deployment-package-target-authorization",
         rule_id="install-deployment-package-target-authorization",
         path="src/apm_cli/install/target_filter.py",
@@ -5216,3 +5200,53 @@ def test_drift_reads_bundle_hashes_through_the_deployed_hash_verifier(old: str, 
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
     assert report.failures == ()
     assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/install/phases/integrate.py",
+            "framed=_dep_locked_chk.content_hash_framed",
+            "framed=True",
+            id="integrate-row-stream",
+        ),
+        pytest.param(
+            "src/apm_cli/install/sources.py",
+            "record_package_digests(ctx, dep_key, local_digests)",
+            "ctx.package_hashes[dep_key] = local_digests.framed",
+            id="second-recorder",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/resolve.py",
+            "compute_package_hash(candidate_path, framed=True)",
+            "compute_package_hash(candidate_path)",
+            id="unnamed-stream",
+        ),
+        pytest.param(
+            "src/apm_cli/install/source_helpers.py",
+            'framed = records_framed_content_hashes(getattr(ctx, "existing_lockfile", None))\n    ctx',
+            (
+                'existing = getattr(ctx, "existing_lockfile", None)\n'
+                "    framed = existing is None or existing.framed_content_hashes\n    ctx"
+            ),
+            id="rederived-stream-rule",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/content_hash_stream.py",
+            "elif recorded_framed and dep.content_hash_framed:",
+            "elif dep.content_hash_framed:",
+            id="framed-flag-gate",
+        ),
+    ],
+)
+def test_package_content_hash_guard_rejects_second_streams_and_hashers(
+    path: str, old: str, new: str
+) -> None:
+    """Hash framing hardening keeps one hasher, one recorder and the row's stream (#4000)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert old in source
+    rule = "install-deployment-package-content-hash"
+    report = run_selected_rules(ROOT, (rule,), source_overrides={path: source.replace(old, new, 1)})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule for violation in report.violations)

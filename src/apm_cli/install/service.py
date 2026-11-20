@@ -570,11 +570,10 @@ class InstallService:
                     selected_source, framed=dependency.content_hash_framed
                 )
                 expected_hash = dependency.content_hash
-                # v0.1 readers also accept the identical SHA-256 digest without its
-                # envelope, in lockfile versions 1-3 only (version 4 requires it).
-                if observed_hash != expected_hash and (
-                    dependency.content_hash_framed
-                    or observed_hash.removeprefix("sha256:") != expected_hash
+                # v0.1 readers also accept the identical SHA-256 digest without its envelope.
+                if (
+                    observed_hash != expected_hash
+                    and observed_hash.removeprefix("sha256:") != expected_hash
                 ):
                     reasons.append(
                         f"  - local dependency {declared.local_path!r} content differs "

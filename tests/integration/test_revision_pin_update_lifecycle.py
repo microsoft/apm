@@ -391,7 +391,7 @@ def test_unchanged_install_keeps_revision_pin_tag_lock_bytes(
     _assert_lock_state(
         lock_path,
         scenario,
-        version="2",
+        version="4",
         released_commit=scenario.released_new.sha,
         released_tag="v2.0.0",
     )
@@ -400,8 +400,8 @@ def test_unchanged_install_keeps_revision_pin_tag_lock_bytes(
     assert "generated_at" not in lock_text
     lock_path.write_text(
         lock_text.replace(
-            "lockfile_version: '2'\n",
-            f"lockfile_version: '2'\ngenerated_at: '{_LEGACY_GENERATED_AT}'\n",
+            "lockfile_version: '4'\n",
+            f"lockfile_version: '4'\ngenerated_at: '{_LEGACY_GENERATED_AT}'\n",
             1,
         ),
         encoding="utf-8",
@@ -416,7 +416,7 @@ def test_unchanged_install_keeps_revision_pin_tag_lock_bytes(
     replaced = _assert_lock_state(
         lock_path,
         scenario,
-        version="3",
+        version="4",
         released_commit=scenario.released_new.sha,
         released_tag="v2.0.0",
     )
@@ -431,7 +431,7 @@ def test_unchanged_install_keeps_revision_pin_tag_lock_bytes(
     repinned = _assert_lock_state(
         lock_path,
         scenario,
-        version="1",
+        version="4",
         released_commit=scenario.released_old.sha,
         released_tag=None,
     )

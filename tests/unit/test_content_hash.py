@@ -402,6 +402,21 @@ class TestFramedPackageStream:
 
         assert compute_package_hash(root) == "sha256:" + hashlib.sha256(stream).hexdigest()
 
+    def test_legacy_stream_matches_its_published_definition(self, tmp_path):
+        """Versions 1-3: path bytes then raw file bytes, byte-wise path order."""
+        import hashlib
+
+        files = {"b.txt": b"two", "a/x.md": b"one"}
+        root = _layout(tmp_path / "pkg", files)
+        stream = b"".join(name.encode("utf-8") + payload for name, payload in sorted(files.items()))
+
+        assert compute_package_hash(root, framed=False) == (
+            "sha256:" + hashlib.sha256(stream).hexdigest()
+        )
+        assert compute_package_hash(root, framed=False) == (
+            "sha256:c370bb235f4995cc991b8dd40c85e5f7272f8854e780ecce64a4406729543e5b"
+        )
+
     def test_one_read_yields_both_streams(self, tmp_path):
         from apm_cli.utils.content_hash import compute_package_digests
 
