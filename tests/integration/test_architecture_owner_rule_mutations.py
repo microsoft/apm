@@ -1410,6 +1410,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Skill lockfile inventory stops excluding generated Python artifacts.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-remediation-advice",
+        rule_id="contracts-tooling-remediation-advice",
+        path="src/apm_cli/commands/experimental.py",
+        old='logger.progress("Tip: apm experimental enable <name>")',
+        new="logger.progress(\"Run 'apm install' to restore the deployed files\")",
+        intent="A command spells remediation advice outside the catalog owner.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-remediation-drift-kinds",
+        rule_id="contracts-tooling-remediation-drift-kinds",
+        path="src/apm_cli/core/remediation.py",
+        old='        "unrecorded": RESYNC_UNRECORDED,\n',
+        new="",
+        intent="An emitted drift kind loses its remediation row.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-root-context-write-eligibility",
         rule_id="contracts-tooling-root-context-write-eligibility",
         path="src/apm_cli/compilation/agents_compiler.py",

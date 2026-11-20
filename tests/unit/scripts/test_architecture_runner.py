@@ -621,6 +621,8 @@ contracts-tooling-policy-content-hash
 contracts-tooling-policy-identity
 contracts-tooling-project-yaml-write-delegation
 contracts-tooling-python-artifact-membership
+contracts-tooling-remediation-advice
+contracts-tooling-remediation-drift-kinds
 contracts-tooling-source-replacements
 contracts-tooling-strip-charset
 install-deployment-approval-outcome-routing
