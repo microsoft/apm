@@ -23650,7 +23650,7 @@
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:850",
+    "src/apm_cli/install/services.py:848",
     "src/apm_cli/install/services.py:1050"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
@@ -23722,7 +23722,7 @@
     "src/apm_cli/commands/uninstall/engine.py:698",
     "src/apm_cli/commands/uninstall/engine.py:857",
     "src/apm_cli/commands/uninstall/engine.py:690",
-    "src/apm_cli/commands/update.py:448",
+    "src/apm_cli/commands/update.py:468",
     "src/apm_cli/commands/prune.py:199",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "593b5a092337fa5b2a4c1bc140011f1be5480e6409948d990946e6297f17d32f"
+ "sha256": "bb9d1347b3c14a898c9ced8f59d2eeceb5db2ff50aaad1526002d9066adabd9f"
 }

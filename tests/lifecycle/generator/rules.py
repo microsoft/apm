@@ -77,10 +77,10 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 1025, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 456, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 466, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 487, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 514, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 476, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 486, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 507, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 534, '"--target"'),
     ),
     "uninstall": (
         Ev("src/apm_cli/commands/uninstall/cli.py", 583, 'argument("packages"'),
@@ -146,7 +146,7 @@ USER_SCOPE_OPS = frozenset(
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 925, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 479, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 499, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 591, '"--global"'),
     "compile": Ev(_COMPILE, 1378, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 100, '"--global"'),
@@ -213,7 +213,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/commands/uninstall/engine.py", 698, "is an MCP server, not a package"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 857, "was not found in apm.yml"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 690, "cannot remove local-bundle"),
-            Ev("src/apm_cli/commands/update.py", 448, "No APM dependencies to update"),
+            Ev("src/apm_cli/commands/update.py", 468, "No APM dependencies to update"),
             Ev("src/apm_cli/commands/prune.py", 199, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
@@ -262,7 +262,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     "E3": (
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
-            Ev("src/apm_cli/install/services.py", 850, "staged_files"),
+            Ev("src/apm_cli/install/services.py", 848, "staged_files"),
             Ev("src/apm_cli/install/services.py", 1050, '"instructions" not in target.primitives'),
         ),
     ),
