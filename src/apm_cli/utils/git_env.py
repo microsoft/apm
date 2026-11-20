@@ -595,7 +595,12 @@ def _read_effective_git_config(
     probe_env = dict(env)
     probe_cwd: str | None = None
     if git_dir is not None:
-        command.extend(("--git-dir", str(git_dir)))
+        # Git refuses an explicit GIT_DIR longer than PATH_MAX - 40 (220 on
+        # Windows) with "'$GIT_DIR' too big", which deep staged clones reach
+        # (#4397). A relative GIT_DIR from its parent probes the same config.
+        absolute_git_dir = Path(os.path.abspath(git_dir))
+        command.append(f"--git-dir={absolute_git_dir.name}")
+        probe_cwd = str(absolute_git_dir.parent)
     elif worktree is not None:
         command.extend(("-C", str(worktree)))
     else:
