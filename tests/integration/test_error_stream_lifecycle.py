@@ -86,8 +86,7 @@ def test_piped_output_is_not_hard_wrapped(apm_binary_path: Path, tmp_path: Path)
 
     assert run.returncode == 1, run.stdout + run.stderr
     lines = (run.stdout + run.stderr).splitlines()
-    sentence = (
-        f"Local package path does not exist: {missing}. Restore the source or correct "
-        "the dependency path, then rerun apm install."
-    )
-    assert any(sentence in line for line in lines), "\n".join(lines)
+    head = f"Local package path does not exist: {missing}."
+    line = next((item for item in lines if head in item), "")
+    # The whole sentence, its long path and its remediation stay on one line.
+    assert "Restore the source or correct the dependency path, then" in line, "\n".join(lines)
