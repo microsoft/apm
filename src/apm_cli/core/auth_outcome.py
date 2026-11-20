@@ -558,3 +558,15 @@ def raise_for_auth_outcome(
     )
     if outcome.is_auth_failure:
         raise AuthAttemptFailed(outcome.detail, response=response)
+
+
+def reports_repository_not_found(error: BaseException) -> bool:
+    """Whether *error* (or a cause) is the canonical repository-not-found failure."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, RepositoryNotFoundError):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False

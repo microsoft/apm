@@ -62,7 +62,7 @@ KNOWN_LARGE_MODULES = {
     "drift.py": 1044,
     # The resolver takes its frozen pin mode from InstallService (#4012).
     # A missing declared dependency ends with a runnable next step (#4199).
-    "phases/resolve.py": 1014,
+    "phases/resolve.py": 1003,
     # An inaccessible package names the host and credential source tried
     # and one runnable verbose retry (#4174). Decomposition tracked as follow-up.
     "validation.py": 1014,
