@@ -89,5 +89,6 @@ def test_install_refuses_a_symlinked_lockfile_before_deploying(
 
     assert refused.returncode == 1, _evidence(refused)
     assert "symbolic link" in " ".join(refused.stderr.split()), _evidence(refused)
+    assert "symbolic link" not in refused.stdout, _evidence(refused)
     assert lock.is_symlink() and os.readlink(lock) == str(shared)
     assert _tree(*roots, shared.parent) == before, _evidence(refused)
