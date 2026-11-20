@@ -1413,7 +1413,7 @@ def test_output_oracle_joins_the_space_led_tail_of_a_path_folded_at_full_width()
         f"[*] Validating 1 package...\n[+] \n{head}\n{tail}\n"
         f"[>] Installing 1 new package...\n  [+] \n{head}\n{tail}\n (local)\n"
     )
-    assert output_violations(("install",), _cli(("install",), stdout)) == []
+    check_cli_output(("install",), _cli(("install",), stdout))
 
 
 def test_output_oracle_allows_non_ascii_characters_of_the_test_own_path() -> None:

@@ -705,7 +705,7 @@ def _logical_lines(text: str) -> list[str]:
     for raw in text.splitlines():
         line = raw.rstrip()
         wrapped = previous_raw.endswith(" ") or len(previous_raw) >= _WRAP_WIDTH
-        if len(previous_raw) >= _WRAP_WIDTH and re.match(r" \S", line):
+        if _WRAP_WIDTH <= len(previous_raw) <= _WRAP_WIDTH + 1 and re.match(r" \S", line):
             line = line[1:]
         previous_raw = raw
         if not line.strip():
