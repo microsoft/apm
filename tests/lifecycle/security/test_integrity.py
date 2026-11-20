@@ -469,8 +469,34 @@ def _edit_skill_package_copies(world: World, stack: contextlib.ExitStack) -> Non
 
 def _edit_recorded_content_hash(world: World, stack: contextlib.ExitStack) -> None:
     del stack
+    # The project commits its lock first, so the refusal's restore path is real.
+    if not (world.project / ".git").exists():
+        _git(world, "-C", str(world.project), "init", "-q", "--initial-branch=main")
+    _git(world, "-C", str(world.project), "add", "apm.lock.yaml")
+    _git(world, "-C", str(world.project), "commit", "-q", "-m", "lock")
     recorded = _dependency(_lock(world), "lifecycle/p-skill")["content_hash"]
     _replace_in_lock(world, recorded, "sha256:" + "2" * 64)
+
+
+def _converges(world: World, *remedy: list[str]) -> None:
+    """Run the refusal's remedy, then every reader of the lock agrees and passes (rule B)."""
+    for step in remedy:
+        if step[0] == "git":
+            _git(world, "-C", str(world.project), *step[1:])
+        else:
+            result = driver.run(world, step)
+            assert result.returncode == 0, f"{step}: {result.stdout}{result.stderr}"
+    for args in (["update", "--yes"], ["install"], ["install", "--frozen"], ["audit", "--ci"]):
+        result = driver.run(world, args)
+        assert result.returncode == 0, f"{args} after {remedy}: {result.stdout}{result.stderr}"
+
+
+def _cache_clean_converges(world: World) -> None:
+    _converges(world, ["cache", "clean", "--yes"])
+
+
+def _lock_restore_converges(world: World) -> None:
+    _converges(world, ["git", "checkout", "--", "apm.lock.yaml"])
 
 
 def _drop_recorded_content_hash(world: World, stack: contextlib.ExitStack) -> None:
@@ -524,9 +550,20 @@ GIT_CONTENT_HASH = ArtifactSlice(
         ("uninstall-prune", "lock-edited"): Expect(0, absent=(SKILL, LOCK)),
         ("uninstall-prune", "missing-hash"): Expect(0, absent=(SKILL, LOCK)),
         ("uninstall-prune", "upstream-or-proxy"): Expect(0, absent=(SKILL, LOCK)),
-        # An unchanged commit takes no new content (update.md).
-        ("update", "disk-or-cache"): Expect(0, unchanged=_SKILL_STATE),
-        ("update", "lock-edited"): Expect(0, unchanged=_SKILL_STATE),
+        # Same commit: a copy or a lock that contradicts the other fails closed, as
+        # install, --frozen and audit --ci do (I3); each remedy converges (rule B).
+        ("update", "disk-or-cache"): Expect(
+            1,
+            (_CONTENT_MISMATCH, r"apm cache clean --yes"),
+            unchanged=_SKILL_STATE,
+            check=_cache_clean_converges,
+        ),
+        ("update", "lock-edited"): Expect(
+            1,
+            (_CONTENT_MISMATCH, r"git checkout -- \S*apm\.lock\.yaml"),
+            unchanged=_SKILL_STATE,
+            check=_lock_restore_converges,
+        ),
         ("update", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("update", "upstream-or-proxy"): Expect(
             0, (r"New locked content for 1 dependency",), check=_skill_moved_in

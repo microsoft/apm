@@ -153,6 +153,29 @@ def _module_cache_needs_rehydration(
     return has_locked_dependency
 
 
+def _locked_copy_contradicts_lock(lockfile: LockFile | None, modules_dir: Path) -> bool:
+    """Whether a materialized locked package no longer matches its ``content_hash``.
+
+    An update with no ref change still runs install when a copy contradicts
+    the lock, so install's locked-source verdict
+    (:func:`~apm_cli.install.source_helpers.locked_content_mismatch`) re-fetches
+    it or refuses, as ``apm install``, ``--frozen`` and ``audit --ci`` do (#4385).
+    """
+    if lockfile is None:
+        return False
+    from apm_cli.install.source_helpers import locked_content_mismatch
+
+    for key, dependency in lockfile.dependencies.items():
+        if key == "." or not dependency.content_hash:
+            continue
+        install_path = dependency.to_dependency_ref().get_install_path(modules_dir)
+        if install_path.is_dir() and locked_content_mismatch(
+            key, dependency, install_path, lockfile=lockfile
+        ):
+            return True
+    return False
+
+
 def _executables_need_reconcile(
     lockfile: LockFile | None,
     modules_dir: Path,
@@ -1059,7 +1082,7 @@ def _run_dep_update_locked(
     _cache_rehydration_required = _module_cache_needs_rehydration(
         _existing_lock,
         _modules_dir,
-    )
+    ) or _locked_copy_contradicts_lock(_existing_lock, _modules_dir)
     _exec_reconcile_required = not _cache_rehydration_required and _executables_need_reconcile(
         _existing_lock, _modules_dir, scope, apm_package
     )
