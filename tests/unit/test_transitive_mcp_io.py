@@ -9,7 +9,12 @@ import yaml
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import APMPackage, MCPDependency
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-mcp-passthrough-denylist", "P-OWN-apm-package-manifest-construction"
+    ),
+]
 
 
 # ---------------------------------------------------------------------------

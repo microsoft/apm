@@ -10,7 +10,7 @@ import pytest
 
 from apm_cli.codex_plugins.client import CodexRpc
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-codex-native-plugin-lifecycle")]
 
 
 def test_rpc_reader_failure_stays_bounded_when_response_queue_is_full():

@@ -7,7 +7,10 @@ import pytest
 from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
 from apm_cli.core.command_logger import CommandLogger
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-skills-root-derivation", "P-OWN-user-facing-output-diagnostics"),
+]
 
 
 # ---------------------------------------------------------------------------

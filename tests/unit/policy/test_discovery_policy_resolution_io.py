@@ -24,7 +24,10 @@ from apm_cli.policy.discovery import (
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-cached-policy-shape", "P-OWN-policy-mcp-transport-projection"),
+]
 
 VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"
 

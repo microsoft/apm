@@ -817,7 +817,7 @@
 "tests/unit/test_uninstall_shared_diamond_dependency.py": 3.71,
 "tests/unit/test_uninstall_shared_ownership.py": 3.0,
 "tests/unit/test_uninstall_transitive_cleanup.py": 4.4,
-"tests/integration/test_unix_installer_checksums.py": 0.43,
+"tests/unit/test_unix_installer_checksums.py": 0.43,
 "tests/unit/test_unpack_security.py": 0.27,
 "tests/unit/test_unpacker.py": 1.29,
 "tests/unit/test_update_command.py": 0.48,

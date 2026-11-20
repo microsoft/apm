@@ -9,7 +9,10 @@ import pytest
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-marketplace-locked-selection", "P-OWN-frontmatter-bom-bounded-yaml"),
+]
 
 
 # ============================================================================

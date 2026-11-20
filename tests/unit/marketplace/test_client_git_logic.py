@@ -19,7 +19,12 @@ from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
 from apm_cli.utils.git_env import GitUrlRewriteError
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise(
+        "P-OWN-local-authoring-catalog", "P-OWN-marketplace-raw-structure-diagnostics"
+    ),
+]
 
 
 def _git_source(url: str, name: str = "acme", ref: str = "main") -> MarketplaceSource:

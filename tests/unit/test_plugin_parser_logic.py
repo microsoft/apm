@@ -8,7 +8,7 @@ from apm_cli.deps.plugin_parser import (
     _union_dep_list,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-legacy-plugin-skill-membership")]
 
 
 def test_union_dep_list_indexes_existing_entries_once() -> None:

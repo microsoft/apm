@@ -11,7 +11,7 @@ from apm_cli.deps.lockfile import (
     LockFile,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-read-only-lockfile-path")]
 
 
 @pytest.mark.parametrize(

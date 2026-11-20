@@ -4,7 +4,7 @@ import pytest
 
 from apm_cli.install.mcp.writer import _diff_entry
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-consumer-manifest-rewrite")]
 
 
 # ---------------------------------------------------------------------------

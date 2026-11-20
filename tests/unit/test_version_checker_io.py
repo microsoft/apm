@@ -13,7 +13,7 @@ from apm_cli.utils.version_checker import (
     should_check_for_updates,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-release-metadata-discovery")]
 
 
 class TestVersionCheckCache(unittest.TestCase):

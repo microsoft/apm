@@ -8,7 +8,12 @@ import pytest
 
 from apm_cli.models.apm_package import DependencyReference
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-install-command-scope-selection", "P-OWN-apm-package-manifest-construction"
+    ),
+]
 
 # ── to_canonical() ──────────────────────────────────────────────────────────
 

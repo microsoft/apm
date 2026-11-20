@@ -6,7 +6,7 @@ import pytest
 from apm_cli.cli import cli
 from apm_cli.output.script_formatters import ScriptExecutionFormatter
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-process-interrupt-signals")]
 
 
 def _walk_commands(group: click.Group, prefix: tuple[str, ...] = ()):

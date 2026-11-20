@@ -12,7 +12,12 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-user-root-scoped-instruction-eligibility", "P-OWN-apm-package-manifest-construction"
+    ),
+]
 
 
 def _make_package_info(pkg_dir: Path, *, name: str = "test-pkg") -> PackageInfo:

@@ -14,7 +14,7 @@ from apm_cli.bundle.plugin_exporter import (
 )
 from apm_cli.deps.lockfile import LockedDependency
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-read-only-lockfile-path")]
 
 # ---------------------------------------------------------------------------
 # Helpers

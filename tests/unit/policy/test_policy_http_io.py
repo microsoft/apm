@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-cached-policy-shape")]
 
 
 def test_url_credentials_become_an_explicit_basic_header(tmp_path) -> None:

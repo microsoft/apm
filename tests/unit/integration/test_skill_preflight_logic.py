@@ -9,7 +9,7 @@ from apm_cli.integration.skill_preflight import (
     format_skill_conflicts,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-unmanaged-skill-preflight")]
 
 
 def test_multiple_conflicts_keep_each_source_and_one_nondestructive_remedy() -> None:

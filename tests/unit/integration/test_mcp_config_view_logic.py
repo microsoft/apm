@@ -9,7 +9,7 @@ from apm_cli.integration.mcp_config_view import (
     McpConfigDiff,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-mcp-declaration-scope")]
 
 
 def test_symmetric_diff_reports_changed_source_only_and_lock_only() -> None:

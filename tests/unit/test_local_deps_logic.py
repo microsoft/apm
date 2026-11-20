@@ -7,7 +7,7 @@ import pytest
 
 from apm_cli.models.apm_package import DependencyReference
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-apm-package-manifest-construction")]
 
 # ===========================================================================
 # DependencyReference.is_local_path()

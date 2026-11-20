@@ -11,7 +11,12 @@ from apm_cli.core.target_detection import (
     parse_target_field,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-effective-install-target-selection", "P-OWN-accepted-target-vocabulary"
+    ),
+]
 
 COMMANDS = ("compile", "install", "update")
 

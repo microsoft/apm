@@ -9,7 +9,7 @@ from apm_cli.marketplace.client import (
 )
 from apm_cli.marketplace.errors import MarketplaceFetchError
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-local-authoring-catalog")]
 
 
 @pytest.mark.parametrize(

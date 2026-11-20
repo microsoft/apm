@@ -17,7 +17,10 @@ import pytest
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.models.dependency.reference import DependencyReference
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-locked-copy-validity", "P-OWN-read-only-lockfile-path"),
+]
 
 
 # ---------------------------------------------------------------------------

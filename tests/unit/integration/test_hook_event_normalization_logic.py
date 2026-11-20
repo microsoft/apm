@@ -9,7 +9,7 @@ from apm_cli.integration.hook_integrator import (
     _emit_hook_event_diagnostics,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-neutral-hook-contract")]
 
 
 @pytest.mark.parametrize(

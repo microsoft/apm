@@ -14,7 +14,7 @@ from apm_cli.commands._helpers import (
 )
 from apm_cli.install.orphans import _find_orphaned_packages
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-orphan-package-selection")]
 
 # ---------------------------------------------------------------------------
 # _atomic_write

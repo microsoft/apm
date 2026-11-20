@@ -12,7 +12,10 @@ from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.policy.policy_checks import run_dependency_policy_checks
 from apm_cli.policy.schema import ApmPolicy, McpPolicy, McpTransportPolicy
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-policy-mcp-transport-projection", "P-OWN-mcp-passthrough-denylist"),
+]
 
 SSE_SERVER = {
     "name": "io.example/sse-server",

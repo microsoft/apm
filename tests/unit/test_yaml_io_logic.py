@@ -8,7 +8,7 @@ from apm_cli.utils.yaml_io import (
     loads_frontmatter,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-frontmatter-bom-bounded-yaml")]
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])

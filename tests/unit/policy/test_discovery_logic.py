@@ -31,7 +31,10 @@ from apm_cli.policy.parser import PolicyValidationError, load_policy  # noqa: F4
 from apm_cli.policy.schema import ApmPolicy
 from tests.utils.simulated_ado_chain import StaticPolicyResolver
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-host-credential-resolution", "P-OWN-cached-policy-shape"),
+]
 
 # Minimal valid YAML that produces a valid ApmPolicy
 VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"

@@ -7,7 +7,7 @@ import pytest
 from apm_cli.integration.lsp_integrator import LSPIntegrator
 from apm_cli.models.dependency.lsp import LSPDependency
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-lsp-target-contract")]
 
 
 # ---------------------------------------------------------------------------

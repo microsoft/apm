@@ -31,7 +31,12 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import APMPackage, DependencyReference
 from apm_cli.models.validation import validate_apm_package
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-host-credential-resolution", "P-OWN-single-file-package-materialization"
+    ),
+]
 
 _REPO = "https://github.com/acme/monorepo"
 _ANONYMOUS_BLOB_FETCH_STDERR = (

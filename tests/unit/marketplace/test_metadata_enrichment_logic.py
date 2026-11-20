@@ -9,7 +9,7 @@ from apm_cli.marketplace.builder import (
     MetadataEnrichmentResult,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-marketplace-metadata-enrichment")]
 
 
 def test_metadata_outcome_mapping_uses_the_precomputed_package_index() -> None:

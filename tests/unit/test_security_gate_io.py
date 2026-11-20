@@ -13,7 +13,10 @@ from apm_cli.security.gate import (
     SecurityGate,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-generated-python-artifact-membership"),
+]
 
 # ---------------------------------------------------------------------------
 # Helpers

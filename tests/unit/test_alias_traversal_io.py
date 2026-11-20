@@ -7,7 +7,7 @@ import pytest
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-url-path-containment-decoding")]
 
 
 class TestInstallPhaseSymlinkEscape:

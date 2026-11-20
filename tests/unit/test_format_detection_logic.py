@@ -12,7 +12,7 @@ from apm_cli.models.format_detection import (
     SkillMdDetector,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-package-format-precedence")]
 
 # ---------------------------------------------------------------------------
 # ApmYmlDetector

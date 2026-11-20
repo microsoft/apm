@@ -14,7 +14,12 @@ from apm_cli.marketplace.models import (
 )
 from apm_cli.marketplace.resolver import resolve_marketplace_plugin
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise(
+        "P-OWN-marketplace-raw-structure-diagnostics", "P-OWN-git-transport-selection"
+    ),
+]
 
 
 def _patch_marketplace(

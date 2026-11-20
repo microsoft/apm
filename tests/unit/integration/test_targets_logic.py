@@ -10,7 +10,10 @@ from apm_cli.integration.targets import (
     PrimitiveMapping,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-user-root-scoped-instruction-eligibility"),
+]
 
 
 class TestPrimitiveMappingValidation:

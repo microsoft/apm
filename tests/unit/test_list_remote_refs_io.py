@@ -13,7 +13,10 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-host-credential-resolution", "P-OWN-ls-remote-tag-commits"),
+]
 
 # ---------------------------------------------------------------------------
 # Fixtures

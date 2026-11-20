@@ -12,7 +12,10 @@ import pytest
 
 from apm_cli.commands.marketplace.plugin import _has_marketplace_block
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-marketplace-entry-ref-verification"),
+]
 
 
 @pytest.mark.parametrize(

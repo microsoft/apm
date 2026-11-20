@@ -9,7 +9,7 @@ from apm_cli.security.audit_report import (
     write_report,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-audit-finding-serialization")]
 
 
 class TestWriteReport:

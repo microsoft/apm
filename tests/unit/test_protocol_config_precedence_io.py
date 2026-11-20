@@ -5,7 +5,10 @@ from unittest.mock import patch
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-install-command-scope-selection", "P-OWN-git-transport-selection"),
+]
 
 # ---------------------------------------------------------------------------
 # Helpers

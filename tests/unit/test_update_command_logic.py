@@ -7,7 +7,7 @@ import pytest
 
 import apm_cli.commands.self_update as update_module
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-self-update-release-resolution")]
 
 
 class TestUpdatePlatformHelpers(unittest.TestCase):

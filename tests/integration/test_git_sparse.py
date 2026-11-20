@@ -31,7 +31,13 @@ from tests.utils.git_link_fixture import (
     tree_bytes,
 )
 
-pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.windows_compat,
+    pytest.mark.promise(
+        "P-OWN-sparse-cone-symlink-validation", "P-OWN-url-path-containment-decoding"
+    ),
+]
 
 _PIN = ["-c", "core.symlinks=false", "-c", "core.autocrlf=false"]
 

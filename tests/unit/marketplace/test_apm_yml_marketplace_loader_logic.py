@@ -6,7 +6,7 @@ import pytest
 
 from apm_cli.marketplace.output_profiles import MARKETPLACE_OUTPUTS, known_output_names
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-effective-marketplace-output-path")]
 
 
 def test_marketplace_output_profiles_define_supported_outputs() -> None:

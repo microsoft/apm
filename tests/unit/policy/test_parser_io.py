@@ -11,7 +11,7 @@ from apm_cli.policy.parser import (
     load_policy,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-policy-mcp-transport-projection")]
 
 
 class TestLoadPolicyFromFile(unittest.TestCase):

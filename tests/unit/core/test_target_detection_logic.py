@@ -23,7 +23,12 @@ from apm_cli.core.target_detection import (
     should_compile_gemini_md,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise(
+        "P-OWN-effective-install-target-selection", "P-OWN-user-root-scoped-instruction-eligibility"
+    ),
+]
 
 
 class TestShouldCompileAgentsMd:

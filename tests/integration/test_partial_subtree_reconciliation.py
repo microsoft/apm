@@ -20,7 +20,10 @@ from apm_cli.install.phases.lockfile import LockfileBuilder
 from apm_cli.install.presentation import dry_run
 from apm_cli.models.dependency.reference import DependencyReference
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-read-only-lockfile-path", "P-OWN-prospective-dry-run-install-plan"),
+]
 
 
 def _lock(*entries: LockedDependency) -> LockFile:

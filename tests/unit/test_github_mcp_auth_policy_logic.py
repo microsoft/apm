@@ -7,7 +7,7 @@ import pytest
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.dependency.mcp import ManifestHeaderValue, MCPDependency
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-mcp-passthrough-denylist")]
 
 
 @pytest.mark.parametrize("value", [None, False, 0, "", "static-auth"])

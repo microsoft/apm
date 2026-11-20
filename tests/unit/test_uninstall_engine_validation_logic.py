@@ -9,7 +9,10 @@ import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-skills-root-derivation", "P-OWN-orphan-package-selection"),
+]
 
 # ---------------------------------------------------------------------------
 # Helpers

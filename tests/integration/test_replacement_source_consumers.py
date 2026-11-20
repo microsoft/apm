@@ -48,7 +48,12 @@ from apm_cli.policy.policy_checks import _check_dependency_allowlist, _check_dep
 from apm_cli.policy.schema import DependencyPolicy
 from apm_cli.utils.content_hash import compute_package_digests, compute_package_hash
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-dependency-identity-materialization", "P-OWN-agent-plugin-package-projection"
+    ),
+]
 
 
 def _locked(tmp_path: Path, source: dict, *, parent: str | None = None):

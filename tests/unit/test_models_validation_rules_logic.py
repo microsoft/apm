@@ -15,7 +15,7 @@ from apm_cli.models.validation import (
     ValidationResult,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-agent-plugin-package-projection")]
 
 # ---------------------------------------------------------------------------
 # PackageContentType.from_string()

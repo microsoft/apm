@@ -10,7 +10,13 @@ from apm_cli.integration import targets as targets_mod
 from apm_cli.integration.hook_command_paths import splice_references
 from apm_cli.integration.targets import KNOWN_TARGETS, UserHookHomeReference
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise(
+        "P-OWN-plugin-root-hook-command-vocabulary",
+        "P-OWN-user-root-scoped-instruction-eligibility",
+    ),
+]
 
 _VERIFIED = {
     "claude": ("command", "bash"),

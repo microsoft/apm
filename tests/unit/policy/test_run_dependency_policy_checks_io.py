@@ -13,7 +13,12 @@ from apm_cli.policy.schema import (
     RegistrySourcePolicy,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-apm-package-manifest-construction", "P-OWN-audit-finding-serialization"
+    ),
+]
 
 # -- Helpers --------------------------------------------------------
 

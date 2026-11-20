@@ -17,7 +17,10 @@ from tests.utils.git_credential_sentinel import (
     exercise_credential_helper,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-host-credential-resolution", "P-OWN-git-clone-connect-retry"),
+]
 
 
 def _ado_host(git_env: dict) -> MagicMock:

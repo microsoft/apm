@@ -17,7 +17,10 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.utils.path_security import PathTraversalError
 from apm_cli.utils.path_security import safe_rmtree as real_safe_rmtree
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-read-only-lockfile-path", "P-OWN-url-path-containment-decoding"),
+]
 
 # ---------------------------------------------------------------------------
 # Helpers

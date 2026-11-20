@@ -10,7 +10,10 @@ from apm_cli.models.apm_package import (
     DependencyReference,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-read-only-lockfile-path", "P-OWN-apm-package-manifest-construction"),
+]
 
 
 class TestLockfileExtensions:

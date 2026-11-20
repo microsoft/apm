@@ -23,7 +23,10 @@ from apm_cli.policy.schema import (
     UnmanagedFilesPolicy,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-cached-policy-shape", "P-OWN-policy-mcp-transport-projection"),
+]
 
 # ---------------------------------------------------------------------------
 # Helpers

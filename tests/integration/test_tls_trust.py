@@ -34,7 +34,7 @@ from apm_cli.core.tls_trust import (
     tls_failure_guidance,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-https-trust-policy")]
 
 _NON_REQUESTS_CA_ENV_VARS = ("SSL_CERT_FILE", "SSL_CERT_DIR")
 _ALL_TRUST_ENV = (

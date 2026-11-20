@@ -16,7 +16,10 @@ from apm_cli.core.script_executors import (
     execute_script,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-lifecycle-script-firing-gate", "P-OWN-https-trust-policy"),
+]
 
 
 def _make_event(event_name: str = "post-install") -> LifecycleEvent:

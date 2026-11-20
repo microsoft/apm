@@ -36,7 +36,12 @@ from apm_cli.deps.transport_selection import (
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.git_env import GitUrlRewriteError, get_git_executable, git_network_env
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-git-transport-selection", "P-OWN-dependency-identity-materialization"
+    ),
+]
 
 # ---------------------------------------------------------------------------
 # Helpers

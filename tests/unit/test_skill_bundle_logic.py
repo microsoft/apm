@@ -7,7 +7,7 @@ from src.apm_cli.models.apm_package import (
     ValidationResult,  # noqa: F401
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-install-command-scope-selection")]
 
 # ============================================================================
 # Detection: covers all 8 shapes from the plan's test matrix

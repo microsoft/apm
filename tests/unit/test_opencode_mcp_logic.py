@@ -7,7 +7,7 @@ import pytest
 from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
 from apm_cli.factory import ClientFactory
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-mcp-passthrough-denylist")]
 
 
 class TestOpenCodeClientFactory(unittest.TestCase):

@@ -10,7 +10,7 @@ from apm_cli.policy.discovery import (
     _get_cache_dir,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-cached-policy-shape")]
 
 # ──────────────────────────────────────────────────────────────────────
 # #2: PolicyBlockError is an alias of PolicyViolationError

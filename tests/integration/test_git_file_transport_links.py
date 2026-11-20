@@ -16,7 +16,11 @@ from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils import git_sparse
 from tests.utils.git_link_fixture import bare_clone, build_link_origin, neutral_git_env
 
-pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.windows_compat,
+    pytest.mark.promise("P-OWN-apm-package-manifest-construction"),
+]
 
 
 def _transport(tmp_path: Path, extra_links: dict[str, str] | None = None) -> GitSparseFileTransport:

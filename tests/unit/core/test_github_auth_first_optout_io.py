@@ -9,7 +9,10 @@ import pytest
 
 from apm_cli.core.auth import AuthContext, AuthResolver, HostInfo
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-host-credential-resolution", "P-OWN-git-child-repository-isolation"),
+]
 
 # ---------------------------------------------------------------------------
 # uses_public_github_anonymous_first -- resolution order

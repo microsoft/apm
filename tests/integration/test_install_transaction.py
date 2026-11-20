@@ -22,7 +22,11 @@ from apm_cli.models.results import InstallDisposition, InstallResult
 from apm_cli.utils.path_security import PathTraversalError, safe_rmtree
 from tests.utils.filelock_retention import retain_native_lock_unlink
 
-pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.windows_compat,
+    pytest.mark.promise("P-OWN-process-interrupt-signals", "P-OWN-user-facing-output-diagnostics"),
+]
 
 
 # Generous upper bound: spawned interpreters start slowly on loaded CI runners,

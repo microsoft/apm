@@ -23,7 +23,10 @@ from apm_cli.utils.version_checker import (
     get_latest_version_from_github,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-self-update-release-resolution", "P-OWN-release-metadata-discovery"),
+]
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "tests/fixtures/public_release_metadata"
 TOKEN = "SYNTHETIC_NOT_A_CREDENTIAL_2833"

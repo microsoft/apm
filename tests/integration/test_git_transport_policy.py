@@ -15,7 +15,10 @@ from apm_cli.utils.git_env import (
     git_network_env,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-host-credential-resolution", "P-OWN-git-child-repository-isolation"),
+]
 
 _PLATFORM_TOKENS = {
     "ADO_APM_PAT": "ado-sentinel",

@@ -24,7 +24,10 @@ from apm_cli.marketplace.ref_resolver import RemoteRef, _parse_ls_remote_output
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepository, LocalGitRepositoryFactory
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-marketplace-metadata-enrichment", "P-OWN-ls-remote-tag-commits"),
+]
 
 _SOURCE = "acme/tagged-package"
 

@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-cached-policy-shape")]
 
 
 def _assert_redirect_target_host(error: str, expected_host: str) -> None:

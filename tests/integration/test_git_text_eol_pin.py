@@ -31,7 +31,13 @@ from apm_cli.utils.git_env import (
 )
 from apm_cli.utils.git_sparse import apply_sparse_cone, materialize_tracked_symlinks
 
-pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.windows_compat,
+    pytest.mark.promise(
+        "P-OWN-codex-native-plugin-lifecycle", "P-OWN-git-child-repository-isolation"
+    ),
+]
 
 _ATTRIBUTES = b"* text=auto\n*.bat text eol=crlf\n*.sh text eol=lf\n*.bin binary\n"
 

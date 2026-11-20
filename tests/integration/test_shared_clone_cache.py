@@ -19,7 +19,12 @@ import pytest
 
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-single-file-package-materialization", "P-OWN-dependency-identity-materialization"
+    ),
+]
 
 
 @pytest.fixture(autouse=True)

@@ -11,7 +11,7 @@ from apm_cli.integration.hook_file_routing import (
     raise_for_legacy_routing,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-neutral-hook-contract")]
 
 
 def test_migration_error_is_actionable_and_printable_ascii() -> None:

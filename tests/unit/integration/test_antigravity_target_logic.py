@@ -11,7 +11,12 @@ from apm_cli.core.target_detection import (
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise(
+        "P-OWN-effective-install-target-selection", "P-OWN-user-root-scoped-instruction-eligibility"
+    ),
+]
 
 
 # ---------------------------------------------------------------------------

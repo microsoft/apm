@@ -28,7 +28,10 @@ from apm_cli.policy.schema import (
     UnmanagedFilesPolicy,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-read-only-lockfile-path", "P-OWN-apm-package-manifest-construction"),
+]
 
 # -- Helpers --------------------------------------------------------
 

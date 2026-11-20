@@ -12,7 +12,12 @@ from apm_cli.marketplace.resolver import (
     _gitlab_in_marketplace_dependency_reference,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-install-command-scope-selection", "P-OWN-apm-package-manifest-construction"
+    ),
+]
 
 
 class TestInstallMarketplaceGitLabMonorepoWiring:

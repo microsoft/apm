@@ -7,7 +7,7 @@ from apm_cli.adapters.client.intellij import (
 )
 from apm_cli.factory import ClientFactory
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-jetbrains-copilot-mcp-config-path")]
 
 
 class TestIntelliJClientFactory:

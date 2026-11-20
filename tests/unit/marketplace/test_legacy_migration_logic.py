@@ -6,7 +6,7 @@ import pytest
 
 from apm_cli.marketplace.models import MarketplaceSource
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-marketplace-raw-structure-diagnostics")]
 
 
 def test_branch_field_accepted_as_ref_alias() -> None:

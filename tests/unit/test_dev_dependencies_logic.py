@@ -8,7 +8,10 @@ from apm_cli.deps.dependency_graph import DependencyNode
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.models.apm_package import APMPackage, DependencyReference
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-read-only-lockfile-path", "P-OWN-apm-package-manifest-construction"),
+]
 
 # ---------------------------------------------------------------------------
 # Part 3d: LockedDependency.is_dev field

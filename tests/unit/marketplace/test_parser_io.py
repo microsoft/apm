@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-marketplace-raw-structure-diagnostics", "P-OWN-marketplace-source-admission"
+    ),
+]
 
 
 def test_marketplace_origin_keeps_hosted_url_and_skips_local(tmp_path) -> None:

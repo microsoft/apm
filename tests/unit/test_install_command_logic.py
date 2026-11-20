@@ -6,7 +6,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise(
+        "P-OWN-install-command-scope-selection", "P-OWN-dependency-identity-materialization"
+    ),
+]
 
 
 # ---------------------------------------------------------------------------

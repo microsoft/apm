@@ -4,7 +4,7 @@ import pytest
 
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-distributed-agents-output-preparation")]
 
 
 # ── Diagnostics security rendering tests ────────────────────────────

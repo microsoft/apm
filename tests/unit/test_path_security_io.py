@@ -12,7 +12,7 @@ from apm_cli.utils.path_security import (
     safe_rmtree,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-url-path-containment-decoding")]
 
 # ---------------------------------------------------------------------------
 # ensure_path_within

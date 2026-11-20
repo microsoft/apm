@@ -17,7 +17,10 @@ from apm_cli.marketplace.ref_resolver import (
 )
 from apm_cli.utils.git_env import get_git_executable
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-ls-remote-tag-commits", "P-OWN-git-child-repository-isolation"),
+]
 
 # ---------------------------------------------------------------------------
 # _parse_ls_remote_output

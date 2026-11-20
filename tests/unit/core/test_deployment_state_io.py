@@ -23,7 +23,12 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-deployment-provenance-state", "P-OWN-target-scoped-deployed-file-contraction"
+    ),
+]
 
 
 def _target(name: str, root: str, managed: Path | None = None) -> TargetProfile:

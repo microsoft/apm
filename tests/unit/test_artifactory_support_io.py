@@ -27,7 +27,10 @@ from apm_cli.utils.github_host import (
     build_artifactory_archive_url,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-host-credential-resolution", "P-OWN-git-transport-selection"),
+]
 
 
 def _mock_stream_response(

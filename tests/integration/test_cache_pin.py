@@ -34,7 +34,10 @@ from apm_cli.install.cache_pin import (
     write_marker,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-locked-copy-validity", "P-OWN-read-only-lockfile-path"),
+]
 
 
 def _make_install_dir(tmp_path: Path, name: str = "pkg") -> Path:

@@ -12,7 +12,12 @@ from apm_cli.integration.skill_integrator import (
     validate_skill_name,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise(
+        "P-OWN-apm-package-manifest-construction", "P-OWN-legacy-plugin-skill-membership"
+    ),
+]
 
 # ---------------------------------------------------------------------------
 # Helpers

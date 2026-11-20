@@ -10,7 +10,12 @@ from apm_cli.primitives.discovery import (
     get_dependency_declaration_order,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-distributed-agents-output-preparation", "P-OWN-dependency-identity-materialization"
+    ),
+]
 
 
 class TestADOPrimitiveDiscovery:

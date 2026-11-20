@@ -11,7 +11,7 @@ import apm_cli.core.token_manager as token_manager_module
 from apm_cli.core.auth import AuthResolver, _redact_secrets
 from apm_cli.core.azure_cli import AzureCliBearerError
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-host-credential-resolution")]
 
 
 class _FakeProvider:

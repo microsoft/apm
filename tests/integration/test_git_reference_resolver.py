@@ -42,7 +42,10 @@ from tests.utils.git_credential_sentinel import (
     exercise_credential_helper,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-git-transport-selection", "P-OWN-host-credential-resolution"),
+]
 
 # ---------------------------------------------------------------------------
 # Test helpers

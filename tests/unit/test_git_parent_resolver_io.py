@@ -6,7 +6,10 @@ import yaml
 from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.models.dependency import DependencyReference
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-dependency-identity-materialization"),
+]
 
 
 @pytest.fixture

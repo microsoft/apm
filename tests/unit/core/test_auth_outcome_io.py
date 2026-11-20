@@ -9,7 +9,7 @@ import pytest
 import apm_cli.core.token_manager as token_manager_module
 from apm_cli.core.token_manager import GitHubTokenManager
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-host-credential-resolution")]
 
 
 def test_helper_credential_keeps_username_and_request_scope(monkeypatch) -> None:

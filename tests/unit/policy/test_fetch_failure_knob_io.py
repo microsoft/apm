@@ -12,7 +12,10 @@ import pytest
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.project_config import read_project_fetch_failure_default
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-policy-violation-subjects", "P-OWN-cached-policy-shape"),
+]
 
 
 # =====================================================================

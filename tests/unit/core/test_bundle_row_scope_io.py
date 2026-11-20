@@ -8,7 +8,10 @@ from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-deployment-provenance-state", "P-OWN-apm-home-resolution"),
+]
 
 _BUNDLED = ".claude/skills/bundled/SKILL.md"
 _HASH = "sha256:" + "b" * 64

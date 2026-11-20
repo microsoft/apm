@@ -4,7 +4,7 @@ import pytest
 
 from apm_cli.commands.deps.cli import _deps_list_source_label
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-dependency-identity-materialization")]
 
 
 def test_deps_list_source_label_mapping():

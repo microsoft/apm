@@ -8,7 +8,10 @@ import pytest
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-neutral-hook-contract", "P-OWN-apm-package-manifest-construction"),
+]
 
 
 def _make_package_info(install_path: Path, name: str = "hookify") -> PackageInfo:

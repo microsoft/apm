@@ -23,7 +23,10 @@ from apm_cli.policy.project_config import (
 )
 from apm_cli.policy.schema import ApmPolicy
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-cached-policy-shape", "P-OWN-policy-violation-subjects"),
+]
 
 _VALID_POLICY_YAML = "name: org-policy\nversion: '1.0'\nenforcement: warn\n"
 

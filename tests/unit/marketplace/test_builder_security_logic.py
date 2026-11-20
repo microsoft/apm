@@ -9,7 +9,7 @@ from apm_cli.marketplace.builder import (
 )
 from apm_cli.marketplace.errors import BuildError
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-marketplace-metadata-enrichment")]
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-copilot-cli-mcp-config-paths")]
 
 
 class TestAdapterRealPathExtraRender:

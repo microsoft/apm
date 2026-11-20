@@ -9,7 +9,10 @@ import pytest
 from apm_cli.marketplace import client as mp_client
 from apm_cli.marketplace.models import MarketplaceSource
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-marketplace-raw-structure-diagnostics"),
+]
 
 CATALOG = {"name": "catalog", "plugins": [{"name": "skill-creator", "source": "owner/repo"}]}
 

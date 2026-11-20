@@ -17,7 +17,10 @@ from apm_cli.core.target_detection import (
     resolve_targets,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-effective-install-target-selection"),
+]
 
 # ---------------------------------------------------------------------------
 # Helpers

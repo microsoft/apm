@@ -9,7 +9,10 @@ import yaml
 
 from apm_cli.integration.mcp_integrator import MCPIntegrator, _is_vscode_available
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-read-only-lockfile-path", "P-OWN-mcp-passthrough-denylist"),
+]
 
 # ---------------------------------------------------------------------------
 # Helpers

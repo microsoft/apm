@@ -15,7 +15,10 @@ from apm_cli.policy.policy_checks import (
 )
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-read-only-lockfile-path", "P-OWN-policy-mcp-transport-projection"),
+]
 
 ENTERPRISE_ALLOW = (
     "ghes.corp.example/**",

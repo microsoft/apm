@@ -20,7 +20,12 @@ from apm_cli.policy.ci_checks import _check_content_integrity
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.git_env import get_git_executable
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise(
+        "P-OWN-read-only-lockfile-path", "P-OWN-single-file-package-materialization"
+    ),
+]
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = (
     ROOT

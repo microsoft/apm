@@ -9,7 +9,7 @@ from apm_cli.core.plugin_manifest import (
     PLUGIN_MANIFEST_ECOSYSTEMS,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-pack-plugin-manifests")]
 
 
 # ---------------------------------------------------------------------------
