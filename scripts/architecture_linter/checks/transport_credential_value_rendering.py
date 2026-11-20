@@ -141,9 +141,7 @@ def _is_rendered(node: ast.expr) -> bool:
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         if node.func.id in _RENDERING_CALLS:
             return True
-    if _is_remediation_render(node):
-        return True
-    return ast.unparse(node) in _SAFE_EXPRESSIONS
+    return _is_remediation_render(node) or ast.unparse(node) in _SAFE_EXPRESSIONS
 
 
 _REMEDIATION_RENDERS = frozenset({"sentence", "clause", "option"})
