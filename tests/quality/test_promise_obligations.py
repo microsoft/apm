@@ -285,3 +285,20 @@ def test_merged_receipts_hold_the_ratchet() -> None:
     ]
     assert not promotable, f"baseline rows now covered; move them to required: {promotable}"
     assert not problems, "\n".join(problems)
+
+
+def test_i9_reports_one_violation_per_duplicated_cause(tmp_path: Path) -> None:
+    stdout = (
+        "[i] a\n[i] a\n[i] b\n[i] b\n[+] p\n  |-- 1 skill integrated\n  |-- 1 skill integrated\n"
+    )
+    result = CommandResult(("apm", "install"), 0, stdout, "", tmp_path)
+    found = [v.message for v in oracles._i9_no_noise(None, None, result, None, None)]
+    assert found == [
+        "identical consecutive line: '[i] a'",
+        "identical consecutive line: '[i] b'",
+        "identical consecutive line: '|-- 1 skill integrated'",
+    ]
+    nonadjacent = "[+] p\n  |-- 1 skill integrated\n  [i] n\n  |-- 1 skill integrated\n"
+    result = CommandResult(("apm", "install"), 0, nonadjacent, "", tmp_path)
+    found = [v.message for v in oracles._i9_no_noise(None, None, result, None, None)]
+    assert found == ["duplicate 'integrated' line: '|-- 1 skill integrated'"]
