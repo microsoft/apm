@@ -77,10 +77,10 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 1013, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 560, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 570, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 591, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 618, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 576, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 586, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 607, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 634, '"--target"'),
     ),
     "uninstall": (
         Ev("src/apm_cli/commands/uninstall/cli.py", 761, 'argument("packages"'),
@@ -146,7 +146,7 @@ USER_SCOPE_OPS = frozenset(
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 913, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 583, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 599, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 769, '"--global"'),
     "compile": Ev(_COMPILE, 1396, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
