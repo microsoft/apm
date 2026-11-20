@@ -49,12 +49,10 @@ from apm_cli.core.auth_chain import (  # AdoAuthChainExhaustedError: re-exported
     run_ado_chain,
 )
 from apm_cli.core.auth_outcome import (  # noqa: F401 -- SecretRedactionFilter re-exported
-    SECRET_RE,
     AuthAttemptFailed,
     AuthOutcomeKind,
     SecretRedactionFilter,
     classify_auth_outcome,
-    redact_secrets,
     sanitize_diagnostic_detail,
 )
 from apm_cli.core.host_providers import (
@@ -68,6 +66,7 @@ from apm_cli.models.dependency.host_virtual import (
     dependency_repository_owner,
     repository_owner_from_reference_text,
 )
+from apm_cli.utils.credential_rendering import redact_secrets as _redact_secrets  # noqa: F401
 from apm_cli.utils.github_host import (
     default_host,
     is_gitlab_hostname,
@@ -84,19 +83,8 @@ logger = logging.getLogger(__name__)
 # Secret redaction -- applied by SecretRedactionFilter to all debug records
 # ---------------------------------------------------------------------------
 
-# The redaction pattern is owned by ``core/auth_outcome.py`` so the auth chain,
-# diagnostics, and this logging filter share one definition.
-_SECRET_RE = SECRET_RE
-
-
-def _redact_secrets(text: str) -> str:
-    """Replace obvious credential patterns in ``text`` with ``[REDACTED]``.
-
-    Called by :class:`SecretRedactionFilter` before log records are emitted.
-    Also safe to call directly in tests.  Preserves text that contains no
-    secret patterns so non-sensitive messages are returned verbatim.
-    """
-    return redact_secrets(text)
+# The redaction pattern is owned by ``utils/credential_rendering.py`` so the
+# auth chain, diagnostics, and this logging filter share one definition.
 
 
 _PORT_CREDENTIAL_DOCS_URL = (
