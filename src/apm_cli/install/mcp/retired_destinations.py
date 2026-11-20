@@ -209,7 +209,7 @@ def heal_retired_project_mcp_destinations(
     detection signal; ``run_mcp_integration`` sets it for a ``--frozen``
     replay from ``InstallService.frozen_disposition``.
     """
-    from apm_cli.utils.atomic_io import atomic_write_text
+    from apm_cli.utils.json_config import write_json_config
 
     heal = RetiredMcpHeal(removed={}, kept={}, deleted_files=[])
     for destination in RETIRED_PROJECT_MCP_DESTINATIONS:
@@ -254,10 +254,7 @@ def heal_retired_project_mcp_destinations(
             continue
         if not removed_here:
             continue
-        text = json.dumps(data, indent=2)
-        if raw.endswith("\n"):
-            text += "\n"
-        atomic_write_text(path, text)
+        write_json_config(path, data, default_trailing_newline=raw.endswith("\n"))
     return heal
 
 

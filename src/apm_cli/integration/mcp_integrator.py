@@ -53,6 +53,7 @@ from apm_cli.utils.console import (
     _rich_success,
     _rich_warning,
 )
+from apm_cli.utils.json_config import write_json_config
 from apm_cli.utils.staging_guard import assert_no_staging_paths
 from apm_cli.utils.yaml_io import load_yaml, yaml_to_str
 
@@ -199,10 +200,12 @@ def _clean_json_mcp_config(
                 del nested[name]
             removed = sorted(builtins.set(removed) | builtins.set(nested_removed))
         if removed:
-            text = json.dumps(config, indent=2)
-            if trailing_newline:
-                text += "\n"
-            atomic_write_text(config_path, text, new_file_mode=0o600)
+            write_json_config(
+                config_path,
+                config,
+                default_trailing_newline=trailing_newline,
+                new_file_mode=0o600,
+            )
             for name in removed:
                 msg = f"Removed stale MCP server '{name}' from {label}"
                 if use_rich:
@@ -371,9 +374,10 @@ def _clean_claude_config(
         for name in removed:
             del servers[name]
         if removed:
-            atomic_write_text(
+            write_json_config(
                 config_path,
-                json.dumps(config, indent=2) + "\n",
+                config,
+                default_trailing_newline=True,
                 new_file_mode=0o600,
             )
             for name in removed:

@@ -2009,6 +2009,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="An adapter serializes MCP JSON straight to a file instead of the owner writer.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-mcp-json-config-writer",
+        rule_id="mutation_writes.mcp_json_config_writer",
+        path="src/apm_cli/utils/json_config.py",
+        old="normalize_line_endings=False",
+        new="normalize_line_endings=True",
+        intent="The MCP JSON config owner rewrites a user's CRLF file with LF line endings.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-mcp-omission-evidence",
         rule_id="mutation_writes.mcp_omission_evidence",
         path="src/apm_cli/integration/mcp_config_view.py",

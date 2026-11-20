@@ -133,6 +133,7 @@
     "P-OWN-materialized-manifest-evidence": "architecture owner (install-deployment.json): Acquired manifest metadata snapshot",
     "P-OWN-mcp-declaration-scope": "architecture owner (hooks-integrations.json): Root vs dependency MCP declaration scope, receipt-bound local-bundle baseline (the set audit MCP policy judges), and dependency-bound intentional omission evidence",
     "P-OWN-mcp-lsp-plugin-root-render": "architecture owner (hooks-integrations.json): Portable ${CLAUDE_PLUGIN_ROOT} in MCP/LSP declarations: recorded and compared in authored form, legacy absolute lock equivalence, and per-target project-root render",
+    "P-OWN-mcp-json-config-writer": "architecture owner (hooks-integrations.json): Writing a user-editable MCP JSON config file (.github/mcp.json, .mcp.json, ~/.claude.json, the IntelliJ MCP config) in the file's own style: indentation, final newline, line endings and literal non-ASCII kept; only APM's entries change; new or minified files use the caller's default",
     "P-OWN-mcp-package-launcher": "architecture owner (hooks-integrations.json): MCP package launcher selection, argv shape (container and non-container), and config-key derivation; MCP JSON config parse-for-update (never rewrite an unparsable file) and atomic write",
     "P-OWN-mcp-passthrough-denylist": "architecture owner (hooks-integrations.json): MCP passthrough denylist and OpenCode enabled manifest intent",
     "P-OWN-mcp-registry-url-resolution": "architecture owner (install-deployment.json): MCP registry URL resolution precedence",

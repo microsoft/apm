@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Updating `.mcp.json`, `.github/mcp.json`, `~/.claude.json` or the IntelliJ MCP config keeps its indentation, final newline, line endings and non-ASCII text; other layout is normalized. (#4530)
 - `apm update` records restored marketplace provenance in its single lockfile write; a failed update leaves `apm.lock.yaml` unchanged. (#4525)
 - `apm install` and `apm update` run `post-install` scripts after MCP and LSP reconciliation, so scripts see the final lockfile and it is written once. (#4486)
 - `apm install --dry-run` after `apm deny`, a revoked approval or an org executables deny names each hook, MCP server, LSP server and bin/ the next install retires, and writes nothing. (#4478)
