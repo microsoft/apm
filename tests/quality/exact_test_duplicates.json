@@ -6543,6 +6543,10 @@
       "TestViewCommand::test_unknown_field_exits",
       "TestViewCommand::test_versions_field_calls_display_versions"
     ],
+    "tests/unit/utils/test_credential_rendering.py": [
+      "test_query_credentials_in_config_values_are_masked",
+      "test_userinfo_inside_equals_form_args_is_removed"
+    ],
     "tests/unit/utils/test_github_host_predicate.py": [
       "TestAdoAuthFailureSignal::test_ado_work_item_codes_are_not_http_auth",
       "TestAdoAuthFailureSignal::test_canonical_signals_match",
