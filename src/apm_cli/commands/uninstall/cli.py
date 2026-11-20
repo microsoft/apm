@@ -37,6 +37,7 @@ from .engine import (
     _stage_shared_local_survivors,
     _sync_integrations_after_uninstall,
     _validate_uninstall_packages,
+    gate_retired_hook_survivors,
     manifest_dependency_entries,
 )
 
@@ -979,6 +980,18 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         # Step 8: Collect deployed files for removed packages (before lockfile mutation)
         removed_keys.update(actual_orphans)
+        # Survivors whose hooks the gates no longer allow are redeployed in
+        # full under install's gate, as install retires them (#4446).
+        refreshed_survivor_keys, gate_excluded = gate_retired_hook_survivors(
+            lockfile,
+            modules_dir,
+            manifest_path,
+            deploy_root,
+            removed_keys,
+            refreshed_survivor_keys,
+            user_scope=scope is InstallScope.USER,
+            logger=logger,
+        )
         if lockfile:
             all_deployed_files, all_deployed_file_hashes = _collect_deployed_cleanup_state(
                 lockfile,
@@ -1027,7 +1040,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             modules_dir=modules_dir,
             deployed_file_hashes=all_deployed_file_hashes,
             default_counts=cleaned,
-            excluded_survivor_keys=profile_keys,
+            excluded_survivor_keys=profile_keys | gate_excluded,
             evidence=deletion_evidence,
         )
         cleaned = integration_cleanup.counts
