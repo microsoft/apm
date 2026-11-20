@@ -24,6 +24,7 @@ from tests.integration._marketplace_pack_kit import (
     MarketplacePackWorld,
     output,
     skill_md,
+    tree_bytes,
     write,
 )
 
@@ -300,8 +301,20 @@ def test_approve_pending_lists_parked_bundle_executables(
     manifest = load_yaml(consumer / "apm.yml")
     manifest["executables"] = {}
     dump_yaml(manifest, consumer / "apm.yml")
+
+    # #4492: an install that fails its integrity check records nothing pending.
+    tampered = tmp_path / "tampered" / bundle.name
+    shutil.copytree(bundle, tampered)
+    (tampered / "hooks.json").write_text('{"hooks": {}}\n', encoding="utf-8")
+    before = tree_bytes(consumer)
+    failed = world.apm(consumer, "install", str(tampered), expect=1)
+    assert "Hash mismatch for hooks.json" in output(failed), output(failed)
+    assert not (consumer / "apm_modules" / ".local-bundle-pending.json").exists()
+    assert tree_bytes(consumer) == before
+
     installed = " ".join(output(world.apm(consumer, "install", str(bundle))).split())
     assert f'"{key}"' in installed, installed
+    assert (consumer / "apm_modules" / ".local-bundle-pending.json").is_file()
 
     pending = " ".join(output(world.apm(consumer, "approve", "--pending")).split())
     assert "All packages with executables are approved" not in pending, pending

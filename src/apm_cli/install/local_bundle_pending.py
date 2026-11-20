@@ -61,6 +61,27 @@ def record_parked_executables(
     path.write_text(json.dumps({"bundles": bundles}, indent=2, sort_keys=True) + "\n", "utf-8")
 
 
+@dataclass
+class PendingRecordStage:
+    """One install's parked-executables entry, persisted only on commit (#4492).
+
+    A failed install never calls :meth:`commit`, so it leaves the record as it was.
+    """
+
+    scope_dir: Path
+    slug: str
+    approval_key: str | None
+    parked: tuple[str, ...]
+    committed: bool = False
+
+    def commit(self) -> None:
+        """Persist the staged entry once; later calls are no-ops."""
+        if self.committed:
+            return
+        self.committed = True
+        record_parked_executables(self.scope_dir, self.slug, self.approval_key, self.parked)
+
+
 def pending_bundles(
     scope_dir: Path, is_approved: Callable[[str, str], bool]
 ) -> list[PendingBundle]:

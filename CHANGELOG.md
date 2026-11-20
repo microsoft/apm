@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A failed `apm install <bundle>` no longer leaves a pending-executables record behind; `apm approve --pending` lists only bundles whose install completed. (closes #4492, #PRNUM)
 - `apm update` with nothing to change applies org policy like `apm install`: a denied dependency exits 1 and nothing is written. (closes #4458, #4482)
 - `apm install` blocked by org policy ends with a runnable next step: remove or replace the blocked dependencies, check `apm policy status`, then re-run. (closes #4404, #4418)
 - `apm uninstall` resolves the remaining packages' org-policy trust before changing state, so that refusal leaves `apm.yml`, the lockfile and deployed files unchanged, and uninstall refuses out-of-project paths before any change. (closes #4185, #4255)
