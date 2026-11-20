@@ -808,6 +808,8 @@
     "G|install|policy-dep-deny|native": "#4154",
     "G|install|revoke-approval|native": "#4154",
     "G|marketplace-install|local-deny|bin": "#4225",
+    "G|marketplace-install|local-deny|hook": "#4189",
+    "G|marketplace-install|local-deny|mcp": "#4189",
     "G|marketplace-install|org-deny|bin": "#4225",
     "G|marketplace-install|org-enables-gate|bin": "#4225",
     "G|marketplace-install|policy-dep-deny|bin": "#4225",
