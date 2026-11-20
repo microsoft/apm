@@ -9,6 +9,7 @@ is refused before apm.yml is rewritten.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -76,3 +77,39 @@ def _setup(
         f"name: consumer\nversion: 0.1.0\n{target_line}\n", encoding="ascii"
     )
     return project, env, ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+
+def test_targets_reports_apm_yml_as_source_of_declared_targets(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``apm targets`` names apm.yml as the source of targets it declares (#4210)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = dict(isolated.subprocess_env())
+    env.pop("CI", None)
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+    declared = ["claude", "copilot", "cursor"]
+
+    init = runner.run(("init", "-y", "--target", ",".join(declared)), cwd=project, env=env)
+    assert init.returncode == 0, init.stdout + init.stderr
+    assert load_yaml(project / "apm.yml").get("targets") == declared
+    before = sorted(p.relative_to(project).as_posix() for p in project.rglob("*"))
+
+    table = runner.run(("targets",), cwd=project, env=env)
+    assert table.returncode == 0, table.stdout + table.stderr
+    assert table.stdout.isascii() and table.stderr.isascii(), table.stdout + table.stderr
+    rows = {line.split()[0]: line.split() for line in table.stdout.splitlines()[2:] if line.strip()}
+    for name in declared:
+        assert rows[name][1:3] == ["active", "apm.yml"], table.stdout
+
+    as_json = runner.run(("targets", "--json"), cwd=project, env=env)
+    assert as_json.returncode == 0, as_json.stdout + as_json.stderr
+    by_name = {row["target"]: row for row in json.loads(as_json.stdout)}
+    for name in declared:
+        assert by_name[name]["status"] == "active", by_name[name]
+        assert by_name[name]["source"] == "apm.yml", by_name[name]
+    assert all(row["source"] is None for row in by_name.values() if row["target"] not in declared)
+
+    # apm targets is read-only.
+    assert sorted(p.relative_to(project).as_posix() for p in project.rglob("*")) == before

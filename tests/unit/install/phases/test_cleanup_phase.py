@@ -367,7 +367,7 @@ class TestOnlyPackagesSkipsOrphanCleanup:
         ):
             cleanup.run(ctx)
         assert [call.kwargs["dep_key"] for call in mock_rm.call_args_list] == ["dropped"]
-        ctx.logger.orphan_cleanup.assert_called_once_with(1)
+        ctx.logger.orphan_cleanup.assert_called_once_with([result])
 
 
 # ---------------------------------------------------------------------------
@@ -489,7 +489,7 @@ class TestOrphanCleanupFullRun:
         ):
             cleanup.run(ctx)
 
-        ctx.logger.orphan_cleanup.assert_called_once_with(1)
+        ctx.logger.orphan_cleanup.assert_called_once_with([mock_result])
 
     def test_orphan_cleanup_preserves_freshly_redeployed_paths(self, tmp_path):
         """A repaired dependency identity must not delete its new deployment."""
@@ -796,7 +796,7 @@ class TestStaleCleanupFullRun:
         ):
             cleanup.run(ctx)
 
-        ctx.logger.stale_cleanup.assert_called_once_with("my-pkg", 1)
+        ctx.logger.stale_cleanup.assert_called_once_with("my-pkg", mock_result)
 
     def test_stale_failed_paths_reinserted_into_deployed(self, tmp_path):
         """Files that failed deletion are re-added to new_deployed."""
