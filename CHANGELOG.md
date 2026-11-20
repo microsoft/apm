@@ -155,7 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm init` lists `apm config set target` in its target precedence comment, `apm plugin init --target claude` advertises only formats that pack, and `apm outdated` never crops columns at 80 characters. (closes #3994, #4004)
 - `apm install -g <bundle>` rows in `~/.apm/apm.lock.yaml` record `scope: user` and keep it when another global install rewrites the lock. (closes #3995, #4024)
 - `apm install` reports pinned hooks denied by org policy or `apm deny --user` as denied, pointing to `apm policy explain`, instead of suggesting `apm approve`. (closes #4044, #4055)
-- `apm install` reports denied bin/ executables and canvas extensions as denied, pointing to `apm policy explain`, instead of suggesting `apm approve`. (closes #4052, #4064)
+- `apm install` reports a denied canvas extension as denied, pointing to `apm policy explain`, instead of suggesting `apm approve`. (closes #4052, #4064)
 
 ### Security
 
