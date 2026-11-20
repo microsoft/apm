@@ -850,6 +850,8 @@ jobs:
       contents: read
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Set up Python
       uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -878,7 +880,7 @@ jobs:
 
   lifecycle-smoke:
     name: Lifecycle Smoke (Linux)
-    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3]
+    needs: [lifecycle-smoke-shard-1, lifecycle-smoke-shard-2, lifecycle-smoke-shard-3, gate-cell-coverage]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -889,8 +891,13 @@ jobs:
         SHARD_1_RESULT: ${{ needs.lifecycle-smoke-shard-1.result }}
         SHARD_2_RESULT: ${{ needs.lifecycle-smoke-shard-2.result }}
         SHARD_3_RESULT: ${{ needs.lifecycle-smoke-shard-3.result }}
+        GATE_COVERAGE_RESULT: ${{ needs.gate-cell-coverage.result }}
       run: |
         if [ "$SHARD_1_RESULT" != success ] || [ "$SHARD_2_RESULT" != success ] || [ "$SHARD_3_RESULT" != success ]; then
           echo "::error::Every lifecycle shard must succeed; got '$SHARD_1_RESULT', '$SHARD_2_RESULT' and '$SHARD_3_RESULT'."
+          exit 1
+        fi
+        if [ "$GATE_COVERAGE_RESULT" != success ]; then
+          echo "::error::GATE cell coverage must succeed; got '$GATE_COVERAGE_RESULT'."
           exit 1
         fi

@@ -159,6 +159,22 @@ def test_gate_machine_kills_the_recorded_approval_mutant(tmp_path: Path) -> None
         replay_gate_spine(machine)
 
 
+@pytest.mark.parametrize(
+    ("verdict", "surface"), [("deny", "lsp"), ("revoke", "lsp"), ("deny", "plugin")]
+)
+def test_narrowing_one_surface_keeps_another_approved_surface(
+    tmp_path: Path, apm_engine_command: tuple[str, ...], verdict: str, surface: str
+) -> None:
+    """Regression: narrowing one surface must not flag an approved hook under I4."""
+    machine = GateMachine(GateWorld.create(tmp_path / "world", apm_engine_command, "project"))
+    machine.declare("hook")
+    machine.install("plain")
+    machine.decide("hook", "approve")
+    machine.decide(surface, verdict)
+    machine.install("plain")
+    assert "hook" in machine.world.observe().deployed
+
+
 def test_a_known_cell_does_not_excuse_an_unrelated_surface(tmp_path: Path) -> None:
     """A known cell owns only matching violations; another surface still fails."""
     state = LifecycleStateSnapshot.capture(tmp_path)
@@ -175,9 +191,6 @@ def test_a_known_cell_does_not_excuse_an_unrelated_surface(tmp_path: Path) -> No
 
         def converged_before(self) -> bool:
             return False
-
-        def deployed_ceiling(self) -> frozenset[str] | None:
-            return None
 
         def expected_cells(self, op, before, after, result):
             return {"I4": (ExpectedCell("gate-cell-x", r"^hook still deployed"),)}

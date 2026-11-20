@@ -104,8 +104,10 @@ class Operation:
     read_only: bool = False
     tightening: bool = False
     json_output: bool = False
-    # Root id -> path prefixes this operation must never touch ("*" is all).
+    # Root id -> path prefixes this operation must never touch ("*" is all),
+    # unless a path also falls under one of the root's ``allowed`` prefixes.
     forbidden: Mapping[str, Collection[str]] = field(default_factory=dict)
+    allowed: Mapping[str, Collection[str]] = field(default_factory=dict)
     # Exit codes of the paired probe; {"audit": rc} pairs an install --frozen with audit --ci.
     paired: Mapping[str, int] = field(default_factory=dict)
     # True when the step only edits inputs (manifest, stores, policy cache).
@@ -158,8 +160,6 @@ class OracleModel(Protocol):
     def allowed_surfaces(self) -> frozenset[str]: ...
 
     def converged_before(self) -> bool: ...
-
-    def deployed_ceiling(self) -> frozenset[str] | None: ...
 
     def expected_cells(
         self, op: Operation, before: Observation, after: Observation, result: CommandResult | None
@@ -279,21 +279,20 @@ def _i3_frozen_audit(
 def _i4_gate_monotonicity(
     before: Observation, after: Observation, result, model: OracleModel, op: Operation
 ) -> list[Violation]:
-    """One violation per surface, so a known cell never hides another surface."""
+    """I4 relative to the model: after each successful mutating step, nothing is
+    deployed that the model's current approvals and policy do not allow.
+
+    A deny, revoke or tightening shrinks the allowed set, so the next mutating
+    step must retire what it no longer allows. One violation per surface, so a
+    known cell never hides another surface.
+    """
     del before
-    found = []
-    ceiling = model.deployed_ceiling()
-    if op.mutating and ceiling is not None:
-        found.extend(
-            Violation("I4", f"{surface} deployed above the ceiling set by the last tightening")
-            for surface in sorted(after.deployed - ceiling)
-        )
-    if op.mutating and (result is None or result.returncode == 0):
-        found.extend(
-            Violation("I4", f"{surface} still deployed but not allowed")
-            for surface in sorted(after.deployed - model.allowed_surfaces())
-        )
-    return found
+    if not op.mutating or (result is not None and result.returncode != 0):
+        return []
+    return [
+        Violation("I4", f"{surface} still deployed but not allowed")
+        for surface in sorted(after.deployed - model.allowed_surfaces())
+    ]
 
 
 def _i5_write_set(
@@ -303,6 +302,8 @@ def _i5_write_set(
     found = []
     for root_id, snapshot in before.artifacts.snapshots:
         observed = _durable_changes(snapshot, after.artifacts.snapshot(root_id))
+        allowed = op.allowed.get(root_id, ())
+        observed -= {path for path in observed if any(_within(path, a) for a in allowed)}
         for prefix in op.forbidden.get(root_id, ()):
             hit = sorted(path for path in observed if _within(path, prefix))
             if hit:

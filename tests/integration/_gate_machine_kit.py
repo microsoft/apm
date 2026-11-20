@@ -419,7 +419,6 @@ class GateMachine(RuleBasedStateMachine):
         self.store_state: dict[str, str] = {}
         self.policy = "none"
         self.converged = False
-        self.ceiling: frozenset[str] | None = None
         self.visited: set[str] = set()
         self.expected_seen: set[str] = set()
 
@@ -453,10 +452,6 @@ class GateMachine(RuleBasedStateMachine):
     def converged_before(self) -> bool:
         return self.converged
 
-    def deployed_ceiling(self) -> frozenset[str] | None:
-        """Surfaces deployed at the last deny, revoke or tightening (None after widening)."""
-        return self.ceiling
-
     def expected_cells(self, op, before, after, result) -> Mapping[str, tuple[ExpectedCell, ...]]:
         expected: dict[str, tuple[ExpectedCell, ...]] = {}
         for cell in KNOWN_CELLS:
@@ -485,8 +480,14 @@ class GateMachine(RuleBasedStateMachine):
 
     def _forbidden(self) -> dict[str, tuple[str, ...]]:
         if self.scope == "project":
-            return {"home": (".copilot", ".apm/apm.yml", ".apm/apm.lock.yaml", ".apm/apm_modules")}
+            # A project step may only write its receipts and bookkeeping under HOME.
+            return {"home": ("*",)}
         return {"cwd": ("*",), "home": (".apm",)}
+
+    def _allowed(self) -> dict[str, tuple[str, ...]]:
+        if self.scope == "project":
+            return {"home": (".apm/deployment-receipts", ".apm-local", ".local", ".cache")}
+        return {}
 
     def _step(
         self,
@@ -513,19 +514,11 @@ class GateMachine(RuleBasedStateMachine):
             )
         for cell_id in owners:
             self.record_expected(cell_id)
-        guarded = Operation(**{**op.__dict__, "forbidden": self._forbidden()})
+        guarded = Operation(
+            **{**op.__dict__, "forbidden": self._forbidden(), "allowed": self._allowed()}
+        )
         check_cross_cutting(before, after, result, _ExpectedWithoutReference(self), guarded)
-        self._move_ceiling(op, after)
         return result
-
-    def _move_ceiling(self, op: Operation, after: Observation) -> None:
-        if op.tightening:
-            current = after.deployed if self.ceiling is None else self.ceiling & after.deployed
-            self.ceiling = frozenset(current)
-        elif op.name in {"approve", "declare"}:
-            self.ceiling = None
-        elif op.mutating and self.ceiling is not None:
-            self.ceiling = self.ceiling & after.deployed
 
     def _edit(self, name: str, kinds: tuple[str, ...], edit: Callable[[], None], **flags) -> None:
         self.converged = False
@@ -694,9 +687,6 @@ class _ExpectedWithoutReference:
 
     def converged_before(self) -> bool:
         return self._machine.converged_before()
-
-    def deployed_ceiling(self) -> frozenset[str] | None:
-        return self._machine.deployed_ceiling()
 
     def expected_cells(self, op, before, after, result) -> Mapping[str, tuple[ExpectedCell, ...]]:
         cells = dict(self._machine.expected_cells(op, before, after, result))
