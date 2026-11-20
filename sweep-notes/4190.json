@@ -1,0 +1,17 @@
+{
+  "changelog": "`apm install --mcp` and `apm uninstall` name the manifest as `apm.yml` or `~/.apm/apm.yml` instead of its absolute path (#4217)",
+  "ledger_row": {
+    "issue": 4190,
+    "fixed_in": "Unreleased",
+    "summary": "apm install --mcp and apm uninstall printed the absolute apm.yml path while every other command printed project-relative paths.",
+    "failure_modes": ["observation", "portability"],
+    "properties": ["outcome.status_matches_state", "portability.byte_deterministic"],
+    "regression_tests": [
+      "tests/integration/test_manifest_rewrite_preservation_lifecycle.py::test_manifest_rewrites_name_the_manifest_by_relative_path"
+    ]
+  },
+  "red": "APM_BINARY_PATH=$(uv run which apm) uv run --extra dev pytest tests/integration/test_manifest_rewrite_preservation_lifecycle.py -k relative_path -n 0 -> 2 failed: assert str(manifest) not in ''.join(output.split()) ('apm.yml: /.../isolated/work/consumer/apm.yml' and '[*] Created /.../isolated/home/.apm/apm.yml')",
+  "green": "same module -> 3 passed (project and user scope plus the existing rewrite-preservation test)",
+  "owner": "src/apm_cli/install/mcp/command.py (manifest_label); src/apm_cli/commands/uninstall/cli.py routes manifest_display and the Updated/Failed lines through it",
+  "notes": "OVERLAP WITH #4143: the install/mcp/command.py hunks are copied VERBATIM from PR #4143 (manifest_label helper, its four call sites, and the tree line rename 'apm.yml:' -> 'manifest:'), so merging #4143 after this branch is conflict-free for that file. The only new code is uninstall/cli.py using manifest_label for the user-scope label and printing manifest_display in 'Updated ... (removed N package(s))' and the read/write failure lines. Journey J06 s1 key line should now expect 'manifest: apm.yml'; J08 s1 forbidden 'Updated <PROJECT>/apm.yml' flips. Pre-existing unrelated failures on main seen while running neighbours: tests/unit/install/test_cache_pin.py::test_sync_markers_never_stamps_a_checkout_at_another_commit and tests/unit/install/test_unix_install_ownership.py (root user environment)."
+}
