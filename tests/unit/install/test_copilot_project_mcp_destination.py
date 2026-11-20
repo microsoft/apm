@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -180,6 +181,40 @@ def test_heal_removes_only_proven_apm_entries_and_keeps_the_file(tmp_path: Path)
     assert heal.kept == {"copilot": {"edited"}}
     remaining = json.loads((tmp_path / ".github/mcp.json").read_text(encoding="utf-8"))
     assert set(remaining["mcpServers"]) == {"edited", "user"}
+
+
+def test_dry_run_preview_names_exactly_what_the_heal_moves(tmp_path: Path) -> None:
+    """``install --dry-run`` previews the .mcp.json move without writing (#3967)."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.mcp.retired_destinations import preview_retired_mcp_moves
+
+    edited = {**_LEGACY_COPILOT, "args": ["--mine"]}
+    retired = tmp_path / ".github/mcp.json"
+    _write(retired, {"mcpServers": {"echo": _LEGACY_COPILOT, "edited": edited}})
+    before = retired.read_bytes()
+    lock = LockFile()
+    lock.apm_version = "0.36.1"
+    lock.mcp_target_servers = {"copilot": ["echo", "edited"]}
+    lock.mcp_configs = {"echo": _ECHO, "edited": {**_ECHO, "name": "edited"}}
+
+    declared = [MCPDependency.from_dict(_ECHO)]
+    preview = preview_retired_mcp_moves(
+        lock, tmp_path, declared=declared, target_runtimes=["copilot"]
+    )
+    assert preview.moves == {".github/mcp.json": ["echo"]}
+    assert preview.removals == {}
+    assert retired.read_bytes() == before
+    # Copilot not selected: the heal still removes the entry, but nothing moves.
+    preview = preview_retired_mcp_moves(
+        lock, tmp_path, declared=declared, target_runtimes=["cursor"]
+    )
+    assert (preview.moves, preview.removals) == ({}, {".github/mcp.json": ["echo"]})
+    # No longer declared: removed, not moved.
+    preview = preview_retired_mcp_moves(lock, tmp_path, declared=[], target_runtimes=["copilot"])
+    assert (preview.moves, preview.removals) == ({}, {".github/mcp.json": ["echo"]})
+    lock.apm_version = "0.37.0"
+    preview = preview_retired_mcp_moves(lock, tmp_path)
+    assert (preview.moves, preview.removals) == ({}, {})
 
 
 def test_heal_keeps_an_emptied_github_mcp_json(tmp_path: Path) -> None:
@@ -525,6 +560,7 @@ def test_uninstall_heals_retired_claims_and_never_touches_user_root_entries(
         lock, {"copilot": ["echo"]}, native_hashes={"copilot": {"echo": github_hash}}
     )
 
+    logger = MagicMock()
     _cleanup_stale_mcp(
         APMPackage.from_apm_yml(tmp_path / "apm.yml"),
         lock,
@@ -533,11 +569,15 @@ def test_uninstall_heals_retired_claims_and_never_touches_user_root_entries(
         modules_dir=tmp_path / "apm_modules",
         project_root=tmp_path,
         persist=False,
+        logger=logger,
     )
 
     assert json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"] == {"echo": user_root}
     assert json.loads((tmp_path / ".github/mcp.json").read_text())["mcpServers"] == {}
     assert not lock.mcp_target_servers
+    # Uninstall reports the heal exactly as install does (C5d).
+    progress = " ".join(str(call.args[0]) for call in logger.progress.call_args_list)
+    assert "Removed APM-managed MCP server 'echo' from .github/mcp.json" in progress
 
 
 def test_bundle_retarget_keeps_the_entry_the_new_runtime_owns(tmp_path: Path) -> None:

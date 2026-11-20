@@ -612,7 +612,8 @@ class _LifecycleReferenceModel(RuleBasedStateMachine):
             1,
             command_cwd=self.fixture.audit_cwd,
         )
-        assert "is not tracked by any installed package" in " ".join(found.stdout.split())
+        # apm find keeps stdout for package names; errors go to stderr (#3994).
+        assert "is not tracked by any installed package" in " ".join(found.stderr.split())
         _assert_same_state(state, self._state())
         assert_snapshot_set_unchanged(before, self._capture())
 

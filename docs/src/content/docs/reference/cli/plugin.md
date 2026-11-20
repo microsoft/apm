@@ -30,7 +30,7 @@ The two common repo shapes for plugin authors -- **single-plugin** (one plugin p
 
 ### `apm plugin init`
 
-Scaffold a plugin authoring project. Writes `plugin.json` and an `apm.yml` with a `devDependencies` block in the current directory (or under `PROJECT_NAME/` if provided).
+Scaffold a plugin authoring project. Writes `plugin.json` and an `apm.yml` with a `devDependencies` block in the current directory (or under `PROJECT_NAME/` if provided). The `apm.yml` carries a commented `license:` line: APM does not choose a license for you, and `apm pack` warns until you set one.
 
 ```bash
 apm plugin init

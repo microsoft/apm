@@ -218,3 +218,14 @@ def test_positional_preview_resolves_full_graph_before_selection(
         dep.to_canonical() for dep in install.deps_to_install
     ]
     assert ArtifactSnapshot.capture(tmp_path) == before
+
+
+def test_two_hosts_one_slot_is_a_declaration_error(tmp_path: Path) -> None:
+    """The #3895 shared-directory refusal reaches the preview as a declaration error."""
+    consumer = LocalPackageFactory(tmp_path).create(
+        "consumer", dependencies=("acme/tool", "gitlab.com/acme/tool")
+    )
+    plan = _preview(consumer.root)
+    assert len(plan.dependency_declaration_errors) == 1
+    assert "would both install to" in plan.dependency_declaration_errors[0]
+    assert set(plan.dependency_declaration_errors) <= set(plan.dependency_preview_errors)

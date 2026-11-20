@@ -44,6 +44,22 @@ class TestScriptRunner:
         )
         assert result == "codex exec --verbose --skip-git-repo-check"
 
+    def test_transform_documented_codex_exec_script_names_exec_once(self):
+        """The run.md script 'codex exec <flags> x.prompt.md' keeps one exec (#3994)."""
+        original = "codex exec --skip-git-repo-check hello-world.prompt.md"
+        result = self.script_runner._transform_runtime_command(
+            original, "hello-world.prompt.md", self.compiled_content, self.compiled_path
+        )
+        assert result == "codex exec --skip-git-repo-check"
+
+    def test_transform_llm_stdin_redirect_is_not_an_argument(self):
+        """'llm < x.prompt.md' passes the prompt, never a literal '<' (#3994)."""
+        original = "llm < hello-world.prompt.md"
+        result = self.script_runner._transform_runtime_command(
+            original, "hello-world.prompt.md", self.compiled_content, self.compiled_path
+        )
+        assert result == "llm"
+
     def test_transform_runtime_command_env_var_simple(self):
         """Test environment variable with simple codex command."""
         original = "DEBUG=true codex hello-world.prompt.md"

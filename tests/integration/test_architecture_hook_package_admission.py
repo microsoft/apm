@@ -72,7 +72,7 @@ RULE = "marketplace-integrations-package-format-precedence"
         ),
         (
             "src/apm_cli/install/phases/integrate.py",
-            "if verify_package_hash(install_path, receipt[1]):",
+            "if verify_package_hash(install_path, receipt[1], framed=True):",
             "if True:",
         ),
         (
@@ -87,7 +87,7 @@ RULE = "marketplace-integrations-package-format-precedence"
         ),
         (
             "src/apm_cli/install/phases/resolve.py",
-            "content_hash = compute_package_hash(candidate_path)",
+            "content_hash = compute_package_hash(candidate_path, framed=True)",
             "content_hash = 'unverified'",
         ),
         (

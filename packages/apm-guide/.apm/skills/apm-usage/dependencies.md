@@ -395,7 +395,9 @@ the marketplace and fail rather than use stale cached data. Exceptions
 until 0.38 (#2903): registry-routed catalog entries still resolve through the
 catalog (the lockfile has no registry binding), and the lockfile does not
 record catalog-inline MCP/LSP servers, so a package with locked servers and no
-`apm_modules/` copy reads the catalog, also under `--frozen`; one with no
+`apm_modules/` copy reads the catalog for server metadata only, also under
+`--frozen` (the locked commit still pins it; a catalog that now selects
+another commit fails until `apm update <name>@<marketplace>`); one with no
 locked servers (`--only=apm`, root-overridden server) fails its content-hash
 check when cold -- run `apm update` for it.
 
@@ -529,6 +531,12 @@ their lockfile entry, and the lockfile is promoted to
 `lockfile_version: "2"` when any dep is registry-sourced OR carries
 git-source semver resolution fields (`constraint` / `resolved_at`) or a
 revision-pin tag annotation (`resolved_tag`).
+
+From APM 0.37 a writable `apm install` promotes `apm.lock.yaml` to
+`lockfile_version: "4"` (hash framing hardening) when every package verifies;
+otherwise the version stays. Older lockfiles still verify; `--frozen` and
+`apm audit` never rewrite them. APM 0.36 and earlier refuse version `"4"`:
+update CI to 0.37 before committing.
 
 The `acme/foo@registry-name#version` shorthand is **not supported** (deferred
 to v2) -- the `@` collides with npm/cargo/pip version syntax, with
@@ -723,6 +731,16 @@ dependencies:
       env:
         API_KEY: ${{ secrets.KEY }}
 
+    # Per-server targets: install targets INTERSECT this list (omitted = all;
+    # no overlap = skipped with a warning). Never written into native config.
+    # Dropping a target here or from manifest targets: prunes it on reinstall.
+    # Project-scope claude and copilot share .mcp.json: either name reaches both.
+    - name: claude-only-tools
+      registry: false
+      transport: stdio
+      command: ./bin/claude-tools
+      targets: [claude]
+
     # Self-defined HTTP server
     - name: internal-kb
       registry: false
@@ -781,7 +799,7 @@ OpenCode 2 layout), APM writes there instead: `false` becomes
 `disabled: true`, `true` or omission writes no field, and other values warn
 and leave the file unchanged. Set `codemode: false` as an extra field to
 bypass Code Mode. See the
-[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#42-dependenciesmcp----listmcpdependency)
+[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#42-dependenciesmcp--listmcpdependency)
 for the dependency contract and
 [OpenCode 2 configuration](https://microsoft.github.io/apm/consumer/install-mcp-servers/#opencode-2-configuration)
 for format selection.

@@ -910,6 +910,8 @@ dependencies:
             assert "repair 1 deployment ownership record" in result.output
             assert ghost_path in result.output
             assert "removed/beta" in result.output
+            # The preview names the path, not the internal composite key (#3994).
+            assert "||" not in result.output
             assert lockfile_path.read_bytes() == before
             assert ghost.read_text() == "# Manual sentinel\n"
 

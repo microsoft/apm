@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from apm_cli.claude_plugins.admission import ClaudeNativePlugin
     from apm_cli.codex_plugins.admission import CodexNativeDeployment
     from apm_cli.core.deployment_state import CompletedReintegration
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -74,6 +75,9 @@ class InstallContext:
     trust_bin: bool | None = None
     trust_transitive_mcp: bool = False
     transaction: Any = None  # InstallTransaction
+    claude_native_plugins: dict[str, ClaudeNativePlugin] = field(default_factory=dict)
+    # Dependency keys routed to native Claude this run, admitted or parked.
+    claude_native_keys: set[str] = field(default_factory=set)
     lsp_preflight: Any = None  # LspPreflight when services integrate LSP after this pipeline
 
     dry_run: bool = False
@@ -169,7 +173,11 @@ class InstallContext:
     package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
     orphan_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
+    # Package content hashes in the stream the existing lockfile records
+    # (legacy for versions 1-3, framed for 4 or a new lockfile), and the framed
+    # digest of the same bytes for the one-time promotion to version 4.
     package_hashes: dict[str, str] = field(default_factory=dict)
+    package_framed_hashes: dict[str, str] = field(default_factory=dict)
     # Declared-license provenance (issue #1777, U6): maps dep_key -> the SPDX
     # expression the dependency's manifest DECLARED at resolve time (apm.yml
     # ``license:`` or plugin.json ``license``). Populated next to
@@ -215,6 +223,8 @@ class InstallContext:
     # Unresolved until effective_allow_map(); a disabled gate is an explicit map.
     exec_allow_map: dict[str, dict[str, bool]] | None = None
     package_exec_status: dict[str, str] = field(default_factory=dict)  # dep_key -> exec_status
+    # dep_key -> types a partially gated package deployed (#3991)
+    package_exec_allowed_types: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # dep_key -> exec types a deny layer refuses (not approvable), for skip wording.
     package_denied_exec_types: dict[str, frozenset[str]] = field(default_factory=dict)
 

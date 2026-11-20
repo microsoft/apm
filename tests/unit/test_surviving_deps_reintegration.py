@@ -741,3 +741,34 @@ def test_uninstall_reports_survivor_hook_refusal_as_incomplete(tmp_path: Path) -
     assert call("Migrate the package above, then run 'apm install' to resync.") in (
         logger.warning.call_args_list
     )
+
+
+def test_uninstall_reports_org_policy_block_with_next_step(tmp_path: Path) -> None:
+    """A policy block during survivor rebuild names its reason and the next step."""
+    from apm_cli.install.errors import PolicyViolationError
+
+    (tmp_path / "apm.yml").write_text("name: root\nversion: 0.0.0\n", encoding="utf-8")
+    refusal = PolicyViolationError("Blocked by org policy: policy hash mismatch")
+    logger = MagicMock()
+
+    with patch(
+        "apm_cli.commands.uninstall.cli._sync_integrations_after_uninstall",
+        side_effect=refusal,
+    ):
+        _outcome, error = _sync_integrations_for_manifest(
+            manifest_path=tmp_path / "apm.yml",
+            deploy_root=tmp_path,
+            all_deployed_files=set(),
+            logger=logger,
+            user_scope=False,
+            lockfile=None,
+            modules_dir=tmp_path / "apm_modules",
+            deployed_file_hashes={},
+            default_counts={"hooks": 0},
+        )
+
+    assert error is refusal
+    assert call(str(refusal)) in logger.warning.call_args_list
+    assert call("Resolve the org policy issue above, then run 'apm install' to resync.") in (
+        logger.warning.call_args_list
+    )

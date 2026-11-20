@@ -158,6 +158,13 @@ function Install-Codex {
             Write-Info "No GitHub token found - you'll need to set GITHUB_TOKEN"
         }
 
+        # GitHub Models has no Responses API: Codex after v0.115 needs wire_api=chat
+        # (#605). Only a release known to be v0.115 or older keeps "responses".
+        $wireApi = "chat"
+        if ($Version -match '^rust-v0\.(\d+)' -and [int]$Matches[1] -le $LastCompatVersionMinor) {
+            $wireApi = "responses"
+        }
+
         @"
 model_provider = "github-models"
 model = "openai/gpt-4o"
@@ -166,25 +173,11 @@ model = "openai/gpt-4o"
 name = "GitHub Models"
 base_url = "https://models.github.ai/inference/"
 env_key = "$githubTokenVar"
-wire_api = "responses"
+wire_api = "$wireApi"
 "@ | Set-Content -Path $codexConfig -Encoding UTF8
 
         Write-Success "Codex configuration created at $codexConfig"
-        Write-Info "Using Codex $Version."
-
-        # Version compatibility check
-        if ($Version -match '^rust-v0\.(\d+)') {
-            $codexMinor = [int]$Matches[1]
-            if ($codexMinor -gt $LastCompatVersionMinor) {
-                Write-Host ""
-                Write-Warning "codex >= v0.116 requires wire_api=chat configuration for GitHub Models compatibility."
-                Write-Warning "The generated config uses wire_api=responses, which returns 404 with GitHub Models."
-                Write-Warning "To fix, update wire_api in ${codexConfig}:"
-                Write-Warning "  wire_api = `"chat`""
-                Write-Warning "Or install an older compatible version: apm runtime setup codex --version rust-v0.115.0"
-                Write-Host ""
-            }
-        }
+        Write-Info "Using Codex $Version (wire_api = `"$wireApi`" for GitHub Models)."
 
         Write-Info "Override with: apm runtime setup codex --version <version> (e.g. 'latest')"
     } else {

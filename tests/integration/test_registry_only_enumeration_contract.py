@@ -156,6 +156,7 @@ def _run(
     registry_only: bool,
     dependency_ref: str | None = None,
     locked_git_dependency: bool = False,
+    mcp_dependency: str | None = None,
 ) -> _Scenario:
     isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
     project = isolated.work_root / "consumer"
@@ -164,6 +165,12 @@ def _run(
         (project / "apm.yml").write_text(
             "name: consumer\nversion: 0.0.1\n"
             f"dependencies:\n  apm:\n    - {_PACKAGE}#{dependency_ref}\n",
+            encoding="utf-8",
+        )
+    if mcp_dependency is not None:
+        (project / "apm.yml").write_text(
+            "name: consumer\nversion: 0.0.1\ntargets: [copilot]\n"
+            f"dependencies:\n  apm: []\n  mcp:\n    - {mcp_dependency}\n",
             encoding="utf-8",
         )
     if locked_git_dependency:
@@ -316,3 +323,26 @@ def test_outdated_lists_source_refs_when_mode_is_off(tmp_path: Path, apm_binary_
 
     assert any("ls-remote" in call for call in scenario.git_network_calls), scenario.output
     assert "PROXY_REGISTRY_ONLY is set" not in scenario.output
+
+
+@pytest.mark.parametrize("flow", ["install-mcp", "manifest-mcp"])
+def test_mcp_registry_lookup_refused_without_contacting_registry(
+    tmp_path: Path, apm_binary_path: Path, flow: str
+) -> None:
+    """PROXY_REGISTRY_ONLY refuses the default MCP registry and writes nothing (#3994)."""
+    server = "io.github.acme/registry-only-probe"
+    if flow == "install-mcp":
+        args: tuple[str, ...] = ("install", "--mcp", server, "--target", "copilot", "--no-policy")
+        scenario = _run(tmp_path, apm_binary_path, args, registry_only=True)
+    else:
+        args = ("install", "--no-policy")
+        scenario = _run(tmp_path, apm_binary_path, args, registry_only=True, mcp_dependency=server)
+    manifest = scenario.project / "apm.yml"
+
+    assert scenario.result.returncode != 0, scenario.output
+    assert "refusing direct MCP registry lookup" in scenario.output
+    assert "MCP_REGISTRY_URL" in scenario.output
+    assert scenario.upstream_requests == []
+    if flow == "install-mcp":
+        assert not manifest.exists() or server not in manifest.read_text(encoding="utf-8")
+    assert not (scenario.project / ".mcp.json").exists()

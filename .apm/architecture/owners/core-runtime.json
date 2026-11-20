@@ -123,7 +123,7 @@
       "decision": "APM-owned user metadata root",
       "owner": "core/scope.py (get_apm_home)",
       "selectors": ["src/apm_cli/core/scope.py"],
-      "guards": ["registry-delegation-apm-home-resolution"]
+      "guards": ["registry-delegation-apm-home-resolution", "install-deployment-bundle-user-scope-root"]
     },
     {
       "id": "harness-user-root-resolution",

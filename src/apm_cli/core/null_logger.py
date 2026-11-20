@@ -79,6 +79,9 @@ class NullCommandLogger:
     def error(self, message: str, symbol: str = "error"):
         _rich_error(message, symbol=symbol)
 
+    def refusal(self, message: str) -> None:
+        _rich_error(message, symbol="error", err=True)
+
     def verbose_detail(self, message: str):
         """Discard verbose details (no CLI context to show them)."""
         pass

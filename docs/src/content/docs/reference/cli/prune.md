@@ -190,4 +190,4 @@ confirm the resulting state.
 - [`apm uninstall`](../uninstall/) -- remove a declared dependency (shares this command's hook-reconciliation owner)
 - [`apm deps list`](../deps/#apm-deps-list) -- inspect what is installed
 - [Lockfile spec](../../lockfile-spec/) -- `deployed_files` schema
-- [Package anatomy](../../../concepts/package-anatomy/) -- what gets deployed where
+- [Package anatomy](../../../producer/create-a-package/) -- what gets deployed where

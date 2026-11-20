@@ -1094,11 +1094,11 @@ class TestPublishCommand:
 class TestConfigModuleHelpers:
     """Additional unit tests for uncovered paths in ``apm_cli.config``."""
 
-    def test_get_default_client_returns_vscode(self, isolated_config: Path) -> None:
-        """get_default_client() returns 'vscode' from default config."""
+    def test_get_default_client_returns_copilot(self, isolated_config: Path) -> None:
+        """get_default_client() returns 'copilot' (vscode is its deprecated alias)."""
         import apm_cli.config as _conf
 
-        assert _conf.get_default_client() == "vscode"
+        assert _conf.get_default_client() == "copilot"
 
     def test_set_default_client(self, isolated_config: Path) -> None:
         """set_default_client() persists to disk."""

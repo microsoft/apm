@@ -60,15 +60,15 @@ def integrate_local_bundle_hooks(
         result.skipped = len(hook_paths)
         if retire:
             _retire_bundle_hooks(project_root, targets, slug)
+        from ..core.scope import InstallScope
+        from ..security.executables import local_bundle_approval_hint
+
         _warn(
             f"Skipped {len(hook_paths)} bundle hook file(s) from {slug}: hooks are "
-            "executable and not approved for this exact bundle content. To approve "
-            "this exact local bundle, add:\n"
-            "executables:\n"
-            "  allow:\n"
-            f'    "{approval_key}":\n'
-            "      hooks: true\n"
-            "Then rerun the install.",
+            "executable and not approved for this exact bundle content. "
+            + local_bundle_approval_hint(
+                str(approval_key), "hooks", user_scope=scope == InstallScope.USER
+            ),
             slug,
             diagnostics,
             logger,
@@ -111,9 +111,12 @@ def integrate_local_bundle_hooks(
     from ..utils.content_hash import compute_file_hash
 
     user_scope = scope == InstallScope.USER
-    managed_files = _prior_bundle_claims(project_root)
+    managed_files = _prior_bundle_claims(project_root, user_scope=user_scope)
     with tempfile.TemporaryDirectory(prefix="apm-bundle-hooks-") as tmp:
         package_info = _bundle_hook_package(bundle_info, verified_files, Path(tmp) / slug, slug)
+        package_info.local_bundle_approval = approval_key
+        # Entries recorded under an earlier key are replaced, never kept beside.
+        _retire_bundle_hooks(project_root, targets, slug)
         integrator = HookIntegrator()
         for target in hook_targets:
             outcome = integrator.integrate_hooks_for_target(
@@ -127,6 +130,9 @@ def integrate_local_bundle_hooks(
                 user_scope=user_scope,
             )
             result.hook_files += outcome.files_integrated
+            _record_per_file_approval(
+                target, project_root, slug, approval_key, outcome.target_paths, user_scope
+            )
             for target_path in outcome.target_paths:
                 dest = Path(target_path)
                 record = _record_path(dest, project_root, user_scope=user_scope)
@@ -184,17 +190,21 @@ def _retire_bundle_hooks(project_root: Path, targets: Any, slug: str) -> None:
     HookIntegrator().retire_local_bundle_hooks(slug, project_root, hook_targets)
 
 
-def _prior_bundle_claims(project_root: Path) -> set[str]:
+def _prior_bundle_claims(project_root: Path, *, user_scope: bool = False) -> set[str]:
     """Return unedited bundle claims, project-relative, that a reinstall may overwrite.
 
     An edited claim is left out so the hook integrator's collision check keeps
-    the edit unless ``--force`` is passed, as the bundle file copy does.
+    the edit unless ``--force`` is passed, as the bundle file copy does. At
+    user scope the claims live in the user lockfile (``$APM_HOME``), recorded
+    relative to the home deploy root.
     """
     from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..core.scope import InstallScope, get_apm_dir
     from ..deps.lockfile import LockFile, get_lockfile_path
     from ..utils.content_hash import compute_file_hash
 
-    lockfile = LockFile.read(get_lockfile_path(project_root))
+    lock_dir = get_apm_dir(InstallScope.USER) if user_scope else project_root
+    lockfile = LockFile.read(get_lockfile_path(lock_dir))
     if lockfile is None:
         return set()
     ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
@@ -206,6 +216,30 @@ def _prior_bundle_claims(project_root: Path) -> set[str]:
             continue
         claims.add(_record_path(path, project_root, user_scope=False))
     return claims
+
+
+def _record_per_file_approval(
+    target: Any,
+    project_root: Path,
+    slug: str,
+    approval_key: str | None,
+    target_paths: Any,
+    user_scope: bool,
+) -> None:
+    """Record the approval key for a per-file hook target's bundle hook files (#4027)."""
+    from ..integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
+    from ..integration.hook_ownership import write_per_file_bundle_record
+
+    if target.name in _MERGE_HOOK_TARGETS:
+        return
+    hooks_dir = project_root / target.root_dir / "hooks"
+    hook_files = [
+        _record_path(Path(path), project_root, user_scope=user_scope)
+        for path in target_paths
+        if Path(path).suffix == ".json" and Path(path).parent == hooks_dir
+    ]
+    sidecar = project_root / target.root_dir / _APM_HOOKS_SIDECAR
+    write_per_file_bundle_record(sidecar, slug, approval_key, hook_files)
 
 
 def _record_path(dest: Path, project_root: Path, *, user_scope: bool) -> str:

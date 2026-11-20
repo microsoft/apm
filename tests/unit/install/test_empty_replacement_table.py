@@ -12,6 +12,7 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
+from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.install.helpers.no_work import write_empty_lockfile
 from apm_cli.install.pipeline import run_install_pipeline
@@ -110,7 +111,7 @@ def test_bundle_only_pipeline_persists_intent_without_running_phases(
     lockfile = LockFile(replacements=[])
     bundled = ".agents/skills/bundled/SKILL.md"
     DeploymentLedgerCodec.record_local_bundle_files(
-        lockfile, [bundled], {bundled: "sha256:" + "b" * 64}
+        lockfile, [bundled], {bundled: "sha256:" + "b" * 64}, scope=InstallScope.PROJECT
     )
     lockfile.save(lock_path)
     before = LockFile.read(lock_path)

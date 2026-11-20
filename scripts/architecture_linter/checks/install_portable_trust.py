@@ -86,7 +86,7 @@ _HOOK_ITEMS = "hook_file_admitted"
 _PACKAGE_APPROVALS = "package_type_approvals"
 _ITEM_ADMISSION_CALLS = ("native_install", "hooks_package_admissible")
 # Native plugin status is decided over the native union of types.
-_NATIVE_STATUS = "package_exec_status"
+_NATIVE_STATUS = ("package_exec_status", "package_exec_decision")
 # Grants are persisted only by the approve command and the install prompt.
 _GRANT_WRITERS = ("write_project_executables", "save_user_executables")
 _GRANT_WRITER_PATHS = ("src/apm_cli/commands/approve.py", "src/apm_cli/install/phases/integrate.py")
@@ -94,7 +94,7 @@ _AST_PREFILTER = (
     *_APPROVAL_INPUTS,
     "trust_bin",
     _PACKAGE_APPROVALS,
-    _NATIVE_STATUS,
+    *_NATIVE_STATUS,
     *_GRANT_WRITERS,
 )
 
@@ -115,7 +115,9 @@ _FINGERPRINT_ROUTES: dict[str, tuple[str, ...]] = {
         "def evidence_fingerprint(",
         "def local_bundle_digest(",
         "def native_plugin_fingerprint(",
-        "return compute_native_plugin_hash(plugin_root)",
+        # Approval pins leave the exec bit out so they hold across operating
+        # systems; the mode-aware hash is the per-machine integrity check.
+        "return compute_native_plugin_pin(plugin_root)",
     ),
     _MCP_VIEW: ("return evidence_fingerprint(payload)",),
     _EXECUTABLES: ("digest = local_bundle_digest(source_dir, lockfile)",),
@@ -288,12 +290,12 @@ def _routing_findings(path: str, tree: ast.AST) -> list[Violation]:
         if not isinstance(node, ast.Call):
             continue
         name = _bare(_callee(node, {}))
-        if name == _NATIVE_STATUS and not any(k.arg == "native" for k in node.keywords):
+        if name in _NATIVE_STATUS and not any(k.arg == "native" for k in node.keywords):
             findings.append(
                 _summary(
                     GUARD_ITEM_ADMISSION,
                     path,
-                    f"{_NATIVE_STATUS} at line {node.lineno} must pass native=",
+                    f"{name} at line {node.lineno} must pass native=",
                 )
             )
         if name in _GRANT_WRITERS and path not in _GRANT_WRITER_PATHS:
@@ -386,6 +388,18 @@ def check_item_admission(provider: FactsProvider) -> tuple[Violation, ...]:
 def check_trust_fingerprint(provider: FactsProvider) -> tuple[Violation, ...]:
     """Every trust fingerprint is computed by security/trust_fingerprint.py."""
     findings = _missing(provider, GUARD_TRUST_FINGERPRINT, _FINGERPRINT_ROUTES)
+    for path in _python_paths(provider, _SRC):
+        if path in (_FINGERPRINT, "src/apm_cli/utils/content_hash.py"):
+            continue
+        facts, failures = _facts_for(provider, path, GUARD_TRUST_FINGERPRINT)
+        if not failures and any("compute_native_plugin_pin(" in line for line in _lines(facts)):
+            findings.append(
+                _summary(
+                    GUARD_TRUST_FINGERPRINT,
+                    path,
+                    "Native plugin approval pins come only from native_plugin_fingerprint",
+                )
+            )
     for path in _NO_HASHLIB:
         facts, failures = _facts_for(provider, path, GUARD_TRUST_FINGERPRINT)
         if failures:

@@ -124,10 +124,13 @@ class TestHelpTextShowsNoPolicy:
         assert "Target a specific runtime only." in normalized
         assert "intellij" in normalized
         assert "kiro" in normalized
-        assert (
-            "Claude Code, Cursor, OpenCode, Codex CLI, Gemini CLI, Antigravity CLI, Hermes, "
-            "Kiro, Windsurf" in normalized
-        )
+        # S11 (#3967): -g help keeps no second runtime list; the skip warning
+        # names the supported runtimes, derived from the adapters.
+        from apm_cli.integration.mcp_user_scope_runtimes import user_scope_runtime_labels
+
+        assert "skipped with a warning that lists the supported ones" in normalized
+        assert "Kiro" in user_scope_runtime_labels()
+        assert "Kiro, Windsurf" not in normalized
 
     def test_help_text_is_plain_ascii(self):
         """Help text must be plain ASCII per cli.instructions.md."""

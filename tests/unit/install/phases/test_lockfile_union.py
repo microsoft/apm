@@ -1147,6 +1147,16 @@ class TestInactiveExperimentalResolverGating:
             "during lockfile reconciliation."
         ) in info_messages
 
+        # The expected skip is noise for users who never opted in (#3994).
+        quiet = DiagnosticCollector(verbose=False)
+        declared_target_profiles(
+            project,
+            user_scope=True,
+            active_targets=[_known("copilot"), _known("claude"), _known("codex")],
+            diagnostics=quiet,
+        )
+        assert not quiet.by_category().get(CATEGORY_INFO)
+
     @pytest.mark.windows_compat
     def test_explicit_experimental_resolver_failure_is_not_silenced(
         self,

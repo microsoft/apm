@@ -1,0 +1,183 @@
+---
+title: Choose your harnesses
+description: Declare which agent tools APM writes for, see where each file lands, and install for your user account instead of one project.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+Use this page to decide which agent tools get your team's skills and
+instructions, and to find where a file landed. APM calls each agent tool a
+**harness**: GitHub Copilot, Claude Code, Cursor, Codex, Gemini CLI,
+OpenCode, Windsurf and Kiro are examples. Each one reads its own folder, so
+APM writes one package in each harness's format.
+
+## Declare targets
+
+List the harnesses in `apm.yml`. Each value is a **target**:
+
+```diff title="apm.yml"
++targets:
++  - copilot
++  - claude
++  - cursor
++  - codex
+```
+
+`apm init --target copilot,claude,cursor,codex` writes the same list. Commit
+it: every teammate and CI run then writes the same files, and the lockfile
+records the same MCP ownership on every machine.
+
+To write for one harness in a single run, pass `--target` (comma-separated):
+
+```bash frame="terminal"
+apm install --target claude
+```
+
+APM picks targets in this order: `--target`, then `targets:` in `apm.yml`,
+then a saved default (`apm config set target claude`), then detection.
+
+:::caution[Replace `target:` with `targets:`]
+The singular `target:` key is deprecated. APM warns once per run and prints
+the exact replacement, for example `Replace 'target: claude' with 'targets:
+[claude]'`.
+:::
+
+## Why a fresh repo needs explicit targets
+
+With no `targets:`, APM looks for folders a harness already created
+(`.claude/`, `.cursor/`, `.codex/`, `.github/instructions/` and so on). A new
+repository has none, so `apm install` stops before writing anything:
+
+```text frame="none"
+Error: No harness detected
+```
+
+Detection can also guess wrong: a `CLAUDE.md` you wrote as documentation turns
+on Claude Code. Declare `targets:` to remove the guess. `apm targets` shows
+what detection finds on disk (it does not read `targets:`):
+
+```bash frame="terminal"
+apm targets
+```
+
+```text frame="none"
+  TARGET       STATUS     SOURCE                                   DEPLOY DIR
+  ------------ ---------- ---------------------------------------- ----------
+  claude       active     .claude/                                 .claude/
+  copilot      active     .github/instructions/                    .github/
+  cursor       active     .cursor/                                 .cursor/
+  codex        active     .codex/                                  .codex/
+  gemini       inactive   needs GEMINI.md                          .gemini/
+...
+```
+
+## What lands where
+
+Installing `microsoft/apm-sample-package#v1.0.0` with the four targets above
+writes files like these; the MCP and hooks lines show where those land when a
+package has them. Skills go to the shared `.agents/skills/` folder that
+Copilot, Cursor and Codex read; Claude Code keeps its own.
+
+<Tabs syncKey="harness">
+  <TabItem label="GitHub Copilot">
+    ```text frame="none"
+    .github/agents/design-reviewer.agent.md
+    .github/instructions/design-standards.instructions.md
+    .github/prompts/design-review.prompt.md
+    .agents/skills/style-checker/SKILL.md
+    .mcp.json                      (MCP servers)
+    .github/hooks/<package>-hooks.json   (hooks)
+    ```
+  </TabItem>
+  <TabItem label="Claude Code">
+    ```text frame="none"
+    .claude/agents/design-reviewer.md
+    .claude/rules/design-standards.md
+    .claude/commands/design-review.md     (from prompts)
+    .claude/skills/style-checker/SKILL.md
+    .mcp.json                      (MCP servers)
+    .claude/settings.json          (hooks)
+    ```
+  </TabItem>
+  <TabItem label="Cursor">
+    ```text frame="none"
+    .cursor/agents/design-reviewer.md
+    .cursor/rules/design-standards.mdc
+    .cursor/commands/design-review.md     (from prompts)
+    .agents/skills/style-checker/SKILL.md
+    .cursor/mcp.json               (MCP servers)
+    .cursor/hooks.json             (hooks)
+    ```
+  </TabItem>
+  <TabItem label="Codex">
+    ```text frame="none"
+    .codex/agents/design-reviewer.toml
+    .agents/skills/style-checker/SKILL.md
+    .codex/config.toml             (MCP servers)
+    .codex/hooks.json              (hooks)
+    AGENTS.md                      (instructions, after apm compile)
+    ```
+  </TabItem>
+</Tabs>
+
+Some primitives have no equivalent in a harness and are skipped with a
+`[!]` line; for example, Claude Code commands drop prompt frontmatter keys
+they do not support. The full primitive-by-harness table, including Gemini,
+OpenCode, Windsurf and Kiro, is the [Targets matrix](../../reference/targets-matrix/).
+To trace one file back to its package, run `apm find PATH`.
+
+## Install for your user account
+
+`-g` installs into your home folder so the packages follow you into every
+project:
+
+```bash frame="terminal"
+apm install -g microsoft/apm-sample-package#v1.0.0 --target copilot,claude
+```
+
+APM keeps the user manifest and lockfile in `~/.apm/` (or `$APM_HOME`) and
+writes files where each harness reads user settings: `~/.copilot/`,
+`~/.claude/`, `~/.cursor/`, `~/.codex/`. Skills go to `~/.claude/skills/` for Claude Code
+and to `~/.agents/skills/` for GitHub Copilot, Codex and Cursor.
+Point a harness at another profile with `COPILOT_HOME`, `CLAUDE_CONFIG_DIR` or
+`CODEX_HOME`; the value must be an absolute path. A selection with no
+harness that supports user scope exits 2 before changing anything. Details:
+[Environment variables](../../reference/environment-variables/#harness-home-variables).
+
+## Compiled outputs
+
+Codex, Gemini CLI and OpenCode read instructions from one root file
+(`AGENTS.md`, or `GEMINI.md` for Gemini), not per-file rules. After an install
+that brings instructions for them, APM prints:
+
+```text frame="none"
+[i] Instructions installed for codex. Run 'apm compile' to update AGENTS.md.
+```
+
+```bash frame="terminal"
+apm compile
+```
+
+`apm compile` merges your instructions into those root files. It writes
+`CLAUDE.md` when `.claude/rules/` does not already carry the
+instructions. Commit the generated file and rerun `apm compile` when
+instructions change. `apm uninstall` and `apm prune` print a matching hint
+when a removed package's instructions are still in the root file. Flags:
+[`apm compile`](../../reference/cli/compile/).
+
+## Verify
+
+Run `apm install` and read its opening line; it names the targets and where
+they came from:
+
+```text frame="none"
+[i] Targets: claude, codex, copilot, cursor  (source: apm.yml)
+```
+
+Then check one path from the tabs above.
+
+:::tip[Other options]
+`--exclude NAME` skips one harness's MCP and LSP config for a run.
+Targets such as `agent-skills` and `hermes` are never auto-detected; list
+them in `targets:`. Every value: [`apm targets`](../../reference/cli/targets/).
+:::

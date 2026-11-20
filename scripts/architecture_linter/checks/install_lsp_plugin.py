@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import ast
+import textwrap
+
 from scripts.architecture_linter.checks.install_deployment_shared import (
     _facts_for,
     _lines,
@@ -59,11 +62,33 @@ _TRUST_OWNER_CALLERS = frozenset(
         ("src/apm_cli/security/trust.py", "resolve"),
         ("src/apm_cli/security/trust.py", "pins"),
         (_EXEC_GATE, "_trust_ctx"),
-        (_EXEC_GATE, "lock_exec_decisions_stale"),
         (_EXEC_GATE, "_resolve"),
         (_EXECUTABLES, "effective_exec_map_for_project"),
+        # ``apm install <bundle>`` reads grants from the scope manifest, never
+        # the working directory's apm.yml under -g (#3989 M2).
+        (_LOCAL_BUNDLE, "effective_bundle_allow_map"),
     }
 )
+# The root-taking convenience wrapper derives the PROJECT manifest from its
+# root, so only the caller that first maps a root through the scope owner
+# (core.scope.manifest_root) may use it.
+_ROOT_TRUST_WRAPPER = "effective_exec_map_for_project"
+_ROOT_TRUST_WRAPPER_CALLERS = frozenset({(_EXECUTABLES, "resolve_project_exec_allow_map")})
+# One owner decides a package's exec status and the types a partial approval
+# still deploys (#3991); one comparer reads them back. A second reader would let
+# update and install disagree on whether a recorded decision still holds.
+_EXEC_DECISION_CALLERS = {
+    "package_exec_decision": frozenset(
+        {
+            ("src/apm_cli/security/trust.py", "package_exec_status"),
+            (_EXEC_GATE, "check_executable_approval"),
+            (_EXEC_GATE, "current_exec_decision"),
+        }
+    ),
+    "recorded_exec_status_is_stale": frozenset(
+        {(_EXEC_GATE, "lock_exec_decisions_stale"), (_EXEC_GATE, "for_dependency")}
+    ),
+}
 _MANIFEST_DERIVATION_TOKENS = ('"apm.yml"', "APM_YML_FILENAME")
 # approve/deny select a package by exact name: a partial name could grant or deny
 # execution for another package, so prefix matching on names is refused.
@@ -164,6 +189,8 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 _LOCAL_BUNDLE: (
                     "bundle_approval_key = local_bundle_approval_key(",
                     "approval_key=bundle_approval_key,",
+                    "grants_manifest = project_manifest_path(manifest_root(project_root, "
+                    "user_scope=user_scope))",
                 ),
                 _INSTALL_SERVICES: (
                     # Bundle hooks and canvas are approved for the exact bundle content.
@@ -177,6 +204,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
         )
     )
     findings.extend(_trust_owner_closed_world(provider))
+    findings.extend(_bundle_trust_scope_findings(provider))
     # A second locked-row trust derivation beside the owner is a split authority.
     facts, failures = _facts_for(provider, _APPROVE_COMMAND, GUARD_EXECUTABLE_TRUST)
     if not failures:
@@ -209,6 +237,124 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
     return tuple(findings)
 
 
+def _bundle_trust_scope_findings(provider: FactsProvider) -> list[Violation]:
+    """``apm install <bundle>`` hands the bundle trust owner the command's scope."""
+    facts, failures = _facts_for(provider, _INSTALL_COMMAND, GUARD_EXECUTABLE_TRUST)
+    if failures:
+        return list(failures)
+    text = "\n".join(_lines(facts))
+    marker = "_effective_bundle_allow_map("
+    calls = [
+        _balanced_call(text, index) for index in range(len(text)) if text.startswith(marker, index)
+    ]
+    if len(calls) == 1 and "user_scope=global_," in calls[0]:
+        return []
+    return [
+        _summary(
+            GUARD_EXECUTABLE_TRUST,
+            _INSTALL_COMMAND,
+            "apm install <bundle> must pass effective_bundle_allow_map user_scope=global_ "
+            "so -g reads grants from the user manifest (#3989)",
+        )
+    ]
+
+
+# What a registered caller may hand the trust owner as the manifest (A8): a
+# call to the scope owner's manifest helpers, or a name bound from one, or the
+# owner-contract parameter that carries the resolved manifest file.
+_MANIFEST_PATH_CALLS = frozenset({"project_manifest_path", "get_manifest_path"})
+_MANIFEST_PATH_PARAMS = frozenset({"manifest_path", "grants_manifest"})
+
+
+def _callee_name(node: ast.AST) -> str:
+    func = getattr(node, "func", None)
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return ""
+
+
+def _is_manifest_call(node: ast.AST) -> bool:
+    return isinstance(node, ast.Call) and _callee_name(node) in _MANIFEST_PATH_CALLS
+
+
+def _balanced_call(text: str, start: int) -> str:
+    """The call starting at *start*, through its balanced closing parenthesis."""
+    depth = 0
+    for index in range(text.index("(", start), len(text)):
+        depth += {"(": 1, ")": -1}.get(text[index], 0)
+        if depth == 0:
+            return text[start : index + 1]
+    return text[start:]
+
+
+def _trust_owner_argument(lines: tuple[str, ...], call: object) -> ast.AST | None:
+    """Parse the first argument of the trust-owner call at *call*."""
+    text = "\n".join(lines[call.line - 1 :])
+    try:
+        node = ast.parse(_balanced_call(text, call.column), mode="eval").body
+    except (SyntaxError, ValueError):
+        return None
+    if isinstance(node, ast.Call) and node.args:
+        return node.args[0]
+    return None
+
+
+def _manifest_name_is_resolved(name: str, scope_source: str) -> bool:
+    """Whether *name* only ever holds a resolved manifest in the enclosing function."""
+    try:
+        tree = ast.parse(textwrap.dedent(scope_source))
+    except SyntaxError:
+        return False
+    params = {
+        arg.arg
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
+        for arg in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
+    }
+    bound = [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+    ]
+    if any(not _is_manifest_call(value) for value in bound):
+        return False
+    return bool(bound) or (name in params and name in _MANIFEST_PATH_PARAMS)
+
+
+def _trust_owner_argument_findings(path: str, facts: object) -> list[Violation]:
+    """A registered caller hands the owner a resolved manifest, never a root (A8)."""
+    lines = _lines(facts)
+    functions = [d for d in facts.definitions if d.kind != "class"]
+    findings: list[Violation] = []
+    for call in facts.calls:
+        if call.qualname.rsplit(".", 1)[-1] != _TRUST_OWNER:
+            continue
+        if (path, call.scope) not in _TRUST_OWNER_CALLERS:
+            continue
+        argument = _trust_owner_argument(lines, call)
+        enclosing = [d for d in functions if d.line <= call.line <= d.end_line]
+        outer = min(enclosing, key=lambda d: d.line) if enclosing else None
+        source = "\n".join(lines[outer.line - 1 : outer.end_line]) if outer else ""
+        if _is_manifest_call(argument) or (
+            isinstance(argument, ast.Name) and _manifest_name_is_resolved(argument.id, source)
+        ):
+            continue
+        findings.append(
+            violation(
+                GUARD_EXECUTABLE_TRUST,
+                path,
+                f"{call.scope} must pass {_TRUST_OWNER} the scope's manifest file "
+                "(project_manifest_path(...) / get_manifest_path(...) or a name bound from "
+                "one), not a directory (#3954)",
+                line=call.line,
+            )
+        )
+    return findings
+
+
 def _trust_owner_closed_world(provider: FactsProvider) -> list[Violation]:
     """Only registered callers reach the trust owner, which never derives apm.yml."""
     findings: list[Violation] = []
@@ -235,6 +381,7 @@ def _trust_owner_closed_world(provider: FactsProvider) -> list[Violation]:
         # (core.scope.get_manifest_path / manifest_root + project_manifest_path);
         # it never builds apm.yml from a root itself (#3954, #3986).
         registered = {scope for caller, scope in _TRUST_OWNER_CALLERS if caller == path}
+        findings.extend(_trust_owner_argument_findings(path, path_facts))
         lines = _lines(path_facts)
         for definition in path_facts.definitions:
             if definition.name not in registered:
@@ -261,6 +408,30 @@ def _trust_owner_closed_world(provider: FactsProvider) -> list[Violation]:
             for call in path_facts.calls
             if call.qualname.rsplit(".", 1)[-1] == _TRUST_OWNER
             and (path, call.scope) not in _TRUST_OWNER_CALLERS
+        )
+        findings.extend(
+            violation(
+                GUARD_EXECUTABLE_TRUST,
+                path,
+                f"{call.scope} calls {_ROOT_TRUST_WRAPPER} with a root; read grants from "
+                "the scope manifest (project_manifest_path(manifest_root(...)))",
+                line=call.line,
+            )
+            for call in path_facts.calls
+            if call.qualname.rsplit(".", 1)[-1] == _ROOT_TRUST_WRAPPER
+            and (path, call.scope) not in _ROOT_TRUST_WRAPPER_CALLERS
+        )
+        findings.extend(
+            violation(
+                GUARD_EXECUTABLE_TRUST,
+                path,
+                f"{call.scope} calls {name} outside its registered callers; the exec "
+                "decision and its staleness check have one owner each (#3990, #3991)",
+                line=call.line,
+            )
+            for call in path_facts.calls
+            if (name := call.qualname.rsplit(".", 1)[-1]) in _EXEC_DECISION_CALLERS
+            and (path, call.scope) not in _EXEC_DECISION_CALLERS[name]
         )
     return findings
 
@@ -367,7 +538,7 @@ def check_lsp_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
                 ),
                 _LOCAL_BUNDLE: (
                     "def effective_bundle_allow_map(",
-                    "return effective_exec_map_for_project(",
+                    "exec_trust_context_for_project(",
                     "def _wire_bundle_lsp_servers(",
                     "force=force,",
                 ),

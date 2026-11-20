@@ -144,7 +144,7 @@ Set personal defaults so you do not repeat the flags (both keys are gated on the
 
 ```bash
 apm config set external.skillspector.llm true
-apm config set external.skillspector.args "--model gpt-4o"
+apm config set -- external.skillspector.args "--model gpt-4o"
 apm config get external.skillspector.llm
 apm config unset external.skillspector.args
 ```
