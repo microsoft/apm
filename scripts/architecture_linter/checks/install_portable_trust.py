@@ -5,7 +5,9 @@ Three owners keep "may this dependency run code here?" single-sourced:
 * item admission  -- ``security/trust.py`` alone reads pinned item grants;
 * fingerprint     -- ``security/trust_fingerprint.py`` alone hashes;
 * MCP admission   -- every ``CurrentMcpConfigView.derive`` call passes the
-  owner's ``admission=``; no command passes a literal trust boolean.
+  owner's ``admission=``; no command passes a literal trust boolean;
+* hook pin parity -- ``install --frozen`` and ``audit --ci`` verify locked
+  hook approval pins through one owner route, and nothing else does (#4188).
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from scripts.architecture_linter.models import Rule, Violation
 GUARD_ITEM_ADMISSION = "install-deployment-executable-item-admission"
 GUARD_TRUST_FINGERPRINT = "install-deployment-trust-fingerprint"
 GUARD_MCP_ADMISSION = "install-deployment-mcp-admission"
+GUARD_HOOK_PIN_PARITY = "install-deployment-hook-pin-frozen-audit-parity"
 
 _SRC = "src/apm_cli/"
 _TRUST = "src/apm_cli/security/trust.py"
@@ -111,6 +114,23 @@ _MCP_ROUTES: dict[str, tuple[str, ...]] = {
     _TRUST: ("class McpAdmission:", "def for_project(", "def admit_all("),
     _MCP_VIEW: ("admission: McpAdmission,", "verdict = admission.admit(subject)"),
     "src/apm_cli/install/service.py": ("admission=admission,",),
+}
+
+
+_EXEC_GATE = "src/apm_cli/install/exec_gate.py"
+_SERVICE = "src/apm_cli/install/service.py"
+_CI_CHECKS = "src/apm_cli/policy/ci_checks.py"
+_HOOK_PIN_ROUTES: dict[str, tuple[str, ...]] = {
+    _TRUST: ("def recorded_hook_pin_mismatches(",),
+    _EXEC_GATE: ("def locked_hook_pin_mismatches(", "recorded_hook_pin_mismatches("),
+    _SERVICE: ("mismatches = locked_hook_pin_mismatches(lockfile, modules_dir, trust_ctx)",),
+    "src/apm_cli/install/phases/integrate.py": ("InstallService.enforce_frozen_hook_pins(",),
+    _CI_CHECKS: ("mismatches = locked_hook_pin_mismatches(", "_check_hook_approval_pins("),
+}
+# Closed world: the owner call and its lock walk have exactly these callers.
+_HOOK_PIN_CALLERS: dict[str, frozenset[str]] = {
+    "recorded_hook_pin_mismatches(": frozenset({_TRUST, _EXEC_GATE}),
+    "locked_hook_pin_mismatches(": frozenset({_EXEC_GATE, _SERVICE, _CI_CHECKS}),
 }
 
 
@@ -236,6 +256,30 @@ def check_mcp_admission(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
+def check_hook_pin_parity(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Frozen install and audit --ci verify hook pins through one owner route."""
+    findings = _missing(provider, GUARD_HOOK_PIN_PARITY, _HOOK_PIN_ROUTES)
+    for path in _python_paths(provider, _SRC):
+        facts, failures = _facts_for(provider, path, GUARD_HOOK_PIN_PARITY)
+        if failures:
+            continue
+        stray = [
+            token
+            for token, callers in _HOOK_PIN_CALLERS.items()
+            if path not in callers and _present(facts, token)
+        ]
+        if stray:
+            findings.append(
+                _summary(
+                    GUARD_HOOK_PIN_PARITY,
+                    path,
+                    "Locked hook pins are verified only for install --frozen and audit --ci "
+                    "through install/exec_gate.py; remove " + ", ".join(stray),
+                )
+            )
+    return tuple(findings)
+
+
 RULES: tuple[Rule, ...] = (
     _rule(
         GUARD_ITEM_ADMISSION,
@@ -251,6 +295,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_MCP_ADMISSION,
         "Every MCP view derivation passes the trust owner's admission.",
         check_mcp_admission,
+    ),
+    _rule(
+        GUARD_HOOK_PIN_PARITY,
+        "install --frozen and audit --ci verify locked hook approval pins through one owner.",
+        check_hook_pin_parity,
     ),
 )
 
