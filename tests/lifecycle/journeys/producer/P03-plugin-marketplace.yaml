@@ -103,8 +103,3 @@ known_cells:
     tracking: "#4201"
     step: 5
     match: "Git failed during ls-remote"
-  - id: o11-vendor-shape-not-hermetic
-    law: O11
-    tracking: "#0"
-    step: 6
-    match: "no hermetic implementation"

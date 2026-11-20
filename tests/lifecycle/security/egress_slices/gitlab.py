@@ -26,5 +26,9 @@ SLICE = HostSlice(
             for cred in ("PAT", "helper", "none")
             for egress in ("api-probe", "clone")
         ),
+        EgressRow("EP|EGRESS=api-probe|HOST=GitLab", "PAT", "api-probe"),
+        EgressRow("EP|EGRESS=clone|HOST=GitLab", "PAT", "clone"),
+        EgressRow("EP|HOST=GitLab|PROXY_ONLY=0", "PAT", "clone"),
+        EgressRow("EP|HOST=GitLab|REDIRECT=none", "PAT", "clone"),
     ),
 )

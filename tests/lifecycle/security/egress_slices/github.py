@@ -30,5 +30,13 @@ SLICE = HostSlice(
             for cred in ("PAT", "gh", "none")
             for egress in _E2
         ),
+        # github.com serves p-skill anonymously: the clone and api-probe rows
+        # run without a credential and prove none is sent.
+        EgressRow("EP|EGRESS=api-probe|HOST=github", "none", "api-probe"),
+        EgressRow("EP|EGRESS=clone|HOST=github", "none", "clone"),
+        EgressRow("EP|EGRESS=marketplace-fetch|HOST=github", "PAT", "marketplace-fetch"),
+        EgressRow("EP|EGRESS=policy-fetch|HOST=github", "PAT", "policy-fetch"),
+        EgressRow("EP|HOST=github|PROXY_ONLY=0", "PAT", "policy-fetch"),
+        EgressRow("EP|HOST=github|REDIRECT=none", "PAT", "policy-fetch"),
     ),
 )

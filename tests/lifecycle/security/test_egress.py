@@ -29,8 +29,10 @@ Unregistered, missing world support: every ``az-bearer`` id and the ADO
 ``helper`` ids (the world's Azure DevOps host answers anonymous requests, so
 APM never reaches those chain steps); ``helper`` on the generic host (no
 generic git host is served); ``registry`` egress (no APM package registry
-service); E1 redirect rows and PROXY_ONLY rows (the world proxy cannot yet
-script a redirect or an unproxied route).
+service); the E1 and EP rows with REDIRECT=same-origin or cross-origin and
+PROXY_ONLY=1 (the world proxy cannot yet script a redirect or an unproxied
+route). A row whose id carries PROXY_ONLY=0 also proves the proxy refused no
+connection; REDIRECT=none proves no response of the step redirected.
 """
 
 from __future__ import annotations
@@ -203,6 +205,11 @@ def _entry(request: ScriptedRequest) -> dict[str, object]:
     return {"host": request.host, "method": request.method, "path": request.path}
 
 
+def _fields(cell_id: str) -> dict[str, str]:
+    """The factor values of an E id: "EP|CRED=PAT|HOST=github" -> {CRED: PAT, HOST: github}."""
+    return dict(part.split("=", 1) for part in cell_id.split("|")[1:])
+
+
 def registered() -> list[tuple[HostSlice, EgressRow]]:
     return [(host, row) for host in slices() for row in host.rows]
 
@@ -231,6 +238,15 @@ def run_egress_row(world: World, host: HostSlice, row: EgressRow) -> None:
     assert host.git_host in reached or reached & set(host.family), (
         f"{row.egress} never reached {host.host}: {sorted(reached)}"
     )
+    fields = _fields(row.id)
+    everything = world.services.proxy.observations
+    if fields.get("PROXY_ONLY") == "0":
+        # Normal mode: every connection went to an origin the world's proxy serves.
+        refused = sorted({r.host for r in everything if r.method == "CONNECT"})
+        assert not refused, f"connections the proxy refused: {refused}"
+    if fields.get("REDIRECT") == "none":
+        redirected = sorted({(r.host, r.path) for r in everything if 300 <= r.status < 400})
+        assert not redirected, f"redirects in a no-redirect row: {redirected}"
     foreign = sorted({r.host for r in requests if _carried(r, arranged.foreign)})
     assert not foreign, f"another platform's credential reached {foreign}"
     if arranged.own:
@@ -272,7 +288,7 @@ def test_every_egress_row_is_an_e_obligation() -> None:
     assert len(ids) == len(set(ids)), "an E id is registered twice"
     assert set(ids) <= set(space), sorted(set(ids) - set(space))
     for host, row in registered():
-        fields = dict(part.split("=", 1) for part in row.id.split("|")[1:])
+        fields = _fields(row.id)
         assert fields.get("HOST", host.host) == host.host, row.id
         assert fields.get("CRED", row.cred) == row.cred, row.id
         assert fields.get("EGRESS", row.egress) == row.egress, row.id

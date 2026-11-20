@@ -52,13 +52,3 @@ steps:
       - "[+] Revoked trust for apm.yml lifecycle:. Its scripts will no longer run."
       - "[!] Skipped 1 untrusted project script(s). Run 'apm lifecycle trust' to enable them."
     forbidden_lines: ["[x]"]
-known_cells:
-  # Runner model gap, not a CLI defect: trust records live in
-  # $APM_HOME/scripts-trust.json (reference/cli/lifecycle.md); the runner's
-  # HOME allow-list does not declare them for "apm lifecycle trust/untrust",
-  # nor $APM_HOME/logs/scripts.log, which a trusted script run appends to.
-  - id: runner-home-allowlist-scripts-trust-json-trust
-    law: I5
-    tracking: "#0"
-    step: 4
-    match: "(lifecycle|install) wrote home:\\['.apm/(scripts-trust.json|logs)'"

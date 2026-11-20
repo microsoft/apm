@@ -27,5 +27,11 @@ SLICE = HostSlice(
             for cred in ("PAT", "gh", "none")
             for egress in ("api-probe", "clone", "policy-fetch")
         ),
+        *(
+            EgressRow(f"EP|EGRESS={egress}|HOST=ghe.com", "PAT", egress)
+            for egress in ("api-probe", "clone", "policy-fetch")
+        ),
+        EgressRow("EP|HOST=ghe.com|PROXY_ONLY=0", "PAT", "clone"),
+        EgressRow("EP|HOST=ghe.com|REDIRECT=none", "PAT", "clone"),
     ),
 )

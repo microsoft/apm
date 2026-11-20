@@ -25,5 +25,31 @@ SLICE = HostSlice(
             for cred in ("PAT", "gh", "helper", "none")
             for egress in _E2
         ),
+        # Pairwise EP and E1 rows. GHES serves every operation with every
+        # supported credential, so it carries the rows whose host is free.
+        *(
+            EgressRow(f"EP|CRED={cred}|EGRESS={egress}", cred, egress)
+            for cred in ("PAT", "gh", "helper", "none")
+            for egress in _E2
+        ),
+        *(
+            EgressRow(f"E1|CRED={cred}|EGRESS={egress}|REDIRECT=none", cred, egress)
+            for cred in ("PAT", "gh", "helper")
+            for egress in _E2
+        ),
+        *(EgressRow(f"EP|EGRESS={egress}|HOST=GHES", "PAT", egress) for egress in _E2),
+        *(
+            EgressRow(f"EP|CRED={cred}|{mode}", cred, "clone")
+            for cred in ("PAT", "gh", "helper", "none")
+            for mode in ("PROXY_ONLY=0", "REDIRECT=none")
+        ),
+        *(
+            EgressRow(f"EP|EGRESS={egress}|{mode}", "PAT", egress)
+            for egress in _E2
+            for mode in ("PROXY_ONLY=0", "REDIRECT=none")
+        ),
+        EgressRow("EP|HOST=GHES|PROXY_ONLY=0", "PAT", "clone"),
+        EgressRow("EP|HOST=GHES|REDIRECT=none", "PAT", "clone"),
+        EgressRow("EP|PROXY_ONLY=0|REDIRECT=none", "PAT", "clone"),
     ),
 )
