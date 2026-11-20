@@ -41,6 +41,14 @@ _POLICY = "needs an org policy; the hermetic world installs with --no-policy"
 _BUNDLE = "needs a local bundle with hooks and an executables trust change"
 
 COMPONENT_ONLY: dict[str, str] = {
+    "frozen-exec-decisions-stale": "covered by test_frozen_stale_decision_advice and the "
+    "frozen stale exec-status lifecycle test asserting the printed next step",
+    "frozen-kept-adopted": "covered by test_frozen_withdrawal asserting the full kept-file "
+    "next step",
+    "frozen-kept-edited": "covered by test_frozen_withdrawal asserting the full kept-file "
+    "next step",
+    "frozen-kept-unremovable": "covered by test_frozen_withdrawal asserting the full "
+    "kept-file next step",
     "bundle-hooks-approved": _BUNDLE,
     "bundle-hooks-unadmitted": _BUNDLE,
     "content-hash-unverified": "needs a legacy (version 1-3) lockfile whose carried bytes "

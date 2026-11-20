@@ -1,8 +1,4 @@
 {
-  "files": {
-    "src/apm_cli/install/frozen_retirement.py": 1,
-    "src/apm_cli/install/frozen_withdrawal.py": 4,
-    "src/apm_cli/policy/ci_checks.py": 1
-  },
+  "files": {},
   "version": 1
 }
