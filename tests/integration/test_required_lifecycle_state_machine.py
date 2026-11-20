@@ -173,6 +173,17 @@ def _assert_skill_receipt(
     lock = LockFile.read(lock_root / "apm.lock.yaml")
     assert lock is not None
     if scope == "user":
+        # Raw form first, independent of the codec: each skill row persists as
+        # scope user, target-relative to its target root outside HOME.
+        raw_rows = (load_yaml(lock_root / "apm.lock.yaml") or {}).get("deployments") or []
+        assert {row["scope"] for row in raw_rows} == {"user"}, raw_rows
+        for target, path in expected.items():
+            root = Path((user_env or {})[_EXTERNAL_USER_ROOT_ENV[target]]).resolve()
+            relative = path.resolve().relative_to(root).as_posix()
+            assert any(
+                (row["kind"], row["target"], row["value"]) == ("target-relative", target, relative)
+                for row in raw_rows
+            ), (target, relative, raw_rows)
         # Read the user lockfile as the CLI does, under the command's target roots.
         with patch.dict(os.environ, user_env or {}):
             DeploymentLedgerCodec.adopt_user_lockfile_rows(lock)
