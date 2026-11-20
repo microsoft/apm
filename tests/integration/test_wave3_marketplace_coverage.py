@@ -24,6 +24,9 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.core.script_runner import ScriptRunner
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # Helpers for test fixture setup
 # ---------------------------------------------------------------------------

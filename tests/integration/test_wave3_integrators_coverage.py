@@ -32,6 +32,9 @@ from apm_cli.integration.skill_integrator import (
     validate_skill_name,
 )
 
+pytestmark = pytest.mark.component
+
+
 # ============================================================================
 # Fixtures: Realistic APM Package Structures
 # ============================================================================

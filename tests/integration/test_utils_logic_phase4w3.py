@@ -21,6 +21,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # mcp/args -- parse_kv_pairs error paths
 # ---------------------------------------------------------------------------

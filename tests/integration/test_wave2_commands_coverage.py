@@ -31,6 +31,9 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.deps.revision_pins import RevisionPinResolutionResult
 
+pytestmark = pytest.mark.component
+
+
 _EMPTY_REVISION_PIN_RESOLUTION = RevisionPinResolutionResult()
 
 # ---------------------------------------------------------------------------

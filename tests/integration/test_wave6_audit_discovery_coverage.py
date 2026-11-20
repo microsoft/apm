@@ -13,6 +13,9 @@ import pytest
 
 from apm_cli.security.content_scanner import ScanFinding
 
+pytestmark = pytest.mark.component
+
+
 # ---------------------------------------------------------------------------
 # commands/audit.py -- helper functions
 # ---------------------------------------------------------------------------

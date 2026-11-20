@@ -24,6 +24,8 @@ from apm_cli.models.validation import (
     validate_apm_package,
 )
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _force_yaml_pure_python(monkeypatch):

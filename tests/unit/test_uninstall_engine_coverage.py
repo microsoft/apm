@@ -14,6 +14,8 @@ from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.install.orphans import _build_children_index
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 
 class TestIsMarketplaceRef:
     """Tests for _is_marketplace_ref helper."""

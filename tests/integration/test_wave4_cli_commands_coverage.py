@@ -17,11 +17,15 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.commands.compile.watcher import _format_target_label
 from apm_cli.models.apm_package import clear_apm_yml_cache
+
+pytestmark = pytest.mark.component
+
 
 # ====== Test Setup Helpers ======
 

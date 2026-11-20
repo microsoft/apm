@@ -8,6 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pytest
+
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import (
     CopilotClientAdapter,
@@ -29,6 +31,8 @@ from apm_cli.marketplace.drift_check import (
 )
 from apm_cli.registry.operations import MCPServerOperations
 from apm_cli.runtime.manager import RuntimeManager
+
+pytestmark = pytest.mark.component
 
 
 class TestCopilotEnvPlaceholders:

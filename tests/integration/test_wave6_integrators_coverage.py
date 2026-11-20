@@ -18,6 +18,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.install.phases.lockfile import compute_deployed_hashes
 from apm_cli.integration.hook_file_routing import (
@@ -45,6 +47,9 @@ from apm_cli.integration.skill_integrator import (
 )
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.validation import PackageType
+
+pytestmark = pytest.mark.component
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers

@@ -16,6 +16,8 @@ from apm_cli.commands.view import (
 )
 from apm_cli.core.command_logger import CommandLogger
 
+pytestmark = pytest.mark.component
+
 
 class TestResolvePackagePath:
     """Tests for resolve_package_path helper."""

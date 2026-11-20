@@ -16,7 +16,7 @@ import yaml
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
-pytestmark = [pytest.mark.windows_compat, pytest.mark.trusted_executable]
+pytestmark = [pytest.mark.e2e, pytest.mark.windows_compat, pytest.mark.trusted_executable]
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
 _CLI = (sys.executable, "-c", "from apm_cli.cli import main; main()")

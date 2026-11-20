@@ -27,10 +27,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
-    reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
-)
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.skipif(
+        not os.environ.get("GITHUB_APM_PAT") and not os.environ.get("GITHUB_TOKEN"),
+        reason="GITHUB_APM_PAT or GITHUB_TOKEN required for GitHub API access",
+    ),
+]
 
 
 @pytest.fixture

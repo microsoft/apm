@@ -17,6 +17,8 @@ import yaml
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.primitives.discovery import get_dependency_declaration_order
 
+pytestmark = pytest.mark.component
+
 
 def _build_expected_installed_packages(declared_deps):
     """Build set of expected installed package paths from declared dependencies.

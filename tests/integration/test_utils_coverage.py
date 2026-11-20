@@ -45,6 +45,8 @@ from apm_cli.utils.helpers import (
 from apm_cli.utils.install_tui import should_animate
 from apm_cli.utils.reflink import clone_file, reflink_supported
 
+pytestmark = pytest.mark.component
+
 
 class TestDiagnosticCollector:
     """Test DiagnosticCollector for diagnostic message collection and rendering."""

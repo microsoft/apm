@@ -21,6 +21,9 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+pytestmark = pytest.mark.component
+
+
 # -------------------------------------------------------------------
 # Helpers to build realistic project fixtures
 # -------------------------------------------------------------------

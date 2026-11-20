@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 pytestmark = [
+    pytest.mark.e2e,
     pytest.mark.requires_github_token,
     pytest.mark.requires_apm_binary,
 ]
