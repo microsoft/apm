@@ -18,6 +18,7 @@ from apm_cli.primitives.discovery import (
     _discover_skill_in_directory,
     _is_readable,
     discover_primitives,
+    discover_primitives_with_dependencies,
     find_primitive_files,
     get_dependency_declaration_order,
     scan_directory_with_source,
@@ -973,6 +974,47 @@ class TestFindPrimitiveFilesEdgeCases(unittest.TestCase):
             # Both patterns should match the same file
             result = find_primitive_files(tmp, ["**/*.agent.md", "*.agent.md"])
             self.assertEqual(len(result), 1)
+
+
+def _dependency_instruction(root: Path, dep: str, body: str) -> None:
+    _write(
+        root
+        / "apm_modules"
+        / Path(*dep.split("/"))
+        / ".apm"
+        / "instructions"
+        / "style.instructions.md",
+        INSTRUCTION_CONTENT.replace("# Instruction body", body),
+    )
+
+
+@pytest.mark.req("req-pr-001")
+def test_discovered_primitives_carry_local_or_dependency_attribution(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "apm.yml", "name: p\nversion: 1.0.0\ndependencies:\n  apm:\n    - acme/rules\n"
+    )
+    _write(tmp_path / ".apm" / "agents" / "helper.agent.md", CHATMODE_CONTENT)
+    _dependency_instruction(tmp_path, "acme/rules", "# from acme")
+
+    collection = discover_primitives_with_dependencies(str(tmp_path))
+
+    assert [c.source for c in collection.chatmodes] == ["local"]
+    assert [i.source for i in collection.instructions] == ["dependency:acme/rules"]
+
+
+@pytest.mark.req("req-pr-003")
+def test_first_declared_dependency_wins_over_name_order(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "apm.yml",
+        "name: p\nversion: 1.0.0\ndependencies:\n  apm:\n    - zeta/rules\n    - alpha/rules\n",
+    )
+    _dependency_instruction(tmp_path, "zeta/rules", "# from zeta")
+    _dependency_instruction(tmp_path, "alpha/rules", "# from alpha")
+
+    collection = discover_primitives_with_dependencies(str(tmp_path))
+
+    assert [i.source for i in collection.instructions] == ["dependency:zeta/rules"]
+    assert "# from zeta" in collection.instructions[0].content
 
 
 if __name__ == "__main__":

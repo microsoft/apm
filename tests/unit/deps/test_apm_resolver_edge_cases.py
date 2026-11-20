@@ -322,6 +322,7 @@ class TestBuildDependencyTree:
         keys = list(tree.nodes.keys())
         assert any("devpkg" in k for k in keys), keys
 
+    @pytest.mark.req("req-mf-010")
     def test_root_parent_repo_inheritance_raises(self, tmp_path: Path) -> None:
         (tmp_path / "apm.yml").write_text(
             yaml.safe_dump(

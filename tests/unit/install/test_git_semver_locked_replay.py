@@ -61,6 +61,7 @@ class TestDownloadStrategyReplaysLockedSemver:
     def _resolved_refs(self, ctx):
         return [call.args[0].reference for call in ctx.downloader.resolve_git_reference.mock_calls]
 
+    @pytest.mark.req("req-lk-009")
     def test_unchanged_constraint_replays_locked_tag(self, tmp_path):
         from apm_cli.install.phases.integrate import _resolve_download_strategy
 
@@ -96,6 +97,7 @@ class TestDownloadStrategyReplaysLockedSemver:
         [(True, "^1.2.0"), (False, "^1.0.0")],
         ids=("update", "constraint-changed"),
     )
+    @pytest.mark.req("req-lk-009")
     def test_update_or_changed_constraint_does_not_replay(self, tmp_path, update_refs, constraint):
         from apm_cli.install.phases.integrate import _resolve_download_strategy
 

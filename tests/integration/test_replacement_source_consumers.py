@@ -567,6 +567,7 @@ def test_replacement_lock_seed_uses_only_matching_clean_selected_source(
         seed.assert_not_called()
 
 
+@pytest.mark.req("req-pl-002")
 @pytest.mark.parametrize("source_kind", ["local", "fork"])
 def test_install_policy_gate_blocks_selected_source_before_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_kind: str
