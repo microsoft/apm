@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updating `.mcp.json`, `.github/mcp.json`, `~/.claude.json` or the IntelliJ MCP config keeps its indentation, final newline, line endings and non-ASCII text; other layout is normalized. (#4530)
 - `apm install -g --target copilot-cowork` names the configured Cowork skills directory in its summary instead of a placeholder path. (#4503)
+- A refused `apm update` leaves the marketplace catalog cache unchanged, and update restores a missing marketplace digest from the registered catalog. (#4532)
 - `apm update` records restored marketplace provenance in its single lockfile write; a failed update leaves `apm.lock.yaml` unchanged. (#4525)
 - `apm update` and `apm uninstall` retire the servers and hooks current gates no longer allow; update exits 1 when org policy denies an installed dependency. (#4516)
 - `apm install` and `apm update` run `post-install` scripts after MCP and LSP reconciliation, so scripts see the final lockfile and it is written once. (#4486)
