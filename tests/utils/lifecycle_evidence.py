@@ -383,11 +383,19 @@ def expect_output_violation(*laws: str, reason: str) -> Iterator[None]:
 
 
 def is_apm_entry_point(prefix: Sequence[str]) -> bool:
-    """True when *prefix* runs APM (``-m apm_cli.cli`` or an ``apm`` binary)."""
+    """True when *prefix* runs APM.
+
+    That is ``-m apm_cli.cli``, an ``apm`` binary, or a recorded mutant
+    launcher under ``tests/fixtures/*_mutants/`` (it runs the real CLI).
+    """
     if not prefix:
         return False
-    last = prefix[-1]
-    return last == "apm_cli.cli" or Path(last).name.lower() in {"apm", "apm.exe"}
+    last = Path(prefix[-1])
+    return (
+        prefix[-1] == "apm_cli.cli"
+        or last.name.lower() in {"apm", "apm.exe"}
+        or (last.suffix == ".py" and last.parent.name.endswith("_mutants"))
+    )
 
 
 def _command_name(args: Sequence[str]) -> str:
