@@ -24,6 +24,9 @@ from scripts.architecture_linter.checks.contracts_lockfile_generator import (
 )
 from scripts.architecture_linter.checks.contracts_test_taxonomy import COLLECTORS
 from scripts.architecture_linter.checks.contracts_test_taxonomy import RULES as EXISTING_RULES
+from scripts.architecture_linter.checks.contracts_update_plan_ref import (
+    RULES as UPDATE_PLAN_REF_RULES,
+)
 
 RULES = (
     *EXISTING_RULES,
@@ -33,6 +36,7 @@ RULES = (
     *LOCKFILE_GENERATOR_RULES,
     *LIFECYCLE_SCRIPT_GATE_RULES,
     *LOCAL_PATH_ANCHOR_RULES,
+    *UPDATE_PLAN_REF_RULES,
 )
 
 __all__ = ["COLLECTORS", "RULES"]

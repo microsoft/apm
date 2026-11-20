@@ -624,6 +624,7 @@ contracts-tooling-project-yaml-write-delegation
 contracts-tooling-python-artifact-membership
 contracts-tooling-source-replacements
 contracts-tooling-strip-charset
+contracts-tooling-update-plan-recorded-ref
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
