@@ -1,35 +1,36 @@
 """Policy discovery outcomes: the owner table and one routing E2E per decision site (#4108).
 
-Owner: ``trust-policy-outcome`` in ``.apm/architecture/owners/install-deployment.json``
-(``src/apm_cli/policy/outcome_routing.py``). ``route_discovery_outcome`` turns
-a discovery outcome into an announcement and a fail-closed decision that
-honors the project's ``policy.fetch_failure_default``; ``resolve_trust_policy``
-routes the trust readers through it.
+PROMISE: P-OWN-trust-policy-outcome -- every discovery outcome routes through
+one owner that announces it and fails closed per ``policy.fetch_failure_default``
+(source: .apm/architecture/owners/install-deployment.json, id
+``trust-policy-outcome``; owner ``src/apm_cli/policy/outcome_routing.py``).
 
-Part 1 is the owner table at the owner symbol, fed real ``PolicyFetchResult``
-and ``ApmPolicy`` inputs and a real project ``apm.yml`` (the owner is never
-patched): every outcome x enforcement (off / warn / block) x
-``fetch_failure_default`` (warn / block) x the cached policy's own
-``fetch_failure``.
+This module is a framework of two tables; a row is data, never code:
 
-Part 2 drives the CLI through ``driver.run`` (via ``RowReplay`` steps, so
-``check_cross_cutting`` checks I1-I9 after every step) in the lifecycle world,
-once per call site of the owner:
+* ``OWNER_ROWS`` -- one row per ``P|owner|<class>`` obligation. The owner
+  test feeds real ``PolicyFetchResult`` / ``ApmPolicy`` inputs and a real
+  project ``apm.yml`` to ``route_discovery_outcome`` and
+  ``resolve_trust_policy`` (never patched), across enforcement off / warn /
+  block and the dry-run preview, and discharges the row at ``unit`` strength.
+* ``SITE_SLICES`` -- one slice per decision site (a caller of the owner):
+  how to arrange the world, the command line, and per-class expectations.
+  ``CLASS_SETUPS`` turns a class into a world input (policy variant, project
+  knob, git remote, cache). The site test runs the command through
+  ``RowReplay`` (driver + ``check_cross_cutting`` I1-I9 per step) and
+  discharges ``P|<site>|<class>`` at ``e2e`` strength.
 
-* ``install/phases/policy_gate.py``      -- ``apm install <pkg>``
-* ``policy/install_preflight.py``        -- ``apm install --mcp <server>``
-* ``core/lifecycle_scripts.py``          -- ``apm compile`` with a trusted script
-* ``install/local_bundle_handler.py``    -- ``apm install <bundle>``
-* ``install/exec_gate.py`` (replay)      -- ``apm audit`` drift replay
-* ``security/executables.py``            -- ``apm uninstall`` survivor rebuild
-
-Decisive assertions are what is deployed (snapshot), the exit code per
-``fetch_failure_default`` and the announcement line.
+Add a site: add one ``SiteSlice`` to ``SITE_SLICES``. Add a class: add its
+setup to ``CLASS_SETUPS`` and an ``Expect`` to each slice that covers it.
+A row whose CLI behavior is wrong today carries ``xfail="#0 <neutral text>"``
+and becomes a strict expected failure.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import shutil
+import subprocess
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -39,10 +40,11 @@ from apm_cli.install.errors import PolicyViolationError
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.outcome_routing import resolve_trust_policy, route_discovery_outcome
 from apm_cli.policy.schema import ApmPolicy
-from tests.lifecycle import driver
+from tests.lifecycle import driver, oracles
+from tests.lifecycle.obligation_space import security_obligations
 from tests.lifecycle.rows import Row, RowReplay
 from tests.lifecycle.world import World, use_policy
-from tests.lifecycle.world.services import REGISTRY_SERVER
+from tests.lifecycle.world.services import API_HOST, ORG, REGISTRY_SERVER
 
 pytestmark = [
     pytest.mark.e2e,
@@ -56,169 +58,527 @@ pytestmark = [
     ),
 ]
 
-# -- Part 1: the owner table -----------------------------------------------------
+# == Tier 1: the owner table ======================================================
 
 ENFORCEMENTS = ("off", "warn", "block")
-FETCH_FAILURE_DEFAULTS = ("warn", "block")
 SOURCE = "org:lifecycle-org/.github"
-
-# When an outcome fails closed: never, always, when the project's
-# fetch_failure_default is block, or when the cached policy's fetch_failure is block.
-NEVER, ALWAYS, PROJECT_KNOB, CACHED_KNOB = "never", "always", "project-knob", "cached-knob"
+MISS, RESOLVED = "miss", "resolved"
 
 
 @dataclass(frozen=True)
-class Route:
-    blocks: str
+class OwnerRow:
+    """One owner class: the inputs and the decision the owner must make.
+
+    ``knob`` is the project ``fetch_failure_default`` and ``cached`` the
+    cached policy's own ``fetch_failure``; the knob that must not decide a
+    class is set to the value that would flip it if the owner consulted it.
+    """
+
+    outcome: str
+    knob: str
+    cached: str
+    blocks: bool
     returns_policy: bool
-    announces: tuple[str, ...]  # logger calls in order: "resolved" / "miss"
+    announces: tuple[str, ...]  # logger calls in order
     carries_policy: bool = False  # discovery attaches the (merged) policy
 
 
-ROUTES: dict[str, Route] = {
-    "found": Route(NEVER, True, ("resolved",), carries_policy=True),
-    "disabled": Route(NEVER, False, ()),
-    "absent": Route(PROJECT_KNOB, False, ("miss",)),
-    "empty": Route(PROJECT_KNOB, False, ("miss",), carries_policy=True),
-    "no_git_remote": Route(PROJECT_KNOB, False, ("miss",)),
-    "malformed": Route(PROJECT_KNOB, False, ("miss",)),
-    "cache_miss_fetch_fail": Route(PROJECT_KNOB, False, ("miss",)),
-    "garbage_response": Route(PROJECT_KNOB, False, ("miss",)),
-    "incomplete_chain": Route(ALWAYS, False, ("miss",), carries_policy=True),
-    "cached_stale": Route(CACHED_KNOB, True, ("resolved", "miss"), carries_policy=True),
-    "hash_mismatch": Route(ALWAYS, False, ("miss",)),
+OWNER_ROWS: Mapping[str, OwnerRow] = {
+    "P|owner|found": OwnerRow("found", "block", "block", False, True, (RESOLVED,), True),
+    "P|owner|disabled": OwnerRow("disabled", "block", "block", False, False, ()),
+    "P|owner|absent/block": OwnerRow("absent", "block", "warn", True, False, (MISS,)),
+    "P|owner|absent/warn": OwnerRow("absent", "warn", "block", False, False, (MISS,)),
+    "P|owner|empty/block": OwnerRow("empty", "block", "warn", True, False, (MISS,), True),
+    "P|owner|empty/warn": OwnerRow("empty", "warn", "block", False, False, (MISS,), True),
+    "P|owner|no_git_remote/block": OwnerRow("no_git_remote", "block", "warn", True, False, (MISS,)),
+    "P|owner|no_git_remote/warn": OwnerRow("no_git_remote", "warn", "block", False, False, (MISS,)),
+    "P|owner|malformed/block": OwnerRow("malformed", "block", "warn", True, False, (MISS,)),
+    "P|owner|malformed/warn": OwnerRow("malformed", "warn", "block", False, False, (MISS,)),
+    "P|owner|cache_miss_fetch_fail/block": OwnerRow(
+        "cache_miss_fetch_fail", "block", "warn", True, False, (MISS,)
+    ),
+    "P|owner|cache_miss_fetch_fail/warn": OwnerRow(
+        "cache_miss_fetch_fail", "warn", "block", False, False, (MISS,)
+    ),
+    "P|owner|garbage_response/block": OwnerRow(
+        "garbage_response", "block", "warn", True, False, (MISS,)
+    ),
+    "P|owner|garbage_response/warn": OwnerRow(
+        "garbage_response", "warn", "block", False, False, (MISS,)
+    ),
+    "P|owner|incomplete_chain": OwnerRow(
+        "incomplete_chain", "warn", "warn", True, False, (MISS,), True
+    ),
+    "P|owner|hash_mismatch": OwnerRow("hash_mismatch", "warn", "warn", True, False, (MISS,)),
+    "P|owner|cached_stale/org-block": OwnerRow(
+        "cached_stale", "warn", "block", True, True, (RESOLVED, MISS), True
+    ),
+    "P|owner|cached_stale/warn": OwnerRow(
+        "cached_stale", "block", "warn", False, True, (RESOLVED, MISS), True
+    ),
 }
 
 
 class RecordingLogger:
-    """A real logger stand-in: records the two announcement calls the owner makes."""
+    """Records the two announcement calls the owner makes."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
 
     def policy_resolved(self, **kwargs) -> None:
-        self.calls.append(("resolved", kwargs))
+        self.calls.append((RESOLVED, kwargs))
 
     def policy_discovery_miss(self, **kwargs) -> None:
-        self.calls.append(("miss", kwargs))
+        self.calls.append((MISS, kwargs))
 
 
-def _fetch_result(outcome: str, enforcement: str, cached_fetch_failure: str) -> PolicyFetchResult:
-    route = ROUTES[outcome]
+def _fetch_result(row: OwnerRow, enforcement: str) -> PolicyFetchResult:
     policy = None
-    if route.carries_policy:
-        policy = ApmPolicy(
-            name="table", enforcement=enforcement, fetch_failure=cached_fetch_failure
-        )
+    if row.carries_policy:
+        policy = ApmPolicy(name="table", enforcement=enforcement, fetch_failure=row.cached)
     return PolicyFetchResult(
         policy=policy,
         source=SOURCE,
-        cached=outcome == "cached_stale",
-        cache_stale=outcome == "cached_stale",
-        outcome=outcome,
-        error=None if route.blocks == NEVER else f"{outcome} detail",
+        cached=row.outcome == "cached_stale",
+        cache_stale=row.outcome == "cached_stale",
+        outcome=row.outcome,
+        error=f"{row.outcome} detail" if row.announces == (MISS,) else None,
     )
 
 
-def _blocks(route: Route, fetch_failure_default: str, cached_fetch_failure: str) -> bool:
-    return {
-        NEVER: False,
-        ALWAYS: True,
-        PROJECT_KNOB: fetch_failure_default == "block",
-        CACHED_KNOB: cached_fetch_failure == "block",
-    }[route.blocks]
-
-
-def _outcome_cases():
-    for outcome in ROUTES:
-        for enforcement in ENFORCEMENTS:
-            for knob in FETCH_FAILURE_DEFAULTS:
-                for cached in ("warn", "block"):
-                    yield pytest.param(
-                        outcome,
-                        enforcement,
-                        knob,
-                        cached,
-                        id=f"{outcome}-{enforcement}-{knob}-c{cached}",
-                    )
-
-
-@pytest.mark.parametrize(("outcome", "enforcement", "knob", "cached"), list(_outcome_cases()))
-def test_route_discovery_outcome_table(
-    outcome: str, enforcement: str, knob: str, cached: str
-) -> None:
-    route = ROUTES[outcome]
-    result = _fetch_result(outcome, enforcement, cached)
-    blocks = _blocks(route, knob, cached)
-
+def _route(result: PolicyFetchResult, row: OwnerRow, *, preview: bool) -> tuple:
+    """What ``route_discovery_outcome`` decided and announced, as plain values."""
     log = RecordingLogger()
-    if blocks:
-        with pytest.raises(PolicyViolationError) as raised:
-            route_discovery_outcome(result, logger=log, fetch_failure_default=knob)
-        assert raised.value.policy_source == SOURCE
-        assert str(raised.value).startswith("Install blocked: ")
-        if route.blocks == PROJECT_KNOB:
-            assert f"outcome={outcome}" in str(raised.value)
-            assert "policy.fetch_failure_default=block" in str(raised.value)
-    else:
-        returned = route_discovery_outcome(result, logger=log, fetch_failure_default=knob)
-        assert returned is (result.policy if route.returns_policy else None)
-    # The announcement does not depend on the decision: it precedes it.
-    assert tuple(kind for kind, _ in log.calls) == route.announces
-    for kind, kwargs in log.calls:
-        assert kwargs["source"] == SOURCE
-        if kind == "miss":
-            assert kwargs["outcome"] == outcome
-        else:
-            assert kwargs["enforcement"] == enforcement
-
-    # A dry-run preview routes the same way and never fails closed.
-    preview = RecordingLogger()
-    returned = route_discovery_outcome(
-        result, logger=preview, fetch_failure_default=knob, raise_blocking_errors=False
+    try:
+        returned = route_discovery_outcome(
+            result, logger=log, fetch_failure_default=row.knob, raise_blocking_errors=not preview
+        )
+        decision = (
+            "policy" if returned is not None and returned is result.policy else repr(returned)
+        )
+    except PolicyViolationError as exc:
+        decision = "blocked:" + str(exc).split(":", 1)[0]
+    announced = tuple(
+        (kind, kwargs.get("outcome") if kind == MISS else kwargs.get("enforcement"))
+        for kind, kwargs in log.calls
     )
-    assert returned is (result.policy if route.returns_policy else None)
-    assert preview.calls == log.calls
+    return decision, announced
 
 
-def _trust_cases():
-    for outcome in ROUTES:
-        for knob in FETCH_FAILURE_DEFAULTS:
-            for cached in ("warn", "block"):
-                yield pytest.param(outcome, knob, cached, id=f"{outcome}-{knob}-c{cached}")
-
-
-@pytest.mark.parametrize(("outcome", "knob", "cached"), list(_trust_cases()))
-def test_resolve_trust_policy_table(tmp_path: Path, outcome: str, knob: str, cached: str) -> None:
-    """Trust readers route like installs, reading the knob from the project apm.yml."""
-    (tmp_path / "apm.yml").write_text(
-        yaml.safe_dump({"name": "table", "policy": {"fetch_failure_default": knob}}),
+def _trust(result: PolicyFetchResult, row: OwnerRow, project: Path) -> tuple:
+    """What ``resolve_trust_policy`` decided and reported for a trust reader."""
+    (project / "apm.yml").write_text(
+        yaml.safe_dump({"name": "table", "policy": {"fetch_failure_default": row.knob}}),
         encoding="utf-8",
     )
-    route = ROUTES[outcome]
-    result = _fetch_result(outcome, "block", cached)
     log = RecordingLogger()
-    if _blocks(route, knob, cached):
-        with pytest.raises(PolicyViolationError, match=r"^Blocked by org policy: "):
-            resolve_trust_policy(tmp_path, logger=log, fetch_result=result)
-        # The exception is the only report of a blocking outcome.
-        assert log.calls == []
-        return
-    returned = resolve_trust_policy(tmp_path, logger=log, fetch_result=result)
-    assert returned is (result.policy if route.returns_policy else None)
-    # A trust reader never announces a resolved policy again; a miss is reported once.
-    assert [kind for kind, _ in log.calls] == [kind for kind in route.announces if kind == "miss"]
-    silent = RecordingLogger()
-    resolve_trust_policy(tmp_path, logger=silent, fetch_result=result, announce=False)
-    assert silent.calls == []
+    try:
+        returned = resolve_trust_policy(project, logger=log, fetch_result=result)
+        decision = (
+            "policy" if returned is not None and returned is result.policy else repr(returned)
+        )
+    except PolicyViolationError as exc:
+        decision = "blocked:" + str(exc).split(":", 1)[0]
+    return decision, tuple(kind for kind, _ in log.calls)
 
 
-# -- Part 2: one routing E2E per decision site ------------------------------------
+def _expected_owner(row: OwnerRow, enforcement: str) -> dict:
+    kept = "policy" if row.returns_policy else "None"
+    announced = tuple(
+        (kind, row.outcome if kind == MISS else enforcement) for kind in row.announces
+    )
+    misses = tuple(kind for kind in row.announces if kind == MISS)
+    return {
+        "route": ("blocked:Install blocked" if row.blocks else kept, announced),
+        "preview": (kept, announced),
+        # A trust reader never re-announces a resolved policy; a block is reported
+        # only by its exception.
+        "trust": ("blocked:Blocked by org policy", ()) if row.blocks else (kept, misses),
+    }
 
+
+@pytest.mark.parametrize("cell_id", list(OWNER_ROWS))
+def test_owner_routes_each_outcome(tmp_path: Path, cell_id: str) -> None:
+    row = OWNER_ROWS[cell_id]
+    expected, observed = {}, {}
+    for enforcement in ENFORCEMENTS:
+        result = _fetch_result(row, enforcement)
+        expected[enforcement] = _expected_owner(row, enforcement)
+        observed[enforcement] = {
+            "route": _route(result, row, preview=False),
+            "preview": _route(result, row, preview=True),
+            "trust": _trust(result, row, tmp_path),
+        }
+    oracles.check_obligation(
+        cell_id, strength="unit", evidence=oracles.Evidence(expected=expected, observed=observed)
+    )
+
+
+# == Tier 2: one routing E2E per decision site =====================================
+
+POLICY_CONTENTS = "/contents/apm-policy.yml"
+SCRIPT_MARKER = ".lifecycle-script-ran"
 MCP_SERVER = "p-exec-mcp"
 
 
-def _replay(world: World, then: dict | None = None, known: tuple[dict, ...] = ()) -> RowReplay:
+@dataclass(frozen=True)
+class Expect:
+    """What one site does for one class."""
+
+    exit: int
+    output: tuple[str, ...] = ()  # regexes the combined output must match
+    forbids: tuple[str, ...] = ()  # regexes it must not match
+    absent: tuple[str, ...] = ()  # project paths absent after the command
+    present: tuple[str, ...] = ()  # project paths present after the command
+    unchanged: tuple[str, ...] = ()  # project path prefixes byte-identical
+    policy_fetch: bool | None = None  # the command fetched the policy file (or not)
+    xfail: str | None = None  # "#<issue> <neutral text>" -> strict expected failure
+    smoke: bool = False
+    # Overrides CLASS_SETUPS[cls] when the site needs another input for the class.
+    setup: Callable[[World, RowReplay], None] | None = None
+
+
+@dataclass(frozen=True)
+class SiteSlice:
+    """One decision site: arrange the world, the command line, per-class expectations."""
+
+    arrange: Callable[[World, RowReplay], None]
+    command: Callable[[World], str]
+    classes: Mapping[str, Expect] = field(default_factory=dict)
+
+
+# -- class setups: turn a class into world inputs -----------------------------------
+
+
+def _set_knob(world: World, knob: str) -> None:
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data["policy"] = {**(data.get("policy") or {}), "fetch_failure_default": knob}
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def _variant(variant: str, knob: str) -> Callable[[World, RowReplay], None]:
+    def setup(world: World, replay: RowReplay) -> None:
+        del replay
+        use_policy(world, variant)
+        _set_knob(world, knob)
+
+    return setup
+
+
+def _absent(knob: str) -> Callable[[World, RowReplay], None]:
+    """The project remote names an org that publishes no policy repository."""
+
+    def setup(world: World, replay: RowReplay) -> None:
+        del replay
+        use_policy(world, "allow")
+        remote = f"https://github.com/{ORG}/consumer.git"
+        git = ("git", "-C", str(world.project), "remote", "set-url", "origin", remote)
+        subprocess.run(git, env=world.env, check=True)
+        _set_knob(world, knob)
+
+    return setup
+
+
+def _no_git_remote(knob: str) -> Callable[[World, RowReplay], None]:
+    def setup(world: World, replay: RowReplay) -> None:
+        del replay
+        shutil.rmtree(world.project / ".git", ignore_errors=True)
+        _set_knob(world, knob)
+
+    return setup
+
+
+def _disabled(world: World, replay: RowReplay) -> None:
+    """``APM_POLICY_DISABLE=1`` over a policy that would deny."""
+    del replay
+    use_policy(world, "deny-pkg")
+    _set_knob(world, "block")
+    world.env["APM_POLICY_DISABLE"] = "1"
+
+
+def _warm(world: World, replay: RowReplay) -> None:
+    """A found policy already in the cache, fetched moments ago."""
+    use_policy(world, "deny-pkg")
+    result = driver.run(world, ["policy", "status"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    del replay
+
+
+CLASS_SETUPS: Mapping[str, Callable[[World, RowReplay], None]] = {
+    "found": _variant("deny-pkg", "block"),
+    "cache=cold": _variant("deny-pkg", "block"),
+    "cache=warm-fresh": _warm,
+    "disabled": _disabled,
+    "hash_mismatch": _variant("hash-mismatch", "warn"),
+    "cache_miss_fetch_fail/block": _variant("unreachable", "block"),
+    "cache_miss_fetch_fail/warn": _variant("unreachable", "warn"),
+    "empty/block": _variant("allow", "block"),
+    "empty/warn": _variant("allow", "warn"),
+    "absent/block": _absent("block"),
+    "absent/warn": _absent("warn"),
+    "no_git_remote/block": _no_git_remote("block"),
+    "no_git_remote/warn": _no_git_remote("warn"),
+}
+
+
+# -- arrangements shared by slices ----------------------------------------------------
+
+
+def _nothing(world: World, replay: RowReplay) -> None:
+    del world, replay
+
+
+def _installed_parked_exec(world: World, replay: RowReplay) -> None:
+    """p-skill deployed and p-exec declared with its executables parked, under ``allow``."""
+    use_policy(world, "allow")
+    replay.step("apm install p-skill p-exec")
+
+
+def _trusted_script(world: World, replay: RowReplay) -> None:
+    """p-skill deployed and a trusted pre-compile script that writes a marker."""
+    use_policy(world, "allow")
+    replay.step("apm install p-skill")
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data["lifecycle"] = {"pre-compile": [{"run": f"touch {world.project / SCRIPT_MARKER}"}]}
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    trusted = driver.run(world, ["lifecycle", "trust"])
+    assert trusted.returncode == 0, trusted.stdout + trusted.stderr
+
+
+def _spec(key: str) -> Callable[[World], str]:
+    return lambda world: world.packages[key].spec
+
+
+# Output patterns of the owner's announcements and decisions.
+KNOB_BLOCK = r"policy\.fetch_failure_default=block"
+UNREACHABLE = r"Could not fetch org policy"
+HASH = r"(?i)policy hash mismatch"
+EMPTY = r"present but empty"
+DENIED = r"denied by pattern"
+TRUST_BLOCK = r"Blocked by org policy: "
+SKILL = ".agents/skills/p-skill/SKILL.md"
+HOOK = ".github/hooks/p-exec-session.json"
+
+# The decision sites, keyed by the obligation site name.
+SITE_SLICES: dict[str, SiteSlice] = {}
+
+# install/phases/policy_gate.py -- the install pipeline.
+SITE_SLICES["install-pipeline"] = SiteSlice(
+    arrange=_nothing,
+    command=lambda world: "apm install p-skill p-exec",
+    classes={
+        "cache_miss_fetch_fail/block": Expect(
+            1, (KNOB_BLOCK,), absent=(SKILL, "apm.lock.yaml"), policy_fetch=True, smoke=True
+        ),
+        "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), present=(SKILL,)),
+        "cache=cold": Expect(1, (DENIED,), absent=(SKILL, HOOK), policy_fetch=True),
+        "cache=warm-fresh": Expect(1, (DENIED,), absent=(SKILL, HOOK), policy_fetch=False),
+    },
+)
+
+# policy/install_preflight.py -- an MCP-only install.
+SITE_SLICES["mcp-install-preflight"] = SiteSlice(
+    arrange=_nothing,
+    command=lambda world: f"apm install --mcp {REGISTRY_SERVER}",
+    classes={
+        "cache_miss_fetch_fail/block": Expect(
+            1,
+            (KNOB_BLOCK,),
+            absent=(".mcp.json",),
+            unchanged=("apm.yml",),
+            xfail="#0 the MCP-only install exits 1 without printing the block reason",
+        ),
+        "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,)),
+        "cache=cold": Expect(
+            1,
+            (r"(?i)denied|blocked",),
+            absent=(".mcp.json",),
+            unchanged=("apm.yml",),
+            policy_fetch=True,
+            setup=_variant("mcp-deny", "block"),
+        ),
+    },
+)
+
+# core/lifecycle_scripts.py -- a trusted project script runs only when the outcome allows.
+SITE_SLICES["lifecycle-scripts"] = SiteSlice(
+    arrange=_trusted_script,
+    command=lambda world: "apm compile",
+    classes={
+        "cache_miss_fetch_fail/block": Expect(
+            0, (r"Lifecycle scripts suppressed by org policy",), absent=(SCRIPT_MARKER,), smoke=True
+        ),
+        "cache_miss_fetch_fail/warn": Expect(
+            0, forbids=(r"Lifecycle scripts suppressed",), present=(SCRIPT_MARKER,)
+        ),
+        "cache=cold": Expect(
+            0, forbids=(r"Lifecycle scripts suppressed",), present=(SCRIPT_MARKER,)
+        ),
+    },
+)
+
+# install/local_bundle_handler.py effective_bundle_allow_map -- a local bundle's trust reader.
+SITE_SLICES["bundle-allow-map(getattr cache_only)"] = SiteSlice(
+    arrange=_nothing,
+    command=lambda world: f"apm install {world.packages['p-exec:bundle'].spec}",
+    classes={
+        "cache_miss_fetch_fail/block": Expect(
+            1, (TRUST_BLOCK + "no enforceable", KNOB_BLOCK), absent=(HOOK, ".mcp.json"), smoke=True
+        ),
+        "hash_mismatch": Expect(1, (TRUST_BLOCK + "policy hash mismatch",), absent=(HOOK,)),
+    },
+)
+
+# install/exec_gate.py ReplayExecAllowMap -- audit's drift replay.
+SITE_SLICES["audit-exec-replay(getattr)"] = SiteSlice(
+    arrange=_installed_parked_exec,
+    command=lambda world: "apm audit",
+    classes={
+        "hash_mismatch": Expect(
+            0,
+            (r"drift replay blocked: Blocked by org policy: policy hash mismatch",),
+            unchanged=("*",),
+            smoke=True,
+        ),
+    },
+)
+
+# security/executables.py resolve_project_exec_allow_map -- uninstall's survivor rebuild.
+SITE_SLICES["exec-map(getattr: uninstall/hook rebuild/lsp)"] = SiteSlice(
+    arrange=_installed_parked_exec,
+    command=lambda world: "apm uninstall p-skill",
+    classes={
+        "hash_mismatch": Expect(
+            1,
+            (TRUST_BLOCK + "policy hash mismatch",),
+            absent=(HOOK,),
+            xfail="#0 uninstall exits 1 after it already removed the package and its manifest entry",
+        ),
+    },
+)
+
+
+# policy/ci_checks.py -- ``apm audit --ci`` policy checks.
+_CI_FAILED = r"\(policy\.fetch_failure_default=block\)"
+SITE_SLICES["audit-ci"] = SiteSlice(
+    arrange=_installed_parked_exec,
+    command=lambda world: "apm audit --ci",
+    classes={
+        "cache_miss_fetch_fail/block": Expect(1, (r"Policy fetch failed: HTTP 503", _CI_FAILED)),
+        "cache_miss_fetch_fail/warn": Expect(0, (r"enforcement skipped",)),
+        "hash_mismatch": Expect(
+            1,
+            (HASH,),
+            xfail="#0 audit --ci exits 0 on a policy hash mismatch that install refuses",
+        ),
+        "absent/block": Expect(1, (r"No org policy found", _CI_FAILED)),
+        "absent/warn": Expect(0),
+        "no_git_remote/block": Expect(1, (r"Could not determine org from git remote", _CI_FAILED)),
+        "no_git_remote/warn": Expect(0),
+        "empty/block": Expect(1, (EMPTY, _CI_FAILED)),
+        "empty/warn": Expect(0),
+        "found": Expect(1, (r"check\(s\) failed",)),
+        "disabled": Expect(0),
+    },
+)
+
+# commands/approve.py -- approval loads the org policy best-effort.
+_APPROVE_UNRESOLVED = r"Org policy could not be resolved; approval is proceeding"
+_APPROVE_TWICE = "#0 approve prints its org policy warning twice"
+SITE_SLICES["approve"] = SiteSlice(
+    arrange=_installed_parked_exec,
+    command=lambda world: "apm approve p-exec",
+    classes={
+        "cache_miss_fetch_fail/block": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
+        "cache_miss_fetch_fail/warn": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
+        "hash_mismatch": Expect(0, (r"Policy hash verification failed",), xfail=_APPROVE_TWICE),
+        "absent/block": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "absent/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "no_git_remote/block": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "no_git_remote/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "empty/block": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "empty/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "found": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "disabled": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+    },
+)
+
+
+def _status(outcome: str) -> Expect:
+    return Expect(0, (rf"Outcome\s*\|\s*{outcome}\s",), unchanged=("*",))
+
+
+# commands/policy.py -- ``apm policy status`` reports the routed outcome.
+SITE_SLICES["policy-status"] = SiteSlice(
+    arrange=_nothing,
+    command=lambda world: "apm policy status",
+    classes={
+        "cache_miss_fetch_fail/block": _status("cache_miss_fetch_fail"),
+        "cache_miss_fetch_fail/warn": _status("cache_miss_fetch_fail"),
+        "hash_mismatch": _status("hash_mismatch"),
+        "absent/block": _status("absent"),
+        "absent/warn": _status("absent"),
+        "no_git_remote/block": _status("no_git_remote"),
+        "no_git_remote/warn": _status("no_git_remote"),
+        "empty/block": _status("empty"),
+        "empty/warn": _status("empty"),
+        "found": _status("found"),
+        "disabled": _status("disabled"),
+    },
+)
+
+# policy/install_preflight.py dry-run path -- a preview never fails closed.
+SITE_SLICES["install-dry-run-preflight"] = SiteSlice(
+    arrange=_nothing,
+    command=lambda world: "apm install --dry-run p-skill p-exec",
+    classes={
+        "cache_miss_fetch_fail/block": Expect(
+            0,
+            (KNOB_BLOCK,),
+            unchanged=("*",),
+            xfail="#0 install --dry-run does not preview that the install would be blocked",
+        ),
+        "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), unchanged=("*",)),
+        "cache=cold": Expect(0, (DENIED,), unchanged=("*",), policy_fetch=True),
+    },
+)
+
+# commands/update.py -- the re-gate short circuit of an update with nothing to change.
+_SHORTCIRCUIT = "#0 update with nothing to change exits 0 where install fails closed"
+SITE_SLICES["update-regate-shortcircuit"] = SiteSlice(
+    arrange=_installed_parked_exec,
+    command=lambda world: "apm update",
+    classes={
+        "cache_miss_fetch_fail/block": Expect(1, (KNOB_BLOCK,), present=(SKILL,)),
+        "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), present=(SKILL,)),
+        "hash_mismatch": Expect(1, (HASH,), present=(SKILL,)),
+        "absent/block": Expect(1, (KNOB_BLOCK,), xfail=_SHORTCIRCUIT),
+        "absent/warn": Expect(0, present=(SKILL,)),
+        "no_git_remote/block": Expect(1, (KNOB_BLOCK,), xfail=_SHORTCIRCUIT),
+        "no_git_remote/warn": Expect(0, present=(SKILL,)),
+        "empty/block": Expect(1, (KNOB_BLOCK,), xfail=_SHORTCIRCUIT),
+        "empty/warn": Expect(0, present=(SKILL,)),
+        "found": Expect(1, (DENIED,), xfail=_SHORTCIRCUIT),
+        "disabled": Expect(0, present=(SKILL,)),
+    },
+)
+
+
+def _site_rows():
+    for site, slice_ in SITE_SLICES.items():
+        for cls, expect in slice_.classes.items():
+            cell_id = f"P|{site}|{cls}"
+            marks = []
+            if expect.smoke:
+                marks.append(pytest.mark.lifecycle_smoke)
+            if expect.xfail:
+                marks.append(pytest.mark.xfail(strict=True, reason=expect.xfail))
+            yield pytest.param(cell_id, id=cell_id, marks=marks)
+
+
+def _replay(world: World) -> RowReplay:
     row = Row(
         id="T7b/policy-outcome",
         promises=("P-OWN-trust-policy-outcome",),
@@ -227,166 +587,67 @@ def _replay(world: World, then: dict | None = None, known: tuple[dict, ...] = ()
         scope="project",
         given=(),
         when=(),
-        then=then or {},
-        known_cells=known,
     )
     return RowReplay(world, row)
 
 
-def _set_fetch_failure_default(world: World, value: str) -> None:
-    manifest = world.project / "apm.yml"
-    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-    policy = data.get("policy") or {}
-    policy["fetch_failure_default"] = value
-    data["policy"] = policy
-    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
-
-
-def _govern(world: World, variant: str, knob: str) -> None:
-    use_policy(world, variant)
-    _set_fetch_failure_default(world, knob)
-
-
-def _output(replay: RowReplay) -> str:
-    assert replay.last is not None
-    return " ".join(f"{replay.last.stdout}\n{replay.last.stderr}".split())
-
-
-def _install_parked_exec(world: World) -> RowReplay:
-    """p-skill deployed and p-exec declared with its executables parked, under ``allow``."""
-    use_policy(world, "allow")
+def run_site_row(world: World, cell_id: str) -> None:
+    """Arrange, apply the class, run the site command, check I1-I9 and the obligation."""
+    _, site, cls = cell_id.split("|", 2)
+    slice_ = SITE_SLICES[site]
+    expect = slice_.classes[cls]
     replay = _replay(world)
-    replay.step("apm install p-skill p-exec")
-    assert replay.observe().deployed == {"p-skill/skill/copilot"}
-    return replay
-
-
-# policy_gate: the project knob decides an unreachable policy; a hash mismatch always blocks.
-@pytest.mark.parametrize(
-    ("variant", "knob", "code", "announce"),
-    [
-        pytest.param(
-            "unreachable",
-            "block",
-            1,
-            "policy.fetch_failure_default=block",
-            id="unreachable-block",
-            marks=pytest.mark.lifecycle_smoke,
+    slice_.arrange(world, replay)
+    (expect.setup or CLASS_SETUPS[cls])(world, replay)
+    before = replay.observe()
+    world.services.reset()
+    replay.step({"run": slice_.command(world), "exit": expect.exit})
+    after = replay.observe()
+    egress = tuple(world.services.egress_log())
+    fetched = any(entry["path"].endswith(POLICY_CONTENTS) for entry in egress)
+    if expect.policy_fetch is not None:
+        assert fetched is expect.policy_fetch, egress
+    oracles.check_obligation(
+        cell_id,
+        strength="e2e",
+        before=before,
+        after=after,
+        result=replay.last,
+        evidence=oracles.Evidence(
+            exit=expect.exit,
+            output_matches=expect.output,
+            output_forbids=expect.forbids,
+            absent={"project": expect.absent} if expect.absent else {},
+            present={"project": expect.present} if expect.present else {},
+            unchanged={"project": expect.unchanged} if expect.unchanged else {},
+            egress=egress,
+            egress_present_hosts=(API_HOST,) if expect.policy_fetch else (),
         ),
-        pytest.param("unreachable", "warn", 0, "Could not fetch org policy", id="unreachable-warn"),
-        pytest.param("hash-mismatch", "warn", 1, "policy hash mismatch", id="hash-mismatch-warn"),
-    ],
-)
-def test_install_gate_routes_the_outcome(
-    lifecycle_world: World, variant: str, knob: str, code: int, announce: str
-) -> None:
-    _govern(lifecycle_world, variant, knob)
-    replay = _replay(
-        lifecycle_world, then={"exit": code, "deployed": "expected", "announce": announce}
     )
-    replay.step({"run": "apm install p-skill", "exit": code})
-    replay.check_then()
-    assert ("p-skill" in (lifecycle_world.project / "apm.yml").read_text()) is (code == 0)
+
+
+@pytest.mark.parametrize("cell_id", list(_site_rows()))
+def test_site_routes_the_outcome(lifecycle_world: World, cell_id: str) -> None:
+    run_site_row(lifecycle_world, cell_id)
 
 
 @pytest.mark.xfail(
     strict=True, reason="#0 a blocked install also prints that it proceeds without enforcement"
 )
 def test_blocked_install_never_claims_to_proceed(lifecycle_world: World) -> None:
-    _govern(lifecycle_world, "unreachable", "block")
     replay = _replay(lifecycle_world)
+    CLASS_SETUPS["cache_miss_fetch_fail/block"](lifecycle_world, replay)
     replay.step({"run": "apm install p-skill", "exit": 1})
-    assert "proceeding without policy enforcement" not in _output(replay)
+    assert replay.last is not None
+    assert "proceeding without policy enforcement" not in replay.last.stdout
 
 
-# install_preflight: an MCP-only install routes through the preflight helper.
-def test_mcp_install_preflight_fails_closed_on_hash_mismatch(lifecycle_world: World) -> None:
-    _govern(lifecycle_world, "hash-mismatch", "warn")
-    replay = _replay(lifecycle_world, then={"exit": 1, "deployed": "expected"})
-    replay.step({"run": f"apm install --mcp {REGISTRY_SERVER}", "exit": 1})
-    replay.check_then()
-    assert "Policy hash mismatch" in _output(replay)
-    assert REGISTRY_SERVER not in (lifecycle_world.project / "apm.yml").read_text()
-    assert not (lifecycle_world.project / ".mcp.json").exists()
-
-
-@pytest.mark.xfail(strict=True, reason="#0 the MCP install block reason is not printed")
-def test_mcp_install_preflight_announces_the_project_knob(lifecycle_world: World) -> None:
-    _govern(lifecycle_world, "unreachable", "block")
-    replay = _replay(lifecycle_world, then={"exit": 1, "deployed": "expected"})
-    replay.step({"run": f"apm install --mcp {REGISTRY_SERVER}", "exit": 1})
-    replay.check_then()
-    assert not (lifecycle_world.project / ".mcp.json").exists()
-    assert "policy.fetch_failure_default=block" in _output(replay)
-
-
-# lifecycle_scripts: a trusted project script runs only when the outcome does not block.
-@pytest.mark.parametrize(
-    ("knob", "runs"),
-    [
-        pytest.param("block", False, id="block", marks=pytest.mark.lifecycle_smoke),
-        pytest.param("warn", True, id="warn"),
-    ],
-)
-def test_lifecycle_scripts_follow_the_outcome(
-    lifecycle_world: World, knob: str, runs: bool
-) -> None:
-    world = lifecycle_world
-    marker = world.root / "pre-compile-ran"
-    _govern(world, "unreachable", knob)
-    manifest = world.project / "apm.yml"
-    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-    data["lifecycle"] = {"pre-compile": [{"run": f"touch {marker}"}]}
-    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
-    replay = _replay(world)
-    trusted = driver.run(world, ["lifecycle", "trust"])
-    assert trusted.returncode == 0, trusted.stdout + trusted.stderr
-    replay.step({"run": "apm compile", "exit": 0})
-    assert marker.exists() is runs
-    suppressed = "Lifecycle scripts suppressed by org policy" in _output(replay)
-    assert suppressed is not runs
-
-
-# local_bundle_handler: the bundle's trust reader fails closed under the project knob.
-@pytest.mark.lifecycle_smoke
-def test_local_bundle_trust_reader_fails_closed(lifecycle_world: World) -> None:
-    world = lifecycle_world
-    _govern(world, "unreachable", "block")
-    bundle = world.packages["p-exec:bundle"].spec
-    replay = _replay(world, then={"exit": 1, "deployed": "expected"})
-    replay.step({"run": f"apm install {bundle}", "exit": 1})
-    replay.check_then()
-    output = _output(replay)
-    assert "Blocked by org policy: no enforceable org policy was resolved" in output
-    assert "outcome=cache_miss_fetch_fail" in output
-    assert not (world.project / ".github" / "hooks").exists()
-    assert not (world.project / ".mcp.json").exists()
-
-
-# exec_gate.ReplayExecAllowMap: audit's drift replay reports the block and writes nothing.
-@pytest.mark.lifecycle_smoke
-def test_audit_replay_trust_reader_reports_the_block(lifecycle_world: World) -> None:
-    world = lifecycle_world
-    replay = _install_parked_exec(world)
-    use_policy(world, "hash-mismatch")
-    before = replay.observe()
-    replay.step({"run": "apm audit", "exit": 0})
-    after = replay.observe()
-    assert after.state.files == before.state.files
-    assert after.state.manifest_bytes == before.state.manifest_bytes
-    assert after.state.lockfile_bytes == before.state.lockfile_bytes
-    assert "drift replay blocked: Blocked by org policy: policy hash mismatch" in _output(replay)
-
-
-# security/executables: uninstall's survivor rebuild fails closed and admits nothing.
-def test_uninstall_trust_reader_fails_closed(lifecycle_world: World) -> None:
-    world = lifecycle_world
-    replay = _install_parked_exec(world)
-    use_policy(world, "hash-mismatch")
-    replay.step({"run": "apm uninstall p-skill", "exit": 1})
-    assert "Blocked by org policy: policy hash mismatch" in _output(replay)
-    deployed = replay.observe().deployed
-    assert not any(surface.startswith("p-exec/") for surface in deployed), deployed
-    assert MCP_SERVER not in (
-        (world.project / ".mcp.json").read_text() if (world.project / ".mcp.json").exists() else ""
-    )
+def test_every_row_is_a_policy_obligation() -> None:
+    known = security_obligations()["P"]
+    rows = {cell: "unit" for cell in OWNER_ROWS}
+    rows.update({f"P|{site}|{cls}": "e2e" for site, s in SITE_SLICES.items() for cls in s.classes})
+    unknown = sorted(set(rows) - set(known))
+    assert not unknown, f"rows with no P obligation id: {unknown}"
+    wrong = sorted(cell for cell, strength in rows.items() if known[cell] != strength)
+    assert not wrong, f"rows whose strength differs from the obligation: {wrong}"
+    assert set(CLASS_SETUPS) >= {cls for s in SITE_SLICES.values() for cls in s.classes}

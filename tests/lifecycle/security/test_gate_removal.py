@@ -19,27 +19,32 @@ checks, as state facts:
 - the final world equals the reference model and the surface is gone;
 - the removing step announces it (I7).
 
-Pairwise coverage over KIND x PATH x CHANGE; every applicable (KIND, PATH)
-pair appears once. Not applicable, so no cell:
+Every parameter row is named by its exact obligation id
+``G|<path>|<change>|<kind>`` (security obligation export, lane T-7a); rows
+with no G id (canvas: the export has no canvas kind) use ``X|...``. Coverage
+is pairwise over KIND x PATH x CHANGE. Ids with no row, and why:
 
-| KIND / PATH | why |
+| ids | why |
 |---|---|
-| bin, every path | bin/ deploys only for marketplace plugins to Claude at user scope |
-|                 | (integration/skill_integrator.py _deploy_plugin_bin); no world    |
-|                 | package ships one (p-exec is an APM package, natives have no bin) |
-| canvas, user    | Copilot has no user-scope canvas surface (integration/targets.py) |
-| native, user    | approve cannot find a parked native plugin at user scope (#4154)  |
-| lsp/canvas/native, bundle or marketplace | the world packs and lists p-exec only |
-| org changes, user | org policy governs project installs only                       |
-| policy denies dep, not p-exec | the deny-pkg variant denies p-exec only          |
+| G|*|*|bin | bin/ deploys only for marketplace plugins to Claude at user scope |
+|           | (integration/skill_integrator.py _deploy_plugin_bin); no world    |
+|           | package ships a bin/ the gate could deploy                         |
+| G|unpack|* | deprecated command; reads only --format apm bundles, none in the world |
+| G|mcp-install|* | root-declared MCP servers are the user's own, not a dependency gate |
+| G|*-g|org-* , G|native-plugin|org-* | org policy governs project installs only |
+| lsp/native in bundle-install, marketplace-install | the world packs and lists p-exec only |
+| definition-changed in bundle/marketplace | a bundle or a tag cannot change in place |
+| native approve-based rows | approve cannot find a parked native plugin (#4154); |
+|                           | they are strict expected failures naming it          |
 
 Lifecycle scripts (the execute path APM runs itself) have no deployed file;
-their cells count script runs instead (``test_lifecycle_script_gate``).
+their rows count script runs instead (``test_lifecycle_script_gate``).
 """
 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -77,6 +82,7 @@ _SURFACES: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     ("project", "lsp", "copilot"): (".github/lsp.json", '"{pkg}-server"'),
     ("project", "canvas", "copilot"): ".github/extensions/{pkg}/extension.mjs",
     ("project", "native", "claude"): (".mcp.json", '"{pkg}-mcp"'),
+    ("user", "native", "claude"): (".claude/settings.json", '"{pkg}'),
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
     ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
@@ -89,6 +95,8 @@ _PROJECT_HOME_ALLOWED = (
     ".local/state/gh",
     ".cache/apm",
     ".apm/scripts-trust.json",
+    ".apm/scripts-trust.json.lock",
+    ".apm/logs",
 )
 # Commands after which nothing the model forbids may stay deployed (I4).
 _GATE_REMOVING = frozenset({"install", "update", "uninstall", "prune"})
@@ -202,7 +210,9 @@ class GateReplay(RowReplay):
                     ]
                     if hits:
                         deployed.add(f"{key}/{kind}/{target}")
-                        managed.update(path.relative_to(root).as_posix() for path in hits)
+                        # A shared config file (MCP, LSP) is not owned by one package.
+                        if not marker:
+                            managed.update(path.relative_to(root).as_posix() for path in hits)
         cache_root = self.world.cache_root or self.world.root / "cache"
         workspace = self._manifest_root()
         user = self.scope == "user"
@@ -237,9 +247,13 @@ class GateReplay(RowReplay):
         assert not gone, f"I4: {sorted(gone)} still deployed after the gate change"
         if "announce" in then:
             output = " ".join(f"{self.announced}".split())
-            assert str(then["announce"]) in output, f"I7: not announced: {then['announce']!r}"
+            assert re.search(str(then["announce"]), output), f"I7: not announced: {output[-400:]}"
 
     # -- one CLI step ----------------------------------------------------
+
+    def _args(self, line: str) -> tuple[str, ...]:
+        url = self.world.services.marketplace_url
+        return tuple(url if arg == "MARKETPLACE_URL" else arg for arg in super()._args(line))
 
     def _fields(self, args: tuple[str, ...], read_only: bool) -> dict[str, object]:
         if self.scope == "project":
@@ -249,7 +263,9 @@ class GateReplay(RowReplay):
             }
         else:
             fields = {"forbidden": {"project": ("*",)}, "allowed": {}}
-        fields["read_only"] = read_only
+        if args[0] == "marketplace":
+            fields["forbidden"] = {"project": ("*",)}
+        fields["read_only"] = read_only or "--dry-run" in args
         if args[0] not in _GATE_REMOVING:
             fields["mutating"] = False
         return fields
@@ -293,7 +309,7 @@ class GateReplay(RowReplay):
         if self.ceiling is not None:
             grown = {s for s in after.deployed if s.split("/")[1] in GATED_KINDS} - self.ceiling
             assert not grown, f"I4: {line!r} deployed {sorted(grown)} after the gate change"
-        if self.ceiling is not None and op.command in _GATE_REMOVING:
+        if self.ceiling is not None and op.mutating:
             self.announced += f"{result.stdout}\n{result.stderr}\n"
         if result.returncode == 0 and op.command in _RECONCILING and not frozen:
             self.model = requested.installed()
@@ -357,163 +373,161 @@ def _lifecycle_block(world, tag: str) -> dict[str, object]:
 
 # -- the cell table ---------------------------------------------------------
 
-
-@dataclass(frozen=True)
-class Kind:
-    key: str
-    target: str = "copilot"
-    approve: str = ""
-
-    def surface(self, kind: str) -> str:
-        return f"{self.key}/{kind}/{self.target}"
-
-
-_KINDS = {
-    "hook": Kind("p-exec"),
-    "mcp": Kind("p-exec"),
-    "lsp": Kind("p-lsp"),
-    "canvas": Kind("p-canvas"),
-    "native": Kind("p-native-claude", target="claude"),
+# KIND -> (package key, target); p-exec carries hook, mcp and bin.
+_KINDS: Mapping[str, tuple[str, str]] = {
+    "hook": ("p-exec", "copilot"),
+    "mcp": ("p-exec", "copilot"),
+    "lsp": ("p-lsp", "copilot"),
+    "canvas": ("p-canvas", "copilot"),
+    "native": ("p-native-claude", "claude"),
 }
-# What each CHANGE does as steps, given the package key and the kind.
-_ORG_VARIANT = {"mcp": "mcp-deny"}
+# PATH -> (package key suffix, scope, the steps that must remove the surface).
+_PATHS: Mapping[str, tuple[str, str, tuple[object, ...]]] = {
+    "install": ("", "project", ("apm install",)),
+    "frozen": ("", "project", ("apm install --frozen",)),
+    "update": ("", "project", ("apm update --yes",)),
+    "uninstall-prune-rebuild": ("", "project", ("apm uninstall p-skill", "apm prune")),
+    "audit-ci": ("", "project", ({"pair": ["apm audit --ci", "apm install --frozen"]},)),
+    "dry-run": ("", "project", ("apm install --dry-run", "apm install")),
+    "install-g": ("", "user", ("apm install",)),
+    "frozen-g": ("", "user", ("apm install --frozen",)),
+    "bundle-install": (":bundle", "project", ("apm install",)),
+    "marketplace-install": (":marketplace", "project", ("apm install",)),
+    "native-plugin": ("", "user", ("apm install",)),
+}
+# CHANGE -> what the removing step must say (I7), as a regex.
+_REMOVAL = r"(Cleaned|Removed) (\d+ )?stale|Parked|skipped|Filtered"
+_ANNOUNCE = {
+    "local-deny": rf"denied|{_REMOVAL}",
+    "revoke-approval": rf"not approved|{_REMOVAL}",
+    "definition-changed": r"definition changed since approval",
+    "org-deny": rf"deny_all|denied|{_REMOVAL}",
+    "org-enables-gate": rf"deny_all|denied|{_REMOVAL}",
+    "policy-dep-deny": r"denied by pattern",
+}
+# The one step left for a user whose dependency the policy now denies: every
+# resolving step refuses it (exit 1, state kept), so they uninstall it.
+_DENY_PKG_TAIL = "apm uninstall {key}"
 
 
 def _change(change: str, key: str, kind: str, witness: list[str]) -> list[object]:
-    if change == "deny":
+    if change == "local-deny":
         return [{"edit": "mark", "witness": witness}, f"apm deny {key}"]
-    if change == "revoke":
+    if change == "revoke-approval":
         return [{"edit": "revoke", "pkg": key, "witness": witness}]
-    if change == "redefine":
+    if change == "definition-changed":
         return [{"edit": "redefine", "pkg": key, "kind": kind, "witness": witness}]
     if change in ("org-deny", "org-enables-gate"):
-        variant = _ORG_VARIANT.get(kind, "exec-deny-all")
-        if change == "org-enables-gate":
-            variant = "exec-deny-all"
-        return [{"edit": "policy", "variant": variant, "witness": witness}]
-    if change == "policy-denies-dep":
+        return [{"edit": "policy", "variant": "exec-deny-all", "witness": witness}]
+    if change == "policy-dep-deny":
         return [{"edit": "policy", "variant": "deny-pkg", "witness": witness}]
     raise ValueError(change)
 
 
-# PATH -> the steps that must remove the surface, after the change.
-_PATHS: Mapping[str, list[object]] = {
-    "install": ["apm install"],
-    "install-frozen": ["apm install --frozen"],
-    "update": ["apm update --yes"],
-    "uninstall": ["apm uninstall p-skill"],
-    "prune": ["apm prune"],
-    "user": ["apm install"],
-    "bundle": ["apm install"],
-    "marketplace": ["apm install"],
-    "audit-replay": [{"pair": ["apm audit --ci", "apm install --frozen"]}],
-}
-_PATH_KEY = {"bundle": ":bundle", "marketplace": ":marketplace"}
-# A removing step under deny-pkg resolves the denied package and refuses (exit 1,
-# state kept); the user then uninstalls it, the next step that can succeed.
-_DENY_PKG_TAIL = ["apm uninstall {key}"]
-_ANNOUNCE = {
-    "deny": "denied",
-    "revoke": "not approved",
-    "redefine": "definition changed since approval",
-    "org-deny": "denied",
-    "org-enables-gate": "denied",
-    "policy-denies-dep": "denied by pattern",
-}
-
-
 @dataclass(frozen=True)
 class Cell:
-    kind: str
-    path: str
-    change: str
+    id: str  # the exact obligation id: G|<path>|<change>|<kind>
     smoke: bool = False
-    known: tuple[Mapping[str, str], ...] = ()
     xfail: str = ""
+    known: tuple[Mapping[str, str], ...] = ()
 
     @property
-    def id(self) -> str:
-        return f"{self.kind}-{self.path}-{self.change}"
+    def parts(self) -> tuple[str, str, str]:
+        _, path, change, kind = self.id.split("|")
+        return path, change, kind
 
 
 def build_row(cell: Cell) -> tuple[Row, str]:
-    spec = _KINDS[cell.kind]
-    key = spec.key + _PATH_KEY.get(cell.path, "")
-    scope = "user" if cell.path == "user" else "project"
-    packages = [key] if cell.path not in ("uninstall", "prune") else [key, "p-skill"]
-    witness = [f"{key}/{cell.kind}/{spec.target}"]
+    path, change, kind = cell.parts
+    base, target = _KINDS[kind]
+    suffix, scope, removal = _PATHS[path]
+    key = base + suffix
+    sibling = path == "uninstall-prune-rebuild"
+    packages = (key, "p-skill") if sibling else (key,)
+    witness = [f"{key}/{kind}/{target}"]
     given: list[object] = []
-    if cell.change == "org-enables-gate":
+    if path == "marketplace-install":
+        given.append("apm marketplace add MARKETPLACE_URL")
+    if change == "org-enables-gate":
         given.append({"edit": "gate-off"})
     given.append(f"apm install {key}")
-    if cell.path in ("uninstall", "prune"):
+    if sibling:
         given.append("apm install p-skill")
-    if cell.change != "org-enables-gate":
+    if change != "org-enables-gate":
         given += [f"apm approve {key}", "apm install"]
-    when = _change(cell.change, key, cell.kind, witness)
-    removal = list(_PATHS[cell.path])
-    if cell.change == "policy-denies-dep":
-        removal = [
-            {"run": s, "exit": 1} if isinstance(s, str) and s.split()[1] in _RECONCILING else s
-            for s in removal
-        ]
-        removal += [line.format(key=key) for line in _DENY_PKG_TAIL]
-    when += removal
+    when = [*_change(change, key, kind, witness), *removal]
+    if change == "policy-dep-deny":
+        when.append(_DENY_PKG_TAIL.format(key=key))
     row = Row(
-        id=f"T-7a/gate-removal/{cell.id}",
+        id=cell.id,
         promises=tuple(PROMISES),
-        packages=tuple(packages),
-        targets=(spec.target,),
+        packages=packages,
+        targets=(target,),
         scope="project",
         given=tuple(given),
         when=tuple(when),
-        then={"deployed": "expected", "announce": _ANNOUNCE[cell.change]},
-        cell={"OP": cell.path, "PRIM": cell.kind, "GATE": cell.change, "SCOPE": scope},
+        then={"deployed": "expected", "announce": _ANNOUNCE[change]},
+        cell={"OP": path, "PRIM": kind, "GATE": change, "SCOPE": scope},
         known_cells=cell.known,
     )
     return row, scope
 
 
-# Pairwise: every applicable (KIND, PATH) once; CHANGE rotates so every
-# (KIND, CHANGE) and (PATH, CHANGE) pair the world supports appears.
+_NATIVE_APPROVE = "#4154 approve cannot find a parked native plugin"
 CELLS = (
-    Cell("hook", "install", "revoke", smoke=True),
-    Cell("mcp", "install", "org-deny"),
-    Cell("lsp", "install", "deny", smoke=True),
-    Cell("canvas", "install", "redefine"),
-    Cell("native", "install", "org-enables-gate"),
-    Cell("hook", "install-frozen", "org-deny"),
-    Cell("mcp", "install-frozen", "deny"),
-    Cell("lsp", "install-frozen", "redefine"),
-    Cell("canvas", "install-frozen", "revoke"),
-    Cell("native", "install-frozen", "deny"),
-    Cell("hook", "update", "redefine", smoke=True),
-    Cell("mcp", "update", "policy-denies-dep"),
-    Cell("lsp", "update", "org-enables-gate"),
-    Cell("canvas", "update", "org-deny"),
-    Cell("native", "update", "revoke"),
-    Cell("hook", "uninstall", "org-enables-gate"),
-    Cell("mcp", "uninstall", "revoke"),
-    Cell("lsp", "uninstall", "org-deny"),
-    Cell("canvas", "uninstall", "deny"),
-    Cell("native", "uninstall", "redefine"),
-    Cell("hook", "prune", "policy-denies-dep"),
-    Cell("mcp", "prune", "redefine"),
-    Cell("lsp", "prune", "revoke"),
-    Cell("canvas", "prune", "org-enables-gate"),
-    Cell("native", "prune", "org-deny"),
-    Cell("hook", "user", "deny"),
-    Cell("mcp", "user", "redefine"),
-    Cell("lsp", "user", "revoke"),
-    Cell("hook", "bundle", "deny"),
-    Cell("mcp", "bundle", "org-deny"),
-    Cell("hook", "marketplace", "policy-denies-dep"),
-    Cell("mcp", "marketplace", "revoke"),
-    Cell("hook", "audit-replay", "deny"),
-    Cell("mcp", "audit-replay", "org-enables-gate"),
-    Cell("lsp", "audit-replay", "org-deny"),
-    Cell("canvas", "audit-replay", "redefine"),
-    Cell("native", "audit-replay", "revoke"),
+    Cell("G|install|revoke-approval|hook", smoke=True),
+    Cell("G|install|local-deny|lsp", smoke=True),
+    Cell("G|install|org-deny|mcp"),
+    Cell("G|install|org-enables-gate|native"),
+    Cell("G|install|policy-dep-deny|hook"),
+    Cell("G|install|definition-changed|mcp"),
+    Cell("G|frozen|org-deny|hook"),
+    Cell("G|frozen|local-deny|mcp"),
+    Cell("G|frozen|revoke-approval|lsp"),
+    Cell("G|frozen|definition-changed|hook"),
+    Cell("G|frozen|local-deny|native", xfail=_NATIVE_APPROVE),
+    Cell("G|frozen|policy-dep-deny|mcp"),
+    Cell("G|frozen|org-enables-gate|lsp"),
+    Cell("G|update|definition-changed|hook", smoke=True),
+    Cell("G|update|policy-dep-deny|mcp"),
+    Cell("G|update|org-enables-gate|lsp"),
+    Cell("G|update|revoke-approval|native", xfail=_NATIVE_APPROVE),
+    Cell("G|update|local-deny|hook"),
+    Cell("G|update|org-deny|lsp"),
+    Cell("G|uninstall-prune-rebuild|org-enables-gate|hook"),
+    Cell("G|uninstall-prune-rebuild|revoke-approval|mcp"),
+    Cell("G|uninstall-prune-rebuild|org-deny|lsp"),
+    Cell("G|uninstall-prune-rebuild|definition-changed|native", xfail=_NATIVE_APPROVE),
+    Cell("G|uninstall-prune-rebuild|policy-dep-deny|hook"),
+    Cell("G|uninstall-prune-rebuild|local-deny|lsp"),
+    Cell("G|audit-ci|local-deny|hook"),
+    Cell("G|audit-ci|org-enables-gate|mcp"),
+    Cell("G|audit-ci|org-deny|lsp"),
+    Cell("G|audit-ci|revoke-approval|native", xfail=_NATIVE_APPROVE),
+    Cell("G|audit-ci|definition-changed|mcp"),
+    Cell("G|audit-ci|policy-dep-deny|hook"),
+    Cell("G|dry-run|local-deny|hook"),
+    Cell("G|dry-run|org-deny|mcp"),
+    Cell("G|dry-run|revoke-approval|lsp"),
+    Cell("G|install-g|local-deny|hook"),
+    Cell("G|install-g|definition-changed|mcp"),
+    Cell("G|install-g|revoke-approval|lsp"),
+    Cell("G|frozen-g|revoke-approval|hook"),
+    Cell("G|frozen-g|local-deny|mcp"),
+    Cell("G|frozen-g|definition-changed|hook"),
+    Cell("G|bundle-install|local-deny|hook"),
+    Cell("G|bundle-install|org-deny|mcp"),
+    Cell("G|bundle-install|revoke-approval|hook"),
+    Cell("G|bundle-install|org-enables-gate|mcp"),
+    Cell("G|marketplace-install|policy-dep-deny|hook"),
+    Cell("G|marketplace-install|revoke-approval|mcp"),
+    Cell("G|marketplace-install|local-deny|hook"),
+    Cell("G|marketplace-install|org-deny|mcp"),
+    Cell("G|marketplace-install|org-enables-gate|hook"),
+    Cell("G|native-plugin|local-deny|native", xfail=_NATIVE_APPROVE),
+    Cell("X|install|definition-changed|canvas"),
+    Cell("X|update|org-deny|canvas"),
+    Cell("X|uninstall-prune-rebuild|local-deny|canvas"),
 )
 
 
@@ -535,27 +549,26 @@ def test_gate_change_removes_on_the_next_mutating_command(lifecycle_world, cell:
 # -- lifecycle scripts: the execute path APM runs itself ---------------------
 
 _SCRIPT_CHANGES = {
-    "revoke": ["apm lifecycle untrust"],
-    "redefine": [{"edit": "lifecycle", "tag": "v2"}],
-    "org-deny": [{"edit": "policy", "variant": "exec-deny-all"}],
+    "G|lifecycle-scripts|revoke-approval|script": ("apm lifecycle untrust",),
+    "G|lifecycle-scripts|org-deny|script": ({"edit": "policy", "variant": "exec-deny-all"},),
+    "X|lifecycle-scripts|definition-changed|script": ({"edit": "lifecycle", "tag": "v2"},),
 }
 
 
-@pytest.mark.parametrize("change", sorted(_SCRIPT_CHANGES))
-def test_lifecycle_script_gate(lifecycle_world, change: str) -> None:
-    """A trusted project script runs; after the change the next install runs nothing."""
+@pytest.mark.parametrize("cell_id", sorted(_SCRIPT_CHANGES))
+def test_lifecycle_script_gate(lifecycle_world, cell_id: str) -> None:
+    """A trusted project script runs; after the change the next install runs none."""
     world = lifecycle_world
     row = Row(
-        id=f"T-7a/gate-removal/script-install-{change}",
+        id=cell_id,
         promises=tuple(PROMISES),
         packages=("p-skill",),
         targets=("copilot",),
         scope="project",
         given=({"edit": "lifecycle"}, "apm lifecycle trust", "apm install p-skill"),
-        when=(*_SCRIPT_CHANGES[change], "apm install"),
+        when=(*_SCRIPT_CHANGES[cell_id], "apm install"),
         then={"deployed": "expected"},
     )
-    replay = GateReplay(world, row)
-    replay.replay()
+    GateReplay(world, row).replay()
     runs = _script_log(world).read_text("ascii").split()
     assert runs == ["v1"], f"script runs after the gate change: {runs}"
