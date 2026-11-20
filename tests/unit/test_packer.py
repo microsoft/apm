@@ -959,7 +959,7 @@ class TestPackBundleStripsLocalFields:
         (the packager's own .github/.. paths) do not exist under the bundle
         source dir.
         """
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         remote = [".github/agents/remote.md"]
         local = [".github/agents/own.md"]
