@@ -419,12 +419,14 @@ def _refuse_uninstall_without_evidence(
 
     if not lockfile or not cleanup_keys:
         return
-    selected, _hashes = _collect_deployed_cleanup_state(lockfile, cleanup_keys)
-    survivors, _hashes = _collect_deployed_cleanup_state(
+    # Hash-tracked skill members count too: directory cleanup deletes them.
+    selected, selected_hashes = _collect_deployed_cleanup_state(lockfile, cleanup_keys)
+    survivors, survivor_hashes = _collect_deployed_cleanup_state(
         lockfile,
         DeploymentLedgerCodec.valid_owner_keys(lockfile, excluded_dependency_keys=cleanup_keys),
     )
-    candidates = selected - survivors - builtins.set(lockfile.local_deployed_files)
+    candidates = (selected | builtins.set(selected_hashes)) - survivors
+    candidates -= builtins.set(survivor_hashes) | builtins.set(lockfile.local_deployed_files)
     candidates -= builtins.set(preserved_values or ())
     refused = evidence.refusals(sorted(candidates))
     if not refused:
@@ -433,7 +435,7 @@ def _refuse_uninstall_without_evidence(
     logger.render_summary()
     logger.error(
         "Uninstall refused: deleting these tracked files needs deployment evidence that "
-        "APM wrote them. apm.yml, apm.lock.yaml and all files are unchanged."
+        "APM wrote them. Nothing was removed; apm.yml and apm.lock.yaml were not changed."
     )
     for claim, verdict in refused:
         logger.error(f"  - {claim}: {refusal_reason(verdict)}")
