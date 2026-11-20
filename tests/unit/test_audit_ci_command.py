@@ -15,6 +15,8 @@ from apm_cli.agent_plugins import AgentPluginDeploymentBoundaryError
 from apm_cli.commands.audit import audit
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
+pytestmark = pytest.mark.component
+
 # -- Fixtures -------------------------------------------------------
 
 
@@ -255,7 +257,7 @@ class TestCIOutputFormats:
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
             result = runner.invoke(audit, ["--ci", "--no-drift", "-f", "json"])
         assert result.exit_code == 1
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert data["passed"] is False
         assert data["summary"]["failed"] > 0
 

@@ -21,6 +21,8 @@ from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import APMPackage, DependencyReference, clear_apm_yml_cache
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 
+pytestmark = pytest.mark.component
+
 
 class _FixedDatetime:
     instant = datetime(2026, 1, 1, tzinfo=UTC)

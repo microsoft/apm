@@ -7,6 +7,8 @@ import pytest
 from src.apm_cli.deps.apm_resolver import APMDependencyResolver
 from src.apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 class TestVirtualPackageMultiInstall:
     """Test that multiple virtual packages from same repo can be installed."""

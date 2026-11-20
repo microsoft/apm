@@ -308,7 +308,7 @@ def fetch_file_via_git_sparse(
         file_path: Path to the file within the repository (e.g.
             ``"agents/api-specialist.agent.md"``).
         ref: Git ref (branch, tag, or commit SHA).
-        build_repo_url_fn: Callable that returns an auth-embedded clone
+        build_repo_url_fn: Callable that returns a credential-free clone
             URL for dep_ref. Injected to avoid circular imports with the
             owning downloader.
         git_env: Subprocess environment dict (inherits git auth, e.g.

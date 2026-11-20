@@ -1,0 +1,153 @@
+"""Cached org policy is verified before use, in one reader (#4218).
+
+* ``policy/_cache_verify.py`` checks a cached document against the project
+  pin and the fingerprint recorded with it (``_cached_policy_verified``).
+* ``policy/discovery.py`` is the only module that locates the policy cache
+  (``_get_cache_dir`` / ``POLICY_CACHE_DIR``).
+* ``_read_cache_entry`` is the only function there that parses a cached
+  policy document. It rejects (returns None) a document that fails
+  ``_cached_policy_verified`` (pin and recorded fingerprint) before any
+  ``load_policy`` call, and parses only the verified text, never the file a
+  second time.
+"""
+
+from __future__ import annotations
+
+import ast
+
+from scripts.architecture_linter.checks.install_deployment_shared import (
+    _facts_for,
+    _present,
+    _python_paths,
+    _summary,
+)
+from scripts.architecture_linter.facts import FactsProvider
+from scripts.architecture_linter.groups.common import violation
+from scripts.architecture_linter.models import Violation
+
+GUARD_POLICY_CACHE_PIN = "install-deployment-policy-cache-pin"
+
+_OWNER = "src/apm_cli/policy/discovery.py"
+_READER = "_read_cache_entry"
+_VERIFY = "_cached_policy_verified"
+_CACHE_NAMES = frozenset({"_get_cache_dir", "POLICY_CACHE_DIR"})
+_VERIFIER = "src/apm_cli/policy/_cache_verify.py"
+_OWNER_NEEDLES = (
+    "if not _cached_policy_verified(serialized, meta, expected_hash):",
+    "policy, _warnings = load_policy(serialized)",
+)
+_VERIFIER_NEEDLES = (
+    "def _cached_policy_matches(serialized: str, meta: dict) -> bool:",
+    "hmac.compare_digest(recorded, _policy_fingerprint(serialized))",
+    "return _cached_pin_matches(raw_bytes_hash, expected_hash) and _cached_policy_matches(",
+)
+
+
+def _names(index, node: ast.AST) -> set[str]:
+    found: set[str] = set()
+    for item in index.walk(node):
+        if isinstance(item, ast.Name):
+            found.add(item.id)
+        elif isinstance(item, ast.Attribute):
+            found.add(item.attr)
+    return found
+
+
+def _rejects_unverified(node: ast.AST) -> bool:
+    """``if not _cached_policy_verified(...): return None``."""
+    if not isinstance(node, ast.If) or node.orelse:
+        return False
+    test = node.test
+    if not (isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)):
+        return False
+    call = test.operand
+    if not (isinstance(call, ast.Call) and getattr(call.func, "id", None) == _VERIFY):
+        return False
+    return (
+        len(node.body) == 1
+        and isinstance(node.body[0], ast.Return)
+        and isinstance(node.body[0].value, ast.Constant)
+        and node.body[0].value.value is None
+    )
+
+
+def _reader_order(index, reader: ast.AST) -> str | None:
+    """Why *reader* may parse a cached document before rejecting it, or None."""
+    rejects = [node.lineno for node in index.walk(reader) if _rejects_unverified(node)]
+    parses = [
+        node
+        for node in index.walk(reader)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "load_policy"
+    ]
+    if not rejects:
+        return f"{_READER} must return None when {_VERIFY} fails"
+    for call in parses:
+        verified = (
+            len(call.args) == 1
+            and isinstance(call.args[0], ast.Name)
+            and call.args[0].id == "serialized"
+        )
+        if not verified or call.lineno < min(rejects):
+            return f"{_READER} parses a cached policy before or without verifying it"
+    return None
+
+
+def check_policy_cache_pin(provider: FactsProvider) -> tuple[Violation, ...]:
+    """The policy cache has one reader, and it verifies a document before use."""
+    rule = GUARD_POLICY_CACHE_PIN
+    owner, failures = _facts_for(provider, _OWNER, rule)
+    if failures:
+        return tuple(failures)
+    verifier, failures = _facts_for(provider, _VERIFIER, rule)
+    if failures:
+        return tuple(failures)
+    findings = [
+        _summary(rule, _OWNER, f"The policy cache reader lost: {needle}")
+        for needle in _OWNER_NEEDLES
+        if not _present(owner, needle)
+    ]
+    findings.extend(
+        _summary(rule, _VERIFIER, f"The cached policy verification lost: {needle}")
+        for needle in _VERIFIER_NEEDLES
+        if not _present(verifier, needle)
+    )
+    index = owner.tree_index
+    if index is not None:
+        for function in index.functions():
+            if function.name == _READER:
+                problem = _reader_order(index, function)
+                if problem is not None:
+                    findings.append(violation(rule, _OWNER, problem, line=function.lineno))
+                continue
+            names = _names(index, function)
+            if "_get_cache_dir" in names and "load_policy" in names:
+                findings.append(
+                    violation(
+                        rule,
+                        _OWNER,
+                        f"{function.name} parses a cached policy outside {_READER}",
+                        line=function.lineno,
+                    )
+                )
+    for path in _python_paths(provider, "src/apm_cli/"):
+        if path == _OWNER:
+            continue
+        facts, failed = _facts_for(provider, path, rule)
+        if failed:
+            findings.extend(failed)
+            continue
+        other = facts.tree_index
+        if other is None:
+            continue
+        for node in other.nodes:
+            name = getattr(node, "id", None) or getattr(node, "attr", None)
+            if isinstance(node, (ast.Name, ast.Attribute)) and name in _CACHE_NAMES:
+                findings.append(
+                    violation(
+                        rule,
+                        path,
+                        f"{name} locates the policy cache outside {_OWNER}",
+                        line=node.lineno,
+                    )
+                )
+    return tuple(findings)

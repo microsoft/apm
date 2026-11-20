@@ -8,6 +8,7 @@ from __future__ import annotations
 import builtins
 from pathlib import Path
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.deps.lockfile_write_authority import lockfile_exists
 
@@ -59,7 +60,7 @@ def resolve_locked_apm_yml_sources(
             for dep in lockfile.get_package_dependencies():
                 if dep.repo_url:
                     package_root = dep.to_dependency_ref().get_install_path(apm_modules_dir)
-                    yml = package_root / "apm.yml"
+                    yml = manifest_file(package_root)
                     if yml.is_symlink():
                         raise ValueError(f"Locked package manifest must not be a symlink: {yml}")
                     resolved_yml = yml.resolve()

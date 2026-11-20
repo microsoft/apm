@@ -37,7 +37,7 @@ Those controls are owned by the **agent harness** that runs your agents, not by 
 Discovery order, in priority:
 
 1. Explicit policy source on `apm audit --ci` via `--policy <ref>` or `apm policy status` via `--policy-source <ref>`. `apm install` auto-discovers from the project's git remote and supports `--no-policy`; it does not accept `--policy` today.
-2. Auto-discovery from the project's git remote -- checks the org policy repo cascade (`.github-private`, `.github`, `.apm`, `_apm`; Azure DevOps uses repository `apm-policy` in project `apm`, then falls back to legacy `_apm/_apm` only after a 404). When no candidate has a policy, the install proceeds silently; `apm policy status` reports outcome `absent` (see [output fields](../cli/policy/#output-fields)). On GitHub, if `.github-private` returned 404, the status adds a hint that the credential may lack read access, because GitHub also answers 404 for private repositories you cannot read.
+2. Auto-discovery from the project's git remote -- checks the org policy repo cascade (`.github-private`, `.github`, `.apm`, `_apm`; Azure DevOps uses repository `apm-policy` in project `apm`, then falls back to legacy `_apm/_apm` only after a 404). When no candidate has a policy, the install proceeds silently; `apm policy status` reports outcome `absent` (see [output fields](../cli/policy/#output-fields)). On GitHub, if `.github-private` returned 404, the status adds a hint that the credential may lack read access, because GitHub also answers 404 for private repositories you cannot read. Offline, an unreachable earlier candidate does not hide a policy cached from a later one: a cached policy up to 7 days old is applied, and output names it as stale. An authentication error still fails closed.
 
 The `<ref>` accepts:
 
@@ -511,7 +511,7 @@ This realizes Claude Code's "skills-directory plugin" contract: a folder under a
 
 **Security note:** deployed executables are tightened to `0o700` on POSIX systems and placed on Claude Code's `PATH`, so Claude can invoke them without further confirmation. By default, APM mirrors npm's trust model: installing a package implies trusting its declared artifacts, including executables. Use this field to opt out globally or per-package in enterprise environments. Additionally, the `--trust-bin` / `--no-trust-bin` flags on `apm install` provide per-invocation consent: `--trust-bin` suppresses the trust-posture warning, `--no-trust-bin` skips bin/ deployment even if policy allows it, and the default (no flag) deploys with a warning.
 
-**Scope:** bin/ deployment only activates for global (`-g`, user-scope) installs. Project-scope installs do not deploy executables.
+**Scope:** bin/ deployment only activates for a marketplace plugin installed at user scope (`-g`) with the Claude target. Project-scope installs and other targets never deploy `bin/`.
 
 **Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../../producer/publish-to-a-marketplace/#choose-a-repository-shape) for the producer-side contract (directory layout, executable bit, scope and trust posture).
 

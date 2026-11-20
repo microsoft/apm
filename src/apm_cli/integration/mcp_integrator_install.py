@@ -9,7 +9,7 @@ from __future__ import annotations
 import builtins
 import copy
 import logging
-import re
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,15 +23,21 @@ from apm_cli.core.apm_yml import (
     UnknownTargetError,
 )
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.core.scope import manifest_file
 from apm_cli.core.target_catalog import accepted_target_values
 from apm_cli.install.errors import (
     InstallFailureAlreadyRendered,
     MCPNativeConflictError,
     RequiredIntegrationError,
 )
+from apm_cli.integration.mcp_registry_hints import (
+    CHOOSING_MCP_REGISTRY_DOCS_URL,  # noqa: F401 -- re-exported for tests
+    _emit_registry_choice_hint,
+    _registry_choice_hint_is_safe,
+)
 from apm_cli.integration.mcp_user_scope_runtimes import user_scope_runtime_labels
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.console import STATUS_SYMBOLS
+from apm_cli.utils.console import STATUS_SYMBOLS, _rich_echo
 from apm_cli.utils.yaml_io import load_yaml
 
 if TYPE_CHECKING:
@@ -61,62 +67,10 @@ class _PrevalidatedRegistryServers(dict[str, dict]):
         )
 
 
-CHOOSING_MCP_REGISTRY_DOCS_URL = (
-    "https://microsoft.github.io/apm/consumer/install-mcp-servers/#choosing-an-mcp-registry"
-)
-
 # Precedence layers a direct ``apm install --mcp NAME`` can resolve from. The
 # manifest-only ``explicit`` layer (an apm.yml ``registry:`` URL) keeps its
 # existing guidance.
 _DIRECT_INSTALL_REGISTRY_SOURCES = frozenset({"default", "flag", "env", "config"})
-
-# Version pins are opaque strings. Only portable literal tokens may appear in
-# a printed command, never shell syntax or control characters.
-_SAFE_RETRY_ARG_RE = re.compile(r"[A-Za-z0-9._+,\-]+")
-
-
-def _registry_choice_hint_is_safe(server_names: list[str], retry_args: tuple[str, ...]) -> bool:
-    from apm_cli.registry.client import is_valid_mcp_server_name
-
-    return all(map(is_valid_mcp_server_name, server_names)) and all(
-        _SAFE_RETRY_ARG_RE.fullmatch(arg) for arg in retry_args
-    )
-
-
-def _emit_registry_choice_hint(
-    logger: Any,
-    server_names: list[str],
-    *,
-    registry_url: str,
-    registry_source: str,
-    retry_args: tuple[str, ...],
-) -> None:
-    """Explain a registry miss without endorsing any alternative registry.
-
-    The searched registry is already named by the error line. ``<URL>`` stays a
-    literal placeholder: the user picks the registry, APM never does.
-    """
-    suffix = "".join(f" {arg}" for arg in retry_args)
-    for server_name in server_names:
-        search = f'apm mcp search "{server_name}"'
-        if registry_source == "flag":
-            # ``apm mcp search`` has no --registry flag; it reads the same
-            # precedence chain minus the flag.
-            search = f"{search} (with MCP_REGISTRY_URL set to {registry_url})"
-        logger.info(f"Search this registry: {search}", soft_wrap=True)
-        logger.info(
-            "Use another registry (replace <URL>): "
-            f'apm install --mcp "{server_name}" --registry <URL>{suffix}',
-            soft_wrap=True,
-        )
-    if registry_source == "env":
-        logger.info("Or point MCP_REGISTRY_URL at <URL> for every lookup", soft_wrap=True)
-    else:
-        logger.info(
-            "Or save it for every lookup: apm config set mcp-registry-url <URL>",
-            soft_wrap=True,
-        )
-    logger.info(f"Choosing an MCP registry: {CHOOSING_MCP_REGISTRY_DOCS_URL}", soft_wrap=True)
 
 
 def _validate_registry_servers(
@@ -132,7 +86,16 @@ def _validate_registry_servers(
     retry_args: tuple[str, ...] = (),
 ) -> list[str]:
     """Validate registry identities and raise before any target write."""
-    logger.mcp_lookup_heartbeat(len(server_names))
+    # Name the registry: one install can look up servers in several (#4244).
+    registry_url = getattr(getattr(operations, "registry_client", None), "registry_url", None)
+    if isinstance(registry_url, str):
+        from apm_cli.registry.client import redact_mcp_registry_url
+
+        logger.mcp_lookup_heartbeat(
+            len(server_names), registry=redact_mcp_registry_url(registry_url)
+        )
+    else:
+        logger.mcp_lookup_heartbeat(len(server_names))
     if verbose:
         logger.verbose_detail(f"Validating {dependency_count} registry servers...")
     if fail_closed:
@@ -223,6 +186,26 @@ class _TargetSelectionSource(str, Enum):
 
     __str__ = str.__str__
     __format__ = str.__format__
+
+
+@dataclass(frozen=True)
+class ResolvedMcpTargets:
+    """MCP target runtimes resolved once per install run (``None``: none can accept)."""
+
+    runtimes: tuple[str, ...] | None
+
+    def runtime_list(self) -> list[str] | None:
+        """Return a mutable copy of the runtimes, or ``None``."""
+        return None if self.runtimes is None else list(self.runtimes)
+
+
+def resolve_mcp_targets(**kwargs: Any) -> ResolvedMcpTargets:
+    """Resolve and announce MCP targets once; ``run_mcp_install`` reuses them (#4089).
+
+    Takes the keyword arguments of :func:`_resolve_target_runtimes`.
+    """
+    runtimes = _resolve_target_runtimes(**kwargs)
+    return ResolvedMcpTargets(None if runtimes is None else tuple(runtimes))
 
 
 def _announce_registry_endpoint(registry_client: Any, logger: Any) -> None:
@@ -856,7 +839,7 @@ def _raise_strict_config_failures(
         "retaining --global and any --target selection."
     )
     if console:
-        console.print(f"[red]{STATUS_SYMBOLS['cross']} {message}[/red]")
+        _rich_echo(f"{STATUS_SYMBOLS['cross']} {message}", color="red")
     else:
         logger.error(message)
     raise InstallFailureAlreadyRendered(message)
@@ -1110,7 +1093,7 @@ def _resolve_target_runtimes(
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
         if apm_config is None:
-            apm_yml = project_root_path / "apm.yml"
+            apm_yml = manifest_file(project_root_path)
             try:
                 if apm_yml.exists():
                     apm_config = load_yaml(apm_yml)
@@ -1745,6 +1728,7 @@ def run_mcp_install(  # noqa: PLR0913
     prevalidated_registry_servers: dict[str, dict] | None = None,
     fail_on_write_error: bool = False,
     native_hashes: dict[str, dict[str, str]] | None = None,
+    resolved_targets: ResolvedMcpTargets | None = None,
 ) -> int:
     """Install MCP dependencies.
 
@@ -1767,6 +1751,8 @@ def run_mcp_install(  # noqa: PLR0913
             runtimes whose adapter declares ``supports_user_scope``
             are targeted; workspace-only runtimes are skipped.
         managed_target_servers: Mutable per-target APM ownership state.
+        resolved_targets: Targets this run already resolved (``--frozen``
+            checks them first); the install reuses them as they are.
 
     Returns:
         Number of MCP servers newly configured or updated.
@@ -1828,20 +1814,23 @@ def run_mcp_install(  # noqa: PLR0913
     else:
         logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
 
-    # Runtime detection, gating, and scope filtering
-    target_runtimes = _resolve_target_runtimes(
-        runtime=runtime,
-        exclude=exclude,
-        verbose=verbose,
-        apm_config=apm_config,
-        project_root=project_root,
-        user_scope=user_scope,
-        explicit_target=explicit_target,
-        target_decision=target_decision,
-        scope=scope,
-        logger=logger,
-        console=console,
-    )
+    # Runtime detection, gating, and scope filtering (once per run, #4089)
+    target_runtimes = (
+        resolved_targets
+        or resolve_mcp_targets(
+            runtime=runtime,
+            exclude=exclude,
+            verbose=verbose,
+            apm_config=apm_config,
+            project_root=project_root,
+            user_scope=user_scope,
+            explicit_target=explicit_target,
+            target_decision=target_decision,
+            scope=scope,
+            logger=logger,
+            console=console,
+        )
+    ).runtime_list()
     if target_runtimes is None:
         if fail_on_write_error:
             raise RequiredIntegrationError(

@@ -9,6 +9,8 @@ import pytest
 
 from apm_cli.marketplace._io import __all__, atomic_write
 
+pytestmark = pytest.mark.component
+
 
 class TestAtomicWrite:
     """Tests for the shared ``atomic_write()`` function."""

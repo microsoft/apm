@@ -31,6 +31,8 @@ from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.content_hash import compute_package_hash
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers to build synthetic data
 # ---------------------------------------------------------------------------

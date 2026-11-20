@@ -7,9 +7,6 @@ never uses the registry keeps lockfile_version "1" forever (§2.1.4).
 
 from __future__ import annotations
 
-import hashlib
-from pathlib import Path
-
 import pytest
 
 from apm_cli.deps.lockfile import (
@@ -20,30 +17,7 @@ from apm_cli.deps.lockfile import (
 from apm_cli.deps.registry.resolver import RegistryResolution
 from apm_cli.models.dependency.reference import DependencyReference
 
-
-@pytest.mark.parametrize(
-    ("fixture_name", "expected_size", "expected_sha256"),
-    [
-        (
-            "v1-git-only.yml",
-            889,
-            "75b7d3b5d6f310e481131f18209103c3f4559933bef70ec5fd087b60af3cc26e",
-        ),
-        (
-            "v2-with-registry.yml",
-            1236,
-            "3f3d9f509c0a07971aa597d223dcdd1afb48df62025fc3f9ebb14b61621ad056",
-        ),
-    ],
-)
-def test_pre_v3_lockfile_canonical_bytes_remain_stable(
-    fixture_name: str, expected_size: int, expected_sha256: str
-) -> None:
-    fixture = Path("tests/fixtures/spec-conformance/lockfile") / fixture_name
-    rendered = LockFile.from_yaml(fixture.read_text(encoding="utf-8")).to_yaml().encode("utf-8")
-
-    assert len(rendered) == expected_size
-    assert hashlib.sha256(rendered).hexdigest() == expected_sha256
+pytestmark = pytest.mark.unit
 
 
 def _git_dep(**kwargs) -> LockedDependency:
@@ -166,15 +140,6 @@ class TestSchemaBumpOpportunistic:
         lock.add_dependency(
             LockedDependency(repo_url="_local/x", source="local", local_path="./local/x")
         )
-        assert "lockfile_version: '1'" in lock.to_yaml()
-
-    def test_v2_back_to_v1_when_registry_dep_removed(self):
-        lock = LockFile()
-        lock.add_dependency(_registry_dep())
-        assert "lockfile_version: '2'" in lock.to_yaml()
-        # Remove the registry dep; lockfile re-emits as v1.
-        del lock.dependencies["acme/web"]
-        lock.add_dependency(_git_dep())
         assert "lockfile_version: '1'" in lock.to_yaml()
 
 

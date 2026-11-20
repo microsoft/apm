@@ -39,7 +39,7 @@
     {
       "id": "host-credential-resolution",
       "decision": "Host + credential resolution and effective provider identity consumed by dependency drift and dependency-scoped lock seeds, including registry-proxy route equivalence of lock rows; authenticated host access: escalation chain entry point and auth-outcome classification; helper credential outcome reporting (git credential approve after acceptance, reject after a verified rejection)",
-      "owner": "core/auth.py (AuthResolver, AuthResolver.try_with_fallback, AuthResolver.github_rest_headers, AuthResolver.bearer_headers, AuthResolver.gitlab_rest_headers), core/auth_outcome.py (classify_auth_outcome), core/auth_chain.py (run_ado_chain, report_helper_outcome), core/token_manager.py (GitHubTokenManager.report_git_helper_credential), core/host_providers.py (effective_host_provider_identity), deps/artifactory_orchestrator.py (ArtifactoryRouter.routing_target, routes_to_locked_proxy); consumers: drift.py, tiered_ref_resolver.py, and every Azure DevOps egress (install/validation.py, install/pipeline.py, deps/download_strategies.py, deps/clone_engine.py, deps/git_reference_resolver.py, deps/github_downloader_validation.py, marketplace/ref_resolver.py, marketplace/client.py, policy/discovery.py, policy/_gitlab.py)",
+      "owner": "core/auth.py (AuthResolver, AuthResolver.try_with_fallback, AuthResolver.github_rest_headers, AuthResolver.bearer_headers, AuthResolver.gitlab_rest_headers), core/auth_outcome.py (classify_auth_outcome), install/repository_access.py (inaccessible and not-found install diagnostics), core/auth_chain.py (run_ado_chain, report_helper_outcome), core/token_manager.py (GitHubTokenManager.report_git_helper_credential), core/host_providers.py (effective_host_provider_identity), deps/artifactory_orchestrator.py (ArtifactoryRouter.routing_target, routes_to_locked_proxy); consumers: drift.py, tiered_ref_resolver.py, and every Azure DevOps egress (install/validation.py, install/pipeline.py, deps/download_strategies.py, deps/clone_engine.py, deps/git_reference_resolver.py, deps/github_downloader_validation.py, marketplace/ref_resolver.py, marketplace/client.py, policy/discovery.py, policy/_gitlab.py)",
       "selectors": [
         "src/apm_cli/core/auth.py",
         "src/apm_cli/core/auth_chain.py",
@@ -47,7 +47,8 @@
         "src/apm_cli/core/host_providers.py",
         "src/apm_cli/core/token_manager.py",
         "src/apm_cli/deps/artifactory_orchestrator.py",
-        "src/apm_cli/drift.py"
+        "src/apm_cli/drift.py",
+        "src/apm_cli/install/repository_access.py"
       ],
       "guards": [
         "transport-platform-ado-validation-bearer-fallback",
@@ -57,6 +58,7 @@
         "transport-platform-auth-outcome-owner",
         "transport-platform-authenticated-egress",
         "transport-platform-credential-report-owner",
+        "transport-platform-github-credential-class",
         "transport-platform-host-credential-resolution"
       ]
     },
@@ -85,7 +87,7 @@
       "id": "git-cache-key-normalization",
       "decision": "Git repository cache-key normalization",
       "owner": "cache/url_normalize.py (normalize_repo_url / cache_shard_key)",
-      "selectors": ["src/apm_cli/cache/url_normalize.py"],
+      "selectors": ["src/apm_cli/cache/url_normalize.py", "src/apm_cli/cache/git_cache.py"],
       "guards": ["transport-platform-git-cache-identity"]
     },
     {
@@ -207,8 +209,8 @@
     },
     {
       "id": "credential-origin-scope",
-      "decision": "Credentials attach only to their configured origin: registry token per PROXY_REGISTRY_URL origin, credential headers dropped on cross-origin redirects, GitHub MCP tokens only for parser-agreed hosts, and the redirect follow decision (same scheme, host and effective port under the base path, at most 3 hops, credentials re-sent only on in-bound hops)",
-      "owner": "utils/http_credentials.py (CREDENTIAL_HEADER_NAMES, strip_cross_origin_credential_headers, CredentialScopedSession, origin_bounded_request, unfollowed_redirect_request); deps/registry_proxy.py (RegistryConfig.headers_for); deps/registry/auth.py (RegistryAuthContext.auth_header, RegistryAuthContext.headers); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, deps/registry/client.py, marketplace/client.py, marketplace/builder.py, policy/_policy_http.py, install/artifactory_resolver.py, install/validation.py, adapters/client/copilot.py",
+      "decision": "Credentials attach only to their configured origin: registry token per PROXY_REGISTRY_URL origin, and over http:// only to a loopback or RFC 1918 host or with PROXY_REGISTRY_ALLOW_HTTP=1 (#4314), credential headers dropped on cross-origin redirects, GitHub MCP tokens only for parser-agreed hosts, and the redirect follow decision (same scheme, host and effective port under the base path, at most 3 hops, credentials re-sent only on in-bound hops); HTTP sessions are CredentialScopedSession unless frozen-exempt, and no URL builder takes a credential",
+      "owner": "utils/http_credentials.py (CREDENTIAL_HEADER_NAMES, strip_cross_origin_credential_headers, CredentialScopedSession, origin_bounded_request, unfollowed_redirect_request); deps/registry_proxy.py (RegistryConfig.headers_for, http_token_allowed); utils/net.py (is_local_network_host); deps/registry/auth.py (RegistryAuthContext.auth_header, RegistryAuthContext.headers); utils/github_host.py (unambiguous_https_hostname); consumers: deps/download_strategies.py, deps/registry/client.py, registry/client.py, marketplace/client.py, marketplace/builder.py, policy/_policy_http.py, install/artifactory_resolver.py, install/validation.py, adapters/client/copilot.py",
       "selectors": [
         "src/apm_cli/utils/http_credentials.py",
         "src/apm_cli/deps/registry_proxy.py"
@@ -216,8 +218,18 @@
       "guards": [
         "transport-platform-authenticated-egress-credential-headers",
         "transport-platform-credential-origin-scope",
-        "transport-platform-origin-bounded-redirect"
+        "transport-platform-http-session-construction",
+        "transport-platform-origin-bounded-redirect",
+        "transport-platform-proxy-http-token",
+        "transport-platform-url-builder-credential-free"
       ]
+    },
+    {
+      "id": "egress-route-policy",
+      "decision": "Route of every outbound request (direct, proxy-only or refused) and registry-only (PROXY_REGISTRY_ONLY) enforcement, with the org policy fetch kept direct as the documented governance-channel exception",
+      "owner": "deps/egress_route.py (EgressSurface, EgressRoute, route_for, is_refused, is_proxy_only); deps/registry_proxy.py parses the flag (is_enforce_only) for the owner only; consumers: install/pipeline.py, install/validation.py, install/phases/integrate.py, install/helpers/ref_reuse.py, deps/git_reference_resolver.py, deps/git_semver_resolver.py, deps/artifactory_orchestrator.py, models/dependency/reference.py, commands/view.py, commands/outdated.py, registry/client.py, marketplace/client.py, policy/_policy_http.py",
+      "selectors": ["src/apm_cli/deps/egress_route.py"],
+      "guards": ["transport-platform-egress-route-policy"]
     },
     {
       "id": "credential-value-rendering",

@@ -9,7 +9,7 @@ sidebar:
 
 ```bash
 apm approve [PACKAGE_REF...] [OPTIONS]
-apm policy explain <PACKAGE_REF>
+apm policy explain [-g] <PACKAGE_REF>
 ```
 
 ## Description
@@ -39,7 +39,7 @@ content (the root `.apm/` directory) is always trusted.
 | Type | Gated | Notes |
 |------|-------|-------|
 | Hooks (`.apm/hooks/`, `hooks/`) | Yes | Auto-fire in IDE on lifecycle events |
-| Bin executables (`bin/`) | Yes | Deployed to agent PATH via symlinks |
+| Bin executables (`bin/`) | Yes | Deployed only for a marketplace plugin installed at user scope (`-g`) with the Claude target; copied into the plugin folder on Claude Code's PATH |
 | MCP servers (self-defined) | Yes | `registry: false` servers write to IDE MCP config |
 | LSP servers | Yes | Supported runtimes may start generated server commands automatically |
 | Canvas extensions (`.apm/extensions/`) | Yes | Deploys executable Node.js to IDE extensions |
@@ -178,6 +178,7 @@ that layer and how to lift it.
 | `--recommended` | Pin and approve the org `executables.recommend` set. |
 | `--list` | Show the fleet-level effective trust decision and deciding layer per installed package. |
 | `--user` | Write the grant, in the same pinned shape, to `$APM_HOME/config.json` instead of `apm.yml`. Works outside a project, for packages `apm install -g` installed. |
+| `-g`, `--global` | Approve packages `apm install -g` installed, from any directory. Writes the user-scope `apm.yml` (`$APM_HOME/apm.yml`); run `apm install -g` to deploy. Parked notices at user scope print this form. |
 
 #### Output
 
@@ -207,7 +208,8 @@ Re-approving replaces the package's pins with the current definitions.
 - an item cannot be pinned, for example a transitive registry server while the
   MCP registry is unreachable (`needs registry access to pin`).
 
-It exits 1 when any requested package was refused, or when you decline the
+It exits 1 when a requested package is not installed, when any requested
+package was refused, or when you decline the
 first-approval prompt (`Nothing written.`), so a script never commits an
 approval that was not recorded. It also exits 1, writing nothing, when the
 org policy outcome blocks, exactly as `apm install` would (for example an
@@ -230,6 +232,7 @@ to `apm policy status` (the policy-chain view).
 
 ```bash
 apm policy explain owner/repo
+apm policy explain -g owner/repo   # a package apm install -g installed
 ```
 
 For a fleet-level view, `apm doctor` runs an executable-trust drift check that
@@ -289,9 +292,26 @@ ignores the personal store when it checks MCP consent, so CI and laptops agree.
 
 Existing `owner/repo#1.2.0` keys still match the package regardless of the
 installed version; `apm approve` folds them into the version-blind key. Local
-bundle grants are different: copy the full `name#version@sha256:<digest>` key
-from the install diagnostic. A changed local bundle does not inherit the prior
-grant.
+bundle grants are different: they bind the full `name#version@sha256:<digest>`
+key the install diagnostic prints. A changed local bundle does not inherit the
+prior grant.
+
+### Local bundles
+
+`apm install <bundle>` parks a local bundle's hooks, MCP, and LSP servers until
+its exact content key is approved, and prints that key. Approve it with:
+
+```bash
+apm approve "hookpkg#1.0.0@sha256:<digest>"   # the key the install printed
+apm install ./hookpkg-1.0.0                  # rerun the install to deploy
+```
+
+This writes the same grant as adding the key under `executables.allow` in
+`apm.yml` (or `$APM_HOME/config.json` with `--user`; use `-g` for a bundle
+installed with `apm install -g`). Either path works. `apm approve --pending`
+lists parked bundles with their keys. A key with a wrong digest, or a key
+printed before the bundle's bytes changed, is refused: `apm approve` exits 1
+with an `[x]` line and writes nothing.
 
 ## Examples
 

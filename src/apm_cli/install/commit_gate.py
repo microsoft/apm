@@ -29,6 +29,29 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
 
 
+class _AnnouncedPolicyLogger:
+    """Forward to the install logger; the policy gate already announced the policy.
+
+    That includes the notices that enforcement is disabled or that no
+    usable org policy was found.
+    """
+
+    def __init__(self, logger: Any) -> None:
+        self._logger = logger
+
+    def policy_resolved(self, **_kwargs: Any) -> None:
+        return None
+
+    def policy_disabled(self, _reason: str) -> None:
+        return None
+
+    def policy_discovery_miss(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._logger, name)
+
+
 class _SilentLogger:
     """Discard collection output; the service stage reports admissions once."""
 
@@ -92,8 +115,11 @@ def enforce_mcp_policy(
     )
     if not subjects and effective_target is None:
         return
+    from apm_cli.core.scope import manifest_root
+
     run_policy_preflight(
-        project_root=project_root,
+        # Org policy is discovered from the scope manifest ($APM_HOME under -g).
+        project_root=manifest_root(project_root, user_scope=user_scope),
         mcp_deps=subjects,
         mcp_brought_in_by=brought_in_by,
         no_policy=no_policy,
@@ -104,11 +130,19 @@ def enforce_mcp_policy(
     )
 
 
-def refuse_blocked_mcp(logger: Any) -> NoReturn:
-    """Render the MCP policy refusal every install entry shows, then fail the install."""
+def refuse_blocked_mcp(logger: Any, exc: BaseException | None = None) -> NoReturn:
+    """Render the MCP policy refusal every install entry shows, then fail the install.
+
+    A discovery-level block (no ``audit_result``, e.g. ``fetch_failure_default:
+    block`` with no reachable policy) prints its own reason (#4179); a check
+    refusal already reported its violations, so it prints the summary line.
+    """
     from apm_cli.install.errors import InstallFailureAlreadyRendered
 
-    logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
+    if exc is not None and getattr(exc, "audit_result", None) is None and str(exc):
+        logger.refusal(str(exc))
+    else:
+        logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
     logger.render_summary()
     raise InstallFailureAlreadyRendered("MCP server(s) blocked by org policy") from None
 
@@ -192,7 +226,7 @@ def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None
         user_scope=user_scope,
         project_root=ctx.project_root,
         no_policy=ctx.no_policy,
-        logger=ctx.logger,
+        logger=_AnnouncedPolicyLogger(ctx.logger),
         dry_run=ctx.dry_run,
     )
     ctx.mcp_policy_enforced = True

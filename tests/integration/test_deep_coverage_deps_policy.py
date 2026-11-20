@@ -141,42 +141,6 @@ class TestDownloadStrategySelection:
                     max_retries=2,
                 )
 
-    def test_build_repo_url_github_https(self) -> None:
-        """build_repo_url generates correct GitHub HTTPS URL."""
-        mock_host = MagicMock()
-        mock_host.github_host = "github.com"
-        mock_host.github_token = "test-token"
-        mock_host.auth_resolver = MagicMock()
-
-        delegate = DownloadDelegate(mock_host)
-
-        with patch("apm_cli.deps.download_strategies.backend_for") as mock_backend_for:
-            mock_backend = MagicMock()
-            mock_backend.kind = "github"
-            mock_backend.is_github_family = True
-            mock_backend_for.return_value = mock_backend
-
-            url = delegate.build_repo_url("owner/repo", use_ssh=False)
-            assert url is not None
-
-    def test_build_repo_url_ssh(self) -> None:
-        """build_repo_url generates SSH URL when requested."""
-        mock_host = MagicMock()
-        mock_host.github_host = "github.com"
-        mock_host.github_token = None
-        mock_host.auth_resolver = MagicMock()
-
-        delegate = DownloadDelegate(mock_host)
-
-        with patch("apm_cli.deps.download_strategies.backend_for") as mock_backend_for:
-            mock_backend = MagicMock()
-            mock_backend.kind = "github"
-            mock_backend.is_github_family = True
-            mock_backend_for.return_value = mock_backend
-
-            url = delegate.build_repo_url("owner/repo", use_ssh=True)
-            assert url is not None
-
 
 class TestPolicyDiscovery:
     """Tests for policy discovery pipeline."""

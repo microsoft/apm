@@ -18,6 +18,8 @@ import pytest
 
 from .conftest import write_text_bytes
 
+pytestmark = pytest.mark.component
+
 CMD_PREFIX = b'lifecycle:\n  post-install:\n    - type: command\n      bash: "echo '
 CMD_SUFFIX = b'"\n'
 

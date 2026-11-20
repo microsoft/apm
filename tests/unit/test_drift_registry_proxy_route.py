@@ -15,6 +15,8 @@ from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.drift import build_download_ref, detect_ref_change
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 _PROXY_HOST = "registry-proxy.example.invalid"
 _PROXY_URL = f"https://{_PROXY_HOST}/artifactory/github"
 

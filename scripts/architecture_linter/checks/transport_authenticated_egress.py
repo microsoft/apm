@@ -121,10 +121,6 @@ _EGRESS_EXEMPTIONS: Mapping[tuple[str, str], tuple[int, str]] = MappingProxyType
             1,
             "anonymous pre-auth raw content CDN fetch; never carries a credential",
         ),
-        ("src/apm_cli/registry/client.py", "SimpleRegistryClient.__init__"): (
-            1,
-            "anonymous MCP registry session",
-        ),
         ("src/apm_cli/registry/client.py", "SimpleRegistryClient._cached_get_json"): (
             3,
             "anonymous MCP registry metadata fetch",

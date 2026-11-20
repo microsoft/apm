@@ -57,8 +57,9 @@ otherwise the concrete target identities recorded by install. An unrelated
 Grok Cloud installation, and `.grok/` alone does not relabel it as Grok Build.
 Older lockfiles without a recorded `deployments` section retain directory
 discovery; identities inferred from legacy file paths do not narrow it.
-The saved `apm config target` is an install/update default, not a request to
-retarget an existing installation during audit.
+The saved `target` config value (`apm config set target`) is an
+install/update default, not a request to retarget an existing installation
+during audit.
 
 Experimental targets remain opt-in. If a selected target's experiment is
 disabled, audit exits with code `3` and an enable instruction on stderr, such
@@ -331,9 +332,9 @@ do malformed JSON, duplicate keys, and non-JSON constants (`NaN`, `Infinity`,
 
 Drift is whole-project only; `--file` and explicit `PACKAGE` runs skip it.
 Use `--no-drift` to opt out with reduced coverage. In bare `apm audit`, drift
-findings are advisory by default. With `security.audit.fail_on_drift: true`,
-a failed drift check (including one that could not run) promotes an otherwise
-clean audit to exit `1`. An advisory cache-miss skip remains non-failing
+findings are advisory by default and render as `[!] Drift detected`. With
+`security.audit.fail_on_drift: true`, a failed drift check (including one that
+could not run) promotes the audit to exit `1` and drift renders as `[x]`. An advisory cache-miss skip remains non-failing
 (see [Exit codes](#exit-codes)).
 
 Bare `apm audit` keeps replay cache-only, so a cache miss produces an
@@ -354,7 +355,8 @@ dependency was removed without running `apm prune` -- is a hard failure,
 not drift: it always exits `1`, in bare `apm audit` and `--ci` alike, and
 is reported under the `deployment-ledger-owners` check ID in `--ci` output.
 The finding names the owning locator and its invalid owner(s) with one
-remediation: `Run 'apm prune', then rerun 'apm audit'.` `--strip` refuses to
+remediation: `Run 'apm prune' to repair the invalid deployment ownership
+records, then rerun 'apm audit'.` `--strip` refuses to
 modify content while any owner reference is invalid. Stale owner rows never
 authorize deleting files -- only `apm prune` reconciles them, and only ever
 as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
@@ -390,6 +392,12 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 | `1` | One or more checks failed (including deployment-owner integrity, drift, hash drift, or policy violations), an explicit `--policy` source could not be loaded, or `apm.lock.yaml` was written by a newer APM. |
 
 CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement`); SARIF has it under `runs[0].invocations[0].properties.policy`. `enforced: false` means no policy checks ran.
+
+A failing CI JSON check can carry `remediation`: the structured advice that clears it, with `id`, `command` (the exact `apm` command line), `fixes` (the state it clears) and optional `before` (a manual step first, such as deleting edited files) and `then` (a step after it succeeds). `remediations` lists every applicable remediation; `remediation` is the first. The text message renders the same advice.
+
+```json
+{"name": "lockfile-exists", "passed": false, "remediation": {"id": "lockfile-missing", "command": "apm install", "fixes": "generate apm.lock.yaml"}}
+```
 
 ## Related
 

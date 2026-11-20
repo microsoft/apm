@@ -20,6 +20,8 @@ from apm_cli.core.lifecycle_scripts import (
 )
 from apm_cli.core.script_trust import trust_project_scripts
 
+pytestmark = pytest.mark.component
+
 PROJECT_YML = "lifecycle:\n  post-install:\n    - type: command\n      bash: echo hi\n"
 
 

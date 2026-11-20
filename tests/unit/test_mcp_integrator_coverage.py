@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, PropertyMock, patch  # noqa: F401
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _suppress_console(monkeypatch):

@@ -9,12 +9,18 @@ from typing import TYPE_CHECKING
 import click
 
 from apm_cli.core.command_logger import CommandLogger
+from apm_cli.core.remediation import (
+    RESYNC_AFTER_UNMANAGED_CONFLICT,
+    RESYNC_DEPLOYED,
+    RESYNC_UNRECORDED,
+)
 from apm_cli.deps.file_provenance import LOCAL_BUNDLE_OWNER
 from apm_cli.install.local_edits import (
-    count_exportable_findings,
+    edited_file_remediations,
+    exportable_edit_paths,
+    install_keeps_edit,
     local_edit_hint,
     rendering_change_hint,
-    restore_locked_content_hint,
     unedited_modified_paths,
 )
 from apm_cli.utils.console import STATUS_SYMBOLS
@@ -88,18 +94,22 @@ def render_drift_text(
     *,
     lockfile: LockFile | None = None,
     project_root: Path | None = None,
+    advisory: bool = False,
 ) -> str:
     """Render drift findings as grouped terminal text.
 
     *lockfile* lets the export-patch hint skip local-path packages; with
     *project_root* it also tells local edits from rendering changes.
+    *advisory* marks drift that does not fail the run, so the header is a
+    warning rather than an error.
     """
     if not findings:
         return f"{STATUS_SYMBOLS['check']} No drift detected"
 
     status = (
         "error"
-        if any(
+        if not advisory
+        and any(
             finding.kind in {"modified", "unrecorded", "unmanaged-conflict"} for finding in findings
         )
         else "warning"
@@ -122,9 +132,11 @@ def render_drift_text(
         lines.append("")
 
     unedited = unedited_modified_paths(findings, lockfile, project_root)
-    exportable = count_exportable_findings(findings, lockfile, unedited=unedited)
+    exportable = exportable_edit_paths(findings, lockfile, unedited=unedited)
     if exportable:
-        lines.append(f"  {STATUS_SYMBOLS['info']} {local_edit_hint(exportable)}")
+        overwritten = sum(1 for path in exportable if not install_keeps_edit(path))
+        hint = local_edit_hint(len(exportable), overwritten=overwritten)
+        lines.append(f"  {STATUS_SYMBOLS['info']} {hint}")
     if unedited:
         lines.append(f"  {STATUS_SYMBOLS['info']} {rendering_change_hint(len(unedited))}")
 
@@ -137,30 +149,24 @@ def render_drift_text(
             "overwrites a skipped non-skill file."
         )
         if any(finding.kind != "unmanaged-conflict" for finding in findings):
-            lines.append(
-                f"  {STATUS_SYMBOLS['info']} After resolving ownership conflicts, "
-                "run 'apm install' to re-sync the other findings."
-            )
+            lines.append(f"  {STATUS_SYMBOLS['info']} {RESYNC_AFTER_UNMANAGED_CONFLICT.sentence()}")
     elif by_kind.get("unrecorded"):
-        lines.append(f"  {STATUS_SYMBOLS['info']} 1. Run 'apm install' to re-sync deployed files.")
-        lines.append(
-            f"  {STATUS_SYMBOLS['info']} 2. Commit the regenerated apm.lock.yaml "
-            "to restore content-integrity coverage."
-        )
+        lines.append(f"  {STATUS_SYMBOLS['info']} {RESYNC_UNRECORDED.sentence()}")
     else:
         edited = [
             finding for finding in by_kind.get("modified", []) if finding.path not in unedited
         ]
-        bundle_edits = {finding.package == LOCAL_BUNDLE_OWNER for finding in edited}
-        for bundle in sorted(bundle_edits):
-            subject = "the modified bundle files" if bundle else "the modified files"
-            hint = restore_locked_content_hint(subject, bundle=bundle)
-            lines.append(f"  {STATUS_SYMBOLS['info']} {hint}.")
+        # True per primitive kind (RA-009): see install/local_edits.py.
+        for bundle in sorted({finding.package == LOCAL_BUNDLE_OWNER for finding in edited}):
+            paths = [
+                finding.path
+                for finding in edited
+                if (finding.package == LOCAL_BUNDLE_OWNER) is bundle
+            ]
+            for remediation in edited_file_remediations(paths, bundle=bundle):
+                lines.append(f"  {STATUS_SYMBOLS['info']} {remediation.sentence()}")
         if len(edited) < len(findings):
-            lines.append(
-                f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files "
-                "with the lockfile."
-            )
+            lines.append(f"  {STATUS_SYMBOLS['info']} {RESYNC_DEPLOYED.sentence()}")
     return "\n".join(lines).rstrip() + "\n"
 
 

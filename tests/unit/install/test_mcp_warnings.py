@@ -8,11 +8,15 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.install.mcp.warnings import (
     _is_internal_or_metadata_host,
     warn_shell_metachars,
     warn_ssrf_url,
 )
+
+pytestmark = pytest.mark.unit
 
 # ================================================================
 # _is_internal_or_metadata_host

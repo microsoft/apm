@@ -11,6 +11,8 @@ from click.testing import CliRunner
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.core import experimental
 
+pytestmark = pytest.mark.component
+
 
 def _write(p: Path, content: str) -> None:
     p.write_text(textwrap.dedent(content).lstrip(), encoding="utf-8")

@@ -219,7 +219,7 @@ to force serial execution. The default selection in `pyproject.toml` excludes
 
 For performance changes, prefer deterministic operation-count regressions over
 wall-clock thresholds. Run the consolidated scan regressions with
-`uv run --extra dev pytest -q tests/unit/test_performance_scan_regressions.py`.
+`uv run --extra dev pytest -q tests/unit/test_performance_scan_regressions.py tests/integration/test_performance_scan_regressions.py`.
 They check deferred error-only imports, at most two indexed ZIP member lookups,
 and uninstall deduplication without comparing previously selected entries.
 Archive parsing and canonical dependency matching retain their existing costs.
@@ -399,6 +399,18 @@ bash scripts/lint-architecture-boundaries.sh
 The check fails closed when metadata is malformed, missing, or not listed in the
 index.
 
+Every module under `src/apm_cli/` must match one owner's `selectors` or appear in
+`.apm/architecture/unowned-modules.json`. That list only shrinks: a new module
+needs an owner, and when you give a listed module an owner, remove its entry and
+lower `UNOWNED_MODULE_CEILING` in
+`scripts/architecture_linter/checks/registry_module_ownership.py` to match.
+
+Every CLI command must be classified in
+`scripts/architecture_linter/checks/install_lifecycle_serialization.py`. A command
+that writes lifecycle state uses `@serialized_lifecycle` (or its `_unless` /
+`_when` variants) and is listed in `SERIALIZED_LIFECYCLE_ROUTES`. A command that
+writes no lifecycle state is listed as exempt, with the reason.
+
 `InstallTransaction` owns one acquisition of the shared lifecycle `FileLock`.
 Commit, rollback, and context exit are the normal release paths; explicit release
 invokes the same `weakref.finalize` callback used for abandoned transactions.
@@ -538,14 +550,24 @@ coupled edits in the same PR:
 2. **Manifest:** update
    `docs/public/specs/manifests/openapm-v0.1.requirements.yml`
    to remain a byte-equivalent projection of the canonical anchors.
-3. **Test:** add or extend a `@pytest.mark.req("req-XXX")` test under
-   `tests/spec_conformance/`. If a real assertion is not yet possible, call
+3. **Test:** add or extend a `@pytest.mark.req("req-XXX")` test. The marker
+   binds from any test under `tests/` (an installed-CLI test in
+   `tests/integration/` counts); `tests/spec_conformance/` holds the
+   requirement-specific ones. If a real assertion is not yet possible, call
    `waive("...")` from `_helpers.py` with a one-line rationale. The waiver
    appears in `CONFORMANCE.md` as visible debt, not test coverage.
+   Only a behavioral test counts as coverage: one that reaches `apm_cli`
+   (not its constants or YAML helpers), `tests.integration`, `tests.unit` or
+   the CLI runner `tests.utils.apm_lifecycle_runner`, or takes the
+   `apm_binary_path` fixture. A requirement whose tests only assert spec text or
+   fixture shape is reported `text-only` (rule:
+   `tests/spec_conformance/_test_kind.py`).
 
-Regenerate the conformance statement after these edits:
+Regenerate the conformance statement after these edits (the full collect-only
+run over `tests/` writes the coverage map):
 
 ```bash
+uv run --extra dev pytest tests --collect-only -q -p no:xdist
 uv run --extra dev python -m tests.spec_conformance.gen_statement
 ```
 

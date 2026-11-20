@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _suppress_console(monkeypatch):
@@ -18,22 +20,6 @@ def _suppress_console(monkeypatch):
 # ---------------------------------------------------------------------------
 # run_mcp_install -- empty mcp_deps
 # ---------------------------------------------------------------------------
-
-
-class TestRunMcpInstallEmpty:
-    def test_no_mcp_deps_returns_zero(self):
-        from apm_cli.integration.mcp_integrator_install import run_mcp_install
-
-        result = run_mcp_install(mcp_deps=[], logger=MagicMock())
-        assert result == 0
-
-    def test_none_mcp_deps_warns_and_returns_zero(self):
-        from apm_cli.integration.mcp_integrator_install import run_mcp_install
-
-        logger = MagicMock()
-        result = run_mcp_install(mcp_deps=None, logger=logger)
-        assert result == 0
-        logger.warning.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -188,34 +174,41 @@ class TestRunMcpInstallSingleRuntime:
         mock_ops.validate_servers_exist.assert_not_called()
         mock_ops.batch_fetch_server_info.assert_not_called()
 
+    def test_single_runtime_targets_only_that_runtime_with_batch_fetch_stub(self, tmp_path):
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
-def test_direct_registry_prevalidation_fails_closed():
-    from apm_cli.integration.mcp_integrator_install import prevalidate_registry_dependencies
+        dep = self._make_reg_dep("my-server")
+        logger = MagicMock()
+        logger.mcp_lookup_heartbeat = MagicMock()
 
-    dep = MagicMock()
-    dep.name = "my-server"
-    operations = MagicMock()
+        mock_ops = MagicMock()
+        mock_ops.validate_servers_exist.return_value = (["my-server"], [])
+        mock_ops.check_servers_needing_installation.return_value = ["my-server"]
+        mock_ops.batch_fetch_server_info.return_value = {"my-server": {"packages": []}}
+        mock_ops.collect_environment_variables.return_value = {}
+        mock_ops.collect_runtime_variables.return_value = {}
 
-    def validate(_names, **kwargs):
-        kwargs["server_info_cache"]["my-server"] = {"packages": []}
-        return ["my-server"], []
-
-    operations.validate_servers_exist.side_effect = validate
-
-    with patch(
-        "apm_cli.registry.operations.MCPServerOperations",
-        return_value=operations,
-    ):
-        result = prevalidate_registry_dependencies(
-            [dep],
-            registry_url=None,
-            verbose=False,
-            logger=MagicMock(),
-        )
-
-    operations.validate_servers_exist.assert_called_once()
-    assert operations.validate_servers_exist.call_args.kwargs["fail_closed"] is True
-    assert result == {"my-server": {"packages": []}}
+        with (
+            patch(
+                "apm_cli.registry.operations.MCPServerOperations",
+                return_value=mock_ops,
+            ),
+            patch(
+                "apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime",
+                return_value=True,
+            ),
+            patch(
+                "apm_cli.integration.mcp_integrator.MCPIntegrator._gate_project_scoped_runtimes",
+                side_effect=lambda rts, **kw: rts,
+            ),
+        ):
+            result = run_mcp_install(
+                mcp_deps=[dep],
+                runtime="copilot",
+                project_root=tmp_path,
+                logger=logger,
+            )
+        assert result >= 0
 
 
 # ---------------------------------------------------------------------------

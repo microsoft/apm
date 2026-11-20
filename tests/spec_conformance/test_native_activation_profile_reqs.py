@@ -45,6 +45,8 @@ from apm_cli.native_plugins.settings import (
 from apm_cli.utils.content_hash import compute_native_plugin_hash
 from tests.spec_conformance._helpers import assert_spec_contains, load_json_fixture, waive
 
+pytestmark = pytest.mark.component
+
 _ORACLE = ("native-activation", "req-na-004.json")
 
 

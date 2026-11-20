@@ -1,0 +1,20 @@
+# Absorbed from tests/integration/test_uninstall_lsp_without_mcp_lifecycle.py
+# ::test_lsp_only_uninstall_removes_the_server_and_keeps_survivors[project]
+# (#4045, #3768): in a scope with LSP servers but no MCP state, uninstall exits
+# 0 and the server leaves the target config and the lockfile. The survivor
+# assertion stays in the integration test (the world has one LSP package).
+id: T10/uninstall/lsp-only-scope/lsp
+promises: [P-INV-I1, P-INV-I4, P-INV-I5, P-INV-I7, P-INV-I8, P-LAW-ownership.preserve_unowned, P-LAW-outcome.status_matches_state]
+cell: {OP: uninstall, SRC: local-path, PRIM: lsp, SCOPE: project, GATE: approved}
+world: {packages: [p-skill, p-lsp], targets: [copilot], scope: project}
+given:
+  - apm install p-skill p-lsp
+  - apm approve p-lsp
+  - apm install
+when:
+  - {run: apm uninstall --no-such-flag, exit: 2}
+  - apm uninstall p-lsp
+  - apm install
+then:
+  exit: 0
+  deployed: expected

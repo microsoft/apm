@@ -31,6 +31,7 @@ from typing import Any
 import requests
 
 from ...utils.credential_rendering import redact_url_userinfo
+from ...utils.diagnostics import printable_ascii_text
 from ...utils.http_credentials import (
     REFUSED_HOP_LIMIT,
     REFUSED_METHOD_CHANGE,
@@ -316,7 +317,7 @@ class RegistryClient:
             ) from exc
         except requests.RequestException as exc:
             raise RegistryError(
-                f"transport error talking to registry: {exc}",
+                f"transport error talking to registry: {printable_ascii_text(str(exc))}",
                 url=url,
             ) from exc
 

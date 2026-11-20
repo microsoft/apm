@@ -9,6 +9,11 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    INIT_TARGETS_UNDETECTED,
+)
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.formats import PREFERRED_PLUGIN_FORMAT, BundleFormat
 from ..bundle.plugin_layout import find_plugin_root_sources
 from ..constants import APM_YML_FILENAME
@@ -401,8 +406,8 @@ def _perform_init(
             sys.exit(1)
 
         # Check for existing generated files
-        apm_yml_exists = Path(APM_YML_FILENAME).exists()
-        generated_paths = [Path(APM_YML_FILENAME)]
+        apm_yml_exists = manifest_file(Path(".")).exists()
+        generated_paths = [manifest_file(Path("."))]
         if plugin:
             generated_paths.append(Path("plugin.json"))
             if effective_plugin_mode == "agent":
@@ -412,13 +417,21 @@ def _perform_init(
         # Handle existing generated files in brownfield projects
         if existing_generated_paths:
             rendered_paths = ", ".join(path.as_posix() for path in existing_generated_paths)
-            if existing_generated_paths == [Path(APM_YML_FILENAME)]:
+            if existing_generated_paths == [manifest_file(Path("."))]:
                 logger.warning("apm.yml already exists")
             else:
                 logger.warning(f"Generated files already exist: {rendered_paths}")
 
             if not yes:
-                confirm = click.confirm("Continue and overwrite?")
+                try:
+                    confirm = click.confirm("Continue and overwrite?")
+                except click.exceptions.Abort:
+                    # No answer (closed stdin): refuse with the way forward.
+                    logger.error(
+                        f"{rendered_paths} not overwritten; rerun with --yes to overwrite, "
+                        "or pass a new project name to scaffold into its own directory."
+                    )
+                    sys.exit(1)
 
                 if not confirm:
                     logger.progress("Initialization cancelled.")
@@ -536,7 +549,7 @@ def _perform_init(
                 install_step += " -t <harness>"
             next_steps = [
                 f"Install a package:               {install_step}",
-                "Build a plugin? Scaffold one:    apm plugin init",
+                "Build a plugin? Scaffold one:    apm plugin init <name>",
                 "Publishing a marketplace?:       apm marketplace init",
             ]
         else:
@@ -547,22 +560,16 @@ def _perform_init(
                 "Author your own plugin:         apm pack --format agent-plugin",
             ]
 
-        # Agentrc integration (#518): suggest agentrc when no instructions exist.
-        # Only applies to consumer init (not plugin mode).
-        agentrc_tip: str | None = None
+        # Agentrc integration (#518): when agentrc is already installed and no
+        # instructions exist, name its step. Consumer init only (not plugin
+        # mode); the default path names APM steps only (#4089).
         if not plugin and source == "init":
             agentrc_installed, has_instructions = _detect_agentrc(project_root)
-            if not has_instructions:
-                if agentrc_installed:
-                    next_steps.insert(
-                        1,
-                        "Generate agent instructions:     agentrc init",
-                    )
-                else:
-                    agentrc_tip = (
-                        "Tip: Use agentrc to generate tailored agent instructions "
-                        "from your codebase. https://github.com/microsoft/agentrc"
-                    )
+            if agentrc_installed and not has_instructions:
+                next_steps.insert(
+                    1,
+                    "Generate agent instructions:     agentrc init",
+                )
 
         try:
             _rich_panel(
@@ -574,9 +581,6 @@ def _perform_init(
             logger.progress("Next steps:")
             for step in next_steps:
                 click.echo(f"  * {step}")
-
-        if agentrc_tip:
-            logger.progress(agentrc_tip, symbol="info")
 
         # Codex tip: suggest agent-skills target when .codex/ exists
         if Path(".codex").is_dir():
@@ -594,6 +598,7 @@ def _perform_init(
                     "  Docs: https://microsoft.github.io/apm  |  "
                     "Star: https://github.com/microsoft/apm",
                     style="dim",
+                    soft_wrap=True,
                 )
             else:
                 click.echo(
@@ -624,7 +629,7 @@ def _write_and_validate_agent_plugin_scaffold(project_root: Path, config: dict) 
     mcp_document = {"$schema": MCP_SCHEMA_ID, "mcpServers": {}}
     with tempfile.TemporaryDirectory(prefix=".apm-plugin-init-", dir=project_root) as stage:
         staged_root = Path(stage)
-        staged_manifest = staged_root / APM_YML_FILENAME
+        staged_manifest = manifest_file(staged_root)
         _create_minimal_apm_yml(config, plugin=True, target_path=staged_manifest)
         _create_plugin_json(config, mode="agent", target_path=staged_root / "plugin.json")
         (staged_root / "mcp.json").write_text(
@@ -841,7 +846,7 @@ def _resolve_init_targets(
             if yes or not is_tty:
                 logger.error(message)
                 logger.progress(
-                    "Re-run 'apm init --target <target,...>' to choose the targets explicitly.",
+                    INIT_TARGETS_UNDETECTED.sentence(),
                     symbol="info",
                 )
                 sys.exit(1)
@@ -903,7 +908,7 @@ def _read_existing_targets(project_root: Path) -> list[str]:
     from ..models.manifest_io import load_manifest
     from ..models.manifest_targets import ManifestTargetDeclaration
 
-    apm_yml_path = project_root / APM_YML_FILENAME
+    apm_yml_path = manifest_file(project_root)
     try:
         data = load_manifest(apm_yml_path) if apm_yml_path.is_file() else None
     except InvalidManifestError:
@@ -983,7 +988,7 @@ def _prompt_target_selection(
 
     click.echo(
         f"\n{INFO}[i] Tip: select the tools your team uses. You can change this later"
-        f"\n    with 'apm targets set <target,...>' or edit apm.yml directly.{RESET}"
+        f"\n    by editing 'targets:' in apm.yml.{RESET}"
     )
     click.echo(
         f"{INFO}[i] Type a number to toggle, ranges like '1-3' or '1,3,5' for multiple,"
@@ -1015,7 +1020,7 @@ def _prompt_target_selection(
         click.echo(
             f"\n{INFO}[!] No targets selected. APM will auto-detect targets from your"
             "\n    filesystem on every compile (e.g. .github/ -> copilot)."
-            f"\n    To pin targets later: apm targets set <target,...>{RESET}"
+            f"\n    To pin targets later, list them under 'targets:' in apm.yml.{RESET}"
         )
         if click.confirm("\nContinue without pinning targets?", default=True):
             return None

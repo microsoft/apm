@@ -14,6 +14,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def _make_tui_stub() -> MagicMock:
     """Return a MagicMock that acts as an InstallTui for the callback."""
@@ -70,22 +74,3 @@ def test_task_completed_called_on_local_copy_path() -> None:
     dep_ref = _make_dep_ref("local/copy#main")
     tui.task_completed(dep_ref.get_unique_key())
     tui.task_completed.assert_called_once_with("local/copy#main")
-
-
-def test_resolve_module_imports_tui_attr_safely() -> None:
-    """Resolve uses getattr(ctx, 'tui', None) -- ctx without tui is OK.
-
-    Pins the duck-typed access pattern so older test fixtures
-    constructing minimal contexts don't break.
-    """
-    from apm_cli.install.phases import resolve as resolve_mod
-
-    # The module must use getattr(ctx, "tui", None) -- not direct
-    # attribute access -- so a missing attr does not raise.
-    src = resolve_mod.__file__
-    with open(src) as fh:
-        text = fh.read()
-    assert 'getattr(ctx, "tui", None)' in text, (
-        "resolve.py must access ctx.tui via getattr(...,None) so "
-        "minimal/older context objects don't trigger AttributeError"
-    )

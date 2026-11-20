@@ -4,9 +4,11 @@ import os
 import tempfile  # noqa: F401
 from unittest.mock import Mock, patch
 
-import pytest  # noqa: F401
+import pytest
 
 from src.apm_cli.runtime.manager import RuntimeManager
+
+pytestmark = pytest.mark.component
 
 
 class TestRuntimeManagerTokenPrecedence:

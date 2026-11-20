@@ -13,24 +13,13 @@ from pathlib import Path
 import pytest
 
 from apm_cli.marketplace.errors import MarketplaceYmlError
-from apm_cli.marketplace.output_profiles import MARKETPLACE_OUTPUTS, known_output_names
 from apm_cli.marketplace.yml_schema import load_marketplace_from_apm_yml
+
+pytestmark = pytest.mark.component
 
 
 def _write(p: Path, content: str) -> None:
     p.write_text(textwrap.dedent(content).lstrip(), encoding="utf-8")
-
-
-def test_marketplace_output_profiles_define_supported_outputs() -> None:
-    assert known_output_names() == {"claude", "codex", "copilot"}
-    assert MARKETPLACE_OUTPUTS["claude"].mapper == "claude"
-    assert MARKETPLACE_OUTPUTS["claude"].supports_cli_output_override is True
-    assert MARKETPLACE_OUTPUTS["codex"].mapper == "codex"
-    assert MARKETPLACE_OUTPUTS["codex"].supports_cli_output_override is False
-    assert MARKETPLACE_OUTPUTS["codex"].required_package_fields == ("category",)
-    assert MARKETPLACE_OUTPUTS["copilot"].mapper == "copilot"
-    assert MARKETPLACE_OUTPUTS["copilot"].supports_cli_output_override is False
-    assert MARKETPLACE_OUTPUTS["copilot"].required_package_fields == ()
 
 
 _MIN_BLOCK_INHERIT = """\

@@ -7,7 +7,6 @@ compatibility.
 """
 
 import logging
-import re
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -16,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from ..utils.credential_rendering import redact_url_userinfo
 from .dependency import (
     DependencyReference,
     GitReferenceType,
@@ -26,6 +24,7 @@ from .dependency import (
     ResolvedReference,
     parse_git_reference,
 )
+from .extension_keys import is_extension_key
 from .manifest_targets import (
     _LEGACY_ALL_TARGET,
     _MANIFEST_TARGET_KEYS,
@@ -137,6 +136,19 @@ def invalidate_apm_yml_cache_entry(apm_yml_path: Path) -> None:
             _apm_yml_cache.pop(key, None)
 
 
+_REGISTRY_KEYS = ("insecure", "url")
+_V01_REGISTRY_KEYS = ("aliases", "insecure", "url")
+
+
+def _reject_unknown_registry_keys(name: str, body: dict, known: tuple[str, ...]) -> None:
+    """Reject a mistyped ``registries.<name>`` key; ``x-`` extension keys are ignored."""
+    unknown = sorted(str(key) for key in body if key not in known and not _is_extension_key(key))
+    if unknown:
+        raise ValueError(
+            f"Registry {name!r} has unknown fields: {unknown} (known fields: {list(known)})"
+        )
+
+
 def _parse_v01_registries_block(
     data: dict,
     apm_yml_path: Path,
@@ -147,6 +159,8 @@ def _parse_v01_registries_block(
         return None, None
     if not isinstance(raw, dict):
         raise ValueError(f"OpenAPM v0.1 'registries:' in {apm_yml_path} must be a mapping")
+    from ..deps.registry.url_scheme import registry_url_error
+
     registries: dict[str, str] = {}
     default_name = raw.get("default")
     for name, value in raw.items():
@@ -155,10 +169,12 @@ def _parse_v01_registries_block(
         body = {"url": value} if isinstance(value, str) else value
         if not isinstance(name, str) or not isinstance(body, dict):
             raise ValueError("OpenAPM v0.1 registry entries must be named strings or objects")
+        _reject_unknown_registry_keys(name, body, _V01_REGISTRY_KEYS)
         url = body.get("url")
-        if not isinstance(url, str) or not url.startswith(("https://", "http://")):
-            raise ValueError(f"OpenAPM v0.1 registry {name!r} requires an HTTP(S) url")
-        registries[name] = url
+        error = registry_url_error(name, url, insecure=body.get("insecure"))
+        if error is not None:
+            raise ValueError(f"{error} (in {apm_yml_path})")
+        registries[name] = url.strip()
         aliases = body.get("aliases", [])
         if aliases is not None and not isinstance(aliases, list):
             raise ValueError(f"OpenAPM v0.1 registry {name!r} aliases must be a list")
@@ -200,6 +216,8 @@ def _parse_registries_block(
     if manifest_contract is ManifestContract.OPENAPM_V01:
         return _parse_v01_registries_block(data, apm_yml_path)
 
+    from ..deps.registry.url_scheme import registry_url_error
+
     raw = data.get("registries")
     if raw is None:
         return None, None
@@ -232,29 +250,21 @@ def _parse_registries_block(
             )
         # Token trap: tokens must never appear in repo-tracked YAML files.
         if "token" in body:
+            from ..core.remediation import REGISTRY_TOKEN_IN_MANIFEST
             from ..deps.registry.auth import registry_token_env_var
 
             raise ValueError(
                 f"Registry {name!r}: 'token' must not appear in apm.yml. "
-                f"Use the {registry_token_env_var(name)} "
-                f"environment variable or 'apm config set registry.{name}.token <value>'."
-            )
-        url = body.get("url")
-        if not isinstance(url, str) or not url.strip():
-            raise ValueError(f"Registry {name!r} is missing required field 'url:'")
-        url = url.strip()
-        if not url.startswith(("https://", "http://")):
-            raise ValueError(
-                f"Registry {name!r} URL must start with https:// or http:// "
-                f"(got {redact_url_userinfo(url)!r})"
+                f"Use the {registry_token_env_var(name)} environment variable, or "
+                f"{REGISTRY_TOKEN_IN_MANIFEST.bind(name=name).clause()}."
             )
         # Reject any unknown keys to catch typos early.
-        unknown = set(body.keys()) - {"url"}
-        if unknown:
-            raise ValueError(
-                f"Registry {name!r} has unknown fields: {sorted(unknown)} (known fields: ['url'])"
-            )
-        registries_map[name] = url
+        _reject_unknown_registry_keys(name, body, _REGISTRY_KEYS)
+        url = body.get("url")
+        error = registry_url_error(name, url, insecure=body.get("insecure"))
+        if error is not None:
+            raise ValueError(f"{error} (in {apm_yml_path})")
+        registries_map[name] = url.strip()
 
     default_name: str | None = None
     if default_value is not None:
@@ -369,13 +379,7 @@ _KNOWN_TOP_LEVEL_KEYS = frozenset(
         "schemaVersion",
     }
 )
-# OpenAPM req-ext-001. A bare ``x-`` prefix is not an extension.
-_EXTENSION_KEY_RE = re.compile(r"^x-[a-z][a-z0-9-]*$")
-
-
-def _is_extension_key(key: object) -> bool:
-    """True when *key* matches OpenAPM req-ext-001 (``x-[a-z][a-z0-9-]*``)."""
-    return isinstance(key, str) and _EXTENSION_KEY_RE.fullmatch(key) is not None
+_is_extension_key = is_extension_key
 
 
 def _ascii_token(value: object) -> str:
@@ -384,12 +388,25 @@ def _ascii_token(value: object) -> str:
     return ascii(text)[1:-1]
 
 
+# OpenAPM req-mf-021: reserved for v0.2; named as such, ignored, never fatal.
+_RESERVED_V02_KEYS = frozenset({"workspaces"})
+
+
 def _warn_unknown_manifest_keys(keys: list[str], manifest_path: Path) -> None:
     """Warn once, naming every ignored top-level key."""
     from ..utils.console import _rich_warning
 
-    safe_keys = ", ".join(_ascii_token(key) for key in keys)
     safe_path = _ascii_token(manifest_path.as_posix())
+    for key in sorted(_RESERVED_V02_KEYS.intersection(keys)):
+        _rich_warning(
+            f"Top-level key '{key}' in {safe_path} is reserved for OpenAPM v0.2; "
+            "its value is ignored in v0.1.",
+            symbol="warning",
+        )
+    keys = [key for key in keys if key not in _RESERVED_V02_KEYS]
+    if not keys:
+        return
+    safe_keys = ", ".join(_ascii_token(key) for key in keys)
     _rich_warning(
         f"Unknown top-level key(s) in {safe_path}: {safe_keys}. "
         "These keys were ignored. Rename each to match x-[a-z][a-z0-9-]* "
@@ -422,6 +439,16 @@ def _collect_manifest_extensions(
     if unknown and warning_handler is not None:
         warning_handler(unknown, manifest_path)
     return extensions
+
+
+def _refuse_reserved_conflict_resolution(raw_deps: Mapping[str, Any], manifest: Path) -> None:
+    """Refuse ``conflict_resolution: nest``, reserved for v0.2 (OpenAPM req-rs-013)."""
+    if raw_deps.get("conflict_resolution") == "nest":
+        raise ValueError(
+            f"'dependencies.conflict_resolution: nest' in {_ascii_token(manifest.as_posix())} "
+            "is reserved for OpenAPM v0.2 and cannot be installed (OpenAPM v0.1 "
+            "Section 7.2, clause (3)). Remove the key or set it to 'intersection-pick'."
+        )
 
 
 def _iter_apm_dependency_lists(
@@ -540,6 +567,12 @@ class APMPackage:
             raw_targets.append(self.target)
         self.canonical_targets = canonical_target_names(raw_targets)
 
+    @property
+    def vendor_targets(self) -> tuple[str, ...]:
+        """Declared ``x-<vendor>-<name>`` targets (req-tg-004); never deployed."""
+        declaration = self.target_declaration
+        return declaration.vendor_targets if declaration is not None else ()
+
     @classmethod
     def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:
         """Parse a dependencies or devDependencies dict from apm.yml.
@@ -612,6 +645,7 @@ class APMPackage:
                     "    apm:\n"
                     "      - owner/repo"
                 )
+            _refuse_reserved_conflict_resolution(raw_deps, source_manifest)
             dependencies = cls._parse_dependency_dict(raw_deps, label="")
 
         # Parse devDependencies (same structure as dependencies)
@@ -688,7 +722,9 @@ class APMPackage:
                 }
             elif group is not None:
                 data[dependency_key] = resolve_plugin_root_placeholders(group, package_path)
-        source_manifest = manifest_path or package_path / "apm.yml"
+        from apm_cli.core.scope import manifest_file
+
+        source_manifest = manifest_path or manifest_file(package_path)
         resolved_source = source_path.resolve() if source_path is not None else None
 
         from .manifest_contract import negotiate_manifest_contract
@@ -728,8 +764,12 @@ class APMPackage:
                 bind_plugin_roots((parsed_group or {}).get(kind), package_path)
 
         # Merge user/policy registry URLs and config.json default routing.
-        from ..deps.registry.config_loader import resolve_effective_registries
+        from ..deps.registry.config_loader import (
+            resolve_effective_registries,
+            user_registry_config_path,
+        )
 
+        project_registries = registries
         registries, default_registry = resolve_effective_registries(
             registries,
             default_registry,
@@ -738,9 +778,13 @@ class APMPackage:
         if registries or default_registry:
             from ..deps.registry.feature_gate import require_package_registry_enabled
 
+            user_source = None
+            if not project_registries:
+                user_source = user_registry_config_path(create_config=create_config)
             require_package_registry_enabled(
                 "Registry configuration",
                 create_config=create_config,
+                config_source=str(user_source) if user_source else None,
             )
 
         # Route unscoped deps to the effective default registry when configured.

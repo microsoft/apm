@@ -18,6 +18,8 @@ from apm_cli.export.spdx import (
     classify_declared_license,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     "decl",

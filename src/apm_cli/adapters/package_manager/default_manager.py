@@ -1,6 +1,7 @@
 """Implementation of the default MCP package manager."""
 
 from ...config import get_default_client
+from ...core.command_logger import library_logger
 from ...registry.integration import RegistryIntegration
 from .base import MCPPackageManagerAdapter
 
@@ -30,10 +31,10 @@ class DefaultMCPPackageManager(MCPPackageManagerAdapter):
             result = client_adapter.configure_mcp_server(package_name, package_name, True)
 
             if result:
-                print(f"Successfully installed {package_name}")
+                library_logger().success(f"Installed {package_name}")
             return result
         except Exception as e:
-            print(f"Error installing package {package_name}: {e}")
+            library_logger().error(f"Error installing package {package_name}: {e}")
             return False
 
     def uninstall(self, package_name):
@@ -61,14 +62,14 @@ class DefaultMCPPackageManager(MCPPackageManagerAdapter):
                 result = client_adapter.update_config({"servers": servers})
 
                 if result:
-                    print(f"Successfully uninstalled {package_name}")
+                    library_logger().success(f"Uninstalled {package_name}")
                 return result
             else:
-                print(f"Package {package_name} not found in configuration")
+                library_logger().warning(f"Package {package_name} not found in configuration")
                 return False
 
         except Exception as e:
-            print(f"Error uninstalling package {package_name}: {e}")
+            library_logger().error(f"Error uninstalling package {package_name}: {e}")
             return False
 
     def list_installed(self):
@@ -97,7 +98,7 @@ class DefaultMCPPackageManager(MCPPackageManagerAdapter):
             # Return the list of server names
             return list(servers.keys())
         except Exception as e:
-            print(f"Error retrieving installed MCP servers: {e}")
+            library_logger().error(f"Error retrieving installed MCP servers: {e}")
             return []
 
     def search(self, query):
@@ -121,5 +122,5 @@ class DefaultMCPPackageManager(MCPPackageManagerAdapter):
             )
 
         except Exception as e:
-            print(f"Error searching for packages: {e}")
+            library_logger().error(f"Error searching for packages: {e}")
             return []

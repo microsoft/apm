@@ -17,6 +17,8 @@ from apm_cli.commands.uninstall.cli import uninstall as uninstall_command
 from apm_cli.core.command_logger import CommandLogger
 from apm_cli.security.content_scanner import ContentScanner
 
+pytestmark = pytest.mark.component
+
 # ── Fixtures ────────────────────────────────────────────────────────
 
 _logger = CommandLogger("audit", verbose=False)

@@ -14,6 +14,8 @@ import pytest
 
 from apm_cli.deps.download_strategies import DownloadDelegate
 
+pytestmark = pytest.mark.component
+
 
 def _zip_with_executable_script() -> bytes:
     """Build a GitHub-style archive containing an executable script."""

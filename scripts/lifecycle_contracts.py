@@ -18,7 +18,7 @@ import click
 LEDGER = "tests/fixtures/lifecycle_bug_ledger.json"
 CONTRACT_ID = "pr2876-alias-path-complete-lifecycle"
 _REQUIRED = "tests/integration/test_required_lifecycle_state_machine.py"
-_GENERATED = "tests/integration/test_generated_lifecycle_state_machine.py"
+_GENERATED = "tests/lifecycle/machines/test_m_spine.py"
 # Deliberately independent of editable ledger membership: deletion cannot waive proof.
 REQUIRED_WITNESSES = (
     *(

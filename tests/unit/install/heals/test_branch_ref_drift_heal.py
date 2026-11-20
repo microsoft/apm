@@ -9,9 +9,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from apm_cli.install.heals.base import HealContext, HealMessageLevel
 from apm_cli.install.heals.branch_ref_drift import BranchRefDriftHeal
 from apm_cli.models.apm_package import GitReferenceType
+
+pytestmark = pytest.mark.unit
 
 
 def _hctx(

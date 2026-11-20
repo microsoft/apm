@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig, compile_agents_md
@@ -16,6 +17,8 @@ from apm_cli.compilation.template_builder import (
     build_conditional_sections,
 )
 from apm_cli.primitives.models import Chatmode, Instruction, PrimitiveCollection
+
+pytestmark = pytest.mark.component
 
 
 class TestTemplateBuilder(unittest.TestCase):

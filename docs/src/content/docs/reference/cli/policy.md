@@ -14,8 +14,8 @@ rules -- without running a full `apm install` or `apm audit`.
 
 ```bash
 apm policy status [--policy-source SOURCE] [--no-cache]
-                  [-o table|json] [--json] [--check]
-apm policy explain PACKAGE
+                  [-o table|json] [--json] [--check] [-g]
+apm policy explain [-g] PACKAGE
 ```
 
 ## Description
@@ -53,6 +53,7 @@ apm policy status [OPTIONS]
 | `-o`, `--output {table,json}` | Output format. Default: `table`. |
 | `--json` | Emit JSON. Alias of `-o json`. |
 | `--check` | Exit `1` when no usable policy is resolved (any `outcome` other than `found`). Default exit is always `0`. |
+| `-g`, `--global` | Show the user-scope (`apm install -g`) posture. User scope has no git remote, so no org policy is discovered: `outcome` is `no_git_remote` and `source` is `none`. |
 
 Direct policy URLs should not embed credentials. Cache metadata and command
 output omit URL userinfo, query strings, and fragments.
@@ -63,7 +64,8 @@ The table and JSON renderers expose the same fields:
 
 | Field | Meaning |
 |---|---|
-| `outcome` | Discovery result, one of: `found`, `absent`, `empty`, `disabled`, `no_git_remote`, `cached_stale`, `cache_miss_fetch_fail`, `garbage_response`, `malformed`, `hash_mismatch`, `incomplete_chain`. Every command that reads policy handles an outcome the same way. |
+| `scope` | `project`, or `user` with `-g`. |
+| `outcome` | Discovery result, one of: `found`, `absent`, `empty`, `disabled`, `no_git_remote`, `cached_stale`, `cache_miss_fetch_fail`, `garbage_response`, `malformed`, `hash_mismatch`, `incomplete_chain`, `ambiguous_git_remote` (several git remotes and no `origin`; always blocks). Every command that reads policy handles an outcome the same way. |
 | `source` | Resolved source label (e.g. `org:owner/repo`, `url:https://...`, `file:./path`). |
 | `enforcement` | Effective enforcement mode: `block`, `warn`, or `off`. |
 | `cache_age_human` | Age of the cached policy entry, with stale / refresh-failure context. |
@@ -95,12 +97,16 @@ the per-package companion to `apm policy status` (the policy-chain view) and
 the fleet-level executable-trust drift check in `apm doctor`.
 
 ```bash
-apm policy explain PACKAGE
+apm policy explain [-g] PACKAGE
 ```
 
-| Argument | Description |
+| Argument or flag | Description |
 |---|---|
-| `PACKAGE` | Package reference (e.g. `owner/repo`) to resolve. Only packages installed in the current project resolve; an uninstalled reference reports no decision. |
+| `PACKAGE` | Installed package, by identity (`owner/repo`), install spec (`plugin@marketplace`) or local path. A reference that matches no installed package exits 1. |
+| `-g`, `--global` | Explain a package `apm install -g` installed, from any directory. |
+
+For a package blocked by an `apm.yml` or `--user` deny, the output names that
+deny entry and how to lift it, rather than suggesting an approval.
 
 The effective decision follows the deny-wins precedence: an organization
 `executables.deny` / `deny_all` is the ceiling no project or user grant can

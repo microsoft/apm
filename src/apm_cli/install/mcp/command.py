@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 from ..errors import InstallFailureAlreadyRendered
 
 if TYPE_CHECKING:
@@ -47,6 +49,17 @@ try:
     APM_DEPS_AVAILABLE = True
 except ImportError:
     pass
+
+
+def manifest_label(manifest_path: Path) -> str:
+    """Name *manifest_path* for CLI output: cwd-relative, else ``~``-relative (#4089)."""
+    resolved = manifest_path.resolve()
+    for base, prefix in ((Path.cwd(), ""), (Path.home(), "~/")):
+        try:
+            return prefix + resolved.relative_to(base.resolve()).as_posix()
+        except ValueError:
+            continue
+    return manifest_path.as_posix()
 
 
 def user_manifest_bootstrap_config(
@@ -84,7 +97,7 @@ def user_manifest_bootstrap_config(
         if exc.token is None:
             raise
         rendered = requested if isinstance(requested, str) else ",".join(requested)
-        label = manifest_path.as_posix()
+        label = manifest_label(manifest_path)
         reason = (
             f"{exc}"
             if isinstance(exc, IdeTargetError)
@@ -104,6 +117,7 @@ def user_manifest_bootstrap_config(
 
 def run_mcp_policy_preflight(
     *,
+    policy_root: Path,
     mcp_name: str,
     transport: str | None,
     url: str | None,
@@ -119,6 +133,7 @@ def run_mcp_policy_preflight(
     the registry override is active so the transport check resolves a
     registry server against the same registry the install will query. A
     blocked server is refused exactly as ``apm install`` refuses it.
+    *policy_root* is the scope manifest root (``$APM_HOME`` under ``-g``).
     """
     registry_url, registry_source = registry
     from ...models.dependency.mcp import MCPDependency
@@ -151,15 +166,15 @@ def run_mcp_policy_preflight(
                 runtime=None,
                 target_decision=None,
                 user_scope=False,
-                project_root=Path.cwd(),
+                project_root=policy_root,
                 no_policy=no_policy,
                 logger=logger,
                 dry_run=logger.dry_run,
                 effective_target=target_decision.canonical_targets,
                 effective_target_source=target_decision.source,
             )
-    except PolicyBlockError:
-        refuse_blocked_mcp(logger)
+    except PolicyBlockError as exc:
+        refuse_blocked_mcp(logger, exc)
 
 
 def _reconcile_mcp_entry(
@@ -231,9 +246,8 @@ def run_mcp_install(  # noqa: PLR0913
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL.
     ``manifest_path`` is derived from ``apm_dir`` (``apm_dir / 'apm.yml'``)."""
-    from ...constants import APM_YML_FILENAME
 
-    manifest_path = apm_dir / APM_YML_FILENAME
+    manifest_path = manifest_file(apm_dir)
     verbose = logger.verbose
     from ...models.dependency.mcp import MCPDependency
 
@@ -310,7 +324,9 @@ def run_mcp_install(  # noqa: PLR0913
                 ) from None
 
     if getattr(logger, "dry_run", False) is True:
-        logger.dry_run_notice(f"would add MCP server '{mcp_name}' to {manifest_path}")
+        logger.dry_run_notice(
+            f"would add MCP server '{mcp_name}' to {manifest_label(manifest_path)}"
+        )
         return
 
     if initial_manifest_config is not None:
@@ -318,7 +334,7 @@ def run_mcp_install(  # noqa: PLR0913
 
         apm_dir.mkdir(parents=True, exist_ok=True)
         write_minimal_manifest(initial_manifest_config, target_path=manifest_path)
-        logger.success(f"Created {manifest_path}")
+        logger.success(f"Created {manifest_label(manifest_path)}")
 
     status, _diff = add_mcp_to_apm_yml(
         mcp_name,
@@ -399,4 +415,4 @@ def run_mcp_install(  # noqa: PLR0913
     else:
         chosen_transport = "registry"
     logger.tree_item(f"  transport: {chosen_transport}")
-    logger.tree_item(f"  apm.yml: {manifest_path}")
+    logger.tree_item(f"  manifest: {manifest_label(manifest_path)}")

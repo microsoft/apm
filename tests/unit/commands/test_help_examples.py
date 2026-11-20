@@ -7,9 +7,12 @@ does not open a paragraph is printed as a literal backspace byte.
 from __future__ import annotations
 
 import click
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+
+pytestmark = pytest.mark.component
 
 
 def _help_pages(group: click.Group, path: tuple[str, ...] = ()):

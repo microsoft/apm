@@ -25,6 +25,14 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from apm_cli.core.scope import manifest_file
+
+from ..core.remediation import (
+    EXECUTABLES_IDENTITY_UNLOCKED,
+    EXECUTABLES_PIN_MALFORMED,
+    MCP_EXECUTABLES_UNTRUSTED,
+)
+
 # Executable type constants used as keys in the allowExecutables block.
 EXEC_TYPE_HOOKS = "hooks"
 EXEC_TYPE_MCP = "mcp"
@@ -610,6 +618,102 @@ def locked_dependency_approval_keys(dependency: Any) -> tuple[str, ...]:
     return tuple(dict.fromkeys((approval.identity, approval.key)))
 
 
+class ApprovalSpecError(ValueError):
+    """A CLI spec names no single installed package, so no store key is derived."""
+
+
+def canonical_approval_spec(spec: str, lockfile: Any, *, selected_key: str | None = None) -> str:
+    """Return the approval-store identity a spec names (#4189, #4245).
+
+    The single owner shared by ``apm approve``, ``apm deny``, ``apm policy
+    explain`` and the store reader. *selected_key* is the ``apm.lock.yaml``
+    row the dependency selector (``select_installed_lock_key``, the owner
+    ``apm uninstall`` and ``apm audit PACKAGE`` use) matched; its locked
+    approval identity is the store key. Without a selection, a marketplace
+    spec (``plugin@marketplace[#ref]``) resolves through the lock's recorded
+    provenance, and any other spec is already an identity spelling.
+
+    Raises:
+        ApprovalSpecError: A marketplace spec names no installed package or
+            more than one, so no store key may be derived from it.
+    """
+    from apm_cli.marketplace.resolver import parse_marketplace_ref
+
+    rows = lockfile.dependencies if lockfile is not None else {}
+    if selected_key is not None and selected_key in rows:
+        return _strip_version(locked_dependency_approval(rows[selected_key]).identity)
+    try:
+        parsed = parse_marketplace_ref(spec)
+    except ValueError as exc:
+        raise ApprovalSpecError(f"{spec}: {exc}") from exc
+    if parsed is None:
+        return spec
+    plugin, marketplace, _ref = parsed
+    matches = lockfile.marketplace_rows(marketplace, plugin) if lockfile is not None else []
+    if len(matches) != 1:
+        why = (
+            "no installed package came from" if not matches else "several installed packages match"
+        )
+        raise ApprovalSpecError(
+            f"{spec}: {why} {plugin}@{marketplace}. Name the package as "
+            "'apm approve --pending' lists it."
+        )
+    return _strip_version(locked_dependency_approval(matches[0]).identity)
+
+
+_CANONICALIZED_KEYS_NOTED: set[tuple[str, str]] = set()
+
+
+def _readable_lockfile(root: Path) -> Any:
+    """The scope's lockfile for store-key migration, or None when unreadable.
+
+    The lockfile's own reader reports a malformed or conflicted file to the
+    command that needs it; migration simply does not apply then.
+    """
+    from apm_cli.deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+
+    try:
+        return LockFile.read(get_lockfile_path(root))
+    except (LockfileFormatError, OSError):
+        return None
+
+
+def canonicalize_store_keys(
+    grants: dict[str, Any], lockfile: Any, *, store: str, drop_raw: bool = False
+) -> dict[str, Any]:
+    """Fold store keys written as an install spec onto the package identity (#4189).
+
+    A store key spelled as an install spec (``plugin@marketplace``) applies to
+    the identity :func:`canonical_approval_spec` resolves: a deny merges its
+    types, an allow never overrides an identity grant. Each mapping is
+    announced once.
+    """
+    result = dict(grants)
+    for key, value in grants.items():
+        try:
+            canonical = canonical_approval_spec(key, lockfile)
+        except ApprovalSpecError:
+            continue
+        if canonical == key:
+            continue
+        existing = result.get(canonical)
+        if isinstance(existing, dict) and isinstance(value, dict) and store.endswith("deny"):
+            result[canonical] = {**value, **existing}
+        else:
+            result.setdefault(canonical, value)
+        if drop_raw:
+            result.pop(key, None)
+        if (key, canonical) not in _CANONICALIZED_KEYS_NOTED:
+            _CANONICALIZED_KEYS_NOTED.add((key, canonical))
+            from apm_cli.utils.console import _rich_warning
+
+            _rich_warning(
+                f"{store} entry '{key}' names an install spec; it applies to {canonical}. "
+                "The next apm approve or apm deny rewrites it under that identity."
+            )
+    return result
+
+
 def dependency_approval_key(dependency_ref: Any) -> str:
     """Return the trust key for a resolved dependency reference.
 
@@ -726,7 +830,7 @@ def scan_package_executables(
     mcp_details: list[str] = []
     lsp_count = 0
     lsp_details: list[str] = []
-    apm_yml = install_path / "apm.yml"
+    apm_yml = manifest_file(install_path)
     data = manifest_data
     if data is None and apm_yml.is_file():
         try:
@@ -798,14 +902,24 @@ def _is_interactive() -> bool:
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
 
-def trust_remedy(package: str, recommend: Collection[str] = ()) -> str:
+def trust_remedy(package: str, recommend: Collection[str] = (), *, user_scope: bool = False) -> str:
     """One remediation line for parked executables.
 
     Offers ``apm approve --recommended`` only when the org policy declares an
-    ``executables.recommend`` set; otherwise that command finds nothing.
+    ``executables.recommend`` set; otherwise that command finds nothing. A
+    user-scope install names the ``-g`` commands (#4154).
     """
-    bulk = "Trust the org-vetted set: apm approve --recommended  |  " if recommend else ""
-    return f"{bulk}Trust one: apm approve {package}  |  Inspect: apm policy explain {package}"
+    from apm_cli.security.trust import approve_command, explain_command
+
+    bulk = (
+        f"Trust the org-vetted set: {approve_command('--recommended', user_scope=user_scope)}  |  "
+        if recommend
+        else ""
+    )
+    return (
+        f"{bulk}Trust one: {approve_command(package, user_scope=user_scope)}  |  "
+        f"Inspect: {explain_command(package, user_scope=user_scope)}"
+    )
 
 
 def prompt_executable_approval(
@@ -1256,19 +1370,13 @@ def exec_trust_context_for_project(
         project_data=project_data,
         migrate_user_legacy=migrate_user_legacy,
         include_user=include_user,
+        lockfile=_readable_lockfile(manifest_path.parent),
     )
     if logger is not None:
         from .trust import warn_content_blind_grants_once
 
         warn_content_blind_grants_once(ctx, logger)
     return ctx
-
-
-def project_manifest_path(project_root: Path) -> Path:
-    """Return the project-scope manifest that holds *project_root*'s trust layer."""
-    from apm_cli.constants import APM_YML_FILENAME
-
-    return Path(project_root) / APM_YML_FILENAME
 
 
 def effective_exec_map_for_project(
@@ -1278,11 +1386,14 @@ def effective_exec_map_for_project(
     fallback_allow_executables: dict[str, dict[str, bool]] | None = None,
     logger: Any | None = None,
     migrate_user_legacy: bool = True,
+    user_scope: bool = False,
 ) -> EffectiveExecMap:
     """Materialize the canonical trust context for one project."""
+    from apm_cli.core.scope import scope_manifest_path
+
     return materialize_exec_map(
         exec_trust_context_for_project(
-            project_manifest_path(project_root),
+            scope_manifest_path(project_root, user_scope=user_scope),
             policy=policy,
             fallback_allow_executables=fallback_allow_executables,
             logger=logger,
@@ -1305,8 +1416,8 @@ def resolve_project_exec_allow_map(
     Reuses a map the caller already resolved (``executable_context`` is
     ``(map, resolved)``); otherwise resolves org policy (unless disabled),
     project, and user layers through :func:`effective_exec_map_for_project`.
-    Org policy is discovered from *project_root*; the grants are read from
-    the scope's manifest (``$APM_HOME/apm.yml`` at user scope).
+    Org policy and the grants both come from the scope's manifest root
+    (``$APM_HOME`` at user scope, which has no git remote).
     """
     allow_map, resolved = executable_context
     if resolved:
@@ -1314,10 +1425,13 @@ def resolve_project_exec_allow_map(
     from apm_cli.core.scope import manifest_root
     from apm_cli.policy.outcome_routing import resolve_trust_policy
 
-    policy = resolve_trust_policy(project_root, no_policy=no_policy, logger=logger)
+    policy = resolve_trust_policy(
+        manifest_root(project_root, user_scope=user_scope), no_policy=no_policy, logger=logger
+    )
 
     return effective_exec_map_for_project(
-        manifest_root(project_root, user_scope=user_scope),
+        project_root,
+        user_scope=user_scope,
         policy=policy,
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
         logger=logger,
@@ -1353,6 +1467,7 @@ def _filter_declared_services(
         return dependencies
     filtered = []
     skipped: dict[str, bool] = {}
+    denied_owners: set[str] = set()
     for dependency in dependencies:
         owner = getattr(dependency, "resolved_by", None)
         approval_keys = getattr(dependency, "approval_keys", ())
@@ -1365,24 +1480,60 @@ def _filter_declared_services(
             continue
         skipped[owner] = bool(approval_keys)
         dependency_name = getattr(dependency, "name", "(unnamed)")
-        if approval_keys:
+        trust_ctx = getattr(effective_allow_execs, "trust_context", None)
+        if (
+            approval_keys
+            and trust_ctx is not None
+            and denied_exec_types(trust_ctx, list(approval_keys), (exec_type,))
+        ):
+            denied_owners.add(owner)
+        if owner in denied_owners:
             logger.verbose_detail(
                 f"Skipping {service_label} server '{dependency_name}' from '{owner}': "
-                f"executables not trusted. Run 'apm policy explain {owner}'; "
-                f"if policy permits, run 'apm approve {owner}'."
+                f"denied. Run 'apm policy explain {owner}' to see which deny applies."
+            )
+        elif approval_keys:
+            logger.verbose_detail(
+                f"Skipping {service_label} server '{dependency_name}' from '{owner}': "
+                f"executables not trusted. {MCP_EXECUTABLES_UNTRUSTED.bind(package=owner).sentence()}"
             )
         else:
             logger.verbose_detail(
                 f"Skipping {service_label} server '{dependency_name}' from '{owner}': package "
-                "identity cannot be verified without lock state. Run 'apm install' "
-                "to regenerate apm.lock.yaml, then approve the package."
+                "identity cannot be verified without lock state. "
+                f"{EXECUTABLES_IDENTITY_UNLOCKED.bind(subject='the package').sentence()}"
             )
     if len(filtered) < len(dependencies):
         skipped_count = len(dependencies) - len(filtered)
         noun = "server" if skipped_count == 1 else "servers"
         owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
-        known_owners = sorted(owner for owner, has_keys in skipped.items() if has_keys)
+        known_owners = sorted(
+            owner for owner, has_keys in skipped.items() if has_keys and owner not in denied_owners
+        )
         unlocked_owners = sorted(owner for owner, has_keys in skipped.items() if not has_keys)
+        if denied_owners:
+            # A denied package is named as denied; approving cannot lift it (#4237).
+            denied_names = ", ".join(f"'{owner}'" for owner in sorted(denied_owners))
+            denied_count = sum(
+                1
+                for dependency in dependencies
+                if getattr(dependency, "resolved_by", None) in denied_owners
+            )
+            denied_noun = "server" if denied_count == 1 else "servers"
+            explain = (
+                f"Run 'apm policy explain {sorted(denied_owners)[0]}' to see which deny applies."
+                if len(denied_owners) == 1
+                else "Run 'apm policy explain <package>' to see which deny applies."
+            )
+            logger.warning(
+                f"Filtered {denied_count} {service_label} {denied_noun} from {denied_names}: "
+                f"declaring package {'is' if len(denied_owners) == 1 else 'are'} denied. "
+                f"{explain}",
+                symbol="warning",
+            )
+            skipped = {o: k for o, k in skipped.items() if o not in denied_owners}
+            skipped_count -= denied_count
+            owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
         remediation_parts = []
         if known_owners:
             remediation_parts.append(
@@ -1396,15 +1547,17 @@ def _filter_declared_services(
         if unlocked_owners:
             package_noun = "that package" if len(unlocked_owners) == 1 else "each package"
             remediation_parts.append(
-                f"Run 'apm install' to regenerate apm.lock.yaml, then approve {package_noun}."
+                EXECUTABLES_IDENTITY_UNLOCKED.bind(subject=package_noun).sentence()
             )
         remediation = " " + " ".join(remediation_parts)
         package_clause = "declaring package is" if len(skipped) == 1 else "declaring packages are"
-        logger.warning(
-            f"Filtered {skipped_count} {service_label} {noun} from {owners}: "
-            f"{package_clause} not trusted yet.{remediation}",
-            symbol="warning",
-        )
+        if skipped:
+            noun = "server" if skipped_count == 1 else "servers"
+            logger.warning(
+                f"Filtered {skipped_count} {service_label} {noun} from {owners}: "
+                f"{package_clause} not trusted yet.{remediation}",
+                symbol="warning",
+            )
     return filtered
 
 
@@ -1430,7 +1583,7 @@ PLUGIN_ITEM = "."
 def _item_error(where: str, pkg_key: str, exec_type: str, item: object) -> ValueError:
     return ValueError(
         f"apm.yml {where}.{pkg_key}.{exec_type}.{item}: expected 'sha256:<64 hex>'. "
-        f"Run 'apm approve {pkg_key}' to record it."
+        f"{EXECUTABLES_PIN_MALFORMED.bind(package=pkg_key).sentence()}"
     )
 
 
@@ -1482,7 +1635,8 @@ def _parse_grant_block(
                 if not where.endswith(".allow") or not is_fingerprint(value):
                     raise ValueError(
                         f"apm.yml {where}.{pkg_key}.plugin: expected 'sha256:<64 hex>' under "
-                        f"executables.allow. Run 'apm approve {pkg_key}' to record it."
+                        "executables.allow. "
+                        f"{EXECUTABLES_PIN_MALFORMED.bind(package=pkg_key).sentence()}"
                     )
                 parsed[exec_type_str] = value
                 continue
@@ -1743,6 +1897,7 @@ def build_exec_trust_context(
     project_data: dict[str, Any] | None,
     migrate_user_legacy: bool = True,
     include_user: bool = True,
+    lockfile: Any | None = None,
 ) -> ExecTrustContext:
     """Assemble an :class:`ExecTrustContext` from org / project / user inputs.
 
@@ -1758,12 +1913,22 @@ def build_exec_trust_context(
     """
     data = project_data or {}
     project_raw_allow, project_raw_deny, _alias = parse_project_executables(data)
-    project_allow, project_items = split_item_grants(project_raw_allow)
-    project_deny = _deny_types(project_raw_deny)
     # ``apm audit`` never reads personal consent: CI and laptops must agree.
     user_raw_allow, user_raw_deny = (
         load_user_executables(migrate_legacy=migrate_user_legacy) if include_user else ({}, {})
     )
+    if lockfile is not None:
+        project_raw_allow, project_raw_deny, user_raw_allow, user_raw_deny = (
+            canonicalize_store_keys(grants, lockfile, store=store)
+            for grants, store in (
+                (project_raw_allow, "executables.allow"),
+                (project_raw_deny, "executables.deny"),
+                (user_raw_allow, "user executables.allow"),
+                (user_raw_deny, "user executables.deny"),
+            )
+        )
+    project_allow, project_items = split_item_grants(project_raw_allow)
+    project_deny = _deny_types(project_raw_deny)
     user_allow, user_items = split_item_grants(user_raw_allow)
     user_deny = _deny_types(user_raw_deny)
 

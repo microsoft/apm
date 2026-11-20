@@ -10,9 +10,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers

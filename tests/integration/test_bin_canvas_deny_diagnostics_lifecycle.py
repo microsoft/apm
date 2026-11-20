@@ -12,14 +12,13 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.yaml_io import dump_yaml
-from tests.integration._policy_scope_kit import ORG, PolicyScopeWorld, output, run_step
+from tests.integration._policy_scope_kit import PolicyScopeWorld, output, run_step
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.local_github_https_fixture import (
     local_github_https_fixture,
@@ -46,7 +45,7 @@ def _denied_line(kind: str, package: str) -> str:
 
 
 def _approve_hint(package: str) -> str:
-    return f"Run 'apm approve {package}' to approve."
+    return f"Run 'apm approve {package}' to approve its"
 
 
 def _exec_status(lock_path: Path) -> str | None:
@@ -77,16 +76,16 @@ def _bin_plugin(root: Path) -> None:
 
 
 @pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI not available")
-def test_native_bin_plugin_denied_by_org_policy_names_the_deny(
+def test_native_bin_plugin_denied_at_user_scope_names_the_deny(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """Control: a Claude plugin with bin/ at -g is loaded natively (#3290).
 
     Its deny is reported by the native-plugin owner, which already points to
-    ``apm policy explain``; this passes before and after #4052.
+    ``apm policy explain``; this passes before and after #4052. User scope is
+    not governed by org policy (#4087), so the deny comes from the user store.
     """
     world = PolicyScopeWorld(tmp_path, dict(os.environ))
-    world.publish_policy(_BASE_POLICY)
     isolated = world.isolated
     plugin = isolated.work_root / "tool"
     _bin_plugin(plugin)
@@ -101,14 +100,7 @@ def test_native_bin_plugin_denied_by_org_policy_names_the_deny(
         },
         isolated.config_root / "apm.yml",
     )
-    # User-scope org policy is discovered from the deploy root ($HOME).
     (isolated.home / ".claude").mkdir(parents=True, exist_ok=True)
-    git_env = isolated.subprocess_env()
-    for args in (
-        ["git", "init", "-q", "--initial-branch=main"],
-        ["git", "remote", "add", "origin", f"https://github.com/{ORG}/home.git"],
-    ):
-        subprocess.run(args, cwd=isolated.home, env=git_env, check=True)
     runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=900)
 
     with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
@@ -122,11 +114,13 @@ def test_native_bin_plugin_denied_by_org_policy_names_the_deny(
         first = apm("install", "-g", "--trust-bin", step="1-install")
         assert "native Claude plugin(s) declared and enabled" in first, first
 
-        world.publish_policy(_DENY_ALL)
-        world.clear_policy_cache()
-        denied = apm("install", "-g", "--trust-bin", step="2-install-denied")
+        apm("deny", "--user", package, step="2-deny")
+        denied = apm("install", "-g", "--trust-bin", step="3-install-denied")
         assert f"Parked native plugin {package}: denied" in denied, denied
-        assert f"apm policy explain {package}" in denied, denied
+        # A user-scope hint names the -g form, which works from any directory (#4154).
+        assert f"apm policy explain -g {package}" in denied, denied
+        # The project-only form would fail from the user scope, so it is never shown (#4296).
+        assert f"apm policy explain {package}" not in denied, denied
 
 
 # -- canvas (project scope, apm deny) -----------------------------------------
@@ -180,3 +174,84 @@ def test_canvas_skip_line_names_the_deny(tmp_path: Path, apm_binary_path: Path, 
     assert _approve_hint(package) not in denied, denied
     assert not deployed.exists()
     assert _exec_status(project / "apm.lock.yaml") == "denied"
+
+
+# -- user scope: the deny hint names the -g explain form (#4296) -------------
+
+
+def _hook_package(root: Path) -> None:
+    hooks = root / ".apm" / "hooks"
+    (hooks / "scripts").mkdir(parents=True)
+    dump_yaml({"name": "hooky", "version": "1.0.0"}, root / "apm.yml")
+    command = {"type": "command", "command": "bash ./scripts/guard-4296.sh"}
+    document = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [command]}]}}
+    (hooks / "guard.json").write_text(json.dumps(document) + "\n", encoding="ascii")
+    (hooks / "scripts" / "guard-4296.sh").write_text("#!/bin/bash\necho guard\n", encoding="ascii")
+
+
+def _residue(root: Path, marker: str) -> list[str]:
+    return sorted(
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and (path.name == marker or marker in path.read_text(errors="ignore"))
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "label", "target", "deploy_root", "marker"),
+    [
+        ("canvas", "canvas extension(s)", "copilot", ".copilot", "extension.mjs"),
+        ("hooks", "hooks", "claude", ".claude", "guard-4296.sh"),
+    ],
+)
+def test_user_scope_deny_line_names_the_global_explain_hint(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    kind: str,
+    label: str,
+    target: str,
+    deploy_root: str,
+    marker: str,
+) -> None:
+    """At -g a denied canvas or hook points to 'apm policy explain -g', never the project form.
+
+    The project-only form resolves the current project, so it cannot explain a
+    user-scope installation; the -g form works from any directory.
+    """
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    isolated = world.isolated
+    source = isolated.work_root / "pkg"
+    (_canvas_package if kind == "canvas" else _hook_package)(source)
+    package = str(source)
+    dump_yaml(
+        {
+            "name": "user",
+            "version": "1.0.0",
+            "targets": [target],
+            "dependencies": {"apm": [package]},
+            "executables": {"allow": {package: {kind: True}}},
+        },
+        isolated.config_root / "apm.yml",
+    )
+    root = isolated.home / deploy_root
+    root.mkdir(parents=True, exist_ok=True)
+    env = {**isolated.subprocess_env(), "COLUMNS": "1000"}
+    env.pop("COPILOT_HOME", None)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=900)
+
+    def apm(*args: str, step: str) -> str:
+        result = run_step(runner, args, cwd=isolated.work_root, env=env, step=step)
+        return _flat(output(result))
+
+    if kind == "canvas":
+        apm("experimental", "enable", "canvas", step="0-enable-canvas")
+    first = apm("install", "-g", "--no-policy", step="1-install")
+    assert _residue(root, marker), first
+
+    apm("deny", "--user", package, step="2-deny")
+    denied = apm("install", "-g", "--no-policy", step="3-install-denied")
+    assert f"{package}: {label} skipped (denied)." in denied, denied
+    assert f"apm policy explain -g {package}" in denied, denied
+    assert f"apm policy explain {package}" not in denied, denied
+    assert _approve_hint(package) not in denied, denied
+    assert _residue(root, marker) == []

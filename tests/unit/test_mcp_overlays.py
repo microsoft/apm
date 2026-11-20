@@ -9,6 +9,8 @@ import pytest
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import MCPDependency
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # MCPDependency Model
@@ -571,16 +573,15 @@ class TestMCPDependencyHardening:
             MCPDependency.from_dict({"name": "bad name"})
 
     def test_from_dict_self_defined_runs_strict_checks(self):
-        # registry=False with stdio transport but no command -> existing
-        # strict=True check still fires.
-        with pytest.raises(ValueError, match="requires 'command'"):
-            MCPDependency.from_dict(
-                {
-                    "name": "x",
-                    "registry": False,
-                    "transport": "stdio",
-                }
-            )
+        # Identical payloads differ only in ``registry``: the registry entry
+        # gets universal checks only, the self-defined one gets strict=True
+        # checks (here: the transport allowlist).
+        payload = {"name": "srv", "transport": "websocket", "url": "https://example.com/mcp"}
+        registry_dep = MCPDependency.from_dict(dict(payload))
+        assert registry_dep.transport == "websocket"
+        assert registry_dep.is_self_defined is False
+        with pytest.raises(ValueError, match="unsupported transport 'websocket'"):
+            MCPDependency.from_dict({**payload, "registry": False})
 
 
 # ---------------------------------------------------------------------------

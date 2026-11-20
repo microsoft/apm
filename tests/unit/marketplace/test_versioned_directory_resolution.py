@@ -10,6 +10,8 @@ from apm_cli.marketplace.resolver import resolve_marketplace_plugin
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import VirtualPackageType
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize("host", ["github.com", "corp.ghe.com"])
 @pytest.mark.parametrize(

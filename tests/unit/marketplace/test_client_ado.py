@@ -29,6 +29,8 @@ from apm_cli.marketplace.client import _fetch_ado
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
 
+pytestmark = pytest.mark.unit
+
 _ADO_URL = "https://dev.azure.com/contoso/platform/_git/tools"
 _MANIFEST = {"name": "acme", "plugins": []}
 

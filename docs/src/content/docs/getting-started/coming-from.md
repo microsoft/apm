@@ -98,7 +98,7 @@ apm install
 The source stays where it is: APM does not copy, translate or run it, and reruns do not
 duplicate the entry. Other harnesses get a copy, such as `.agents/skills/review/` for Copilot.
 Where the folder already is the harness's own (`.claude/skills/` for Claude Code), APM keeps
-your file and reports `1 file skipped`. Loose rules, hooks and MCP config are listed in the
+your file in place and reports it as `(files unchanged)`. Loose rules, hooks and MCP config are listed in the
 report but not adopted.
 
 To share these skills with other repositories, move them into a package of their own:

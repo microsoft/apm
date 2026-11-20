@@ -6,6 +6,8 @@ import pytest
 
 from apm_cli.utils.net import is_loopback_host, parse_host_address
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     ("host", "expected"),

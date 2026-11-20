@@ -48,12 +48,14 @@ live'`) the same way every other perf/benchmark test in this repo is.
 from __future__ import annotations
 
 import ast
+import itertools
 import json
 import os
 import shutil
 import statistics
+import time
 import types
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,6 +66,12 @@ from scripts.architecture_linter.checks.tree_index import TreeIndex
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.inventory import EXCLUDED_ROOTS
 from scripts.architecture_linter.models import Rule, Violation
+from scripts.architecture_linter.session_cache import linter_session
+from tests.integration.test_architecture_owner_rule_mutations import (
+    EXECUTABLE_MUTATIONS,
+    MutationCase,
+    _mutate,
+)
 
 from .conftest import PERF_ENABLED
 
@@ -561,3 +569,54 @@ def test_real_six_group_catalog_wall_time_scales_below_fifteen_x(
         )
     assert incremental_n_work > 0
     assert incremental_ten_n_work / incremental_n_work < _MAX_REAL_CATALOG_RATIO
+
+
+# ---------------------------------------------------------------------------
+# Section D: session-cached owner mutation matrix at N and 2N cases (#4119).
+# Non-gating scaling evidence: reported by the Architecture Scaling job.
+# ---------------------------------------------------------------------------
+_MATRIX_SMALL_N = 10
+_MATRIX_SAMPLES = 3
+_MAX_MATRIX_RATIO = 2.2
+
+
+def _replay_seconds(cases: Sequence[MutationCase], repetitions: int, tags: Iterator[int]) -> float:
+    """Time `repetitions` passes over `cases`, each run with never-seen content.
+
+    A unique trailing comment gives every run a fresh content hash, so each
+    run rebuilds exactly its overridden file and reuses every other parse.
+    """
+    started = time.perf_counter()
+    for _ in range(repetitions):
+        for case in cases:
+            source = f"{_mutate(case)}\n# scaling-sample {next(tags)}\n"
+            runner.run_selected_rules(ROOT, (case.rule_id,), source_overrides={case.path: source})
+    return time.perf_counter() - started
+
+
+def test_session_cached_mutation_matrix_scales_within_2_2x_from_n_to_2n() -> None:
+    """Warm mutation cases cost linear time: 2N cases stay within 2.2x of N.
+
+    N and 2N replay the same Python cases (2N = two passes), so per-case work
+    is identical and only session growth can bend the ratio. Both sizes run
+    in one prewarmed session and take the median of interleaved samples.
+    """
+    cases = tuple(case for case in EXECUTABLE_MUTATIONS if case.path.endswith(".py"))
+    cases = cases[:_MATRIX_SMALL_N]
+    tags = itertools.count()
+    with linter_session():
+        for rule_id in dict.fromkeys(case.rule_id for case in cases):
+            runner.run_selected_rules(ROOT, (rule_id,))
+        _replay_seconds(cases, 1, tags)
+        small_samples: list[float] = []
+        large_samples: list[float] = []
+        for _ in range(_MATRIX_SAMPLES):
+            small_samples.append(_replay_seconds(cases, 1, tags))
+            large_samples.append(_replay_seconds(cases, 2, tags))
+    small = statistics.median(small_samples)
+    large = statistics.median(large_samples)
+    print(
+        f"mutation matrix N={len(cases)} median {small:.2f}s 2N median {large:.2f}s "
+        f"ratio {large / small:.2f}"
+    )
+    assert large / small <= _MAX_MATRIX_RATIO

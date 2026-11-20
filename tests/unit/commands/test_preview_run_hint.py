@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+
+pytestmark = pytest.mark.component
 
 
 def test_preview_run_hint_repeats_params(tmp_path, monkeypatch):

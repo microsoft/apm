@@ -23,6 +23,8 @@ from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.models import CheckResult, CIAuditResult
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
+pytestmark = pytest.mark.unit
+
 # Patch targets:
 # _discover_with_chain is a module-level function in policy_gate
 _PATCH_DISCOVER = "apm_cli.install.phases.policy_gate._discover_with_chain"

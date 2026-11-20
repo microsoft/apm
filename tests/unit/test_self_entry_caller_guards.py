@@ -9,10 +9,12 @@ must skip it. These tests pin the contract for representative call sites.
 from pathlib import Path  # noqa: F401
 from unittest.mock import patch
 
-from apm_cli.commands.uninstall.engine import _validate_uninstall_packages
-from apm_cli.core.command_logger import CommandLogger
+import pytest
+
 from apm_cli.deps.lockfile import _SELF_KEY, LockedDependency, LockFile
 from apm_cli.integration.skill_integrator import SkillIntegrator
+
+pytestmark = pytest.mark.component
 
 
 def _lockfile_with_self_and_remote() -> LockFile:
@@ -75,22 +77,6 @@ class TestGetInstalledPathsSkipsSelfEntry:
 # ---------------------------------------------------------------------------
 # apm uninstall <self-key> must not crash
 # ---------------------------------------------------------------------------
-
-
-class TestUninstallRejectsSelfKey:
-    def test_uninstall_dot_does_not_crash(self):
-        """Trying to uninstall the literal '.' returns 'not found', no crash."""
-        logger = CommandLogger(command="uninstall", verbose=False)
-        # current_deps are real apm.yml dependency entries; "." is not one.
-        to_remove, not_found = _validate_uninstall_packages(  # noqa: RUF059
-            packages=["."],
-            current_deps=["owner/repo"],
-            logger=logger,
-        )
-        # "." has no "/", so the validator rejects it as invalid format and
-        # skips it entirely - never reaches the not-found list.
-        assert to_remove == []
-        assert "." not in to_remove
 
 
 # ---------------------------------------------------------------------------

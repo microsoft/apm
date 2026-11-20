@@ -8,7 +8,11 @@ limit. Each parse is daemon-thread guarded so a runaway never stalls CI.
 
 from __future__ import annotations
 
+import pytest
+
 from .conftest import run_guarded, write_apm_yml
+
+pytestmark = pytest.mark.component
 
 
 def test_thousands_of_entries_parse_bounded(tmp_path):

@@ -6,11 +6,19 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    COPILOT_PLUGIN_REGISTRATION_STALE,
+    HOOK_CONFIG_STALE,
+    PROJECT_MANIFEST_MISSING,
+    PRUNE_INCOMPLETE,
+    PRUNE_PARTIAL,
+)
+
 from ..constants import APM_MODULES_DIR, APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..core.deployment_ledger import DeploymentLedgerCodec
 from ..core.deployment_state import LocatorKind
-from ..core.scope import InstallScope
+from ..core.scope import InstallScope, manifest_file
 
 # APM Dependencies
 from ..deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
@@ -103,14 +111,14 @@ def prune(ctx, dry_run):
     logger = CommandLogger("prune", dry_run=dry_run)
     registration_token = _publish_native_registration(Path.cwd())
     try:
-        if not Path(APM_YML_FILENAME).exists():
-            logger.error("No apm.yml found. Run 'apm init' first.")
+        if not manifest_file(Path(".")).exists():
+            logger.error(f"No apm.yml found. {PROJECT_MANIFEST_MISSING.sentence()}")
             sys.exit(1)
 
         logger.start("Analyzing installed packages vs apm.yml...")
 
         try:
-            apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
+            apm_package = APMPackage.from_apm_yml(manifest_file(Path(".")))
         except Exception as e:
             logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
             sys.exit(1)
@@ -120,6 +128,7 @@ def prune(ctx, dry_run):
         # A re-check that cannot resolve targets writes nothing; package
         # removal still proceeds, as with hook reconciliation below. Any other
         # re-check failure (policy, lockfile, integrator) fails closed.
+        from ..core.remediation import BUNDLE_HOOKS_UNCHECKED
         from ..install.local_bundle_hook_trust import (
             BundleHookTargetsUnresolved,
             reconcile_scope_bundle_hooks,
@@ -132,7 +141,7 @@ def prune(ctx, dry_run):
         except BundleHookTargetsUnresolved as e:
             logger.warning(
                 f"Local bundle hooks were NOT re-checked: target resolution failed ({e}). "
-                "Run 'apm install' to re-check them."
+                f"{BUNDLE_HOOKS_UNCHECKED.sentence()}"
             )
         except Exception as e:
             logger.error(f"Local bundle hook re-check failed: {e}")
@@ -206,13 +215,7 @@ def prune(ctx, dry_run):
             and not owner_violations
             and not absent_staging
         ):
-            if not apm_modules_dir.exists():
-                logger.progress("No apm_modules/ directory found. Nothing to prune.")
-            else:
-                logger.success(
-                    "No orphaned packages found. apm_modules/ is clean.",
-                    symbol="check",
-                )
+            logger.nothing_to_prune()
             _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run)
             return
 
@@ -292,6 +295,8 @@ def prune(ctx, dry_run):
             lockfile=lockfile,
             lockfile_root=project_root,
             diagnostics=logger.diagnostics,
+            # Not an integrating install: nothing was kept this run.
+            kept=(),
         )
         if lockfile is not None:
             deletion_evidence.prepare(
@@ -350,7 +355,6 @@ def prune(ctx, dry_run):
                 for record in reconciled.ledger.records.values()
             }
             deleted_targets: list[Path] = []
-            deployed_cleaned = 0
             trusted_cleanup_paths: set[str] = set()
             for dep_key, (paths, hashes) in cleanup_claims.items():
                 trusted_paths = set(paths)
@@ -365,15 +369,13 @@ def prune(ctx, dry_run):
                     recorded_hashes=hashes,
                     failed_path_retained=False,
                 )
-                deployed_cleaned += len(cleanup.deleted)
+                logger.stale_cleanup(dep_key, cleanup)
                 deleted_targets.extend(cleanup.deleted_targets)
 
             BaseIntegrator.cleanup_empty_parents(
                 deleted_targets,
                 stop_at=project_root,
             )
-            if deployed_cleaned:
-                logger.progress(f"Cleaned {deployed_cleaned} deployed integration file(s)")
 
             for violation in owner_violations:
                 locator = violation.locator
@@ -420,7 +422,7 @@ def prune(ctx, dry_run):
                         f"Package directories already removed: {', '.join(removed_packages)}."
                     )
                 logger.error_detail(
-                    "Filesystem cleanup may be partial. Rerun 'apm prune', then run 'apm audit'."
+                    f"Filesystem cleanup may be partial. {PRUNE_PARTIAL.sentence()}"
                 )
                 sys.exit(1)
 
@@ -452,14 +454,14 @@ def prune(ctx, dry_run):
                     logger.warning(
                         f"Hook reconciliation incomplete for {hook_errors} "
                         "dependency(ies) -- some hook entries may be stale. "
-                        "Run 'apm install' to rebuild hook configuration."
+                        f"{HOOK_CONFIG_STALE.sentence()}"
                     )
-                else:
+                elif hook_stats.get("merged_hooks_changed"):
                     logger.progress("Reconciled merged hook ownership for pruned package(s)")
             except Exception as e:
                 logger.warning(
                     f"Hook reconciliation failed: {e}. Some hook entries may be "
-                    "stale -- run 'apm install' to rebuild hook configuration."
+                    f"stale -- {HOOK_CONFIG_STALE.clause()}."
                 )
 
         hint_compile_after_removal(compile_inputs, apm_modules_dir, logger)
@@ -469,10 +471,7 @@ def prune(ctx, dry_run):
                 f"Prune incomplete: removed {removed_count} orphaned package(s); "
                 f"failed to remove {failed_count} package(s)."
             )
-            logger.error_detail(
-                "Filesystem cleanup may be partial. Resolve the removal errors, "
-                "then rerun 'apm prune'."
-            )
+            logger.error_detail(f"Filesystem cleanup may be partial. {PRUNE_INCOMPLETE.sentence()}")
             sys.exit(1)
 
         if removed_count > 0:
@@ -512,7 +511,7 @@ def _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_
     except (CopilotSettingsCollisionError, AgentPluginError, OSError) as registration_error:
         logger.warning(
             f"GitHub Copilot plugin registration could not be updated: {registration_error} "
-            "Re-run 'apm install' to re-register once resolved."
+            f"{COPILOT_PLUGIN_REGISTRATION_STALE.sentence()}"
         )
 
 
@@ -536,7 +535,7 @@ def _publish_native_registration(project_root: Path):
     manifest_target = None
     with contextlib.suppress(Exception):
         manifest_target = package_target_selection(
-            APMPackage.from_apm_yml(project_root / APM_YML_FILENAME)
+            APMPackage.from_apm_yml(manifest_file(project_root))
         )
     try:
         targets = resolve_targets(project_root, user_scope=False, explicit_target=manifest_target)

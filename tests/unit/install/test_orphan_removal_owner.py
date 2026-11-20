@@ -7,6 +7,8 @@ import pytest
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.orphans import DeploymentClaims, OrphanOperation, decide_orphan_removal
 
+pytestmark = pytest.mark.unit
+
 
 def _decide(operation: OrphanOperation, lock: LockFile, **inputs):
     arguments = {

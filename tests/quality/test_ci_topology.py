@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import re
 import shlex
@@ -14,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import ci_sharding
 from scripts.test_file_inventory import is_test_module_path
 from tests.quality.repository_python_inventory import (
     INVENTORY_CALLS,
@@ -22,9 +25,13 @@ from tests.quality.repository_python_inventory import (
 )
 from tests.workflow_contracts import (
     WorkflowNode,
+    assert_exact_command,
+    assert_unconditional,
+    effective_env,
     load_workflow,
     run_bash,
     shell_commands,
+    shell_tokens,
     workflow_job,
     workflow_step,
 )
@@ -39,9 +46,17 @@ RATCHET_CHECK = "Test Architecture Ratchets"
 RATCHET_CONTRACT_JOB = "test-architecture-contracts"
 RATCHET_SCALING_JOB = "test-architecture-scaling"
 RATCHET_EXECUTION_JOBS = (RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB)
-ARCHITECTURE_SCALING_TARGET = (
+# A job that hits its cap ends "cancelled", which hides the ratchet result.
+RATCHET_TIMEOUT_MINUTES = {RATCHET_CONTRACT_JOB: 15, RATCHET_SCALING_JOB: 5}
+MAIN_PUSH_RATCHET_WORKFLOW = "main-architecture-ratchets.yml"
+MAIN_PUSH_RATCHET_CHECK = "Architecture Ratchet Contracts (main)"
+RATCHET_AGGREGATE_STEP = "Require the architecture contracts"
+RATCHET_SCALING_CHECK = "Architecture Scaling (Linux)"
+ARCHITECTURE_SCALING_TARGETS = (
     "tests/perf/test_architecture_linter_scaling.py::"
-    "test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction"
+    "test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction",
+    # The session-cache 2.2x wall-clock ratio stays off CI (timing asserts
+    # flake); the deterministic parse-once guard gates the cache instead.
 )
 ALLOW_PROVISIONAL_KEY = "APM_ALLOW_PROVISIONAL_BASELINES"
 DRAFT_PROVISIONAL_GUARD = (
@@ -70,6 +85,9 @@ REQUIRED_SHARD_ROOTS = (
 # The full marker family stays merge-group covered while the required release
 # expression excludes explicitly merge-group-only contracts to remain bounded.
 LIFECYCLE_SMOKE_JOB = "lifecycle-smoke"
+# Sharded jobs write their shard's test files here first (#4120).
+SHARD_SELECT_STEP = "Select shard test files"
+SHARD_FILE_LIST = "shard-files.txt"
 LIFECYCLE_SMOKE_SHARD_JOBS = (
     "lifecycle-smoke-shard-1",
     "lifecycle-smoke-shard-2",
@@ -86,7 +104,8 @@ LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
 LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 15
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
-LIFECYCLE_SMOKE_ROOT = "tests/integration"
+# The lifecycle family core (#4093) runs beside the integration lifecycle modules.
+LIFECYCLE_SMOKE_ROOTS = ("tests/integration", "tests/lifecycle")
 LIFECYCLE_SMOKE_E2E_ENV = "APM_E2E_TESTS"
 LIFECYCLE_SMOKE_E2E_VALUE = "1"
 LIFECYCLE_SMOKE_FULL_EXPRESSION = "lifecycle_smoke"
@@ -216,15 +235,17 @@ def _pytest_targets(job: WorkflowNode) -> tuple[str, ...]:
     targets: list[str] = []
     for step in _run_steps(job):
         run = step.get("run")
-        if not isinstance(run, str) or "pytest" not in run:
+        if not isinstance(run, str) or ("pytest" not in run and "scripts.ci_sharding" not in run):
             continue
         for tokens in shell_commands(step):
-            if "pytest" not in tokens:
+            if "pytest" in tokens:
+                start = tokens.index("pytest") + 1
+            elif "scripts.ci_sharding" in tokens and "files" in tokens:
+                # A shard file-list emitter: its roots are the job's selection.
+                start = tokens.index("files") + 1
+            else:
                 continue
-            pytest_index = tokens.index("pytest")
-            targets.extend(
-                token for token in tokens[pytest_index + 1 :] if token.startswith("tests/")
-            )
+            targets.extend(token for token in tokens[start:] if token.startswith("tests/"))
     return tuple(targets)
 
 
@@ -282,7 +303,7 @@ def _assert_ci_test_targets(
     ratchet = workflow_job(ci, RATCHET_CONTRACT_JOB)
     expected_ratchet_targets = Counter({path: 1 for path in repository_modules | fixture_modules})
     assert Counter(_pytest_targets(ratchet)) == expected_ratchet_targets
-    assert _pytest_targets(workflow_job(ci, RATCHET_SCALING_JOB)) == (ARCHITECTURE_SCALING_TARGET,)
+    assert _pytest_targets(workflow_job(ci, RATCHET_SCALING_JOB)) == ARCHITECTURE_SCALING_TARGETS
 
     required_shard = workflow_job(ci, "build-and-test-shard")
     assert _pytest_targets(required_shard) == REQUIRED_SHARD_ROOTS
@@ -292,7 +313,7 @@ def _assert_ratchet_execution(ci: WorkflowNode, job_id: str) -> None:
     """Keep each execution's source, environment, selection and deadline."""
     job = workflow_job(ci, job_id)
     assert job["runs-on"] == "ubuntu-24.04"
-    assert job["timeout-minutes"] == 5
+    assert job["timeout-minutes"] == RATCHET_TIMEOUT_MINUTES[job_id]
     assert job["permissions"] == {"contents": "read"}
     assert job.get("env", {}) == {}
     assert all(key not in job for key in ("if", "needs", "continue-on-error", "strategy"))
@@ -314,30 +335,34 @@ def _assert_ratchet_execution(ci: WorkflowNode, job_id: str) -> None:
         expected_env = {ALLOW_PROVISIONAL_KEY: DRAFT_PROVISIONAL_GUARD}
     else:
         assert job_id == RATCHET_SCALING_JOB
-        expected_command = [*prefix, "-m", "benchmark", ARCHITECTURE_SCALING_TARGET]
+        expected_command = [*prefix, "-m", "benchmark", *ARCHITECTURE_SCALING_TARGETS]
         expected_env = {"PYTEST_PERF": "1"}
     assert list(shell_commands(steps[4])) == [expected_command]
     assert steps[4].get("env", {}) == expected_env
 
 
 def _assert_ratchet_split(ci: WorkflowNode) -> None:
-    """Preserve the original signal while independently bounding both jobs."""
+    """The required aggregate gates only the contracts; scaling stays separate.
+
+    The wall-clock scaling ratio is a non-required signal (timing asserts
+    flake), so the required aggregate must not depend on its result.
+    """
     aggregate = workflow_job(ci, RATCHET_JOB)
-    assert aggregate.get("needs") == list(RATCHET_EXECUTION_JOBS), (
-        "ratchet contracts and scaling must execute in separate jobs"
+    assert aggregate.get("needs") == [RATCHET_CONTRACT_JOB], (
+        "the required ratchet aggregate must depend only on the contracts job"
     )
     assert aggregate["name"] == RATCHET_CHECK
     assert aggregate["if"] == "always()"
     assert aggregate["permissions"] == {}
     assert "continue-on-error" not in aggregate
     assert len(aggregate["steps"]) == 1
-    step = workflow_step(aggregate, "Require both architecture executions")
+    step = workflow_step(aggregate, RATCHET_AGGREGATE_STEP)
     assert "if" not in step and "continue-on-error" not in step
     assert step["env"] == {
         "CONTRACT_RESULT": "${{ needs.test-architecture-contracts.result }}",
-        "SCALING_RESULT": "${{ needs.test-architecture-scaling.result }}",
     }
-    _assert_success_results(step, ("CONTRACT_RESULT", "SCALING_RESULT"))
+    assert RATCHET_SCALING_JOB not in str(aggregate), "the aggregate must not read scaling"
+    _assert_success_results(step, ("CONTRACT_RESULT",))
     for job_id in RATCHET_EXECUTION_JOBS:
         _assert_ratchet_execution(ci, job_id)
 
@@ -372,7 +397,9 @@ def _assert_topology(root: Path, inventory: dict[str, str]) -> None:
     wait_step = workflow_step(gate, "Wait for all required checks")
     expected_checks = wait_step["env"]["EXPECTED_CHECKS"]
     assert isinstance(expected_checks, str)
-    assert RATCHET_CHECK not in expected_checks
+    contexts = _expected_checks(merge_gate)
+    for context, names in contexts.items():
+        assert RATCHET_CHECK in names, f"{RATCHET_CHECK} must gate {context}"
     for required_check in REQUIRED_SHARD_CHECKS:
         assert required_check in expected_checks
 
@@ -387,7 +414,27 @@ def _assert_topology(root: Path, inventory: dict[str, str]) -> None:
                 continue
             if repository_modules.intersection(_pytest_targets(job)):
                 ratchet_callers.append((workflow_path.name, job_name))
-    assert ratchet_callers == [("ci.yml", RATCHET_CONTRACT_JOB)]
+    assert ratchet_callers == [
+        ("ci.yml", RATCHET_CONTRACT_JOB),
+        (MAIN_PUSH_RATCHET_WORKFLOW, RATCHET_CONTRACT_JOB),
+    ]
+    _assert_main_push_ratchets(load_workflow(workflows / MAIN_PUSH_RATCHET_WORKFLOW), ci)
+
+
+def _assert_main_push_ratchets(main_push: WorkflowNode, ci: WorkflowNode) -> None:
+    """Every push to main re-runs ci.yml's exact ratchet contract job.
+
+    Without it, a change that reaches main outside merge_group skips the
+    ratchet contracts and main goes red with no signal. The push copy must
+    never opt into provisional baselines.
+    """
+    assert main_push["on"] == {"push": {"branches": ["main"]}}
+    assert main_push["env"] == {"PYTHON_VERSION": ci["env"]["PYTHON_VERSION"]}
+    assert list(main_push["jobs"]) == [RATCHET_CONTRACT_JOB]
+    expected = deepcopy(workflow_job(ci, RATCHET_CONTRACT_JOB))
+    expected["name"] = MAIN_PUSH_RATCHET_CHECK
+    expected["steps"][4].pop("env")
+    assert workflow_job(main_push, RATCHET_CONTRACT_JOB) == expected
 
 
 @pytest.fixture(scope="module")
@@ -397,7 +444,7 @@ def repository_inventory(
     return _ratchet_test_inventory(repository_python_inventory)
 
 
-def test_test_architecture_ratchets_remain_non_required(
+def test_test_architecture_ratchets_are_required_in_every_context(
     repository_inventory: dict[str, str],
 ) -> None:
     _assert_topology(REPO_ROOT, repository_inventory)
@@ -416,7 +463,7 @@ def test_provisional_ci_opt_in_is_draft_guarded() -> None:
 
 
 def test_ratchet_executions_are_separate_and_bounded() -> None:
-    """Both original workloads retain independent five-minute execution caps."""
+    """Both original workloads retain independent, pinned execution caps."""
     _assert_ratchet_split(load_workflow(REPO_ROOT / ".github" / "workflows" / "ci.yml"))
 
 
@@ -582,8 +629,8 @@ def test_duplicate_ratchet_target_fails(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("timeout-minutes", 4),
-        ("timeout-minutes", 6),
+        ("timeout-minutes", -1),
+        ("timeout-minutes", 1),
         ("runs-on", "ubuntu-latest"),
         ("permissions", {"contents": "write"}),
         ("if", "false"),
@@ -593,6 +640,8 @@ def test_duplicate_ratchet_target_fails(
 def test_ratchet_execution_job_drift_fails(
     provisional_ci: WorkflowNode, job_id: str, field: str, value: object
 ) -> None:
+    if field == "timeout-minutes":
+        value = RATCHET_TIMEOUT_MINUTES[job_id] + value
     workflow_job(provisional_ci, job_id)[field] = value
     with pytest.raises(AssertionError):
         _assert_ratchet_split(provisional_ci)
@@ -620,6 +669,36 @@ def test_ratchet_execution_step_drift_fails(
         _assert_ratchet_split(provisional_ci)
 
 
+def _main_push_and_ci() -> tuple[WorkflowNode, WorkflowNode]:
+    workflows = REPO_ROOT / ".github" / "workflows"
+    return (
+        load_workflow(workflows / MAIN_PUSH_RATCHET_WORKFLOW),
+        load_workflow(workflows / "ci.yml"),
+    )
+
+
+def test_main_push_reruns_the_ratchet_contracts() -> None:
+    _assert_main_push_ratchets(*_main_push_and_ci())
+
+
+@pytest.mark.parametrize("mutation", ["trigger", "selection", "provisional", "skip"])
+def test_main_push_ratchet_drift_fails(mutation: str) -> None:
+    main_push, ci = _main_push_and_ci()
+    job = workflow_job(main_push, RATCHET_CONTRACT_JOB)
+    if mutation == "trigger":
+        main_push["on"] = {"pull_request": {"branches": ["main"]}}
+    elif mutation == "selection":
+        job["steps"][4]["run"] = job["steps"][4]["run"].replace(
+            "tests/quality/test_test_taxonomy.py", ""
+        )
+    elif mutation == "provisional":
+        job["steps"][4]["env"] = {ALLOW_PROVISIONAL_KEY: "1"}
+    else:
+        job["if"] = "false"
+    with pytest.raises(AssertionError):
+        _assert_main_push_ratchets(main_push, ci)
+
+
 @pytest.mark.parametrize("job_id", RATCHET_EXECUTION_JOBS)
 @pytest.mark.parametrize("field", ["if", "continue-on-error"])
 def test_ratchet_execution_step_cannot_skip_or_suppress(
@@ -633,8 +712,9 @@ def test_ratchet_execution_step_cannot_skip_or_suppress(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("needs", [RATCHET_CONTRACT_JOB]),
+        ("needs", []),
         ("needs", [RATCHET_SCALING_JOB]),
+        ("needs", [RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB]),
         ("if", "success()"),
         ("name", "Renamed ratchet signal"),
         ("continue-on-error", True),
@@ -648,25 +728,258 @@ def test_ratchet_aggregate_topology_drift_fails(
         _assert_ratchet_split(provisional_ci)
 
 
-@pytest.mark.parametrize("result_name", ["CONTRACT_RESULT", "SCALING_RESULT"])
-def test_ratchet_aggregate_cannot_ignore_either_execution(
-    provisional_ci: WorkflowNode, result_name: str
-) -> None:
-    step = workflow_step(
-        workflow_job(provisional_ci, RATCHET_JOB), "Require both architecture executions"
-    )
-    step["run"] = step["run"].replace(f'[ "${result_name}" != success ]', "false")
+def test_ratchet_aggregate_cannot_ignore_the_contracts(provisional_ci: WorkflowNode) -> None:
+    step = workflow_step(workflow_job(provisional_ci, RATCHET_JOB), RATCHET_AGGREGATE_STEP)
+    step["run"] = step["run"].replace('[ "$CONTRACT_RESULT" != success ]', "false")
     with pytest.raises(AssertionError, match="invalid results"):
         _assert_ratchet_split(provisional_ci)
+
+
+def test_ratchet_aggregate_reading_the_scaling_result_fails(provisional_ci: WorkflowNode) -> None:
+    """Negative control: gating the required aggregate on the timing ratio fails."""
+    step = workflow_step(workflow_job(provisional_ci, RATCHET_JOB), RATCHET_AGGREGATE_STEP)
+    step["env"]["SCALING_RESULT"] = "${{ needs.test-architecture-scaling.result }}"
+    step["run"] = step["run"].replace(
+        '[ "$CONTRACT_RESULT" != success ]',
+        '[ "$CONTRACT_RESULT" != success ] || [ "$SCALING_RESULT" != success ]',
+    )
+    with pytest.raises(AssertionError):
+        _assert_ratchet_split(provisional_ci)
+
+
+def test_architecture_scaling_is_never_required() -> None:
+    merge_gate = load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml")
+    for context, names in _expected_checks(merge_gate).items():
+        assert RATCHET_SCALING_CHECK not in names, f"{RATCHET_SCALING_CHECK} gates {context}"
 
 
 def test_ratchet_aggregate_cannot_suppress_failure(provisional_ci: WorkflowNode) -> None:
-    step = workflow_step(
-        workflow_job(provisional_ci, RATCHET_JOB), "Require both architecture executions"
-    )
+    step = workflow_step(workflow_job(provisional_ci, RATCHET_JOB), RATCHET_AGGREGATE_STEP)
     step["run"] = step["run"].replace("exit 1", ":")
     with pytest.raises(AssertionError, match="invalid results"):
         _assert_ratchet_split(provisional_ci)
+
+
+# Windows units on pull requests (#4115, PERF-H2). Every required Windows
+# gate shard runs its slice of the Windows unit suite through the
+# ci-validation-topology owner (scripts/ci_selections.py), the same selection
+# main push runs, plus its slice of the windows_compat integration family.
+# No Windows job may spell a unit-suite run of its own.
+WINDOWS_GATE_SHARD_JOBS = (
+    "windows-compat-gate-1",
+    "windows-compat-gate-2",
+    "windows-compat-gate-3",
+)
+WINDOWS_UNIT_STEP = "Run Windows unit suite"
+WINDOWS_COMPAT_STEP = "Run cross-platform contract family"
+WINDOWS_FULL_UNIT_STEP = "Run unit tests (Windows diagnostics)"
+WINDOWS_UNIT_OWNER = ("python", "-m", "scripts.ci_selections", "windows-unit")
+WINDOWS_UNIT_ROOTS = ("tests/unit", "tests/test_console.py")
+_PYTEST_VALUE_FLAGS = ("-p", "-m", "-n", "--dist", "--shard-count", "--shard-index")
+
+
+def _owner_tail(command: Sequence[str]) -> list[str] | None:
+    """Arguments after the owner invocation, or None when the command bypasses it."""
+    width = len(WINDOWS_UNIT_OWNER)
+    for index in range(len(command) - width + 1):
+        if tuple(command[index : index + width]) == WINDOWS_UNIT_OWNER:
+            return list(command[index + width :])
+    return None
+
+
+def _pytest_roots(command: Sequence[str]) -> list[str]:
+    """Positional test paths of a pytest command (flag values excluded)."""
+    if not any(token.endswith("pytest") for token in command):
+        return []
+    tokens = list(command)
+    start = max(i for i, token in enumerate(tokens) if token.endswith("pytest")) + 1
+    roots: list[str] = []
+    skip = False
+    for token in tokens[start:]:
+        if skip:
+            skip = False
+        elif token in _PYTEST_VALUE_FLAGS or token.startswith("--shard-durations"):
+            skip = "=" not in token
+        elif not token.startswith("-"):
+            roots.append(token)
+    return roots
+
+
+def _is_windows_job(job: WorkflowNode) -> bool:
+    include = job.get("strategy", {}).get("matrix", {}).get("include", [])
+    return "windows" in str(job.get("runs-on", "")) or any(
+        isinstance(row, dict) and "windows" in str(row.get("os", "")) for row in include
+    )
+
+
+def _test_commands(step: WorkflowNode) -> list[list[str]]:
+    """Tokenize the step's pytest and owner lines; other shell lines may be PowerShell."""
+    commands: list[list[str]] = []
+    for line in str(step.get("run", "")).replace("\\\n", " ").splitlines():
+        if "pytest" not in line and "scripts.ci_selections" not in line:
+            continue
+        try:
+            commands.append(shlex.split(line, comments=True, posix=True))
+        except ValueError:
+            commands.append(line.split())
+    return commands
+
+
+def _windows_unit_runs(job: WorkflowNode) -> list[tuple[WorkflowNode, list[str]]]:
+    """Every step command that runs the unit suite on Windows, owner-routed or not."""
+    runs: list[tuple[WorkflowNode, list[str]]] = []
+    for step in _run_steps(job):
+        if "run" not in step or "matrix.platform != 'windows'" in str(step.get("if", "")):
+            continue
+        for command in _test_commands(step):
+            roots = _pytest_roots(command)
+            if _owner_tail(command) is not None or set(roots) & set(WINDOWS_UNIT_ROOTS):
+                runs.append((step, command))
+    return runs
+
+
+def _assert_windows_units_route_through_owner(workflow: WorkflowNode, label: str) -> None:
+    for job_id, job in workflow["jobs"].items():
+        if not _is_windows_job(job):
+            continue
+        for _step, command in _windows_unit_runs(job):
+            assert _owner_tail(command) is not None, (
+                f"{label} job {job_id!r} runs Windows units without scripts/ci_selections.py: "
+                f"{shlex.join(command)}"
+            )
+
+
+def _assert_owner_shard_step(job: WorkflowNode, label: str, shard_count: int) -> WorkflowNode:
+    runs = _windows_unit_runs(job)
+    assert len(runs) == 1, f"{label} must run the Windows unit suite exactly once"
+    step, command = runs[0]
+    assert _owner_tail(command) == [
+        "--shard-count",
+        str(shard_count),
+        "--shard-index",
+        "$env:SHARD",
+    ], f"{label} must run its Windows unit shard through scripts/ci_selections.py"
+    assert "if" not in step and "continue-on-error" not in step, label
+    return step
+
+
+def _assert_pr_windows_units(ci: WorkflowNode, release: WorkflowNode) -> None:
+    from scripts.ci_selections import SELECTIONS
+
+    owner = SELECTIONS["windows-unit"]
+    assert _pytest_roots(["pytest", *owner]) == list(WINDOWS_UNIT_ROOTS)
+    assert "-m" not in owner and "-k" not in owner, "Windows units must not be filtered"
+    assert ("-n", "4") in set(pairwise(owner))
+
+    for workflow, label in ((ci, "ci.yml"), (release, "build-release.yml")):
+        _assert_windows_units_route_through_owner(workflow, label)
+
+    push_jobs = sorted(job_id for job_id in release["jobs"] if job_id.startswith("windows-unit-"))
+    assert push_jobs, "main push must keep its Windows unit shards"
+    for job_id in push_jobs:
+        _assert_owner_shard_step(release["jobs"][job_id], job_id, len(push_jobs))
+    full_step = workflow_step(workflow_job(release, "build-windows"), WINDOWS_FULL_UNIT_STEP)
+    assert [_owner_tail(command) for command in _test_commands(full_step)] == [[]]
+
+    count = len(WINDOWS_GATE_SHARD_JOBS)
+    for index, job_id in enumerate(WINDOWS_GATE_SHARD_JOBS, 1):
+        job = workflow_job(ci, job_id)
+        assert job["env"] == {"SHARD": str(index)}
+        unit_step = _assert_owner_shard_step(job, job_id, count)
+        assert unit_step.get("name") == WINDOWS_UNIT_STEP
+        compat = workflow_step(job, WINDOWS_COMPAT_STEP)
+        # Integration contracts still run when a unit fails, for full signal.
+        assert compat.get("if") == "${{ !cancelled() }}"
+        assert "continue-on-error" not in compat
+        [command] = [c for c in _test_commands(compat) if _pytest_roots(c)]
+        assert ("-m", "windows_compat") in set(pairwise(command))
+        assert _pytest_roots(command) == [f"@{SHARD_FILE_LIST}"]
+        select = shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
+        pairs = set(pairwise(select))
+        assert ("-m", "windows_compat") in pairs
+        assert ("--shard-count", str(count)) in pairs
+        assert ("--shard-index", "$env:SHARD") in pairs
+        assert _shard_list_roots(select) == ["tests/integration"]
+
+
+@pytest.fixture
+def provisional_release() -> WorkflowNode:
+    return deepcopy(load_workflow(RELEASE_WORKFLOW))
+
+
+def test_pr_windows_gate_runs_every_windows_unit_node() -> None:
+    _assert_pr_windows_units(
+        load_workflow(REPO_ROOT / ".github/workflows/ci.yml"),
+        load_workflow(RELEASE_WORKFLOW),
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "marker-only-units",
+        "drop-unit-step",
+        "unit-shard-count",
+        "skip-unit-step",
+        "tolerate-unit-failure",
+        "skip-compat-step",
+        "unit-root-in-compat",
+        "compat-root-dropped",
+        "push-bypasses-owner",
+        "full-run-bypasses-owner",
+        "owner-marker-filter",
+    ],
+)
+def test_pr_windows_unit_drift_fails(
+    provisional_ci: WorkflowNode,
+    provisional_release: WorkflowNode,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    shard = workflow_job(provisional_ci, WINDOWS_GATE_SHARD_JOBS[-1])
+    steps = shard["steps"]
+    compat = workflow_step(shard, SHARD_SELECT_STEP)
+    if mutation == "marker-only-units":
+        # The pre-#4115 selection: windows_compat units only.
+        steps.remove(workflow_step(shard, WINDOWS_UNIT_STEP))
+        compat["run"] = compat["run"].replace("tests/integration", "tests/unit tests/integration")
+    elif mutation == "drop-unit-step":
+        steps.remove(workflow_step(shard, WINDOWS_UNIT_STEP))
+    elif mutation == "unit-shard-count":
+        unit = workflow_step(shard, WINDOWS_UNIT_STEP)
+        unit["run"] = unit["run"].replace("--shard-count 3", "--shard-count 2")
+    elif mutation == "skip-unit-step":
+        workflow_step(shard, WINDOWS_UNIT_STEP)["if"] = "github.event_name != 'pull_request'"
+    elif mutation == "tolerate-unit-failure":
+        workflow_step(shard, WINDOWS_UNIT_STEP)["continue-on-error"] = True
+    elif mutation == "skip-compat-step":
+        workflow_step(shard, WINDOWS_COMPAT_STEP)["if"] = "success()"
+    elif mutation == "unit-root-in-compat":
+        compat["run"] = compat["run"].replace("tests/integration", "tests/integration tests/unit")
+    elif mutation == "compat-root-dropped":
+        compat["run"] = compat["run"].replace("tests/integration", "tests/integration/x.py")
+    elif mutation == "push-bypasses-owner":
+        step = workflow_step(
+            workflow_job(provisional_release, "windows-unit-1"), WINDOWS_FULL_UNIT_STEP
+        )
+        step["run"] = step["run"].replace(
+            " ".join(WINDOWS_UNIT_OWNER), "python -m pytest tests/unit tests/test_console.py"
+        )
+    elif mutation == "full-run-bypasses-owner":
+        step = workflow_step(
+            workflow_job(provisional_release, "build-windows"), WINDOWS_FULL_UNIT_STEP
+        )
+        step["run"] = "uv run pytest tests/unit tests/test_console.py -n auto"
+    else:
+        from scripts import ci_selections
+
+        monkeypatch.setitem(
+            ci_selections.SELECTIONS,
+            "windows-unit",
+            (*ci_selections.SELECTIONS["windows-unit"], "-m", "windows_compat"),
+        )
+    with pytest.raises(AssertionError):
+        _assert_pr_windows_units(provisional_ci, provisional_release)
 
 
 def _assert_lifecycle_smoke_marker_registered(markers: list[str]) -> None:
@@ -707,6 +1020,10 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
     )
     worker_flags = [token for token in tokens if token.startswith(("-n", "--numprocesses"))]
     assert worker_flags == ["-n"], "lifecycle-smoke must use four bounded xdist workers"
+    assert not any(token.startswith("--shard") for token in tokens), (
+        "lifecycle-smoke must run its shard file list, not re-shard the collection"
+    )
+    assert "scripts.ci_sharding" not in tokens
     worker_index = tokens.index("-n")
     assert tokens[worker_index : worker_index + 2] == ["-n", "4"], (
         "lifecycle-smoke must use four bounded xdist workers"
@@ -718,18 +1035,21 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
     assert tokens[scheduler_index : scheduler_index + 2] == ["--dist", "loadgroup"], (
         "lifecycle-smoke must use loadgroup to preserve xdist_group serialization"
     )
-    pairs = [tokens[index : index + 2] for index in range(len(tokens) - 1)]
-    assert ["-p", "scripts.ci_sharding"] in pairs, (
-        "lifecycle-smoke must load the affinity-aware duration sharder"
-    )
+    emitter = shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
+    pairs = [emitter[index : index + 2] for index in range(len(emitter) - 1)]
     for flag, value in (
         ("--shard-count", str(len(LIFECYCLE_SMOKE_SHARD_JOBS))),
         ("--shard-index", "$LIFECYCLE_SHARD"),
         ("--shard-durations", LIFECYCLE_SMOKE_DURATIONS),
+        ("-m", LIFECYCLE_SMOKE_REQUIRED_EXPRESSION),
+        ("--out", SHARD_FILE_LIST),
     ):
-        assert tokens.count(flag) == 1 and [flag, value] in pairs, (
-            f"lifecycle-smoke must select one shard with {flag} {value}"
+        assert emitter.count(flag) == 1 and [flag, value] in pairs, (
+            f"lifecycle-smoke must select one shard's files with {flag} {value}"
         )
+    assert _shard_list_roots(emitter) == list(LIFECYCLE_SMOKE_ROOTS), (
+        f"lifecycle-smoke must bound marker collection to {LIFECYCLE_SMOKE_ROOTS!r}"
+    )
     assert not any(token.startswith(("--splits", "--group")) for token in tokens)
     assert not any(
         token.startswith(("--deselect", "--ignore", "--maxfail")) or token == "-k"
@@ -738,10 +1058,17 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
     assert "-m" in tokens
     marker_index = tokens.index("-m")
     assert tokens[marker_index + 1] == LIFECYCLE_SMOKE_REQUIRED_EXPRESSION
-    targets = [token for token in tokens if token.startswith("tests/")]
-    assert targets == [LIFECYCLE_SMOKE_ROOT], (
-        f"lifecycle-smoke must bound marker collection to {LIFECYCLE_SMOKE_ROOT!r}"
+    targets = [token for token in tokens if token.startswith(("tests", "@"))]
+    assert targets == [f"@{SHARD_FILE_LIST}"], (
+        "lifecycle-smoke must run only its shard's explicit test file list"
     )
+
+
+def _replace_in_lifecycle_commands(job: WorkflowNode, before: str, after: str) -> None:
+    """Apply one edit to the shard's file-list step and its pytest step."""
+    for name in (SHARD_SELECT_STEP, LIFECYCLE_SMOKE_RUN_STEP):
+        step = workflow_step(job, name)
+        step["run"] = step["run"].replace(before, after)
 
 
 def _assert_lifecycle_smoke_hermetic(job: WorkflowNode) -> None:
@@ -827,7 +1154,7 @@ def _assert_marker_collection_non_empty(marker: str) -> None:
             "--strict-markers",
             "-m",
             marker,
-            LIFECYCLE_SMOKE_ROOT,
+            *LIFECYCLE_SMOKE_ROOTS,
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -854,23 +1181,19 @@ def _collect_lifecycle_nodes(expression: str, shard: int | None = None) -> tuple
             "-q",
             "--collect-only",
             "--strict-markers",
-            *(
-                [
-                    "-p",
-                    "scripts.ci_sharding",
-                    "--shard-count",
-                    str(len(LIFECYCLE_SMOKE_SHARD_JOBS)),
-                    "--shard-index",
-                    str(shard),
-                    "--shard-durations",
-                    LIFECYCLE_SMOKE_DURATIONS,
-                ]
-                if shard is not None
-                else []
-            ),
             "-m",
             expression,
-            LIFECYCLE_SMOKE_ROOT,
+            *(
+                list(LIFECYCLE_SMOKE_ROOTS)
+                if shard is None
+                else ci_sharding.shard_test_files(
+                    list(LIFECYCLE_SMOKE_ROOTS),
+                    expression,
+                    len(LIFECYCLE_SMOKE_SHARD_JOBS),
+                    ci_sharding.load_durations(REPO_ROOT / LIFECYCLE_SMOKE_DURATIONS),
+                    REPO_ROOT,
+                ).shards[shard - 1]
+            ),
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -937,7 +1260,10 @@ def _assert_merge_group_full_lifecycle_path() -> None:
     assert step["env"][LIFECYCLE_SMOKE_E2E_ENV] == LIFECYCLE_SMOKE_E2E_VALUE
     assert "uv run ./scripts/test-integration.sh" in step["run"]
     script = MERGE_GROUP_INTEGRATION_SCRIPT.read_text(encoding="utf-8")
-    assert "pytest tests/integration/ -v" in script
+    # Without PYTEST_TARGETS the script runs the whole root; the merge group
+    # passes each shard's file list (guarded by the shard file-list drift test).
+    assert "target_args=(${PYTEST_TARGETS:-tests/integration/})" in script
+    assert 'python -m pytest "${target_args[@]}" -v' in script
 
 
 def _assert_lifecycle_smoke_timeout(job: WorkflowNode) -> None:
@@ -1089,7 +1415,8 @@ def test_lifecycle_shard_binding_drift_fails(
     [
         ("python -m pytest", "pytest"),
         ('--shard-index "$LIFECYCLE_SHARD"', ""),
-        ("-p scripts.ci_sharding", ""),
+        (f"@{SHARD_FILE_LIST}", " ".join(LIFECYCLE_SMOKE_ROOTS)),
+        ("--durations=20", "--durations=20 -p scripts.ci_sharding --shard-count 4"),
         ('--shard-index "$LIFECYCLE_SHARD"', "--shard-index 1"),
         ("--shard-count 4", "--shard-count 3"),
         (f"--shard-durations {LIFECYCLE_SMOKE_DURATIONS}", ""),
@@ -1100,8 +1427,7 @@ def test_lifecycle_shard_binding_drift_fails(
 def test_lifecycle_shard_command_drift_fails(
     provisional_lifecycle_job: WorkflowNode, before: str, after: str
 ) -> None:
-    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace(before, after)
+    _replace_in_lifecycle_commands(provisional_lifecycle_job, before, after)
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_command(provisional_lifecycle_job)
 
@@ -1157,8 +1483,8 @@ def test_lifecycle_smoke_timeout_drift_fails(
 def test_lifecycle_smoke_exclusion_dropped_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
-    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace(
+    _replace_in_lifecycle_commands(
+        provisional_lifecycle_job,
         LIFECYCLE_SMOKE_REQUIRED_EXPRESSION,
         LIFECYCLE_SMOKE_FULL_EXPRESSION,
     )
@@ -1170,8 +1496,8 @@ def test_lifecycle_smoke_exclusion_dropped_fails(
 def test_lifecycle_smoke_marker_expression_substitution_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
-    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace(
+    _replace_in_lifecycle_commands(
+        provisional_lifecycle_job,
         LIFECYCLE_SMOKE_REQUIRED_EXPRESSION,
         "lifecycle_smoke or lifecycle_merge_group",
     )
@@ -1183,8 +1509,9 @@ def test_lifecycle_smoke_marker_expression_substitution_fails(
 def test_lifecycle_smoke_unbounded_root_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
-    step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace("tests/integration", "tests")
+    _replace_in_lifecycle_commands(
+        provisional_lifecycle_job, " ".join(LIFECYCLE_SMOKE_ROOTS), "tests"
+    )
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_command(provisional_lifecycle_job)
@@ -1437,7 +1764,9 @@ def _assert_unit_shard_layout(ci: WorkflowNode) -> None:
     assert job["strategy"]["matrix"]["shard"] == [1, 2]
     tokens = shlex.split(workflow_step(job, UNIT_SHARD_STEP)["run"].replace("\\\n", " "))
     pairs = list(pairwise(tokens))
-    assert ("--shard-count", "2") in pairs
+    assert ("--shard-count", "2") in pairwise(
+        shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
+    )
     worker_flags = [t for t in tokens if t.startswith(("-n", "--numprocesses", "--dist"))]
     assert worker_flags == ["-n", "--dist"], "PR unit shards must set xdist exactly once"
     assert ("-n", "auto") in pairs and ("--dist", "worksteal") in pairs
@@ -1522,8 +1851,10 @@ def test_shard_layout_matches_issue_4030() -> None:
 def test_unit_shard_layout_drift_fails(
     provisional_ci: WorkflowNode, before: str, after: str
 ) -> None:
-    step = workflow_step(workflow_job(provisional_ci, "build-and-test-shard"), UNIT_SHARD_STEP)
-    step["run"] = step["run"].replace(before, after)
+    job = workflow_job(provisional_ci, "build-and-test-shard")
+    for name in (SHARD_SELECT_STEP, UNIT_SHARD_STEP):
+        step = workflow_step(job, name)
+        step["run"] = step["run"].replace(before, after)
     with pytest.raises(AssertionError):
         _assert_unit_shard_layout(provisional_ci)
 
@@ -1569,6 +1900,744 @@ def test_macos_arm_split_drift_fails(release_workflow: WorkflowNode, mutation: s
         jobs[MACOS_ARM_BUILD_JOB]["steps"].append({"run": MACOS_UNIT_COMMAND})
     with pytest.raises((AssertionError, KeyError)):
         _assert_macos_arm_split(release_workflow)
+
+
+# Shard file lists (#4120, PERF-H8). Every sharded job runs an explicit,
+# disjoint list of test files (or, for a module too heavy for one shard, its
+# top-level test node IDs) written by `python -m scripts.ci_sharding files`,
+# so a shard imports only its own modules. The drift guard collects every
+# sharded root once on this SHA and requires each job's shards to cover
+# every selected node exactly once.
+SHARD_SEED_DIR = ".github/ci-durations/"
+# Sharded jobs whose shard count is planned at run time: check the planner's cap.
+PLANNED_SHARD_COUNTS = {"integration-linux-x86": 8, "integration-linux-arm": 6}
+SHARD_FILE_LIST_JOBS = (
+    ("ci.yml", "windows-compat-gate-1"),
+    ("ci.yml", "build-and-test-shard"),
+    ("ci.yml", "lifecycle-smoke-shard-1"),
+    ("build-release.yml", "integration-linux-x86"),
+    ("build-release.yml", "integration-linux-arm"),
+)
+SHARDED_ROOTS = (
+    "tests/unit",
+    "tests/integration",
+    "tests/test_console.py",
+    "tests/red_team",
+    "tests/fixtures/policy",
+)
+
+
+def shard_file_list_args(step: WorkflowNode) -> list[str]:
+    """Arguments of the one `scripts.ci_sharding files` command in a step.
+
+    A `${{ ... }}` expression stays one token (its inner spaces dropped).
+    """
+    run = re.sub(r"\$\{\{\s*(.*?)\s*\}\}", lambda match: "${{" + match.group(1) + "}}", step["run"])
+    commands = [
+        tokens for tokens in shell_commands({**step, "run": run}) if "scripts.ci_sharding" in tokens
+    ]
+    assert len(commands) == 1, f"{step.get('name')!r} must run the shard file-list emitter once"
+    command = commands[0]
+    index = command.index("scripts.ci_sharding")
+    assert command[index + 1 : index + 2] == ["files"], "the emitter must run its files mode"
+    return command[index + 2 :]
+
+
+def _shard_list_roots(args: Sequence[str]) -> list[str]:
+    return list(ci_sharding._files_parser().parse_args([*_resolved_index(args)]).targets)
+
+
+def _resolved_index(args: Sequence[str]) -> list[str]:
+    tokens = list(args)
+    if "--shard-index" in tokens:
+        tokens[tokens.index("--shard-index") + 1] = "1"
+    return tokens
+
+
+def _resolve_job_tokens(args: Sequence[str], job: WorkflowNode, job_id: str) -> list[str]:
+    """Bind the workflow expressions an emitter command uses to checkable values."""
+    env = {key: str(value) for key, value in (job.get("env") or {}).items()}
+    resolved: list[str] = []
+    for token in _resolved_index(args):
+        for key in sorted(env, key=len, reverse=True):
+            token = token.replace("${{env." + key + "}}", env[key]).replace("$" + key, env[key])
+        if token.startswith("${{ needs.integration-plan.outputs."):
+            token = str(PLANNED_SHARD_COUNTS[job_id])
+        # scripts/ci-shard-durations.sh seeds shard-plan/ from the committed seeds.
+        resolved.append(token.replace("shard-plan/", SHARD_SEED_DIR))
+    return resolved
+
+
+def _job_shards(workflow: str, job_id: str) -> tuple[argparse.Namespace, list[tuple[str, ...]]]:
+    """Every shard's file list for one sharded job, through the canonical emitter."""
+    job = workflow_job(load_workflow(REPO_ROOT / ".github/workflows" / workflow), job_id)
+    raw = shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
+    args = ci_sharding._files_parser().parse_args(_resolve_job_tokens(raw, job, job_id))
+    plan = ci_sharding.shard_test_files(
+        args.targets,
+        args.marker_expression,
+        args.shard_count,
+        ci_sharding.load_durations(REPO_ROOT / args.shard_durations),
+        REPO_ROOT,
+    )
+    return args, [tuple(shard) for shard in plan.shards]
+
+
+def _windows_unit_shards() -> list[tuple[str, ...]]:
+    from scripts import ci_selections
+
+    shards: list[tuple[str, ...]] = []
+    for index in range(1, len(WINDOWS_GATE_SHARD_JOBS) + 1):
+        args = ci_selections.shard_pytest_args(
+            "windows-unit",
+            ["--shard-count", str(len(WINDOWS_GATE_SHARD_JOBS)), "--shard-index", str(index)],
+        )
+        shards.append(tuple(arg for arg in args if arg.startswith("tests/")))
+    return shards
+
+
+def _selected_nodes(
+    inventory: dict[str, list[str]], roots: Sequence[str], expression: str | None
+) -> set[str]:
+    from _pytest.mark.expression import Expression
+
+    compiled = Expression.compile(expression) if expression else None
+    selected: set[str] = set()
+    for node, markers in inventory.items():
+        path = node.split("::", 1)[0]
+        if not any(path == root or path.startswith(root.rstrip("/") + "/") for root in roots):
+            continue
+        if compiled is None or compiled.evaluate(_marker_matcher(set(markers))):
+            selected.add(node)
+    return selected
+
+
+def _marker_matcher(names: set[str]):
+    return lambda name, /, **_kwargs: name in names
+
+
+def _assert_shard_entries_partition(
+    selected: set[str],
+    collected: set[str],
+    shards: Sequence[Sequence[str]],
+    label: str,
+) -> None:
+    """Every selected node runs on exactly one shard; every node ID entry exists."""
+    owners: dict[str, list[int]] = {}
+    for index, shard in enumerate(shards, 1):
+        assert shard, f"{label}: shard {index} has no test files"
+        for entry in shard:
+            assert entry not in owners, f"{label}: {entry} is listed on two shards"
+            owners[entry] = [index]
+            if "::" in entry:
+                assert any(
+                    node == entry or node.startswith((entry + "::", entry + "["))
+                    for node in collected
+                ), f"{label}: shard {index} names {entry}, which pytest does not collect"
+    dropped: list[str] = []
+    duplicated: list[str] = []
+    for node in sorted(selected):
+        module, _, rest = node.partition("::")
+        top = re.split(r"::|\[", rest, maxsplit=1)[0]
+        hits = [owner for key in (module, f"{module}::{top}") for owner in owners.get(key, [])]
+        if not hits:
+            dropped.append(node)
+        elif len(hits) > 1:
+            duplicated.append(node)
+    assert not dropped, (
+        f"{label}: shard file lists drop {len(dropped)} selected tests a full collect "
+        f"finds, e.g. {dropped[:3]}; add their modules to the selection"
+    )
+    assert not duplicated, f"{label}: tests run on two shards, e.g. {duplicated[:3]}"
+
+
+@pytest.fixture(scope="module")
+def full_collection(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list[str]]:
+    """One full collect of every sharded root on this SHA, with each node's markers."""
+    out = tmp_path_factory.mktemp("shard-inventory") / "inventory.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            "--collect-only",
+            "-p",
+            "scripts.ci_sharding",
+            "--shard-inventory-out",
+            str(out),
+            # Override addopts' -m so every job's own expression is evaluated here.
+            "-m",
+            "",
+            *SHARDED_ROOTS,
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+        env={
+            **{key: value for key, value in os.environ.items() if key != "PYTHONPATH"},
+            LIFECYCLE_SMOKE_E2E_ENV: LIFECYCLE_SMOKE_E2E_VALUE,
+        },
+    )
+    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(("workflow", "job_id"), SHARD_FILE_LIST_JOBS)
+def test_shard_file_lists_match_full_collection(
+    full_collection: dict[str, list[str]], workflow: str, job_id: str
+) -> None:
+    args, shards = _job_shards(workflow, job_id)
+    _assert_shard_entries_partition(
+        _selected_nodes(full_collection, args.targets, args.marker_expression),
+        set(full_collection),
+        shards,
+        f"{workflow}:{job_id}",
+    )
+
+
+def test_windows_unit_shard_file_lists_match_full_collection(
+    full_collection: dict[str, list[str]],
+) -> None:
+    from scripts.ci_selections import selection_roots
+
+    _assert_shard_entries_partition(
+        _selected_nodes(full_collection, selection_roots("windows-unit"), None),
+        set(full_collection),
+        _windows_unit_shards(),
+        "ci_selections:windows-unit",
+    )
+
+
+@pytest.mark.parametrize(("workflow", "job_id"), SHARD_FILE_LIST_JOBS)
+def test_sharded_jobs_run_their_file_list(workflow: str, job_id: str) -> None:
+    """The pytest step runs the emitted list, never a whole root or a node-level re-shard."""
+    job = workflow_job(load_workflow(REPO_ROOT / ".github/workflows" / workflow), job_id)
+    emitter = shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
+    assert emitter[emitter.index("--out") + 1] == SHARD_FILE_LIST
+    runs = [
+        (step, tokens)
+        for step in _run_steps(job)
+        for tokens in (shell_commands(step) if "run" in step else [])
+        if "pytest" in tokens or "./scripts/test-integration.sh" in tokens
+    ]
+    assert len(runs) == 1, f"{job_id} must run one sharded pytest command"
+    step, tokens = runs[0]
+    if "pytest" in tokens:
+        targets = [
+            token
+            for token in tokens[tokens.index("pytest") + 1 :]
+            if token.startswith(("tests", "@"))
+        ]
+        extra = tokens
+    else:
+        targets = [step["env"]["PYTEST_TARGETS"]]
+        extra = str(step["env"].get("PYTEST_EXTRA_ARGS", "")).split()
+    assert targets == [f"@{SHARD_FILE_LIST}"], f"{job_id} must pass only its shard file list"
+    assert not any(
+        flag in extra for flag in ("--shard-count", "--shard-index", "--splits", "--group")
+    )
+
+
+@pytest.mark.parametrize(
+    "drift", ["dropped-file", "dropped-test", "two-shards", "missing-node", "empty-shard"]
+)
+def test_shard_file_list_drift_fails(drift: str) -> None:
+    selected = {"tests/a.py::t", "tests/b.py::T::t[1]", "tests/c.py::u"}
+    collected = {*selected, "tests/b.py::Other::t"}
+    baseline = [["tests/a.py", "tests/b.py::T"], ["tests/c.py"]]
+    _assert_shard_entries_partition(selected, collected, baseline, "baseline")
+    shards = deepcopy(baseline)
+    if drift == "dropped-file":
+        shards[1] = ["tests/d.py"]
+    elif drift == "dropped-test":
+        shards[0][1] = "tests/b.py::Other"
+    elif drift == "two-shards":
+        shards[1].append("tests/a.py")
+    elif drift == "missing-node":
+        shards[1].append("tests/c.py::gone")
+    else:
+        shards.append([])
+    with pytest.raises(AssertionError):
+        _assert_shard_entries_partition(selected, collected, shards, "drift")
+
+
+# ---------------------------------------------------------------------------
+# Merge-time gate liveness (#4116): merge-gate.yml's merge_group
+# EXPECTED_CHECKS is the merge-time authority. Every name it waits for must
+# be produced by a job that actually runs on merge_group, ci-integration.yml
+# must shard with the build-release planner and stay secret-safe, the global
+# coverage floor must gate the merge, and a scheduled alarm must fail when
+# main moves without the queue.
+# ---------------------------------------------------------------------------
+WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
+MERGE_GATE_WAIT_STEP = "Wait for all required checks"
+MERGE_GROUP_EVENT = "merge_group"
+MERGE_TIME_TRIGGERS = frozenset({MERGE_GROUP_EVENT, "workflow_dispatch", "pull_request"})
+MERGE_TIME_PLAN_JOB = "integration-plan"
+MERGE_TIME_NETWORK_JOB = "integration-network"
+MERGE_TIME_FAN_IN_JOB = "integration-tests"
+MERGE_TIME_PLAN_STEP = "Plan shards"
+MERGE_TIME_NETWORK_STEP = "Run network-dependent integration tests"
+MERGE_TIME_SHARD_MATRIX = "${{ fromJSON(needs.integration-plan.outputs.shards) }}"
+MERGE_TIME_SHARD_COUNT = "--shard-count ${{ needs.integration-plan.outputs.count }}"
+MERGE_TIME_MAX_SHARDS = "16"
+PLANNER_MARK_ENV = ("HERMETIC_MARK_EXPR", "NETWORK_MARK_EXPR")
+GLOBAL_COVERAGE_CHECK = "Coverage Combine (Linux)"
+GLOBAL_COVERAGE_JOB = "coverage-combine"
+GLOBAL_COVERAGE_STEP = "Enforce unit coverage gate"
+FRESHNESS_WORKFLOW = "merge-queue-freshness.yml"
+FRESHNESS_JOB = "freshness"
+FRESHNESS_STEP = "Require a recent merge_group run"
+FRESHNESS_SCRIPT = "scripts/merge_queue_freshness.py"
+FRESHNESS_WINDOW_DAYS = "3"
+_EXPECTED_CHECKS_EXPRESSION = re.compile(
+    r"^\$\{\{\s*github\.event_name == 'merge_group' && '([^']+)' \|\| "
+    r"contains\(github\.event\.pull_request\.labels\.\*\.name, 'full-integration'\) "
+    r"&& '([^']+)' \|\| '([^']+)'\s*\}\}$"
+)
+_MATRIX_REFERENCE = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}")
+
+
+def _expected_checks(merge_gate: WorkflowNode) -> dict[str, tuple[str, ...]]:
+    """Split merge-gate.yml's EXPECTED_CHECKS into its two event contexts."""
+    wait_step = workflow_step(workflow_job(merge_gate, "gate"), MERGE_GATE_WAIT_STEP)
+    expression = wait_step["env"]["EXPECTED_CHECKS"]
+    match = _EXPECTED_CHECKS_EXPRESSION.match(str(expression).strip())
+    assert match, f"EXPECTED_CHECKS must branch on merge_group explicitly: {expression!r}"
+    contexts = {
+        MERGE_GROUP_EVENT: tuple(name.strip() for name in match.group(1).split(",")),
+        "pull_request_labeled": tuple(name.strip() for name in match.group(2).split(",")),
+        "pull_request": tuple(name.strip() for name in match.group(3).split(",")),
+    }
+    for event, names in contexts.items():
+        assert all(names), f"{event} EXPECTED_CHECKS contains an empty name"
+        duplicates = sorted(name for name, count in Counter(names).items() if count > 1)
+        assert not duplicates, f"{event} EXPECTED_CHECKS repeats {duplicates}"
+    return contexts
+
+
+def _workflow_events(workflow: WorkflowNode) -> frozenset[str]:
+    triggers = workflow.get("on")
+    if isinstance(triggers, str):
+        return frozenset({triggers})
+    if isinstance(triggers, list):
+        return frozenset(str(event) for event in triggers)
+    if isinstance(triggers, dict):
+        return frozenset(str(event) for event in triggers)
+    return frozenset()
+
+
+def _runs_on_merge_group(job: WorkflowNode) -> bool:
+    """Only conditions known to let the job run on merge_group count.
+
+    No condition, `always()`, the `full-integration` label gate, or
+    `always() && (<label gate>)`. Anything else (`${{ false }}`,
+    `github.event_name == 'workflow_dispatch'`, an unknown expression) is not
+    a merge_group producer, because a skipped check would still pass the gate.
+    """
+    condition = str(job.get("if", "")).strip()
+    if condition.startswith("${{") and condition.endswith("}}"):
+        condition = condition[3:-2].strip()
+    return condition in {
+        "",
+        "always()",
+        FULL_INTEGRATION_GATE,
+        f"always() && ({FULL_INTEGRATION_GATE})",
+    }
+
+
+def _check_names(job_id: str, job: WorkflowNode) -> tuple[str, ...]:
+    """Expand a job's check-run names over a static matrix; dynamic ones expand to nothing."""
+    name = str(job.get("name", job_id))
+    references = _MATRIX_REFERENCE.findall(name)
+    if not references:
+        return (name,)
+    strategy = job.get("strategy")
+    matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+    if not isinstance(matrix, dict):
+        return ()
+    values: list[list[object]] = []
+    for reference in references:
+        axis = matrix.get(reference)
+        if not isinstance(axis, list):
+            return ()
+        values.append(axis)
+    names = []
+    for combination in product(*values):
+        rendered = name
+        for reference, value in zip(references, combination, strict=True):
+            rendered = _MATRIX_REFERENCE.sub(
+                lambda m, ref=reference, val=value: str(val) if m.group(1) == ref else m.group(0),
+                rendered,
+            )
+        names.append(rendered)
+    return tuple(names)
+
+
+def _merge_group_producers(
+    workflows: dict[str, WorkflowNode],
+) -> dict[str, list[str]]:
+    """Every check-run name a merge_group event produces, with its producers."""
+    producers: dict[str, list[str]] = {}
+    for workflow_name, workflow in sorted(workflows.items()):
+        if MERGE_GROUP_EVENT not in _workflow_events(workflow):
+            continue
+        jobs = workflow.get("jobs")
+        if not isinstance(jobs, dict):
+            continue
+        for job_id, job in jobs.items():
+            if not isinstance(job, dict) or not _runs_on_merge_group(job):
+                continue
+            for check_name in _check_names(job_id, job):
+                producers.setdefault(check_name, []).append(f"{workflow_name}:{job_id}")
+    return producers
+
+
+def _assert_merge_group_checks_are_produced(
+    merge_gate: WorkflowNode, workflows: dict[str, WorkflowNode]
+) -> None:
+    """The merge-time gate may only wait for checks merge_group really runs."""
+    contexts = _expected_checks(merge_gate)
+    merge_time = contexts[MERGE_GROUP_EVENT]
+    producers = _merge_group_producers(workflows)
+    assert "gate" not in merge_time, "the gate would deadlock waiting for itself"
+    missing = sorted(name for name in merge_time if name not in producers)
+    assert not missing, (
+        f"merge_group EXPECTED_CHECKS waits for checks no merge_group job produces: {missing}"
+    )
+    ambiguous = {name: producers[name] for name in merge_time if len(producers[name]) > 1}
+    assert not ambiguous, f"merge_group checks produced by more than one job: {ambiguous}"
+    weaker = sorted(
+        (set(contexts["pull_request"]) | set(contexts["pull_request_labeled"])) - set(merge_time)
+    )
+    assert not weaker, f"PR-time required checks missing from the merge-time gate: {weaker}"
+
+
+def _assert_merge_time_integration_authority(
+    integration: WorkflowNode, release: WorkflowNode
+) -> None:
+    """ci-integration.yml shards with the build-release planner on merge_group."""
+    events = _workflow_events(integration)
+    assert events == MERGE_TIME_TRIGGERS, (
+        f"ci-integration.yml must trigger on exactly {sorted(MERGE_TIME_TRIGGERS)}; "
+        f"got {sorted(events)} (secrets must never reach pull_request code)"
+    )
+    for key in PLANNER_MARK_ENV:
+        assert integration["env"][key] == release["env"][key], (
+            f"{key} must match build-release.yml so both lanes partition the same corpus"
+        )
+
+    plan_step = workflow_step(workflow_job(integration, MERGE_TIME_PLAN_JOB), MERGE_TIME_PLAN_STEP)
+    plan = " ".join(shell_tokens(plan_step))
+    for needle in (
+        "-p scripts.ci_sharding",
+        "--shard-plan-out",
+        "--shard-workers 4",
+        f"--shard-max {MERGE_TIME_MAX_SHARDS}",
+        "-m $HERMETIC_MARK_EXPR",
+    ):
+        assert needle in plan, f"merge-time shard plan lost {needle!r}"
+
+    shard_job = workflow_job(integration, MERGE_GROUP_INTEGRATION_JOB)
+    assert shard_job["strategy"]["matrix"]["shard"] == MERGE_TIME_SHARD_MATRIX
+    assert MERGE_TIME_PLAN_JOB in shard_job["needs"]
+    shard_step = workflow_step(shard_job, MERGE_GROUP_INTEGRATION_STEP)
+    shard_env = effective_env(integration, shard_job, shard_step)
+    assert shard_env["PYTEST_MARK_EXPR"] == release["env"]["HERMETIC_MARK_EXPR"]
+    shard_args = " ".join(str(shard_env["PYTEST_EXTRA_ARGS"]).split())
+    for needle in (MERGE_TIME_SHARD_COUNT, "--shard-index ${{ matrix.shard }}", "--cov"):
+        assert needle in shard_args, f"merge-time shard lost {needle!r}"
+
+    network_job = workflow_job(integration, MERGE_TIME_NETWORK_JOB)
+    network_step = workflow_step(network_job, MERGE_TIME_NETWORK_STEP)
+    network_env = effective_env(integration, network_job, network_step)
+    assert network_env["PYTEST_MARK_EXPR"] == release["env"]["NETWORK_MARK_EXPR"]
+
+    fan_in = workflow_job(integration, MERGE_TIME_FAN_IN_JOB)
+    assert str(fan_in.get("if", "")).startswith("always() && ")
+    assert set(fan_in["needs"]) >= {
+        MERGE_TIME_PLAN_JOB,
+        MERGE_GROUP_INTEGRATION_JOB,
+        MERGE_TIME_NETWORK_JOB,
+    }
+    aggregate = workflow_step(fan_in, "Aggregate shard results")
+    for job_id in (MERGE_TIME_PLAN_JOB, MERGE_GROUP_INTEGRATION_JOB, MERGE_TIME_NETWORK_JOB):
+        assert f"needs.{job_id}.result" in str(aggregate["run"]), (
+            f"the integration fan-in ignores {job_id}"
+        )
+
+
+def _assert_global_coverage_floor_gates_merge(merge_gate: WorkflowNode, ci: WorkflowNode) -> None:
+    """The pyproject.toml floor is enforced by a check the merge-time gate requires."""
+    with PYPROJECT.open("rb") as handle:
+        floor = tomllib.load(handle)["tool"]["coverage"]["report"]["fail_under"]
+    assert GLOBAL_COVERAGE_CHECK in _expected_checks(merge_gate)[MERGE_GROUP_EVENT]
+    job = workflow_job(ci, GLOBAL_COVERAGE_JOB)
+    assert job["name"] == GLOBAL_COVERAGE_CHECK
+    step = workflow_step(job, GLOBAL_COVERAGE_STEP)
+    assert_exact_command(
+        shell_commands(step),
+        ["coverage", "report", f"--fail-under={floor}"],
+        label=GLOBAL_COVERAGE_STEP,
+    )
+
+
+def _assert_merge_queue_freshness_alarm(freshness: WorkflowNode) -> None:
+    """A schedule fails when main moves but no merge_group run completed."""
+    assert {"schedule", "workflow_dispatch"} <= _workflow_events(freshness)
+    job = workflow_job(freshness, FRESHNESS_JOB)
+    assert_unconditional(job, label=FRESHNESS_JOB)
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    step = workflow_step(job, FRESHNESS_STEP)
+    assert_unconditional(step, label=FRESHNESS_STEP)
+    assert "continue-on-error" not in step
+    assert_exact_command(shell_commands(step), ["python3", FRESHNESS_SCRIPT], label=FRESHNESS_STEP)
+    env = effective_env(freshness, job, step)
+    assert env["WINDOW_DAYS"] == FRESHNESS_WINDOW_DAYS
+    assert env["BRANCH"] == "main"
+
+
+def _load_workflows() -> dict[str, WorkflowNode]:
+    return {path.name: load_workflow(path) for path in sorted(WORKFLOWS_DIR.glob("*.yml"))}
+
+
+@pytest.fixture(scope="module")
+def repository_workflows() -> dict[str, WorkflowNode]:
+    return _load_workflows()
+
+
+def test_merge_group_expected_checks_are_produced_by_merge_group_jobs(
+    repository_workflows: dict[str, WorkflowNode],
+) -> None:
+    _assert_merge_group_checks_are_produced(
+        repository_workflows["merge-gate.yml"], repository_workflows
+    )
+
+
+def test_merge_time_integration_uses_the_release_planner(
+    repository_workflows: dict[str, WorkflowNode],
+) -> None:
+    _assert_merge_time_integration_authority(
+        repository_workflows["ci-integration.yml"], repository_workflows["build-release.yml"]
+    )
+
+
+def test_global_coverage_floor_gates_the_merge(
+    repository_workflows: dict[str, WorkflowNode],
+) -> None:
+    _assert_global_coverage_floor_gates_merge(
+        repository_workflows["merge-gate.yml"], repository_workflows["ci.yml"]
+    )
+
+
+def test_merge_queue_freshness_alarm_is_scheduled(
+    repository_workflows: dict[str, WorkflowNode],
+) -> None:
+    _assert_merge_queue_freshness_alarm(repository_workflows[FRESHNESS_WORKFLOW])
+
+
+@pytest.fixture
+def mutable_workflows(repository_workflows: dict[str, WorkflowNode]) -> dict[str, WorkflowNode]:
+    return deepcopy(repository_workflows)
+
+
+def _gate_merge_time_checks(workflows: dict[str, WorkflowNode], names: str) -> None:
+    wait_step = workflow_step(
+        workflow_job(workflows["merge-gate.yml"], "gate"), MERGE_GATE_WAIT_STEP
+    )
+    contexts = _expected_checks(workflows["merge-gate.yml"])
+    labeled = ",".join(contexts["pull_request_labeled"])
+    unlabeled = ",".join(contexts["pull_request"])
+    wait_step["env"]["EXPECTED_CHECKS"] = (
+        f"${{{{ github.event_name == 'merge_group' && '{names}' || "
+        "contains(github.event.pull_request.labels.*.name, 'full-integration') "
+        f"&& '{labeled}' || '{unlabeled}' }}}}"
+    )
+
+
+def test_merge_group_check_without_a_producer_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    merge_time = _expected_checks(mutable_workflows["merge-gate.yml"])[MERGE_GROUP_EVENT]
+    _gate_merge_time_checks(mutable_workflows, ",".join((*merge_time, "Phantom Check (Linux)")))
+
+    with pytest.raises(AssertionError, match="no merge_group job produces"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+def test_merge_group_check_from_a_pull_request_only_workflow_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    del mutable_workflows["ci-integration.yml"]["on"][MERGE_GROUP_EVENT]
+
+    with pytest.raises(AssertionError, match="no merge_group job produces"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+def test_merge_group_check_skipped_by_a_job_condition_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    job = workflow_job(mutable_workflows["ci-integration.yml"], "release-validation")
+    job["if"] = "github.event_name == 'workflow_dispatch'"
+
+    with pytest.raises(AssertionError, match="no merge_group job produces"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+@pytest.mark.parametrize("condition", ["${{ false }}", "false", "github.repository == 'x/y'"])
+def test_merge_group_check_from_an_always_false_producer_fails(
+    mutable_workflows: dict[str, WorkflowNode], condition: str
+) -> None:
+    workflow_job(mutable_workflows["ci-integration.yml"], "release-validation")["if"] = condition
+
+    with pytest.raises(AssertionError, match="no merge_group job produces"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+def test_merge_group_check_from_a_dynamic_matrix_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    merge_time = _expected_checks(mutable_workflows["merge-gate.yml"])[MERGE_GROUP_EVENT]
+    shard_check = "Integration Tests Shard 1 (Linux)"
+    _gate_merge_time_checks(mutable_workflows, ",".join((*merge_time, shard_check)))
+
+    with pytest.raises(AssertionError, match="no merge_group job produces"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+def test_merge_group_check_with_two_producers_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    jobs = mutable_workflows["ci-integration.yml"]["jobs"]
+    jobs["shadow-build"] = deepcopy(jobs["build"])
+
+    with pytest.raises(AssertionError, match="more than one job"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+def test_pr_time_check_missing_from_merge_time_gate_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    merge_time = _expected_checks(mutable_workflows["merge-gate.yml"])[MERGE_GROUP_EVENT]
+    _gate_merge_time_checks(
+        mutable_workflows, ",".join(name for name in merge_time if name != "APM Self-Check")
+    )
+
+    with pytest.raises(AssertionError, match="PR-time required checks missing"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+@pytest.mark.parametrize("event", ["pull_request_target", "push"])
+def test_merge_time_integration_secret_reaching_trigger_fails(
+    mutable_workflows: dict[str, WorkflowNode], event: str
+) -> None:
+    mutable_workflows["ci-integration.yml"]["on"][event] = {"branches": ["main"]}
+
+    with pytest.raises(AssertionError, match="must trigger on exactly"):
+        _assert_merge_time_integration_authority(
+            mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
+        )
+
+
+def test_merge_time_integration_without_dispatch_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    del mutable_workflows["ci-integration.yml"]["on"]["workflow_dispatch"]
+
+    with pytest.raises(AssertionError, match="must trigger on exactly"):
+        _assert_merge_time_integration_authority(
+            mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
+        )
+
+
+def test_merge_time_static_shard_matrix_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    job = workflow_job(mutable_workflows["ci-integration.yml"], MERGE_GROUP_INTEGRATION_JOB)
+    job["strategy"]["matrix"]["shard"] = [1, 2, 3, 4]
+
+    with pytest.raises(AssertionError):
+        _assert_merge_time_integration_authority(
+            mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
+        )
+
+
+def test_merge_time_selection_drift_from_release_planner_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    mutable_workflows["ci-integration.yml"]["env"]["HERMETIC_MARK_EXPR"] = "not live"
+
+    with pytest.raises(AssertionError, match=r"must match build-release\.yml"):
+        _assert_merge_time_integration_authority(
+            mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
+        )
+
+
+def test_merge_time_fan_in_ignoring_the_network_lane_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    fan_in = workflow_job(mutable_workflows["ci-integration.yml"], MERGE_TIME_FAN_IN_JOB)
+    step = workflow_step(fan_in, "Aggregate shard results")
+    step["run"] = step["run"].replace(f"needs.{MERGE_TIME_NETWORK_JOB}.result", "needs.x.result")
+
+    with pytest.raises(AssertionError, match="ignores integration-network"):
+        _assert_merge_time_integration_authority(
+            mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
+        )
+
+
+def test_global_coverage_floor_drift_fails(mutable_workflows: dict[str, WorkflowNode]) -> None:
+    job = workflow_job(mutable_workflows["ci.yml"], GLOBAL_COVERAGE_JOB)
+    step = workflow_step(job, GLOBAL_COVERAGE_STEP)
+    step["run"] = step["run"].replace("--fail-under=80", "--fail-under=70")
+
+    with pytest.raises(AssertionError, match="must contain exact command"):
+        _assert_global_coverage_floor_gates_merge(
+            mutable_workflows["merge-gate.yml"], mutable_workflows["ci.yml"]
+        )
+
+
+def test_global_coverage_floor_dropped_from_merge_gate_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    merge_time = _expected_checks(mutable_workflows["merge-gate.yml"])[MERGE_GROUP_EVENT]
+    _gate_merge_time_checks(
+        mutable_workflows, ",".join(name for name in merge_time if name != GLOBAL_COVERAGE_CHECK)
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_global_coverage_floor_gates_merge(
+            mutable_workflows["merge-gate.yml"], mutable_workflows["ci.yml"]
+        )
+
+
+def test_merge_queue_freshness_alarm_suppressed_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    job = workflow_job(mutable_workflows[FRESHNESS_WORKFLOW], FRESHNESS_JOB)
+    workflow_step(job, FRESHNESS_STEP)["continue-on-error"] = True
+
+    with pytest.raises(AssertionError):
+        _assert_merge_queue_freshness_alarm(mutable_workflows[FRESHNESS_WORKFLOW])
 
 
 # Opt-in full integration before the queue (#4116): ci-integration.yml runs on
@@ -1759,3 +2828,93 @@ def test_merge_group_only_node_is_collected_as_lifecycle_smoke(
     )
     result.stdout.fnmatch_lines(["*::test_merge_group_only"])
     result.stdout.no_fnmatch_line("*::test_unmarked")
+
+
+def test_exactly_one_job_provisions_and_requires_codex() -> None:
+    """The Codex native plugin cell runs for real in one job and cannot silently vanish (#4154).
+
+    The lifecycle world skips that cell without a qualified Codex unless
+    APM_REQUIRE_CODEX is set; exactly one job sets it, and that job installs
+    Codex pinned to the production floor before running the lifecycle suite.
+    """
+    from apm_cli.codex_plugins.client import MINIMUM_CODEX_VERSION
+
+    requiring: list[tuple[str, str]] = []
+    for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        if path.name.endswith(".lock.yml"):
+            continue
+        workflow = load_workflow(path)
+        for job_id, job in (workflow.get("jobs") or {}).items():
+            steps = [step for step in job.get("steps") or [] if isinstance(step, dict)]
+            if any(effective_env(workflow, job, step).get("APM_REQUIRE_CODEX") for step in steps):
+                requiring.append((path.name, job_id))
+    assert requiring == [("lifecycle-journeys.yml", "lifecycle-full")], requiring
+    workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml")
+    job = workflow_job(workflow, "lifecycle-full")
+    names = [step.get("name") for step in job["steps"]]
+    install = workflow_step(job, "Install the pinned Codex CLI")
+    assert install["run"].split() == [
+        "npm",
+        "install",
+        "-g",
+        f"@openai/codex@{MINIMUM_CODEX_VERSION}",
+    ]
+    run = workflow_step(job, "Run the full lifecycle suite")
+    assert effective_env(workflow, job, run)["APM_REQUIRE_CODEX"] == "1"
+    assert "tests/lifecycle" in run["run"].split()
+    assert names.index("Install the pinned Codex CLI") < names.index("Run the full lifecycle suite")
+
+
+def test_every_quality_module_runs_in_some_workflow_job() -> None:
+    """A tests/quality module that no job collects is a contract CI never checks."""
+    workflows = REPO_ROOT / ".github" / "workflows"
+    targets: set[str] = set()
+    for path in sorted(workflows.glob("*.yml")):
+        if path.name.endswith(".lock.yml"):
+            continue
+        for job in (load_workflow(path).get("jobs") or {}).values():
+            if isinstance(job, dict):
+                targets.update(target.rstrip("/") for target in _pytest_targets(job))
+    from apm_cli.utils.paths import portable_relpath
+
+    modules = sorted(
+        portable_relpath(path, REPO_ROOT)
+        for path in (REPO_ROOT / "tests" / "quality").glob("test_*.py")
+    )
+    orphans = [
+        module
+        for module in modules
+        if not any(module == target or module.startswith(f"{target}/") for target in targets)
+    ]
+    assert orphans == [], f"no workflow job runs these modules: {orphans}"
+
+
+CACHE_FULL_MATRIX_NODE = (
+    "tests/integration/test_architecture_linter_session_cache.py::"
+    "test_session_cache_findings_match_uncached_runs_full_matrix"
+)
+
+
+def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
+    """The env-gated full-matrix cache replay has a schedule, not only "on demand".
+
+    PR shards keep the per-group sample; the nightly lifecycle workflow (also
+    dispatched on each release-candidate ref) replays the full matrix with
+    PYTEST_PERF=1, and its tracking-issue signal waits for that job.
+    """
+    workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml")
+    assert "schedule" in workflow["on"]
+    assert "ref" in workflow["on"]["workflow_dispatch"]["inputs"]
+    job = workflow_job(workflow, "architecture-cache-full-matrix")
+    assert job["steps"][0]["with"]["ref"] == "${{ inputs.ref }}"
+    assert all(key not in job for key in ("if", "continue-on-error"))
+    step = workflow_step(job, "Replay the full owner mutation matrix through the session cache")
+    assert "if" not in step and "continue-on-error" not in step
+    assert effective_env(workflow, job, step)["PYTEST_PERF"] == "1"
+    tokens = step["run"].replace("\\\n", " ").split()
+    assert CACHE_FULL_MATRIX_NODE in tokens
+    assert ("-m", "benchmark") in set(pairwise(tokens))
+    signal = workflow_job(workflow, "signal")
+    assert "architecture-cache-full-matrix" in signal["needs"]
+    result = workflow_step(signal, "Open, update or close the tracking issue")["env"]["RESULT"]
+    assert "needs.architecture-cache-full-matrix.result" in result

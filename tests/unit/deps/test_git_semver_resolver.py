@@ -15,6 +15,8 @@ from apm_cli.deps.git_semver_resolver import (
 )
 from apm_cli.marketplace.ref_resolver import RemoteRef
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Test fixtures
 # ---------------------------------------------------------------------------

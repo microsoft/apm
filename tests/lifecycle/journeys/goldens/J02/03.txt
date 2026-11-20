@@ -1,0 +1,12 @@
+# apm journey golden v1: J02 step 3
+$ apm audit
+[exit 0]
+--- stdout
+[>] Scanning installed packages and deployed files...
+
+[*] 12 file(s) scanned -- no issues found
+--- stderr
+[>] Replaying install (cache-only)...
+[+] Replayed 2 package(s)
+[>] Diffing scratch vs working tree...
+[+] No drift detected

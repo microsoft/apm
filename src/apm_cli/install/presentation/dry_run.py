@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import DRY_RUN_INCOMPLETE
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 
 if TYPE_CHECKING:
@@ -26,6 +27,8 @@ def render_and_exit(
     apm_dir: Path,
     local_cleanup_pending: Callable[[LockFile], bool] | None = None,
     project_root: Path | None = None,
+    no_policy: bool = False,
+    scope: object = None,
 ) -> None:
     """Render the dry-run preview to the user.
 
@@ -86,8 +89,7 @@ def render_and_exit(
     if plan.dependency_preview_errors:
         logger.dry_run_notice(
             "Dependency preview incomplete; showing only locally known dependencies. "
-            "Orphan removals are not previewed. Run 'apm install' without --dry-run "
-            "to resolve dependencies."
+            f"Orphan removals are not previewed. {DRY_RUN_INCOMPLETE.sentence()}"
         )
         for error in plan.dependency_preview_errors:
             if error not in plan.dependency_declaration_errors:
@@ -111,6 +113,24 @@ def render_and_exit(
                 logger.progress(f"  - {_orphan}")
             if len(_orphan_preview) > 10:
                 logger.progress(f"  ... and {len(_orphan_preview) - 10} more")
+
+    if _dryrun_lock and plan.should_install_apm:
+        from apm_cli.install.frozen_retirement import preview_executable_retirements
+
+        # Deny wins (#3944, #4043): install would remove these packages' deployed
+        # executables; the preview removes nothing.
+        retirements = preview_executable_retirements(
+            _dryrun_lock, apm_dir, no_policy=no_policy, scope=scope
+        )
+        if retirements:
+            logger.progress(
+                f"Executables that would be retired (decision changed since apm.lock.yaml): "
+                f"{len(retirements)}"
+            )
+            for source, surfaces in retirements:
+                logger.progress(f"  - {source}")
+                for surface in surfaces:
+                    logger.progress(f"      {surface}")
 
     if _dryrun_lock and plan.should_install_mcp and project_root is not None:
         from apm_cli.install.mcp.retired_destinations import preview_retired_mcp_moves

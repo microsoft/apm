@@ -18,10 +18,10 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
-from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.lifecycle_scenario import LifecycleScenario, new_lifecycle_scenario
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
-from tests.utils.local_git_repository import LocalGitRepository, LocalGitRepositoryFactory
-from tests.utils.local_package import LocalPackage, LocalPackageFactory
+from tests.utils.local_git_repository import LocalGitRepository
+from tests.utils.local_package import LocalPackage
 
 pytestmark = [
     pytest.mark.integration,
@@ -61,17 +61,6 @@ _COPILOT_CAPTURE_PATHS = (
 
 
 @dataclass(frozen=True)
-class _Scenario:
-    """One isolated installed-CLI lifecycle workspace."""
-
-    isolated: IsolatedApmEnvironment
-    sources: LocalPackageFactory
-    consumers: LocalPackageFactory
-    repositories: LocalGitRepositoryFactory
-    runner: ApmLifecycleRunner
-
-
-@dataclass(frozen=True)
 class _PublishedPackage:
     """A package published through a production-shaped local Git remote."""
 
@@ -79,25 +68,6 @@ class _PublishedPackage:
     repository: LocalGitRepository
     dependency: dict[str, object]
     environment: dict[str, str]
-
-
-def _new_scenario(root: Path, apm_binary_path: Path) -> _Scenario:
-    isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
-    environment = isolated.subprocess_env()
-    return _Scenario(
-        isolated=isolated,
-        sources=LocalPackageFactory(isolated.package_root),
-        consumers=LocalPackageFactory(isolated.work_root),
-        repositories=LocalGitRepositoryFactory(
-            isolated.repository_root,
-            env=environment,
-        ),
-        runner=ApmLifecycleRunner(
-            (str(apm_binary_path),),
-            timeout_seconds=90,
-            scenario_timeout_seconds=300,
-        ),
-    )
 
 
 def _hook_document() -> dict[str, object]:
@@ -119,7 +89,7 @@ def _script(marker: str) -> str:
     )
 
 
-def _publish(scenario: _Scenario) -> _PublishedPackage:
+def _publish(scenario: LifecycleScenario) -> _PublishedPackage:
     package = scenario.sources.create(_PACKAGE_NAME)
     scenario.sources.add_hook(package, "esm", _hook_document())
     scenario.sources.add_hook_asset(
@@ -159,7 +129,7 @@ def _publish(scenario: _Scenario) -> _PublishedPackage:
 
 
 def _consumer(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     published: _PublishedPackage,
     *,
     name: str,
@@ -180,7 +150,7 @@ def _consumer(
 
 
 def _run_success(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     consumer: LocalPackage,
     args: tuple[str, ...],
     *,
@@ -249,7 +219,7 @@ def _deployed_command(consumer: LocalPackage) -> tuple[str, ...]:
 
 
 def _execute_hook(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     consumer: LocalPackage,
     *,
     environment: dict[str, str],
@@ -275,7 +245,7 @@ def _execute_hook(
     )
 
 
-def _advance_hook(published: _PublishedPackage, scenario: _Scenario) -> None:
+def _advance_hook(published: _PublishedPackage, scenario: LifecycleScenario) -> None:
     script = published.repository.worktree / ".apm" / "hooks" / "esm" / "entry.mjs"
     script.write_text(_script("esm-hook-v2"), encoding="utf-8")
     scenario.repositories.commit(published.repository, message="update JavaScript hook")
@@ -313,7 +283,7 @@ def _seed_legacy_managed_sidecar(
     return seeded
 
 
-def _capture_global(scenario: _Scenario) -> LifecycleStateSnapshot:
+def _capture_global(scenario: LifecycleScenario) -> LifecycleStateSnapshot:
     copilot_root = scenario.isolated.home / ".copilot"
     return LifecycleStateSnapshot.capture(
         scenario.isolated.config_root,
@@ -335,7 +305,7 @@ def _capture_global(scenario: _Scenario) -> LifecycleStateSnapshot:
     )
 
 
-def _seed_global_legacy_sidecar(scenario: _Scenario) -> LifecycleStateSnapshot:
+def _seed_global_legacy_sidecar(scenario: LifecycleScenario) -> LifecycleStateSnapshot:
     sidecar = scenario.isolated.home / ".copilot"
     sidecar = sidecar.joinpath(*_GLOBAL_FORBIDDEN_SIDECAR.parts)
     sidecar.parent.mkdir(parents=True, exist_ok=True)
@@ -403,7 +373,7 @@ def test_required_copilot_and_vscode_js_hook_lifecycle(
     target_selector: str,
 ) -> None:
     """Install, update, replay, uninstall, and reinstall an executable ESM hook."""
-    scenario = _new_scenario(tmp_path / target_selector, apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / target_selector, apm_binary_path)
     published = _publish(scenario)
     consumer = _consumer(
         scenario,
@@ -560,7 +530,7 @@ def test_required_target_contraction_removes_retained_sidecar(
     apm_binary_path: Path,
 ) -> None:
     """A dropped target loses its managed sidecar without touching user hooks."""
-    scenario = _new_scenario(tmp_path / "target-contraction", apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / "target-contraction", apm_binary_path)
     published = _publish(scenario)
     consumer = _consumer(
         scenario,
@@ -646,7 +616,7 @@ def test_required_user_edited_legacy_sidecar_is_preserved(
     apm_binary_path: Path,
 ) -> None:
     """Cleanup must retain user-edited bytes at a formerly managed sidecar path."""
-    scenario = _new_scenario(tmp_path / "user-sidecar", apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / "user-sidecar", apm_binary_path)
     published = _publish(scenario)
     consumer = _consumer(
         scenario,
@@ -695,7 +665,7 @@ def test_required_global_copilot_sidecar_lifecycle(
     apm_binary_path: Path,
 ) -> None:
     """Global Copilot hooks omit, clean, and never recreate the legacy sidecar."""
-    scenario = _new_scenario(tmp_path / "global-copilot", apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / "global-copilot", apm_binary_path)
     published = _publish(scenario)
     cwd = scenario.consumers.create("global-copilot-cwd").root
     copilot_root = scenario.isolated.home / ".copilot"

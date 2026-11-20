@@ -16,6 +16,8 @@ from apm_cli.marketplace.resolver import CrossRepoMisconfigRisk, MarketplacePlug
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 _RISK = CrossRepoMisconfigRisk(
     marketplace_host="corp.ghe.com",
     bare_repo_field="acme/tools",

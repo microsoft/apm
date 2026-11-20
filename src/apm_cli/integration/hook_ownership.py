@@ -7,6 +7,7 @@ from collections import Counter, deque
 from pathlib import Path
 from typing import Any, NoReturn
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -392,7 +393,7 @@ def is_dependency_package_dir(path: Path) -> bool:
     try:
         hooks = path / "hooks"
         apm_hooks = path / ".apm" / "hooks"
-        apm_yml = path / "apm.yml"
+        apm_yml = manifest_file(path)
         skill_md = path / "SKILL.md"
         return (
             (hooks.is_dir() and not hooks.is_symlink())

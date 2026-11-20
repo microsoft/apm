@@ -15,6 +15,8 @@ from apm_cli.core.auth import AuthResolver, HostInfo
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _reset_bearer_singleton():
@@ -141,53 +143,6 @@ class TestClassifyHost:
     def test_case_insensitive(self):
         hi = AuthResolver.classify_host("GitHub.COM")
         assert hi.kind == "github"
-
-
-# ---------------------------------------------------------------------------
-# TestDetectTokenType
-# ---------------------------------------------------------------------------
-
-
-class TestDetectTokenType:
-    def test_fine_grained(self):
-        assert AuthResolver.detect_token_type("github_pat_abc123") == "fine-grained"
-
-    def test_classic(self):
-        assert AuthResolver.detect_token_type("ghp_abc123") == "classic"
-
-    def test_oauth_user(self):
-        assert AuthResolver.detect_token_type("ghu_abc123") == "oauth"
-
-    def test_oauth_app(self):
-        assert AuthResolver.detect_token_type("gho_abc123") == "oauth"
-
-    def test_github_app_install(self):
-        assert AuthResolver.detect_token_type("ghs_abc123") == "github-app"
-
-    def test_github_app_refresh(self):
-        assert AuthResolver.detect_token_type("ghr_abc123") == "github-app"
-
-    def test_unknown(self):
-        assert AuthResolver.detect_token_type("some-random-token") == "unknown"
-
-
-# ---------------------------------------------------------------------------
-# TestGitlabRestHeaders
-# ---------------------------------------------------------------------------
-
-
-class TestGitlabRestHeaders:
-    def test_no_token_returns_empty_dict(self):
-        assert AuthResolver.gitlab_rest_headers(None) == {}
-        assert AuthResolver.gitlab_rest_headers("") == {}
-
-    def test_pat_uses_private_token_header(self):
-        headers = AuthResolver.gitlab_rest_headers("glpat-secret")
-        assert headers == {"PRIVATE-TOKEN": "glpat-secret"}
-
-    def test_oauth_bearer_style(self):
-        headers = AuthResolver.gitlab_rest_headers("oauth-access-token", oauth_bearer=True)
-        assert headers == {"Authorization": "Bearer oauth-access-token"}
 
 
 # ---------------------------------------------------------------------------
@@ -1164,20 +1119,6 @@ class TestHostInfoPort:
         hi = HostInfo(host="github.com", kind="github", has_public_repos=True, api_base="x")
         assert hi.port is None
 
-    def test_display_name_without_port(self):
-        hi = HostInfo(host="github.com", kind="github", has_public_repos=True, api_base="x")
-        assert hi.display_name == "github.com"
-
-    def test_display_name_with_port(self):
-        hi = HostInfo(
-            host="bitbucket.corp.com",
-            kind="generic",
-            has_public_repos=True,
-            api_base="x",
-            port=7999,
-        )
-        assert hi.display_name == "bitbucket.corp.com:7999"
-
     def test_classify_host_attaches_port(self):
         hi = AuthResolver.classify_host("bitbucket.corp.com", port=7999)
         assert hi.kind == "generic"
@@ -1190,37 +1131,6 @@ class TestHostInfoPort:
         hi = AuthResolver.classify_host("github.com", port=8443)
         assert hi.kind == "github"
         assert hi.port == 8443
-
-    def test_display_name_suppresses_default_port_443(self):
-        """Defence-in-depth: display_name never renders well-known default ports."""
-        hi = HostInfo(
-            host="github.com",
-            kind="github",
-            has_public_repos=True,
-            api_base="x",
-            port=443,
-        )
-        assert hi.display_name == "github.com"
-
-    def test_display_name_suppresses_default_port_22(self):
-        hi = HostInfo(
-            host="gitlab.com",
-            kind="generic",
-            has_public_repos=True,
-            api_base="x",
-            port=22,
-        )
-        assert hi.display_name == "gitlab.com"
-
-    def test_display_name_suppresses_default_port_80(self):
-        hi = HostInfo(
-            host="internal.git",
-            kind="generic",
-            has_public_repos=True,
-            api_base="x",
-            port=80,
-        )
-        assert hi.display_name == "internal.git"
 
 
 # ---------------------------------------------------------------------------

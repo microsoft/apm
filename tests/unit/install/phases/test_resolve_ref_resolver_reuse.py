@@ -13,6 +13,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
 
 from apm_cli.core.auth import AuthResolver
@@ -24,6 +26,8 @@ from apm_cli.deps.transport_selection import (
 from apm_cli.install.helpers.ref_reuse import maybe_resolve_git_semver, resolve_dep_auth
 from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 def _authorization_config_values(env: dict[str, str]) -> set[str]:

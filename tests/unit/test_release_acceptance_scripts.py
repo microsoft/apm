@@ -12,6 +12,8 @@ from types import ModuleType
 
 import pytest
 
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I6", "P-INV-I9")]
+
 ROOT = Path(__file__).parents[2]
 SCRIPTS = ROOT / ".apm/skills/release-acceptance/scripts"
 

@@ -16,6 +16,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import (
+    AGENT_PLUGIN_EXECUTABLES_UNAPPROVED,
+    NATIVE_PLUGIN_CACHE_DIFFERS,
+    NATIVE_PLUGIN_HASH_MISSING,
+)
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -128,13 +134,18 @@ def finalize_native_plugin(
     # is treated as unapproved.
     denied = any(not approvals.get(exec_type, False) for exec_type in present_types)
     if denied:
+        from apm_cli.core.scope import is_user_scope
+        from apm_cli.security.trust import approve_command
+
         label = package_name or "the plugin"
+        command = approve_command(label, user_scope=is_user_scope(getattr(ctx, "scope", None)))
+        approve = AGENT_PLUGIN_EXECUTABLES_UNAPPROVED.bind(package=label).with_command(command)
         # ONE authoritative refusal owned by the DiagnosticCollector, with the
         # actionable fix folded into the message itself (the summary line is not
         # verbose-gated, so the fix must live there, not in a dim detail line).
         diagnostics.warn(
             "Agent Plugin not registered with GitHub Copilot: its executables "
-            f"are not approved. Run 'apm approve {label}' to trust and register it.",
+            f"are not approved. {approve.sentence()}",
             package=package_name,
         )
         return result
@@ -176,13 +187,16 @@ def verify_native_plugin_cache(
         if not expected_hash:
             raise AgentPluginDeploymentBoundaryError(
                 f"Native Agent Plugin {lock_dep.get_unique_key()} has no content hash; "
-                "run 'apm install' to regenerate its integrity baseline"
+                f"{NATIVE_PLUGIN_HASH_MISSING.clause()}"
             )
     carried = () if lock_dep.is_local_source else lock_dep.carried_licenses
     if not candidate.is_dir() or not verify_locked_package(
         candidate, expected_hash, carried, framed=lock_dep.content_hash_framed
     ):
+        from apm_cli.core.cache_drift import package_cache_drift
+
         raise AgentPluginDeploymentBoundaryError(
-            f"Native Agent Plugin cache differs from its replay baseline: {candidate}; "
-            "run 'apm install' to restore the package"
+            package_cache_drift(
+                f"Native Agent Plugin {candidate}", NATIVE_PLUGIN_CACHE_DIFFERS.clause()
+            )
         )

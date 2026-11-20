@@ -19,6 +19,8 @@ import pytest
 
 from .conftest import run_guarded
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture()
 def fire_env(tmp_path, monkeypatch):

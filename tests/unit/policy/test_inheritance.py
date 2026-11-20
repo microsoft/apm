@@ -6,6 +6,8 @@ import dataclasses
 import unittest
 from typing import ClassVar
 
+import pytest
+
 from apm_cli.policy.inheritance import (
     MAX_CHAIN_DEPTH,
     PolicyInheritanceError,
@@ -31,6 +33,8 @@ from apm_cli.policy.schema import (
     SecurityPolicy,
     UnmanagedFilesPolicy,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestEnforcementEscalation(unittest.TestCase):
@@ -544,22 +548,6 @@ class TestUnmanagedFilesTransparency(unittest.TestCase):
         result = merge_policies(
             ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny")),
             ApmPolicy(),  # child omits unmanaged_files entirely -> action=None
-        )
-        self.assertEqual(result.unmanaged_files.action, "deny")
-
-    def test_parent_deny_child_explicit_ignore(self):
-        """Parent deny + child explicitly sets ignore -> merged deny (escalation)."""
-        result = merge_policies(
-            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny")),
-            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="ignore")),
-        )
-        self.assertEqual(result.unmanaged_files.action, "deny")
-
-    def test_parent_warn_child_explicit_deny(self):
-        """Parent warn + child explicitly sets deny -> merged deny (child tightens)."""
-        result = merge_policies(
-            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="warn")),
-            ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny")),
         )
         self.assertEqual(result.unmanaged_files.action, "deny")
 

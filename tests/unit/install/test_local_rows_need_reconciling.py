@@ -13,7 +13,7 @@ from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.install.helpers.no_work import local_rows_need_reconciling, retained_local_work
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 
 def _lockfile() -> LockFile:

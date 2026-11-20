@@ -14,6 +14,8 @@ import yaml
 
 from tests.workflow_contracts import run_bash as _run_bash
 
+pytestmark = pytest.mark.component
+
 ROOT = Path(__file__).resolve().parents[2]
 SHARED_APM = ROOT / ".github" / "workflows" / "shared" / "apm.md"
 VERIFY_SHARED_APM = ROOT / ".github" / "workflows" / "verify-shared-apm-matrix.yml"

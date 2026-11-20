@@ -13,6 +13,8 @@ from apm_cli.core.scope import InstallScope
 from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
 from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -92,9 +94,11 @@ def test_grok_cloud_disabled_flag_emits_enable_hint(
 
     _check_grok_cloud_flag_gate("grok-cloud", [], ctx)
 
+    from apm_cli.core.remediation import EXPERIMENTAL_FLAG_DISABLED
+
     ctx.logger.progress.assert_called_once_with(
         "The 'grok-cloud' target requires an experimental flag. "
-        "Run: apm experimental enable grok-cloud",
+        f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='grok-cloud').sentence()}",
         symbol="info",
     )
 
@@ -337,7 +341,10 @@ class TestProjectScopeGateForCowork:
         ):
             from apm_cli.install.phases.targets import run
 
-            run(ctx)  # Should not raise
+            run(ctx)
+
+        assert ctx.targets == [cowork_target]
+        assert not (tmp_path / "cowork").exists()
 
     @pytest.mark.parametrize(
         ("selected", "expected"),
@@ -396,7 +403,10 @@ class TestProjectScopeGateForCowork:
         ):
             from apm_cli.install.phases.targets import run
 
-            run(ctx)  # Should not raise
+            run(ctx)
+
+        assert ctx.targets == [copilot]
+        assert (ctx.project_root / ".github").is_dir()
 
 
 # ---------------------------------------------------------------------------

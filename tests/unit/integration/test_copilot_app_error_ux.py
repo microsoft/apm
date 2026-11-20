@@ -25,6 +25,8 @@ from apm_cli.integration.copilot_app_db import (
 from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 
+pytestmark = pytest.mark.component
+
 SCHEDULED_PROMPT = """---
 name: Daily Digest
 interval: daily

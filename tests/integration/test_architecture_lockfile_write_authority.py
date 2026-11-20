@@ -25,6 +25,8 @@ _COMMIT_SITE_BASELINE = frozenset(
         ("src/apm_cli/commands/uninstall/cli.py", "_abort_if_retained_target_cleanup_paths"),
         ("src/apm_cli/commands/uninstall/cli.py", "_persist_uninstall_lockfile"),
         ("src/apm_cli/commands/update.py", "_annotate_lockfile_revision_tags"),
+        # #4228 provenance re-verification, staged provisionally; removal: #4430.
+        ("src/apm_cli/commands/update.py", "_reverified_lock"),
         ("src/apm_cli/install/local_bundle_handler.py", "install_local_bundle"),
         ("src/apm_cli/install/local_bundle_hook_trust.py", "_drop_lock_rows"),
         ("src/apm_cli/install/lsp/integration.py", "run_owned_lsp_integration"),
@@ -60,8 +62,8 @@ _SUB_CHECK_MUTATIONS = (
     (
         "3-staging-route",
         "src/apm_cli/deps/lockfile.py",
-        "        staged = has_staged_lockfile(path)\n",
-        "        staged = None\n",
+        "        if (staged := has_staged_lockfile(path)) is not None:",
+        "        if (staged := None) is not None:",
         "read must call has_staged_lockfile",
     ),
     (
@@ -103,6 +105,10 @@ _SUB_CHECK_MUTATIONS = (
 
 def test_commit_sites_only_shrink() -> None:
     assert COMMIT_SITES <= _COMMIT_SITE_BASELINE
+    # Every registered site still names a real function in its source file.
+    assert all(
+        f"def {name}(" in (_ROOT / path).read_text(encoding="utf-8") for path, name in COMMIT_SITES
+    )
 
 
 _FLUSH_SITE_BASELINE = frozenset(
@@ -118,11 +124,16 @@ _FLUSH_SITE_BASELINE = frozenset(
 
 def test_flush_sites_only_shrink() -> None:
     assert FLUSH_SITES <= _FLUSH_SITE_BASELINE
+    assert all(
+        f"def {name}(" in (_ROOT / path).read_text(encoding="utf-8") for path, name in FLUSH_SITES
+    )
 
 
 def test_sub_check_mutations_are_sorted() -> None:
     names = [case[0] for case in _SUB_CHECK_MUTATIONS]
     assert names == sorted(names)
+    # Each mutation targets a source file that exists.
+    assert all((_ROOT / case[1]).is_file() for case in _SUB_CHECK_MUTATIONS)
 
 
 @pytest.mark.parametrize(

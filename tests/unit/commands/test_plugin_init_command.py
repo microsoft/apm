@@ -14,6 +14,8 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
 
 class TestPluginInitCommand:
     """``apm plugin init`` behaves like ``apm init --plugin``."""

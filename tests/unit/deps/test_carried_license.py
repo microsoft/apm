@@ -19,6 +19,8 @@ from apm_cli.deps.carried_license import (
 )
 from apm_cli.utils.content_hash import compute_file_hash
 
+pytestmark = pytest.mark.component
+
 MIT_TEXT = b"MIT License\n\nCopyright (c) 2026 Example\n"
 
 

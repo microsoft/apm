@@ -8,7 +8,11 @@ from pathlib import Path
 
 import click
 
-from ..constants import APM_YML_FILENAME
+from apm_cli.core.remediation import (
+    EXPERIMENTAL_FLAG_DISABLED,
+)
+from apm_cli.core.scope import manifest_file
+
 from ..core.command_logger import CommandLogger
 from ..install.locking import serialized_lifecycle
 from ..utils.credential_rendering import redact_secrets, render_config_value
@@ -225,6 +229,33 @@ def _show_all_user_config(logger: CommandLogger) -> None:
                 _echo_setting(f"registry.{reg_name}.default", True, indent="  ")
 
 
+def _set_registry_key(logger: CommandLogger, reg_name: str, field: str, value: str) -> None:
+    """Apply ``apm config set registry.<name>.<field> <value>``."""
+    from ..config import set_registry_default, set_registry_token, set_registry_url
+
+    if field == "url":
+        try:
+            set_registry_url(reg_name, value)
+        except ValueError as exc:
+            logger.error(redact_secrets(str(exc)))
+            sys.exit(1)
+        logger.success(f"registry.{reg_name}.url set")
+    elif field == "token":
+        set_registry_token(reg_name, value)
+        logger.success(f"registry.{reg_name}.token set")
+    else:
+        try:
+            is_default = _parse_bool_value(value)
+        except ValueError as exc:
+            logger.error(redact_secrets(str(exc)))
+            sys.exit(1)
+        set_registry_default(reg_name, is_default)
+        if is_default:
+            logger.success(f"registry.{reg_name}.default set")
+        else:
+            logger.success(f"registry.{reg_name}.default cleared")
+
+
 def _require_external_scanners(logger, key: str) -> None:
     """Exit with an actionable error if the external-scanners flag is off."""
     from ..core.experimental import is_enabled
@@ -232,7 +263,7 @@ def _require_external_scanners(logger, key: str) -> None:
     if not is_enabled("external_scanners"):
         logger.error(
             f"'{key}' requires the external-scanners experimental flag. "
-            "Run: apm experimental enable external-scanners"
+            f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='external-scanners').sentence()}"
         )
         sys.exit(1)
 
@@ -263,11 +294,11 @@ def config(ctx):
         logger = CommandLogger("config")
         try:
             # Lazy import rich table
-            from rich.table import Table  # type: ignore
+            from apm_cli.utils.console import new_table
 
             console = _get_console()
             # Create configuration display
-            config_table = Table(
+            config_table = new_table(
                 title="Current APM Configuration",
                 show_header=True,
                 header_style="bold cyan",
@@ -277,7 +308,7 @@ def config(ctx):
             config_table.add_column("Value", style="cyan")
 
             # Show apm.yml if in project
-            if Path(APM_YML_FILENAME).exists():
+            if manifest_file(Path(".")).exists():
                 apm_config = _load_apm_config()
                 _add_table_row(config_table, "Project", "Name", apm_config.get("name", "Unknown"))
                 _add_table_row(config_table, "", "Version", apm_config.get("version", "Unknown"))
@@ -372,7 +403,7 @@ def config(ctx):
             # Fallback display
             logger.progress("Current APM Configuration:")
 
-            if Path(APM_YML_FILENAME).exists():
+            if manifest_file(Path(".")).exists():
                 apm_config = _load_apm_config()
                 click.echo(f"\n{HIGHLIGHT}Project (apm.yml):{RESET}")
                 _echo_setting("Name", apm_config.get("name", "Unknown"), indent="  ")
@@ -445,29 +476,10 @@ def set(key, value):  # noqa: F811
         if not is_enabled("registries"):
             logger.error(
                 f"'{key}' requires the registries experimental flag. "
-                "Run: apm experimental enable registries"
+                f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='registries').sentence()}"
             )
             sys.exit(1)
-        reg_name, field = registry_match.group(1), registry_match.group(2)
-        from ..config import set_registry_default, set_registry_token, set_registry_url
-
-        if field == "url":
-            set_registry_url(reg_name, value)
-            logger.success(f"registry.{reg_name}.url set")
-        elif field == "token":
-            set_registry_token(reg_name, value)
-            logger.success(f"registry.{reg_name}.token set")
-        else:
-            try:
-                is_default = _parse_bool_value(value)
-            except ValueError as exc:
-                logger.error(redact_secrets(str(exc)))
-                sys.exit(1)
-            set_registry_default(reg_name, is_default)
-            if is_default:
-                logger.success(f"registry.{reg_name}.default set")
-            else:
-                logger.success(f"registry.{reg_name}.default cleared")
+        _set_registry_key(logger, registry_match.group(1), registry_match.group(2), value)
         return
 
     external_match = _EXTERNAL_SCANNER_KEY_RE.match(key)
@@ -506,7 +518,7 @@ def set(key, value):  # noqa: F811
         if not is_enabled("copilot_cowork"):
             logger.error(
                 "copilot-cowork-skills-dir requires the copilot-cowork experimental flag. "
-                "Run: apm experimental enable copilot-cowork"
+                f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='copilot-cowork').sentence()}"
             )
             sys.exit(1)
         from ..config import get_copilot_cowork_skills_dir, set_copilot_cowork_skills_dir
@@ -608,7 +620,7 @@ def set(key, value):  # noqa: F811
         if not is_enabled("external_scanners"):
             logger.error(
                 "audit-on-install requires the external-scanners experimental flag. "
-                "Run: apm experimental enable external-scanners"
+                f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='external-scanners').sentence()}"
             )
             sys.exit(1)
         from ..config import get_audit_on_install, set_audit_on_install
@@ -680,7 +692,7 @@ def get(key):
             if not is_enabled("registries"):
                 logger.error(
                     f"'{key}' requires the registries experimental flag. "
-                    "Run: apm experimental enable registries"
+                    f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='registries').sentence()}"
                 )
                 sys.exit(1)
             reg_name, field = registry_match.group(1), registry_match.group(2)
@@ -822,7 +834,7 @@ def unset(key):
         if not is_enabled("registries"):
             logger.error(
                 f"'{key}' requires the registries experimental flag. "
-                "Run: apm experimental enable registries"
+                f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='registries').sentence()}"
             )
             sys.exit(1)
         reg_name, field = registry_match.group(1), registry_match.group(2)

@@ -194,13 +194,52 @@ def get_apm_dir(scope: InstallScope) -> Path:
     return Path.cwd()
 
 
-def manifest_root(project_root: Path, *, user_scope: bool) -> Path:
-    """Return the directory whose ``apm.yml`` holds a command's trust grants.
+def manifest_file(directory: Path) -> Path:
+    """Return the ``apm.yml`` inside *directory* (a project, package or APM home).
 
-    At user scope the deploy root is ``$HOME`` but the manifest, and its
-    ``executables`` grants, live in ``$APM_HOME`` (default ``~/.apm/``).
+    The single place the manifest file name is joined onto a directory; a
+    relative *directory* stays relative (``Path(".")`` yields ``apm.yml``).
+    """
+    from ..constants import APM_YML_FILENAME
+
+    return Path(directory) / APM_YML_FILENAME
+
+
+def manifest_root(project_root: Path, *, user_scope: bool) -> Path:
+    """Return the directory whose ``apm.yml`` is a command's scope manifest.
+
+    At user scope the deploy root is ``$HOME`` but the manifest, its
+    ``executables`` grants and its ``policy:`` settings live in
+    ``$APM_HOME`` (default ``~/.apm/``).
     """
     return get_apm_home() if user_scope else Path(project_root)
+
+
+def scope_manifest_path(project_root: Path, *, user_scope: bool) -> Path:
+    """Return the scope manifest for a command rooted at *project_root*."""
+    return manifest_file(manifest_root(project_root, user_scope=user_scope))
+
+
+def is_user_scope_root(root: Path) -> bool:
+    """Return whether *root* is the user-scope manifest directory (``$APM_HOME``).
+
+    User scope has no project repository, so callers that derive project
+    facts (such as an org from a git remote) skip this root.
+    """
+    try:
+        return Path(root).resolve() == get_apm_home().resolve()
+    except (OSError, ValueError):
+        return False
+
+
+def policy_discovery_uses_git_remote(root: Path) -> bool:
+    """Return whether org policy is auto-discovered from *root*'s git remote.
+
+    The single user-scope policy decision: user scope (``-g``, rooted at
+    ``$APM_HOME``) has no project repository, so it discovers no org policy
+    from a git remote. An explicit ``--policy-source`` still applies.
+    """
+    return not is_user_scope_root(root)
 
 
 def get_modules_dir(scope: InstallScope) -> Path:
@@ -222,11 +261,9 @@ def get_manifest_path(scope: InstallScope) -> Path:
     User scope delegates to :func:`get_apm_dir` so the user-level
     location can't drift between this helper and the dir helper.
     """
-    from ..constants import APM_YML_FILENAME
-
     if scope is InstallScope.USER:
-        return get_apm_dir(scope) / APM_YML_FILENAME
-    return get_source_root(scope) / APM_YML_FILENAME
+        return manifest_file(get_apm_dir(scope))
+    return manifest_file(get_source_root(scope))
 
 
 def get_lockfile_dir(scope: InstallScope) -> Path:

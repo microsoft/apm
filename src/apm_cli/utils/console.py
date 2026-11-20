@@ -1,6 +1,8 @@
 """Console utility functions for formatting and output."""
 
+import os
 import re
+import sys
 import threading
 from contextlib import contextmanager
 from typing import Any
@@ -67,13 +69,47 @@ _ascii_console_classes: dict[type, type] = {}
 _ELLIPSIS_RUN = re.compile(r"([^\s|]{0,2})\u2026")
 
 
+def ascii_safe(text: str) -> str:
+    """Return *text* with every non-ASCII character as a Python escape (#4330).
+
+    User-supplied text such as a project or package path may hold any
+    character; output stays printable ASCII, so ``\u00fc`` prints as
+    ``\\xfc``. Control characters are left to their callers.
+    """
+    if text.isascii():
+        return text
+    return text.encode("ascii", "backslashreplace").decode("ascii")
+
+
 def _ascii_ellipsis(segment: Any) -> Any:
-    """Return *segment* with U+2026 runs rewritten to dots of the same width."""
+    """Return *segment* in ASCII: U+2026 runs become dots of the same width.
+
+    Any other non-ASCII character left by a pre-built renderable is escaped.
+    """
     text = segment.text
-    if "\u2026" not in text:
+    if text.isascii():
         return segment
-    dotted = _ELLIPSIS_RUN.sub(lambda m: "." * (len(m.group(1)) + 1), text)
-    return segment._replace(text=dotted)
+    if "\u2026" in text:
+        text = _ELLIPSIS_RUN.sub(lambda m: "." * (len(m.group(1)) + 1), text)
+    return segment._replace(text=ascii_safe(text))
+
+
+def _piped_windows_width(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Keep the full width when a Windows console writes to a pipe or file (#4409).
+
+    Rich treats any stream without VT support as a legacy Windows console and
+    renders one column narrower, which only prevents an auto-wrap on an
+    interactive old conhost. Rich keeps its own detection for a terminal.
+    """
+    if os.name != "nt" or "legacy_windows" in kwargs:
+        return kwargs
+    stream = kwargs.get("file") or (sys.stderr if kwargs.get("stderr") else sys.stdout)
+    isatty = getattr(stream, "isatty", None)
+    try:
+        interactive = bool(isatty and isatty())
+    except (OSError, ValueError):
+        interactive = False
+    return kwargs if interactive else {**kwargs, "legacy_windows": False}
 
 
 def _ascii_console(base: Any, **kwargs: Any) -> Any:
@@ -85,6 +121,7 @@ def _ascii_console(base: Any, **kwargs: Any) -> Any:
     """
     if not isinstance(base, type):
         return base(**kwargs)
+    kwargs = _piped_windows_width(kwargs)
     cls = _ascii_console_classes.get(base)
     if cls is None:
 
@@ -92,6 +129,10 @@ def _ascii_console(base: Any, **kwargs: Any) -> Any:
             @property
             def encoding(self) -> str:
                 return "ascii"
+
+            def render_str(self, text: str, **kwargs: Any) -> Any:
+                # Escape before layout so table columns size the escaped text.
+                return super().render_str(ascii_safe(text), **kwargs)
 
             def _render_buffer(self, buffer: Any) -> str:
                 # Rich truncates with U+2026 whatever the encoding (#3994); swap
@@ -112,6 +153,26 @@ def new_console(**kwargs: Any) -> Any:
     from rich import console as rich_console
 
     return _ascii_console(rich_console.Console, **kwargs)
+
+
+_UNSET: Any = object()
+
+
+def new_table(*args: Any, box: Any = _UNSET, **kwargs: Any) -> Any:
+    """Return a new Rich table drawn with the ASCII box (#4089).
+
+    The one constructor for Rich tables in APM; ``args``/``kwargs`` pass
+    through to ``rich.table.Table``. ``box`` may only be ``None`` (no box) or
+    an ASCII box, so a table stays ASCII on any console that renders it.
+    """
+    from rich import box as rich_box
+    from rich.table import Table as RichTable
+
+    if box is _UNSET:
+        box = rich_box.ASCII
+    elif box is not None and not box.ascii:
+        raise ValueError("new_table() draws ASCII boxes only; pass box=None or an ASCII box")
+    return RichTable(*args, box=box, **kwargs)
 
 
 # Thread-safe console singleton ------------------------------------------------
@@ -193,6 +254,7 @@ def _rich_echo(
     """Echo message with Rich formatting or colorama fallback.
 
     ``err=True`` writes to stderr regardless of the configured output stream.
+    Error lines (red, or the ``error`` symbol) always go to stderr.
     """
     # Handle backward compatibility - if style is provided, use it as color
     if style is not None:
@@ -202,10 +264,14 @@ def _rich_echo(
         symbol_char = STATUS_SYMBOLS[symbol]
         message = f"{symbol_char} {message}"
 
+    err = err or color == "red" or symbol == "error"
     # A hard-wrapped URL is split into lines that no longer open (#3994).
     soft_wrap = soft_wrap or "://" in message
     console = _get_stderr_console() if err else _get_console()
     if console:
+        # Piped or captured output is never hard-wrapped: a wrapped command or
+        # path no longer copies, greps or parses as one line.
+        soft_wrap = soft_wrap or not console.is_terminal
         try:
             style_str = color
             if bold:
@@ -237,10 +303,11 @@ def _rich_echo(
         color_code = color_map.get(color, Fore.WHITE)
         style_code = Style.BRIGHT if bold else ""
         click.echo(
-            f"{color_code}{style_code}{message}{Style.RESET_ALL}", err=err or _console_stderr
+            f"{color_code}{style_code}{ascii_safe(message)}{Style.RESET_ALL}",
+            err=err or _console_stderr,
         )
     else:
-        click.echo(message, err=err or _console_stderr)
+        click.echo(ascii_safe(message), err=err or _console_stderr)
 
 
 def _rich_success(message: str, symbol: str = None):  # noqa: RUF013
@@ -248,8 +315,8 @@ def _rich_success(message: str, symbol: str = None):  # noqa: RUF013
     _rich_echo(message, color="green", symbol=symbol, bold=True)
 
 
-def _rich_error(message: str, symbol: str = None, *, err: bool = False):  # noqa: RUF013
-    """Display error message with red color (``err=True`` writes to stderr)."""
+def _rich_error(message: str, symbol: str = None, *, err: bool = True):  # noqa: RUF013
+    """Display an error message in red on stderr."""
     _rich_echo(message, color="red", symbol=symbol, err=err)
 
 
@@ -300,7 +367,7 @@ def _create_files_table(files_data: list, title: str = "Files") -> Any | None:
         return None
 
     try:
-        table = Table(title=title, show_header=True, header_style="bold cyan")
+        table = new_table(title=title, show_header=True, header_style="bold cyan")
         table.add_column("File", style="bold white")
         table.add_column("Description", style="white")
 

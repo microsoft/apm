@@ -127,8 +127,10 @@ def test_commands_fail_closed_on_symlinked_lockfile(symlinked_project: Path, arg
     assert result.exit_code != 0, output
     assert "[x]" in output
     assert "symbolic link" in output
-    assert "apm.lock.yaml" in output
-    assert "shared.lock.yaml" in output
+    # The terminal wraps long paths mid-name; compare file names unwrapped.
+    compact = "".join(output.split())
+    assert "apm.lock.yaml" in compact
+    assert "shared.lock.yaml" in compact
     assert "Lockfile written" not in output
     assert link.is_symlink(), "the lockfile link must not be replaced by a regular file"
     assert os.readlink(link) == "shared.lock.yaml"

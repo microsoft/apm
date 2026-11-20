@@ -22,8 +22,11 @@ from typing import Any, Protocol
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.formats import BundleFormat
 from ..utils.yaml_io import load_yaml
+from .remediation import CLAUDE_PLUGIN_LAYOUT
 
 
 class OutputKind(enum.Enum):
@@ -186,7 +189,7 @@ class MarketplaceProducer:
         if source == ConfigSource.LEGACY_YML:
             yml_for_builder = project_root / "marketplace.yml"
         else:
-            yml_for_builder = project_root / "apm.yml"
+            yml_for_builder = manifest_file(project_root)
 
         mkt_opts = MktBuildOptions(
             dry_run=options.dry_run,
@@ -400,8 +403,8 @@ class PluginManifestProducer:
         ):
             raise BuildError(
                 "The selected targets only request Claude plugin metadata, but Agent Plugin "
-                "output is active. Run 'apm pack --claude-plugin' for the historical Claude "
-                "layout, or add dependencies to produce an Agent Plugin bundle."
+                "output is active. Add dependencies to produce an Agent Plugin bundle, "
+                f"or {CLAUDE_PLUGIN_LAYOUT.clause()}."
             )
 
         outputs: list[Path] = []

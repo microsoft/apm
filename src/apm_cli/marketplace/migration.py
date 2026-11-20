@@ -26,6 +26,14 @@ from pathlib import Path
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
+
+from ..core.remediation import (
+    MARKETPLACE_CONFIG_DUPLICATE,
+    MARKETPLACE_CONFIG_LEGACY,
+    MARKETPLACE_CONFIG_MISSING,
+    PROJECT_MANIFEST_MISSING,
+)
 from .errors import MarketplaceYmlError
 from .yml_schema import (
     MarketplaceConfig,
@@ -42,10 +50,7 @@ __all__ = [
 ]
 
 
-DEPRECATION_MESSAGE = (
-    "marketplace.yml is deprecated. Run 'apm marketplace migrate' to "
-    "fold it into apm.yml's 'marketplace:' block."
-)
+DEPRECATION_MESSAGE = f"marketplace.yml is deprecated. {MARKETPLACE_CONFIG_LEGACY.sentence()}"
 
 
 logger = logging.getLogger(__name__)
@@ -91,7 +96,7 @@ def detect_config_source(project_root: Path) -> ConfigSource:
     ``marketplace:`` block) and a standalone ``marketplace.yml`` are
     present -- the user must explicitly choose which one wins.
     """
-    apm_yml = project_root / "apm.yml"
+    apm_yml = manifest_file(project_root)
     legacy_yml = project_root / "marketplace.yml"
 
     has_apm_block = _has_marketplace_block(apm_yml)
@@ -100,8 +105,8 @@ def detect_config_source(project_root: Path) -> ConfigSource:
     if has_apm_block and has_legacy:
         raise MarketplaceYmlError(
             "Both apm.yml (with a 'marketplace:' block) and "
-            "marketplace.yml exist. Remove marketplace.yml or run "
-            "'apm marketplace migrate --force' to consolidate."
+            "marketplace.yml exist. Remove marketplace.yml or "
+            f"{MARKETPLACE_CONFIG_DUPLICATE.clause()}."
         )
     if has_apm_block:
         return ConfigSource.APM_YML
@@ -133,7 +138,7 @@ def load_marketplace_config(
     """
     source = detect_config_source(project_root)
     if source == ConfigSource.APM_YML:
-        return load_marketplace_from_apm_yml(project_root / "apm.yml")
+        return load_marketplace_from_apm_yml(manifest_file(project_root))
     if source == ConfigSource.LEGACY_YML:
         msg = DEPRECATION_MESSAGE
         if warn_callback is not None:
@@ -143,7 +148,7 @@ def load_marketplace_config(
         return load_marketplace_from_legacy_yml(project_root / "marketplace.yml")
     raise MarketplaceYmlError(
         "No marketplace config found. Add a 'marketplace:' block to "
-        "apm.yml or run 'apm marketplace init' to scaffold one."
+        f"apm.yml or {MARKETPLACE_CONFIG_MISSING.clause()}."
     )
 
 
@@ -216,12 +221,12 @@ def migrate_marketplace_yml(
         already has a ``marketplace:`` block and ``force`` is ``False``.
     """
     legacy_path = project_root / "marketplace.yml"
-    apm_path = project_root / "apm.yml"
+    apm_path = manifest_file(project_root)
 
     if not legacy_path.exists():
         raise MarketplaceYmlError("marketplace.yml not found -- nothing to migrate.")
     if not apm_path.exists():
-        raise MarketplaceYmlError("apm.yml not found. Run 'apm init' first.")
+        raise MarketplaceYmlError(f"apm.yml not found. {PROJECT_MANIFEST_MISSING.sentence()}")
 
     # Validate legacy file before doing anything destructive.
     load_marketplace_from_legacy_yml(legacy_path)

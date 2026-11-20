@@ -10,6 +10,8 @@ import pytest
 
 from apm_cli.core.script_runner import ScriptRunner
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def preserve_cwd():
@@ -480,4 +482,5 @@ name: test-project
         assert "To find available prompts, check:" in error_msg
         assert ".apm/prompts/" in error_msg
         assert "apm_modules/" in error_msg
-        assert "apm install" in error_msg
+        assert "Run 'apm list' to see each script and its command." in error_msg
+        assert "<owner>" not in error_msg

@@ -13,6 +13,8 @@ from dataclasses import fields, is_dataclass, replace
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.local_bundle import route_agent_plugin_package
 from ..core.errors import TargetResolutionError
 from ..models.apm_package import APMPackage, DependencyReference
@@ -355,7 +357,7 @@ class APMDependencyResolver:
             self._apm_modules_dir = project_root / "apm_modules"
 
         # Load the root package
-        apm_yml_path = project_root / "apm.yml"
+        apm_yml_path = manifest_file(project_root)
         if not apm_yml_path.exists() and root_package is None:
             # Create empty dependency graph for projects without apm.yml
             empty_package = APMPackage(name="unknown", version="0.0.0", package_path=project_root)
@@ -708,12 +710,20 @@ class APMDependencyResolver:
         require_locked_catalog_origin(
             dep_ref.marketplace_name, dep_ref.marketplace_plugin_name, self._existing_lockfile
         )
+        update_selected = self._update_keys is None or dep_ref.get_unique_key() in self._update_keys
         resolution = resolve_marketplace_plugin(
             dep_ref.marketplace_plugin_name,
             dep_ref.marketplace_name,
             version_spec=dep_ref.marketplace_version_spec,
             auth_resolver=self._auth_resolver,
             warning_handler=_logger.warning,
+            # An update accepts a changed ref for the plugins it selects; an
+            # unselected plugin keeps its locked ref, and a catalog read for
+            # locked server metadata does not choose the download, so neither
+            # touches the pin.
+            enforce_ref_pins=not (self._update_refs and not update_selected)
+            and decision.reason != MARKETPLACE_CATALOG_METADATA,
+            accept_ref_change=bool(self._update_refs) and update_selected,
         )
         admit_marketplace_resolution(resolution)
         resolved = (
@@ -799,6 +809,19 @@ class APMDependencyResolver:
                 f"{f' ({context})' if context else ''}: {exc}"
             )
             return None
+
+    def _depth_limit_error(
+        self, dep_ref: DependencyReference, parent_node: DependencyNode | None
+    ) -> str:
+        """Name the chain that reached ``max_depth`` (req-rs-006)."""
+        chain = [dep_ref.to_display_reference()]
+        ancestor = parent_node
+        while ancestor is not None:
+            chain.append(ancestor.dependency_ref.to_display_reference())
+            ancestor = ancestor.parent
+        return f"Dependency depth limit ({self.max_depth}) exceeded: " + " -> ".join(
+            reversed(chain)
+        )
 
     def build_dependency_tree(
         self,
@@ -967,12 +990,10 @@ class APMDependencyResolver:
                 # Remove from queued set since we're now processing this dependency
                 queued_keys.discard(dep_ref.get_resolution_key())
 
-                # Check maximum depth to prevent infinite recursion
+                # Check maximum depth to prevent infinite recursion. Exceeding
+                # the cap fails resolution naming the chain (req-rs-006, #4277).
                 if depth > self.max_depth:
-                    if self._read_only:
-                        tree.resolution_errors.append(
-                            f"Dependency preview depth limit reached: {dep_ref.to_display_reference()}"
-                        )
+                    tree.resolution_errors.append(self._depth_limit_error(dep_ref, parent_node))
                     continue
 
                 # Check if we already processed this dependency at this level or higher
@@ -1693,7 +1714,7 @@ class APMDependencyResolver:
             )
 
         # Look for apm.yml in the install path
-        apm_yml_path = install_path / "apm.yml"
+        apm_yml_path = manifest_file(install_path)
         if not apm_yml_path.exists():
             # Package exists but has no apm.yml (e.g., Claude Skill)
             # Check for SKILL.md and create minimal package

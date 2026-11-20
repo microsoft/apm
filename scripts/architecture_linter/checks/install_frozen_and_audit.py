@@ -29,6 +29,9 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _python_paths,
     _summary,
 )
+from scripts.architecture_linter.checks.install_lifecycle_serialization import (
+    SERIALIZED_LIFECYCLE_ROUTES,
+)
 from scripts.architecture_linter.checks.python_semantics import dotted_name
 from scripts.architecture_linter.facts import FactsProvider
 from scripts.architecture_linter.groups.common import EXEMPT_MARKER, violation
@@ -68,11 +71,17 @@ def _last_line_re(facts: object, pattern: re.Pattern[str]) -> int | None:
 
 
 _FROZEN_OWNER = "src/apm_cli/install/service.py"
-# req-lk-017: frozen install and audit content-integrity share one verifier.
+# req-lk-017: frozen install and audit share one deployed-file presence
+# verifier (#4043) and one content-integrity hash verifier.
 _DEPLOYED_HASH_VERIFIER = "src/apm_cli/policy/ci_checks.py"
 _DRIFT_DIFF = "src/apm_cli/install/drift.py"
 _DEPLOYED_HASH_FRAGMENTS = (
     (_FROZEN_OWNER, "resolve_audit_scope(lockfile_path.parent, committed)"),
+    (_DEPLOYED_HASH_VERIFIER, "def find_missing_deployed_files("),
+    (
+        _DEPLOYED_HASH_VERIFIER,
+        "missing, gitignored_skipped = find_missing_deployed_files(project_root, lock, targets)",
+    ),
     (_FROZEN_OWNER, "= verify_deployed_file_hashes(deploy_root, committed, targets)"),
     (_DEPLOYED_HASH_VERIFIER, "def verify_deployed_file_hashes("),
     (
@@ -83,6 +92,48 @@ _DEPLOYED_HASH_FRAGMENTS = (
     # Plain audit's drift row reads local-bundle hashes through the same
     # verifier, so it never disagrees with --ci (#3989).
     (_DRIFT_DIFF, "= verify_deployed_file_hashes(project_root, lockfile, targets)"),
+)
+
+# I7-X1 (#4043): a failed frozen install may only have retired executables
+# the gate now withholds. The refusal names them through the exec gate owner,
+# and the GATE oracle's exception stays closed: the lockfile never changes,
+# no allowed surface goes, and no file changes beyond the retired ones.
+_FROZEN_RETIREMENT = "src/apm_cli/install/frozen_retirement.py"
+_GATE_ORACLE = "tests/lifecycle/oracles.py"
+_RETIREMENT_FRAGMENTS = (
+    (_FROZEN_OWNER, "enforce_frozen_presence(request, committed, withheld,"),
+    (_FROZEN_RETIREMENT, "= find_missing_deployed_files(deploy_root, committed, targets)"),
+    (_FROZEN_RETIREMENT, "raise frozen_missing_files_error("),
+    (_FROZEN_RETIREMENT, "return withheld_executables("),
+    (_GATE_ORACLE, "if after.state.lockfile_bytes != before.state.lockfile_bytes:"),
+    (_GATE_ORACLE, "if after.deployed - before.deployed or retired & model.allowed_surfaces():"),
+    (_GATE_ORACLE, "and not _within_retirement(path, retirement)"),
+    (_GATE_ORACLE, "and not (retirement and _RETIREMENT_BOOKKEEPING in path)"),
+    (_GATE_ORACLE, "retirement = _i7_x1_retirement(before, after, model)"),
+    (
+        _GATE_ORACLE,
+        'return path in retirement or any(retired.startswith(path + "/") for retired in retirement)',
+    ),
+    (_GATE_ORACLE, '_RETIREMENT_BOOKKEEPING = "deployment-receipts/"'),
+)
+
+
+# #4053: frozen and audit ask the exec_status staleness owner (the one
+# apm update uses) and never re-derive the gate's decision themselves.
+_EXEC_STATUS_OWNER = "src/apm_cli/install/exec_gate.py"
+_AUDIT_COMMAND = "src/apm_cli/commands/audit.py"
+_EXEC_STATUS_FRAGMENTS = (
+    (_EXEC_STATUS_OWNER, "def stale_exec_decisions("),
+    (_EXEC_STATUS_OWNER, "stale, indeterminate = stale_exec_decisions("),
+    (_FROZEN_RETIREMENT, "stale, _indeterminate = stale_exec_decisions("),
+    (_DEPLOYED_HASH_VERIFIER, "stale, indeterminate = stale_exec_decisions("),
+    # Audit's provider reports an unresolvable org policy as indeterminate.
+    (_AUDIT_COMMAND, "else lambda: exec_policy_from_discovery(fetch_policy)"),
+)
+_EXEC_STATUS_REDERIVATION = (
+    "recorded_exec_status_is_stale(",
+    "current_exec_decision(",
+    "exec_trust_context_for_project(",
 )
 
 
@@ -100,7 +151,11 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
     outcome, outcome_fail = _facts_for(provider, "src/apm_cli/install/outcome.py", rule_id)
     mcp, mcp_fail = _facts_for(provider, "src/apm_cli/install/mcp/integration.py", rule_id)
     audit, audit_fail = _facts_for(provider, _DEPLOYED_HASH_VERIFIER, rule_id)
+    retirement, retirement_fail = _facts_for(provider, _FROZEN_RETIREMENT, rule_id)
+    oracle, oracle_fail = _facts_for(provider, _GATE_ORACLE, rule_id)
     drift, drift_fail = _facts_for(provider, _DRIFT_DIFF, rule_id)
+    exec_status, exec_status_fail = _facts_for(provider, _EXEC_STATUS_OWNER, rule_id)
+    audit_command, audit_command_fail = _facts_for(provider, _AUDIT_COMMAND, rule_id)
     failures = (
         drift_fail
         + owner_fail
@@ -110,6 +165,10 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         + outcome_fail
         + mcp_fail
         + audit_fail
+        + retirement_fail
+        + oracle_fail
+        + exec_status_fail
+        + audit_command_fail
     )
     if failures:
         return tuple(failures)
@@ -230,6 +289,28 @@ def check_frozen(provider: FactsProvider) -> tuple[Violation, ...]:
         or not all(
             _present({_FROZEN_OWNER: owner, _DRIFT_DIFF: drift}.get(path, audit), needle)
             for path, needle in _DEPLOYED_HASH_FRAGMENTS
+        )
+        or not all(
+            _present(
+                {_FROZEN_OWNER: owner, _FROZEN_RETIREMENT: retirement}.get(path, oracle), needle
+            )
+            for path, needle in _RETIREMENT_FRAGMENTS
+        )
+        or not all(
+            _present(
+                {
+                    _FROZEN_RETIREMENT: retirement,
+                    _EXEC_STATUS_OWNER: exec_status,
+                    _AUDIT_COMMAND: audit_command,
+                }.get(path, audit),
+                needle,
+            )
+            for path, needle in _EXEC_STATUS_FRAGMENTS
+        )
+        or any(
+            _present(facts, token)
+            for facts in (owner, retirement, audit)
+            for token in _EXEC_STATUS_REDERIVATION
         )
         or bool(duplicates)
     )
@@ -997,51 +1078,7 @@ def check_audit_replay(provider: FactsProvider) -> tuple[Violation, ...]:
 def check_lifecycle_serialization(provider: FactsProvider) -> tuple[Violation, ...]:
     """Every declared lifecycle mutator must route through install/locking.py."""
     rule_id = _GUARD_LIFECYCLE_SERIALIZATION
-    required = {
-        "src/apm_cli/commands/audit.py": {
-            "audit": "serialized_lifecycle_when",
-        },
-        "src/apm_cli/commands/approve.py": {
-            "approve_cmd": "serialized_lifecycle",
-            "deny_cmd": "serialized_lifecycle",
-        },
-        "src/apm_cli/commands/compile/cli.py": {
-            "_handle_global_flag": "serialized_lifecycle_unless",
-            "_run_compilation": "serialized_lifecycle_unless",
-        },
-        "src/apm_cli/commands/config.py": {
-            "set": "serialized_lifecycle",
-            "unset": "serialized_lifecycle",
-        },
-        "src/apm_cli/commands/deps/cli.py": {
-            "clean": "serialized_lifecycle_unless",
-            "update": "serialized_lifecycle",
-        },
-        "src/apm_cli/commands/experimental.py": {
-            "enable_flag": "serialized_lifecycle",
-            "disable_flag": "serialized_lifecycle",
-            "reset_flags": "serialized_lifecycle",
-        },
-        "src/apm_cli/commands/init.py": {"init": "serialized_lifecycle_unless"},
-        "src/apm_cli/commands/install.py": {"install": "serialized_lifecycle_unless_fresh_preview"},
-        "src/apm_cli/commands/lifecycle.py": {
-            "lifecycle_init": "serialized_lifecycle",
-        },
-        "src/apm_cli/commands/lock.py": {"_run_lock": "serialized_lifecycle"},
-        "src/apm_cli/commands/marketplace/__init__.py": {
-            "add": "serialized_lifecycle",
-            "update": "serialized_lifecycle",
-            "remove": "serialized_lifecycle",
-        },
-        "src/apm_cli/commands/marketplace/init.py": {"init": "serialized_lifecycle"},
-        "src/apm_cli/commands/marketplace/plugin/add.py": {"add": "serialized_lifecycle"},
-        "src/apm_cli/commands/marketplace/plugin/remove.py": {"remove": "serialized_lifecycle"},
-        "src/apm_cli/commands/marketplace/plugin/set.py": {"set_cmd": "serialized_lifecycle"},
-        "src/apm_cli/commands/plugin/init.py": {"init": "serialized_lifecycle"},
-        "src/apm_cli/commands/prune.py": {"prune": "serialized_lifecycle_unless"},
-        "src/apm_cli/commands/uninstall/cli.py": {"uninstall": "serialized_lifecycle"},
-        "src/apm_cli/commands/update.py": {"update": "serialized_lifecycle"},
-    }
+    required = SERIALIZED_LIFECYCLE_ROUTES
     findings: list[Violation] = []
     for path, functions in required.items():
         facts, failures = _facts_for(provider, path, rule_id)

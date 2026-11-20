@@ -3,7 +3,9 @@
 from pathlib import Path
 from typing import Any
 
-from ...constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
+from apm_cli.core.scope import manifest_file
+
+from ...constants import APM_DIR, SKILL_MD_FILENAME
 from ...models.apm_package import APMPackage
 from ...utils.yaml_io import load_yaml
 
@@ -28,7 +30,7 @@ def _scan_installed_packages(apm_modules_dir: Path) -> list:
         if candidate.name.startswith(".") and candidate.parent != apm_modules_dir:
             continue
         if not (
-            (candidate / APM_YML_FILENAME).exists()
+            manifest_file(candidate).exists()
             or (candidate / APM_DIR).exists()
             or (candidate / SKILL_MD_FILENAME).is_file()
         ):
@@ -53,7 +55,7 @@ def _is_nested_under_package(candidate: Path, apm_modules_path: Path) -> bool:
     parent = candidate.parent
     while parent != apm_modules_path and parent != parent.parent:  # noqa: PLR1714
         if (
-            (parent / APM_YML_FILENAME).exists()
+            manifest_file(parent).exists()
             or (parent / APM_DIR).exists()
             or (parent / SKILL_MD_FILENAME).is_file()
             or _is_agent_plugin_root(parent)
@@ -219,7 +221,7 @@ def _tolerant_identity(package_path: Path, apm_yml_path: Path) -> dict[str, str]
 def _get_package_display_info(package_path: Path) -> dict[str, str]:
     """Get package display information."""
     try:
-        apm_yml_path = package_path / APM_YML_FILENAME
+        apm_yml_path = manifest_file(package_path)
         if apm_yml_path.exists():
             package = APMPackage.from_apm_yml(apm_yml_path)
             version_info = f"@{package.version}" if package.version else "@unknown"
@@ -235,7 +237,7 @@ def _get_package_display_info(package_path: Path) -> dict[str, str]:
                 "version": "unknown",
             }
     except Exception:
-        identity = _tolerant_identity(package_path, package_path / APM_YML_FILENAME)
+        identity = _tolerant_identity(package_path, manifest_file(package_path))
         if identity is None:
             return {
                 "display_name": f"{package_path.name}@error",
@@ -252,7 +254,7 @@ def _get_package_display_info(package_path: Path) -> dict[str, str]:
 def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
     """Get detailed package information for the info command."""
     try:
-        apm_yml_path = package_path / APM_YML_FILENAME
+        apm_yml_path = manifest_file(package_path)
         if apm_yml_path.exists():
             package = APMPackage.from_apm_yml(apm_yml_path)
             context_count, workflow_count = _count_package_files(package_path)
@@ -297,7 +299,7 @@ def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
                 "hooks": primitives.get("hooks", 0),
             }
     except Exception as e:
-        identity = _tolerant_identity(package_path, package_path / APM_YML_FILENAME)
+        identity = _tolerant_identity(package_path, manifest_file(package_path))
         if identity is not None:
             # Tolerant display: a readable manifest with incomplete identity
             # (e.g. empty/missing version) renders gracefully -- symmetric with

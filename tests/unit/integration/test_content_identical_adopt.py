@@ -40,6 +40,8 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _make_package_info(package_dir: Path, name: str = "test-pkg") -> PackageInfo:
     package = APMPackage(
@@ -807,3 +809,84 @@ class TestCommandIntegratorAdopt:
         # User content preserved; adopt did not fire.
         assert target.read_bytes() == user_body
         assert result.files_adopted == 0
+
+
+def test_gemini_command_adopts_its_rendered_toml(tmp_path: Path) -> None:
+    """A Gemini command is transformed to TOML; adopt compares that render (#4360)."""
+    pkg_dir = tmp_path / "pkg"
+    source = pkg_dir / ".apm" / "prompts" / "cmd.prompt.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "---\ndescription: cmd\ninput: [x]\n---\n# Cmd $ARGUMENTS\n", encoding="utf-8"
+    )
+    target = tmp_path / ".gemini" / "commands" / "cmd.toml"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        CommandIntegrator._gemini_command_text(source), encoding="utf-8", newline="\n"
+    )
+
+    result = CommandIntegrator().integrate_commands_for_target(
+        KNOWN_TARGETS["gemini"],
+        _make_package_info(pkg_dir),
+        tmp_path,
+        force=False,
+        managed_files=None,
+    )
+
+    assert result.files_adopted == 1
+    assert result.files_integrated == 0
+    assert target.read_text(encoding="utf-8") == CommandIntegrator._gemini_command_text(source)
+
+
+class TestCommandFilesDeployLfOnEveryPlatform:
+    """Command files deploy LF everywhere, so a reinstall adopts them (#4468).
+
+    ``_crlf_text_open`` gives text-mode writes Windows newline translation on any
+    OS; only a writer that leaves newlines to the platform is affected by it.
+    """
+
+    @staticmethod
+    def _crlf_text_open(file, mode="r", *args, **kwargs):
+        if "w" in mode and "b" not in mode and kwargs.get("newline") is None:
+            kwargs["newline"] = "\r\n"
+        return open(file, mode, *args, **kwargs)
+
+    @staticmethod
+    def _deploy(root: Path, target_name: str) -> tuple[Path, PackageInfo]:
+        pkg_dir = root / "pkg"
+        prompts_src = pkg_dir / ".apm" / "prompts"
+        prompts_src.mkdir(parents=True)
+        (prompts_src / "cmd.prompt.md").write_bytes(
+            b"---\ndescription: cmd\n---\n# Cmd\n\nRun it.\n"
+        )
+        pkg_info = _make_package_info(pkg_dir)
+        (root / KNOWN_TARGETS[target_name].root_dir).mkdir(parents=True)
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS[target_name], pkg_info, root, force=False, managed_files=None
+        )
+        assert result.files_integrated == 1
+        (target,) = result.target_paths
+        return target, pkg_info
+
+    @pytest.mark.parametrize("target_name", ["claude", "cursor"])
+    def test_deployed_command_is_lf_and_a_reinstall_adopts_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_name: str
+    ) -> None:
+        reference, _ = self._deploy(tmp_path / "reference", target_name)
+        lf_render = reference.read_bytes().replace(b"\r\n", b"\n")
+
+        from apm_cli.integration import command_integrator
+
+        monkeypatch.setattr(command_integrator, "open", self._crlf_text_open, raising=False)
+        root = tmp_path / "project"
+        target, pkg_info = self._deploy(root, target_name)
+        deployed = target.read_bytes()
+        assert b"\r\n" not in deployed
+        assert deployed == lf_render
+
+        again = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS[target_name], pkg_info, root, force=False, managed_files=None
+        )
+        assert again.files_adopted == 1
+        assert again.files_integrated == 0
+        assert target.read_bytes() == deployed

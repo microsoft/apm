@@ -21,6 +21,8 @@ from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
 from apm_cli.models.dependency.mcp import MCPDependency
 
+pytestmark = pytest.mark.component
+
 ALL_RUNTIMES = sorted(ClientFactory.supported_clients())
 # VS Code always keyed servers by their declared name, so it never wrote a
 # truncated entry. OpenCode's detector reads ``mcpServers`` while the adapter

@@ -79,3 +79,41 @@ def test_empty_manifest_frozen_install_agrees_with_audit(
     assert frozen.returncode == 0, _evidence(frozen)
     assert not (workspace / "apm.lock.yaml").exists()
     assert _tree(workspace, cwd, isolated.home) == before
+
+
+def test_empty_manifest_with_stale_deployed_files_frozen_agrees_with_audit(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Nothing declared, no lockfile, files from an earlier install on disk (I3)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "stale", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    workspace = isolated.work_root / "stale-consumer"
+    package = workspace / "packages" / "stale"
+    (package / ".apm" / "instructions").mkdir(parents=True)
+    (package / "apm.yml").write_text("name: stale\nversion: 1.0.0\n", encoding="utf-8")
+    (package / ".apm" / "instructions" / "stale.instructions.md").write_text(
+        "---\napplyTo: '**'\ndescription: stale\n---\nStale rule.\n", encoding="utf-8"
+    )
+    (workspace / "apm.yml").write_text(
+        _MANIFEST.replace("  apm: []\n", "  apm:\n  - ./packages/stale\n"), encoding="utf-8"
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+
+    def run(*args: str) -> CommandResult:
+        return runner.run(args, cwd=workspace, env=env, scenario_id=f"stale-{args[-1]}")
+
+    installed = run("install")
+    assert installed.returncode == 0, _evidence(installed)
+    stale = workspace / ".github" / "instructions" / "stale.instructions.md"
+    assert stale.is_file(), _evidence(installed)
+    (workspace / "apm.yml").write_text(_MANIFEST, encoding="utf-8")
+    (workspace / "apm.lock.yaml").unlink()
+    before = _tree(workspace, isolated.home)
+
+    frozen = run("install", "--frozen")
+    after_frozen = _tree(workspace, isolated.home)
+    audit = run("audit", "--ci")
+
+    assert frozen.returncode == audit.returncode, (_evidence(frozen), _evidence(audit))
+    assert after_frozen == before, _evidence(frozen)
+    assert stale.is_file()

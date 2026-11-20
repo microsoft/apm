@@ -15,6 +15,8 @@ import pytest
 from apm_cli.install import audit_replay
 from apm_cli.install.audit_replay import resolve_ci_audit_materialization
 
+pytestmark = pytest.mark.component
+
 _NO_PACKAGES = (
     "lockfile_version: '1'\napm_version: 0.36.0\ndependencies: []\nmcp_servers:\n- local-tool\n"
 )

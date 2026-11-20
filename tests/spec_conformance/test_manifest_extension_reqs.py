@@ -16,6 +16,8 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from tests.spec_conformance._helpers import assert_spec_contains, load_schema
 
+pytestmark = pytest.mark.component
+
 _WARN = "apm_cli.utils.console._rich_warning"
 
 

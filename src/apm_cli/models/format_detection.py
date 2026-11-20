@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from ..agent_plugins import AgentPluginDetection
     from .validation import PackageType
 
-from ..constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
+from ..constants import APM_DIR, SKILL_MD_FILENAME
 
 # Canonical directory names that form part of the Claude Code marketplace
 # plugin layout.  Order is preserved in ``ClaudePluginFormatEvidence``
@@ -207,7 +207,9 @@ class ApmYmlDetector:
     """
 
     def detect(self, package_path: Path) -> ApmYmlFormatEvidence | None:
-        apm_yml_path = package_path / APM_YML_FILENAME
+        from apm_cli.core.scope import manifest_file
+
+        apm_yml_path = manifest_file(package_path)
         if not apm_yml_path.exists():
             return None
         has_apm_dir = (package_path / APM_DIR).is_dir()

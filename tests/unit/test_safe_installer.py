@@ -3,7 +3,11 @@
 import unittest
 from unittest.mock import Mock, patch
 
+import pytest
+
 from apm_cli.core.safe_installer import InstallationSummary, SafeMCPInstaller
+
+pytestmark = pytest.mark.unit
 
 
 class TestSafeMCPInstaller(unittest.TestCase):

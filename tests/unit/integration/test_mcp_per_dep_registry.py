@@ -13,6 +13,8 @@ import pytest
 
 from apm_cli.models.dependency.mcp import MCPDependency
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

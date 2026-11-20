@@ -21,6 +21,8 @@ from apm_cli.policy.inheritance import resolve_policy_chain
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy
 
+pytestmark = pytest.mark.component
+
 PROPERTY_SEED = 0xA9C2026
 PROPERTY_PROFILE = settings(
     max_examples=24,

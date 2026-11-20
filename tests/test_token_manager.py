@@ -9,6 +9,8 @@ import pytest
 
 from apm_cli.core.token_manager import GitHubTokenManager, _sanitize_credential_path
 
+pytestmark = pytest.mark.unit
+
 
 class TestSanitizeCredentialPath:
     """Direct coverage of the security-critical credential-path sanitizer.
@@ -465,8 +467,8 @@ class TestIsValidCredentialToken:
         assert not GitHubTokenManager._is_valid_credential_token("")
 
     def test_none_coerced_invalid(self):
-        """None would fail the truthiness check (caller already guards this)."""
-        assert not GitHubTokenManager._is_valid_credential_token("")
+        """None fails the truthiness check and is reported invalid instead of raising."""
+        assert GitHubTokenManager._is_valid_credential_token(None) is False
 
     def test_whitespace_only_invalid(self):
         assert not GitHubTokenManager._is_valid_credential_token("  ")

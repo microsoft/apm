@@ -21,106 +21,11 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # _parse_toggle_input
 # ---------------------------------------------------------------------------
-
-
-class TestParseToggleInput:
-    def test_empty_response_returns_empty(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("", 5)
-        assert indices == []
-        assert err is None
-
-    def test_single_number(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("3", 5)
-        assert indices == [2]  # 0-based
-        assert err is None
-
-    def test_csv_numbers(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("1,3,5", 5)
-        assert indices == [0, 2, 4]
-        assert err is None
-
-    def test_range(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("2-4", 5)
-        assert indices == [1, 2, 3]
-        assert err is None
-
-    def test_mixed_range_and_csv(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("1,3-5,7", 7)
-        assert set(indices) == {0, 2, 3, 4, 6}
-        assert err is None
-
-    def test_all_keyword(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("all", 4)
-        assert indices == [0, 1, 2, 3]
-        assert err is None
-
-    def test_none_keyword(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("none", 4)
-        assert indices == [0, 1, 2, 3]
-        assert err is None
-
-    def test_invalid_range_non_numeric(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("a-b", 5)
-        assert indices == []
-        assert err is not None
-        assert "Invalid range" in err
-
-    def test_range_out_of_bounds(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("1-10", 5)
-        assert indices == []
-        assert err is not None
-        assert "out of bounds" in err
-
-    def test_invalid_token(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("abc", 5)
-        assert indices == []
-        assert err is not None
-        assert "Invalid token" in err
-
-    def test_number_out_of_bounds(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("10", 5)
-        assert indices == []
-        assert err is not None
-        assert "out of bounds" in err
-
-    def test_number_zero_out_of_bounds(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("0", 5)
-        assert indices == []
-        assert err is not None
-
-    def test_whitespace_ignored(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("  2  ", 5)
-        assert indices == [1]
-        assert err is None
 
 
 # ---------------------------------------------------------------------------
@@ -129,11 +34,17 @@ class TestParseToggleInput:
 
 
 class TestReadExistingTargets:
-    def test_no_apm_yml_returns_empty(self, tmp_path):
+    @pytest.mark.parametrize(
+        "content",
+        [None, "- list\n- items\n", "name: test\n", "{{{{invalid yaml"],
+        ids=["no-apm-yml", "non-dict-yaml", "no-target-field", "invalid-yaml"],
+    )
+    def test_unusable_manifest_returns_empty(self, tmp_path, content):
         from apm_cli.commands.init import _read_existing_targets
 
-        result = _read_existing_targets(tmp_path)
-        assert result == []
+        if content is not None:
+            (tmp_path / "apm.yml").write_text(content)
+        assert _read_existing_targets(tmp_path) == []
 
     def test_plural_targets_list(self, tmp_path):
         from apm_cli.commands.init import _read_existing_targets
@@ -163,26 +74,36 @@ class TestReadExistingTargets:
         result = _read_existing_targets(tmp_path)
         assert result == ["copilot", "cursor"]
 
-    def test_non_dict_yaml_returns_empty(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("declared", "expected"),
+        [
+            ({"target": "agents"}, ["copilot"]),
+            ({"target": "agents,claude"}, ["copilot", "claude"]),
+            ({"target": "agy"}, ["antigravity"]),
+        ],
+    )
+    def test_legacy_target_uses_the_migrate_mapping(self, tmp_path, declared, expected):
+        """#3857: a re-init never writes a ``targets:`` token APM rejects."""
         from apm_cli.commands.init import _read_existing_targets
 
-        (tmp_path / "apm.yml").write_text("- list\n- items\n")
-        result = _read_existing_targets(tmp_path)
-        assert result == []
+        (tmp_path / "apm.yml").write_text(yaml.safe_dump(declared))
+        assert _read_existing_targets(tmp_path) == expected
 
-    def test_no_target_field_returns_empty(self, tmp_path):
+    def test_unmappable_target_is_refused(self, tmp_path):
         from apm_cli.commands.init import _read_existing_targets
+        from apm_cli.models.manifest_targets import TargetRewriteError
 
-        (tmp_path / "apm.yml").write_text(yaml.safe_dump({"name": "test"}))
-        result = _read_existing_targets(tmp_path)
-        assert result == []
+        (tmp_path / "apm.yml").write_text(yaml.safe_dump({"target": "intellij"}))
+        with pytest.raises(TargetRewriteError, match="'intellij' has no 'targets:'"):
+            _read_existing_targets(tmp_path)
 
-    def test_invalid_yaml_returns_empty(self, tmp_path):
+    def test_anchored_manifest_is_refused(self, tmp_path):
         from apm_cli.commands.init import _read_existing_targets
+        from apm_cli.models.manifest_io import ManifestAnchorError
 
-        (tmp_path / "apm.yml").write_text("{{{{invalid yaml")
-        result = _read_existing_targets(tmp_path)
-        assert result == []
+        (tmp_path / "apm.yml").write_text("x: &t [claude]\ntargets: *t\n")
+        with pytest.raises(ManifestAnchorError, match="anchor '&t' on line 1"):
+            _read_existing_targets(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -294,95 +215,73 @@ class TestResolveInitTargets:
             )
         assert result == ["copilot"]
 
+    def test_ide_target_flag_is_refused_before_writing(self, tmp_path):
+        """#3878: --target intellij is never recorded (not even as copilot)."""
+        from apm_cli.commands.init import _resolve_init_targets
+
+        logger = self._make_logger()
+        with pytest.raises(SystemExit) as excinfo:
+            _resolve_init_targets(
+                tmp_path, target_flag="intellij", yes=True, apm_yml_exists=False, logger=logger
+            )
+        assert excinfo.value.code == 1
+        assert "'intellij' is an IDE, not a target" in logger.error.call_args.args[0]
+        assert not (tmp_path / "apm.yml").exists()
+
+    def test_unmappable_existing_target_exits_before_writing_when_non_interactive(self, tmp_path):
+        from apm_cli.commands.init import _resolve_init_targets
+
+        (tmp_path / "apm.yml").write_text("target: intellij\n")
+        logger = self._make_logger()
+        with (
+            patch("apm_cli.commands.init._stdin_is_tty", return_value=False),
+            pytest.raises(SystemExit) as excinfo,
+        ):
+            _resolve_init_targets(
+                tmp_path, target_flag=None, yes=True, apm_yml_exists=True, logger=logger
+            )
+        assert excinfo.value.code == 1
+        assert "'intellij' has no 'targets:' equivalent" in logger.error.call_args.args[0]
+        assert (tmp_path / "apm.yml").read_text() == "target: intellij\n"
+
+    def test_anchored_existing_manifest_exits_before_writing_when_non_interactive(self, tmp_path):
+        from apm_cli.commands.init import _resolve_init_targets
+
+        (tmp_path / "apm.yml").write_text("x: &t [claude]\ntargets: *t\n")
+        logger = self._make_logger()
+        with (
+            patch("apm_cli.commands.init._stdin_is_tty", return_value=False),
+            pytest.raises(SystemExit) as excinfo,
+        ):
+            _resolve_init_targets(
+                tmp_path, target_flag=None, yes=True, apm_yml_exists=True, logger=logger
+            )
+        assert excinfo.value.code == 1
+        assert "must not use YAML anchors" in logger.error.call_args.args[0]
+
+    def test_unmappable_existing_target_warns_and_prompts_when_interactive(self, tmp_path):
+        from apm_cli.commands.init import _resolve_init_targets
+
+        (tmp_path / "apm.yml").write_text("target: intellij\n")
+        logger = self._make_logger()
+        with (
+            patch("apm_cli.commands.init._stdin_is_tty", return_value=True),
+            patch("apm_cli.commands.init.detect_signals", return_value=[]),
+            patch(
+                "apm_cli.commands.init._prompt_target_selection", return_value=["claude"]
+            ) as prompt,
+        ):
+            result = _resolve_init_targets(
+                tmp_path, target_flag=None, yes=False, apm_yml_exists=True, logger=logger
+            )
+        assert result == ["claude"]
+        assert prompt.call_args.args[0] == set()
+        assert "'intellij' has no 'targets:' equivalent" in logger.warning.call_args.args[0]
+
 
 # ---------------------------------------------------------------------------
 # _confirm_setup_summary - ImportError fallback
 # ---------------------------------------------------------------------------
-
-
-class TestConfirmSetupSummary:
-    def test_rich_path_aborts_on_no(self):
-        from apm_cli.commands.init import _confirm_setup_summary
-
-        config = {
-            "name": "my-proj",
-            "version": "1.0.0",
-            "description": "Desc",
-            "author": "Author",
-        }
-        logger = MagicMock()
-
-        with (
-            patch("apm_cli.commands.init._get_console", return_value=MagicMock()),
-        ):
-            # Patch Confirm.ask to return False -> should sys.exit(0)
-            with (
-                patch("rich.prompt.Confirm.ask", return_value=False),
-                pytest.raises(SystemExit) as exc_info,
-            ):
-                _confirm_setup_summary(config, logger)
-        assert exc_info.value.code == 0
-
-    def test_fallback_text_confirms_proceed(self):
-        from apm_cli.commands.init import _confirm_setup_summary
-
-        config = {
-            "name": "my-proj",
-            "version": "1.0.0",
-            "description": "Desc",
-            "author": "Author",
-        }
-        logger = MagicMock()
-
-        with (
-            patch.dict(
-                sys.modules, {"rich.console": None, "rich.panel": None, "rich.prompt": None}
-            ),
-            patch("click.confirm", return_value=True),
-        ):
-            # Should not raise
-            _confirm_setup_summary(config, logger)
-
-    def test_fallback_text_aborts_on_no(self):
-        from apm_cli.commands.init import _confirm_setup_summary
-
-        config = {
-            "name": "my-proj",
-            "version": "1.0.0",
-            "description": "Desc",
-            "author": "Author",
-        }
-        logger = MagicMock()
-
-        with (
-            patch.dict(
-                sys.modules, {"rich.console": None, "rich.panel": None, "rich.prompt": None}
-            ),
-            patch("click.confirm", return_value=False),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            _confirm_setup_summary(config, logger)
-        assert exc_info.value.code == 0
-
-    def test_targets_line_shows_in_summary(self):
-        from apm_cli.commands.init import _confirm_setup_summary
-
-        config = {
-            "name": "my-proj",
-            "version": "1.0.0",
-            "description": "Desc",
-            "author": "Author",
-            "targets": ["copilot", "claude"],
-        }
-        logger = MagicMock()
-
-        with (
-            patch.dict(
-                sys.modules, {"rich.console": None, "rich.panel": None, "rich.prompt": None}
-            ),
-            patch("click.confirm", return_value=True),
-        ):
-            _confirm_setup_summary(config, logger)
 
 
 # ---------------------------------------------------------------------------

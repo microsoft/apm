@@ -38,6 +38,13 @@ host and uses the earliest credential it finds:
 | `gitlab.com` and registered GitLab hosts | `GITLAB_APM_PAT`, `GITLAB_TOKEN`, git credential helper |
 | Any other host (Bitbucket, Gitea, your own server) | git credential helper |
 
+`github.com` and every `*.ghe.com` host share one chain: `GITHUB_APM_PAT`
+(and `GITHUB_TOKEN`, `GH_TOKEN`) is sent to `github.com` and to any
+`*.ghe.com` host a dependency names. There is no per-host token today;
+`GITHUB_APM_PAT_<ORG>` scopes a token to one organization name on any of
+these hosts. A GitHub Enterprise Server host joins the chain only when the
+`GITHUB_HOST` environment variable names it.
+
 A token for one kind of host is never sent to another: a `GITHUB_TOKEN` set
 in CI never reaches GitLab. APM sends credentials as an HTTPS header, never
 in a URL, and does not store them. Every variable:
@@ -182,6 +189,14 @@ rule involved:
 
 ```bash frame="terminal"
 git config --show-origin --get-regexp '^url\..*\.insteadOf$'
+```
+
+If Git cannot read its configuration, APM refuses too. The error shows Git's
+first diagnostic line, with credentials redacted, and the config file Git
+names. To list every config file and its origin:
+
+```bash frame="terminal"
+git config --show-origin --list
 ```
 
 ## Corporate CA and proxies

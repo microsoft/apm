@@ -10,6 +10,8 @@ import pytest
 from apm_cli.install import manifest_helpers
 from apm_cli.install.manifest_helpers import preflight_bootstrap_targets
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

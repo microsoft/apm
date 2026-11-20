@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from apm_cli.install.heals.base import HealContext, HealMessageLevel
 from apm_cli.install.heals.buggy_lockfile_recovery import (
     _BUGGY_BRANCH_REF_DRIFT_VERSIONS,
@@ -11,6 +13,8 @@ from apm_cli.install.heals.buggy_lockfile_recovery import (
     _is_buggy_lockfile_apm_version,
 )
 from apm_cli.models.apm_package import GitReferenceType
+
+pytestmark = pytest.mark.unit
 
 
 def _hctx(

@@ -24,6 +24,8 @@ from apm_cli.deps.registry.extractor import (
     verify_sha256,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _build_tar(entries: list[tuple[str, bytes]], *, mode: str = "w:gz") -> bytes:
     """Build an in-memory tarball from a list of (name, content) pairs."""

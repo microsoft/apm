@@ -19,6 +19,8 @@ from apm_cli.marketplace import client as mp_client
 from apm_cli.marketplace.models import MarketplaceSource
 from apm_cli.marketplace.source_identity import admit_marketplace_catalog_path
 
+pytestmark = pytest.mark.component
+
 CATALOG = {"name": "frontend", "plugins": [{"name": "fe-skill", "source": "./plugins/fe"}]}
 
 

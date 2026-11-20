@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.commands.find import _lookup_in_index, build_reverse_index
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+pytestmark = pytest.mark.unit
 
 
 def _make_lockfile(*deps: LockedDependency) -> LockFile:

@@ -313,6 +313,11 @@ apm install myenterprise.ghe.com/platform/standards
 
 No public repos exist on `*.ghe.com` -- auth is always required.
 
+`GITHUB_APM_PAT` (and `GITHUB_TOKEN`, `GH_TOKEN`) is sent to `github.com`
+and to any `*.ghe.com` host a dependency names. There is no per-host token;
+`GITHUB_APM_PAT_{ORG}` scopes a token to one organization name on any of
+these hosts. GHES joins this chain only when `GITHUB_HOST` names it.
+
 ## Enterprise Managed Users (EMU)
 
 - EMU orgs live on `github.com` (e.g., `contoso-microsoft`) or `*.ghe.com`
@@ -334,11 +339,14 @@ export PROXY_REGISTRY_ONLY=1                   # optional: proxy-only mode
 proxy token. The deprecated `ARTIFACTORY_APM_TOKEN` is ignored (with one
 warning) when no proxy URL is configured.
 
-When `PROXY_REGISTRY_ONLY=1`, APM routes all traffic through the proxy and
-never contacts GitHub directly. It also refuses marketplace catalogs the proxy
-cannot serve (Azure DevOps, generic git, URL, or no `PROXY_REGISTRY_URL`) and
-lookups in the default MCP registry (set `MCP_REGISTRY_URL` to a proxied
-registry). The policy fetch stays direct: it is the governance channel. APM fetches exact versions only and does not
+When `PROXY_REGISTRY_ONLY=1`, APM downloads every package through the proxy
+and sends no probe or listing to the source host. It also refuses marketplace
+catalogs the proxy cannot serve (Azure DevOps, generic git, URL, or no
+`PROXY_REGISTRY_URL`) and lookups in the default MCP registry (set
+`MCP_REGISTRY_URL` to a proxied registry). Two requests stay direct by design:
+the org policy fetch (the governance channel; APM prints one `[i]` line naming
+its origin) and an explicit `apm self-update`; the automatic update check is
+skipped. APM fetches exact versions only and does not
 list versions through the proxy, so semver ranges (`#^1.2.0`) and
 `apm view <pkg> versions` fail with an actionable error and `apm outdated`
 reports git deps as unknown. Pin the exact upstream tag (`#v1.2.3`) and commit

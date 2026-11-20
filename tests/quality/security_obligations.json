@@ -1,0 +1,559 @@
+{
+  "schema": "security-obligations/1",
+  "counts": {
+    "G": 244,
+    "P": 224,
+    "I": 116,
+    "E": 281,
+    "M": 38,
+    "C": 22
+  },
+  "ids": {
+    "G": {
+      "e2e-evidence": [
+        "G|audit-ci|definition-changed|hook",
+        "G|audit-ci|definition-changed|mcp",
+        "G|audit-ci|definition-changed|native",
+        "G|audit-ci|local-deny|bin",
+        "G|audit-ci|local-deny|hook",
+        "G|audit-ci|local-deny|lsp",
+        "G|audit-ci|local-deny|mcp",
+        "G|audit-ci|local-deny|native",
+        "G|audit-ci|org-deny|bin",
+        "G|audit-ci|org-deny|hook",
+        "G|audit-ci|org-deny|lsp",
+        "G|audit-ci|org-deny|mcp",
+        "G|audit-ci|org-deny|native",
+        "G|audit-ci|org-enables-gate|bin",
+        "G|audit-ci|org-enables-gate|hook",
+        "G|audit-ci|org-enables-gate|lsp",
+        "G|audit-ci|org-enables-gate|mcp",
+        "G|audit-ci|org-enables-gate|native",
+        "G|audit-ci|policy-dep-deny|bin",
+        "G|audit-ci|policy-dep-deny|hook",
+        "G|audit-ci|policy-dep-deny|lsp",
+        "G|audit-ci|policy-dep-deny|mcp",
+        "G|audit-ci|policy-dep-deny|native",
+        "G|audit-ci|revoke-approval|bin",
+        "G|audit-ci|revoke-approval|hook",
+        "G|audit-ci|revoke-approval|lsp",
+        "G|audit-ci|revoke-approval|mcp",
+        "G|audit-ci|revoke-approval|native",
+        "G|bundle-install|definition-changed|hook",
+        "G|bundle-install|definition-changed|mcp",
+        "G|bundle-install|local-deny|bin",
+        "G|bundle-install|local-deny|hook",
+        "G|bundle-install|local-deny|lsp",
+        "G|bundle-install|local-deny|mcp",
+        "G|bundle-install|org-deny|bin",
+        "G|bundle-install|org-deny|hook",
+        "G|bundle-install|org-deny|lsp",
+        "G|bundle-install|org-deny|mcp",
+        "G|bundle-install|org-enables-gate|bin",
+        "G|bundle-install|org-enables-gate|hook",
+        "G|bundle-install|org-enables-gate|lsp",
+        "G|bundle-install|org-enables-gate|mcp",
+        "G|bundle-install|revoke-approval|bin",
+        "G|bundle-install|revoke-approval|hook",
+        "G|bundle-install|revoke-approval|lsp",
+        "G|bundle-install|revoke-approval|mcp",
+        "G|dry-run|local-deny|bin",
+        "G|dry-run|local-deny|hook",
+        "G|dry-run|local-deny|lsp",
+        "G|dry-run|local-deny|mcp",
+        "G|dry-run|org-deny|bin",
+        "G|dry-run|org-deny|hook",
+        "G|dry-run|org-deny|lsp",
+        "G|dry-run|org-deny|mcp",
+        "G|dry-run|revoke-approval|bin",
+        "G|dry-run|revoke-approval|hook",
+        "G|dry-run|revoke-approval|lsp",
+        "G|dry-run|revoke-approval|mcp",
+        "G|frozen-g|definition-changed|hook",
+        "G|frozen-g|definition-changed|mcp",
+        "G|frozen-g|definition-changed|native",
+        "G|frozen-g|local-deny|bin",
+        "G|frozen-g|local-deny|hook",
+        "G|frozen-g|local-deny|lsp",
+        "G|frozen-g|local-deny|mcp",
+        "G|frozen-g|local-deny|native",
+        "G|frozen-g|revoke-approval|bin",
+        "G|frozen-g|revoke-approval|hook",
+        "G|frozen-g|revoke-approval|lsp",
+        "G|frozen-g|revoke-approval|mcp",
+        "G|frozen-g|revoke-approval|native",
+        "G|frozen|definition-changed|hook",
+        "G|frozen|definition-changed|mcp",
+        "G|frozen|definition-changed|native",
+        "G|frozen|local-deny|bin",
+        "G|frozen|local-deny|hook",
+        "G|frozen|local-deny|lsp",
+        "G|frozen|local-deny|mcp",
+        "G|frozen|local-deny|native",
+        "G|frozen|org-deny|bin",
+        "G|frozen|org-deny|hook",
+        "G|frozen|org-deny|lsp",
+        "G|frozen|org-deny|mcp",
+        "G|frozen|org-deny|native",
+        "G|frozen|org-enables-gate|bin",
+        "G|frozen|org-enables-gate|hook",
+        "G|frozen|org-enables-gate|lsp",
+        "G|frozen|org-enables-gate|mcp",
+        "G|frozen|org-enables-gate|native",
+        "G|frozen|policy-dep-deny|bin",
+        "G|frozen|policy-dep-deny|hook",
+        "G|frozen|policy-dep-deny|lsp",
+        "G|frozen|policy-dep-deny|mcp",
+        "G|frozen|policy-dep-deny|native",
+        "G|frozen|revoke-approval|bin",
+        "G|frozen|revoke-approval|hook",
+        "G|frozen|revoke-approval|lsp",
+        "G|frozen|revoke-approval|mcp",
+        "G|frozen|revoke-approval|native",
+        "G|install-g|definition-changed|hook",
+        "G|install-g|definition-changed|mcp",
+        "G|install-g|definition-changed|native",
+        "G|install-g|local-deny|bin",
+        "G|install-g|local-deny|hook",
+        "G|install-g|local-deny|lsp",
+        "G|install-g|local-deny|mcp",
+        "G|install-g|local-deny|native",
+        "G|install-g|revoke-approval|bin",
+        "G|install-g|revoke-approval|hook",
+        "G|install-g|revoke-approval|lsp",
+        "G|install-g|revoke-approval|mcp",
+        "G|install-g|revoke-approval|native",
+        "G|install|definition-changed|hook",
+        "G|install|definition-changed|mcp",
+        "G|install|definition-changed|native",
+        "G|install|local-deny|bin",
+        "G|install|local-deny|hook",
+        "G|install|local-deny|lsp",
+        "G|install|local-deny|mcp",
+        "G|install|local-deny|native",
+        "G|install|org-deny|bin",
+        "G|install|org-deny|hook",
+        "G|install|org-deny|lsp",
+        "G|install|org-deny|mcp",
+        "G|install|org-deny|native",
+        "G|install|org-enables-gate|bin",
+        "G|install|org-enables-gate|hook",
+        "G|install|org-enables-gate|lsp",
+        "G|install|org-enables-gate|mcp",
+        "G|install|org-enables-gate|native",
+        "G|install|policy-dep-deny|bin",
+        "G|install|policy-dep-deny|hook",
+        "G|install|policy-dep-deny|lsp",
+        "G|install|policy-dep-deny|mcp",
+        "G|install|policy-dep-deny|native",
+        "G|install|revoke-approval|bin",
+        "G|install|revoke-approval|hook",
+        "G|install|revoke-approval|lsp",
+        "G|install|revoke-approval|mcp",
+        "G|install|revoke-approval|native",
+        "G|lifecycle-scripts|org-deny|script",
+        "G|lifecycle-scripts|revoke-approval|script",
+        "G|marketplace-install|definition-changed|hook",
+        "G|marketplace-install|definition-changed|mcp",
+        "G|marketplace-install|definition-changed|native",
+        "G|marketplace-install|local-deny|bin",
+        "G|marketplace-install|local-deny|hook",
+        "G|marketplace-install|local-deny|lsp",
+        "G|marketplace-install|local-deny|mcp",
+        "G|marketplace-install|local-deny|native",
+        "G|marketplace-install|org-deny|bin",
+        "G|marketplace-install|org-deny|hook",
+        "G|marketplace-install|org-deny|lsp",
+        "G|marketplace-install|org-deny|mcp",
+        "G|marketplace-install|org-deny|native",
+        "G|marketplace-install|org-enables-gate|bin",
+        "G|marketplace-install|org-enables-gate|hook",
+        "G|marketplace-install|org-enables-gate|lsp",
+        "G|marketplace-install|org-enables-gate|mcp",
+        "G|marketplace-install|org-enables-gate|native",
+        "G|marketplace-install|policy-dep-deny|bin",
+        "G|marketplace-install|policy-dep-deny|hook",
+        "G|marketplace-install|policy-dep-deny|lsp",
+        "G|marketplace-install|policy-dep-deny|mcp",
+        "G|marketplace-install|policy-dep-deny|native",
+        "G|marketplace-install|revoke-approval|bin",
+        "G|marketplace-install|revoke-approval|hook",
+        "G|marketplace-install|revoke-approval|lsp",
+        "G|marketplace-install|revoke-approval|mcp",
+        "G|marketplace-install|revoke-approval|native",
+        "G|mcp-install|org-deny|mcp",
+        "G|mcp-install|policy-dep-deny|mcp",
+        "G|native-plugin|definition-changed|native",
+        "G|native-plugin|local-deny|native",
+        "G|native-plugin|org-deny|native",
+        "G|native-plugin|org-enables-gate|native",
+        "G|native-plugin|policy-dep-deny|native",
+        "G|native-plugin|revoke-approval|native",
+        "G|uninstall-prune-rebuild|definition-changed|hook",
+        "G|uninstall-prune-rebuild|definition-changed|mcp",
+        "G|uninstall-prune-rebuild|definition-changed|native",
+        "G|uninstall-prune-rebuild|local-deny|bin",
+        "G|uninstall-prune-rebuild|local-deny|hook",
+        "G|uninstall-prune-rebuild|local-deny|lsp",
+        "G|uninstall-prune-rebuild|local-deny|mcp",
+        "G|uninstall-prune-rebuild|local-deny|native",
+        "G|uninstall-prune-rebuild|org-deny|bin",
+        "G|uninstall-prune-rebuild|org-deny|hook",
+        "G|uninstall-prune-rebuild|org-deny|lsp",
+        "G|uninstall-prune-rebuild|org-deny|mcp",
+        "G|uninstall-prune-rebuild|org-deny|native",
+        "G|uninstall-prune-rebuild|org-enables-gate|bin",
+        "G|uninstall-prune-rebuild|org-enables-gate|hook",
+        "G|uninstall-prune-rebuild|org-enables-gate|lsp",
+        "G|uninstall-prune-rebuild|org-enables-gate|mcp",
+        "G|uninstall-prune-rebuild|org-enables-gate|native",
+        "G|uninstall-prune-rebuild|policy-dep-deny|bin",
+        "G|uninstall-prune-rebuild|policy-dep-deny|hook",
+        "G|uninstall-prune-rebuild|policy-dep-deny|lsp",
+        "G|uninstall-prune-rebuild|policy-dep-deny|mcp",
+        "G|uninstall-prune-rebuild|policy-dep-deny|native",
+        "G|uninstall-prune-rebuild|revoke-approval|bin",
+        "G|uninstall-prune-rebuild|revoke-approval|hook",
+        "G|uninstall-prune-rebuild|revoke-approval|lsp",
+        "G|uninstall-prune-rebuild|revoke-approval|mcp",
+        "G|uninstall-prune-rebuild|revoke-approval|native",
+        "G|unpack|local-deny|bin",
+        "G|unpack|local-deny|hook",
+        "G|unpack|org-deny|bin",
+        "G|unpack|org-deny|hook",
+        "G|unpack|org-enables-gate|bin",
+        "G|unpack|org-enables-gate|hook",
+        "G|unpack|policy-dep-deny|bin",
+        "G|unpack|policy-dep-deny|hook",
+        "G|unpack|revoke-approval|bin",
+        "G|unpack|revoke-approval|hook",
+        "G|update|definition-changed|hook",
+        "G|update|definition-changed|mcp",
+        "G|update|definition-changed|native",
+        "G|update|local-deny|bin",
+        "G|update|local-deny|hook",
+        "G|update|local-deny|lsp",
+        "G|update|local-deny|mcp",
+        "G|update|local-deny|native",
+        "G|update|org-deny|bin",
+        "G|update|org-deny|hook",
+        "G|update|org-deny|lsp",
+        "G|update|org-deny|mcp",
+        "G|update|org-deny|native",
+        "G|update|org-enables-gate|bin",
+        "G|update|org-enables-gate|hook",
+        "G|update|org-enables-gate|lsp",
+        "G|update|org-enables-gate|mcp",
+        "G|update|org-enables-gate|native",
+        "G|update|policy-dep-deny|bin",
+        "G|update|policy-dep-deny|hook",
+        "G|update|policy-dep-deny|lsp",
+        "G|update|policy-dep-deny|mcp",
+        "G|update|policy-dep-deny|native",
+        "G|update|revoke-approval|bin",
+        "G|update|revoke-approval|hook",
+        "G|update|revoke-approval|lsp",
+        "G|update|revoke-approval|mcp",
+        "G|update|revoke-approval|native"
+      ]
+    },
+    "P": {
+      "unit": [
+        "P|owner|absent/block",
+        "P|owner|absent/warn",
+        "P|owner|cache_miss_fetch_fail/block",
+        "P|owner|cache_miss_fetch_fail/warn",
+        "P|owner|cached_stale/org-block",
+        "P|owner|cached_stale/warn",
+        "P|owner|disabled",
+        "P|owner|empty/block",
+        "P|owner|empty/warn",
+        "P|owner|found",
+        "P|owner|garbage_response/block",
+        "P|owner|garbage_response/warn",
+        "P|owner|hash_mismatch",
+        "P|owner|incomplete_chain",
+        "P|owner|malformed/block",
+        "P|owner|malformed/warn",
+        "P|owner|no_git_remote/block",
+        "P|owner|no_git_remote/warn"
+      ],
+      "e2e_generated": "P|<SITE>|<CLASS> for SITE in [approve, audit-ci, audit-exec-replay(getattr), bundle-allow-map(getattr cache_only), exec-map(getattr: uninstall/hook rebuild/lsp), mcp-admission(trust.py), policy-status, update-regate-shortcircuit] x CLASS in the 18 owner classes above PLUS cache=cold, cache=stale<7d, cache=stale>7d-or-expired, cache=warm-fresh (22 each = 176); and SITE in [bundle-install-preflight(cache_only), install-dry-run-preflight, install-pipeline, lifecycle-scripts, mcp-install-preflight] x CLASS in [cache=cold, cache=stale<7d, cache=stale>7d-or-expired, cache=warm-fresh, cache_miss_fetch_fail/block, cache_miss_fetch_fail/warn] (6 each = 30). Total e2e 206 + unit 18 = 224."
+    },
+    "I": {
+      "e2e_generated": "I|<ART>|<OP>|<TAMPER>: approval-pins x {audit-ci,bundle-install,frozen,install,uninstall-prune,update} x {disk-or-cache,lock-edited,upstream-or-proxy} (18); bundle-files x bundle-install x {lock-edited,missing-hash,upstream-or-proxy} (3); deployed_file_hashes, git-content_hash, marketplace-origin(source_url/digest) each x {audit-ci,frozen,install,uninstall-prune,update} x {disk-or-cache,lock-edited,missing-hash,upstream-or-proxy} (20 each = 60); path-containment x {bundle-install,install,uninstall-prune,update} x {disk-or-cache,upstream-or-proxy} (8); policy-hash-pin x {audit-ci,bundle-install,frozen,install,update} x {disk-or-cache,missing-hash,upstream-or-proxy} (15); registry-resolved_hash x {frozen,install,update} x {disk-or-cache,lock-edited,missing-hash,upstream-or-proxy} (12). Total 116."
+    },
+    "E": {
+      "e2e": [
+        "EP|CRED=PAT|HOST=ADO",
+        "EP|CRED=PAT|HOST=GHES",
+        "EP|CRED=PAT|HOST=GitLab",
+        "EP|CRED=PAT|HOST=generic",
+        "EP|CRED=PAT|HOST=ghe.com",
+        "EP|CRED=PAT|HOST=github",
+        "EP|CRED=az-bearer|HOST=ADO",
+        "EP|CRED=gh|HOST=GHES",
+        "EP|CRED=gh|HOST=ghe.com",
+        "EP|CRED=gh|HOST=github",
+        "EP|CRED=helper|HOST=ADO",
+        "EP|CRED=helper|HOST=GHES",
+        "EP|CRED=helper|HOST=GitLab",
+        "EP|CRED=helper|HOST=generic",
+        "EP|CRED=none|HOST=ADO",
+        "EP|CRED=none|HOST=GHES",
+        "EP|CRED=none|HOST=GitLab",
+        "EP|CRED=none|HOST=generic",
+        "EP|CRED=none|HOST=ghe.com",
+        "EP|CRED=none|HOST=github"
+      ],
+      "e2e-evidence_generated": "(a) E1|CRED=<c>|EGRESS=<e>|REDIRECT=<r>: c in {PAT,gh,helper} x e in {api-probe,clone,marketplace-fetch,policy-fetch} x r in {cross-origin,none,same-origin} plus PAT x registry x r, plus az-bearer x {api-probe,clone,policy-fetch} x r (48). (b) E2|HOST=<h>|CRED=<c>|EGRESS=<e>: ADO x {PAT,helper,none} x {api-probe,clone,marketplace-fetch,policy-fetch} + ADO x az-bearer x {api-probe,clone,policy-fetch}; GHES x {PAT,gh,helper,none} x the 4; GitLab x {PAT,helper,none} x the 4; ghe.com x {PAT,gh,none} x the 4; github x {PAT,gh,none} x the 4; generic: PAT x {clone,marketplace-fetch,registry}, helper x {clone,marketplace-fetch}, none x {clone,marketplace-fetch,mcp-registry,registry} (88). (c) EP pairwise rows: EP|CRED=<c>|EGRESS=<e> for the CRED/EGRESS combos above (PAT: api-probe,clone,marketplace-fetch,policy-fetch,registry; az-bearer: api-probe,clone,policy-fetch; gh: 4; helper: 4; none: api-probe,clone,marketplace-fetch,mcp-registry,policy-fetch,registry); EP|CRED=<c>|PROXY_ONLY={0,1} and EP|CRED=<c>|REDIRECT={cross-origin,none,same-origin} for c in {PAT,az-bearer,gh,helper,none}; EP|EGRESS=<e>|HOST=<h> (api-probe,policy-fetch: ADO,GHES,GitLab,ghe.com,github; clone,marketplace-fetch: those + generic; mcp-registry,registry: generic); EP|EGRESS=<e>|PROXY_ONLY={0,1} and EP|EGRESS=<e>|REDIRECT={3} for all 6 egress; EP|HOST=<h>|PROXY_ONLY={0,1} and EP|HOST=<h>|REDIRECT={3} for all 6 hosts; EP|PROXY_ONLY={0,1}|REDIRECT={3}. E total 281 (20 e2e + 261 e2e-evidence)."
+    },
+    "M": {
+      "e2e_generated": "M|<OP>|<EVENT>: OP in {audit-ci, dry-run, install object-form, install plugin@mkt, outdated/view, transitive marketplace dep, update} x EVENT in {alias-rebind, catalog-unreachable, confusion-sentinel(cross-repo bare name), duplicate-origin-registration, lock-row-edited} (35) + M|frozen|{catalog-unreachable, confusion-sentinel(cross-repo bare name), lock-row-edited} (3) = 38."
+    },
+    "C": {
+      "e2e-evidence": [
+        "C|apm.yml|ADO-PAT-or-helper",
+        "C|apm.yml|github-PAT",
+        "C|apm.yml|mcp-header-secret",
+        "C|apm.yml|registry-token",
+        "C|cache-git-config|ADO-PAT-or-helper",
+        "C|cache-git-config|az-bearer",
+        "C|cache-git-config|github-PAT",
+        "C|lock|ADO-PAT-or-helper",
+        "C|lock|az-bearer",
+        "C|lock|github-PAT",
+        "C|lock|mcp-header-secret",
+        "C|lock|registry-token",
+        "C|pack-output|github-PAT",
+        "C|pack-output|mcp-header-secret",
+        "C|policy-cache|ADO-PAT-or-helper",
+        "C|policy-cache|github-PAT",
+        "C|rendered-mcp-config|mcp-header-secret",
+        "C|stdout-stderr|ADO-PAT-or-helper",
+        "C|stdout-stderr|az-bearer",
+        "C|stdout-stderr|github-PAT",
+        "C|stdout-stderr|mcp-header-secret",
+        "C|stdout-stderr|registry-token"
+      ]
+    }
+  },
+  "excluded": {
+    "G|audit-ci|local-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|audit-ci|org-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|audit-ci|org-enables-gate|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|audit-ci|policy-dep-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|audit-ci|revoke-approval|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|bundle-install|org-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|bundle-install|local-deny|bin"
+    },
+    "G|bundle-install|org-enables-gate|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|bundle-install|local-deny|bin"
+    },
+    "G|bundle-install|revoke-approval|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|bundle-install|local-deny|bin"
+    },
+    "G|dry-run|org-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|dry-run|local-deny|bin"
+    },
+    "G|dry-run|revoke-approval|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|dry-run|local-deny|bin"
+    },
+    "G|frozen-g|local-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install-g|local-deny|bin"
+    },
+    "G|frozen-g|revoke-approval|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install-g|local-deny|bin"
+    },
+    "G|frozen|local-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|frozen|org-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|frozen|org-enables-gate|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|frozen|policy-dep-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|frozen|revoke-approval|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|install-g|revoke-approval|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install-g|local-deny|bin"
+    },
+    "G|install|org-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|install|org-enables-gate|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|install|policy-dep-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|install|revoke-approval|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|uninstall-prune-rebuild|local-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|uninstall-prune-rebuild|org-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|uninstall-prune-rebuild|org-enables-gate|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|uninstall-prune-rebuild|policy-dep-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|uninstall-prune-rebuild|revoke-approval|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|unpack|org-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|unpack|local-deny|bin"
+    },
+    "G|unpack|org-enables-gate|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|unpack|local-deny|bin"
+    },
+    "G|unpack|policy-dep-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|unpack|local-deny|bin"
+    },
+    "G|unpack|revoke-approval|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|unpack|local-deny|bin"
+    },
+    "G|update|local-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|update|org-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|update|org-enables-gate|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|update|policy-dep-deny|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    },
+    "G|update|revoke-approval|bin": {
+      "rules": [
+        "U-BIN"
+      ],
+      "witness": "G|install|local-deny|bin"
+    }
+  }
+}

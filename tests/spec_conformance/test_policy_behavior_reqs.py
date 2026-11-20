@@ -18,6 +18,8 @@ from apm_cli.policy._remote import _extract_org_host_port_from_git_remote
 from apm_cli.policy.inheritance import PolicyInheritanceError
 from apm_cli.policy.schema import ApmPolicy
 
+pytestmark = [pytest.mark.component, pytest.mark.promise("req-pl-001", "req-pl-004", "req-pl-012")]
+
 
 def _git_project(root: Path, remotes: dict[str, str]) -> Path:
     root.mkdir(parents=True, exist_ok=True)
@@ -159,14 +161,13 @@ def test_origin_is_preferred_and_no_remote_means_no_discovery(
 
 
 @pytest.mark.req("req-pl-012")
-@pytest.mark.xfail(strict=True, reason="#4279: only the origin remote is ever read")
 def test_single_non_origin_remote_identifies_the_project(tmp_path: Path) -> None:
+    """Without origin, the single remote names the project (#4279)."""
     project = _git_project(tmp_path / "app", {"upstream": "https://github.com/acme/app.git"})
     assert _extract_org_host_port_from_git_remote(project) == ("acme", "github.com", None)
 
 
 @pytest.mark.req("req-pl-012")
-@pytest.mark.xfail(strict=True, reason="#4279: only the origin remote is ever read")
 def test_several_non_origin_remotes_fail_closed_naming_candidates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -177,6 +178,7 @@ def test_several_non_origin_remotes_fail_closed_naming_candidates(
     fetches = _Fetches(monkeypatch)
     result = discovery.discover_policy(project, no_cache=True)
 
+    assert result.outcome == "ambiguous_git_remote"
     assert result.outcome not in ("absent", "no_git_remote", "found")
     assert "fork" in (result.error or "") and "upstream" in (result.error or "")
     assert fetches.calls == []

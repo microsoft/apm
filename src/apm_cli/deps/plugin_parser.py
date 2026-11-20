@@ -21,6 +21,8 @@ from typing import Any
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.plugin_layout import plugin_command_prompt_name
 from ..utils.atomic_io import atomic_write_text, write_text_lf
 from ..utils.console import _rich_warning
@@ -779,7 +781,7 @@ def synthesize_apm_yml_from_plugin(
 
     # Load existing apm.yml as base so resolution-critical blocks are not
     # discarded when the synthesized manifest overwrites the file (#1666).
-    source_apm_yml_path = plugin_path / "apm.yml"
+    source_apm_yml_path = manifest_file(plugin_path)
     apm_yml_path = output_path or source_apm_yml_path
     existing_manifest: dict[str, Any] | None = None
     if merge_existing and source_apm_yml_path.exists():

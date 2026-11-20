@@ -161,7 +161,7 @@ See also: [Install failures](../install-failures/), [Lockfile specification](../
 ### `Install blocked by org policy -- see violations above`
 
 ```
-[x] Install blocked by org policy -- see violations above
+[x] Install blocked by org policy -- see violations above. Remove or replace the blocked dependencies in apm.yml (run 'apm policy status' to see the active policy), then re-run the install.
 ```
 
 Cause: an org-level policy (compilation target, dependency allowlist, security baseline) rejected one or more dependencies. The per-violation lines printed above this message identify the offending packages and rules.
@@ -354,7 +354,7 @@ Available scripts in apm.yml: <list>
 
 Cause: `apm run <name>` could not match `<name>` to a script in `apm.yml`, an auto-discovered prompt file, or an installable virtual package.
 
-Fix: check the available scripts list printed under the error (`apm list` shows the same scripts). The error also lists where APM looks for prompts. To install a remote prompt, use `apm install <owner>/<repo>/path/to/prompt.prompt.md`.
+Fix: check the available scripts list printed under the error, or run `apm list` (the error's next step) to see each script and its command. The error also lists where APM looks for prompts. To install a remote prompt, use `apm install <owner>/<repo>/path/to/prompt.prompt.md`.
 
 See also: [`apm run` reference](../../reference/cli/run/), [`apm list` reference](../../reference/cli/list/)
 

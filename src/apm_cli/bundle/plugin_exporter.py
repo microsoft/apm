@@ -16,6 +16,13 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
+
+from ..core.remediation import (
+    PACK_DEPENDENCY_UNATTESTED,
+    PACK_INSTALLED_FILES_MISSING,
+    PACK_SKILL_SUBSET_MISSING,
+)
 from ..deps.lockfile import (
     LockedDependency,
     LockFile,
@@ -35,6 +42,7 @@ from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ..utils.paths import portable_relpath
 from .attest import verify_attested_file
+from .credential_files import refuse_credential_files
 from .packer import PackResult
 from .plugin_layout import PLUGIN_ROOT_DIRS, find_plugin_root_sources
 
@@ -842,8 +850,7 @@ def _collect_deployed_components(
         suffix = f"\n  ... and {remaining} more" if remaining else ""
         raise ValueError(
             f"Cannot pack dependency {dep.repo_url}: installed files recorded "
-            "in apm.lock.yaml are missing on disk. Run 'apm install' to "
-            "restore them, then pack again:\n"
+            f"in apm.lock.yaml are missing on disk. {PACK_INSTALLED_FILES_MISSING.sentence()}\n"
             + "\n".join(f"  - {path}" for path in shown_missing)
             + suffix
         )
@@ -928,7 +935,7 @@ def export_plugin_bundle(
     lockfile = LockFile.read(lockfile_path)
 
     # 2. Read apm.yml
-    apm_yml_path = project_root / "apm.yml"
+    apm_yml_path = manifest_file(project_root)
     package = APMPackage.from_apm_yml(apm_yml_path)
     pkg_name = package.name
     pkg_version = package.version or "0.0.0"
@@ -1001,8 +1008,8 @@ def export_plugin_bundle(
                     raise ValueError(
                         f"Cannot pack dependency {dep.repo_url}: the skills "
                         f"recorded in apm.lock.yaml (skill_subset: {declared_skills}) "
-                        "were not found among its installed files. Run 'apm install' "
-                        "to re-deploy the expected skills, then pack again."
+                        "were not found among its installed files. "
+                        f"{PACK_SKILL_SUBSET_MISSING.sentence()}"
                     )
             elif _cache_would_contribute_primitives(install_path, dep):
                 # Unattested primitives sit in the cache but the lockfile
@@ -1012,8 +1019,7 @@ def export_plugin_bundle(
                     f"Cannot pack dependency {dep.repo_url}: the lockfile records "
                     "no deployed files for it, but installed content that cannot "
                     "be verified exists in the apm_modules cache (a stale or "
-                    "partial install). Run 'apm install' to record provenance in "
-                    "apm.lock.yaml, then pack again."
+                    f"partial install). {PACK_DEPENDENCY_UNATTESTED.sentence()}"
                 )
             else:
                 # No attested content and nothing packable in the cache: the
@@ -1111,6 +1117,7 @@ def export_plugin_bundle(
             _rich_warning(msg)
 
     # 8. Build output file list (sorted for determinism)
+    refuse_credential_files(file_map)
     output_files = sorted(file_map.keys())
 
     # Add generated files to the list

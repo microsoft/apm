@@ -15,6 +15,13 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import yaml
 
+from apm_cli.core.remediation import (
+    MCP_ADMITTED_DENIED,
+    MCP_ADMITTED_UNAPPROVED,
+    MCP_LOCAL_PACKAGE_UNRESOLVED,
+    MCP_PACKAGE_MANIFEST_MISSING,
+)
+from apm_cli.core.scope import is_user_scope_root, manifest_file
 from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.deps.path_anchoring import (
     LocalResolutionError,
@@ -334,13 +341,12 @@ class CurrentMcpConfigView:
                 # A deny is not a missing approval: name the gate and the deny (#3957).
                 problems[name] = (
                     "admitted in apm.lock.yaml but the executables gate now parks it "
-                    f"(denied); see 'apm policy explain {target}' for the deny to lift, "
-                    "then re-run 'apm install'"
+                    f"(denied); {MCP_ADMITTED_DENIED.bind(target=target).clause()}"
                 )
                 continue
             problems[name] = (
                 f"admitted in apm.lock.yaml but not approved in apm.yml ({reason}); "
-                f"run 'apm approve {target}' and re-run 'apm install'"
+                f"{MCP_ADMITTED_UNAPPROVED.bind(target=target).clause()}"
             )
         return problems
 
@@ -474,6 +480,18 @@ class McpConfigDiff:
     def is_empty(self) -> bool:
         """Return whether current and stored configurations are identical."""
         return not (self.changed or self.source_only or self.lock_only)
+
+
+# Trust notices already shown in this process (#4256): one install collects
+# the locked MCP view in several passes, but the user needs one notice per server.
+_TRUST_NOTICES_SHOWN: set[str] = set()
+
+
+def _progress_trust_once(logger: Any, message: str) -> None:
+    if message in _TRUST_NOTICES_SHOWN:
+        return
+    _TRUST_NOTICES_SHOWN.add(message)
+    logger.progress(message)
 
 
 def _deduplicate(dependencies: list[Any] | tuple[Any, ...]) -> list[Any]:
@@ -672,8 +690,8 @@ def _fallback_manifest_path(
     if dependency.source == "local" and dependency.local_path:
         raw = Path(dependency.local_path).expanduser()
         package_dir = raw if raw.is_absolute() else project_root / raw
-        return (package_dir / "apm.yml").resolve()
-    return (modules_root / dependency.repo_url / "apm.yml").resolve()
+        return manifest_file(package_dir).resolve()
+    return manifest_file(modules_root / dependency.repo_url).resolve()
 
 
 def _is_local_claude_plugin_source(dependency: LockedDependency, package_dir: Path) -> bool:
@@ -682,7 +700,7 @@ def _is_local_claude_plugin_source(dependency: LockedDependency, package_dir: Pa
 
     if dependency.package_type != PackageType.MARKETPLACE_PLUGIN.value:
         return False
-    if not package_dir.is_dir() or (package_dir / "apm.yml").exists():
+    if not package_dir.is_dir() or manifest_file(package_dir).exists():
         return False
     package_type, selected_manifest = detect_package_type(package_dir)
     return package_type is PackageType.MARKETPLACE_PLUGIN and not (
@@ -739,7 +757,7 @@ def _package_manifest_path(
             package_dir = dependency.to_dependency_ref().get_install_path(modules_root)
     else:
         package_dir = dependency.to_dependency_ref().get_install_path(modules_root)
-    return (package_dir / "apm.yml").resolve()
+    return manifest_file(package_dir).resolve()
 
 
 def _allows_missing_manifest(
@@ -828,6 +846,25 @@ class _CollectedDependencies:
     one_off: list[tuple[str, str]] = field(default_factory=list)
 
 
+def _copy_contradicts_lock(
+    package_key: str, dependency: LockedDependency, modules_root: Path, lockfile: LockFile
+) -> bool:
+    """Whether the apm_modules copy differs from its locked ``content_hash`` (#4389).
+
+    A frozen install then judges this package's declarations from the verified
+    copy it restores (the strict post-restoration check), never from these bytes.
+    """
+    from apm_cli.install.source_helpers import locked_content_mismatch
+
+    try:
+        package_root = dependency.to_dependency_ref().get_install_path(modules_root)
+    except (OSError, ValueError):
+        return False
+    return package_root.is_dir() and locked_content_mismatch(
+        package_key, dependency, package_root, lockfile=lockfile
+    )
+
+
 def _collect_locked_dependencies(
     lockfile: LockFile | None,
     modules_root: Path,
@@ -887,7 +924,7 @@ def _collect_locked_dependencies(
                     manifest_path=fallback_path,
                     message=(
                         f"cannot resolve local package: {exc}; "
-                        "re-run 'apm install' to rebuild the lockfile"
+                        f"{MCP_LOCAL_PACKAGE_UNRESOLVED.clause()}"
                     ),
                 )
             )
@@ -919,7 +956,14 @@ def _collect_locked_dependencies(
                 )
             continue
 
-        if allow_pending and not manifest_path.parent.exists() and dependency.source != "local":
+        if (
+            allow_pending
+            and dependency.source != "local"
+            and (
+                not manifest_path.parent.exists()
+                or _copy_contradicts_lock(package_key, dependency, modules_root, lockfile)
+            )
+        ):
             from apm_cli.drift import build_download_ref
 
             try:
@@ -961,7 +1005,8 @@ def _collect_locked_dependencies(
             ):
                 continue
             message = (
-                f"package manifest not found at {manifest_path}; re-run 'apm install' to restore it"
+                f"package manifest not found at {manifest_path}; "
+                f"{MCP_PACKAGE_MANIFEST_MISSING.clause()}"
             )
             if (
                 dependency.source == "local"
@@ -1056,6 +1101,7 @@ def _collect_locked_dependencies(
                     str(verdict.reason),
                     layer=verdict.layer,
                     unverifiable=subject.fingerprint is None,
+                    user_scope=is_user_scope_root(project_root),
                 )
                 if diagnostics is not None:
                     diagnostics.warn(message)
@@ -1070,8 +1116,9 @@ def _collect_locked_dependencies(
                 and dependency.depth == 1
                 and verdict.layer not in ("project-allow", "user-allow")
             ):
-                logger.progress(
-                    f"Trusting direct dependency MCP '{mcp_dependency.name}' from '{declarer}'"
+                _progress_trust_once(
+                    logger,
+                    f"Trusting direct dependency MCP '{mcp_dependency.name}' from '{declarer}'",
                 )
             collected.append(
                 replace(
@@ -1094,6 +1141,30 @@ def _collect_locked_dependencies(
     return result
 
 
+class _ParkedNoticeSilenced:
+    """A logger view that drops parked-server notices and keeps every other line.
+
+    ``apm install --frozen`` checks MCP drift before and after hydration; the
+    MCP phase is the one printer of each parked server (#4422).
+    """
+
+    def __init__(self, logger: Any) -> None:
+        self._logger = logger
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        if str(message).startswith("Parked MCP server"):
+            return
+        self._logger.warning(message, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._logger, name)
+
+
+def without_parked_notices(logger: Any) -> Any:
+    """Return *logger* without parked-server notices (None stays None)."""
+    return None if logger is None else _ParkedNoticeSilenced(logger)
+
+
 def parked_mcp_message(
     dependency: MCPDependency,
     package: str,
@@ -1101,9 +1172,14 @@ def parked_mcp_message(
     *,
     layer: str = "",
     unverifiable: bool = False,
+    user_scope: bool = False,
 ) -> str:
     """Return the warning for one dependency MCP server the trust owner parked."""
+    from apm_cli.security.trust import approve_command, explain_command
+
     name = dependency.name
+    approve = approve_command(package, user_scope=user_scope)
+    explain = explain_command(package, user_scope=user_scope)
     if reason == REASON_UNTRUSTED_TRANSITIVE:
         detail = (
             "self-defined"
@@ -1113,7 +1189,7 @@ def parked_mcp_message(
         return (
             f"Parked MCP server '{name}' from transitive package {package} "
             f"({detail}, not approved)\n"
-            f"    Approve for everyone: apm approve {package}  |  "
+            f"    Approve for everyone: {approve}  |  "
             "This run only: --trust-transitive-mcp"
         )
     if reason == REASON_DEFINITION_CHANGED:
@@ -1124,16 +1200,14 @@ def parked_mcp_message(
         )
         return (
             f"Parked MCP server '{name}' ({package}): {why}\n"
-            f"    Review: apm approve --pending  |  Re-approve: apm approve {package}"
+            f"    Review: {approve_command('--pending', user_scope=user_scope)}  |  "
+            f"Re-approve: {approve}"
         )
     if reason == REASON_DENIED:
-        return (
-            f"Parked MCP server '{name}' ({package}): denied ({layer})\n"
-            f"    Explain: apm policy explain {package}"
-        )
+        return f"Parked MCP server '{name}' ({package}): denied ({layer})\n    Explain: {explain}"
     return (
         f"Parked MCP server '{name}' ({package}): executables not approved\n"
-        f"    Explain: apm policy explain {package}  |  Approve: apm approve {package}"
+        f"    Explain: {explain}  |  Approve: {approve}"
     )
 
 

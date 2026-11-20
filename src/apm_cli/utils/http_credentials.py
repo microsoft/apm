@@ -73,8 +73,33 @@ def strip_cross_origin_credential_headers(
         prepared_request.headers.pop(name, None)
 
 
+class _NoAmbientCredentials(requests.auth.AuthBase):
+    """Explicit no-op auth so ``requests`` never loads ambient netrc credentials.
+
+    ``Session.prepare_request`` consults ``.netrc`` only when no ``auth`` is
+    given. Passing this keeps the caller's credential header authoritative
+    while proxy and CA-bundle environment settings stay in effect.
+    """
+
+    def __call__(self, request: requests.PreparedRequest) -> requests.PreparedRequest:
+        return request
+
+
+_NO_AMBIENT_CREDENTIALS = _NoAmbientCredentials()
+
+
 class CredentialScopedSession(requests.Session):
-    """Requests session whose credential headers never cross origins."""
+    """Requests session whose credential headers never cross origins.
+
+    ``ambient_credentials=False`` also keeps ``requests`` from attaching
+    ``.netrc`` credentials, for clients that send only the credentials they
+    were given (the MCP registry client).
+    """
+
+    def __init__(self, *, ambient_credentials: bool = True) -> None:
+        super().__init__()
+        if not ambient_credentials:
+            self.auth = _NO_AMBIENT_CREDENTIALS
 
     def rebuild_auth(
         self,
@@ -83,6 +108,8 @@ class CredentialScopedSession(requests.Session):
     ) -> None:
         """Strip every credential header across origins, then apply defaults."""
         strip_cross_origin_credential_headers(self, prepared_request, response)
+        if self.auth is _NO_AMBIENT_CREDENTIALS:
+            return  # requests would re-read .netrc for the redirect target here.
         super().rebuild_auth(prepared_request, response)
 
 
@@ -105,21 +132,6 @@ class RedirectRefusedError(requests.RequestException):
         super().__init__(f"redirect from {origin} refused: {detail}", response=response)
         self.reason = reason
         self.origin = origin
-
-
-class _NoAmbientCredentials(requests.auth.AuthBase):
-    """Explicit no-op auth so ``requests`` never loads ambient netrc credentials.
-
-    ``Session.prepare_request`` consults ``.netrc`` only when no ``auth`` is
-    given. Passing this keeps the caller's credential header authoritative
-    while proxy and CA-bundle environment settings stay in effect.
-    """
-
-    def __call__(self, request: requests.PreparedRequest) -> requests.PreparedRequest:
-        return request
-
-
-_NO_AMBIENT_CREDENTIALS = _NoAmbientCredentials()
 
 
 def origin_root(url: str) -> str:

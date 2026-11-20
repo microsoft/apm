@@ -6,6 +6,8 @@ import pytest
 
 from apm_cli.models.dependency.lsp import LSPDependency
 
+pytestmark = pytest.mark.unit
+
 # ===========================================================================
 # LSPDependency.from_string
 # ===========================================================================

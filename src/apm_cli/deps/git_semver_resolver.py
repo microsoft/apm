@@ -280,9 +280,9 @@ class GitSemverResolver:
             the semver route for them so they resolve as a literal ref
             through the proxy.
         """
-        from .registry_proxy import is_enforce_only
+        from .egress_route import EgressSurface, is_refused
 
-        if is_enforce_only():
+        if is_refused(EgressSurface.SOURCE_ENUMERATION):
             raise RegistryOnlySemverError(
                 summary=(
                     f"Cannot resolve the range '{constraint}' for"

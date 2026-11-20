@@ -21,7 +21,7 @@ from apm_cli.install.mcp.ownership import (
     mcp_native_hash,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 _URL = "https://heal.example.invalid/sse"
 _REGISTRY = {"name": "io.example/heal"}

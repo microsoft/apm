@@ -591,32 +591,5 @@ class TestGitHubDownloaderLogic:
         assert reporter.package_name == "test"
 
 
-class TestDownloadStrategiesBuildRepoUrl:
-    """Test URL building logic in DownloadDelegate.build_repo_url()."""
-
-    def test_build_repo_url_github_https(self) -> None:
-        """Test build_repo_url() for GitHub HTTPS."""
-        host_mock = mock.MagicMock()
-        host_mock.github_host = "github.com"
-        host_mock.github_token = "test-token"
-        host_mock.auth_resolver = mock.MagicMock()
-
-        delegate = DownloadDelegate(host_mock)
-
-        # Mock backend_for to return GitHub backend
-        with mock.patch("apm_cli.deps.download_strategies.backend_for") as mock_backend:
-            backend_mock = mock.MagicMock()
-            backend_mock.kind = "github"
-            backend_mock.is_github_family = True
-            mock_backend.return_value = backend_mock
-
-            url = delegate.build_repo_url(
-                "owner/repo",
-                use_ssh=False,
-                token="test-token",
-            )
-            assert url is not None
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

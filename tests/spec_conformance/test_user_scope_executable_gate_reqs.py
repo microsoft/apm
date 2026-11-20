@@ -16,6 +16,8 @@ from apm_cli.install.template import effective_allow_map
 from apm_cli.security.executables import materialize_exec_map
 from apm_cli.security.trust import McpAdmission
 
+pytestmark = pytest.mark.component
+
 
 def _user_install_ctx(home):
     return SimpleNamespace(

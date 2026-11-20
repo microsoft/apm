@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.scope import manifest_file
+
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -141,7 +143,7 @@ def _graph_declares_trusted_lsp(ctx: "InstallContext") -> bool:
     allow_map = closed_exec_map(None)
     allow_resolved = False
     for dep_ref in dependencies:
-        manifest = dep_ref.get_install_path(ctx.apm_modules_dir) / "apm.yml"
+        manifest = manifest_file(dep_ref.get_install_path(ctx.apm_modules_dir))
         try:
             declared = (
                 manifest.is_file() and APMPackage.from_apm_yml(manifest).get_lsp_dependencies()

@@ -161,7 +161,7 @@ class TestAdapterUserScopeSupport(unittest.TestCase):
                     for case, raw in unsafe_contents.items():
                         with self.subTest(adapter=adapter_cls.__name__, case=case):
                             config_path.write_bytes(raw)
-                            with patch("apm_cli.adapters.client.base._rich_warning") as warn:
+                            with patch("apm_cli.core.null_logger._rich_warning") as warn:
                                 self.assertIsNone(adapter._read_json_config_for_update(config_path))
                             warn.assert_called_once()
                             message = warn.call_args.args[0]

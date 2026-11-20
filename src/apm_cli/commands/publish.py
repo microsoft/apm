@@ -15,6 +15,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 from ..core.command_logger import CommandLogger
 from ..deps.registry.feature_gate import require_package_registry_enabled
 from ..models.dependency.identity import normalize_package_repo_url
@@ -92,7 +94,7 @@ def publish_cmd(ctx, registry_name, package_id, zip_path, dry_run, verbose):
 
     # ------------------------------------------------------------------ apm.yml
     project_root = Path.cwd()
-    apm_yml_path = project_root / "apm.yml"
+    apm_yml_path = manifest_file(project_root)
     if not apm_yml_path.exists():
         raise click.ClickException("apm.yml not found in the current directory.")
 
@@ -231,6 +233,22 @@ def _pack_archive(project_root: Path, apm_yml_path: Path, pkg, logger, verbose: 
             "or pass --zip with a pre-built flat archive."
         )
 
+    def _should_skip(path: Path) -> bool:
+        # Skip macOS AppleDouble sidecars (._*) and .DS_Store that break registry validation.
+        return any(part.startswith("._") for part in path.parts) or path.name == ".DS_Store"
+
+    sources = [
+        f
+        for f in sorted(apm_dir.rglob("*"))
+        if f.is_file() and not f.is_symlink() and not _should_skip(f)
+    ]
+    from ..bundle.credential_files import refuse_credential_files
+
+    try:
+        refuse_credential_files(portable_relpath(f, project_root) for f in sources)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
     archive_name = f"{pkg.name}-{pkg.version}.zip"
     dest = project_root / archive_name
     if dest.exists():
@@ -239,10 +257,6 @@ def _pack_archive(project_root: Path, apm_yml_path: Path, pkg, logger, verbose: 
     if verbose:
         logger.info(f"Packing flat registry archive -> {dest.name}")
 
-    def _should_skip(path: Path) -> bool:
-        # Skip macOS AppleDouble sidecars (._*) and .DS_Store that break registry validation.
-        return any(part.startswith("._") for part in path.parts) or path.name == ".DS_Store"
-
     # Standard root-level doc files included when present (npm parity).
     # Matched case-insensitively; LICENSE has no required extension.
     _DOC_CANDIDATES = ("README.md", "CHANGELOG.md", "LICENSE", "LICENCE")
@@ -250,9 +264,8 @@ def _pack_archive(project_root: Path, apm_yml_path: Path, pkg, logger, verbose: 
     with zipfile.ZipFile(dest, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         if not _should_skip(apm_yml_path):
             zf.write(apm_yml_path, arcname="apm.yml")
-        for file in sorted(apm_dir.rglob("*")):
-            if file.is_file() and not file.is_symlink() and not _should_skip(file):
-                zf.write(file, arcname=portable_relpath(file, project_root))
+        for file in sources:
+            zf.write(file, arcname=portable_relpath(file, project_root))
         for candidate in _DOC_CANDIDATES:
             # Case-insensitive match against actual filenames in project root.
             match = next(

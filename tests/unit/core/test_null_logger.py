@@ -19,7 +19,11 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.core.null_logger import NullCommandLogger
+
+pytestmark = pytest.mark.unit
 
 # Module path where the console helpers are looked up
 _MODULE = "apm_cli.core.null_logger"

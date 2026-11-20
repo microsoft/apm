@@ -22,6 +22,8 @@ from apm_cli.utils.diagnostics import (
     _group_by_package,
 )
 
+pytestmark = pytest.mark.unit
+
 # ── Diagnostic dataclass ────────────────────────────────────────────
 
 

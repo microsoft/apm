@@ -25,6 +25,8 @@ import yaml
 from tests.spec_conformance._helpers import waive
 from tests.spec_conformance._manifest import FIXTURE_ROOT, requirements_by_id
 
+pytestmark = pytest.mark.component
+
 
 def _canonical_yaml(doc) -> str:
     buf = io.StringIO()

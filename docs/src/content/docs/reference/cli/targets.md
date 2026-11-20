@@ -40,7 +40,7 @@ Invoking `apm targets` without arguments prints the resolved-target
 table.
 
 :::note[Planned]
-Subcommands such as `apm targets add` are reserved on the group for
+Subcommand names such as `add` are reserved on the group for
 future use. They are not implemented yet.
 :::
 
@@ -78,6 +78,9 @@ Sample output in a project with `CLAUDE.md` and `.cursor/`:
   windsurf     inactive   needs .windsurf/                         .windsurf/
   kiro         inactive   needs .kiro/                             .kiro/
 ```
+
+When `targets:` is declared in `apm.yml`, each declared target shows
+`apm.yml` as its source.
 
 Machine-readable form:
 

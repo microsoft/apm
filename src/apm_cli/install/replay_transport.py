@@ -23,6 +23,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.scope import manifest_file
+
 if TYPE_CHECKING:
     from apm_cli.deps.apm_resolver import APMDependencyResolver
     from apm_cli.deps.lockfile import LockedDependency
@@ -66,7 +68,7 @@ class DeclaredTransportIndex:
         parent = None if lock_dep.replacement is not None else self._selection().get(parent_key)
         if parent is None:
             parent = self.apply(lock_dep, lock_dep.to_dependency_ref())
-        manifest_path = package_root / "apm.yml"
+        manifest_path = manifest_file(package_root)
         if not manifest_path.is_file():
             return
         from apm_cli.models.apm_package import APMPackage

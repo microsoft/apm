@@ -158,3 +158,4 @@ def test_ported_alias_and_default_port_sibling_list_as_distinct_rows(tmp_path: P
         "test/tool",
         "github.com:8443/test/tool",
     }
+    assert all(Path(package["path"]).is_dir() for package in packages)

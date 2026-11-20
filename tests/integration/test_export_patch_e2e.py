@@ -188,11 +188,12 @@ class _StopBeforeDownload(Exception):
 def test_install_points_local_edits_at_export_patch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A real 'apm install' shows the hint once before it re-syncs files.
+    """A real 'apm install' shows the export hint once and keeps the edit (#4360).
 
     The download phase is stubbed to stop the run right after the hint so
     the test stays hermetic; the edit must survive the aborted install.
     """
+    from apm_cli.install.local_edits import local_edit_hint
     from apm_cli.utils.content_hash import compute_file_hash
 
     proj = tmp_path / "proj"
@@ -237,5 +238,7 @@ def test_install_points_local_edits_at_export_patch(
 
     output = " ".join(result.output.split())
     assert output.count("apm export-patch") == 1, result.output
-    assert "1 local edit(s) to managed files may be overwritten by this install" in output
+    # #4360: install keeps the edit, so the hint names no overwrite.
+    assert local_edit_hint(1, overwritten=0) in output, result.output
+    assert "overwrites" not in output, result.output
     assert (proj / _DEPLOYED).read_bytes() == _EDITED

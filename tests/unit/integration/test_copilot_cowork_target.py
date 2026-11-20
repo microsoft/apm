@@ -19,6 +19,8 @@ from apm_cli.integration.targets import (
     resolve_targets,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Shared fixtures (same pattern as test_experimental.py)
 # ---------------------------------------------------------------------------

@@ -8,6 +8,13 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import click
 
+from apm_cli.core.remediation import (
+    DEPENDENCIES_NOT_INSTALLED,
+    DEPENDENCY_UNPLACED,
+    DEPS_UPDATE_DEPRECATED,
+    ORPHANED_PACKAGES_PRUNE,
+)
+from apm_cli.core.scope import manifest_file
 from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.install.locking import serialized_lifecycle, serialized_lifecycle_unless
 
@@ -257,7 +264,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
     display_keys: dict[str, str] = {}
     declared_deps = []
     try:
-        apm_yml_path = apm_dir / APM_YML_FILENAME
+        apm_yml_path = manifest_file(apm_dir)
         if apm_yml_path.exists():
             project_package = APMPackage.from_apm_yml(apm_yml_path)
             declared_deps = project_package.get_all_apm_dependencies()
@@ -366,7 +373,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             continue
         if candidate.name.startswith(".") and candidate.parent != apm_modules_path:
             continue
-        has_apm_yml = (candidate / APM_YML_FILENAME).exists()
+        has_apm_yml = manifest_file(candidate).exists()
         has_skill_md = (candidate / SKILL_MD_FILENAME).exists()
         # A canonical Agent Plugin root is a package even though it carries
         # neither apm.yml nor a root SKILL.md -- it is installed as one unit.
@@ -454,7 +461,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         try:
             version = "unknown"
             if has_apm_yml:
-                package = APMPackage.from_apm_yml(candidate / APM_YML_FILENAME)
+                package = APMPackage.from_apm_yml(manifest_file(candidate))
                 version = package.version or "unknown"
             else:
                 version = _agent_plugin_version(candidate) or version
@@ -550,7 +557,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
 
     if installed_packages is None:
         logger.progress(f"No APM dependencies installed ({scope_label} scope)")
-        logger.verbose_detail("Run 'apm install' to install dependencies from apm.yml")
+        logger.verbose_detail(DEPENDENCIES_NOT_INSTALLED.sentence())
         return
 
     if not installed_packages:
@@ -565,9 +572,9 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
 
     # Display packages in table format
     if has_rich:
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(
+        table = new_table(
             title=(
                 f" Insecure APM Dependencies ({scope_label})"
                 if insecure_only
@@ -614,7 +621,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             )
             for pkg in orphaned_packages:
                 logger.warning(f"  - {pkg}")
-            logger.info("Run 'apm prune' to remove orphaned packages")
+            logger.info(ORPHANED_PACKAGES_PRUNE.sentence())
     else:
         # Fallback text table
         if insecure_only:
@@ -661,7 +668,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             )
             for pkg in orphaned_packages:
                 logger.warning(f"  - {pkg}")
-            logger.info("Run 'apm prune' to remove orphaned packages")
+            logger.info(ORPHANED_PACKAGES_PRUNE.sentence())
 
     _report_native_plugins(apm_dir, logger)
 
@@ -778,7 +785,7 @@ def _build_dep_tree(apm_dir):
     # Load project info
     project_name = DEFAULT_BOOTSTRAP_PROJECT_NAME
     try:
-        apm_yml_path = apm_dir / APM_YML_FILENAME
+        apm_yml_path = manifest_file(apm_dir)
         if apm_yml_path.exists():
             root_package = APMPackage.from_apm_yml(apm_yml_path)
             project_name = root_package.name
@@ -847,7 +854,7 @@ def _build_dep_tree(apm_dir):
     for candidate in sorted(apm_modules_path.rglob("*")):
         if not candidate.is_dir() or candidate.name.startswith("."):
             continue
-        has_apm = (candidate / APM_YML_FILENAME).exists()
+        has_apm = manifest_file(candidate).exists()
         has_skill = (candidate / SKILL_MD_FILENAME).exists()
         if not has_apm and not has_skill:
             continue
@@ -929,7 +936,7 @@ def tree(global_):
                         display = _dep_display_name(dep)
                         branch = root_tree.add(
                             f"[yellow]{display} (could not place in tree; "
-                            "run apm install to resolve)[/yellow]"
+                            f"{DEPENDENCY_UNPLACED.clause()})[/yellow]"
                         )
                         _add_tree_children(branch, dep.get_unique_key(), children_map)
                 console.print(root_tree)
@@ -951,7 +958,7 @@ def tree(global_):
                         click.echo(
                             f"{prefix}{_dep_display_name(dep)} "
                             "(could not place in tree; "
-                            "run apm install to resolve)"
+                            f"{DEPENDENCY_UNPLACED.clause()})"
                         )
                         sub_prefix = "    " if is_last else "|   "
                         _echo_tree_children(dep.get_unique_key(), children_map, sub_prefix)
@@ -1111,7 +1118,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     # of this command. Kept working for one release; removed in the next
     # breaking release.
     _rich_warning(
-        "'apm deps update' is deprecated; use 'apm update' instead. "
+        f"'apm deps update' is deprecated. {DEPS_UPDATE_DEPRECATED.sentence()} "
         "'apm update' now supports -g/--global, [PACKAGES]..., --force, "
         "--parallel-downloads, --target, and --legacy-skill-paths, plus an "
         "interactive plan, --dry-run, and --yes.",
@@ -1133,7 +1140,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     from ...deps.lockfile_generator import require_current_cli
 
     require_current_cli(project_root, command="apm deps update")
-    apm_yml_path = project_root / APM_YML_FILENAME
+    apm_yml_path = manifest_file(project_root)
 
     if not apm_yml_path.exists():
         scope_hint = str(project_root) if global_ else "current directory"
@@ -1262,7 +1269,7 @@ def info(package: str):
 
     if not apm_modules_path.exists():
         logger.error("No apm_modules/ directory found")
-        logger.progress("Run 'apm install' to install dependencies first")
+        logger.progress(DEPENDENCIES_NOT_INSTALLED.sentence())
         sys.exit(1)
 
     package_path = resolve_package_path(package, apm_modules_path, logger)

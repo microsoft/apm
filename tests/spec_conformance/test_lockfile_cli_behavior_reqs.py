@@ -20,8 +20,13 @@ from tests.utils.hermetic_packaged_sample import (
     HermeticPackagedSample,
     create_hermetic_packaged_sample,
 )
+from tests.utils.local_package import LocalPackageFactory
 
-pytestmark = [pytest.mark.e2e, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.promise("req-lk-015", "req-lk-017", "req-lk-018"),
+]
 
 _AGENT = Path(".apm") / "agents" / "fixture-agent.agent.md"
 _DEPLOYED_AGENT = ".github/agents/fixture-agent.agent.md"
@@ -146,23 +151,115 @@ def test_locked_content_hash_is_recomputed_and_names_both_envelopes(
 # --- req-lk-018: frozen by default under CI ------------------------------------
 
 
-@pytest.mark.req("req-lk-018")
-@pytest.mark.xfail(strict=True, reason="#4292: CI does not select frozen install behaviour")
-def test_install_under_ci_defaults_to_frozen(tmp_path: Path, apm_binary_path: Path) -> None:
-    sample = create_hermetic_packaged_sample(
-        tmp_path, apm_binary_path=apm_binary_path, project_name="consumer"
+def _install_with_ci(sample: HermeticPackagedSample, ci: str | None, *args: str):
+    env = {key: value for key, value in sample.environment.items() if key != "CI"}
+    if ci is not None:
+        env["CI"] = ci
+    return sample.runner.run(
+        ("install", *args), scenario_id="lk-018-ci-default", cwd=sample.project.root, env=env
     )
-    project = sample.project.root
 
-    result = sample.runner.run(
-        ("install",),
-        scenario_id="lk-018-ci-default",
-        cwd=project,
-        env={**sample.environment, "CI": "true"},
+
+def _locked_then_drifted(tmp_path: Path, apm_binary_path: Path) -> HermeticPackagedSample:
+    """A committed lockfile, then a new local dependency apm.yml declares but the lock lacks."""
+    sample = _installed(tmp_path, apm_binary_path)
+    packages = LocalPackageFactory(sample.project.root.parent)
+    extra = packages.create("extra", targets=("copilot",))
+    packages.add_instruction(
+        extra, "extra", "---\napplyTo: '**'\ndescription: Extra\n---\n# Extra\n"
     )
+    manifest_path = sample.project.root / "apm.yml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["dependencies"]["apm"].append({"path": "../extra"})
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    return sample
+
+
+@pytest.mark.req("req-lk-018")
+@pytest.mark.parametrize("ci", ["true", "1", "TRUE"])
+def test_install_under_ci_with_lockfile_defaults_to_frozen(
+    tmp_path: Path, apm_binary_path: Path, ci: str
+) -> None:
+    sample = _locked_then_drifted(tmp_path, apm_binary_path)
+    lock_path = sample.project.root / "apm.lock.yaml"
+    lock_before = lock_path.read_bytes()
+
+    result = _install_with_ci(sample, ci)
 
     output = _text(result)
     assert result.returncode == 1, output
-    assert "--frozen requires apm.lock.yaml" in output
-    assert not (project / "apm.lock.yaml").exists()
-    assert not (project / "apm_modules").exists()
+    assert "installing as --frozen" in output
+    assert "--no-frozen" in output
+    assert lock_path.read_bytes() == lock_before
+    assert b"extra" not in lock_before
+
+
+@pytest.mark.req("req-lk-018")
+@pytest.mark.parametrize(
+    ("ci", "args"),
+    [
+        pytest.param(None, (), id="unset"),
+        pytest.param("", (), id="empty"),
+        pytest.param("0", (), id="zero"),
+        pytest.param("FALSE", (), id="false"),
+        pytest.param("true", ("--no-frozen",), id="explicit-no-frozen"),
+    ],
+)
+def test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves(
+    tmp_path: Path, apm_binary_path: Path, ci: str | None, args: tuple[str, ...]
+) -> None:
+    sample = _locked_then_drifted(tmp_path, apm_binary_path)
+
+    result = _install_with_ci(sample, ci, *args)
+
+    output = _text(result)
+    assert result.returncode == 0, output
+    assert "installing as --frozen" not in output
+    assert "extra" in (sample.project.root / "apm.lock.yaml").read_text(encoding="utf-8")
+
+
+@pytest.mark.req("req-lk-018")
+def test_install_under_ci_without_lockfile_resolves_and_writes_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    sample = create_hermetic_packaged_sample(
+        tmp_path, apm_binary_path=apm_binary_path, project_name="consumer"
+    )
+
+    result = _install_with_ci(sample, "true")
+
+    output = _text(result)
+    assert result.returncode == 0, output
+    assert "installing as --frozen" not in output
+    assert (sample.project.root / "apm.lock.yaml").is_file()
+
+
+# --- req-lk-014: top-level vendor keys survive a rewrite ------------------------
+
+
+@pytest.mark.req("req-lk-014")
+def test_install_rewrite_keeps_top_level_vendor_keys(tmp_path: Path, apm_binary_path: Path) -> None:
+    """#4261: an install that rewrites the lockfile keeps its top-level x- keys."""
+    sample = _installed(tmp_path, apm_binary_path)
+    lock_path = sample.project.root / "apm.lock.yaml"
+    lock_path.write_text(
+        lock_path.read_text(encoding="utf-8") + "x-acme-build-id: ci-12345\n", encoding="utf-8"
+    )
+    # A second dependency makes the next install rewrite the lockfile.
+    project = sample.project.root
+    LocalPackageFactory(project / "packages").create("local-dep", targets=("copilot",))
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["dependencies"]["apm"].append("./packages/local-dep")
+    (project / "apm.yml").write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+    result = sample.run(("install",), scenario_id="lk-014-rewrite")
+    assert result.returncode == 0, _text(result)
+    rewritten = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    assert any("local-dep" in str(dep.get("repo_url")) for dep in rewritten["dependencies"])
+    assert rewritten["x-acme-build-id"] == "ci-12345", rewritten
+
+    # Paired probe: both verifiers accept the rewritten lockfile.
+    for name, args in sorted(_VERIFY.items()):
+        verified = sample.run(args, scenario_id=f"lk-014-{name}")
+        assert verified.returncode == 0, _text(verified)
+    assert yaml.safe_load(lock_path.read_text(encoding="utf-8"))["x-acme-build-id"] == "ci-12345"

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 import apm_cli.config as _conf
 from apm_cli.deps.registry.config_loader import resolve_effective_registries
+
+pytestmark = pytest.mark.unit
 
 
 def test_resolve_effective_registries_uses_config_default(monkeypatch):

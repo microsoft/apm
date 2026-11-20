@@ -21,6 +21,8 @@ from apm_cli.bundle.plugin_exporter import export_plugin_bundle
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.utils.content_hash import compute_file_hash
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers (reuse patterns from test_plugin_exporter.py)
 # ---------------------------------------------------------------------------

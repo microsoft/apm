@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from apm_cli.deps.verifier import (
@@ -13,6 +14,8 @@ from apm_cli.deps.verifier import (
     load_apm_config,
     verify_dependencies,
 )
+
+pytestmark = pytest.mark.component
 
 
 class TestDependenciesVerifier(unittest.TestCase):

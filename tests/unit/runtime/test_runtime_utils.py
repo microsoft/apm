@@ -8,6 +8,8 @@ import pytest
 
 from apm_cli.runtime.utils import find_runtime_binary
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def fake_home(tmp_path, monkeypatch):

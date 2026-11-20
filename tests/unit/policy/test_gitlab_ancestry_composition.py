@@ -19,6 +19,8 @@ from apm_cli.policy import discovery
 from apm_cli.policy.discovery import discover_policy_with_chain
 from apm_cli.policy.inheritance import PolicyInheritanceError
 
+pytestmark = pytest.mark.component
+
 _REMOTE = "https://gitlab.com/acme/dept-a/team-x/service.git"
 _ACME = "name: company\nenforcement: block\ndependencies:\n  deny: [evil/pkg]\n"
 _DEPT = "name: dept\nenforcement: warn\ndependencies:\n  deny: [dept/pkg]\n"

@@ -25,6 +25,8 @@ from apm_cli.policy.discovery import PolicyFetchResult, _CacheEntry
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy
 
+pytestmark = pytest.mark.component
+
 # -- Fixtures -------------------------------------------------------
 
 

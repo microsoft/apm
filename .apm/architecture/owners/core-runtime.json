@@ -19,7 +19,7 @@
       "id": "effective-install-target-selection",
       "decision": "Effective target selection and its compilation-target policy projection",
       "owner": "core/target_detection.py (EffectiveTargetDecision.canonical_targets, canonical_policy_target_names)",
-      "selectors": ["src/apm_cli/core/target_detection.py"],
+      "selectors": ["src/apm_cli/core/target_detection.py", "src/apm_cli/install/phases/targets.py"],
       "guards": [
         "registry-delegation-install-target-selection",
         "registry-delegation-audit-target-selection",
@@ -45,13 +45,27 @@
     },
     {
       "id": "user-facing-output-diagnostics",
-      "decision": "User-facing output / diagnostics",
-      "owner": "CommandLogger / console owner",
-      "selectors": [
-        "src/apm_cli/core/command_logger.py",
-        "src/apm_cli/utils/console.py"
-      ],
+      "decision": "User-facing output / diagnostics, including MCP client adapters and the safe MCP installer, which emit through CommandLogger",
+      "owner": "core/command_logger.py (CommandLogger, library_output, library_logger)",
+      "selectors": ["src/apm_cli/core/command_logger.py"],
       "guards": ["registry-delegation-output-diagnostics"]
+    },
+    {
+      "id": "console-construction",
+      "decision": "Rich Console and Table construction: every console and table comes from one ASCII-rendering factory; the stream and wrap mode of every line (error lines on stderr, no hard wrap when not a terminal)",
+      "owner": "utils/console.py (new_console, new_table, _get_console, _rich_echo)",
+      "selectors": ["src/apm_cli/utils/console.py"],
+      "guards": [
+        "registry-delegation-console-construction",
+        "registry-delegation-console-streams"
+      ]
+    },
+    {
+      "id": "experimental-flag-registry",
+      "decision": "Experimental flags: every registered flag has a runtime reader; experimental-only notices stay verbose; GA help is not marked experimental",
+      "owner": "core/experimental.py (FLAGS, is_enabled)",
+      "selectors": ["src/apm_cli/core/experimental.py"],
+      "guards": ["registry-delegation-experimental-flags"]
     },
     {
       "id": "compiled-output-writes",
@@ -120,10 +134,14 @@
     },
     {
       "id": "apm-home-resolution",
-      "decision": "APM-owned user metadata root",
-      "owner": "core/scope.py (get_apm_home)",
+      "decision": "APM-owned user metadata root, and which apm.yml is the manifest for a directory and a command scope (project root at project scope, $APM_HOME at user scope with no git remote); policy settings and discovery read that root, never the deploy root",
+      "owner": "core/scope.py (get_apm_home, manifest_file, get_manifest_path, manifest_root, scope_manifest_path, is_user_scope_root, policy_discovery_uses_git_remote)",
       "selectors": ["src/apm_cli/core/scope.py"],
-      "guards": ["registry-delegation-apm-home-resolution", "install-deployment-bundle-user-scope-root"]
+      "guards": [
+        "registry-delegation-apm-home-resolution",
+        "install-deployment-bundle-user-scope-root",
+        "registry-delegation-scope-manifest-path"
+      ]
     },
     {
       "id": "harness-user-root-resolution",
@@ -141,6 +159,17 @@
       "owner": "cli.py (main, _route_sigterm_to_interrupt)",
       "selectors": ["src/apm_cli/cli.py"],
       "guards": ["registry-delegation-process-interrupt-signals"]
+    },
+    {
+      "id": "cli-startup-import-budget",
+      "decision": "CLI startup (apm --help / --version) imports no command module and no GitPython; root verbs register as lazy stubs and deps exports resolve lazily",
+      "owner": "cli.py (_LazyCommand, _LAZY_COMMANDS, _OutputModeGroup) + deps/__init__.py (PEP 562 __getattr__); installed-CLI budget in tests/integration/test_cli_startup_import_budget.py",
+      "selectors": [
+        "src/apm_cli/deps/__init__.py",
+        "src/apm_cli/update_notice.py",
+        "tests/integration/test_cli_startup_import_budget.py"
+      ],
+      "guards": ["registry-delegation-cli-startup-import-budget"]
     }
   ]
 }

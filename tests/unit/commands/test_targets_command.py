@@ -13,6 +13,8 @@ from click.testing import CliRunner
 from apm_cli.commands.targets import targets
 from apm_cli.core.target_detection import ResolvedTargets, Signal
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

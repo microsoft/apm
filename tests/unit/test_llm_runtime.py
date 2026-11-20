@@ -7,6 +7,8 @@ import pytest
 
 from apm_cli.runtime.llm_runtime import LLMRuntime
 
+pytestmark = pytest.mark.unit
+
 
 class TestLLMRuntime:
     """Test LLM runtime adapter."""

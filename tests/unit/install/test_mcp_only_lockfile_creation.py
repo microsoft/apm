@@ -20,11 +20,16 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import pytest
+
+from apm_cli.core.remediation import MCP_LOCKFILE_UNWRITABLE
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.policy.ci_checks import _check_lockfile_exists
 from apm_cli.security.trust import McpAdmission
+
+pytestmark = pytest.mark.component
 
 MCP_ONLY_APM_YML = """\
 name: jira
@@ -103,7 +108,10 @@ class TestLockfileCreatedForMcpOnlyProject(_ProjectCase):
 
         warning.assert_called_once()
         self.assertIn("Could not write", warning.call_args.args[0])
-        self.assertIn("Ensure the directory is writable", warning.call_args.args[0])
+        self.assertIn(
+            MCP_LOCKFILE_UNWRITABLE.bind(lockfile="apm.lock.yaml").sentence(),
+            warning.call_args.args[0],
+        )
 
 
 class TestLegacyLockfileIsMigratedFirst(_ProjectCase):

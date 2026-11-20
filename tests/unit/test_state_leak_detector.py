@@ -23,6 +23,8 @@ import pytest
 from apm_cli.utils import console, git_env
 from tests.utils import state_leaks
 
+pytestmark = pytest.mark.component
+
 ROOT = Path(__file__).resolve().parents[2]
 POLLUTER = (
     "tests/unit/core/test_output_mode.py::"
@@ -162,6 +164,7 @@ def test_detector_wraps_every_other_function_autouse_fixture(
     for other in (
         "_reset_console_state",
         "_reset_config_cache",
+        "_reset_marketplace_registry_cache",
         "_isolate_discovery_state",
         "monkeypatch",
     ):

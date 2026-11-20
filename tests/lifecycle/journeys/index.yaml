@@ -9,7 +9,7 @@ oracles:
   O1:
     name: TRANSCRIPT
     invariant: '-'
-    check: normalized stdout+stderr of each step equals the reviewed golden file tests/journeys/goldens/<J>/<step>.txt; package blocks compared as unordered units, lines inside a block ordered
+    check: normalized stdout+stderr of each step equals the reviewed golden file tests/lifecycle/journeys/goldens/<J>/<nn>.txt; package blocks compared as unordered units, lines inside a block ordered
     applies: golden journeys only (PR tier)
   O2:
     name: DOCS-OUTPUT
@@ -2016,8 +2016,8 @@ journeys:
     kind: apm
     exit: 0
     key_lines:
-    - '[+] dependency-allowlist'
-    - '[*] All <N> check(s) passed'
+    - '[!] dependency-allowlist (enforcement: warn)'
+    - '<N> check(s) passed; 1 reports violations under ''enforcement: warn'''
     forbidden_lines:
     - non-ASCII box
     files: []
@@ -2060,7 +2060,8 @@ journeys:
     kind: edit
     exit: 1
     key_lines:
-    - '[x] policy could not be fetched'
+    - '[x] Install blocked: no enforceable org policy was resolved'
+    - '[x] Policy fetch failed'
     forbidden_lines: []
     files: []
     oracles:
@@ -2311,10 +2312,11 @@ journeys:
     - O5
     - O8
   - n: 5
-    cmd: apm auth (status)
+    cmd: apm auth github.com
     argv:
     - - apm
       - auth
+      - github.com
     kind: apm
     exit: 0
     key_lines: []
@@ -2403,11 +2405,15 @@ journeys:
     oracles:
     - O9
   - n: 4
-    cmd: apm deps list --json; apm find --source <file>
+    cmd: apm deps list; apm deps why <pkg> --json; apm find --source <file>
     argv:
     - - apm
       - deps
       - list
+    - - apm
+      - deps
+      - why
+      - <pkg>
       - --json
     - - apm
       - find

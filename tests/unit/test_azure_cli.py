@@ -13,6 +13,8 @@ from apm_cli.core.azure_cli import (
     AzureCliBearerProvider,
 )
 
+pytestmark = pytest.mark.component
+
 # A plausible JWT-shaped string (starts with eyJ, length > 100).
 FAKE_JWT = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9." + "a" * 200
 

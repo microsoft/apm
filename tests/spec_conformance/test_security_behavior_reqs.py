@@ -44,6 +44,11 @@ from apm_cli.utils.http_credentials import (
 )
 from tests.unit.test_packer import _setup_project
 
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("req-sc-002", "req-sc-003", "req-sc-007", "req-sc-010", "req-sc-012"),
+]
+
 _FAKE_PAT = "ghp_" + "Q" * 36
 
 
@@ -262,7 +267,7 @@ def test_rejected_archive_leaves_no_partial_extraction(tmp_path: Path) -> None:
 
 
 @pytest.mark.req("req-sc-005")
-@pytest.mark.xfail(strict=True, reason="S-pending")
+@pytest.mark.xfail(strict=True, reason="#4324 opt-in strict host-class credential scope")
 @pytest.mark.usefixtures("isolated_credentials")
 def test_token_scoped_to_its_host_class() -> None:
     """A credential for one registrable domain is not resolved for another."""
@@ -291,7 +296,6 @@ def _load_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema, entr
 
 
 @pytest.mark.req("req-sc-006")
-@pytest.mark.xfail(strict=True, reason="#4286: a public http:// registry URL is accepted at parse")
 @_CONTRACTS
 def test_public_plaintext_registry_url_is_rejected_naming_the_registry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: str | None
@@ -310,23 +314,8 @@ def test_private_plaintext_registry_url_is_accepted(
     assert loaded.registries == {"corp": url}
 
 
-@pytest.mark.parametrize(
-    "schema",
-    [
-        pytest.param(
-            None,
-            id="default",
-            marks=[
-                pytest.mark.req("req-sc-006"),
-                pytest.mark.xfail(
-                    strict=True, reason="S-pending: the default contract rejects the insecure field"
-                ),
-            ],
-        ),
-        # Passing under the v0.1 contract; unmarked so the id reports the xfail above.
-        pytest.param(_V01_SCHEMA, id="openapm-v0.1"),
-    ],
-)
+@pytest.mark.req("req-sc-006")
+@_CONTRACTS
 def test_insecure_opt_in_admits_a_public_plaintext_registry_url(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: str | None
 ) -> None:
@@ -337,7 +326,6 @@ def test_insecure_opt_in_admits_a_public_plaintext_registry_url(
 
 
 @pytest.mark.req("req-sc-007")
-@pytest.mark.xfail(strict=True, reason="S-pending")
 @pytest.mark.parametrize("name", [".env", "server.pem", "id_ed25519"])
 def test_pack_refuses_credential_files(tmp_path: Path, name: str) -> None:
     deployed = [".github/instructions/rules.md", f".github/skills/tool/{name}"]
@@ -345,6 +333,29 @@ def test_pack_refuses_credential_files(tmp_path: Path, name: str) -> None:
     with pytest.raises(ValueError, match=re.escape(name)):
         pack_bundle(project, tmp_path / "build", fmt="apm")
     assert not (tmp_path / "build").exists()
+
+
+@pytest.mark.req("req-sc-008")
+@pytest.mark.parametrize(
+    ("host", "attached"),
+    [("proxy.example.com", False), ("127.0.0.1", True)],
+    ids=["public-host", "loopback"],
+)
+def test_proxy_token_is_not_attached_over_http_to_a_public_host(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], host: str, attached: bool
+) -> None:
+    from apm_cli.deps import registry_proxy
+
+    registry_proxy._emitted_warnings.clear()
+    for name in ("ARTIFACTORY_BASE_URL", "ARTIFACTORY_APM_TOKEN", "PROXY_REGISTRY_ALLOW_HTTP"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PROXY_REGISTRY_URL", f"http://{host}/artifactory/github")
+    monkeypatch.setenv("PROXY_REGISTRY_TOKEN", "sc008-token")
+    config = registry_proxy.RegistryConfig.from_env()
+    assert config is not None
+    assert ("Authorization" in config.headers_for("http", host)) is attached
+    captured = capsys.readouterr()
+    assert ("PROXY_REGISTRY_TOKEN is not sent" in captured.out + captured.err) is not attached
 
 
 def test_token_text_is_redacted_from_diagnostics() -> None:

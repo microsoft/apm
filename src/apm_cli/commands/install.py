@@ -15,6 +15,16 @@ from apm_cli.agent_plugins.errors import (
     enforce_agent_plugin_deployment_boundary,
 )
 from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
+from apm_cli.core.remediation import (
+    BUNDLE_REPACK_PLUGIN,
+    FROZEN_UPDATE_CONFLICT,
+    LEGACY_BUNDLE_UNPACK,
+    PROJECT_MANIFEST_BOOTSTRAP,
+    PROJECT_MANIFEST_MISSING,
+    REGISTRY_PACKAGE_INSTALL,
+    USER_MANIFEST_MISSING,
+    either_sentence,
+)
 
 # Re-export the pre-deploy security scan so that bare-name call sites inside
 # this module and ``tests/unit/test_install_scanning.py``'s direct import
@@ -22,13 +32,15 @@ from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
 # working without modification.
 from apm_cli.core.scope import InstallScope as _InstallScope
 from apm_cli.core.scope import get_apm_dir as _get_apm_dir
+from apm_cli.core.scope import manifest_file
+from apm_cli.core.scope import manifest_root as _scope_manifest_root
 from apm_cli.deps.lockfile_generator import (
     LockfileGeneratorError,
     check_current_cli,
     refusal_exit,
 )
 from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
-from apm_cli.deps.transport_selection import initial_transport_scheme as _initial_scheme
+from apm_cli.deps.registry.feature_gate import UserRegistryConfigDisabledError
 from apm_cli.install.argv import (
     _get_invocation_argv,
     _split_argv_at_double_dash,
@@ -109,6 +121,8 @@ from apm_cli.install.phases.local_content import (
 # test pinned in #762 (test_hash_deployed_is_module_level_and_works) keep
 # working via "apm_cli.commands.install._hash_deployed".
 from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed  # noqa: F401
+from apm_cli.install.pipeline_entry import install_pipeline_options, pipeline_preview
+from apm_cli.install.repository_access import probe_failure_reason
 
 # Re-export DI-seam helpers from the install services module so that test
 # patches against ``apm_cli.commands.install._integrate_*`` keep working.
@@ -128,10 +142,10 @@ from apm_cli.install.validation import (
 from apm_cli.install.validation import (
     _local_path_failure_reason,
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
-    _uses_clone_root_probe,
     _validate_package_exists,
 )
 from apm_cli.marketplace.errors import MarketplaceFreshnessError
+from apm_cli.marketplace.version_pins import staged_ref_pin_keys, withdraw_ref_pins
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
 from apm_cli.models.results import InstallDisposition, InstallResult
 from apm_cli.policy.outcome_routing import discover_trust_policy
@@ -261,6 +275,8 @@ def _resolve_package_references(
 
     valid_outcomes = []  # (canonical, already_present) tuples
     invalid_outcomes = []  # (package, reason) tuples
+    # Marketplace ref pins each requested package staged while it resolved.
+    pins_by_package: dict[str, frozenset] = {}
     _marketplace_provenance = {}  # canonical -> {discovered_via, marketplace_plugin_name}
     _apm_yml_entries = {}  # canonical -> apm.yml entry (str or dict for HTTP deps)
     validated_packages = []
@@ -309,6 +325,7 @@ def _resolve_package_references(
                     if existing_lockfile is None:
                         existing_lockfile = _scoped_lockfile(scope)
                     require_locked_catalog_origin(marketplace_name, plugin_name, existing_lockfile)
+                    pins_before = staged_ref_pin_keys()
                     resolution = resolve_marketplace_plugin(
                         plugin_name,
                         marketplace_name,
@@ -317,6 +334,7 @@ def _resolve_package_references(
                         warning_handler=warning_handler,
                     )
                     canonical_str, _resolved_plugin = resolution
+                    pins_by_package[canonical_str] = staged_ref_pin_keys() - pins_before
                     if logger:
                         logger.verbose_detail(f"    Resolved to: {canonical_str}")
                     # #1326: refuse before any outbound validation probe.
@@ -476,41 +494,14 @@ def _resolve_package_references(
         else:
             reason = _local_path_failure_reason(dep_ref) or _ambiguous_subpath_hint(dep_ref)
             if not reason:
-                # Round-4 panel fix (devx-ux): name the four-step probe
-                # chain explicitly when the validator exhausted it
-                # (virtual subdirectory + explicit ref). Generic "not
-                # accessible" hides the failure mode for the precise
-                # case where the most diagnostics are available. A clone-root
-                # ``git ls-remote`` probe never ran that chain.
-                is_subdir_ref_chain = (
-                    dep_ref.is_virtual
-                    and dep_ref.is_virtual_subdirectory()
-                    and bool(dep_ref.reference)
-                    and not _uses_clone_root_probe(dep_ref)
-                )
-                if is_subdir_ref_chain:
-                    reason = (
-                        "all probes failed (marker-file, Contents API, "
-                        "git ls-remote, shallow-fetch) -- verify the path "
-                        "and ref exist and that your credentials have "
-                        "read access"
-                    )
-                    if not verbose:
-                        reason += " (run with --verbose for the full probe log)"
-                elif _uses_clone_root_probe(dep_ref) and _initial_scheme(dep_ref) == "ssh":
-                    reason = (
-                        "git ls-remote over SSH failed -- verify that your SSH "
-                        "key has read access to the repository"
-                    )
-                    if not verbose:
-                        reason += " (run with --verbose for the git output)"
-                else:
-                    reason = "not accessible or doesn't exist"
-                    if not verbose:
-                        reason += " -- run with --verbose for auth details"
+                reason = probe_failure_reason(dep_ref, package, auth_resolver, verbose, scope=scope)
             invalid_outcomes.append((package, reason))
             if logger:
                 logger.validation_fail(package, reason)
+
+    # A package that will not install records no ref pin (#4322).
+    for rejected, _reason in invalid_outcomes:
+        withdraw_ref_pins(pins_by_package.get(rejected, frozenset()))
 
     return (
         valid_outcomes,
@@ -559,7 +550,7 @@ def _validate_and_add_packages_to_apm_yml(
     """
     from pathlib import Path
 
-    apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
+    apm_yml_path = manifest_path or manifest_file(Path("."))
 
     data, manifest_host = _load_manifest_for_add(apm_yml_path, logger)
 
@@ -773,6 +764,7 @@ def _handle_mcp_install(  # noqa: PLR0913
             )
         target_decision = EffectiveTargetDecision(supported_runtimes, target_decision.source)
     _run_mcp_policy_preflight(
+        policy_root=_scope_manifest_root(Path.cwd(), user_scope=scope is _InstallScope.USER),
         mcp_name=mcp_name,
         transport=transport,
         url=url,
@@ -860,13 +852,12 @@ def _handle_mcp_install(  # noqa: PLR0913
     help="Overwrite locally-authored files on collision and deploy despite critical security findings (does NOT refresh refs; use 'apm update' for that)",
 )
 @click.option(
-    "--frozen",
-    is_flag=True,
+    "--frozen/--no-frozen",
+    default=None,
     help=(
-        "Refuse to install when apm.lock.yaml is missing or out of sync with "
-        "apm.yml, including Git source, ref, host provider, transport, and MCP "
-        "config state, or when deployed files do not match the hashes it records "
-        "(CI-safe; mutually exclusive with --update, --mcp, and positional packages)."
+        "Refuse to install when apm.lock.yaml is missing or out of sync with apm.yml (Git source, ref, "
+        "host provider, transport, MCP config), or when deployed files do not match the hashes it records. "
+        "Default when CI is truthy and apm.lock.yaml exists. Mutually exclusive with --update, --mcp, and packages."
     ),
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed installation information")
@@ -1178,8 +1169,9 @@ def install(  # noqa: PLR0913
     logger = dry_run_manifest_tmp = None
     command_result: InstallResult | None = None
     transaction: InstallTransaction | None = None
-    from ..install.service import InstallService
+    from ..install.service import InstallService, resolve_frozen
 
+    frozen = resolve_frozen(frozen, update or refresh or packages or mcp_name, global_, root)
     ctx.with_resource(InstallService.frozen_writes(frozen))
     ctx.with_resource(
         InstallService.catalog_freshness(update_refs=update, refresh=refresh, frozen=frozen)
@@ -1193,8 +1185,7 @@ def install(  # noqa: PLR0913
         raise click.ClickException(str(exc)) from exc
     if frozen and update:
         raise click.UsageError(
-            "--frozen and --update are mutually exclusive. "
-            "Use 'apm update' to refresh refs, then 'apm install --frozen' in CI."
+            f"--frozen and --update are mutually exclusive. {FROZEN_UPDATE_CONFLICT.sentence()}"
         )
     if root and global_:
         raise click.UsageError("--root is not valid with --global (user scope)")
@@ -1249,8 +1240,8 @@ def install(  # noqa: PLR0913
                 from ..install.local_bundle_handler import install_local_bundle as _install_lb
 
                 _bundle_project_root = _source_root
-                # One policy discovery serves the trust map and, at project
-                # scope (same root), the bundle policy preflight.
+                # One policy discovery, at the scope manifest root, serves the
+                # trust map and the bundle policy preflight.
                 _allow_execs_for_bundle = _effective_bundle_allow_map(
                     _bundle_project_root,
                     user_scope=global_,
@@ -1261,7 +1252,9 @@ def install(  # noqa: PLR0913
                     policy_fetch_result=(
                         _bundle_policy := None
                         if no_policy
-                        else discover_trust_policy(_bundle_project_root)
+                        else discover_trust_policy(
+                            _scope_manifest_root(_bundle_project_root, user_scope=global_)
+                        )
                     ),
                 )
                 lockfile_writer(LockfileWriter.INSTALL_BUNDLE)(_install_lb)(
@@ -1318,14 +1311,12 @@ def install(  # noqa: PLR0913
                     raise click.UsageError(
                         f"'{packages[0]}' was packed with '--format apm' (legacy format). "
                         "'apm install <bundle>' requires the plugin format. "
-                        "Repack with 'apm pack --claude-plugin --archive', "
-                        "or use 'apm unpack' to deploy the legacy bundle."
+                        f"{either_sentence(BUNDLE_REPACK_PLUGIN, LEGACY_BUNDLE_UNPACK)}"
                     )
                 raise click.UsageError(
                     f"'{packages[0]}' is not a valid APM bundle archive "
                     "(no plugin.json found at the bundle root). "
-                    "Use 'apm install org/package' for registry installs, "
-                    "or repack the source with 'apm pack'."
+                    f"{either_sentence(REGISTRY_PACKAGE_INSTALL, BUNDLE_REPACK_PLUGIN)}"
                 )
         # IM8: --as is only meaningful for local-bundle installs.  If we get
         # here, no local bundle was detected, so reject --as instead of
@@ -1474,8 +1465,6 @@ def install(  # noqa: PLR0913
             apm_modules_dir=get_modules_dir(scope),
             validation=None,
             logger=logger,
-            # A preview never creates lifecycle lock state (#2549); its
-            # resolution staging rolls back when the transaction completes.
             acquire_lock=not dry_run,
         )
 
@@ -1503,10 +1492,11 @@ def install(  # noqa: PLR0913
         if not apm_yml_exists and not packages:
             logger.error(f"No {manifest_display} found")
             if scope is InstallScope.USER:
-                logger.progress("Run 'apm install -g <org/repo>' to auto-create + install")
+                logger.progress(USER_MANIFEST_MISSING.sentence())
             else:
-                logger.progress("Run 'apm init' to create one, or:")
-                logger.progress("  apm install <org/repo> to auto-create + install")
+                logger.progress(
+                    either_sentence(PROJECT_MANIFEST_MISSING, PROJECT_MANIFEST_BOOTSTRAP)
+                )
             sys.exit(1)
 
         reconcile_user_marketplaces_or_exit(manifest_path, scope, logger=logger, dry_run=dry_run)
@@ -1608,8 +1598,14 @@ def install(  # noqa: PLR0913
             )
             summary_rendered = True
 
-            if frozen and apm_count > 0:
-                # --frozen verified lockfile structure and deployed hashes (req-lk-017).
+            if (
+                frozen
+                and command_result.exit_code == 0
+                and getattr(command_result, "disposition", None) is not InstallDisposition.FAILED
+                and getattr(_scoped_lockfile(scope), "dependencies", None)
+            ):
+                # --frozen verified lockfile structure and deployed hashes (req-lk-017),
+                # also on a converged run that installs nothing (#4184).
                 logger.info(
                     "Deployed files verified against apm.lock.yaml.",
                     symbol="info",
@@ -1731,6 +1727,9 @@ def _install_apm_packages(ctx, outcome):
             apm_package = outcome.prospective_package
     except click.UsageError:
         raise
+    except UserRegistryConfigDisabledError as e:
+        logger.error(str(e))
+        raise InstallFailureAlreadyRendered("Registry configuration needs registries") from e
     except Exception as e:
         logger.error(f"Failed to parse {ctx.manifest_display}: {e}")
         raise InstallFailureAlreadyRendered("Failed to parse install manifest") from e
@@ -1784,41 +1783,15 @@ def _install_apm_packages(ctx, outcome):
             scope=ctx.scope,
         )
 
-    # Every package install and its --dry-run preview enter one pipeline (#4085).
-    pipeline_options = dict(
-        post_install_after_services=True,
-        force=ctx.force,
-        parallel_downloads=ctx.parallel_downloads,
+    pipeline_options = install_pipeline_options(
+        ctx,
+        outcome,
         logger=logger,
-        scope=ctx.scope,
-        auth_resolver=ctx.auth_resolver,
-        target=ctx.target or ctx.runtime,
-        allow_insecure=ctx.allow_insecure,
-        allow_insecure_hosts=ctx.allow_insecure_hosts,
-        marketplace_provenance=(
-            outcome.marketplace_provenance if ctx.packages and outcome else None
-        ),
-        protocol_pref=ctx.protocol_pref,
-        allow_protocol_fallback=ctx.allow_protocol_fallback,
-        no_policy=ctx.no_policy,
-        audit_override=ctx.audit_override,
-        legacy_skill_paths=ctx.legacy_skill_paths,
-        trust_transitive_mcp=ctx.trust_transitive_mcp,
         install_mcp=should_install_mcp,
-        mcp_runtime=ctx.runtime,
-        frozen=frozen_disposition.replay,
-        plan_callback=ctx.plan_callback,
-        skill_subset=ctx.skill_subset,
-        skill_subset_from_cli=ctx.skill_subset_from_cli,
-        refresh=ctx.refresh,
-        trust_bin=ctx.trust_bin,
-        transaction=ctx.transaction,
         lsp_preflight=LspPreflight.for_install(ctx),
-    )
+    ) | {"frozen": frozen_disposition.replay}
 
     if ctx.dry_run:
-        from apm_cli.install.pipeline_entry import pipeline_preview
-
         preview = None
         if should_install_apm and has_any_apm_deps and APM_DEPS_AVAILABLE:
             preview = pipeline_preview(
@@ -1869,6 +1842,8 @@ def _install_apm_packages(ctx, outcome):
             apm_dir=ctx.apm_dir,
             local_cleanup_pending=_local_cleanup_pending,
             project_root=None if ctx.scope is _InstallScope.USER else ctx.project_root,
+            no_policy=ctx.no_policy,
+            scope=ctx.scope,
         )
         return (*prospective_plan.dependency_counts, None)
 
@@ -2031,8 +2006,8 @@ def _install_apm_packages(ctx, outcome):
             ),
             frozen_disposition=frozen_disposition,
         )
-    except PolicyBlockError:
-        refuse_blocked_mcp(logger)
+    except PolicyBlockError as exc:
+        refuse_blocked_mcp(logger, exc)
     except RequiredIntegrationError as exc:
         logger.error(str(exc))
         logger.render_summary()

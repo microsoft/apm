@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.lifecycle.world.shims import write_shim
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -92,6 +93,22 @@ def _spellings(root: Path, env: dict[str, str]) -> tuple[tuple[str, Path], ...]:
     return (("windows-long", long), ("windows-short", short))
 
 
+# A logged-out ``gh``: the world is hermetic, so APM must never read real
+# github.com credentials or wait on the runner's gh (it can hang on Windows).
+_GH_LOGGED_OUT = (
+    "import sys\n"
+    "sys.stderr.write('You are not logged into any GitHub hosts.\\n')\n"
+    "raise SystemExit(1)\n"
+)
+
+
+def _without_gh_login(env: dict[str, str], root: Path) -> dict[str, str]:
+    """Put a logged-out ``gh`` first on PATH, outside every repository the test audits."""
+    directory = root / "gh-logged-out"
+    write_shim(directory, "gh", _GH_LOGGED_OUT)
+    return {**env, "PATH": os.pathsep.join((str(directory), env.get("PATH", "")))}
+
+
 def _seed(tmp_path: Path, apm_binary_path: Path, *, dependency_kind: str = "local") -> _Workspace:
     """Install a baseline, commit its real outputs, then clone without modules."""
     isolated = IsolatedApmEnvironment.create(
@@ -115,25 +132,7 @@ def _seed(tmp_path: Path, apm_binary_path: Path, *, dependency_kind: str = "loca
         env[f"GIT_CONFIG_VALUE_{index}"] = "git@github.com:test/remote-dependency.git"
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         dependency = {"git": url, "ref": pin}
-        gh = shutil.which("gh", path=env.get("PATH"))
-        if gh is not None:
-            # Initialize gh's device state before taking read-only audit snapshots.
-            auth = subprocess.run(
-                (gh, "auth", "token", "--hostname", "github.com"),
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
-            auth_summary = {
-                "returncode": auth.returncode,
-                "stdout_length": len(auth.stdout),
-                "stderr_length": len(auth.stderr),
-            }
-            assert auth_summary["returncode"] == 1 and auth_summary["stdout_length"] == 0, (
-                auth_summary
-            )
+    env = _without_gh_login(env, isolated.root)
     consumer = packages.create(
         "consumer-source",
         dependencies=(dependency,),

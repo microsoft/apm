@@ -14,6 +14,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlparse
 
+import pytest
+
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,  # noqa: F401
     _cache_key,
@@ -24,6 +26,8 @@ from apm_cli.policy.discovery import (
 )
 from apm_cli.policy.parser import load_policy  # noqa: F401
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
+
+pytestmark = pytest.mark.component
 
 NUM_WRITERS = 16
 

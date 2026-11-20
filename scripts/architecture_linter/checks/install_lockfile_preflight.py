@@ -5,7 +5,8 @@ download, deploy or cleanup. For every install that will write the lockfile
 (not ``--frozen``, ``--dry-run`` or lockfile-only) it calls the lockfile
 owner's ``refuse_lockfile_before_mutation``, so a symlinked or newer-generator
 lockfile stops the command while nothing has changed. The refusal must not
-depend on update intent alone.
+depend on update intent alone: ``writes_lockfile`` also counts an install
+that adds or removes a dependency.
 """
 
 from __future__ import annotations

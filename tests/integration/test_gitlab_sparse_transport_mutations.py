@@ -47,7 +47,7 @@ MUTATIONS: tuple[Mutation, ...] = (
         "M1-force-https",
         "_prepared_repo_url",
         "return requested_url",
-        'return self.build_repo_url(repo_ref, dep_ref=dep_ref, use_ssh=False, token="")',
+        "return self.build_repo_url(repo_ref, dep_ref=dep_ref, use_ssh=False)",
         f"{GIT_CONTRACT}::test_real_git_manifest_remote_bytes_and_single_fetch[main]",
         "manifest transport must reach the actual Git remote",
     ),

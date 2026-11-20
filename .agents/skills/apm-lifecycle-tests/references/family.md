@@ -28,7 +28,7 @@ Read `_new_scenario`, `_Scenario`, `_publish`, `_run_success` and
 | fault injection, smallest world | `tests/integration/_fault_injection_kit.py` `build_world(...)` -> `FaultWorld` (`apm()`, `install()`, `lockfile_bytes()`, `snapshot()`, `assert_user_file_intact()`, `assert_converges()`) |
 | other shared worlds | `_containment_kit.py`, `_harness_output_kit.py`, `_install_audit_replay_kit.py` (I3), `_lockfile_chain_kit.py`, `_marketplace_pack_kit.py`, `_mcp_chain_kit.py`, `_path_corner_world_kit.py`, `_target_compile_kit.py` (all under `tests/integration/`) |
 | skill-bundle graphs, declarative rows | `tests/utils/skill_selection_world.py`, `tests/utils/scenario_rows.py` |
-| model-based exploration | `tests/integration/test_generated_lifecycle_state_machine.py` (Hypothesis) |
+| model-based exploration | `tests/lifecycle/machines/test_m_spine.py` (Hypothesis, on the family core) |
 | CLI fixtures | `apm_binary_path` (packaged; `APM_BINARY_PATH` or a built binary, else skip) and `apm_engine_command` (`python -m apm_cli.cli`) in `tests/integration/conftest.py` |
 
 Markers (`pyproject.toml`):

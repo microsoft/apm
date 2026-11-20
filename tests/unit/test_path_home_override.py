@@ -12,6 +12,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 
 def test_path_home_does_not_raise_with_cleared_env(monkeypatch):
     """Path.home() must return a usable Path even with HOME/USERPROFILE/etc cleared."""

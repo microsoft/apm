@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from scripts.architecture_linter.checks.contracts_strip_charset import (
     check_strip_charset_literals,
 )
 from scripts.architecture_linter.facts import FactsProvider
+
+pytestmark = pytest.mark.component
 
 _RULE = "contracts-tooling-strip-charset"
 _SOURCE = """\

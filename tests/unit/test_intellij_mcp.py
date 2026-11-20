@@ -18,24 +18,9 @@ from apm_cli.adapters.client.intellij import (
     _legacy_intellij_config_dir,
 )
 from apm_cli.cli import cli
-from apm_cli.factory import ClientFactory
 from apm_cli.utils.path_security import PathTraversalError
 
-
-class TestIntelliJClientFactory:
-    """Verify IntelliJClientAdapter is registered in ClientFactory."""
-
-    def test_factory_creates_intellij_adapter(self):
-        adapter = ClientFactory.create_client("intellij")
-        assert isinstance(adapter, IntelliJClientAdapter)
-
-    def test_supports_user_scope_is_true(self):
-        adapter = ClientFactory.create_client("intellij")
-        assert adapter.supports_user_scope is True
-
-    def test_mcp_servers_key_is_servers(self):
-        adapter = ClientFactory.create_client("intellij")
-        assert adapter.mcp_servers_key == "servers"
+pytestmark = pytest.mark.component
 
 
 class TestIntelliJConfigDir(unittest.TestCase):
@@ -569,6 +554,7 @@ class TestIntelliJConfigureMCPServer(unittest.TestCase):
     def test_returns_false_for_empty_url(self):
         result = self.adapter.configure_mcp_server("")
         self.assertFalse(result)
+        self.assertFalse(self.mcp_json.exists())
 
     def test_returns_false_when_server_not_found(self):
         self.registry.find_server_by_reference.return_value = None

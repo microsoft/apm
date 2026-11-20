@@ -610,7 +610,7 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             "src/apm_cli/integration/mcp_config_view.py",
             (
                 "elif _is_local_claude_plugin_source(dependency, package_dir):",
-                'if not package_dir.is_dir() or (package_dir / "apm.yml").exists():',
+                "if not package_dir.is_dir() or manifest_file(package_dir).exists():",
             ),
             "Local Claude MCP inspection must read the install-synthesized manifest, "
             "never the writable source",
@@ -671,7 +671,9 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
         _CODEX_PREFIX + "admission.py": (
             "record_native_exec_status(",
             "skill_subset_filter_tokens(skill_subset)",
-            "if any(not approvals.get(kind, False) for kind in types):",
+            # Unapproved executables park the whole bundle: never registered (#4154).
+            "parked = any(not approvals.get(kind, False) for kind in types)",
+            "    if plugin.parked:",
             "CodexNativeDeployment(",
             "scratch_root is None",
             "plugin.source_hash",

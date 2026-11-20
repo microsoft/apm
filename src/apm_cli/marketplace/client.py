@@ -38,6 +38,10 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
+from ..core.remediation import (
+    MARKETPLACE_GIT_ACCESS_FAILED,
+    MARKETPLACE_GIT_REWRITE_REJECTED,
+)
 from ..utils.http_credentials import (
     CredentialScopedSession,
     RedirectRefusedError,
@@ -637,10 +641,7 @@ def _fetch_git(
         return MarketplaceFetchError(
             source.name,
             reason,
-            retry_hint=(
-                "Correct the matching Git configuration, then run "
-                f"'apm marketplace update {source.name}' to retry."
-            ),
+            retry_hint=MARKETPLACE_GIT_REWRITE_REJECTED.bind(name=source.name).sentence(),
         )
 
     cache = GitCache(get_cache_root(), refresh=False)
@@ -701,9 +702,7 @@ def _fetch_git(
         raise MarketplaceFetchError(
             source.name,
             str(exc),
-            retry_hint=(
-                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
-            ),
+            retry_hint=MARKETPLACE_GIT_ACCESS_FAILED.bind(name=source.name).sentence(),
         ) from exc
     except subprocess.CalledProcessError as exc:
         # Map "object not found" / "couldn't find remote ref" to None so the
@@ -716,18 +715,14 @@ def _fetch_git(
         raise MarketplaceFetchError(
             source.name,
             "git fetch failed; verify the remote, configured Git credentials, or SSH key",
-            retry_hint=(
-                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
-            ),
+            retry_hint=MARKETPLACE_GIT_ACCESS_FAILED.bind(name=source.name).sentence(),
         ) from exc
     except Exception as exc:
         logger.debug("Generic-git fetch failed for '%s': %s", source.name, type(exc).__name__)
         raise MarketplaceFetchError(
             source.name,
             "git fetch failed; verify the remote, configured Git credentials, or SSH key",
-            retry_hint=(
-                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
-            ),
+            retry_hint=MARKETPLACE_GIT_ACCESS_FAILED.bind(name=source.name).sentence(),
         ) from exc
 
     target = Path(checkout_dir) / file_path
@@ -1102,10 +1097,11 @@ def fetch_raw(
     if proxy_bytes is not None:
         return proxy_bytes
 
-    from ..deps.registry_proxy import RegistryConfig, is_enforce_only
+    from ..deps.egress_route import EgressRoute, EgressSurface, route_for
+    from ..deps.registry_proxy import RegistryConfig
 
-    cfg = RegistryConfig.from_env()
-    if (cfg is not None and cfg.enforce_only) or is_enforce_only():
+    if route_for(EgressSurface.MARKETPLACE_FILE) is not EgressRoute.DIRECT:
+        cfg = RegistryConfig.from_env()
         raise MarketplaceError(
             f"cannot verify {owner}/{repo}/{file_path}@{ref}: "
             "PROXY_REGISTRY_ONLY blocks the direct GitHub fetch"
@@ -1159,9 +1155,9 @@ def _refuse_direct_egress(source_name: str, what: str) -> None:
     catalogs route through ``PROXY_REGISTRY_URL``; every other remote kind,
     and any kind without a configured proxy, would go direct.
     """
-    from ..deps.registry_proxy import is_enforce_only
+    from ..deps.egress_route import EgressRoute, EgressSurface, route_for
 
-    if is_enforce_only():
+    if route_for(EgressSurface.MARKETPLACE_FILE) is not EgressRoute.DIRECT:
         # Drop any query string: a signed catalog URL must not reach CI logs.
         what = re.sub(r"\?\S*", "", what)
         raise MarketplaceEgressRefusedError(
@@ -1200,10 +1196,10 @@ def _fetch_file(
         proxy_result = _try_proxy_fetch(source, file_path)
         if proxy_result is not None:
             return proxy_result
+        from ..deps.egress_route import EgressSurface, is_proxy_only
         from ..deps.registry_proxy import RegistryConfig
 
-        cfg = RegistryConfig.from_env()
-        if cfg is not None and cfg.enforce_only:
+        if RegistryConfig.from_env() is not None and is_proxy_only(EgressSurface.MARKETPLACE_FILE):
             # The proxy answered for this path: a miss is "not found".
             logger.debug(
                 "PROXY_REGISTRY_ONLY blocks direct fetch for %s/%s %s",

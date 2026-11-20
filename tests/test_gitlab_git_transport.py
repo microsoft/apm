@@ -26,6 +26,8 @@ from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.git_env import get_git_executable
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.component
+
 # Patch cred helper so tests never call real git for token resolution.
 _CRED_FILL_PATCH = patch(
     "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",

@@ -21,6 +21,8 @@ from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.targets import KNOWN_TARGETS
 
+pytestmark = pytest.mark.component
+
 _BASE_ENV = {"APM_E2E_TESTS": "1"}
 _OLD_ROOT = ".gemini/antigravity-cli"
 _NEW_ROOT = ".gemini/config"

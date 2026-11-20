@@ -9,6 +9,8 @@ from apm_cli.marketplace import registry as registry_mod
 from apm_cli.marketplace.errors import MarketplaceNotFoundError
 from apm_cli.marketplace.models import MarketplaceSource
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _isolate_registry(tmp_path, monkeypatch):

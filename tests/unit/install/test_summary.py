@@ -9,6 +9,8 @@ import pytest
 from apm_cli.install.summary import classify_post_install_result, render_post_install_summary
 from apm_cli.models.results import InstallDisposition
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

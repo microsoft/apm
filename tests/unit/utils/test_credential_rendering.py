@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +17,11 @@ from apm_cli.utils.credential_rendering import (
     redact_url_userinfo,
     render_config_value,
 )
+
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-OWN-credential-value-rendering", "P-LAW-auth.credentials_isolated"),
+]
 
 _SECRET = "Sentinel0a1b2c3d4e5f6a7b8c9d"
 _URL = f"https://alice:{_SECRET}@reg.example.invalid/apm"
@@ -115,26 +119,20 @@ def test_credential_flags_in_free_text_values_are_redacted(value: str, expected:
             f"--endpoint=https://h.invalid/x?sig={_SHORT} --mode fast",
             "--endpoint=https://h.invalid/x?sig=******** --mode fast",
         ),
-    ],
-)
-def test_query_credentials_in_config_values_are_masked(value: str, expected: str) -> None:
-    assert render_config_value("external.skillspector.args", value) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (
+        # Userinfo inside --flag=URL arguments is removed, not masked.
+        pytest.param(
             f"--endpoint=https://{_SECRET}@reg.example.invalid/apm",
             "--endpoint=https://reg.example.invalid/apm",
+            id="userinfo-equals-form-arg",
         ),
-        (
+        pytest.param(
             f"--endpoint=https://u:a:{_SHORT}@reg.example.invalid/apm --x",
             "--endpoint=https://reg.example.invalid/apm --x",
+            id="userinfo-colon-password-equals-form-arg",
         ),
     ],
 )
-def test_userinfo_inside_equals_form_args_is_removed(value: str, expected: str) -> None:
+def test_credentials_in_config_values_are_masked_or_removed(value: str, expected: str) -> None:
     assert render_config_value("external.skillspector.args", value) == expected
 
 
@@ -180,26 +178,36 @@ def test_mask_known_values_masks_longest_first() -> None:
 
 
 def test_proxy_plaintext_warning_drops_url_userinfo(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apm_cli.deps import registry_proxy
+
     monkeypatch.setenv("PROXY_REGISTRY_URL", f"http://alice:{_SECRET}@proxy.invalid/art/apm")
     monkeypatch.setenv("PROXY_REGISTRY_TOKEN", _SECRET)
     monkeypatch.delenv("PROXY_REGISTRY_ALLOW_HTTP", raising=False)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        RegistryConfig.from_env()
-    messages = [str(item.message) for item in caught]
+    registry_proxy._emitted_warnings.clear()
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "apm_cli.utils.console._rich_warning", lambda message, *a, **k: messages.append(message)
+    )
+    RegistryConfig.from_env()
     assert any("http://proxy.invalid/art/apm" in message for message in messages), messages
     assert not any(_SECRET in message for message in messages)
 
 
 def test_proxy_plaintext_warning_masks_query_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apm_cli.deps import registry_proxy
+
     monkeypatch.setenv("PROXY_REGISTRY_URL", f"http://proxy.invalid/art/apm?token={_SECRET}")
     monkeypatch.setenv("PROXY_REGISTRY_TOKEN", _SECRET)
     monkeypatch.delenv("PROXY_REGISTRY_ALLOW_HTTP", raising=False)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        RegistryConfig.from_env()
-    messages = [str(item.message) for item in caught]
-    assert any("http://proxy.invalid/art/apm?token=********" in m for m in messages), messages
+    registry_proxy._emitted_warnings.clear()
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "apm_cli.utils.console._rich_warning", lambda message, *a, **k: messages.append(message)
+    )
+    RegistryConfig.from_env()
+    assert any("http://proxy.invalid/art/apm?token=********" in message for message in messages), (
+        messages
+    )
     assert not any(_SECRET in message for message in messages)
 
 

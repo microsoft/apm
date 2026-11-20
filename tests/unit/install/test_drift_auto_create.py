@@ -2,11 +2,14 @@
 
 from unittest.mock import MagicMock
 
+import pytest
 import yaml
 
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.diagnostics import DiagnosticCollector
+
+pytestmark = pytest.mark.component
 
 
 def test_auto_create_false_targets_still_integrate_in_scratch(tmp_path):

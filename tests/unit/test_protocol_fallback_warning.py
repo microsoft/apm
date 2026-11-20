@@ -18,11 +18,13 @@ from pathlib import Path
 from unittest.mock import Mock, patch  # noqa: F401
 from urllib.parse import urlsplit
 
-import pytest  # noqa: F401
+import pytest
 from git.exc import GitCommandError
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
+
+pytestmark = pytest.mark.component
 
 
 def _make_downloader():

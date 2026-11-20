@@ -33,7 +33,6 @@ import logging
 import os
 import sys
 import threading
-import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -49,9 +48,10 @@ from apm_cli.core.auth_chain import (  # AdoAuthChainExhaustedError: re-exported
     helper_cache_key,
     run_ado_chain,
 )
-from apm_cli.core.auth_outcome import (
+from apm_cli.core.auth_outcome import (  # noqa: F401 -- SecretRedactionFilter re-exported
     AuthAttemptFailed,
     AuthOutcomeKind,
+    SecretRedactionFilter,
     classify_auth_outcome,
     sanitize_diagnostic_detail,
 )
@@ -61,12 +61,13 @@ from apm_cli.core.host_providers import (
     git_transport_cache_key,
     git_transport_policy,
 )
+from apm_cli.core.remediation import GITHUB_AUTH_FIRST_ENABLED
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.models.dependency.host_virtual import (
     dependency_repository_owner,
     repository_owner_from_reference_text,
 )
-from apm_cli.utils.credential_rendering import redact_secrets as _redact_secrets
+from apm_cli.utils.credential_rendering import redact_secrets as _redact_secrets  # noqa: F401
 from apm_cli.utils.github_host import (
     default_host,
     is_gitlab_hostname,
@@ -85,35 +86,6 @@ logger = logging.getLogger(__name__)
 
 # The redaction pattern is owned by ``utils/credential_rendering.py`` so the
 # auth chain, diagnostics, and this logging filter share one definition.
-
-
-class SecretRedactionFilter(logging.Filter):
-    """Logging filter that redacts secret patterns from all emitted log records.
-
-    Install on the ``apm_cli`` logger (or a sub-logger) when debug logging is
-    enabled so that exception messages carrying HTTP client error strings --
-    which some libraries embed auth headers or token values in -- do not leak
-    credentials into the debug stream.
-
-    Usage::
-
-        logging.getLogger("apm_cli").addFilter(SecretRedactionFilter())
-    """
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        try:
-            msg = record.getMessage()
-            redacted = _redact_secrets(msg)
-            if redacted != msg:
-                record.msg = redacted
-                record.args = ()
-            if record.exc_info is not None:
-                formatted = "".join(traceback.format_exception(*record.exc_info))
-                record.exc_text = _redact_secrets(formatted)
-                record.exc_info = None
-        except Exception:
-            pass
-        return True
 
 
 _PORT_CREDENTIAL_DOCS_URL = (
@@ -236,6 +208,14 @@ class AuthResolver:
         # F5 #852: pre-init the per-host dedup set so callers do not need
         # the prior hasattr() guard.
         self._verbose_auth_logged_hosts: set = set()
+        # Auth-chain trace lines already shown this command: a chain re-run by a
+        # later clone attempt reports the same steps once (#4290).
+        self._emitted_auth_traces: set[str] = set()
+        self._auth_trace_lock = threading.Lock()
+
+        # Secondary credential sources each host was tried with, in order
+        # (labels only, never values), for the not-found diagnostic (#4322).
+        self._secondary_sources_tried: dict[tuple[str, int | None], list[str]] = {}
         # #1212 follow-up: with preflight + list_remote_refs + clone all
         # routing through the ADO auth chain, a single ADO host
         # in an install plan can trigger emit_stale_pat_diagnostic up to
@@ -285,8 +265,15 @@ class AuthResolver:
         line: str,
         verbose_callback: Callable[[str], None] | None,
     ) -> None:
-        """Send one auth-chain step to the caller's or the wired verbose channel."""
+        """Send one auth-chain step to the caller's or the wired verbose channel.
+
+        An identical step line is sent once per resolver (per command).
+        """
         safe = sanitize_diagnostic_detail(line) or line
+        with self._auth_trace_lock:
+            if safe in self._emitted_auth_traces:
+                return
+            self._emitted_auth_traces.add(safe)
         if verbose_callback is not None:
             verbose_callback(safe)
             return
@@ -632,8 +619,8 @@ class AuthResolver:
         self._emit_warning_with_detail(
             "github-auth-first is enabled: git credentials will be forwarded "
             "on the first HTTPS attempt to github.com.",
-            "To restore the default, run 'apm config unset github-auth-first', "
-            "unset APM_GITHUB_AUTH_FIRST, or omit --auth-first.",
+            "To restore the default, unset APM_GITHUB_AUTH_FIRST, omit --auth-first, "
+            f"and {GITHUB_AUTH_FIRST_ENABLED.clause()}.",
             fallback_context="auth-first",
             always_show_detail=True,
         )
@@ -864,6 +851,7 @@ class AuthResolver:
             gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
             if gh_token:
                 _log(f"gh auth token resolved a credential for {host_info.display_name}")
+                self.note_credential_source_tried(host_info, "gh auth token")
                 return operation(
                     gh_token,
                     _secondary_credential_env(gh_token, "gh-auth-token"),
@@ -875,6 +863,7 @@ class AuthResolver:
             )
             if cred:
                 _log(f"git credential fill resolved a credential for {host_info.display_name}")
+                self.note_credential_source_tried(host_info, "git credential helper")
                 return operation(
                     cred,
                     _secondary_credential_env(cred, "git-credential-fill"),
@@ -1207,6 +1196,79 @@ class AuthResolver:
 
         lines.append("Run with --verbose for detailed auth diagnostics.")
         return "\n".join(lines)
+
+    def note_credential_source_tried(self, host_info: HostInfo, source: str) -> None:
+        """Record that a secondary credential *source* (a label) was sent to a host."""
+        key = ((host_info.host or "").lower(), host_info.port)
+        with self._lock:
+            tried = self._secondary_sources_tried.setdefault(key, [])
+            if source not in tried:
+                tried.append(source)
+
+    def describe_credential_tried(
+        self,
+        host: str,
+        org: str | None = None,
+        *,
+        port: int | None = None,
+        host_type: str | None = None,
+    ) -> str:
+        """Name the credential source(s) resolved for *host* in this process.
+
+        Renders ``credential tried: <source>`` (an env var name or helper
+        label, never the value), the ordered sources checked when none held a
+        credential, or ``no credential sent`` when access stayed anonymous.
+        Reads only contexts already resolved, so a diagnostic never runs a
+        credential helper.
+        """
+        host_info = self.classify_host(host, port=port, host_type=host_type)
+        wanted_host = host.lower() if host else host
+        wanted_org = (org or "").lower()
+        with self._lock:
+            contexts = [
+                ctx
+                for key, ctx in self._cache.items()
+                if key.host == wanted_host and key.port == port and key.org in (wanted_org, "")
+            ]
+            secondary = list(self._secondary_sources_tried.get((wanted_host, port), ()))
+        sources = list(dict.fromkeys([*(ctx.source for ctx in contexts if ctx.token), *secondary]))
+        if sources:
+            label = "credential" if len(sources) == 1 else "credentials"
+            return f"{label} tried: {', '.join(sources)}"
+        if not contexts:
+            return "no credential sent"
+        return f"no credential found in {', '.join(self._credential_sources(host_info, org))}"
+
+    def build_not_found_message(
+        self,
+        host: str,
+        repo: str,
+        org: str | None = None,
+        *,
+        port: int | None = None,
+        host_type: str | None = None,
+    ) -> str:
+        """Render the canonical "repository not found" diagnostic for *repo*."""
+        display = self.classify_host(host, port=port, host_type=host_type).display_name
+        tried = self.describe_credential_tried(host, org, port=port, host_type=host_type)
+        return (
+            f"Repository {repo} not found on {display} ({tried}). Check the name, and "
+            "for a private repository that the credential can read it."
+        )
+
+    def _credential_sources(self, host_info: HostInfo, org: str | None) -> list[str]:
+        """Return the credential sources ``_resolve_token`` consults, in order."""
+        if host_info.kind == "ado":
+            return ["ADO_APM_PAT", "az cli", "git credential helper"]
+        github_class = host_info.kind in ("github", "ghe_cloud", "ghes")
+        names = [f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"] if org and github_class else []
+        names.extend(
+            self._token_manager.TOKEN_PRECEDENCE.get(self._purpose_for_host(host_info), [])
+        )
+        if github_class:
+            names.append("gh auth token")
+        names.append("git credential helper")
+        return names
 
     # -- internals ----------------------------------------------------------
 

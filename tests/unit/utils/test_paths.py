@@ -44,7 +44,7 @@ def test_portable_link_relpath_refuses_cross_drive_absolute_fallback() -> None:
 # relative-path formatting (microsoft/apm#2233's backslash-on-Windows
 # diagnostic class). Selected by the PR-time Windows Compatibility
 # Gate via `pytest -m windows_compat`; also runs on every other OS.
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
 
 class TestPortableRelpath:

@@ -60,6 +60,7 @@ TRACKED_GLOBALS: tuple[TrackedGlobal, ...] = (
     # Reset around every test by the root conftest; strict.
     TrackedGlobal("apm_cli.utils.console", "_console_stderr"),
     TrackedGlobal("apm_cli.config", "_config_cache"),
+    TrackedGlobal("apm_cli.marketplace.registry", "_registry_cache"),
     # Executable lookups memoised by their owner.
     TrackedGlobal("apm_cli.utils.git_env", "_git_executable", lazy=True),
     TrackedGlobal("apm_cli.utils.git_env", "_gh_executable", lazy=True),
@@ -174,3 +175,22 @@ def verdict(
 
 def applies_to(nodeid: str) -> bool:
     return not nodeid.startswith(EXCLUDED_ROOTS)
+
+
+def mock_bound_module_globals(modules: Mapping[str, object] | None = None) -> list[str]:
+    """Name every ``apm_cli`` module global that is a ``unittest.mock`` object.
+
+    A test that patches a name at its source module while another module is
+    imported for the first time leaves that module holding the mock for the
+    rest of the worker. Checked once per session (bounded cost).
+    """
+    from unittest.mock import NonCallableMock
+
+    found: list[str] = []
+    for name, module in list((sys.modules if modules is None else modules).items()):
+        if module is None or not (name == "apm_cli" or name.startswith("apm_cli.")):
+            continue
+        for attribute, value in list(vars(module).items()):
+            if isinstance(value, NonCallableMock):
+                found.append(f"{name}.{attribute}")
+    return sorted(found)

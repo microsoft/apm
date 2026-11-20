@@ -20,6 +20,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from apm_cli.adapters.client.codex import CodexClientAdapter
 
+pytestmark = pytest.mark.component
+
 
 class TestCodexEmptyStringAndDefaults:
     """Test empty string handling and default values for Codex adapter."""

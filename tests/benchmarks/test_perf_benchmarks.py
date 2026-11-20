@@ -24,6 +24,8 @@ from apm_cli.primitives.models import (
     PrimitiveCollection,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers to build synthetic data
 # ---------------------------------------------------------------------------

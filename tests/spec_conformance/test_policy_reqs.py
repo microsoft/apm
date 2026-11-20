@@ -16,6 +16,8 @@ from tests.spec_conformance._helpers import (
     waive,
 )
 
+pytestmark = pytest.mark.component
+
 audit_project = audit_contract.project
 
 

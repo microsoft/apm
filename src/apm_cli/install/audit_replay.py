@@ -18,7 +18,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from apm_cli.deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+from apm_cli.core.remediation import (
+    LOCKFILE_MISSING,
+    REPLACEMENT_SOURCES_UNRECORDED,
+    USER_PACKAGE_COPIES_STALE,
+    USER_PACKAGE_MATERIALIZATION_MISSING,
+)
+from apm_cli.core.scope import manifest_file
+from apm_cli.deps.lockfile import (
+    LockFile,
+    LockfileFormatError,
+    UnsupportedLockfileVersionError,
+    get_lockfile_path,
+)
 from apm_cli.install.drift import (
     CheckLogger,
     ReplayConfig,
@@ -95,17 +107,21 @@ def prepare_ci_audit_replay(
     lockfile_path = get_lockfile_path(project_root)
     if not lockfile_path.exists():
         raise CiAuditReplayError(
-            f"lockfile not found at {lockfile_path}; run 'apm install' to generate it"
+            f"lockfile not found at {lockfile_path}; {LOCKFILE_MISSING.clause()}"
         )
 
     from apm_cli.models.manifest_io import InvalidManifestError
 
     try:
-        manifest = APMPackage.from_apm_yml(project_root / "apm.yml")
+        manifest = APMPackage.from_apm_yml(manifest_file(project_root))
     except InvalidManifestError as exc:
         # Reported as a failed check, so JSON/SARIF output still renders.
         raise CiAuditReplayError(str(exc)) from exc
-    lockfile = LockFile.read(lockfile_path)
+    try:
+        lockfile = LockFile.read(lockfile_path)
+    except UnsupportedLockfileVersionError as exc:
+        # Reported as a failed check that names both remedies (#4233).
+        raise CiAuditReplayError(str(exc)) from exc
     if lockfile is None:
         raise CiAuditReplayError(f"lockfile at {lockfile_path} is empty or unreadable")
 
@@ -116,7 +132,7 @@ def prepare_ci_audit_replay(
         raise CiAuditReplayError(
             "Replacement rules differ from apm.lock.yaml. "
             + " ".join(replacement_reasons)
-            + " Run 'apm install' to record the selected sources."
+            + f" {REPLACEMENT_SOURCES_UNRECORDED.sentence()}"
         )
     manifest_deps = project_manifest_dependencies(manifest)
     satisfied, reasons = lockfile_satisfies_manifest(lockfile, manifest_deps)
@@ -213,11 +229,11 @@ def resolve_ci_audit_materialization(
     MCP/LSP servers or the workspace's own content needs none, whichever of
     ``apm install -g`` or ``apm update -g`` wrote it (#3781).
     """
-    from apm_cli.constants import APM_MODULES_DIR, APM_YML_FILENAME
+    from apm_cli.constants import APM_MODULES_DIR
     from apm_cli.core.scope import get_workspace_deploy_root
 
     lockfile_path = get_lockfile_path(project_root)
-    if not (project_root / APM_YML_FILENAME).exists() or not lockfile_path.exists():
+    if not manifest_file(project_root).exists() or not lockfile_path.exists():
         return CiAuditMaterialization()
     warm = (project_root / APM_MODULES_DIR).exists()
     mismatches: tuple[str, ...] = ()
@@ -231,10 +247,12 @@ def resolve_ci_audit_materialization(
             _rich_warning(f"{line} Verifying from the locked source.", symbol="warning", err=True)
     if get_workspace_deploy_root(project_root) != project_root.resolve():
         if warm:
+            from apm_cli.core.cache_drift import package_cache_drift
+
             return CiAuditMaterialization(
-                error=(
-                    f"package copies in {project_root / APM_MODULES_DIR} do not match "
-                    "apm.lock.yaml; run 'apm install --global' to refresh them"
+                error=package_cache_drift(
+                    f"Package copies in {project_root / APM_MODULES_DIR}",
+                    USER_PACKAGE_COPIES_STALE.clause(),
                 )
             )
         try:
@@ -246,8 +264,8 @@ def resolve_ci_audit_materialization(
         return CiAuditMaterialization(
             error=(
                 "installed package materialization is missing at "
-                f"{project_root / APM_MODULES_DIR}; run 'apm install --global' "
-                "to restore it"
+                f"{project_root / APM_MODULES_DIR}; "
+                f"{USER_PACKAGE_MATERIALIZATION_MISSING.clause()}"
             )
         )
     try:

@@ -88,6 +88,9 @@ class _WriteScope:
     writer: LockfileWriter
     pending: dict[Path, str | _Removed] = field(default_factory=dict)
     after_commit: list[Callable[[], None]] = field(default_factory=list)
+    # False while only provisional corrections are staged: a failure then
+    # commits nothing, because the command has not changed state yet.
+    changed_state: bool = False
 
 
 @dataclass
@@ -97,6 +100,38 @@ class _Writer:
 
 
 _active_writer: ContextVar[_Writer | None] = ContextVar("apm_lockfile_writer", default=None)
+_provisional: ContextVar[bool] = ContextVar("apm_lockfile_provisional", default=False)
+
+
+@dataclass
+class LockfileWriterObservation:
+    """Read-only record of which writers commands declared and which opened a scope."""
+
+    declared: list[LockfileWriter] = field(default_factory=list)
+    opened: list[LockfileWriter] = field(default_factory=list)
+
+    def clear(self) -> None:
+        self.declared.clear()
+        self.opened.clear()
+
+
+_observers: list[LockfileWriterObservation] = []
+
+
+@contextmanager
+def observe_lockfile_writers() -> Iterator[LockfileWriterObservation]:
+    """Observe the single-writer contract without changing it.
+
+    Each outermost :func:`lockfile_write_scope` appends its writer to
+    ``declared``; each write scope it opens (its first staged write) appends
+    to ``opened``. Nothing about staging or committing changes.
+    """
+    observation = LockfileWriterObservation()
+    _observers.append(observation)
+    try:
+        yield observation
+    finally:
+        _observers.remove(observation)
 
 
 def _key(path: Path) -> Path:
@@ -112,6 +147,10 @@ def _scope(*, open_: bool = False) -> _WriteScope | None:
         return None
     if active.scope is None and open_:
         active.scope = _WriteScope(active.writer)
+        for observation in _observers:
+            observation.opened.append(active.writer)
+    if open_ and not _provisional.get():
+        active.scope.changed_state = True
     return active.scope
 
 
@@ -162,12 +201,14 @@ def lockfile_write_scope(writer: LockfileWriter) -> Iterator[None]:
     if _active_writer.get() is not None:
         yield
         return
+    for observation in _observers:
+        observation.declared.append(writer)
     active = _Writer(writer)
     token = _active_writer.set(active)
     try:
         yield
     except BaseException as error:
-        if active.scope is not None and _commits(error):
+        if active.scope is not None and active.scope.changed_state and _commits(error):
             _commit(active.scope)
         raise
     else:
@@ -294,6 +335,22 @@ def restore_lockfile_bytes(path: Path, data: bytes) -> None:
 
 
 @contextmanager
+def provisional_lockfile_writes() -> Iterator[None]:
+    """Stage a lockfile correction that commits only with the command's own result.
+
+    A correction staged here (for example restored marketplace provenance)
+    reaches disk when the command completes, or with the state change of a
+    command that later fails; a command that fails before changing state
+    leaves the lockfile byte-identical.
+    """
+    token = _provisional.set(True)
+    try:
+        yield
+    finally:
+        _provisional.reset(token)
+
+
+@contextmanager
 def lockfile_scratch_writes() -> Iterator[None]:
     """Write a private scratch snapshot now, outside the command's lockfile.
 
@@ -326,6 +383,10 @@ def after_lockfile_commit(action: Callable[[], None]) -> None:
     scope.after_commit.append(action)
 
 
+class LockfileCommitError(OSError):
+    """The commit point could not write a staged lockfile; names the file."""
+
+
 def flush_lockfile_writes() -> None:
     """Commit what this command staged now; it keeps staging afterwards."""
     scope = _scope()
@@ -342,7 +403,10 @@ def _commit(scope: _WriteScope) -> None:
         document = scope.pending[key]
         if not isinstance(document, _Removed) and not _same_document(_disk_text(key), document):
             ensure_lockfile_writable(key)
-            atomic_write_text(key, document, new_file_mode=umask_file_mode(key))
+            try:
+                atomic_write_text(key, document, new_file_mode=umask_file_mode(key))
+            except OSError as exc:
+                raise LockfileCommitError(f"Could not generate {key.name}: {exc}") from exc
         del scope.pending[key]
     actions, scope.after_commit = scope.after_commit, []
     for action in actions:

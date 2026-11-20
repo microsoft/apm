@@ -22,16 +22,19 @@ the blast radius of a deeper DI rewrite.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core import remediation
+from apm_cli.core.scope import manifest_file
 from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.install.frozen_selection import (
     _changed_selections,
-    _outermost,
+    _outermost,  # noqa: F401 -- re-exported for install.frozen_withdrawal and tests
     frozen_selection_changes,
 )
 from apm_cli.install.request import InstallRequest
@@ -73,6 +76,49 @@ class FrozenDisposition:
     def withhold_lockfile_writes(self) -> bool:
         """apm.lock.yaml is never rewritten, so nothing new may be recorded."""
         return self.replay
+
+
+def ci_selects_frozen(environ: Mapping[str, str] | None = None) -> bool:
+    """req-lk-018: ``CI`` is truthy when present and not ``""``, ``"0"`` or ``"false"``."""
+    value = (os.environ if environ is None else environ).get("CI")
+    return value is not None and value.lower() not in {"", "0", "false"}
+
+
+def resolve_frozen(
+    frozen: bool | None,
+    resolve_intent: Any,
+    global_: bool,
+    root: str | None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> bool:
+    """The single decision whether ``apm install`` runs frozen (req-lk-006, req-lk-018).
+
+    An explicit ``--frozen``/``--no-frozen`` wins. An invocation that asks to
+    resolve (``--update``, ``--refresh``, positional packages, ``--mcp``) stays
+    non-frozen. Otherwise a truthy ``CI`` selects frozen when the scope's
+    ``apm.lock.yaml`` exists; without one, install resolves and writes it.
+    """
+    if frozen is not None:
+        return frozen
+    if resolve_intent or not ci_selects_frozen(environ):
+        return False
+    from apm_cli.core.scope import InstallScope, get_lockfile_dir
+
+    if root is not None and not global_:
+        lockfile_dir = Path(root)
+    else:
+        lockfile_dir = get_lockfile_dir(InstallScope.USER if global_ else InstallScope.PROJECT)
+    if not (lockfile_dir / "apm.lock.yaml").is_file():
+        return False
+    from apm_cli.utils.console import _rich_info
+
+    _rich_info(
+        "CI is set and apm.lock.yaml exists: installing as --frozen. "
+        "Pass --no-frozen to resolve and update it.",
+        symbol="info",
+    )
+    return True
 
 
 def frozen_unrecorded_reason(service: str, name: str, target: str) -> str:
@@ -170,10 +216,11 @@ class InstallService:
         this same error otherwise.
         """
         from apm_cli.adapters.client._remote_shapes import may_refuse_remote
-        from apm_cli.install.mcp.ownership import (
-            migrate_legacy_project_target_servers,
+        from apm_cli.install.mcp.native_entry import (
+            native_mcp_entry_matches_declaration,
             native_mcp_entry_present,
         )
+        from apm_cli.install.mcp.ownership import migrate_legacy_project_target_servers
 
         mcp_ownership = {
             target: set(names) for target, names in lockfile.mcp_target_servers.items()
@@ -226,6 +273,14 @@ class InstallService:
                 ):
                     deferred.add((name, target))
                     continue
+                if service == "MCP" and native_mcp_entry_matches_declaration(
+                    target,
+                    name,
+                    stored_config=lockfile.mcp_configs.get(name),
+                    project_root=project_root,
+                    user_scope=user_scope,
+                ):
+                    continue
                 reasons.append(frozen_unrecorded_reason(service, name, target))
         if reasons:
             raise frozen_services_error(reasons)
@@ -270,9 +325,9 @@ class InstallService:
             # Suppress at the chokepoint, then decide from what was
             # withheld whether this install can report success.  The
             # pipeline still deploys, as `npm ci` does.
-            from apm_cli.deps.lockfile import suppress_lockfile_writes
+            from apm_cli.install.frozen_withdrawal import frozen_capture
 
-            with suppress_lockfile_writes() as withheld:
+            with frozen_capture(_frozen_lockfile_path(request)) as withheld:
                 result = self._run_pipeline(request)
         else:
             withheld = None
@@ -288,7 +343,7 @@ class InstallService:
         # diagnostics and an unreliable ledger, so raising here would
         # replace the real cause with a confusing lockfile complaint.
         if withheld is not None and install_worked:
-            self._enforce_frozen_no_rewrite(request, withheld)
+            self._enforce_frozen_no_rewrite(request, withheld, result.active_package_keys)
 
         if install_worked:
             post_event = self._build_event("post-install", request)
@@ -395,10 +450,7 @@ class InstallService:
             raise FrozenInstallError(
                 "--frozen: dependency selections differ from apm.lock.yaml.",
                 reasons=[f"  - {reason}" for reason in changes],
-                tip=(
-                    "Tip: run 'apm install' without --frozen, retaining --root DIR "
-                    "or --global if specified, then commit apm.lock.yaml."
-                ),
+                tip=f"Tip: {remediation.FROZEN_SELECTIONS_CHANGED.sentence()}",
             )
 
     @staticmethod
@@ -413,8 +465,8 @@ class InstallService:
                 "--frozen: apm.lock.yaml records hooks their approval no longer admits.",
                 reasons=[f"  - {mismatch.describe()}" for mismatch in mismatches],
                 tip=(
-                    "Tip: re-approve the package, or run 'apm install' without --frozen "
-                    "to retire the hooks, then commit apm.yml and apm.lock.yaml."
+                    "Tip: re-approve the package as shown above, or "
+                    f"{remediation.FROZEN_HOOK_PINS_STALE.clause()}."
                 ),
             )
 
@@ -427,8 +479,7 @@ class InstallService:
 
         raise FrozenInstallError(
             f"--frozen cannot be combined with {operation}. "
-            "Update apm.yml first, run 'apm install' without --frozen to refresh "
-            "apm.lock.yaml, then retry the frozen install."
+            f"{remediation.FROZEN_OPERATION_REJECTED.sentence()}"
         )
 
     @staticmethod
@@ -454,6 +505,7 @@ class InstallService:
         for unscoped API callers) and checks package dependencies and the canonical
         current MCP config view. Any miss raises before install mutation.
         """
+        from apm_cli.deps import lockfile as lockfile_module
         from apm_cli.deps.lockfile import LockFile, LockfileConflictError
         from apm_cli.install.errors import FrozenInstallError
         from apm_cli.install.plan import (
@@ -484,6 +536,8 @@ class InstallService:
                 f"--frozen cannot read the lockfile. {e}\nFor CI, commit the resolved lockfile.",
                 tip="",
             ) from e
+        except lockfile_module.UnsupportedLockfileVersionError as e:
+            raise FrozenInstallError(f"--frozen could not read apm.lock.yaml: {e}", tip="") from e
         except Exception as e:
             raise FrozenInstallError(
                 f"--frozen could not read apm.lock.yaml: {e}. Fix the file, or restore "
@@ -517,6 +571,7 @@ class InstallService:
         # Same admission inputs as install, so a gate-parked or approved server
         # reaches the same verdict frozen or not (#3893, #3902).
         from apm_cli.core.scope import is_user_scope
+        from apm_cli.integration.mcp_config_view import without_parked_notices
         from apm_cli.security.trust import McpAdmission
 
         admission = McpAdmission.for_project(
@@ -531,7 +586,8 @@ class InstallService:
                 lockfile,
                 modules_dir,
                 admission=admission,
-                logger=request.logger,
+                # The hydrated check and the MCP phase report parked servers.
+                logger=without_parked_notices(request.logger),
                 allow_pending=allow_pending_mcp,
             )
         )
@@ -656,8 +712,8 @@ class InstallService:
                 # Only selected, verified local manifests can introduce further
                 # local declarations. Do not inspect orphan lock entries or
                 # expand local paths declared by untrusted remote packages.
-                if (source / "apm.yml").is_file():
-                    package = APMPackage.from_apm_yml(source / "apm.yml", source_path=source)
+                if manifest_file(source).is_file():
+                    package = APMPackage.from_apm_yml(manifest_file(source), source_path=source)
                     for child in package.get_apm_dependencies():
                         child = rules.bind(
                             child,
@@ -691,8 +747,8 @@ class InstallService:
                 "--frozen: local dependency content does not match apm.lock.yaml.",
                 reasons=reasons,
                 tip=(
-                    "Restore the locked local content, or run 'apm install' without "
-                    "--frozen to explicitly accept and record the change."
+                    "Restore the locked local content, or "
+                    f"{remediation.FROZEN_LOCAL_CONTENT_CHANGED.clause()}."
                 ),
             )
 
@@ -765,13 +821,14 @@ class InstallService:
     ) -> None:
         """Reject restored MCP drift before a package can activate native configuration."""
         from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.integration.mcp_config_view import without_parked_notices
 
         reasons = InstallService._frozen_mcp_reasons(
             package,
             lockfile,
             modules_dir,
             admission=admission,
-            logger=logger,
+            logger=without_parked_notices(logger),
             allow_pending=False,
             active_package_keys=active_package_keys,
         )
@@ -787,10 +844,12 @@ class InstallService:
             )
 
     @staticmethod
-    def _enforce_frozen_no_rewrite(request: InstallRequest, withheld: list[str]) -> None:
+    def _enforce_frozen_no_rewrite(
+        request: InstallRequest, withheld: list[str], active_keys: frozenset[str] | None = None
+    ) -> None:
         """Fail a frozen install whose result does not match the committed lockfile.
 
-        Two post-deploy checks share this owner:
+        Three post-deploy checks share this owner:
 
         * **Unrecorded claims.** Each lockfile the frozen install *would*
           have written is compared against the committed ``apm.lock.yaml``.
@@ -799,20 +858,20 @@ class InstallService:
           hidden-Unicode scan (#2379).  Deliberately one-directional:
           claims a narrower install would *drop* (``--target`` filter,
           ``--only``, a removed dependency) do not fail.  Equivalence ignores
-          ``generated_at`` and ``apm_version`` (Section 5.5).
+          ``generated_at`` and ``apm_version`` (Section 5.5).  The refusal
+          first removes the unrecorded files this install wrote (#4309).
+        * **Deployed presence and exec decisions** of the graph (#4043, #4053).
         * **Deployed hashes (req-lk-017).** Every ``deployed_file_hashes``
-          entry is re-verified against the on-disk bytes through the same
-          verifier ``apm audit`` uses, so ``install --frozen`` and
-          ``audit --ci`` give one answer.  This catches a user edit the
-          install kept and an APM upgrade that renders a locked file
-          differently (#3654).
+          entry is re-verified through audit's verifier, so ``install --frozen``
+          and ``audit --ci`` agree on kept user edits and re-renders (#3654).
 
-        Native target files are outside the install transaction, so files
-        already deployed stay on disk; only the lockfile write is withheld.
+        Native target files are outside the install transaction, so recorded
+        files already deployed stay on disk; only the lockfile write is withheld.
         """
         from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
         from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.frozen_retirement import enforce_frozen_presence
 
         # Re-read rather than reuse the copy `enforce_frozen` loaded: this
         # judges what is on disk now.  `--frozen` is a CI primitive with a
@@ -843,21 +902,17 @@ class InstallService:
             raise FrozenInstallError(
                 "--frozen: dependency selections differ from apm.lock.yaml.",
                 reasons=[f"  - {reason}" for _key, reason in sorted(changed_selections.items())],
-                tip=(
-                    "Tip: run 'apm install' without --frozen, retaining --root DIR "
-                    "or --global if specified, then commit apm.lock.yaml."
-                ),
+                tip=f"Tip: {remediation.FROZEN_SELECTIONS_CHANGED.sentence()}",
             )
         if unclaimed:
-            raise FrozenInstallError(
-                "--frozen: apm.lock.yaml does not record everything this install deploys.",
-                reasons=[
-                    f"  - {path} is deployed by this install but not recorded in apm.lock.yaml"
-                    for path in _outermost(unclaimed)
-                ],
-                tip=_FROZEN_REPAIR_TIP,
+            # I7 (#4309): withdraw what this install deployed, then refuse.
+            from apm_cli.install.frozen_withdrawal import refuse_unrecorded_deployments
+
+            raise refuse_unrecorded_deployments(
+                withheld, unclaimed, committed, lockfile_path.parent
             )
 
+        enforce_frozen_presence(request, committed, withheld, lockfile_path.parent, active_keys)
         InstallService._enforce_frozen_deployed_hashes(request, committed, deployed=True)
 
     @staticmethod
@@ -873,9 +928,10 @@ class InstallService:
         deployment it catches an APM upgrade that renders a locked file
         differently (#3654).
         """
+        from apm_cli.claude_plugins.registrar import native_deployed_drift
         from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.errors import FrozenInstallError
-        from apm_cli.install.local_edits import restore_locked_content_hint
+        from apm_cli.install.local_edits import edited_file_remediations
         from apm_cli.policy.ci_checks import resolve_audit_scope, verify_deployed_file_hashes
 
         lockfile_path = _frozen_lockfile_path(request)
@@ -890,18 +946,25 @@ class InstallService:
 
             stale = unedited_apm_output(deploy_root, user_scope, committed, targets, drifted)
             drifted = [drift for drift in drifted if drift.path not in stale]
+        drifted += [] if deployed else native_deployed_drift(deploy_root, committed)
         if not drifted and not unresolved:
             return
         if deployed:
             tip = (
-                _FROZEN_REPAIR_TIP
-                + " To keep local edits, run 'apm export-patch' or move them aside first."
+                f"{_FROZEN_REPAIR_TIP} To keep local edits, first "
+                f"{remediation.LOCAL_EDITS_EXPORT.clause()}, or move them aside."
             )
         else:
+            # True per primitive kind (RA-009): see install/local_edits.py.
+            advice = " ".join(
+                item.sentence()
+                for item in edited_file_remediations(drift.path for drift in drifted)
+            )
+            from apm_cli.core.remediation import LOCAL_EDITS_EXPORT
+
             tip = (
-                "Tip: nothing was deployed. "
-                f"{restore_locked_content_hint('the listed files')}. To keep local "
-                "edits, run 'apm export-patch' or move them aside first."
+                f"Tip: nothing was deployed. {advice} To keep the edits, "
+                f"{LOCAL_EDITS_EXPORT.clause()} first."
             )
         raise FrozenInstallError(
             "--frozen: deployed files do not match the hashes recorded in apm.lock.yaml.",
@@ -917,9 +980,8 @@ class InstallService:
 
 
 _FROZEN_REPAIR_TIP = (
-    "Tip: the files were still deployed; only the lockfile write was "
-    "withheld. Rerun 'apm install' without --frozen, retaining --root DIR "
-    "or --global if specified, then commit the deployed files and apm.lock.yaml."
+    "Tip: the files were still deployed; only the lockfile write was withheld. "
+    f"{remediation.FROZEN_LOCKFILE_WITHHELD.sentence()}"
 )
 
 

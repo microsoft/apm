@@ -17,12 +17,15 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 from ..core.command_logger import CommandLogger
 from ..core.deployment_ledger import (
     DEPLOYMENT_OWNER_REMEDIATION,
     DeploymentLedgerCodec,
     DeploymentOwnerViolation,
 )
+from ..core.remediation import HIDDEN_CHARACTERS_FOUND, HIDDEN_CHARACTERS_PREVIEWED
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..install.locking import serialized_lifecycle_when
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
@@ -60,25 +63,10 @@ class _AuditConfig:
 
 
 def _audit_outcome_cause(outcome: str, source: str | None, err_text: str | None) -> str:
-    """Render a per-outcome `cause` line for audit --ci policy-discovery messages.
+    """Render the per-outcome cause line for audit --ci policy-discovery messages."""
+    from ..policy.outcome_routing import outcome_cause
 
-    Used by both the ``warn`` (`[!]`) and ``block`` (`[x]`) branches so the
-    wording is identical; only the prefix and suffix change. Closes #1159
-    by replacing the prior silent-skip with explicit, actionable causes
-    for ``no_git_remote`` / ``absent`` / ``empty`` outcomes (and matching
-    the existing wording for fetch failures).
-    """
-    src = source or "unknown"
-    if outcome == "no_git_remote":
-        return "Could not determine org from git remote"
-    if outcome == "absent":
-        return f"No org policy found at {src}"
-    if outcome == "empty":
-        return f"Org policy at {src} is present but empty"
-    # malformed / cache_miss_fetch_fail / garbage_response (and any
-    # `error` set on the result): preserve the legacy wording so existing
-    # consumers parsing the line keep working.
-    return f"Policy fetch failed: {err_text or outcome}"
+    return outcome_cause(outcome, source, err_text)
 
 
 def _is_explicit_policy_source(policy_source: str | None) -> bool:
@@ -209,10 +197,11 @@ def _render_findings_table(
 
     if console:
         try:
-            from rich.table import Table
             from rich.text import Text
 
-            table = Table(
+            from apm_cli.utils.console import new_table
+
+            table = new_table(
                 title=title,
                 show_header=True,
                 header_style="bold cyan",
@@ -345,7 +334,7 @@ def _render_summary(
     remedy = (
         "Review structured or external prompt fields manually; --strip does not rewrite native settings."
         if any(not entry.strippable and entry.file in findings_by_file for entry in coverage)
-        else "  Review file contents, then run 'apm audit --strip' to remove hidden characters"
+        else f"  {HIDDEN_CHARACTERS_FOUND.sentence()}"
     )
 
     _rich_echo("")
@@ -474,10 +463,11 @@ def _preview_strip(
 
     if console:
         try:
-            from rich.table import Table
             from rich.text import Text
 
-            table = Table(
+            from apm_cli.utils.console import new_table
+
+            table = new_table(
                 show_header=True,
                 header_style="bold cyan",
             )
@@ -516,7 +506,7 @@ def _preview_strip(
 
     _rich_echo("")
     logger.progress(f"{affected} file(s) would be modified")
-    logger.progress("Run 'apm audit --strip' to apply")
+    logger.progress(HIDDEN_CHARACTERS_PREVIEWED.sentence())
     return affected
 
 
@@ -532,6 +522,44 @@ def _report_passed(ci_result: "CIAuditResult", total: int) -> None:
     )
 
 
+def _render_ci_failures_to_stderr(ci_result: "CIAuditResult") -> None:
+    """Name each failed check and its details on stderr (#4224).
+
+    A structured report (json/sarif) keeps stdout machine-readable, so a
+    failing run states its verdict and next steps on stderr, as text does.
+    """
+    if ci_result.passed:
+        return
+    failed = [check for check in ci_result.checks if not check.passed and not check.warned]
+    for check in failed:
+        click.echo(
+            f"{STATUS_SYMBOLS['cross']} {check.name}: {printable_ascii_text(check.message)}",
+            err=True,
+        )
+        for detail in check.details:
+            click.echo(f"    - {printable_ascii_text(detail)}", err=True)
+    summary = ci_result.to_json()["summary"]
+    click.echo(
+        f"{STATUS_SYMBOLS['cross']} {summary['failed']} of {summary['total']} check(s) failed",
+        err=True,
+    )
+
+
+def _warn_unhashed_dependencies(project_root: Path, fetch_result) -> None:
+    """Name locked entries without a content hash when policy does not require one."""
+    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..install.integrity import unhashed_dependencies_advisory
+
+    lockfile = LockFile.read(get_lockfile_path(project_root))
+    if lockfile is None:
+        return
+    policy = fetch_result.policy if fetch_result is not None and fetch_result.found else None
+    integrity = getattr(getattr(policy, "security", None), "integrity", None)
+    advisory = unhashed_dependencies_advisory(lockfile.get_package_dependencies(), integrity)
+    if advisory is not None:
+        _rich_warning(advisory, symbol="warning", err=True)
+
+
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
 
@@ -541,10 +569,11 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
 
     if console:
         try:
-            from rich.table import Table
             from rich.text import Text
 
-            table = Table(
+            from apm_cli.utils.console import new_table
+
+            table = new_table(
                 title=f"{STATUS_SYMBOLS['search']} APM Policy Compliance",
                 show_header=True,
                 header_style="bold cyan",
@@ -576,8 +605,13 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
                         color="yellow" if check.warned else "red",
                         bold=True,
                     )
+                    # Details follow their header's stream (failed checks: stderr).
                     for detail in check.details:
-                        _rich_echo(f"    - {printable_ascii_text(detail)}", color="dim")
+                        _rich_echo(
+                            f"    - {printable_ascii_text(detail)}",
+                            color="dim",
+                            err=not check.warned,
+                        )
 
             console.print()
             summary = ci_result.to_json()["summary"]
@@ -695,6 +729,7 @@ def _audit_ci_gate(
     logger = cfg.logger
 
     from ..install.audit_replay import resolve_ci_audit_materialization
+    from ..install.exec_gate import exec_policy_from_discovery
     from ..policy.ci_checks import _check_drift, run_baseline_checks
     from ..policy.policy_checks import run_policy_checks
 
@@ -733,6 +768,11 @@ def _audit_ci_gate(
         prepared_replay=prepared_replay,
         prepared_replay_error=prepared_replay_error,
         no_policy=no_policy,
+        policy_provider=(
+            None
+            if no_policy and not policy_source
+            else lambda: exec_policy_from_discovery(fetch_policy)
+        ),
     )
 
     # Resolve policy source: explicit --policy wins; otherwise mirror
@@ -815,14 +855,19 @@ def _audit_ci_gate(
                         )
                     )
 
+    _warn_unhashed_dependencies(cfg.project_root, fetch_result)
+
     # -- Drift detection (default-on per ADR-02) --------------------
     drift_findings: list = []
-    if not no_drift and (cfg.project_root / "apm.yml").exists():
-        from ..deps.lockfile import LockFile, get_lockfile_path
+    if not no_drift and manifest_file(cfg.project_root).exists():
+        from ..deps.lockfile import LockFile, UnsupportedLockfileVersionError, get_lockfile_path
 
         lockfile_path = get_lockfile_path(cfg.project_root)
         if lockfile_path.exists():
-            lockfile = LockFile.read(lockfile_path)
+            try:
+                lockfile = LockFile.read(lockfile_path)
+            except UnsupportedLockfileVersionError:
+                lockfile = None  # the lockfile-exists check already failed with both remedies
             if lockfile is not None:
                 if prepared_replay_error is not None:
                     from ..policy.models import CheckResult
@@ -886,6 +931,7 @@ def _audit_ci_gate(
             logger.success(f"CI audit report written to {cfg.output_path}")
         else:
             click.echo(output)
+        _render_ci_failures_to_stderr(ci_result)
     else:
         _render_ci_results(ci_result)
         if drift_findings:
@@ -1027,7 +1073,7 @@ def _require_installed_package_key(
     from ..models.manifest_io import load_manifest
     from .uninstall.engine import select_installed_lock_key
 
-    manifest_path = project_root / APM_YML_FILENAME
+    manifest_path = manifest_file(project_root)
     try:
         manifest = load_manifest(manifest_path) if manifest_path.is_file() else None
     except Exception as e:
@@ -1062,7 +1108,7 @@ def _reject_invalid_manifest(project_root: Path, logger: CommandLogger) -> None:
     """Refuse an apm.yml every command refuses, before scanning or stripping."""
     from ..models.manifest_io import InvalidManifestError, read_manifest_text
 
-    manifest_path = project_root / "apm.yml"
+    manifest_path = manifest_file(project_root)
     if not manifest_path.is_file():
         return
     try:
@@ -1215,7 +1261,7 @@ def _audit_content_scan(
         and not strip
         and not file_path
         and not package
-        and (project_root / "apm.yml").exists()
+        and manifest_file(project_root).exists()
     ):
         from ..policy.ci_checks import DRIFT_SKIP_PREFIX, _check_drift
 
@@ -1278,8 +1324,10 @@ def _audit_content_scan(
     # both detected drift AND a drift check that could not run (corrupt local
     # graph, unsupported replay); an advisory cache-miss SKIP stays passed=True
     # and does NOT gate. Policy is discovered only when a drift failure
-    # occurred, so the clean common case is unchanged.
-    if drift_failed and exit_code == 0 and _resolve_fail_on_drift(project_root):
+    # occurred, so the clean common case is unchanged. Advisory drift renders
+    # as a warning so an [x] drift line always comes with a failing exit.
+    drift_gates = drift_failed and _resolve_fail_on_drift(project_root)
+    if drift_gates:
         exit_code = 1
 
     if effective_format == "text":
@@ -1308,6 +1356,7 @@ def _audit_content_scan(
                     verbose=cfg.verbose,
                     lockfile=lockfile,
                     project_root=cfg.project_root,
+                    advisory=not drift_gates,
                 )
             )
     elif effective_format == "markdown":

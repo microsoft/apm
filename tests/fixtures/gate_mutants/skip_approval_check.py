@@ -1,6 +1,6 @@
 """Recorded mutant of the executable gate owner: the approval check is skipped (#4031).
 
-``tests/integration/test_generated_gate_state_machine.py`` runs the GATE spine
+``tests/lifecycle/machines/test_m_gate.py`` runs the GATE spine
 with this launcher instead of ``python -m apm_cli.cli`` and requires the
 machine to fail.
 """

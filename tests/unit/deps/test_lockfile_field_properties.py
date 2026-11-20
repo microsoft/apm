@@ -19,6 +19,7 @@ none of them re-implement URL parsing or normalization.
 
 from __future__ import annotations
 
+import re
 import string
 from dataclasses import fields
 from typing import Any
@@ -28,6 +29,7 @@ from hypothesis import given, seed, settings
 from hypothesis import strategies as st
 
 from apm_cli.core.host_providers import accepted_host_types
+from apm_cli.core.remediation import ADO_COORDINATES_MISMATCHED
 from apm_cli.deps.carried_license import CarriedLicense
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.provider_coordinates import ProviderCoordinateMixin
@@ -573,7 +575,7 @@ def test_any_single_mismatched_ado_field_fails_closed(
         host=host,
         **corrupted,
     )
-    with pytest.raises(ValueError, match=r"Run `apm install <original-ado-url>`"):
+    with pytest.raises(ValueError, match=re.escape(ADO_COORDINATES_MISMATCHED.sentence())):
         reference.validate_provider_coordinates()
 
 

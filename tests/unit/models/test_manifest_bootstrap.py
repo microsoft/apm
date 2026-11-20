@@ -11,6 +11,8 @@ import pytest
 
 from apm_cli.models.manifest_bootstrap import write_minimal_manifest
 
+pytestmark = pytest.mark.component
+
 _SCAFFOLD = (
     "name: p\n"
     "version: 1.0.0\n"

@@ -12,6 +12,10 @@ import typing
 import unittest
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 
 def _try_symlink(link: Path, target: Path):
     """Create a symlink or skip the test on platforms that don't support it."""
@@ -286,8 +290,12 @@ class TestSkillIntegratorCopytreeSymlinkContainment(unittest.TestCase):
             ),
             "Skill deployment must not bypass the canonical member-copy owner",
         )
-        self.assertIn("base_ignore = build_copy_ignore(", source)
-        self.assertIn("source_plan.copy_ignore(directory, contents)", source)
+        # The canonical filter lives beside build_copy_ignore in skill_support.
+        from apm_cli.integration import skill_support
+
+        support_source = inspect.getsource(skill_support)
+        self.assertIn("base_ignore = build_copy_ignore(", support_source)
+        self.assertIn("source_plan.copy_ignore(directory, contents)", support_source)
 
 
 class TestIgnoreNonContentSourceGuard(unittest.TestCase):

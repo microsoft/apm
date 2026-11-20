@@ -6,6 +6,8 @@ import pytest
 
 from apm_cli.runtime.codex_runtime import CodexRuntime
 
+pytestmark = pytest.mark.unit
+
 
 class TestCodexRuntime:
     """Test Codex runtime adapter."""

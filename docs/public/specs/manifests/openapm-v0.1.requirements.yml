@@ -592,6 +592,7 @@ requirements:
     keyword: MUST
     section: "10.3"
     conformance_class: consumer
+    notes: "Amendment 0.1.72, adopted 2026-11-20 (#4092): bases are eTLD+1 (a), explicit aliases (b), or the built-in GitHub-operated host class (c): github.com and *.ghe.com, plus GHES only via the operator's GITHUB_HOST; (c) never widens (a) or (b) for any other host"
   - id: req-sc-006
     keyword: MUST
     section: "4.2.3"

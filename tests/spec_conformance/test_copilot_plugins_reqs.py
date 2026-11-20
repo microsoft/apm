@@ -62,6 +62,8 @@ from tests.unit.copilot_plugins._builders import read_json, write_agent_plugin
 from tests.utils.artifact_snapshot import ArtifactSnapshot
 from tests.utils.local_package import LocalPackageFactory
 
+pytestmark = pytest.mark.component
+
 _COPILOT_TARGET = SimpleNamespace(name="copilot")
 
 

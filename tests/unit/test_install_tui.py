@@ -26,6 +26,8 @@ from apm_cli.utils.install_tui import (
     should_animate,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # should_animate() decision matrix
 # ---------------------------------------------------------------------------

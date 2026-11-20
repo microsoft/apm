@@ -18,6 +18,8 @@ from apm_cli.deps.registry.auth import (
     resolve_registry_token,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestEnvKey:
     """Env-var key derivation per design §7.1."""

@@ -90,3 +90,4 @@ def test_clean_does_not_follow_entry_or_bucket_symlinks(tmp_path: Path) -> None:
 def test_clean_missing_bucket_is_already_clean(tmp_path: Path) -> None:
     """Concurrent removal or a never-created cache needs no cleanup."""
     assert clean_cache_buckets((tmp_path / "missing",)) == []
+    assert not (tmp_path / "missing").exists()

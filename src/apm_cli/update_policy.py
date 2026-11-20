@@ -4,6 +4,8 @@ Package maintainers can patch this module during build to disable self-update
 and show users a package-manager-specific update command.
 """
 
+from apm_cli.core.remediation import CLI_BINARY_OUTDATED
+
 # Default guidance when self-update is disabled.
 DEFAULT_SELF_UPDATE_DISABLED_MESSAGE = (
     "Self-update is disabled for this APM distribution. Update APM using your package manager."
@@ -46,5 +48,5 @@ def get_self_update_disabled_message() -> str:
 def get_update_hint_message() -> str:
     """Return the update hint used in startup notifications."""
     if is_self_update_enabled():
-        return "Run apm self-update to upgrade"
+        return CLI_BINARY_OUTDATED.sentence()
     return get_self_update_disabled_message()

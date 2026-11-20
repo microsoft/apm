@@ -65,7 +65,8 @@ Accepted forms:
 
 - `OWNER/REPO` -- GitHub shorthand (`acme/marketplace`).
 - `HOST/OWNER/.../REPO` -- non-GitHub host shorthand
-  (`gitlab.com/team/marketplace`).
+  (`gitlab.com/team/marketplace`). Both shorthand forms accept `#ref`, for
+  example `acme/marketplace#v1.0.0`.
 - HTTPS git URL -- Azure DevOps Services, a configured Azure DevOps Server,
   GitLab, Gitea, Bitbucket Server, or another self-hosted git server. Add
   `#ref` to pin the marketplace, for example
@@ -231,7 +232,8 @@ apm marketplace list --verbose
 
 Show the packages exposed by a registered marketplace. Each plugin prints
 its full install name (`plugin@marketplace`) and version, with the
-description wrapped underneath.
+description wrapped underneath. `--offline` reads a live local `apm.yml`
+catalog without network access.
 
 ```bash
 apm marketplace browse awesome-agents
@@ -346,7 +348,8 @@ apm marketplace audit local --strict
 ### `apm marketplace outdated`
 
 Show packages in the authoring config that have newer upstream
-versions available.
+versions available. Local-path entries (such as `source: ./`) have no
+remote tags and are listed as skipped.
 
 | Flag | Description |
 |---|---|
@@ -394,9 +397,18 @@ remote, as `apm marketplace check` requires; otherwise the command exits
 
 ### `apm marketplace package set NAME`
 
-Update fields on an existing package entry. Same flag set as
-`package add` minus `--name` and `--no-verify` (`--subdir` has no `-s`
-short form); only the fields you pass are modified.
+Update fields on an existing package entry. Only the fields you pass are
+modified.
+
+| Flag | Description |
+|---|---|
+| `--version` | Semver range (e.g. `>=1.0.0`). |
+| `--ref` | Pin to a git ref (SHA, tag, or `HEAD`). |
+| `--subdir` | Subdirectory inside the source repo. |
+| `--tag-pattern` | Tag pattern (e.g. `v{version}`). |
+| `--category` | Package category (e.g. `developer-tools`). |
+| `--tags` | Comma-separated tags. |
+| `--include-prerelease` | Include prerelease versions. |
 
 ### `apm marketplace package remove NAME`
 

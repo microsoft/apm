@@ -7,6 +7,8 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture()
 def runner() -> CliRunner:

@@ -12,6 +12,8 @@ from apm_cli.compilation import context_optimizer
 from apm_cli.compilation.context_optimizer import ContextOptimizer
 from apm_cli.primitives.models import Instruction
 
+pytestmark = pytest.mark.component
+
 
 def _touch(base: Path, rel: str) -> None:
     p = base / rel

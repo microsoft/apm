@@ -15,6 +15,8 @@ import pytest
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

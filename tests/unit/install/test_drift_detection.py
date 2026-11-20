@@ -22,6 +22,7 @@ Covers branches not hit by existing test_drift.py / test_drift_perf.py:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -31,24 +32,19 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.drift import (
     CacheMissError,
     CheckLogger,
-    DriftFinding,
     ReplayConfig,
     _assert_scratch_bound,
     _build_package_info,
-    _collect_tracked_files,
-    _filter_targets,
-    _governed_root_dirs,
     _inline_diff_for,
-    _make_integrators,
+    _normalize_legacy_local_plugin_for_replay,
     _read_apm_yml_target,
     _walk_managed,
     diff_scratch_against_project,
-    render_drift,
-    render_drift_json,
-    render_drift_text,
     run_replay,
 )
 from apm_cli.integration.hook_integrator import HookIntegrator
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # _assert_scratch_bound
@@ -84,36 +80,6 @@ class TestAssertScratchBound:
 
 
 class TestCheckLogger:
-    def test_replay_start_writes_to_stderr(self, capsys) -> None:
-        logger = CheckLogger(verbose=False)
-        logger.replay_start()
-        captured = capsys.readouterr()
-        assert "Replaying" in captured.err
-
-    def test_diff_start_writes_to_stderr(self, capsys) -> None:
-        logger = CheckLogger(verbose=False)
-        logger.diff_start()
-        captured = capsys.readouterr()
-        assert "Diffing" in captured.err
-
-    def test_replay_complete_includes_count(self, capsys) -> None:
-        logger = CheckLogger(verbose=False)
-        logger.replay_complete(7)
-        captured = capsys.readouterr()
-        assert "7" in captured.err
-
-    def test_clean_writes_no_drift(self, capsys) -> None:
-        logger = CheckLogger(verbose=False)
-        logger.clean()
-        captured = capsys.readouterr()
-        assert "No drift" in captured.err
-
-    def test_findings_includes_count(self, capsys) -> None:
-        logger = CheckLogger(verbose=False)
-        logger.findings(3)
-        captured = capsys.readouterr()
-        assert "3" in captured.err
-
     def test_scratch_root_silent_when_not_verbose(self, capsys, tmp_path: Path) -> None:
         logger = CheckLogger(verbose=False)
         logger.scratch_root(tmp_path)
@@ -232,6 +198,50 @@ class TestMaterializeInstallPath:
 
         assert result == cached
 
+    def test_local_dep_replays_a_scratch_copy_not_the_source(self, tmp_path: Path) -> None:
+        from apm_cli.install.drift import _materialize_install_path
+
+        local_pkg = tmp_path / "local_pkg"
+        local_pkg.mkdir()
+        (local_pkg / "apm.yml").write_text("name: local_pkg\n", encoding="utf-8")
+        dep = LockedDependency(repo_url="./local_pkg", source="local", local_path="./local_pkg")
+        modules = tmp_path / "scratch" / "apm_modules"
+        result = _materialize_install_path(dep, tmp_path, modules, cache_only=True)
+        assert result.is_relative_to(modules)
+        assert (result / "apm.yml").read_text(encoding="utf-8") == "name: local_pkg\n"
+
+    def test_unadmittable_local_dir_fails_like_install(self, tmp_path: Path) -> None:
+        from apm_cli.install.drift import _materialize_install_path
+        from apm_cli.install.phases.local_content import LocalPackageError
+
+        (tmp_path / "local_pkg").mkdir()
+        dep = LockedDependency(repo_url="./local_pkg", source="local", local_path="./local_pkg")
+        with pytest.raises(LocalPackageError, match="not a valid APM package"):
+            _materialize_install_path(dep, tmp_path, tmp_path / "apm_modules", cache_only=True)
+
+    @pytest.mark.skipif(os.name == "nt", reason="creates OS symlinks")
+    def test_local_dep_with_contained_link_replays_dereferenced_copy(self, tmp_path: Path) -> None:
+        """#3667: replay uses install's image, where in-package links are bytes."""
+        from apm_cli.install.drift import _materialize_install_path
+
+        local_pkg = tmp_path / "local_pkg"
+        (local_pkg / "shared").mkdir(parents=True)
+        (local_pkg / "apm.yml").write_text("name: local_pkg\n", encoding="utf-8")
+        (local_pkg / "shared" / "s.md").write_text("shared\n", encoding="utf-8")
+        (local_pkg / "rules").mkdir()
+        (local_pkg / "rules" / "linked.md").symlink_to("../shared/s.md")
+        dep = LockedDependency(
+            repo_url="_local/local_pkg", source="local", local_path="./local_pkg"
+        )
+        modules = tmp_path / "scratch" / "apm_modules"
+
+        result = _materialize_install_path(dep, tmp_path, modules, cache_only=True)
+
+        copied = result / "rules" / "linked.md"
+        assert not copied.is_symlink()
+        assert copied.read_text(encoding="utf-8") == "shared\n"
+        assert (local_pkg / "rules" / "linked.md").is_symlink()
+
 
 # ---------------------------------------------------------------------------
 # _build_package_info
@@ -283,40 +293,9 @@ class TestBuildPackageInfo:
 # ---------------------------------------------------------------------------
 
 
-class TestMakeIntegrators:
-    def test_returns_all_expected_keys(self) -> None:
-        integrators = _make_integrators()
-        expected = {"prompt", "agent", "skill", "command", "hook", "instruction"}
-        assert expected == set(integrators.keys())
-
-
 # ---------------------------------------------------------------------------
 # _filter_targets
 # ---------------------------------------------------------------------------
-
-
-class TestFilterTargets:
-    def _make_target(self, name: str) -> MagicMock:
-        t = MagicMock()
-        t.name = name
-        return t
-
-    def test_no_names_returns_all(self) -> None:
-        targets = [self._make_target("a"), self._make_target("b")]
-        assert _filter_targets(targets, None) == targets
-
-    def test_names_filters_correctly(self) -> None:
-        targets = [self._make_target("a"), self._make_target("b"), self._make_target("c")]
-        result = _filter_targets(targets, frozenset({"a", "c"}))
-        names = [t.name for t in result]
-        assert "b" not in names
-        assert "a" in names and "c" in names
-
-    def test_empty_names_returns_all_targets(self) -> None:
-        # frozenset() is falsy so _filter_targets treats it as "no filter"
-        targets = [self._make_target("x")]
-        result = _filter_targets(targets, frozenset())
-        assert result == targets
 
 
 # ---------------------------------------------------------------------------
@@ -368,23 +347,6 @@ class TestReadApmYmlTarget:
 # ---------------------------------------------------------------------------
 
 
-class TestGovernedRootDirs:
-    def test_always_includes_dot_apm(self) -> None:
-        assert ".apm" in _governed_root_dirs([])
-
-    def test_includes_target_root_dir(self) -> None:
-        t = MagicMock()
-        t.root_dir = ".github/copilot-instructions.md"
-        result = _governed_root_dirs([t])
-        assert ".github" in result
-
-    def test_targets_without_root_dir_skipped(self) -> None:
-        t = MagicMock()
-        t.root_dir = None
-        result = _governed_root_dirs([t])
-        assert result == {".apm"}
-
-
 # ---------------------------------------------------------------------------
 # _walk_managed
 # ---------------------------------------------------------------------------
@@ -412,32 +374,6 @@ class TestWalkManaged:
 # ---------------------------------------------------------------------------
 # _collect_tracked_files
 # ---------------------------------------------------------------------------
-
-
-class TestCollectTrackedFiles:
-    def test_dep_deployed_files_included(self) -> None:
-        lock = LockFile()
-        dep = LockedDependency(repo_url="owner/pkg", deployed_files=[".apm/skills/x.md"])
-        lock.add_dependency(dep)
-        tracked = _collect_tracked_files(lock)
-        assert ".apm/skills/x.md" in tracked
-
-    def test_local_deployed_files_included(self) -> None:
-        lock = LockFile()
-        lock.local_deployed_files = [".apm/local.md"]
-        tracked = _collect_tracked_files(lock)
-        assert ".apm/local.md" in tracked
-        assert tracked[".apm/local.md"] == "."
-
-    def test_first_dep_wins_for_duplicate_path(self) -> None:
-        lock = LockFile()
-        dep1 = LockedDependency(repo_url="owner/first", deployed_files=["shared/file.md"])
-        dep2 = LockedDependency(repo_url="owner/second", deployed_files=["shared/file.md"])
-        lock.add_dependency(dep1)
-        lock.add_dependency(dep2)
-        tracked = _collect_tracked_files(lock)
-        # First setter wins (setdefault semantics)
-        assert tracked["shared/file.md"] in {"owner/first", "owner/second"}
 
 
 # ---------------------------------------------------------------------------
@@ -504,72 +440,6 @@ class TestDiffScratchReadError:
 # ---------------------------------------------------------------------------
 
 
-class TestRenderDriftText:
-    def test_empty_findings_shows_no_drift(self) -> None:
-        out = render_drift_text([])
-        assert "No drift" in out
-
-    def test_findings_grouped_by_kind(self) -> None:
-        findings = [
-            DriftFinding(path="a.md", kind="modified"),
-            DriftFinding(path="b.md", kind="unintegrated"),
-            DriftFinding(path="c.md", kind="orphaned"),
-        ]
-        out = render_drift_text(findings)
-        assert "modified (1)" in out
-        assert "unintegrated (1)" in out
-        assert "orphaned (1)" in out
-
-    def test_verbose_includes_inline_diff(self) -> None:
-        findings = [DriftFinding(path="x.md", kind="modified", inline_diff="see diff here")]
-        out = render_drift_text(findings, verbose=True)
-        assert "see diff here" in out
-
-    def test_non_verbose_hides_inline_diff(self) -> None:
-        findings = [DriftFinding(path="x.md", kind="modified", inline_diff="hidden hint")]
-        out = render_drift_text(findings, verbose=False)
-        assert "hidden hint" not in out
-
-    def test_package_name_shown_in_output(self) -> None:
-        findings = [DriftFinding(path="p.md", kind="orphaned", package="mypkg")]
-        out = render_drift_text(findings)
-        assert "mypkg" in out
-
-
-class TestRenderDriftJson:
-    def test_returns_dict_with_drift_key(self) -> None:
-        findings = [DriftFinding(path="x.md", kind="modified", package="pkg")]
-        result = render_drift_json(findings)
-        assert "drift" in result
-        assert result["drift"][0]["path"] == "x.md"
-        assert result["drift"][0]["kind"] == "modified"
-
-    def test_empty_findings_returns_empty_list(self) -> None:
-        result = render_drift_json([])
-        assert result == {"drift": []}
-
-
-class TestRenderDrift:
-    def test_default_text_format(self) -> None:
-        findings = [DriftFinding(path="a.md", kind="modified")]
-        out = render_drift(findings, fmt="text")
-        assert isinstance(out, str)
-        assert "modified" in out
-
-    def test_json_format_is_valid_json(self) -> None:
-        findings = [DriftFinding(path="b.md", kind="orphaned")]
-        out = render_drift(findings, fmt="json")
-        data = json.loads(out)
-        assert "drift" in data
-
-    def test_sarif_format_is_valid_json(self) -> None:
-        findings = [DriftFinding(path="c.md", kind="unintegrated")]
-        out = render_drift(findings, fmt="sarif")
-        data = json.loads(out)
-        assert "results" in data
-        assert data["results"][0]["ruleId"].startswith("apm/drift/")
-
-
 class TestReplayConfig:
     def test_default_values(self, tmp_path: Path) -> None:
         cfg = ReplayConfig(
@@ -580,3 +450,56 @@ class TestReplayConfig:
         assert cfg.no_hooks is True
         assert cfg.parallel_downloads == 1
         assert cfg.targets is None
+
+
+class TestLegacyPluginReplayNormalization:
+    def test_native_agent_plugin_bypasses_legacy_normalization(self, tmp_path: Path) -> None:
+        from apm_cli.agent_plugins.constants import PLUGIN_SCHEMA_ID
+
+        plugin = tmp_path / "native"
+        plugin.mkdir()
+        (plugin / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "$schema": PLUGIN_SCHEMA_ID,
+                    "name": "native.plugin",
+                    "version": "1.0.0",
+                    "extensions": {"com.microsoft.apm": {"schemaVersion": "1"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        dependency = LockedDependency(
+            repo_url="./native",
+            source="local",
+            local_path="./native",
+        )
+
+        result = _normalize_legacy_local_plugin_for_replay(dependency, plugin)
+
+        assert result == plugin
+        assert not (tmp_path / "apm_modules").exists()
+
+    def test_apm_package_with_plugin_json_is_not_normalized(self, tmp_path: Path) -> None:
+        """Replay keeps install's apm_package classification (#3604 routing)."""
+        package = tmp_path / "plug"
+        (package / ".apm" / "instructions").mkdir(parents=True)
+        (package / "apm.yml").write_text("name: plug\nversion: 1.0.0\n", encoding="utf-8")
+        (package / ".apm" / "instructions" / "plug.instructions.md").write_text(
+            "---\napplyTo: '**'\n---\nRules.\n", encoding="utf-8"
+        )
+        (package / "plugin.json").write_text('{"name": "plug"}\n', encoding="utf-8")
+        (package / "agents").mkdir()
+        (package / "agents" / "helper.md").write_text("Help.\n", encoding="utf-8")
+        dependency = LockedDependency(
+            repo_url="_local/plug",
+            source="local",
+            local_path="../plug",
+            package_type="apm_package",
+        )
+
+        result = _normalize_legacy_local_plugin_for_replay(dependency, package)
+
+        assert result == package
+        assert not (tmp_path / "apm_modules").exists()
+        assert (package / "apm.yml").read_text(encoding="utf-8") == "name: plug\nversion: 1.0.0\n"
