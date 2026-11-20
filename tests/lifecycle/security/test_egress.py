@@ -266,11 +266,8 @@ def _fields(cell_id: str) -> dict[str, str]:
 # Under PROXY_REGISTRY_ONLY, a registry the operator configured is the sanctioned
 # route, not a bypass (registry/client.py _refuse_direct_egress_when_proxy_only;
 # docs enterprise/registry-proxy.md): the world's MCP registry (MCP_REGISTRY_URL)
-# and its package registry (bound in the user config).
-_SANCTIONED: Mapping[str, tuple[str, ...]] = {
-    "mcp-registry": (REGISTRY_HOST,),
-    "registry": (world_registry.HOST,),
-}
+# and its package registry (bound in the user config). forbid_direct keeps both.
+_SANCTIONED = frozenset({REGISTRY_HOST, world_registry.HOST})
 
 # Where a REDIRECT row sends the host's requests: a path no route serves.
 _MOVED = "/lifecycle-egress-moved"
@@ -318,8 +315,7 @@ def run_egress_row(world: World, host: HostSlice, row: EgressRow) -> None:
         world.services.require_ado_auth()
     if redirect:
         _redirect(world, host, fields["REDIRECT"])
-    sanctioned = _SANCTIONED.get(row.egress, ()) if proxy_only else ()
-    if proxy_only and not sanctioned:
+    if proxy_only:
         world.services.forbid_direct()
     before = ArtifactSnapshotSet.capture(roots)
     result: CommandResult = driver.run(world, operation.command(world, host))
@@ -348,7 +344,7 @@ def run_egress_row(world: World, host: HostSlice, row: EgressRow) -> None:
                 for r in everything
                 if r.method != "CONNECT"
                 and r.host != routes.PROXY_HOST
-                and r.host not in sanctioned
+                and r.host not in _SANCTIONED
                 and "/policy-" not in r.path
             }
         )
