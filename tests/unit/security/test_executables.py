@@ -465,9 +465,7 @@ class TestWriteAllowExecutables:
             allow = {"pkg#1.0": {"hooks": True}}
             write_allow_executables(manifest, allow)
 
-            from apm_cli.utils.yaml_io import load_yaml
-
-            data = load_yaml(manifest)
+            data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
             assert data["allowExecutables"] == {"pkg#1.0": {"hooks": True}}
 
     def test_removes_block_when_empty(self) -> None:
@@ -484,9 +482,7 @@ class TestWriteAllowExecutables:
 
             write_allow_executables(manifest, {})
 
-            from apm_cli.utils.yaml_io import load_yaml
-
-            data = load_yaml(manifest)
+            data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
             assert "allowExecutables" not in data
 
     def test_preserves_other_fields(self) -> None:
@@ -499,9 +495,7 @@ class TestWriteAllowExecutables:
             allow = {"pkg#1.0": {"bin": True}}
             write_allow_executables(manifest, allow)
 
-            from apm_cli.utils.yaml_io import load_yaml
-
-            data = load_yaml(manifest)
+            data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
             assert data["name"] == "my-project"
             assert data["version"] == "1.0"
             assert data["description"] == "test"
