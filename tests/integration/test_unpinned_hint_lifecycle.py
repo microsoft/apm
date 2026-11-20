@@ -1,17 +1,18 @@
 """Installed-CLI regression: the unpinned-dependency hint is correct and actionable.
 
 Promise (install finalize owner, ``src/apm_cli/install/phases/finalize.py``):
-when ``apm install`` reports an unpinned dependency, the remedy it prints works
-for that dependency. A transitive dependency is not declared in the consumer's
-``apm.yml``, and a repository without release tags cannot satisfy a semver
-range, so the hint must name the exact commit pin the lockfile already holds.
-Following the hint must pin the dependency and clear the warning.
+a user is warned only about dependencies they can pin. An unpinned transitive
+dependency is chosen by the package that declares it, so a default install
+prints nothing about it (#4183); ``--verbose`` names the declaring package and
+the exact commit pin, which works for untagged repositories, and following it
+clears the note (RA-003).
 """
 
 from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -78,15 +79,21 @@ def test_unpinned_transitive_hint_names_a_working_pin(
     first = _apm(apm_binary_path, project, env, *_INSTALL)
     output = first.stdout + first.stderr
     assert first.returncode == 0, output
-    warning = next(line for line in output.splitlines() if "unpinned" in line)
-    assert "pinhint-secondary" in warning, output
-    pins = re.findall(r"(\S+#[0-9a-f]{7,40})\b", output)
-    assert pins, f"the unpinned hint names no commit pin to copy:\n{output}"
-    assert any(pin.endswith(secondary_commit[: len(pin.split("#")[1])]) for pin in pins), output
+    assert "unpinned" not in output, output
+
+    shutil.rmtree(project / "apm_modules")
+    verbose = _apm(apm_binary_path, project, env, *_INSTALL, "--verbose")
+    output = verbose.stdout + verbose.stderr
+    assert verbose.returncode == 0, output
+    note = next(line for line in output.splitlines() if "transitive dependency unpinned" in line)
+    assert "declared by" in note and "pinhint-primary" in note, output
+    pins = re.findall(r"(\S+#[0-9a-f]{40})\b", note)
+    assert pins == [f"apm-fixture-org/pinhint-secondary#{secondary_commit}"], output
 
     manifest = load_yaml(project / "apm.yml")
-    manifest["dependencies"]["apm"].append(next(p for p in pins if "pinhint-secondary" in p))
+    manifest["dependencies"]["apm"].append(pins[0])
     dump_yaml(manifest, project / "apm.yml")
-    second = _apm(apm_binary_path, project, env, *_INSTALL)
+    shutil.rmtree(project / "apm_modules")
+    second = _apm(apm_binary_path, project, env, *_INSTALL, "--verbose")
     assert second.returncode == 0, second.stdout + second.stderr
     assert "unpinned" not in second.stdout + second.stderr

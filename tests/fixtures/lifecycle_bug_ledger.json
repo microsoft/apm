@@ -618,6 +618,18 @@
       ]
     },
     {
+      "issue": 4183,
+      "fixed_in": "0.37.0",
+      "summary": "apm install warned that a transitive dependency was unpinned although the user's apm.yml does not declare it, and a converged rerun repeated the notice; the warning now covers only direct dependencies the user can pin, with the exact pin, while transitive ones are a verbose note naming the declaring package.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_unpinned_hint_lifecycle.py::test_unpinned_transitive_hint_names_a_working_pin",
+        "tests/unit/install/test_finalize_phase.py::TestFinalizeUnpinnedWarning::test_transitive_unpinned_is_verbose_only_and_names_its_parent",
+        "tests/unit/install/test_finalize_phase.py::TestFinalizeUnpinnedWarning::test_converged_run_repeats_no_unpinned_notice"
+      ]
+    },
+    {
       "issue": 4184,
       "fixed_in": "0.37.0",
       "summary": "A converged apm install reported unchanged commands, skills and hooks as integrated and claimed to install dependencies, local packages and the project root's own .apm content always counted as installed dependencies, and uninstall counted one package once per store with internal names and an absolute manifest path.",
