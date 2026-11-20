@@ -222,12 +222,20 @@ class TestRenderBundleResult:
         assert not any("Plugin bundle ready" in p for p in logger.progresses)
 
     def test_live_share_line_emitted(self) -> None:
-        """The 'Share with: apm install ...' info line is always emitted."""
+        """The share line names the consumer that accepts the format (#3994)."""
         logger = _RecordingLogger()
         result = _pack_result(files=["file.md"], bundle_path="build/my-bundle")
-        _render_bundle_result(logger, result, "apm", None, False)
+        _render_bundle_result(logger, result, BundleFormat.CLAUDE_PLUGIN, None, False)
         # A bare 'build/x' parses as owner/repo, so the line spells a path (#3994).
         assert "Share with: apm install ./build/my-bundle" in logger.infos
+
+    def test_live_legacy_format_shares_with_unpack(self) -> None:
+        """'apm install' rejects the legacy APM layout; unpack reads it (#3994)."""
+        logger = _RecordingLogger()
+        result = _pack_result(files=["file.md"], bundle_path="build/my-bundle.zip")
+        _render_bundle_result(logger, result, BundleFormat.APM, None, False)
+        assert "Share with: apm unpack ./build/my-bundle.zip (legacy APM layout)" in logger.infos
+        assert not any("apm install" in i for i in logger.infos)
 
     def test_live_zip_archive_emits_migration_tip_when_requested(self) -> None:
         logger = _RecordingLogger()

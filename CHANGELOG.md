@@ -139,6 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm compile` never leaves a `GEMINI.md` importing a missing `AGENTS.md`, `--clean` no longer tells you to run `--clean`, and a project with no instructions gets `No instructions to compile` instead of a target warning. (closes #3994, #4004)
 - `apm uninstall <server>` names how to remove an MCP server, `apm install -g` warns only about primitives its selected targets skip, warn-mode `apm audit --ci` names the dependencies it would block, and `apm policy explain` no longer says a disabled executables gate means a package deploys. (closes #3994, #4004)
 - `apm deps list` no longer exits 1 with "Invalid local package path ''" in a project with its own `.apm/` content. (closes #3994, #4004)
+- `apm pack` shares each bundle format with the command that accepts it (`apm unpack` for `--format apm`), and `apm unpack` names a plugin-format bundle and points to `apm install` instead of reporting missing files. (closes #3994, #4004)
 
 ### Security
 

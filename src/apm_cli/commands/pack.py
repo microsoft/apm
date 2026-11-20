@@ -823,7 +823,16 @@ def _render_bundle_result(
             # A bare 'build/x' would parse as owner/repo; spell it as a path.
             share = Path(pack_result.bundle_path)
             share_arg = str(share) if share.is_absolute() else f"./{share.as_posix()}"
-            logger.info(f"Share with: apm install {share_arg}")
+            # Only the Claude plugin layout installs imperatively (#3994).
+            if fmt == BundleFormat.CLAUDE_PLUGIN:
+                logger.info(f"Share with: apm install {share_arg}")
+            elif fmt == BundleFormat.AGENT_PLUGIN:
+                logger.info(
+                    f"Share: consumers declare {share_arg} under dependencies in "
+                    "apm.yml, then run 'apm install --target copilot'."
+                )
+            else:
+                logger.info(f"Share with: apm unpack {share_arg} (legacy APM layout)")
 
 
 def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, outputs=None):
@@ -902,8 +911,9 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
 @click.command(
     name="unpack",
     help=(
-        "[Deprecated] Extract an APM bundle into the current project. "
-        "Use 'apm install <bundle-path>' instead -- this command will be removed in a future release."
+        "[Deprecated] Extract a '--format apm' bundle into the current project. "
+        "Plugin bundles (the default) install with 'apm install <bundle-path>' -- "
+        "this command will be removed in a future release."
     ),
 )
 @click.argument("bundle_path", type=click.Path(exists=True))
@@ -931,7 +941,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
     logger.warning(
         "'apm unpack' is deprecated and will be removed in a future release. "
-        "Use 'apm install <bundle-path>' instead.",
+        "Repack with the default plugin format and use 'apm install <bundle-path>'.",
     )
     try:
         logger.start(f"Unpacking {bundle_path} -> {output}")
