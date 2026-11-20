@@ -1738,6 +1738,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Config mutation stops routing through the canonical lifecycle lock.",
     ),
     MutationCase(
+        guard_id="install-deployment-lifecycle-serialization-closed-world",
+        rule_id="install-deployment-lifecycle-serialization-closed-world",
+        path="src/apm_cli/commands/runtime.py",
+        old="def status():",
+        new="def status_report():",
+        intent="A CLI command lands without a lifecycle serialization classification.",
+    ),
+    MutationCase(
         guard_id="install-deployment-local-bundle-hook-trust",
         rule_id="install-deployment-local-bundle-hook-trust",
         path="src/apm_cli/install/local_bundle_hook_trust.py",
@@ -2394,6 +2402,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             '    raw_targets = vars(package).get("targets")\n'
         ),
         intent="Package-target authorization re-reads the raw manifest targets field.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-module-ownership",
+        rule_id="registry_delegation.module_ownership",
+        path=".apm/architecture/unowned-modules.json",
+        old='    "src/apm_cli/__init__.py",\n',
+        new="",
+        intent="A module with no owner drops off the shrink-only unowned allowlist.",
     ),
     MutationCase(
         guard_id="registry-delegation-output-diagnostics",
@@ -4799,6 +4815,13 @@ def test_output_diagnostics_guard_keeps_target_errors_plain(path: str, old: str,
             'help="Scan installed packages for hidden Unicode characters",',
             id="audit-help-drops-integrity-mode",
         ),
+        pytest.param(
+            "registry_delegation.experimental_flags",
+            "src/apm_cli/core/experimental.py",
+            "    del create_config\n",
+            "    from apm_cli.config import ensure_config_exists\n\n    ensure_config_exists()\n",
+            id="flag-read-creates-config",
+        ),
     ],
 )
 def test_output_owner_guards_catch_bypasses(rule_id: str, path: str, old: str, new: str) -> None:
@@ -4816,6 +4839,44 @@ def test_output_owner_guards_catch_bypasses(rule_id: str, path: str, old: str, n
     assert report.failures == ()
     assert {violation.rule_id for violation in report.violations} == {rule_id}
     assert any(violation.path == path for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new"),
+    [
+        pytest.param(
+            "contracts-tooling-remediation-advice",
+            "src/apm_cli/commands/install.py",
+            '"config state, or when deployed files do not match the hashes it records "',
+            '"config state "',
+            id="frozen-help-drops-hash-refusal",
+        ),
+        pytest.param(
+            "contracts-tooling-remediation-advice",
+            "src/apm_cli/commands/init.py",
+            "    if write:\n        discover_flag = True\n",
+            "    if write:\n        pass\n",
+            id="init-apply-stops-implying-discover",
+        ),
+        pytest.param(
+            "contracts-tooling-remediation-drift-kinds",
+            "src/apm_cli/core/remediation.py",
+            '        "orphaned": RESYNC_DEPLOYED,\n',
+            "",
+            id="drift-kind-orphaned-loses-its-row",
+        ),
+    ],
+)
+def test_remediation_guards_catch_regressions(rule_id: str, path: str, old: str, new: str) -> None:
+    """DX5, DX6 and H7 regressions each trip only their own rule (#4090)."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    rule_ids = ("contracts-tooling-remediation-advice", "contracts-tooling-remediation-drift-kinds")
+    report = run_selected_rules(ROOT, rule_ids, source_overrides={path: mutated})
+    assert report.failures == ()
+    assert {violation.rule_id for violation in report.violations} == {rule_id}
 
 
 # ---------------------------------------------------------------------------

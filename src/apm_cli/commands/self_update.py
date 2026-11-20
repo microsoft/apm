@@ -16,6 +16,11 @@ from dataclasses import dataclass
 
 import click
 
+from apm_cli.core.remediation import (
+    CLI_BINARY_OUTDATED,
+    CLI_INSTALLER_UNREACHABLE,
+)
+
 from ..bootstrap_mirror import (
     append_url_path,
     get_installer_base_url,
@@ -24,6 +29,7 @@ from ..bootstrap_mirror import (
     release_metadata_public_lookup_blocked,
 )
 from ..core.command_logger import CommandLogger
+from ..install.locking import serialized_lifecycle_unless
 from ..update_policy import get_self_update_disabled_message, is_self_update_enabled
 from ..utils.subprocess_env import external_process_env
 from ..version import get_version
@@ -113,7 +119,7 @@ def _get_manual_update_command(
             try:
                 installer_url = _get_update_installer_url(release)
             except RuntimeError:
-                return "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
+                return CLI_INSTALLER_UNREACHABLE.sentence()
         command = f"powershell -ExecutionPolicy Bypass -c 'irm \"{installer_url}\" | iex'"
         if release is not None:
             return f"$env:VERSION='{release.tag}'; {command}"
@@ -125,7 +131,7 @@ def _get_manual_update_command(
         try:
             installer_url = _get_update_installer_url(release)
         except RuntimeError:
-            return "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
+            return CLI_INSTALLER_UNREACHABLE.sentence()
     command = f'curl -sSL "{installer_url}"'
     if release is not None:
         return f"{command} | env VERSION='{release.tag}' sh"
@@ -224,6 +230,7 @@ def _build_self_update_installer_env(
     ),
 )
 @click.option("--check", is_flag=True, help="Only check for updates without installing")
+@serialized_lifecycle_unless("check")
 def self_update(check: bool) -> None:
     """Update APM CLI to the latest version (like npm update -g npm).
 
@@ -330,7 +337,7 @@ def self_update(check: bool) -> None:
 
         if check:
             logger.warning(f"Update available: {current_version} -> {release.version}")
-            logger.progress("Run 'apm self-update' (without --check) to install")
+            logger.progress(CLI_BINARY_OUTDATED.sentence())
             return
 
         # Proceed with update

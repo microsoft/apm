@@ -9,6 +9,16 @@ from typing import Any
 
 import click
 
+from apm_cli.core.remediation import (
+    CLAUDE_PLUGIN_REGISTRATION_STALE,
+    COPILOT_PLUGIN_REGISTRATION_STALE,
+    INTEGRATIONS_UNSYNCED,
+    INTEGRATIONS_UNSYNCED_AFTER,
+    LOCKFILE_STATE_UNRECONCILED,
+    MCP_ENTRY_STALE,
+    PROJECT_MANIFEST_MISSING,
+)
+
 from ...codex_plugins.client import CodexNativeError
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
@@ -146,8 +156,7 @@ def _hold_native_registration(native_before, logger: CommandLogger) -> None:
     if native_before:
         logger.warning(
             "Claude native plugin registrations were left unchanged because the lockfile "
-            "update did not complete. Resolve the errors above, then run "
-            "'apm install --global' to reconcile them."
+            f"update did not complete. {CLAUDE_PLUGIN_REGISTRATION_STALE.sentence()}"
         )
 
 
@@ -214,7 +223,7 @@ def _sync_integrations_for_manifest(
         apm_package = APMPackage.from_apm_yml(manifest_path)
     except Exception as manifest_err:
         logger.warning("Integration cleanup did not finish.")
-        logger.warning("Run 'apm install' to resync remaining integrations.")
+        logger.warning(INTEGRATIONS_UNSYNCED.sentence())
         logger.verbose_detail(
             f"Integration cleanup skipped: {type(manifest_err).__name__}: {manifest_err}"
         )
@@ -241,12 +250,18 @@ def _sync_integrations_for_manifest(
             # The survivor preflight refused before any hook settings changed;
             # 'apm install' would refuse the same package until it is migrated.
             logger.warning(str(sync_err))
-            logger.warning("Migrate the package above, then run 'apm install' to resync.")
+            logger.warning(
+                INTEGRATIONS_UNSYNCED_AFTER.bind(fix="migrate the package above").sentence()
+            )
         elif isinstance(sync_err, PolicyViolationError):
             logger.warning(str(sync_err))
-            logger.warning("Resolve the org policy issue above, then run 'apm install' to resync.")
+            logger.warning(
+                INTEGRATIONS_UNSYNCED_AFTER.bind(
+                    fix="resolve the org policy issue above"
+                ).sentence()
+            )
         else:
-            logger.warning("Run 'apm install' to resync remaining integrations.")
+            logger.warning(INTEGRATIONS_UNSYNCED.sentence())
         logger.verbose_detail(f"Integration cleanup failed: {type(sync_err).__name__}: {sync_err}")
         logger.verbose_detail(traceback.format_exc().rstrip())
         return default_outcome, sync_err
@@ -601,7 +616,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                     "first with 'apm install -g <package>' or create the file manually."
                 )
             else:
-                logger.error(f"No {manifest_display} found. Run 'apm init' in this project first.")
+                logger.error(f"No {manifest_display} found. {PROJECT_MANIFEST_MISSING.sentence()}")
             sys.exit(1)
 
         if not packages:
@@ -974,7 +989,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 lockfile_ready = False
                 logger.warning(
                     "Lockfile state could not be reconciled. "
-                    "Run 'apm install --force' to resync before retrying."
+                    f"{LOCKFILE_STATE_UNRECONCILED.sentence()}"
                 )
                 logger.verbose_detail(f"Lockfile reconciliation error: {state_err}")
 
@@ -1013,13 +1028,13 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             recovery = ""
             if isinstance(cleanup_error, PathTraversalError):
                 recovery = (
-                    " Fix the MCP config path, then run 'apm install' to reconcile "
-                    "the stale entry; the package was already removed from apm.yml."
+                    f" {MCP_ENTRY_STALE.bind(fix='fix the MCP config path').sentence()}"
+                    " The package was already removed from apm.yml."
                 )
             elif isinstance(cleanup_error, MCPUninstallCleanupError):
                 recovery = (
-                    " Fix the reported target configs, then run 'apm install' "
-                    "to reconcile stale MCP entries; lock ownership was retained."
+                    f" {MCP_ENTRY_STALE.bind(fix='fix the reported target configs').sentence()}"
+                    " Lock ownership was retained."
                 )
             logger.error(
                 "Uninstall incomplete: package removal completed, but MCP cleanup failed: "
@@ -1030,9 +1045,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             mcp_cleanup_error = cleanup_error
             logger.error(
                 "Uninstall incomplete: package removal completed, but MCP cleanup failed: "
-                f"{type(cleanup_error).__name__}: {cleanup_error}. Fix the target config, "
-                "then run 'apm install' to reconcile stale MCP entries; lock ownership "
-                "was retained."
+                f"{type(cleanup_error).__name__}: {cleanup_error}. "
+                f"{MCP_ENTRY_STALE.bind(fix='fix the target config').sentence()} "
+                "Lock ownership was retained."
             )
             logger.verbose_detail(traceback.format_exc().rstrip())
 
@@ -1200,7 +1215,7 @@ def _resync_native_registration_after_uninstall(
     except (CopilotSettingsCollisionError, AgentPluginError, OSError) as registration_error:
         logger.warning(
             f"GitHub Copilot plugin registration could not be updated: {registration_error} "
-            "Re-run 'apm install' to re-register once resolved."
+            f"{COPILOT_PLUGIN_REGISTRATION_STALE.sentence()}"
         )
 
 

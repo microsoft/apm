@@ -568,7 +568,9 @@ class TestPruneCommand:
             assert result.exit_code == 1
             assert "Failed to remove bad-org/bad-repo" in result.output
             assert "Prune incomplete" in result.output
-            assert "rerun 'apm prune'" in " ".join(result.output.split())
+            assert "then run 'apm prune' to finish the filesystem cleanup" in " ".join(
+                result.output.split()
+            )
 
     # ------------------------------------------------------------------
     # Lockfile cleanup
@@ -1222,7 +1224,7 @@ dependencies:
             assert result.exit_code == 1
             assert "Failed to update apm.lock.yaml" in result.output
             assert "Package directories already removed: orphan-org/orphan-repo." in result.output
-            assert "Rerun 'apm prune'" in result.output
+            assert "Run 'apm prune' to finish the filesystem" in result.output
 
     def test_prune_retry_repairs_lock_after_prior_write_failure(self):
         """A retry converges after package cleanup outlives a failed lock write."""

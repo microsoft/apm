@@ -28,6 +28,7 @@ import json
 import re
 import sys
 from collections.abc import Callable, Iterable
+from itertools import pairwise
 from pathlib import Path
 
 from scripts.architecture_linter.facts import FactsProvider
@@ -61,6 +62,8 @@ READ_ONLY_COMMANDS = frozenset(
         "apm deps why",
         "apm doctor",
         "apm experimental list",
+        "apm lifecycle test",
+        "apm lifecycle validate",
         "apm list",
         "apm marketplace audit",
         "apm marketplace browse",
@@ -77,7 +80,7 @@ READ_ONLY_COMMANDS = frozenset(
         "apm view",
     }
 )
-_MUTATING_FLAGS = ("--strip", "--fix", "--force", "--write")
+_MUTATING_FLAGS = ("--strip", "--fix", "--force", "--write", "--execute")
 _COMMAND = re.compile(r"apm [a-z][^'\"`\[\n;,)]*")
 
 
@@ -151,6 +154,7 @@ def _baseline(provider: FactsProvider) -> tuple[dict[str, int] | None, list[Viol
 
 def _check_advice(provider: FactsProvider) -> Iterable[Violation]:
     baseline, findings = _baseline(provider)
+    findings.extend(_landed_help_findings(provider))
     if baseline is None:
         return findings
     seen: set[str] = set()
@@ -188,6 +192,47 @@ def _check_advice(provider: FactsProvider) -> Iterable[Violation]:
         for path, count in sorted(baseline.items())
         if path not in seen and count
     )
+    return findings
+
+
+# -- Landed help and advice fixes (#3994, #4004) --------------------------------
+
+_INSTALL_COMMAND = "src/apm_cli/commands/install.py"
+_INIT_COMMAND = "src/apm_cli/commands/init.py"
+_FROZEN_HELP = "or when deployed files do not match the hashes it records"
+
+
+def _landed_help_findings(provider: FactsProvider) -> list[Violation]:
+    """DX5: --frozen help names the hash refusal; DX6: init --apply implies --discover."""
+    findings: list[Violation] = []
+    install, failures = checked_facts(
+        provider, _INSTALL_COMMAND, ADVICE_RULE_ID, require_python=True
+    )
+    findings.extend(failures)
+    if not failures and not any(_FROZEN_HELP in line for line in install.lines):
+        findings.append(
+            violation(
+                ADVICE_RULE_ID,
+                _INSTALL_COMMAND,
+                "install --frozen help must say it refuses when deployed files do not "
+                "match the lockfile hashes (DX5)",
+            )
+        )
+    init, failures = checked_facts(provider, _INIT_COMMAND, ADVICE_RULE_ID, require_python=True)
+    findings.extend(failures)
+    lines = [line.strip() for line in init.lines]
+    implied = any(
+        line == "if write:" and following == "discover_flag = True"
+        for line, following in pairwise(lines)
+    )
+    if not failures and not implied:
+        findings.append(
+            violation(
+                ADVICE_RULE_ID,
+                _INIT_COMMAND,
+                "init --apply must imply --discover ('if write: discover_flag = True') (DX6)",
+            )
+        )
     return findings
 
 
@@ -276,7 +321,8 @@ RULES = (
         ADVICE_RULE_ID,
         "contracts_tests",
         (ADVICE_RULE_ID,),
-        "Remediation advice is rendered from the core/remediation.py catalog only.",
+        "Remediation advice is rendered from the core/remediation.py catalog only; "
+        "install --frozen help and init --apply keep their landed fixes.",
         _check_advice,
     ),
     Rule(

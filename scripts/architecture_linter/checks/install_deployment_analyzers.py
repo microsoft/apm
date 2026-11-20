@@ -58,6 +58,10 @@ from scripts.architecture_linter.checks.install_frozen_and_audit import (
     check_mcp_ownership_migration,
     check_uninstall_reachability,
 )
+from scripts.architecture_linter.checks.install_lifecycle_serialization import (
+    GUARD_LIFECYCLE_SERIALIZATION_CLOSED,
+    check_lifecycle_serialization_closed_world,
+)
 from scripts.architecture_linter.checks.install_lock_parent_placement import (
     GUARD_LOCK_PARENT_PLACEMENT,
     check_lock_parent_placement,
@@ -369,6 +373,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_LIFECYCLE_SERIALIZATION,
         "Lifecycle mutators route through install/locking.py.",
         check_lifecycle_serialization,
+    ),
+    _rule(
+        GUARD_LIFECYCLE_SERIALIZATION_CLOSED,
+        "Every CLI command is classified once: serialized, delegated, exempt, or pending.",
+        check_lifecycle_serialization_closed_world,
     ),
     _rule(
         _GUARD_UNINSTALL_SELECTION,

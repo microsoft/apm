@@ -9,6 +9,10 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    INIT_TARGETS_UNDETECTED,
+)
+
 from ..bundle.formats import PREFERRED_PLUGIN_FORMAT, BundleFormat
 from ..bundle.plugin_layout import find_plugin_root_sources
 from ..constants import APM_YML_FILENAME
@@ -832,7 +836,7 @@ def _resolve_init_targets(
             if yes or not is_tty:
                 logger.error(message)
                 logger.progress(
-                    "Re-run 'apm init --target <target,...>' to choose the targets explicitly.",
+                    INIT_TARGETS_UNDETECTED.sentence(),
                     symbol="info",
                 )
                 sys.exit(1)
@@ -974,7 +978,7 @@ def _prompt_target_selection(
 
     click.echo(
         f"\n{INFO}[i] Tip: select the tools your team uses. You can change this later"
-        f"\n    with 'apm targets set <target,...>' or edit apm.yml directly.{RESET}"
+        f"\n    by editing 'targets:' in apm.yml.{RESET}"
     )
     click.echo(
         f"{INFO}[i] Type a number to toggle, ranges like '1-3' or '1,3,5' for multiple,"
@@ -1006,7 +1010,7 @@ def _prompt_target_selection(
         click.echo(
             f"\n{INFO}[!] No targets selected. APM will auto-detect targets from your"
             "\n    filesystem on every compile (e.g. .github/ -> copilot)."
-            f"\n    To pin targets later: apm targets set <target,...>{RESET}"
+            f"\n    To pin targets later, list them under 'targets:' in apm.yml.{RESET}"
         )
         if click.confirm("\nContinue without pinning targets?", default=True):
             return None

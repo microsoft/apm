@@ -5,6 +5,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from apm_cli.core.remediation import (
+    DEPLOYMENT_RECORDS_STALE,
+    PROJECT_OWNED_FILE,
+)
+
 from ..core.command_logger import CommandLogger
 from ..deps.file_provenance import (
     FileProvenance,
@@ -29,10 +34,7 @@ _STATUS_TEXT = {
 }
 
 _GUIDANCE = {
-    OwnerKind.PROJECT_SELF: (
-        "Owned by this project. Edit the project's own source (for example under "
-        ".apm/), then rerun 'apm install'."
-    ),
+    OwnerKind.PROJECT_SELF: (f"Owned by this project. {PROJECT_OWNED_FILE.sentence()}"),
     OwnerKind.LOCAL_BUNDLE: (
         "Deployed from a local bundle, not replayable from apm.yml. Edit the "
         "bundle's source and reinstall it instead of this copy."
@@ -110,7 +112,7 @@ def render_file_provenance(
     if result.legacy_records:
         logger.warning(
             "Lockfile has no canonical deployment records; owners come from legacy "
-            "deployed_files views. Rerun 'apm install' to refresh them."
+            f"deployed_files views. {DEPLOYMENT_RECORDS_STALE.sentence()}"
         )
     if any(record.status is not FileStatus.MATCHES for record in result.records):
         logger.warning(
@@ -121,7 +123,7 @@ def render_file_provenance(
             "A recorded owner (active writer or surviving owner) is not in the lockfile "
             "dependencies; provenance is incomplete."
         )
-        logger.error_detail("  Rerun 'apm install' to rebuild deployment records.")
+        logger.error_detail(f"  {DEPLOYMENT_RECORDS_STALE.sentence()}")
         return EXIT_UNRECORDED
 
     active = result.records[0].active_owner

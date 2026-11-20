@@ -19,6 +19,10 @@ from urllib.parse import urlparse
 import click
 
 from apm_cli.core.lifecycle_scripts import LIFECYCLE_EVENTS
+from apm_cli.core.remediation import (
+    LIFECYCLE_SCRIPTS_UNTRUSTED,
+    PROJECT_MANIFEST_MISSING,
+)
 from apm_cli.install.locking import serialized_lifecycle
 from apm_cli.utils.console import (
     STATUS_SYMBOLS,
@@ -138,7 +142,9 @@ def lifecycle_test(event: str, verbose: bool, execute: bool) -> None:
     if not execute:
         project_file = _get_project_apm_yml(project_root)
         trusted = is_project_scripts_trusted(project_file)
-        trust_label = "[trusted]" if trusted else "[untrusted -- run: apm lifecycle trust]"
+        trust_label = (
+            "[trusted]" if trusted else f"[untrusted -- {LIFECYCLE_SCRIPTS_UNTRUSTED.clause()}]"
+        )
         _rich_info(
             f"Dry-run: '{event}' would fire {len(matching)} script(s) "
             "(no commands or requests are run).",
@@ -161,7 +167,7 @@ def lifecycle_test(event: str, verbose: bool, execute: bool) -> None:
         _rich_warning(
             f"Skipped {skipped} script(s) the script gate withholds "
             "(APM_NO_SCRIPTS, org executables.deny_all, or untrusted project scripts: "
-            "run 'apm lifecycle trust').",
+            f"{LIFECYCLE_SCRIPTS_UNTRUSTED.clause()}).",
             symbol="warning",
         )
     if not gated:
@@ -211,7 +217,7 @@ def lifecycle_init(force: bool) -> None:
             "No apm.yml found in the current directory.",
             symbol="error",
         )
-        _rich_echo("  Run 'apm init' first to create apm.yml.", style="dim")
+        _rich_echo(f"  {PROJECT_MANIFEST_MISSING.sentence()}", style="dim")
         sys.exit(1)
 
     try:
@@ -284,7 +290,7 @@ def lifecycle_init(force: bool) -> None:
                 "  1. Edit [cyan]apm.yml[/cyan] to customise the lifecycle: block\n"
                 "  2. Run [cyan]apm lifecycle validate[/cyan] to check for errors\n"
                 "  3. Run [cyan]apm lifecycle test post-install[/cyan] to dry-run\n"
-                "  4. Run [cyan]apm lifecycle trust[/cyan] to allow scripts to run\n",
+                f"  4. {LIFECYCLE_SCRIPTS_UNTRUSTED.sentence()}\n",
                 title="Getting Started",
                 style="cyan",
             )
@@ -294,7 +300,7 @@ def lifecycle_init(force: bool) -> None:
         click.echo("  1. Edit apm.yml to customise the lifecycle: block")
         click.echo("  2. Run `apm lifecycle validate` to check for errors")
         click.echo("  3. Run `apm lifecycle test post-install` to dry-run")
-        click.echo("  4. Run `apm lifecycle trust` to allow scripts to run")
+        click.echo(f"  4. {LIFECYCLE_SCRIPTS_UNTRUSTED.sentence()}")
 
 
 @lifecycle.command(
@@ -537,6 +543,7 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
     name="trust",
     help="Trust the project apm.yml lifecycle: block so its scripts run.",
 )
+@serialized_lifecycle
 def lifecycle_trust() -> None:
     """Record trust for the current lifecycle: subtree of apm.yml.
 
@@ -561,7 +568,7 @@ def lifecycle_trust() -> None:
         return
 
     _rich_warning(
-        "Project lifecycle scripts can run arbitrary commands during apm install, update, "
+        "Project lifecycle scripts can execute arbitrary commands during apm install, update, "
         "uninstall, and compile.",
         symbol="warning",
     )
@@ -583,6 +590,7 @@ def lifecycle_trust() -> None:
     name="untrust",
     help="Revoke trust for the project apm.yml lifecycle: block.",
 )
+@serialized_lifecycle
 def lifecycle_untrust() -> None:
     """Revoke trust for the apm.yml lifecycle: block so its scripts stop running."""
     from apm_cli.core.lifecycle_scripts import _get_project_apm_yml

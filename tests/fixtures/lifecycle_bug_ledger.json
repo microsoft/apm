@@ -542,7 +542,36 @@
         "tests/integration/test_command_output_owner_e2e.py::test_mcp_adapter_success_is_reported_once",
         "tests/integration/test_command_output_owner_e2e.py::test_default_init_prints_no_third_party_tip",
         "tests/integration/test_command_output_owner_e2e.py::test_install_mcp_names_the_manifest_relatively",
-        "tests/integration/test_architecture_owner_rule_mutations.py::test_output_owner_guards_catch_bypasses"
+        "tests/integration/test_architecture_owner_rule_mutations.py::test_output_owner_guards_catch_bypasses",
+        "tests/unit/core/test_experimental.py::test_flag_read_is_a_pure_read"
+      ]
+    },
+    {
+      "issue": 4090,
+      "fixed_in": "0.37.0",
+      "summary": "apm audit --ci and apm install --frozen advised that a plain apm install keeps local edits, but install overwrites edited instructions, agents, prompts, commands and rules behind an info line and refuses edited skills; the advice now states what install does per kind and the overwrite notice is a warning naming the files.",
+      "failure_modes": ["outcome", "observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_local_edit_advice_lifecycle.py::test_local_edit_advice_is_true_and_restores_each_kind",
+        "tests/integration/test_remediation_advice_lifecycle.py::test_audit_remediation_clears_the_reported_check",
+        "tests/quality/test_cli_command_literals.py::test_every_apm_command_literal_resolves"
+      ]
+    },
+    {
+      "issue": 4091,
+      "fixed_in": "0.37.0",
+      "summary": "apm lifecycle trust and untrust wrote the script trust store outside the cross-process lifecycle serialization owner, so a concurrent lifecycle writer could drop a recorded trust or restore a revoked one while the command reported success.",
+      "failure_modes": [
+        "transaction",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lifecycle_trust_serialization_lifecycle.py::test_concurrent_lifecycle_trust_keeps_every_trust_record",
+        "tests/integration/test_lifecycle_trust_serialization_lifecycle.py::test_concurrent_lifecycle_untrust_keeps_the_revocation"
       ]
     }
   ],

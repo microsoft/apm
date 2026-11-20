@@ -661,6 +661,8 @@ inventory in `content-integrity.primitive_coverage`, separate from violation
 passing checks. Structured findings identify pointers and decoded offsets,
 not physical file line/column positions. CI `content_findings` retains the exact
 offending file and pointer; SARIF locates that artifact, not the lockfile.
+A failing CI JSON check may carry `remediation` (`id`, `command`, `fixes`, optional
+`before`/`then`) and `remediations` (all of them): run `before`, then `command`.
 Copilot App's SQLite workflow prompts
 are not covered by filesystem discovery. Tracking is file-level,
 not entry ownership or hash verification. Automatic `--strip` refuses

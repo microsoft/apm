@@ -8,6 +8,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from apm_cli.core.remediation import (
+    INTEGRATED_FILES_STALE,
+    LOCAL_DEPENDENCY_UNMAPPED,
+    LOCAL_DEPENDENCY_UNRESOLVED,
+    LOCKFILE_RECORDS_INCONSISTENT,
+    MARKETPLACE_REF_UNRESOLVED,
+    MCP_DEPENDENCY_DECLARED,
+    REGISTRY_CANONICAL_UNRECORDED,
+)
+
 from ...bundle.local_bundle import looks_like_local_bundle
 from ...constants import APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
@@ -117,8 +127,8 @@ def _refuse_unsafe_marketplace_removals(
             label = _marketplace_declaration_label(entry)
             logger.error(
                 f"apm.lock.yaml records {len(rows)} packages for {label}, so uninstall "
-                "cannot tell which one to remove. Nothing was changed. Run 'apm install' "
-                "to refresh apm.lock.yaml, then retry."
+                "cannot tell which one to remove. Nothing was changed. "
+                f"{LOCKFILE_RECORDS_INCONSISTENT.sentence()}"
             )
             refused.append(label)
     if refused:
@@ -218,7 +228,7 @@ class _LocalRefreshLogger:
         self.failed = True
         self._logger.error(
             f"Failed to refresh {self._package_label} from its declared local path. "
-            "Check the exact path in apm.yml, run 'apm install', and retry."
+            f"{LOCAL_DEPENDENCY_UNRESOLVED.sentence()}"
         )
 
 
@@ -635,8 +645,8 @@ def _resolve_marketplace_packages(
                         logger.warning(
                             f"Registry resolved {plugin_name}@{marketplace_name} to "
                             f"{canonical}, but it is not recorded in apm.lock.yaml. "
-                            "Refusing as a supply-chain precaution; use "
-                            f"`apm uninstall {canonical}` directly if this is correct."
+                            "Refusing as a supply-chain precaution. "
+                            f"{REGISTRY_CANONICAL_UNRECORDED.bind(canonical=canonical).sentence()}"
                         )
                         canonical = None
                     elif lockfile is None:
@@ -663,9 +673,8 @@ def _resolve_marketplace_packages(
             else:
                 logger.error(
                     f"{plugin_name}@{marketplace_name} could not be resolved -- "
-                    "use owner/repo format to uninstall directly, or run "
-                    "`apm list` to find the owner/repo canonical name "
-                    "then use `apm uninstall owner/repo` directly."
+                    "find its owner/repo canonical name with `apm list`, then "
+                    f"{MARKETPLACE_REF_UNRESOLVED.clause()}."
                 )
 
         resolved[package] = canonical
@@ -694,9 +703,8 @@ def _mcp_server_hint(name: str, lockfile: "LockFile | None") -> str | None:
             "Uninstall that package to remove it."
         )
     return (
-        f"'{name}' is an MCP server, not a package. Remove '{name}' under "
-        "dependencies.mcp in apm.yml, then run 'apm install' to remove it "
-        "from your harnesses."
+        f"'{name}' is an MCP server, not a package. "
+        f"{MCP_DEPENDENCY_DECLARED.bind(name=name).sentence()}"
     )
 
 
@@ -830,7 +838,7 @@ def _validate_uninstall_packages(
             if canonical_for_match.startswith("_local/"):
                 logger.error(
                     f"{display_label} could not be mapped to one declared local dependency. "
-                    "Run 'apm install' to regenerate apm.lock.yaml, or use one exact "
+                    f"{LOCAL_DEPENDENCY_UNMAPPED.sentence()[:-1]}, or use one exact "
                     "path from apm.yml."
                 )
             elif is_local and looks_like_local_bundle(Path(package)):
@@ -1678,7 +1686,7 @@ def _sync_integrations_after_uninstall(
                 pkg_id = _dependency_public_label(dep_ref)
                 logger.warning(
                     f"Best-effort re-integration skipped for {pkg_id}. "
-                    "Run 'apm install' to rebuild integrated files."
+                    f"{INTEGRATED_FILES_STALE.sentence()}"
                 )
                 logger.verbose_detail(
                     f"    Re-integration error: {_reintegration_error_detail(dep_ref, exc)}"

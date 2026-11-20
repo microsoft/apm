@@ -7,6 +7,10 @@ import sys
 import click
 from click.core import ParameterSource
 
+from apm_cli.core.remediation import (
+    MCP_REGISTRY_URL_OVERRIDE,
+)
+
 from ..core.command_logger import CommandLogger
 from ..mcp_transport import (
     TRANSPORT_SSE,
@@ -93,7 +97,7 @@ def _handle_registry_network_error(exc, registry, console, logger, action):
     elif source == "config":
         hint = (
             "mcp-registry-url is set in apm config -- verify the URL is correct "
-            "and reachable, or run 'apm config unset mcp-registry-url'."
+            f"and reachable, or {MCP_REGISTRY_URL_OVERRIDE.clause()}."
         )
     else:
         hint = "The registry may be temporarily unavailable. Retry shortly."

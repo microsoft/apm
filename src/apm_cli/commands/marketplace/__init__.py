@@ -18,6 +18,14 @@ from urllib.parse import urlsplit
 
 import click
 
+from apm_cli.core.remediation import (
+    MARKETPLACE_ADD_FAILED,
+    MARKETPLACE_BUILD_REMOVED,
+    MARKETPLACE_CONFIG_MISSING,
+    MARKETPLACE_SEARCH_FORMAT,
+    MARKETPLACES_NONE_REGISTERED,
+)
+
 from ...core.command_logger import CommandLogger
 from ...install.locking import serialized_lifecycle
 from ...marketplace.builder import BuildOptions, BuildReport, MarketplaceBuilder, ResolvedPackage
@@ -103,9 +111,7 @@ class MarketplaceGroup(click.Group):
         # hint rather than silently aliasing.
         if cmd_name == "build":
             raise click.UsageError(
-                "'apm marketplace build' was removed. Use 'apm pack' instead.\n"
-                "marketplace.json is now produced by 'apm pack' when "
-                "apm.yml has a 'marketplace:' block."
+                f"'apm marketplace build' was removed. {MARKETPLACE_BUILD_REMOVED.sentence()}"
             )
         return super().get_command(ctx, cmd_name)
 
@@ -140,7 +146,7 @@ def _load_yml_or_exit(logger):
     yml_path = Path.cwd() / "marketplace.yml"
     if not yml_path.exists():
         logger.error(
-            "No marketplace.yml found. Run 'apm marketplace init' to scaffold one.",
+            f"No marketplace.yml found. {MARKETPLACE_CONFIG_MISSING.sentence()}",
             symbol="error",
         )
         sys.exit(1)
@@ -515,7 +521,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
             detail = f": {exc.reason}" if exc.reason else ""
             logger.error(
                 f"Failed to fetch marketplace '{probe_name}'{detail}. It was not "
-                "registered; fix the cause, then rerun this 'apm marketplace add' command.",
+                f"registered. {MARKETPLACE_ADD_FAILED.sentence()}",
                 symbol="error",
             )
             sys.exit(1)
@@ -720,8 +726,7 @@ def list_cmd(verbose):
 
         if not sources:
             logger.progress(
-                "No marketplaces registered. Use 'apm marketplace add SOURCE' to register one "
-                "(OWNER/REPO, HTTPS URL, SSH URL, or local path).",
+                f"No marketplaces registered. {MARKETPLACES_NONE_REGISTERED.sentence()}",
                 symbol="info",
             )
             return
@@ -1242,16 +1247,16 @@ def search(expression, limit, verbose):
 
         if "@" not in expression:
             logger.error(
-                f"Invalid format: '{expression}'. "
-                "Use QUERY@MARKETPLACE, e.g.: apm search security@skills"
+                f"Invalid format: '{expression}'. {MARKETPLACE_SEARCH_FORMAT.sentence()} "
+                "For example: apm search security@skills"
             )
             sys.exit(1)
 
         query, marketplace_name = expression.rsplit("@", 1)
         if not query or not marketplace_name:
             logger.error(
-                "Both QUERY and MARKETPLACE are required. "
-                "Use QUERY@MARKETPLACE, e.g.: apm search security@skills"
+                f"Both QUERY and MARKETPLACE are required. {MARKETPLACE_SEARCH_FORMAT.sentence()} "
+                "For example: apm search security@skills"
             )
             sys.exit(1)
 

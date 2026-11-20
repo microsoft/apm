@@ -9,6 +9,10 @@ import sys
 
 import click
 
+from apm_cli.core.remediation import (
+    EXPERIMENTAL_FLAGS_UNKNOWN,
+)
+
 from ..core.command_logger import CommandLogger
 from ..core.experimental import (
     FLAGS,
@@ -66,7 +70,7 @@ def _print_list_footer(flags_shown: list, logger: "CommandLogger") -> None:
         logger.verbose_detail(
             f"Ignoring {len(stale)} unknown or retired flag(s) in config: "
             f"{', '.join(display_name(key) for key in stale)} "
-            "(run 'apm experimental reset' to clean up)"
+            f"({EXPERIMENTAL_FLAGS_UNKNOWN.clause()})"
         )
 
 
