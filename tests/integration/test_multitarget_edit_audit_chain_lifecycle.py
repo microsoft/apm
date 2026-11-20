@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.integration.base_integrator import unproven_overwrite_message
+from apm_cli.integration.base_integrator import kept_edit_message
 from tests.integration._target_compile_kit import (
     ALL_TARGETS,
     Scenario,
@@ -96,7 +96,7 @@ def test_multi_target_edit_compile_audit_narrow_uninstall_chain(
     kept = scenario.run("install", "--no-policy", cwd=project, expect=1)
     text = output(kept)
     for relative, path in edited.items():
-        assert unproven_overwrite_message(relative, user_scope=False) in text, text
+        assert kept_edit_message(relative, user_scope=False, proven_edit=False) in text, text
         assert path.read_bytes() == edited_bytes[relative]
     assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
     aside = scenario.isolated.work_root / "aside"

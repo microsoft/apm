@@ -172,9 +172,10 @@ def test_cursor_rules_installed_lifecycle(
     owner = records[".cursor/rules/style.mdc"]["owners"][0]
     before = snapshot()
     removal = run("uninstall", *scope, owner, expected_returncode=1)
-    # The refusal is an error, so it goes to stderr (RA-004).
-    text = " ".join((removal.stdout + removal.stderr).split())
+    # The refusal is an error: it goes to stderr, never stdout (RA-004).
+    text = " ".join(removal.stderr.split())
     assert "Uninstall refused" in text, text
+    assert "Uninstall refused" not in removal.stdout, removal.stdout
     assert ".cursor/rules/edited.mdc: edited since APM deployed it" in text, text
     # Without deletion evidence nothing changes (#3701).
     assert (state_root / "apm.yml").read_bytes() == manifest_before

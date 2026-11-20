@@ -483,11 +483,11 @@ def _refuse_unproven_legacy(kept: list[str], logger, *, user_scope: bool) -> Non
 
     The lockfile keeps their rows; the files stay on disk for the user.
     """
-    from ..integration.base_integrator import unproven_overwrite_message
+    from ..integration.base_integrator import kept_edit_message
     from .errors import InstallFailureAlreadyRendered
 
     for path in kept:
-        logger.error(unproven_overwrite_message(path, user_scope=user_scope))
+        logger.error(kept_edit_message(path, user_scope=user_scope, proven_edit=False))
     raise InstallFailureAlreadyRendered(f"{len(kept)} legacy skill file(s) kept")
 
 

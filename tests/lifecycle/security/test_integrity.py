@@ -405,10 +405,14 @@ DEPLOYED_FILE_HASHES = ArtifactSlice(
         ("frozen", "lock-edited"): Expect(1, (_FROZEN_HASHES,), unchanged=_SKILL_STATE),
         ("frozen", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("frozen", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
-        # Plain install keeps a hand-edited file and warns (drift-detection.md).
+        # Plain install keeps a hand-edited file and warns (drift-detection.md):
+        # the render is unchanged, so the edit is drift, not a blocked upgrade.
         ("install", "disk-or-cache"): Expect(
             0,
-            (r"Kept user-edited file \.agents/skills/p-skill/SKILL\.md",),
+            (
+                r"Kept \.agents/skills/p-skill/SKILL\.md:\s+it\s+was\s+modified\s+since\s+"
+                r"APM\s+deployed\s+it\.\s+Move\s+it\s+aside,\s+then\s+run\s+'apm\s+install'",
+            ),
             unchanged=_SKILL_STATE,
         ),
         # Install re-records the hash of the bytes it deployed.

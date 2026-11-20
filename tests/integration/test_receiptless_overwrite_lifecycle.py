@@ -137,7 +137,7 @@ def _kept_line(entry: str, *, user_scope: bool) -> str:
     return (
         f"Kept {entry}: it differs from what APM renders and there is no local "
         "deployment receipt or locked render proving APM wrote it, so it may hold "
-        f"local edits. Move it aside, then run '{install}' to restore it; or run "
+        f"local edits. Move it aside, then run '{install}' to restore it, or "
         f"'{install} --force' to overwrite it."
     )
 

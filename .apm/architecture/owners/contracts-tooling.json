@@ -152,7 +152,10 @@
       "id": "lockfile-generator-compatibility",
       "decision": "Whether the running CLI may write, replay or certify a lockfile another APM generated (apm_version)",
       "owner": "deps/lockfile_generator.py (assert_writable, check_current_cli, require_current_cli, warn_if_newer); utils/version_checker.py (release_precedence) orders versions; deps/lockfile.py (LockFile.write) stamps apm_version",
-      "selectors": ["src/apm_cli/deps/lockfile_generator.py"],
+      "selectors": [
+        "src/apm_cli/deps/lockfile_generator.py",
+        "src/apm_cli/deps/lockfile_version_remedy.py"
+      ],
       "guards": [
         "contracts-tooling-lockfile-generator-gate",
         "contracts-tooling-lockfile-generator-stamp"
@@ -174,10 +177,7 @@
       "id": "read-only-lockfile-path",
       "decision": "Lockfile read path, timestamp emission, reproducible fallback, and marketplace declaration association",
       "owner": "deps/lockfile.py (resolve_lockfile_path_for_read, LockFile.write, resolve_reproducible_timestamp, LockedDependency alias projection, LockFile.get_dependency)",
-      "selectors": [
-        "src/apm_cli/deps/lockfile.py",
-        "src/apm_cli/deps/lockfile_version_remedy.py"
-      ],
+      "selectors": ["src/apm_cli/deps/lockfile.py"],
       "guards": [
         "contracts-tooling-lockfile-read",
         "contracts-tooling-lockfile-symlink-write-guard",

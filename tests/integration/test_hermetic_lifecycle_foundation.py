@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.integration.base_integrator import unproven_overwrite_message
+from apm_cli.integration.base_integrator import kept_edit_message
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.artifact_snapshot import (
@@ -454,7 +454,7 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             env=environment,
         )
         kept_text = " ".join(kept.stderr.split())
-        assert unproven_overwrite_message(instruction_path, user_scope=False) in kept_text
+        assert kept_edit_message(instruction_path, user_scope=False, proven_edit=False) in kept_text
         assert (project_root / instruction_path).read_text(encoding="utf-8") == (
             "# Mutated generated deployment\n"
         )
