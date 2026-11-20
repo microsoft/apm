@@ -384,3 +384,74 @@ def test_relative_codex_home_does_not_block_claude_global_lifecycle(tmp_path: Pa
     assert removed.returncode == 0, removed.stdout + removed.stderr
     assert env.state(env.default) == (set(), set())
     assert _declared(env.manifest_path) == []
+
+
+def _deployment_rows(lock_path: Path) -> list[dict[str, Any]]:
+    """Return the canonical deployment rows of a lockfile."""
+    return list((load_yaml(lock_path) or {}).get("deployments") or [])
+
+
+def _row_forms(lock_path: Path) -> set[tuple[str, str, str, str]]:
+    """Return ``(kind, scope, target, value)`` for each deployment row."""
+    return {
+        (row["kind"], row["scope"], row["target"], row["value"])
+        for row in _deployment_rows(lock_path)
+    }
+
+
+def _files(root: Path) -> set[str]:
+    """Return every file under *root*, relative to it."""
+    return {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
+
+
+@pytest.mark.parametrize("location", ["home", "outside-home"])
+def test_user_lockfile_rows_record_user_scope(tmp_path: Path, location: str) -> None:
+    """User-lockfile rows record scope user and values relative to their kind (#4248).
+
+    A profile root inside HOME records project-relative values from the user
+    deploy root; a root outside HOME records target-relative values under that
+    root. A lock still carrying project-scope rows with absolute values reads
+    without drift, its next write records this form, and uninstall then
+    removes exactly the deployed files.
+    """
+    env = _ProfileSkills(tmp_path, location)
+    demo = env.package("profile-skills", "demo")
+    extra = env.package("extra-skills", "extra")
+    env.run("install", env.profile_b, demo)
+
+    def expected(*skills: str) -> set[tuple[str, str, str, str]]:
+        """Return the row forms of *skills* deployed to profile B."""
+        prefix, kind = ("profiles/b/", "project-relative")
+        if location != "home":
+            prefix, kind = ("", "target-relative")
+        return {
+            (kind, "user", "claude", f"{prefix}skills/{skill}{leaf}")
+            for skill in skills
+            for leaf in ("", "/SKILL.md")
+        }
+
+    assert _row_forms(env.lock_path) == expected("demo")
+    assert _files(env.profile_b) == {"skills/demo/SKILL.md"}
+
+    lock = load_yaml(env.lock_path)
+    root = env.profile_b.resolve()
+    for row in lock["deployments"]:
+        if row["kind"] == "target-relative":
+            row["kind"] = "project-relative"
+            row["value"] = f"{root.as_posix()}/{row['value']}"
+        row["scope"] = "project"
+    dump_yaml(lock, env.lock_path)
+    earlier = env.lock_path.read_bytes()
+
+    env.run("install", env.profile_b, demo)
+    assert env.lock_path.read_bytes() == earlier
+    assert _files(env.profile_b) == {"skills/demo/SKILL.md"}
+
+    env.run("install", env.profile_b, extra)
+    assert _row_forms(env.lock_path) == expected("demo", "extra")
+    assert _files(env.profile_b) == {"skills/demo/SKILL.md", "skills/extra/SKILL.md"}
+
+    env.run("uninstall", env.profile_b, demo, extra)
+    assert _files(env.profile_b) == set()
+    assert not env.lock_path.exists()
+    assert _declared(env.manifest_path) == []

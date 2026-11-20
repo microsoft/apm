@@ -3104,6 +3104,17 @@
       ]
     },
     {
+      "issue": 4248,
+      "fixed_in": "Unreleased",
+      "summary": "Deployment rows in the user lockfile record scope user, and a path under a target root outside HOME records a target-relative value instead of an absolute project-relative one; rows in the earlier form read without drift.",
+      "failure_modes": ["portability", "outcome"],
+      "properties": ["portability.byte_deterministic", "outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_claude_config_profile_lifecycle.py::test_user_lockfile_rows_record_user_scope",
+        "tests/lifecycle/machines/test_m_spine.py::test_global_install_records_user_scope_deployment_rows"
+      ]
+    },
+    {
       "issue": 4249,
       "fixed_in": "Unreleased",
       "summary": "apm install printed the org policy status line once per phase when MCP servers were also installed",
