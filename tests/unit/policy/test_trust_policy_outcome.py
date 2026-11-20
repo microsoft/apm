@@ -61,7 +61,9 @@ def _readers(root: Path):
         "audit-replay": lambda: ReplayExecAllowMap(root).for_dependency(
             SimpleNamespace(exec_status="denied")
         ),
-        "local-bundle": lambda: effective_bundle_allow_map(root, no_policy=False, logger=logger),
+        "local-bundle": lambda: effective_bundle_allow_map(
+            root, user_scope=False, no_policy=False, logger=logger
+        ),
     }
 
 
