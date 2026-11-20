@@ -51,6 +51,8 @@ def _report_uninstall_outcome(
     mcp_cleanup_fatal: bool,
 ) -> bool:
     """Render the final summary and return whether cleanup was incomplete."""
+    # Cleanup evidence warnings (#3701) name kept files before the outcome.
+    logger.render_summary()
     integration_incomplete = not integration_cleanup.complete
     if not mcp_cleanup_fatal and lsp_cleanup_error is None and not integration_incomplete:
         if integration_cleanup_error is None:
@@ -354,6 +356,8 @@ def _abort_if_retained_target_cleanup_paths(
     """
     if not outcome.retained_paths:
         return
+    # Name why each file was kept (#3701) before stopping.
+    logger.render_summary()
     outcome.apply_to(lockfile)
     try:
         lockfile.write(lockfile_path)
@@ -871,7 +875,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 recorded_deployed_paths,
                 resolve_reintegration_targets,
             )
-            from ...utils.diagnostics import DiagnosticCollector
 
             cleanup_target_names = list(APMPackage.from_apm_yml(manifest_path).canonical_targets)
             cleanup_targets = resolve_reintegration_targets(
@@ -887,7 +890,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 lockfile=lockfile,
                 active_targets=cleanup_targets,
                 declared_targets=cleanup_targets,
-                diagnostics=DiagnosticCollector(verbose=verbose),
+                diagnostics=logger.diagnostics,
                 evidence=deletion_evidence,
                 dependency_keys=cleanup_keys,
                 remove_selected_ownership=True,

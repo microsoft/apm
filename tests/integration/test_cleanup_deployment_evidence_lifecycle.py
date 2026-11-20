@@ -220,7 +220,8 @@ def test_update_on_receipt_less_clone_removes_only_locked_render_bytes(
     assert not (clone / _DROPPED).exists()
     assert (clone / _EDITED).read_bytes() == b"---\napplyTo: '**'\n---\n# Locally edited\n"
     assert (clone / _FORGED).read_bytes() == user_bytes
-    assert f"Kept {_FORGED} (from {_DEP}): {_NO_EVIDENCE}" in output, output
+    assert f"Kept {_FORGED}: {_NO_EVIDENCE}" in output, output
+    assert output.count(f"Kept {_FORGED}:") == 1, output
     assert f"Kept user-edited file {_EDITED}" in output, output
 
 
@@ -361,3 +362,96 @@ def test_cowork_row_removed_only_with_valid_provenance(
         "file has been edited since APM deployed it" if provenance == "edited" else _NO_EVIDENCE
     )
     assert "cowork://skills/demo/SKILL.md" in output and expected in output, output
+
+
+def _local_world(tmp_path: Path, apm_binary_path: Path, targets: list[str]):
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    project = isolated.work_root / "consumer"
+    source = project / "pkgs" / "a"
+    source.mkdir(parents=True)
+    dump_yaml({"name": "a", "version": "1.0.0"}, source / "apm.yml")
+    _write(source / ".apm/instructions/one.instructions.md", "---\napplyTo: '**'\n---\n# v1\n")
+    dump_yaml(
+        {
+            "name": "consumer",
+            "version": "1.0.0",
+            "targets": targets,
+            "dependencies": {"apm": ["./pkgs/a"]},
+        },
+        project / "apm.yml",
+    )
+    world = _World(
+        isolated,
+        isolated.subprocess_env(),
+        ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180),
+        LocalGitRepositoryFactory(isolated.repository_root, env=isolated.subprocess_env()),
+        None,  # type: ignore[arg-type]
+        project,
+    )
+    world.apm(project, "install", "--no-policy")
+    return world, source
+
+
+def test_adopted_after_pull_then_uninstall_uses_the_locked_render(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A stale receipt does not block render evidence: receipt OR render (#3701)."""
+    world, source = _local_world(tmp_path, apm_binary_path, ["copilot"])
+    deployed = world.project / ".github/instructions/one.instructions.md"
+    v2 = "---\napplyTo: '**'\n---\n# v2\n"
+    # A pull brings both the new source and its committed output; install adopts.
+    _write(source / ".apm/instructions/one.instructions.md", v2)
+    _write(deployed, v2)
+    world.apm(world.project, "install", "--no-policy")
+
+    world.apm(world.project, "uninstall", "./pkgs/a")
+
+    assert not deployed.exists()
+
+
+def test_dropped_target_is_proven_by_the_render_of_recorded_targets(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The locked render covers targets the lock recorded, not only current ones."""
+    world, _source = _local_world(tmp_path, apm_binary_path, ["copilot", "claude"])
+    claude_rule = world.project / ".claude/rules/one.md"
+    assert claude_rule.is_file()
+    world.evict_machine_state()
+    manifest = load_yaml(world.project / "apm.yml")
+    dump_yaml({**manifest, "targets": ["copilot"]}, world.project / "apm.yml")
+
+    output = world.apm(world.project, "install", "--no-policy")
+
+    assert not claude_rule.exists(), output
+    assert _NO_EVIDENCE not in output, output
+
+
+@pytest.mark.parametrize("missing", ["other-package", "removed-package"])
+def test_render_evidence_is_per_package(
+    tmp_path: Path, apm_binary_path: Path, missing: str
+) -> None:
+    """One unmaterializable package drops render evidence only for itself."""
+    world, _source = _local_world(tmp_path, apm_binary_path, ["copilot"])
+    other = world.project / "pkgs" / "b"
+    other.mkdir(parents=True)
+    dump_yaml({"name": "b", "version": "1.0.0"}, other / "apm.yml")
+    _write(other / ".apm/instructions/two.instructions.md", "---\napplyTo: '**'\n---\n# b\n")
+    manifest = load_yaml(world.project / "apm.yml")
+    manifest["dependencies"]["apm"].append("./pkgs/b")
+    dump_yaml(manifest, world.project / "apm.yml")
+    world.apm(world.project, "install", "--no-policy")
+    world.evict_machine_state()
+    deployed = world.project / ".github/instructions/one.instructions.md"
+    gone = other if missing == "other-package" else world.project / "pkgs" / "a"
+    shutil.move(str(gone), str(world.isolated.work_root / "moved-away"))
+    if missing == "removed-package":
+        robust_rmtree(world.project / "apm_modules" / "_local" / "a")
+
+    if missing == "other-package":
+        world.apm(world.project, "uninstall", "./pkgs/a")
+        assert not deployed.exists()
+        return
+    output = world.apm(world.project, "uninstall", "./pkgs/a", expect=1)
+    assert deployed.is_file()
+    # The render failure is flushed before uninstall stops.
+    assert "Could not render the locked version of" in output, output

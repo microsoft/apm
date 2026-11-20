@@ -74,7 +74,7 @@ def test_receipt_or_locked_render_authorizes_deletion(tmp_path: Path, source: st
         receipts=(
             {path.resolve().as_posix(): compute_file_hash(path)} if source == "receipt" else {}
         ),
-        render=(lambda: render) if source == "locked-render" else None,
+        render=(lambda _owner: render) if source == "locked-render" else None,
     )
 
     result, _messages = _cleanup(root, evidence, path)

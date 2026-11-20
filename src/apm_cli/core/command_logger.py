@@ -179,15 +179,6 @@ class CommandLogger:
             symbol="warning",
         )
 
-    def cleanup_kept_without_evidence(self, rel_path: str, dep_key: str):
-        """Explain that a file without deployment evidence was retained (#3701)."""
-        _rich_warning(
-            f"Kept {rel_path} from {dep_key}: no local deployment receipt or render "
-            "of the locked package version proves APM deployed it; delete it "
-            "manually if no longer needed.",
-            symbol="warning",
-        )
-
     def tree_item(self, message: str):
         """Log a tree sub-item (└─ line) under a package block.
 
@@ -712,19 +703,6 @@ class InstallLogger(CommandLogger):
         """
         _rich_warning(
             f"  Kept user-edited file {rel_path} (from {dep_key}); "
-            "delete manually if no longer needed",
-            symbol="warning",
-        )
-
-    def cleanup_kept_without_evidence(self, rel_path: str, dep_key: str):
-        """Log a stale file kept because nothing proves APM deployed it (#3701).
-
-        Yellow inline at default verbosity, like a user edit: a lockfile row
-        alone is not deployment evidence, so the decision is the user's.
-        """
-        _rich_warning(
-            f"  Kept {rel_path} (from {dep_key}): no local deployment receipt or "
-            "render of the locked package version proves APM deployed it; "
             "delete manually if no longer needed",
             symbol="warning",
         )

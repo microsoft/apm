@@ -62,12 +62,14 @@ UNREADABLE = "unreadable"
 class DeploymentEvidence:
     """Proof that APM deployed the bytes a lockfile-driven deletion removes (#3701).
 
-    Deletion is authorized only by a local deployment receipt whose hash
-    matches the file, or by byte equality (the canonical hash domain of
-    req-lk-012) with what the locked package versions render. The render
-    runs at most once, through the drift replay of the locked lockfile, and
-    only when some candidate has no matching receipt. Lockfile hashes are
-    never consulted: on a clone they prove content, not deployment.
+    Deletion is authorized by a local deployment receipt whose hash matches
+    the file, or by byte equality (the canonical hash domain of req-lk-012)
+    with what the locked package versions render. A stale receipt does not
+    block the render comparison. The render replays the pre-transition lock
+    once, with the targets it recorded; when that fails, each owning package
+    renders alone, so one unmaterializable package costs only its own
+    evidence. Lockfile hashes are never consulted: on a clone they prove
+    content, not deployment.
     """
 
     def __init__(
@@ -75,13 +77,14 @@ class DeploymentEvidence:
         *,
         deploy_root: Path,
         receipts: Mapping[str, str],
-        render: Callable[[], Path | None] | None,
+        render: Callable[[str | None], Path | None] | None,
+        owners: Mapping[str, tuple[str, ...]] | None = None,
     ) -> None:
         self._deploy_root = deploy_root
         self._receipts = dict(receipts)
         self._render = render
-        self._rendered: Path | None = None
-        self._render_done = render is None
+        self._owners = dict(owners or {})
+        self._renders: dict[str | None, Path | None] = {}
 
     @classmethod
     def none(cls, deploy_root: Path) -> DeploymentEvidence:
@@ -113,51 +116,24 @@ class DeploymentEvidence:
         except (OSError, ValueError) as exc:
             diagnostics.warn(f"Ignored local deployment receipts: {exc}")
             receipts = {}
-        evidence = cls(deploy_root=deploy_root, receipts=receipts, render=None)
-        if lockfile is not None and lockfile.dependencies:
-            # Freeze the pre-transition lock: callers mutate theirs before rendering.
-            locked = copy.deepcopy(lockfile)
-            evidence._render = lambda: evidence._render_locked(
-                locked, lockfile_root, user_scope, diagnostics
-            )
-            evidence._render_done = False
-        return evidence
+        if lockfile is None or not lockfile.dependencies:
+            return cls(deploy_root=deploy_root, receipts=receipts, render=None)
+        # Freeze the pre-transition lock: callers mutate theirs before rendering.
+        locked = copy.deepcopy(lockfile)
+        owners: dict[str, list[str]] = {}
+        for key, dependency in locked.dependencies.items():
+            for path in dependency.deployed_files:
+                owners.setdefault(path.rstrip("/"), []).append(key)
 
-    def _render_locked(
-        self, lockfile: LockFile, lockfile_root: Path, user_scope: bool, diagnostics
-    ) -> Path | None:
-        """Render every locked package into a private scratch tree, or ``None``."""
-        from apm_cli.install.drift import (
-            CheckLogger,
-            ReplayConfig,
-            _make_scratch_root,
-            run_replay,
-        )
+        def render(owner: str | None) -> Path | None:
+            return _render_locked(locked, owner, lockfile_root, user_scope, diagnostics)
 
-        # The scratch tree is private and removed at exit; the snapshot sits
-        # under a name no target deploys to.
-        scratch = _make_scratch_root(lockfile_root)
-        snapshot = scratch / ".apm-locked-render" / "apm.lock.yaml"
-        config = ReplayConfig(
-            project_root=lockfile_root,
-            lockfile_path=snapshot,
-            cache_only=False,
-            scratch_root=scratch,
-            modules_root=scratch / "apm_modules",
-            user_scope=user_scope,
+        return cls(
+            deploy_root=deploy_root,
+            receipts=receipts,
+            render=render,
+            owners={path: tuple(keys) for path, keys in owners.items()},
         )
-        try:
-            snapshot.parent.mkdir()
-            lockfile.write(snapshot)
-            with contextlib.redirect_stdout(io.StringIO()):
-                with contextlib.redirect_stderr(io.StringIO()):
-                    return run_replay(config, CheckLogger(verbose=False))
-        except Exception as exc:
-            diagnostics.warn(
-                f"Could not render the locked package versions to verify cleanup ({exc}). "
-                "Files without a local deployment receipt are kept."
-            )
-            return None
 
     def prepare(self, claims: Iterable[str]) -> None:
         """Render now when any existing candidate file lacks a matching receipt.
@@ -165,8 +141,9 @@ class DeploymentEvidence:
         Uninstall and prune call this before removing package sources, so the
         locked render can still read them.
         """
-        if self._render_done:
+        if self._render is None:
             return
+        unproven: list[str] = []
         for claim in claims:
             physical = self._physical(claim)
             if physical is None or physical.is_symlink() or not physical.is_file():
@@ -176,8 +153,9 @@ class DeploymentEvidence:
                     continue
             except OSError:
                 continue
-            self._rendered_root()
-            return
+            unproven.append(claim)
+        for claim in unproven:
+            self._rendered_roots(claim)
 
     def _physical(self, claim: str) -> Path | None:
         from .copilot_cowork_paths import (
@@ -197,11 +175,29 @@ class DeploymentEvidence:
         path = Path(claim)
         return path if path.is_absolute() else self._deploy_root / path
 
-    def _rendered_root(self) -> Path | None:
-        if not self._render_done:
-            self._render_done = True
-            self._rendered = self._render() if self._render is not None else None
-        return self._rendered
+    def _render_root(self, owner: str | None) -> Path | None:
+        if owner not in self._renders:
+            self._renders[owner] = self._render(owner) if self._render is not None else None
+        return self._renders[owner]
+
+    def _owners_of(self, claim: str) -> tuple[str, ...]:
+        """Return the locked owners of *claim* or of its claimed skill directory."""
+        path = claim.rstrip("/")
+        while path:
+            if path in self._owners:
+                return self._owners[path]
+            path = path.rpartition("/")[0]
+        return ()
+
+    def _rendered_roots(self, claim: str) -> list[Path]:
+        """Return the render trees that can show *claim*: the whole lock, else its owners."""
+        if self._render is None:
+            return []
+        whole = self._render_root(None)
+        if whole is not None:
+            return [whole]
+        roots = (self._render_root(owner) for owner in self._owners_of(claim))
+        return [root for root in roots if root is not None]
 
     def _receipt_match(self, physical: Path) -> bool | None:
         from apm_cli.utils.content_hash import compute_file_hash
@@ -211,25 +207,26 @@ class DeploymentEvidence:
             return None
         return compute_file_hash(physical) == recorded
 
-    def _rendered_path(self, claim: str) -> Path | None:
-        root = self._rendered_root()
-        if root is None:
-            return None
+    def _rendered_paths(self, claim: str, owner_claim: str) -> list[Path]:
+        relative: Path | None
         if "://" in claim:
             from apm_cli.install.audit_target_roots import external_replay_root
             from apm_cli.integration.targets import KNOWN_TARGETS, target_name_for_locator
 
             name = target_name_for_locator(claim)
             if name is None:
-                return None
-            return external_replay_root(root, KNOWN_TARGETS[name]) / claim.split("://", 1)[1]
-        path = Path(claim)
-        if path.is_absolute():
+                return []
+            return [
+                external_replay_root(root, KNOWN_TARGETS[name]) / claim.split("://", 1)[1]
+                for root in self._rendered_roots(owner_claim)
+            ]
+        relative = Path(claim)
+        if relative.is_absolute():
             try:
-                path = path.relative_to(self._deploy_root)
+                relative = relative.relative_to(self._deploy_root)
             except ValueError:
-                return None
-        return root / path
+                return []
+        return [root / relative for root in self._rendered_roots(owner_claim)]
 
     def verdict(self, claim: str, physical: Path, *, rendered_as: str | None = None) -> str:
         """Classify deleting *physical* (lockfile *claim*) as authorized or kept.
@@ -241,17 +238,22 @@ class DeploymentEvidence:
 
         try:
             receipt = self._receipt_match(physical)
-            if receipt is not None:
-                return AUTHORIZED if receipt else EDITED
-            rendered = None
-            for candidate in (claim, rendered_as):
-                path = self._rendered_path(candidate.replace("\\", "/")) if candidate else None
-                if path is not None and not path.is_symlink() and path.is_file():
-                    rendered = path
-                    break
-            if rendered is None:
-                return UNPROVEN
-            same = compute_file_hash(rendered) == compute_file_hash(physical)
+            if receipt is True:
+                return AUTHORIZED
+            # A stale receipt (the file was later adopted unchanged from a newer
+            # render) does not block the render comparison: receipt OR render.
+            claim = claim.replace("\\", "/")
+            rendered = [
+                path
+                for candidate in (claim, rendered_as)
+                if candidate
+                for path in self._rendered_paths(candidate, claim)
+                if not path.is_symlink() and path.is_file()
+            ]
+            if not rendered:
+                return EDITED if receipt is False else UNPROVEN
+            actual = compute_file_hash(physical)
+            same = any(compute_file_hash(path) == actual for path in rendered)
         except OSError:
             return UNREADABLE
         return AUTHORIZED if same else EDITED
@@ -273,6 +275,66 @@ class DeploymentEvidence:
             if self.verdict(f"{claim}/{member}", child, rendered_as=alias) != AUTHORIZED:
                 return False
         return True
+
+
+def _locked_subset(lockfile: LockFile, owner: str) -> LockFile:
+    """Return *lockfile* narrowed to *owner* and the local parents anchoring it."""
+    subset = copy.deepcopy(lockfile)
+    keep = {owner}
+    by_url = {dependency.repo_url: key for key, dependency in subset.dependencies.items()}
+    parent = subset.dependencies[owner].resolved_by if owner in subset.dependencies else None
+    while parent and by_url.get(parent) not in (None, *keep):
+        keep.add(by_url[parent])
+        parent = subset.dependencies[by_url[parent]].resolved_by
+    for key in list(subset.dependencies):
+        if key not in keep:
+            del subset.dependencies[key]
+    return subset
+
+
+def _render_locked(
+    lockfile: LockFile, owner: str | None, lockfile_root: Path, user_scope: bool, diagnostics
+) -> Path | None:
+    """Render the locked packages (or only *owner*) into a private scratch tree.
+
+    The replay uses every target the lock recorded as well as the current
+    manifest's, so files of a target the manifest just dropped stay provable.
+    """
+    from apm_cli.install.drift import (
+        CheckLogger,
+        ReplayConfig,
+        _make_scratch_root,
+        run_replay,
+    )
+
+    if owner is not None and owner not in lockfile.dependencies:
+        return None
+    # The scratch tree is private and removed at exit; the snapshot sits
+    # under a name no target deploys to.
+    scratch = _make_scratch_root(lockfile_root)
+    snapshot = scratch / ".apm-locked-render" / "apm.lock.yaml"
+    config = ReplayConfig(
+        project_root=lockfile_root,
+        lockfile_path=snapshot,
+        cache_only=False,
+        scratch_root=scratch,
+        modules_root=scratch / "apm_modules",
+        user_scope=user_scope,
+        include_recorded_targets=True,
+    )
+    try:
+        snapshot.parent.mkdir()
+        (lockfile if owner is None else _locked_subset(lockfile, owner)).write(snapshot)
+        with contextlib.redirect_stdout(io.StringIO()):
+            with contextlib.redirect_stderr(io.StringIO()):
+                return run_replay(config, CheckLogger(verbose=False))
+    except Exception as exc:
+        if owner is not None:
+            diagnostics.warn(
+                f"Could not render the locked version of {owner} to verify cleanup "
+                f"({exc}). Its files without a matching local deployment receipt are kept."
+            )
+        return None
 
 
 @dataclass

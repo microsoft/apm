@@ -195,9 +195,6 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
             for _skipped in _orphan_result.skipped_user_edit:
                 if logger:
                     logger.cleanup_skipped_user_edit(_skipped, _orphan_key)
-            for _kept in _orphan_result.unproven:
-                if logger:
-                    logger.cleanup_kept_without_evidence(_kept, _orphan_key)
         if _orphan_deleted_targets:
             BaseIntegrator.cleanup_empty_parents(_orphan_deleted_targets, project_root)
         if logger:
@@ -285,9 +282,6 @@ def _run_cleanup(ctx: InstallContext, receipt_retirements: list[Path]) -> None:
             for _skipped in cleanup_result.skipped_user_edit:
                 if logger:
                     logger.cleanup_skipped_user_edit(_skipped, dep_key)
-            for _kept in cleanup_result.unproven:
-                if logger:
-                    logger.cleanup_kept_without_evidence(_kept, dep_key)
             if logger:
                 for _aliased in cleanup_result.aliased:
                     logger.verbose_detail(
