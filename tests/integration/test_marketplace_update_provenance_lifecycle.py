@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.yaml_io import load_yaml
+from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
@@ -167,3 +167,101 @@ def test_branch_update_retains_marketplace_alias_for_offline_uninstall(
     assert unrelated_skill.read_text(encoding="utf-8") == "User-owned content\n"
     assert not lock_path.exists()
     assert not load_yaml(workspace / "apm.yml").get("dependencies", {}).get("apm")
+
+
+_PROVENANCE = ("discovered_via", "marketplace_plugin_name", "source_url", "source_digest")
+_TAMPERED = {
+    "discovered_via": "other-marketplace",
+    "marketplace_plugin_name": "other-plugin",
+    "source_url": "https://gitlab.example.invalid/evil/agent-catalog",
+    "source_digest": "sha256:" + "0" * 64,
+}
+
+
+def _output(result) -> str:
+    return " ".join((result.stdout + result.stderr).split())
+
+
+@pytest.mark.parametrize("edit", ["tamper", "clear"])
+@pytest.mark.parametrize("field", _PROVENANCE)
+def test_update_restores_or_refuses_altered_marketplace_provenance(
+    tmp_path: Path, apm_binary_path: Path, field: str, edit: str
+) -> None:
+    """#4228: update never keeps altered provenance; it restores it or fails closed."""
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path.resolve() / "isolated", base_env=dict(os.environ)
+    )
+    environment = isolated.subprocess_env()
+    repositories = LocalGitRepositoryFactory(isolated.repository_root, env=environment)
+    repository = repositories.create("agent-catalog")
+    packages = LocalPackageFactory(repository.worktree / "plugins")
+    package = packages.create(_PLUGIN, targets=("codex",))
+    packages.add_skill(package, _PLUGIN, _skill_document("provenance"))
+    (repository.worktree / ".claude-plugin").mkdir()
+    (repository.worktree / ".claude-plugin" / "marketplace.json").write_text(
+        json.dumps(
+            {
+                "name": _MARKETPLACE,
+                "owner": {"name": "APM Test"},
+                "plugins": [
+                    {
+                        "name": _PLUGIN,
+                        "source": {
+                            "source": "git-subdir",
+                            "url": _REMOTE,
+                            "path": _SUBDIR,
+                            "ref": "main",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    repositories.commit(repository, message="publish plugin")
+    repositories.install_url_rewrite(repository, _REMOTE)
+    (isolated.home / ".gitconfig").write_bytes(Path(environment["GIT_CONFIG_GLOBAL"]).read_bytes())
+    environment = repositories.url_rewrite_subprocess_env(repository, _REMOTE)
+    consumer = LocalPackageFactory(isolated.work_root).create("consumer", targets=("codex",))
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+    lock_path = consumer.root / "apm.lock.yaml"
+    runner.run_sequence(
+        (
+            ("marketplace", "add", _REMOTE, "--name", _MARKETPLACE, "--ref", "main"),
+            ("install", _ALIAS, "--target", "codex", "--no-policy", "--parallel-downloads", "0"),
+        ),
+        expected_returncodes=(0, 0),
+        scenario_id="4228-install",
+        cwd=consumer.root,
+        env=environment,
+    )
+    before = _locked_dependency(lock_path)
+    assert all(before.get(name) for name in _PROVENANCE), before
+
+    lock = load_yaml(lock_path)
+    if edit == "tamper":
+        lock["dependencies"][0][field] = _TAMPERED[field]
+    else:
+        del lock["dependencies"][0][field]
+    dump_yaml(lock, lock_path)
+    altered = lock_path.read_bytes()
+
+    def run(*args: str):
+        return runner.run(args, scenario_id=f"4228-{args[0]}", cwd=consumer.root, env=environment)
+
+    update = run("update", "--yes", "--target", "codex", "--parallel-downloads", "0")
+
+    if update.returncode == 0:
+        after = _locked_dependency(lock_path)
+        assert {name: after.get(name) for name in _PROVENANCE} == {
+            name: before[name] for name in _PROVENANCE
+        }, _output(update)
+    else:
+        assert "[x]" in _output(update), _output(update)
+        assert lock_path.read_bytes() == altered
+    # Paired probe: install --frozen and audit --ci agree on the resulting state.
+    frozen = run("install", "--frozen", "--target", "codex", "--parallel-downloads", "0")
+    audit = run("audit", "--ci", "--no-policy")
+    assert (frozen.returncode == 0) == (audit.returncode == 0), (
+        _output(frozen) + " || " + _output(audit)
+    )

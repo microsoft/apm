@@ -708,6 +708,7 @@ install-deployment-uninstall-selection
 install-deployment-unpack-executable-refusal
 install-deployment-update-content-integrity
 install-deployment-update-registry-integrity
+install-deployment-update-marketplace-provenance
 install-deployment-update-plan-ref-annotation
 marketplace-integrations-agent-plugin-contract
 marketplace-integrations-authoring-source
