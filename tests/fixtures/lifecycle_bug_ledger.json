@@ -544,6 +544,22 @@
         "tests/integration/test_command_output_owner_e2e.py::test_install_mcp_names_the_manifest_relatively",
         "tests/integration/test_architecture_owner_rule_mutations.py::test_output_owner_guards_catch_bypasses"
       ]
+    },
+    {
+      "issue": 4091,
+      "fixed_in": "0.37.0",
+      "summary": "apm lifecycle trust and untrust wrote the script trust store outside the cross-process lifecycle serialization owner, so a concurrent lifecycle writer could drop a recorded trust or restore a revoked one while the command reported success.",
+      "failure_modes": [
+        "transaction",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lifecycle_trust_serialization_lifecycle.py::test_concurrent_lifecycle_trust_keeps_every_trust_record",
+        "tests/integration/test_lifecycle_trust_serialization_lifecycle.py::test_concurrent_lifecycle_untrust_keeps_the_revocation"
+      ]
     }
   ],
   "lifecycle_contracts": [

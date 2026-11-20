@@ -85,7 +85,7 @@
       "id": "git-cache-key-normalization",
       "decision": "Git repository cache-key normalization",
       "owner": "cache/url_normalize.py (normalize_repo_url / cache_shard_key)",
-      "selectors": ["src/apm_cli/cache/url_normalize.py"],
+      "selectors": ["src/apm_cli/cache/url_normalize.py", "src/apm_cli/cache/git_cache.py"],
       "guards": ["transport-platform-git-cache-identity"]
     },
     {

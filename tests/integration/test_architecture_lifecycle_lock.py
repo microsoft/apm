@@ -61,3 +61,41 @@ def test_lifecycle_guard_rejects_unlocked_watch_startup() -> None:
         violation.rule_id == _RULE_ID and "_watch_mode must route" in violation.message
         for violation in result.violations
     )
+
+
+_CLOSED_RULE_ID = "install-deployment-lifecycle-serialization-closed-world"
+
+
+def test_closed_world_guard_rejects_serialized_command_missing_from_the_list() -> None:
+    """A newly serialized command must join the closed serialized-route list."""
+    path = "src/apm_cli/commands/doctor.py"
+    source = (_ROOT / path).read_text(encoding="utf-8")
+    mutated = source.replace("def doctor(", "@serialized_lifecycle\ndef doctor(", 1)
+    assert mutated != source
+
+    result = run_selected_rules(_ROOT, {_CLOSED_RULE_ID}, source_overrides={path: mutated})
+
+    assert result.failures == ()
+    assert [violation.message for violation in result.violations] == [
+        "serialized CLI command doctor must be listed in SERIALIZED_LIFECYCLE_ROUTES"
+    ]
+
+
+def test_module_ownership_guard_rejects_a_stale_unowned_entry() -> None:
+    """An owned module on the unowned allowlist is stale and breaks the ceiling."""
+    path = ".apm/architecture/unowned-modules.json"
+    source = (_ROOT / path).read_text(encoding="utf-8")
+    mutated = source.replace(
+        '"src/apm_cli/__init__.py",',
+        '"src/apm_cli/__init__.py",\n    "src/apm_cli/core/script_trust.py",',
+        1,
+    )
+    assert mutated != source
+    rule_id = "registry_delegation.module_ownership"
+
+    result = run_selected_rules(_ROOT, {rule_id}, source_overrides={path: mutated})
+
+    assert result.failures == ()
+    messages = [violation.message for violation in result.violations]
+    assert any("stale unowned entry src/apm_cli/core/script_trust.py" in m for m in messages)
+    assert any("the allowlist only shrinks" in m for m in messages)

@@ -399,6 +399,18 @@ bash scripts/lint-architecture-boundaries.sh
 The check fails closed when metadata is malformed, missing, or not listed in the
 index.
 
+Every module under `src/apm_cli/` must match one owner's `selectors` or appear in
+`.apm/architecture/unowned-modules.json`. That list only shrinks: a new module
+needs an owner, and when you give a listed module an owner, remove its entry and
+lower `UNOWNED_MODULE_CEILING` in
+`scripts/architecture_linter/checks/registry_module_ownership.py` to match.
+
+Every CLI command must be classified in
+`scripts/architecture_linter/checks/install_lifecycle_serialization.py`. A command
+that writes lifecycle state uses `@serialized_lifecycle` (or its `_unless` /
+`_when` variants) and is listed in `SERIALIZED_LIFECYCLE_ROUTES`. A command that
+writes no lifecycle state is listed as exempt, with the reason.
+
 `InstallTransaction` owns one acquisition of the shared lifecycle `FileLock`.
 Commit, rollback, and context exit are the normal release paths; explicit release
 invokes the same `weakref.finalize` callback used for abandoned transactions.
