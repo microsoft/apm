@@ -977,3 +977,13 @@ def test_w3_core_models_remediation_clears_the_reported_state(
 
 # -- end W3 core-models proofs --
 # -- end W3 executed proofs ---------------------------------------------------
+
+
+# -- W4 executed proofs (install/, policy/) -----------------------------------
+# -- W4 frozen-policy proofs --
+# -- end W4 frozen-policy proofs --
+# -- W4 drift-trust proofs --
+# -- end W4 drift-trust proofs --
+# -- W4 phases-targets proofs --
+# -- end W4 phases-targets proofs --
+# -- end W4 executed proofs ---------------------------------------------------

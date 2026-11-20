@@ -1018,6 +1018,15 @@ GITHUB_GITLAB_HOST_CONFLICT = _entry(
 # -- end W3 core-models --
 # -- end W3 -------------------------------------------------------------------
 
+# -- install/policy (W4) -------------------------------------------------------
+# -- W4 frozen-policy --
+# -- end W4 frozen-policy --
+# -- W4 drift-trust --
+# -- end W4 drift-trust --
+# -- W4 phases-targets --
+# -- end W4 phases-targets --
+# -- end install/policy (W4) ---------------------------------------------------
+
 
 __all__ = [
     "DRIFT_KIND_REMEDIATION",
