@@ -23657,9 +23657,9 @@
   },
   "U-BIN": {
    "evidence": [
-    "src/apm_cli/install/exec_gate.py:507",
-    "src/apm_cli/install/exec_gate.py:508",
-    "src/apm_cli/install/exec_gate.py:511"
+    "src/apm_cli/install/exec_gate.py:497",
+    "src/apm_cli/install/exec_gate.py:498",
+    "src/apm_cli/install/exec_gate.py:501"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
@@ -23676,7 +23676,7 @@
   },
   "U2": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:164",
+    "src/apm_cli/commands/approve.py:154",
     "src/apm_cli/policy/install_preflight.py:220"
    ],
    "text": "the executable gate governs only executable primitives; a plain file next to a revoked executable must survive; an org policy dependency deny removes it"
@@ -23722,7 +23722,7 @@
     "src/apm_cli/commands/uninstall/engine.py:698",
     "src/apm_cli/commands/uninstall/engine.py:857",
     "src/apm_cli/commands/uninstall/engine.py:690",
-    "src/apm_cli/commands/update.py:452",
+    "src/apm_cli/commands/update.py:448",
     "src/apm_cli/commands/prune.py:199",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
@@ -23737,5 +23737,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "34308e36b2e63f43ce5ffa308e2c0de9799e9282f70cf1e0adc06c4150803326"
+ "sha256": "0f31d7f1440c52f4b7e72068767bfa17eae99d386bc31e031dfce33e8d0a2e1f"
 }

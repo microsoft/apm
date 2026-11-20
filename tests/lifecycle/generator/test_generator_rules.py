@@ -413,7 +413,7 @@ def _u8_mapping(cell) -> str | None:
     if op == "uninstall" and src in _MCP_SERVER_SOURCES:
         return f"uninstall of an MCP server ({src})"  # uninstall/engine.py:698, 857
     if src == "local-bundle" and op in ("uninstall", "update", "prune"):
-        return f"{op} of a local bundle"  # uninstall/engine.py:690, update.py:452, prune.py:199
+        return f"{op} of a local bundle"  # uninstall/engine.py:690, update.py:448, prune.py:199
     return None
 
 

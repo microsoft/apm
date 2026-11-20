@@ -166,7 +166,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "the executable gate governs only executable primitives; a plain file next to a "
         "revoked executable must survive; an org policy dependency deny removes it",
         (
-            Ev(_APPROVE, 164, "hooks, MCP, LSP, bin, canvas"),
+            Ev(_APPROVE, 154, "hooks, MCP, LSP, bin, canvas"),
             Ev("src/apm_cli/policy/install_preflight.py", 220, "Install blocked by org policy"),
         ),
     ),
@@ -213,7 +213,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/commands/uninstall/engine.py", 698, "is an MCP server, not a package"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 857, "was not found in apm.yml"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 690, "cannot remove local-bundle"),
-            Ev("src/apm_cli/commands/update.py", 452, "No APM dependencies to update"),
+            Ev("src/apm_cli/commands/update.py", 448, "No APM dependencies to update"),
             Ev("src/apm_cli/commands/prune.py", 199, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
@@ -227,9 +227,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 507, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 508, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 511, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 497, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 498, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 501, 'target.name == "claude"'),
         ),
     ),
     "U9": (
@@ -393,6 +393,20 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
     return None
 
 
+def _u8_target(cell: Mapping[str, str]) -> dict[str, str] | str | None:
+    """Where U8 sends a source the command parses: the same command, or its refusal."""
+    op, src = cell.get("OP"), cell.get("SRC")
+    if op == "install" and src == "local-bundle":
+        return {**cell, "OP": "bundle-install"}
+    if op == "marketplace" and src is not None and src not in MARKETPLACE_SOURCES:
+        return MARKETPLACE_ADD_REFUSAL
+    if op == "uninstall" and src in MCP_SOURCES:
+        return UNINSTALL_MCP_REFUSALS[src]
+    if src == "local-bundle" and op in LOCAL_BUNDLE_REFUSALS:
+        return LOCAL_BUNDLE_REFUSALS[op]
+    return None
+
+
 def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | None:
     """(target cell or rule cell id, rule) of a partial equivalence, or None.
 
@@ -403,15 +417,9 @@ def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | N
     if any(name in cell for name in EXCEPTION_FACTORS):
         return None
     op, prim, gate = cell.get("OP"), cell.get("PRIM"), cell.get("GATE")
-    src = cell.get("SRC")
-    if op == "install" and src == "local-bundle":
-        return {**cell, "OP": "bundle-install"}, "U8"
-    if op == "marketplace" and src is not None and src not in MARKETPLACE_SOURCES:
-        return MARKETPLACE_ADD_REFUSAL, "U8"
-    if op == "uninstall" and src in MCP_SOURCES:
-        return UNINSTALL_MCP_REFUSALS[src], "U8"
-    if src == "local-bundle" and op in LOCAL_BUNDLE_REFUSALS:
-        return LOCAL_BUNDLE_REFUSALS[op], "U8"
+    source_target = _u8_target(cell)
+    if source_target is not None:
+        return source_target, "U8"
     policy_level = GATE_AUTHORITY.get(gate) == "org-policy"
     if op == "compile" and prim in ("hook", "lsp", "mcp") and policy_level:
         return None
@@ -475,7 +483,7 @@ U_BIN_PIN = "a2fb54bea5abdfe3d5aababbe1a10461fc5a89ec357c94f0dbca9e21b57e6851"
 
 
 def u_bin_applies(cell: Mapping[str, str]) -> bool:
-    """bin/ at project scope: the shape U-BIN defines away (exec_gate.py:508)."""
+    """bin/ at project scope: the shape U-BIN defines away (exec_gate.py:498)."""
     return cell.get("PRIM") == "bin" and cell.get("SCOPE") == "project"
 
 
