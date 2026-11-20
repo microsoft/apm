@@ -59,7 +59,8 @@ KNOWN_LARGE_MODULES = {
     # Root-only hook replay (#3600), native Claude cache verification (#3290)
     # and local bundle hash drift through the deployed-hash verifier (#3989).
     # Cleanup evidence renders recorded targets too (#3701).
-    "drift.py": 1044,
+    # Replay copies ask install's locked content verdict (#4187).
+    "drift.py": 1058,
     # The resolver takes its frozen pin mode from InstallService (#4012).
     # A missing declared dependency ends with a runnable next step (#4199).
     "phases/resolve.py": 1003,

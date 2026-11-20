@@ -23,6 +23,8 @@ from tests.unit.integration.test_hook_integrator_defect_regression import (
     _session_start_hook,
 )
 
+pytestmark = [pytest.mark.component, pytest.mark.promise("req-tg-001", "req-tg-004", "req-tg-010")]
+
 _DETECTABLE = sorted(name for name, profile in KNOWN_TARGETS.items() if profile.detect_by_dir)
 _EXPLICIT_ONLY = sorted(
     name for name, profile in KNOWN_TARGETS.items() if profile.capability.explicit_only

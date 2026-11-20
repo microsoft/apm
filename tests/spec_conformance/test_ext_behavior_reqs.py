@@ -14,6 +14,8 @@ import pytest
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.policy.parser import load_policy
 
+pytestmark = [pytest.mark.component, pytest.mark.promise("req-ext-001")]
+
 _BASE = {"name": "p", "version": "1.0.0"}
 
 _POLICY_PLAIN = """\
