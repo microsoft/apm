@@ -480,6 +480,22 @@ class TestErrorMapping:
         with pytest.raises(RegistryError, match="transport error"):
             client.list_versions("a", "b")
 
+    def test_transport_error_text_from_the_os_is_rendered_in_ascii(self):
+        session = MagicMock(spec=requests.Session)
+        session.request.side_effect = requests.exceptions.SSLError(
+            "\u201clocalhost\u201d certificate is not trusted"
+        )
+        client = RegistryClient(
+            "https://r.example.com",
+            RegistryAuthContext(registry_name="x", token=None),
+            session=session,
+        )
+        with pytest.raises(RegistryError) as excinfo:
+            client.list_versions("a", "b")
+        message = str(excinfo.value)
+        assert message.isascii(), message
+        assert "?localhost? certificate is not trusted" in message
+
     def test_401_includes_problem_detail(self):
         session = _make_session(
             _make_response(

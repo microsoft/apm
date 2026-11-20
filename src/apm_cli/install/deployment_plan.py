@@ -109,7 +109,7 @@ def prepare_package_deployment(  # noqa: PLR0913
     selection = resolve_effective_package_targets(
         targets, dep_target_subset, package_info, diagnostics, package_name
     )
-    log_package_target_restriction(logger, selection)
+    log_package_target_restriction(logger, selection, package_name)
     if not selection.targets:
         return PackageDeploymentPlan(selection)
     approvals = check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)

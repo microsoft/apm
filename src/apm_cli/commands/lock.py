@@ -49,6 +49,7 @@ from apm_cli.core.remediation import (
     USER_MANIFEST_MISSING,
 )
 from apm_cli.core.scope import manifest_file
+from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.install.locking import serialized_lifecycle
 
 from ..core.command_logger import InstallLogger
@@ -83,7 +84,7 @@ def _handle_lock_error(e: Exception, verbose: bool) -> None:
     elif isinstance(e, (DirectDependencyError, PolicyViolationError)):
         _rich_error(str(e))
     else:
-        _rich_error(f"Error generating lockfile: {e}")
+        _rich_error(f"Error generating lockfile: {e}", symbol="error")
         if not verbose:
             _rich_info("Run with --verbose for detailed diagnostics.", symbol="info")
     sys.exit(1)
@@ -178,6 +179,7 @@ def lock(
 
 
 @serialized_lifecycle
+@lockfile_writer(LockfileWriter.LOCK)
 def _run_lock(
     *,
     verbose: bool,

@@ -53,6 +53,7 @@
     },
     {
       "behavioral_tests": [
+        "tests/integration/test_vendor_extension_manifest_lifecycle.py::test_dependency_entry_vendor_key_is_ignored_and_preserved",
         "tests/spec_conformance/test_ext_behavior_reqs.py::test_apm_dependency_entry_vendor_keys_are_ignored[git]",
         "tests/spec_conformance/test_ext_behavior_reqs.py::test_apm_dependency_entry_vendor_keys_are_ignored[path]",
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lock_top_level_vendor_keys_survive_rewrite"
@@ -61,9 +62,10 @@
       "id": "req-ext-001",
       "keyword": "MUST",
       "section": "4.1",
-      "status": "xfail",
-      "test_count": 4,
+      "status": "active",
+      "test_count": 5,
       "tests": [
+        "tests/integration/test_vendor_extension_manifest_lifecycle.py::test_dependency_entry_vendor_key_is_ignored_and_preserved",
         "tests/spec_conformance/test_ext_behavior_reqs.py::test_apm_dependency_entry_vendor_keys_are_ignored[git]",
         "tests/spec_conformance/test_ext_behavior_reqs.py::test_apm_dependency_entry_vendor_keys_are_ignored[path]",
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lock_top_level_vendor_keys_survive_rewrite",
@@ -121,14 +123,17 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/integration/test_lockfile_version_monotonic_lifecycle.py::test_lockfile_version_is_kept_after_the_v2_dependency_is_removed"
+      ],
       "conformance_class": "consumer",
       "id": "req-lk-002",
       "keyword": "MUST",
       "section": "5.4",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
+        "tests/integration/test_lockfile_version_monotonic_lifecycle.py::test_lockfile_version_is_kept_after_the_v2_dependency_is_removed",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_declares_apiversion"
       ]
     },
@@ -209,8 +214,10 @@
         "tests/spec_conformance/test_local_file_frozen_contract.py::test_frozen_local_file_requires_lock_before_any_durable_mutation[instructions]",
         "tests/spec_conformance/test_local_file_frozen_contract.py::test_frozen_local_file_requires_lock_before_any_durable_mutation[prompt]",
         "tests/spec_conformance/test_lockfile_reqs.py::TestFrozenInstallNeverWritesLockfile::test_frozen_install_withholds_the_write_and_fails_instead",
+        "tests/spec_conformance/test_lockfile_reqs.py::TestFrozenInstallNeverWritesLockfile::test_frozen_refusal_keeps_unrecorded_files_it_cannot_prove_it_wrote",
         "tests/spec_conformance/test_lockfile_reqs.py::test_cold_dependency_evidence_cannot_defer_direct_mcp_drift[False]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_cold_dependency_evidence_cannot_defer_direct_mcp_drift[True]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_fails_rather_than_keep_a_stale_executables_decision",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_preserves_conflicted_lockfile_bytes[crlf]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_preserves_conflicted_lockfile_bytes[lf]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_lock_withholding_is_decided_once_and_cannot_be_omitted",
@@ -229,7 +236,7 @@
       "keyword": "MUST",
       "section": "5.5",
       "status": "active",
-      "test_count": 33,
+      "test_count": 35,
       "tests": [
         "tests/spec_conformance/test_codex_mcp_reqs.py::test_frozen_mcp_drift_precedes_codex_legacy_repair[False-http]",
         "tests/spec_conformance/test_codex_mcp_reqs.py::test_frozen_mcp_drift_precedes_codex_legacy_repair[False-stdio]",
@@ -250,8 +257,10 @@
         "tests/spec_conformance/test_local_file_frozen_contract.py::test_frozen_local_file_requires_lock_before_any_durable_mutation[instructions]",
         "tests/spec_conformance/test_local_file_frozen_contract.py::test_frozen_local_file_requires_lock_before_any_durable_mutation[prompt]",
         "tests/spec_conformance/test_lockfile_reqs.py::TestFrozenInstallNeverWritesLockfile::test_frozen_install_withholds_the_write_and_fails_instead",
+        "tests/spec_conformance/test_lockfile_reqs.py::TestFrozenInstallNeverWritesLockfile::test_frozen_refusal_keeps_unrecorded_files_it_cannot_prove_it_wrote",
         "tests/spec_conformance/test_lockfile_reqs.py::test_cold_dependency_evidence_cannot_defer_direct_mcp_drift[False]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_cold_dependency_evidence_cannot_defer_direct_mcp_drift[True]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_fails_rather_than_keep_a_stale_executables_decision",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_preserves_conflicted_lockfile_bytes[crlf]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_preserves_conflicted_lockfile_bytes[lf]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_lock_withholding_is_decided_once_and_cannot_be_omitted",
@@ -382,16 +391,18 @@
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lock_top_level_vendor_keys_survive_rewrite"
+        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lock_top_level_vendor_keys_survive_rewrite",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_rewrite_keeps_top_level_vendor_keys"
       ],
       "conformance_class": "consumer",
       "id": "req-lk-014",
       "keyword": "MUST",
       "section": "5.2",
-      "status": "xfail",
-      "test_count": 2,
+      "status": "active",
+      "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lock_top_level_vendor_keys_survive_rewrite",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_rewrite_keeps_top_level_vendor_keys",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_unknown_hash_algorithm_rejected"
       ]
     },
@@ -454,6 +465,7 @@
       "behavioral_tests": [
         "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_deployed_file_fails_closed_naming_both_hashes[audit-ci]",
         "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_deployed_file_fails_closed_naming_both_hashes[install-frozen]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_fails_closed_when_a_recorded_deployed_file_is_missing",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_reverifies_deployed_file_hashes_and_fails_closed"
       ],
       "conformance_class": "consumer",
@@ -461,26 +473,44 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 4,
+      "test_count": 5,
       "tests": [
         "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_deployed_file_fails_closed_naming_both_hashes[audit-ci]",
         "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_deployed_file_fails_closed_naming_both_hashes[install-frozen]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_fails_closed_when_a_recorded_deployed_file_is_missing",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_reverifies_deployed_file_hashes_and_fails_closed",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_deployed_file_hash_mismatch_fails_closed"
       ]
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen"
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[1]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[TRUE]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[true]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_without_lockfile_resolves_and_writes_it",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[empty]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[explicit-no-frozen]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[false]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[unset]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[zero]"
       ],
       "conformance_class": "consumer",
       "id": "req-lk-018",
       "keyword": "SHOULD",
+      "partial": "default frozen in CI when a lockfile exists; without a lockfile, resolve normally",
       "section": "5.5",
-      "status": "xfail",
-      "test_count": 2,
+      "status": "partial",
+      "test_count": 10,
       "tests": [
-        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_defaults_to_frozen",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[1]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[TRUE]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_with_lockfile_defaults_to_frozen[true]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_under_ci_without_lockfile_resolves_and_writes_it",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[empty]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[explicit-no-frozen]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[false]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[unset]",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_with_lockfile_without_truthy_ci_or_with_no_frozen_resolves[zero]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_should_record_publish_timestamp"
       ],
       "waivers": [
@@ -732,7 +762,7 @@
       "id": "req-mf-005",
       "keyword": "MUST",
       "section": "4.2.1",
-      "status": "xfail",
+      "status": "active",
       "test_count": 2,
       "tests": [
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_vendor_extension_target_identifier_is_accepted",
@@ -957,7 +987,7 @@
       "id": "req-mf-015",
       "keyword": "MUST",
       "section": "4.2.3",
-      "status": "xfail",
+      "status": "active",
       "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_registry_entry_rejects_typos_but_keeps_vendor_keys[default]",
@@ -1017,6 +1047,8 @@
     },
     {
       "behavioral_tests": [
+        "tests/integration/test_policy_hash_prefix_lifecycle.py::test_prefixed_policy_hash_pin_is_verified_with_its_algorithm[sha384]",
+        "tests/integration/test_policy_hash_prefix_lifecycle.py::test_prefixed_policy_hash_pin_is_verified_with_its_algorithm[sha512]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_policy_hash_algorithm_is_inferred_from_digest_prefix[sha384-96]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_policy_hash_algorithm_is_inferred_from_digest_prefix[sha512-128]"
       ],
@@ -1024,9 +1056,11 @@
       "id": "req-mf-018",
       "keyword": "MUST",
       "section": "4.6.1",
-      "status": "xfail",
-      "test_count": 3,
+      "status": "active",
+      "test_count": 5,
       "tests": [
+        "tests/integration/test_policy_hash_prefix_lifecycle.py::test_prefixed_policy_hash_pin_is_verified_with_its_algorithm[sha384]",
+        "tests/integration/test_policy_hash_prefix_lifecycle.py::test_prefixed_policy_hash_pin_is_verified_with_its_algorithm[sha512]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_policy_hash_algorithm_is_inferred_from_digest_prefix[sha384-96]",
         "tests/spec_conformance/test_manifest_behavior_reqs.py::test_policy_hash_algorithm_is_inferred_from_digest_prefix[sha512-128]",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_restricts_policy_hash_algorithm_to_strong_set"
@@ -1065,14 +1099,17 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_top_level_workspaces_key_warns_reserved_and_installs"
+      ],
       "conformance_class": "producer",
       "id": "req-mf-021",
       "keyword": "MUST",
       "section": "4.8",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_top_level_workspaces_key_warns_reserved_and_installs",
         "tests/spec_conformance/test_manifest_reqs.py::test_producer_workspaces_must_not_use_in_v0_1"
       ]
     },
@@ -1509,14 +1546,19 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/integration/test_policy_vendor_keys_lifecycle.py::test_policy_vendor_key_loads_without_warning",
+        "tests/spec_conformance/test_ext_behavior_reqs.py::test_policy_vendor_keys_do_not_warn_but_unknown_keys_do"
+      ],
       "conformance_class": "governance",
       "id": "req-pl-009",
       "keyword": "MUST",
       "section": "6.6",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 3,
       "tests": [
+        "tests/integration/test_policy_vendor_keys_lifecycle.py::test_policy_vendor_key_loads_without_warning",
+        "tests/spec_conformance/test_ext_behavior_reqs.py::test_policy_vendor_keys_do_not_warn_but_unknown_keys_do",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_evaluator_short_circuits_on_first_deny"
       ]
     },
@@ -1556,6 +1598,8 @@
     },
     {
       "behavioral_tests": [
+        "tests/integration/test_policy_remote_selection_lifecycle.py::test_several_remotes_without_origin_fail_closed",
+        "tests/integration/test_policy_remote_selection_lifecycle.py::test_single_non_origin_remote_is_used_for_discovery",
         "tests/spec_conformance/test_policy_behavior_reqs.py::test_several_non_origin_remotes_fail_closed_naming_candidates",
         "tests/spec_conformance/test_policy_behavior_reqs.py::test_single_non_origin_remote_identifies_the_project"
       ],
@@ -1563,9 +1607,11 @@
       "id": "req-pl-012",
       "keyword": "MUST",
       "section": "6.1.1",
-      "status": "xfail",
-      "test_count": 3,
+      "status": "active",
+      "test_count": 5,
       "tests": [
+        "tests/integration/test_policy_remote_selection_lifecycle.py::test_several_remotes_without_origin_fail_closed",
+        "tests/integration/test_policy_remote_selection_lifecycle.py::test_single_non_origin_remote_is_used_for_discovery",
         "tests/spec_conformance/test_policy_behavior_reqs.py::test_several_non_origin_remotes_fail_closed_naming_candidates",
         "tests/spec_conformance/test_policy_behavior_reqs.py::test_single_non_origin_remote_identifies_the_project",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_provides_default_deny_list_shape"
@@ -2150,15 +2196,17 @@
     },
     {
       "behavioral_tests": [
+        "tests/integration/test_dependency_depth_cap_lifecycle.py::test_install_fails_when_the_chain_exceeds_the_depth_cap",
         "tests/spec_conformance/test_resolve_behavior_reqs.py::test_exceeding_depth_cap_fails_naming_the_chain"
       ],
       "conformance_class": "consumer",
       "id": "req-rs-006",
       "keyword": "MUST",
       "section": "7.2",
-      "status": "xfail",
-      "test_count": 2,
+      "status": "active",
+      "test_count": 3,
       "tests": [
+        "tests/integration/test_dependency_depth_cap_lifecycle.py::test_install_fails_when_the_chain_exceeds_the_depth_cap",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_handles_commit_pin",
         "tests/spec_conformance/test_resolve_behavior_reqs.py::test_exceeding_depth_cap_fails_naming_the_chain"
       ]
@@ -2229,15 +2277,17 @@
     },
     {
       "behavioral_tests": [
+        "tests/integration/test_registry_mirror_lock_replay_lifecycle.py::test_lock_replay_fetches_hash_matching_bytes_from_a_declared_mirror",
         "tests/spec_conformance/test_resolve_behavior_reqs.py::test_lock_replay_accepts_mirror_bytes_matching_the_locked_hash"
       ],
       "conformance_class": "consumer",
       "id": "req-rs-009",
       "keyword": "MUST",
       "section": "7.5.1",
-      "status": "xfail",
-      "test_count": 2,
+      "status": "active",
+      "test_count": 3,
       "tests": [
+        "tests/integration/test_registry_mirror_lock_replay_lifecycle.py::test_lock_replay_fetches_hash_matching_bytes_from_a_declared_mirror",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_tilde_range",
         "tests/spec_conformance/test_resolve_behavior_reqs.py::test_lock_replay_accepts_mirror_bytes_matching_the_locked_hash"
       ]
@@ -2308,14 +2358,17 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_conflict_resolution_nest_refuses_install_and_writes_nothing"
+      ],
       "conformance_class": "consumer",
       "id": "req-rs-013",
       "keyword": "MUST",
       "section": "7.2",
-      "status": "text-only",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_conflict_resolution_nest_refuses_install_and_writes_nothing",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_fails_closed_on_ambiguous_resolution"
       ]
     },
@@ -2589,6 +2642,7 @@
     {
       "behavioral_tests": [
         "tests/spec_conformance/test_security_behavior_reqs.py::test_insecure_opt_in_admits_a_public_plaintext_registry_url[default]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_insecure_opt_in_admits_a_public_plaintext_registry_url[openapm-v0.1]",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_public_plaintext_registry_url_is_rejected_naming_the_registry[default]",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_public_plaintext_registry_url_is_rejected_naming_the_registry[openapm-v0.1]"
       ],
@@ -2596,11 +2650,12 @@
       "id": "req-sc-006",
       "keyword": "MUST",
       "section": "4.2.3",
-      "status": "xfail",
-      "test_count": 4,
+      "status": "active",
+      "test_count": 5,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_http_registry_url_without_opt_in",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_insecure_opt_in_admits_a_public_plaintext_registry_url[default]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_insecure_opt_in_admits_a_public_plaintext_registry_url[openapm-v0.1]",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_public_plaintext_registry_url_is_rejected_naming_the_registry[default]",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_public_plaintext_registry_url_is_rejected_naming_the_registry[openapm-v0.1]"
       ]
@@ -2626,6 +2681,8 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_proxy_token_is_not_attached_over_http_to_a_public_host[loopback]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_proxy_token_is_not_attached_over_http_to_a_public_host[public-host]",
         "tests/unit/test_auth_scoping_io.py::TestCloneWithFallbackEnv::test_insecure_http_dep_is_strict_by_default"
       ],
       "conformance_class": "consumer",
@@ -2633,9 +2690,11 @@
       "keyword": "SHOULD",
       "section": "10.3",
       "status": "active",
-      "test_count": 2,
+      "test_count": 4,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_should_refuse_credential_on_non_https_git_over_http",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_proxy_token_is_not_attached_over_http_to_a_public_host[loopback]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_proxy_token_is_not_attached_over_http_to_a_public_host[public-host]",
         "tests/unit/test_auth_scoping_io.py::TestCloneWithFallbackEnv::test_insecure_http_dep_is_strict_by_default"
       ]
     },
@@ -2873,15 +2932,17 @@
     },
     {
       "behavioral_tests": [
+        "tests/integration/test_vendor_extension_manifest_lifecycle.py::test_vendor_target_is_named_and_not_deployed",
         "tests/spec_conformance/test_targets_behavior_reqs.py::test_vendor_target_identifier_parses"
       ],
       "conformance_class": "consumer",
       "id": "req-tg-004",
       "keyword": "MUST",
       "section": "4.2.1",
-      "status": "xfail",
-      "test_count": 2,
+      "status": "active",
+      "test_count": 3,
       "tests": [
+        "tests/integration/test_vendor_extension_manifest_lifecycle.py::test_vendor_target_is_named_and_not_deployed",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_routes_vendor_target_identifiers_to_handlers",
         "tests/spec_conformance/test_targets_behavior_reqs.py::test_vendor_target_identifier_parses"
       ]
@@ -3192,28 +3253,32 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 98,
+      "active": 107,
+      "partial": 1,
       "skipped": 3,
-      "text-only": 5,
-      "unbound": 0,
-      "xfail": 9
-    },
-    "governance": {
-      "active": 19,
-      "skipped": 0,
-      "text-only": 1,
+      "text-only": 3,
       "unbound": 0,
       "xfail": 1
     },
-    "producer": {
-      "active": 6,
+    "governance": {
+      "active": 21,
+      "partial": 0,
       "skipped": 0,
-      "text-only": 4,
+      "text-only": 0,
       "unbound": 0,
-      "xfail": 2
+      "xfail": 0
+    },
+    "producer": {
+      "active": 9,
+      "partial": 0,
+      "skipped": 0,
+      "text-only": 3,
+      "unbound": 0,
+      "xfail": 0
     },
     "registry": {
       "active": 0,
+      "partial": 0,
       "skipped": 0,
       "text-only": 1,
       "unbound": 0,

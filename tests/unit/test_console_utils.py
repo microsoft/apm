@@ -683,6 +683,41 @@ def test_ascii_ellipsis_keeps_ansi_styles_intact():
     assert "\x1b[32mabcdefgh\x1b[0m" in out
 
 
+class _Stream:
+    """A writable stream that reports whether it is a terminal."""
+
+    def __init__(self, tty: bool) -> None:
+        self.tty = tty
+
+    def isatty(self) -> bool:
+        return self.tty
+
+    def write(self, _text: str) -> int:
+        return 0
+
+    def flush(self) -> None:
+        pass
+
+
+def test_windows_console_width_full_when_piped_rich_detection_when_interactive(monkeypatch):
+    """Piped Windows output keeps COLUMNS; a legacy terminal keeps Rich's detection (#4409)."""
+    import types
+
+    from rich import console as rich_console
+
+    import apm_cli.utils.console as console_mod
+
+    monkeypatch.setattr(console_mod, "os", types.SimpleNamespace(name="nt"), raising=False)
+    monkeypatch.setattr(rich_console, "detect_legacy_windows", lambda: True)
+    monkeypatch.setenv("COLUMNS", "400")
+    piped = console_mod.new_console(file=_Stream(False))
+    interactive = console_mod.new_console(file=_Stream(True))
+    rich_auto = rich_console.Console(file=_Stream(True))
+    assert piped.width == 400
+    assert interactive.legacy_windows is True
+    assert interactive.width == rich_auto.width < 400
+
+
 def test_new_table_draws_ascii_on_a_utf_console():
     """new_table() owns the box, so even a plain UTF Rich console renders ASCII (#4089)."""
     import io

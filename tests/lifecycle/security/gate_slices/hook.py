@@ -16,34 +16,28 @@ _ALL = (
 )
 _LOCAL = ("definition-changed", "local-deny", "revoke-approval")
 _BUNDLE = tuple(change for change in _ALL if change != "policy-dep-deny")
-_UPDATE_REDEFINED = "S-pending (neutral issue to follow): update and install agreement on gated surfaces after a definition change"
-_UPDATE_DEP_DENY = "S-pending (neutral issue to follow): update and install agreement on a policy-denied dependency"
-_UNINSTALL_SIBLING = (
-    "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
-)
-_DRY_RUN = "S-pending (neutral issue to follow): dry-run preview of gate removal"
+_UPDATE_REDEFINED = "#4444 update and install agreement on gated surfaces after a definition change"
+_UPDATE_DEP_DENY = "#4445 update and install agreement on a policy-denied dependency"
+_UNINSTALL_SIBLING = "#4446 uninstall rebuild agreement on gated surfaces"
 _XFAIL = {
     "G|update|definition-changed|hook": _UPDATE_REDEFINED,
     "G|update|policy-dep-deny|hook": _UPDATE_DEP_DENY,
     **{f"G|uninstall-prune-rebuild|{change}|hook": _UNINSTALL_SIBLING for change in _ALL},
-    **{f"G|dry-run|{change}|hook": _DRY_RUN for change in ("local-deny", "org-deny")},
-    "G|dry-run|revoke-approval|hook": _DRY_RUN,
 }
-_BUNDLE_KEEPS = "#4216 reinstalling a local bundle keeps hook files the gate no longer allows"
-_XFAIL.update({f"G|bundle-install|{change}|hook": _BUNDLE_KEEPS for change in _BUNDLE})
+# A bundle approval pins the whole bundle digest: a changed definition reads as
+# a bundle that is not approved yet.
+_ANNOUNCE = {"G|bundle-install|definition-changed|hook": r"not approved for this exact bundle"}
 _SMOKE = {"G|install|revoke-approval|hook", "G|frozen|local-deny|hook"}
 
 # G path -> (changes with a row, surface files)
 _MARKETPLACE = tuple(change for change in _ALL if change != "definition-changed")
-_DENY_BY_SPEC = "#4189 deny by install spec and installed identity"
-_XFAIL["G|marketplace-install|local-deny|hook"] = _DENY_BY_SPEC
-_USER_ORG = "S-pending (neutral issue to follow): org policy for user-scope installs"
-_XFAIL.update(
-    {
-        f"G|marketplace-install|{change}|hook": _USER_ORG
-        for change in ("org-deny", "org-enables-gate", "policy-dep-deny")
-    }
-)
+# User scope discovers no org policy (docs/src/content/docs/enterprise/apm-policy.mdx;
+# core/scope.policy_discovery_uses_git_remote); user-scope org policy is #3703.
+_USER_UNGOVERNED = "user scope is not governed by org policy (#3703)"
+_UNGOVERNED = {
+    f"G|marketplace-install|{change}|hook": _USER_UNGOVERNED
+    for change in ("org-deny", "org-enables-gate", "policy-dep-deny")
+}
 
 _PATHS = {
     "install": (_ALL, _PROJECT),
@@ -69,8 +63,10 @@ SLICE = GateSlice(
         GateRow(
             f"G|{path}|{change}|hook",
             surface=surface,
+            announce=_ANNOUNCE.get(f"G|{path}|{change}|hook"),
             smoke=f"G|{path}|{change}|hook" in _SMOKE,
             xfail=_XFAIL.get(f"G|{path}|{change}|hook", ""),
+            ungoverned=_UNGOVERNED.get(f"G|{path}|{change}|hook", ""),
         )
         for path, (changes, surface) in _PATHS.items()
         for change in changes

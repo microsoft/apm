@@ -63,25 +63,10 @@ class _AuditConfig:
 
 
 def _audit_outcome_cause(outcome: str, source: str | None, err_text: str | None) -> str:
-    """Render a per-outcome `cause` line for audit --ci policy-discovery messages.
+    """Render the per-outcome cause line for audit --ci policy-discovery messages."""
+    from ..policy.outcome_routing import outcome_cause
 
-    Used by both the ``warn`` (`[!]`) and ``block`` (`[x]`) branches so the
-    wording is identical; only the prefix and suffix change. Closes #1159
-    by replacing the prior silent-skip with explicit, actionable causes
-    for ``no_git_remote`` / ``absent`` / ``empty`` outcomes (and matching
-    the existing wording for fetch failures).
-    """
-    src = source or "unknown"
-    if outcome == "no_git_remote":
-        return "Could not determine org from git remote"
-    if outcome == "absent":
-        return f"No org policy found at {src}"
-    if outcome == "empty":
-        return f"Org policy at {src} is present but empty"
-    # malformed / cache_miss_fetch_fail / garbage_response (and any
-    # `error` set on the result): preserve the legacy wording so existing
-    # consumers parsing the line keep working.
-    return f"Policy fetch failed: {err_text or outcome}"
+    return outcome_cause(outcome, source, err_text)
 
 
 def _is_explicit_policy_source(policy_source: str | None) -> bool:
@@ -537,6 +522,44 @@ def _report_passed(ci_result: "CIAuditResult", total: int) -> None:
     )
 
 
+def _render_ci_failures_to_stderr(ci_result: "CIAuditResult") -> None:
+    """Name each failed check and its details on stderr (#4224).
+
+    A structured report (json/sarif) keeps stdout machine-readable, so a
+    failing run states its verdict and next steps on stderr, as text does.
+    """
+    if ci_result.passed:
+        return
+    failed = [check for check in ci_result.checks if not check.passed and not check.warned]
+    for check in failed:
+        click.echo(
+            f"{STATUS_SYMBOLS['cross']} {check.name}: {printable_ascii_text(check.message)}",
+            err=True,
+        )
+        for detail in check.details:
+            click.echo(f"    - {printable_ascii_text(detail)}", err=True)
+    summary = ci_result.to_json()["summary"]
+    click.echo(
+        f"{STATUS_SYMBOLS['cross']} {summary['failed']} of {summary['total']} check(s) failed",
+        err=True,
+    )
+
+
+def _warn_unhashed_dependencies(project_root: Path, fetch_result) -> None:
+    """Name locked entries without a content hash when policy does not require one."""
+    from ..deps.lockfile import LockFile, get_lockfile_path
+    from ..install.integrity import unhashed_dependencies_advisory
+
+    lockfile = LockFile.read(get_lockfile_path(project_root))
+    if lockfile is None:
+        return
+    policy = fetch_result.policy if fetch_result is not None and fetch_result.found else None
+    integrity = getattr(getattr(policy, "security", None), "integrity", None)
+    advisory = unhashed_dependencies_advisory(lockfile.get_package_dependencies(), integrity)
+    if advisory is not None:
+        _rich_warning(advisory, symbol="warning", err=True)
+
+
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
 
@@ -706,6 +729,7 @@ def _audit_ci_gate(
     logger = cfg.logger
 
     from ..install.audit_replay import resolve_ci_audit_materialization
+    from ..install.exec_gate import exec_policy_from_discovery
     from ..policy.ci_checks import _check_drift, run_baseline_checks
     from ..policy.policy_checks import run_policy_checks
 
@@ -744,6 +768,11 @@ def _audit_ci_gate(
         prepared_replay=prepared_replay,
         prepared_replay_error=prepared_replay_error,
         no_policy=no_policy,
+        policy_provider=(
+            None
+            if no_policy and not policy_source
+            else lambda: exec_policy_from_discovery(fetch_policy)
+        ),
     )
 
     # Resolve policy source: explicit --policy wins; otherwise mirror
@@ -826,14 +855,19 @@ def _audit_ci_gate(
                         )
                     )
 
+    _warn_unhashed_dependencies(cfg.project_root, fetch_result)
+
     # -- Drift detection (default-on per ADR-02) --------------------
     drift_findings: list = []
     if not no_drift and manifest_file(cfg.project_root).exists():
-        from ..deps.lockfile import LockFile, get_lockfile_path
+        from ..deps.lockfile import LockFile, UnsupportedLockfileVersionError, get_lockfile_path
 
         lockfile_path = get_lockfile_path(cfg.project_root)
         if lockfile_path.exists():
-            lockfile = LockFile.read(lockfile_path)
+            try:
+                lockfile = LockFile.read(lockfile_path)
+            except UnsupportedLockfileVersionError:
+                lockfile = None  # the lockfile-exists check already failed with both remedies
             if lockfile is not None:
                 if prepared_replay_error is not None:
                     from ..policy.models import CheckResult
@@ -897,6 +931,7 @@ def _audit_ci_gate(
             logger.success(f"CI audit report written to {cfg.output_path}")
         else:
             click.echo(output)
+        _render_ci_failures_to_stderr(ci_result)
     else:
         _render_ci_results(ci_result)
         if drift_findings:

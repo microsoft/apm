@@ -4,8 +4,9 @@
 from the tests ``tests/spec_conformance/_test_kind.py`` classifies as
 behavioral; a requirement with only text/shape tests is ``text-only``. This
 guard pins that aggregation in the generator and checks the committed
-CONFORMANCE.json: every requirement it reports ``active`` names at least one
-behavioral test, and every behavioral test is one of its linked tests.
+CONFORMANCE.json: every requirement it reports ``active`` or ``partial`` names
+at least one behavioral test, and every behavioral test is one of its linked
+tests.
 """
 
 from __future__ import annotations
@@ -43,12 +44,12 @@ def _statement_findings(provider: FactsProvider) -> list[Violation]:
                     RULE_ID, _STATEMENT, f"{req_id} names a behavioral test it is not bound to"
                 )
             )
-        if entry.get("status") == "active" and not behavioral:
+        if entry.get("status") in ("active", "partial") and not behavioral:
             findings.append(
                 violation(
                     RULE_ID,
                     _STATEMENT,
-                    f"{req_id} is reported active with only text/shape tests; "
+                    f"{req_id} is reported {entry['status']} with only text/shape tests; "
                     "report it text-only or bind a behavioral test",
                 )
             )

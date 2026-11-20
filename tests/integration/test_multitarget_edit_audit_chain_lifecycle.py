@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.integration.base_integrator import kept_edit_message
 from tests.integration._target_compile_kit import (
     ALL_TARGETS,
     Scenario,
@@ -88,7 +89,20 @@ def test_multi_target_edit_compile_audit_narrow_uninstall_chain(
         assert (project / name).read_bytes() == data, name
     assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
 
-    # 5. documented: plain reinstall re-deploys edited managed files from the cache.
+    # 5. #4360: a plain reinstall keeps the hand-edited files, names each one and
+    #    exits 1; the printed remedy (move aside, then install) restores them.
+    edited = {".kiro/steering/py.md": edited_rule, ".codex/agents/rev.toml": edited_agent}
+    edited_bytes = {relative: path.read_bytes() for relative, path in edited.items()}
+    kept = scenario.run("install", "--no-policy", cwd=project, expect=1)
+    text = output(kept)
+    for relative, path in edited.items():
+        assert kept_edit_message(relative, user_scope=False, proven_edit=False) in text, text
+        assert path.read_bytes() == edited_bytes[relative]
+    assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
+    aside = scenario.isolated.work_root / "aside"
+    aside.mkdir()
+    for index, path in enumerate(edited.values()):
+        path.rename(aside / f"{index}-{path.name}")
     scenario.run("install", "--no-policy", cwd=project)
     assert "EDIT" not in edited_rule.read_text("ascii")
     assert "EDIT" not in edited_agent.read_text("ascii")

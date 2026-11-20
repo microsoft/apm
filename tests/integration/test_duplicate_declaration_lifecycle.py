@@ -42,6 +42,11 @@ def _sections(world: World) -> tuple[list[object], list[object]]:
     return prod, dev
 
 
+def _assert_printed_once(result, line: str) -> None:
+    lines = [raw.rstrip() for raw in result.stdout.splitlines()]
+    assert lines.count(line) == 1, f"{line!r} x{lines.count(line)}\nstdout={result.stdout}"
+
+
 def test_install_dev_moves_and_plain_install_keeps(tmp_path: Path, apm_binary_path: Path) -> None:
     world = _world(tmp_path, apm_binary_path)
 
@@ -80,8 +85,12 @@ def test_uninstall_removes_every_declaration_of_one_package(
     preview = world.apm("uninstall", "https://github.com/test/c", "--dry-run")
     assert "Ambiguous" not in preview.stdout
     assert _sections(world)[1] == [{"git": remote("c")}]
+    # Three declarations share one label; each removal line prints once (#4331).
+    _assert_printed_once(preview, "[i]   - test/c from apm.yml")
 
-    world.apm("uninstall", "https://github.com/test/c")
+    removed = world.apm("uninstall", "https://github.com/test/c")
+    _assert_printed_once(removed, "[i] Removed test/c from dependencies.apm in apm.yml")
+    _assert_printed_once(removed, "[i] Removed test/c from devDependencies.apm in apm.yml")
     assert _sections(world) == (["test/d"], [])
     assert world.modules() == {"test/d"}
     assert world.deployed() == {"d.instructions.md"}

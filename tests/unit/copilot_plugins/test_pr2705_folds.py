@@ -385,10 +385,10 @@ def test_integrity_gate_failure_leaves_no_registration(
     write_agent_plugin(source, name="sentinel")
     _write_project(project, [str(source)])
 
-    def _boom(_ctx):
+    def _boom(_ctx, _lockfile):
         raise PolicyViolationError("require_hashes: missing content hash")
 
-    monkeypatch.setattr("apm_cli.install.pipeline._enforce_require_hashes", _boom)
+    monkeypatch.setattr("apm_cli.install.pipeline.check_before_lockfile", _boom)
 
     result = _install(monkeypatch, project)
 
@@ -643,11 +643,13 @@ def test_update_and_frozen_restore_never_discover_a_copilot_binary(
     assert _install(monkeypatch, project).exit_code == 0
 
     _forbid_copilot_discovery(monkeypatch)
-    # Update reads org policy for packages with executables (#3990); no org here.
-    monkeypatch.setattr(
+    # Update reads org policy for packages with executables (#3990), and a
+    # no-change update applies it through the install preflight (#4458); no org here.
+    for target in (
         "apm_cli.policy.discovery.discover_policy_with_chain",
-        lambda *_args, **_kwargs: PolicyFetchResult(outcome="absent"),
-    )
+        "apm_cli.policy.install_preflight.discover_policy_with_chain",
+    ):
+        monkeypatch.setattr(target, lambda *_args, **_kwargs: PolicyFetchResult(outcome="absent"))
 
     updated = CliRunner().invoke(
         cli,

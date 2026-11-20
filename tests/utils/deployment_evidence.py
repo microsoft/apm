@@ -22,7 +22,7 @@ def receipted_evidence(*roots: Path, deploy_root: Path | None = None) -> Deploym
             if path.is_file() and not path.is_symlink():
                 receipts[path.resolve().as_posix()] = compute_file_hash(path)
     base = deploy_root if deploy_root is not None else (roots[0] if roots else Path.cwd())
-    return DeploymentEvidence(deploy_root=base, receipts=receipts, render=None)
+    return DeploymentEvidence(deploy_root=base, receipts=receipts, render=None, kept=())
 
 
 def seed_receipts(
@@ -48,3 +48,27 @@ def seed_receipts(
 def no_evidence(deploy_root: Path) -> DeploymentEvidence:
     """Return evidence that authorizes nothing (a clone without receipts or render)."""
     return DeploymentEvidence.none(deploy_root)
+
+
+class _ProvenOverwrites:
+    """An overwrite gate whose every managed file carries deployment evidence."""
+
+    owner = "test"
+    user_scope = False
+
+    def authorizes(self, path: Path, claim: str) -> bool:
+        return True
+
+    def keep(self, path: Path) -> bool:
+        return False
+
+
+def prove_overwrites(monkeypatch) -> None:
+    """Give direct integrator calls the evidence a live install binds (#4360).
+
+    Outside ``recorded_writes`` an integrator replaces no differing managed
+    file; tests of the overwrite itself model a receipted reinstall.
+    """
+    from apm_cli.integration.base_integrator import BaseIntegrator
+
+    monkeypatch.setattr(BaseIntegrator, "_overwrite_gate", _ProvenOverwrites())

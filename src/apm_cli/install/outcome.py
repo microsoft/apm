@@ -232,6 +232,7 @@ def result_from_install_context(ctx: InstallContext) -> InstallResult:
                 frozenset(complete_dep_keys) if complete_dep_keys is not None else None
             ),
             claude_native_keys=frozenset(getattr(ctx, "claude_native_keys", ())),
+            mcp_policy_enforced=bool(getattr(ctx, "mcp_policy_enforced", False)),
         ),
         force=bool(getattr(ctx, "force", False)),
     )
@@ -293,4 +294,39 @@ def raise_direct_dependency_failure(ctx: InstallContext) -> NoReturn:
         ctx.diagnostics.render_summary()
     raise DirectDependencyError(
         "One or more direct dependencies failed validation. Run with --verbose for details."
+    )
+
+
+def local_bundle_update_next_step(names, file_count: int, scope) -> str:
+    """Explain why 'apm update' leaves local bundles untouched and how to update one (#4318)."""
+    from apm_cli.core.scope import is_user_scope
+
+    if names:
+        noun = "Local bundle" if len(names) == 1 else "Local bundles"
+        subject = f"{noun} {', '.join(names)}"
+    else:
+        subject = f"Local bundle content ({file_count} file(s))"
+    from apm_cli.core.remediation import LOCAL_BUNDLE_UPDATE
+
+    step = LOCAL_BUNDLE_UPDATE
+    if is_user_scope(scope):
+        step = step.with_command("apm install -g <newer-bundle-file>")
+    return f"{subject} not updated: 'apm update' refreshes apm.yml dependencies only. {step.sentence()}"
+
+
+def local_bundle_parked_next_step(slug: str, exec_types, scope) -> str:
+    """Name a local bundle whose executables stay parked and how to approve them (#4441).
+
+    Same remedy as ``apm approve --pending``: approve the exact key under
+    ``executables.allow``, then reinstall the bundle.
+    """
+    from apm_cli.core.remediation import LOCAL_BUNDLE_EXECUTABLES_PARKED
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.security.trust import approve_command
+
+    pending = approve_command("--pending", user_scope=is_user_scope(scope))
+    remedy = LOCAL_BUNDLE_EXECUTABLES_PARKED.with_command(pending)
+    return (
+        f"Local bundle '{slug}': {', '.join(exec_types)} parked, awaiting approval. "
+        f"{remedy.sentence()}"
     )

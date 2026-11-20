@@ -15,6 +15,7 @@ from apm_cli.core.remediation import (
     ORPHANED_PACKAGES_PRUNE,
 )
 from apm_cli.core.scope import manifest_file
+from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.install.locking import serialized_lifecycle, serialized_lifecycle_unless
 
 # Import existing APM components
@@ -1089,6 +1090,7 @@ def clean(dry_run: bool, yes: bool):
     ),
 )
 @serialized_lifecycle
+@lockfile_writer(LockfileWriter.UPDATE)
 def update(packages, verbose, force, target, parallel_downloads, global_, legacy_skill_paths):
     """Update APM dependencies to latest git refs.
 

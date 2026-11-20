@@ -68,52 +68,52 @@ ACCEPTS: Mapping[str, frozenset[str]] = {
 }
 ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
     "install": (
-        Ev(_INSTALL, 857, '"--only"'),
-        Ev(_INSTALL, 862, '"--update"'),
-        Ev(_INSTALL, 866, '"--dry-run"'),
-        Ev(_INSTALL, 868, '"--force"'),
-        Ev(_INSTALL, 873, '"--frozen"'),
-        Ev(_INSTALL, 898, '"--target"'),
-        Ev(_INSTALL, 1030, '"--no-policy"'),
+        Ev(_INSTALL, 839, '"--only"'),
+        Ev(_INSTALL, 844, '"--update"'),
+        Ev(_INSTALL, 848, '"--dry-run"'),
+        Ev(_INSTALL, 850, '"--force"'),
+        Ev(_INSTALL, 855, '"--frozen/--no-frozen"'),
+        Ev(_INSTALL, 879, '"--target"'),
+        Ev(_INSTALL, 1011, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 464, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 474, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 495, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 522, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 557, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 567, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 588, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 615, '"--target"'),
     ),
     "uninstall": (
-        Ev("src/apm_cli/commands/uninstall/cli.py", 617, 'argument("packages"'),
-        Ev("src/apm_cli/commands/uninstall/cli.py", 619, '"--dry-run"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 761, 'argument("packages"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 763, '"--dry-run"'),
     ),
     "prune": (
-        Ev("src/apm_cli/commands/prune.py", 79, '"--dry-run"'),
-        Ev("src/apm_cli/commands/prune.py", 85, "def prune(ctx, dry_run)"),
+        Ev("src/apm_cli/commands/prune.py", 85, '"--dry-run"'),
+        Ev("src/apm_cli/commands/prune.py", 92, "def prune(ctx, dry_run)"),
     ),
-    "compile": (Ev(_COMPILE, 1279, '"--target"'), Ev(_COMPILE, 1289, '"--dry-run"')),
+    "compile": (Ev(_COMPILE, 1287, '"--target"'), Ev(_COMPILE, 1297, '"--dry-run"')),
     "lock": (
-        Ev("src/apm_cli/commands/lock.py", 108, '"--update"'),
-        Ev("src/apm_cli/commands/lock.py", 115, '"--no-policy"'),
-        Ev("src/apm_cli/commands/lock.py", 121, '"--target"'),
+        Ev("src/apm_cli/commands/lock.py", 115, '"--update"'),
+        Ev("src/apm_cli/commands/lock.py", 122, '"--no-policy"'),
+        Ev("src/apm_cli/commands/lock.py", 128, '"--target"'),
     ),
     "pack": (
-        Ev(_PACK, 192, '"--target"'),
-        Ev(_PACK, 228, '"--dry-run"'),
-        Ev(_PACK, 231, '"--force"'),
+        Ev(_PACK, 198, '"--target"'),
+        Ev(_PACK, 234, '"--dry-run"'),
+        Ev(_PACK, 237, '"--force"'),
     ),
-    "bundle-install": (Ev(_INSTALL, 1245, "detect_local_bundle"),),
-    "mcp-install": (Ev(_INSTALL, 966, '"--mcp"'), Ev(_INSTALL, 898, '"--target"')),
+    "bundle-install": (Ev(_INSTALL, 1227, "detect_local_bundle"),),
+    "mcp-install": (Ev(_INSTALL, 947, '"--mcp"'), Ev(_INSTALL, 879, '"--target"')),
     "approve-deny": (
-        Ev(_APPROVE, 201, 'argument("packages"'),
-        Ev(_APPROVE, 296, 'argument("packages"'),
+        Ev(_APPROVE, 224, 'argument("packages"'),
+        Ev(_APPROVE, 328, 'argument("packages"'),
     ),
     "audit": (
-        Ev("src/apm_cli/commands/audit.py", 1380, 'argument("package"'),
-        Ev("src/apm_cli/commands/audit.py", 1399, '"--dry-run"'),
-        Ev("src/apm_cli/commands/audit.py", 1437, '"--no-policy"'),
+        Ev("src/apm_cli/commands/audit.py", 1418, 'argument("package"'),
+        Ev("src/apm_cli/commands/audit.py", 1437, '"--dry-run"'),
+        Ev("src/apm_cli/commands/audit.py", 1475, '"--no-policy"'),
     ),
     "marketplace": (
-        Ev("src/apm_cli/commands/marketplace/__init__.py", 351, "def add(source, name"),
+        Ev("src/apm_cli/commands/marketplace/__init__.py", 357, "def add(source, name"),
     ),
 }
 # Refusals that exit 1 (a semantic refusal, ClickException) instead of a
@@ -123,13 +123,13 @@ REFUSAL_EXIT: Mapping[tuple[str, ...], int] = {
     ("bundle-install", "FROZEN"): 1,
 }
 REFUSAL_EVIDENCE: Mapping[tuple[str, ...], Ev] = {
-    ("mcp-install", "FROZEN"): Ev(_INSTALL, 1199, 'reject_frozen_mutation(frozen, "--mcp")'),
-    ("bundle-install", "FROZEN"): Ev(_INSTALL, 1201, '"positional packages"'),
+    ("mcp-install", "FROZEN"): Ev(_INSTALL, 1181, 'reject_frozen_mutation(frozen, "--mcp")'),
+    ("bundle-install", "FROZEN"): Ev(_INSTALL, 1183, '"positional packages"'),
     ("mcp-install", "UPDATE"): Ev(
-        "src/apm_cli/install/mcp/conflicts.py", 89, "--update does not apply to --mcp"
+        "src/apm_cli/install/mcp/conflicts.py", 91, "--update does not apply to --mcp"
     ),
     # Verified on the real CLI: exit 2 at project and user scope, lock unchanged.
-    ("install", "FROZEN", "UPDATE"): Ev(_INSTALL, 1206, "--frozen and --update are mutually"),
+    ("install", "FROZEN", "UPDATE"): Ev(_INSTALL, 1188, "--frozen and --update are mutually"),
 }
 # Commands with a user-scope form; any other command refuses -g (U5 for pack).
 USER_SCOPE_OPS = frozenset(
@@ -145,17 +145,17 @@ USER_SCOPE_OPS = frozenset(
     }
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
-    "install": Ev(_INSTALL, 930, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 487, '"--global"'),
-    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 625, '"--global"'),
-    "compile": Ev(_COMPILE, 1388, '"--global"'),
-    "lock": Ev("src/apm_cli/commands/lock.py", 100, '"--global"'),
-    "approve-deny": Ev(_APPROVE, 216, '"--user"'),
+    "install": Ev(_INSTALL, 911, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 580, '"--global"'),
+    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 769, '"--global"'),
+    "compile": Ev(_COMPILE, 1396, '"--global"'),
+    "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
+    "approve-deny": Ev(_APPROVE, 239, '"--user"'),
     # U5: pack has no --global (options 163-301).
-    "pack": Ev(_PACK, 171, '@click.command(name="pack"'),
-    "prune": Ev("src/apm_cli/commands/prune.py", 85, "def prune(ctx, dry_run)"),
-    "audit": Ev("src/apm_cli/commands/audit.py", 1501, "def audit("),
-    "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 351, "def add(source, name"),
+    "pack": Ev(_PACK, 177, '@click.command(name="pack"'),
+    "prune": Ev("src/apm_cli/commands/prune.py", 92, "def prune(ctx, dry_run)"),
+    "audit": Ev("src/apm_cli/commands/audit.py", 1539, "def audit("),
+    "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 357, "def add(source, name"),
 }
 
 # -- Rule evidence -------------------------------------------------------------
@@ -166,13 +166,13 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "the executable gate governs only executable primitives; a plain file next to a "
         "revoked executable must survive; an org policy dependency deny removes it",
         (
-            Ev(_APPROVE, 240, "hooks, MCP, LSP, bin, canvas"),
-            Ev("src/apm_cli/policy/install_preflight.py", 220, "Install blocked by org policy"),
+            Ev(_APPROVE, 263, "hooks, MCP, LSP, bin, canvas"),
+            Ev("src/apm_cli/policy/install_preflight.py", 218, "Install blocked by org policy"),
         ),
     ),
     "U3": (
         "edited is defined relative to a receipt; present with unknown provenance has no lock",
-        (Ev("src/apm_cli/core/deployment_ledger.py", 596, "class DeploymentLedgerCodec"),),
+        (Ev("src/apm_cli/core/deployment_ledger.py", 815, "class DeploymentLedgerCodec"),),
     ),
     "U4": (
         "a declared target change without a receipt is reachable; only receipt-backed "
@@ -180,19 +180,19 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         (
             Ev(
                 "src/apm_cli/install/manifest_reconcile.py",
-                756,
+                696,
                 "canonical target-contraction owner",
             ),
         ),
     ),
-    "U5": ("pack -g is a syntactic refusal", (Ev(_PACK, 171, '@click.command(name="pack"'),)),
+    "U5": ("pack -g is a syntactic refusal", (Ev(_PACK, 177, '@click.command(name="pack"'),)),
     "U6": (
         "pack provenance is the dependencies / marketplace block, not SRC",
-        (Ev(_PACK, 41, "dependencies: block"), Ev(_PACK, 42, "marketplace: block")),
+        (Ev(_PACK, 43, "dependencies: block"), Ev(_PACK, 44, "marketplace: block")),
     ),
     "U7": (
         "mcp-install acts on the requested server; other primitives keep no-collateral-write",
-        (Ev(_INSTALL, 966, '"--mcp"'),),
+        (Ev(_INSTALL, 947, '"--mcp"'),),
     ),
     "U8": (
         "the source decides the command: bundle-install is install of a local bundle (install "
@@ -205,16 +205,16 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "local bundle, which writes no manifest entry (uninstall refuses it; update and "
         "prune leave it untouched). A native plugin carries no canvas primitive",
         (
-            Ev(_INSTALL, 1245, "detect_local_bundle"),
-            Ev(_INSTALL, 1010, '"--registry"'),
-            Ev(_INSTALL, 984, '"--url"'),
+            Ev(_INSTALL, 1227, "detect_local_bundle"),
+            Ev(_INSTALL, 991, '"--registry"'),
+            Ev(_INSTALL, 965, '"--url"'),
             Ev("src/apm_cli/models/dependency/reference.py", 860, '"registry" in entry'),
             Ev("src/apm_cli/marketplace/registration.py", 45, "No marketplace.json found"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 734, "is an MCP server, not a package"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 881, "was not found in apm.yml"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 726, "cannot remove local-bundle"),
-            Ev("src/apm_cli/commands/update.py", 456, "No APM dependencies to update"),
-            Ev("src/apm_cli/commands/prune.py", 208, "Nothing to prune"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 749, "is an MCP server, not a package"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 912, "was not found in apm.yml"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 741, "cannot remove local-bundle"),
+            Ev("src/apm_cli/commands/update.py", 493, "No APM dependencies to update"),
+            Ev("src/apm_cli/core/command_logger.py", 289, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
     ),
@@ -227,18 +227,18 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 497, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 498, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 501, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 701, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 702, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 705, 'target.name == "claude"'),
         ),
     ),
     "U9": (
         "approve/deny with no prior decision is reachable; --list and --pending are read-only",
-        (Ev(_APPROVE, 262, "if list_decisions:"), Ev(_APPROVE, 266, "if pending:")),
+        (Ev(_APPROVE, 290, "if list_decisions:"), Ev(_APPROVE, 294, "if pending:")),
     ),
     "U10": (
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",
-        (Ev(_COMPILE, 694, "def _run_validation_mode"), Ev(_COMPILE, 728, "get_mcp_dependencies")),
+        (Ev(_COMPILE, 695, "def _run_validation_mode"), Ev(_COMPILE, 729, "get_mcp_dependencies")),
     ),
     "E1": (
         "hosts are equivalent except lock identity (HOSTID)",
@@ -254,7 +254,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             ),
             Ev(
                 "src/apm_cli/install/mcp/retired_destinations.py",
-                163,
+                165,
                 "def heal_retired_project_mcp_destinations",
             ),
         ),
@@ -262,8 +262,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     "E3": (
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
-            Ev("src/apm_cli/install/services.py", 822, "staged_files"),
-            Ev("src/apm_cli/install/services.py", 1024, '"instructions" not in target.primitives'),
+            Ev("src/apm_cli/install/services.py", 825, "staged_files"),
+            Ev("src/apm_cli/install/services.py", 1028, '"instructions" not in target.primitives'),
         ),
     ),
 }
@@ -314,15 +314,15 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     UNINSTALL_MCP_REFUSALS["mcp-registry"]: (1, r"was not found in apm\.yml"),
     UNINSTALL_MCP_REFUSALS["inline-mcp"]: (1, r"is an MCP server, not a package"),
     LOCAL_BUNDLE_REFUSALS["uninstall"]: (1, r"is a local bundle\. Bundles installed with"),
+    # p-exec ships only executables the gate parks, so its bundle install records
+    # nothing: update has no bundle to name (#4318 names a recorded one).
     LOCAL_BUNDLE_REFUSALS["update"]: (0, r"No APM dependencies"),
-    LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"Nothing to prune"),
+    # One canonical no-op line (#4460); the retired wordings must not match.
+    LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"No orphaned packages found\. Nothing to prune\."),
 }
 # Refusal rule cells whose current message is a defect: (tracking issue, a regex
 # the fixed output matches). The cell is known-failing until that output appears.
-RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {
-    # The message says there is nothing to update while a local bundle is installed.
-    LOCAL_BUNDLE_REFUSALS["update"]: ("#4318", r"p-exec"),
-}
+RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {}
 
 # Rule cells: must-cover singletons a rule names on its own.
 RULE_CELLS: Mapping[str, str] = {
@@ -483,7 +483,7 @@ U_BIN_PIN = "a2fb54bea5abdfe3d5aababbe1a10461fc5a89ec357c94f0dbca9e21b57e6851"
 
 
 def u_bin_applies(cell: Mapping[str, str]) -> bool:
-    """bin/ at project scope: the shape U-BIN defines away (exec_gate.py:498)."""
+    """bin/ at project scope: the shape U-BIN defines away (exec_gate.py:679)."""
     return cell.get("PRIM") == "bin" and cell.get("SCOPE") == "project"
 
 

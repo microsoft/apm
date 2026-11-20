@@ -26,7 +26,6 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.core.remediation import FROZEN_LOCKFILE_WITHHELD
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration._target_compile_kit import Scenario, output, write, write_package
@@ -52,7 +51,9 @@ _OLD_RENDERINGS = {
         '[ext](https://example.com/x.md) and [anchor](#top)."\n'
     ),
 }
-_REMEDY = FROZEN_LOCKFILE_WITHHELD.sentence()
+_KEPT_REMEDY = (
+    "Move it aside, then run 'apm install' to restore it, or 'apm install --force' to overwrite it."
+)
 
 
 def _git(cwd: Path, env: dict[str, str], *args: str) -> str:
@@ -131,19 +132,23 @@ def test_frozen_replay_of_previous_cli_output_fails_closed_and_names_paths(
     text = output(audit)
     assert "render" in text and "apm export-patch" not in text, text
 
-    # Frozen fails closed: every re-rendered path is named with both hashes.
+    # Frozen fails closed and names every re-rendered path. A lockfile hash
+    # never proves APM wrote the committed bytes, so it keeps them (#4360).
     frozen = scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env, expect=1)
     text = output(frozen)
-    assert "do not match the hashes recorded in apm.lock.yaml" in text, text
     for relative, old in _OLD_RENDERINGS.items():
-        observed = compute_file_hash(clone / relative)
-        assert f"{relative}: expected {_sha(old.encode('ascii'))}, observed {observed}" in text
-    assert _REMEDY in text
+        assert f"Kept {relative}: it differs from what APM renders" in text, text
+        assert (clone / relative).read_text(encoding="ascii") == old
+    # Every refusal prints its runnable next step: move the files aside, then install.
+    assert _KEPT_REMEDY in text, text
     assert "Deployed files verified" not in text
     assert (clone / "apm.lock.yaml").read_bytes() == lock_before
     scenario.run("audit", "--ci", "--no-policy", cwd=clone, env=env, expect=1)
 
-    # The documented repair converges: install, then frozen and audit agree.
+    # The documented repair converges: move the files aside, install, then
+    # frozen and audit agree.
+    for relative in _OLD_RENDERINGS:
+        (clone / relative).unlink()
     scenario.run("install", "--no-policy", cwd=clone, env=env)
     assert (clone / "apm.lock.yaml").read_bytes() != lock_before
     verified = scenario.run("install", "--frozen", "--no-policy", cwd=clone, env=env)

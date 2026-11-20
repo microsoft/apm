@@ -7,12 +7,19 @@ origin -- never the alias -- before an alias is trusted to resolve.
 
 from __future__ import annotations
 
+import re
 import shlex
 from collections.abc import Iterable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..core.remediation import MARKETPLACE_DUPLICATE_ALIAS
-from .errors import MarketplaceOriginConflictError
+from ..core.remediation import (
+    MARKETPLACE_DUPLICATE_ALIAS,
+    MARKETPLACE_ORIGIN_READD,
+    MARKETPLACE_ORIGIN_REINSTALL,
+    either_sentence,
+)
+from .errors import MarketplaceError, MarketplaceOriginConflictError, MarketplaceProvenanceError
 from .registry import get_marketplace_by_name
 from .source_identity import (
     marketplace_origin,
@@ -97,3 +104,184 @@ def duplicate_origin_warning(source: MarketplaceSource, existing: MarketplaceSou
         "if this was unintended, "
         f"{MARKETPLACE_DUPLICATE_ALIAS.bind(name=shlex.quote(source.name)).clause()}."
     )
+
+
+_PROVENANCE_FIELDS = ("discovered_via", "marketplace_plugin_name", "source_url", "source_digest")
+_CATALOG_FIELDS = ("source_url", "source_digest")
+# Origin evidence (source_url/source_digest) and its lock format are first
+# written by APM 0.37; an older generator stamp is the only legacy evidence.
+_ORIGIN_RECORDING_RELEASE = (0, 37)
+_RELEASE = re.compile(r"^\s*v?(\d+)\.(\d+)")
+_NEXT_STEP = f"Nothing was changed. {either_sentence(MARKETPLACE_ORIGIN_READD, MARKETPLACE_ORIGIN_REINSTALL)}"
+
+
+def _predates_origin_recording(apm_version: str | None) -> bool:
+    """Whether the lock's generator stamp names a release before origin recording."""
+    match = _RELEASE.match(apm_version) if isinstance(apm_version, str) else None
+    if match is None:
+        return False
+    return (int(match.group(1)), int(match.group(2))) < _ORIGIN_RECORDING_RELEASE
+
+
+def _legacy_lock(lockfile: LockFile) -> bool:
+    """A pre-0.37 lock; a mixed one (old stamp, newer fields) is refused as edited."""
+    if not _predates_origin_recording(lockfile.apm_version):
+        return False
+    rows = lockfile.dependencies.values()
+    if lockfile.is_origin_recording_format() or any(
+        getattr(dep, field) for dep in rows for field in _CATALOG_FIELDS
+    ):
+        raise MarketplaceProvenanceError(
+            f"apm.lock.yaml says APM {lockfile.apm_version} wrote it, but it carries fields "
+            f"only APM 0.37 or later writes, so it may have been edited. {_NEXT_STEP}"
+        )
+    return True
+
+
+def _declared_row_keeps_provenance(lockfile: LockFile, declared: Iterable[object]) -> list[str]:
+    """Restore or refuse a marketplace declaration whose locked row lost its provenance.
+
+    apm.yml is the source of truth: an entry declared as ``name@marketplace``
+    (or with a ``marketplace:`` key) must keep its marketplace provenance in
+    the lock. A row that names another alias but records the declared alias's
+    registered origin is restored to the declared alias and returned for the
+    caller to report; a stripped row, or one recording another origin, is
+    refused, so it is never re-recorded from the catalog unseen.
+    """
+    from ..models.dependency import DependencyReference
+    from .dependency_confusion import admit_marketplace_resolution
+    from .resolver import resolve_marketplace_plugin
+
+    restored: list[str] = []
+    for ref in declared:
+        alias = getattr(ref, "marketplace_name", None)
+        plugin = getattr(ref, "marketplace_plugin_name", None)
+        if not (getattr(ref, "is_marketplace", False) and alias and plugin):
+            continue
+        if lockfile.marketplace_rows(alias, plugin):
+            continue
+        require_locked_catalog_origin(alias, plugin, lockfile)
+        try:
+            # Origin only: ref pins stay with install and update resolution.
+            resolution = resolve_marketplace_plugin(plugin, alias, enforce_ref_pins=False)
+            admit_marketplace_resolution(resolution)
+        except MarketplaceError as exc:
+            raise MarketplaceProvenanceError(
+                f"Cannot re-verify the marketplace provenance of {plugin}@{alias}: {exc}"
+            ) from exc
+        resolved = resolution.dependency_reference or DependencyReference.parse(
+            resolution.canonical
+        )
+        key = resolved.get_unique_key()
+        dep = lockfile.dependencies.get(key)
+        if dep is None:
+            continue
+        if _records_declared_origin(dep, alias):
+            dep.discovered_via, dep.marketplace_plugin_name = alias, plugin
+            restored.append(f"{key} ({plugin}@{alias})")
+            continue
+        raise MarketplaceProvenanceError(
+            f"apm.yml declares {plugin}@{alias}, but apm.lock.yaml records {key} "
+            f"without its marketplace provenance. {_NEXT_STEP}"
+        )
+    return restored
+
+
+def _records_declared_origin(dep: LockedDependency, alias: str) -> bool:
+    """Whether *dep* records the origin the user registered for *alias*."""
+    if not (dep.discovered_via and dep.source_url):
+        return False
+    current = marketplace_origin(get_marketplace_by_name(alias))
+    return same_marketplace_origin(dep.source_url, current)
+
+
+def _registered_local_catalog(alias: str) -> bool:
+    """Whether the user registered *alias* as a local catalog, which has no origin.
+
+    Decided by the user's marketplace registration only, never by the lock row.
+    """
+    try:
+        return get_marketplace_by_name(alias).kind == "local"
+    except MarketplaceError:
+        return False
+
+
+def _declared_dependencies(manifest: Path | None) -> list[object]:
+    if manifest is None or not manifest.is_file():
+        return []
+    from ..models.apm_package import APMPackage
+
+    return list(APMPackage.from_apm_yml(manifest).get_all_apm_dependencies())
+
+
+def reverify_locked_provenance(
+    lockfile: LockFile | None, manifest: Path | None = None
+) -> list[str]:
+    """Re-verify every locked marketplace row against its registered catalog (#4228).
+
+    ``apm update`` calls this before planning, so recorded provenance is never
+    carried forward on the lock's word alone. A row's alias and plugin name
+    must both be recorded and still resolve, and a lock from APM 0.37 or later
+    must carry the row's origin evidence; its origin must match the registered
+    catalog (:func:`require_locked_row_origin`). A stale catalog digest is
+    replaced by the catalog's current one, and each changed row is returned
+    so the caller can report it. A pre-0.37 lock (:func:`_legacy_lock`) is
+    accepted without origin evidence; its next lock write records it.
+
+    Raises:
+        MarketplaceProvenanceError: A row records incomplete provenance, a
+            mixed lock claims an older generator, a *declared* marketplace
+            entry's row lost its provenance, or the alias or plugin no longer
+            resolves.
+        MarketplaceOriginConflictError: The alias names a different catalog.
+    """
+    from .dependency_confusion import admit_marketplace_resolution
+    from .resolver import resolve_marketplace_plugin
+
+    if lockfile is None:
+        return []
+    legacy = _legacy_lock(lockfile)
+    restored = _declared_row_keeps_provenance(lockfile, _declared_dependencies(manifest))
+    for dep in lockfile.dependencies.values():
+        if not any(getattr(dep, field) for field in _PROVENANCE_FIELDS):
+            continue
+        key = dep.get_unique_key()
+        alias, plugin = dep.discovered_via, dep.marketplace_plugin_name
+        if not (alias and plugin):
+            raise MarketplaceProvenanceError(
+                f"apm.lock.yaml records incomplete marketplace provenance for {key}: "
+                f"discovered_via and marketplace_plugin_name are both required. {_NEXT_STEP}"
+            )
+        if legacy:
+            continue
+        if not dep.source_url and not _registered_local_catalog(alias):
+            raise MarketplaceProvenanceError(
+                f"apm.lock.yaml records no marketplace origin for {key} ({plugin}@{alias}). "
+                + _NEXT_STEP
+            )
+        require_locked_row_origin(dep)
+        try:
+            # Origin only: ref pins stay with install and update resolution.
+            resolution = resolve_marketplace_plugin(plugin, alias, enforce_ref_pins=False)
+            admit_marketplace_resolution(resolution)
+        except MarketplaceError as exc:
+            raise MarketplaceProvenanceError(
+                f"Cannot re-verify the marketplace provenance of {key} ({plugin}@{alias}): {exc}"
+            ) from exc
+        current = resolution.provenance(alias, plugin)
+        changed = False
+        for field in _CATALOG_FIELDS:
+            value = current.get(field)
+            if not value:
+                continue
+            if not getattr(dep, field):
+                raise MarketplaceProvenanceError(
+                    f"apm.lock.yaml records no marketplace {field} for {key} "
+                    f"({plugin}@{alias}). {_NEXT_STEP}"
+                )
+            if getattr(dep, field) != value:
+                setattr(dep, field, value)
+                changed = True
+        if changed:
+            restored.append(f"{key} ({plugin}@{alias})")
+    return restored

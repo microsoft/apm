@@ -455,6 +455,7 @@ def _fetch_from_gitlab_repo(
         return _gitlab_fetch_error_result(
             error,
             cache_entry=cache_entry,
+            unverified_pin=expected_hash if cache_entry_persisted else None,
             source_label=source_label,
             org=org,
             repo=repo,
@@ -499,6 +500,7 @@ def _gitlab_fetch_error_result(
     error: str,
     *,
     cache_entry: _CacheEntry | None,
+    unverified_pin: str | None = None,
     source_label: str,
     org: str,
     repo: str,
@@ -512,7 +514,13 @@ def _gitlab_fetch_error_result(
         return PolicyFetchResult(source=source_label, outcome="absent")
     if error.startswith("gitlab-status:410:"):
         _gitlab_project_state_via_git(org=org, repo=repo, host=host, port=port)
-    return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
+    return _stale_fallback_or_error(
+        cache_entry,
+        error,
+        source_label,
+        "cache_miss_fetch_fail",
+        unverified_pin=unverified_pin,
+    )
 
 
 def _gitlab_content_result(
@@ -526,9 +534,9 @@ def _gitlab_content_result(
 ) -> PolicyFetchResult:
     """Parse, validate, and cache fetched GitLab policy content."""
     from .discovery import (
-        PolicyFetchResult,
         _compute_hash_normalized,
         _detect_garbage,
+        _malformed_refresh,
         _verify_hash_pin,
     )
 
@@ -543,11 +551,8 @@ def _gitlab_content_result(
     try:
         policy, warnings = load_policy(content)
     except PolicyValidationError as exc:
-        return PolicyFetchResult(
-            error=f"Invalid policy in {repo_ref}: {exc}",
-            source=source_label,
-            outcome="malformed",
-            warnings=exc.warnings,
+        return _malformed_refresh(
+            cache_entry, f"Invalid policy in {repo_ref}: {exc}", source_label, exc.warnings
         )
 
     actual_hash = _compute_hash_normalized(content, expected_hash)

@@ -76,7 +76,7 @@ steps:
     converged: true
     files: []
     key_lines: ["No changes -- install state already up to date"]
-    forbidden_lines: [integrated, "[!]"]
+    forbidden_lines: [integrated, adopted, "[!]"]
   - n: 7
     run: ["apm install microsoft/apm/packages/apm-guide#{release}"]
     exit: 0
