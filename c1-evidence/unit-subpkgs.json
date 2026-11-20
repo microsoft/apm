@@ -1,9 +1,29 @@
 {
-  "partition": "unit remaining subpackages",
-  "steps_done": [1],
-  "folds": {},
-  "decisions": [
-    "step1: D5 report listed 2 in-scope copies (export/test_purl.py, primitives/test_discovery_walk.py); deleted the copies, kept the listed twins"
-  ],
-  "counts_left": {"same_body_groups": 9, "unclassified_modules": 75, "placement_offenders": 24, "weak_tests": 53}
+ "partition": "unit remaining subpackages",
+ "steps_done": [
+  1,
+  2
+ ],
+ "folds": {
+  "tests/unit/utils/test_github_host_predicate.py::TestAdoAuthFailureSignal::test_case_insensitive": "tests/unit/utils/test_github_host_predicate.py::TestAdoAuthFailureSignal::test_canonical_signals_match",
+  "tests/unit/utils/test_github_host_predicate.py::TestAdoAuthFailureSignal::test_ado_work_item_codes_are_not_http_auth": "tests/unit/utils/test_github_host_predicate.py::TestAdoAuthFailureSignal::test_non_auth_errors_dont_match",
+  "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_https_proxy_in_subprocess_env": "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_proxy_var_in_subprocess_env",
+  "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_http_proxy_in_subprocess_env": "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_proxy_var_in_subprocess_env",
+  "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_no_proxy_in_subprocess_env": "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_proxy_var_in_subprocess_env",
+  "tests/unit/cache/test_git_env.py::TestGitSubprocessEnv::test_preserves_https_proxy": "tests/unit/cache/test_proxy_compat.py::TestProxyEnvPreserved::test_proxy_var_in_subprocess_env"
+ },
+ "decisions": [
+  "step1: D5 report listed 2 in-scope copies (export/test_purl.py, primitives/test_discovery_walk.py); deleted the copies, kept the listed twins",
+  "step2: folded same-file clones in utils/test_github_host_predicate.py into the surviving parametrized tests (case variants into canonical signals, ADO work-item codes into non-auth errors)",
+  "step2: folded proxy env passthrough (HTTPS/HTTP/NO_PROXY) into one parametrized test in cache/test_proxy_compat.py; removed the HTTPS twin from cache/test_git_env.py",
+  "step2: cross-partition groups kept: utils/test_paths.py (3 portable_relpath groups) and registry/test_compat_matrix.py identity test have twins in tests/unit root (unit-root-small partition); in-scope copy is kept as the surviving owner so the root partition can delete its copy without a double deletion",
+  "step2: 2 groups among tests/unit/scripts/test_architecture_*.py (test_allowlist_is_not_stale, test_real_tree_is_clean / test_head_is_clean) kept: test_architecture_* files are protected by hard rule",
+  "pre-existing failures on base in cache/test_git_env.py (test_modern_windows_missing_lookup_scales_linearly[git|gh], TestUncachedFallbackLineEndings::test_locked_sha_checks_out_from_a_crlf_host) are unchanged by this branch"
+ ],
+ "counts_left": {
+  "same_body_groups": 6,
+  "unclassified_modules": 75,
+  "placement_offenders": 24,
+  "weak_tests": 53
+ }
 }

@@ -23,14 +23,6 @@ class TestAdoAuthFailureSignal:
             "fatal: unable to access 'https://...': The requested URL returned error: 403",
             "fatal: could not read Username for 'https://dev.azure.com'",
             "fatal: HTTP 401 Unauthorized",
-        ],
-    )
-    def test_canonical_signals_match(self, stderr_text: str) -> None:
-        assert is_ado_auth_failure_signal(stderr_text) is True
-
-    @pytest.mark.parametrize(
-        "stderr_text",
-        [
             "FATAL: AUTHENTICATION FAILED for ...",
             "Could Not Read Username for ...",
             "UNAUTHORIZED",
@@ -38,7 +30,7 @@ class TestAdoAuthFailureSignal:
             "Error 403",
         ],
     )
-    def test_case_insensitive(self, stderr_text: str) -> None:
+    def test_canonical_signals_match(self, stderr_text: str) -> None:
         assert is_ado_auth_failure_signal(stderr_text) is True
 
     @pytest.mark.parametrize("text", [None, "", "   "])
@@ -53,6 +45,9 @@ class TestAdoAuthFailureSignal:
             "Connection timed out",
             "remote: Repository not found.",
             "fatal: unable to access: SSL certificate problem",
+            "remote: TF401019: The Git repository does not exist",
+            "TF401027: You need the Git 'GenericContribute' permission",
+            "VS403403: The item does not exist",
         ],
     )
     def test_non_auth_errors_dont_match(self, stderr_text: str) -> None:
@@ -67,17 +62,6 @@ class TestAdoAuthFailureSignal:
             "fatal: Authentication failed for 'https://dev.azure.com/org/proj'\n"
         )
         assert is_ado_auth_failure_signal(blob) is True
-
-    @pytest.mark.parametrize(
-        "stderr_text",
-        [
-            "remote: TF401019: The Git repository does not exist",
-            "TF401027: You need the Git 'GenericContribute' permission",
-            "VS403403: The item does not exist",
-        ],
-    )
-    def test_ado_work_item_codes_are_not_http_auth(self, stderr_text: str) -> None:
-        assert is_ado_auth_failure_signal(stderr_text) is False
 
     def test_flattens_called_process_error_stderr_on_cause(self) -> None:
         inner = subprocess.CalledProcessError(
