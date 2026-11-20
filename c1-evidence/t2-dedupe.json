@@ -1,7 +1,8 @@
 {
   "partition": "train2 dedupe integration and unit residual",
   "steps_done": [
-    1
+    1,
+    2
   ],
   "folds": {
     "tests/integration/test_integrators_hooks_phase3c.py::TestIntegratePackageHooksCursor::test_integrates_when_cursor_dir_exists": "tests/integration/test_integrators_hooks_execution.py::TestIntegratePackageHooksCursor::test_integrates_when_cursor_dir_exists",
@@ -76,12 +77,15 @@
     "Pre-existing failure on base, not caused by this branch: tests/integration/test_integrators_hooks_execution.py::TestSyncIntegrationHooks::test_removes_managed_hook_json (also failed in the deleted phase3c twin).",
     "Deleted placeholder tests/integration/test_ado_bearer_e2e.py::TestWrongTenant::test_wrong_tenant_renders_case_2_error (body was only pass; no behavior). test_marketplace_e2e.py placeholder kept as an explicit pytest.skip in the body so it no longer clones that empty body.",
     "Pre-existing base failures (unchanged by this branch): test_wave6_integrators_coverage.py::TestSyncIntegrationHooks::test_removes_tracked_hook_files and ::TestSkillIntegratorSyncIntegration::test_removes_tracked_skill_directories.",
-    "Groups whose only other members are open-PR or protected files were resolved by parametrizing or strengthening the in-scope copy (never by deleting it), so coverage survives whatever the open PRs do to their copies."
+    "Groups whose only other members are open-PR or protected files were resolved by parametrizing or strengthening the in-scope copy (never by deleting it), so coverage survives whatever the open PRs do to their copies.",
+    "Left 1 group: tests/unit/deps/test_git_remote_ops.py::TestValidateLsRemoteTagOutput::test_invalid_or_ambiguous_records_are_rejected shares its body with protected tests/spec_conformance/test_resolution_reqs.py::test_revision_pin_update_rejects_malformed_tag_records; inputs differ (parametrize) and the spec copy is req-rs-017 evidence, so no honest body change exists for the unit copy.",
+    "test_deps_resolver_resolution.py::TestGitHubDownloaderCloseRepo::test_close_repo_with_none now asserts the None return instead of only calling the helper (twins live in open-PR files).",
+    "counts_left measured over the 32 surviving modules this branch touched; unclassified_modules is left to the parallel classification worker (out of scope here)."
   ],
   "counts_left": {
-    "same_body_groups": null,
-    "unclassified_modules": null,
-    "placement_offenders": null,
-    "weak_tests": null
+    "same_body_groups": 1,
+    "unclassified_modules": 31,
+    "placement_offenders": 0,
+    "weak_tests": 11
   }
 }
