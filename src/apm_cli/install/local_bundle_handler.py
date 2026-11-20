@@ -5,8 +5,9 @@ architecture invariant LOC budget enforced by
 ``tests/unit/install/test_architecture_invariants.py``.
 
 The handler owns the imperative deploy path for local bundles. It does not go
-through the dependency resolver or registry, but it must route policy discovery
-and enforcement through the shared preflight owner before any deployment.
+through the dependency resolver or registry, but it must admit the bundle
+through :func:`apm_cli.install.bundle_admission.admit_bundle` (policy and
+integrity) before any deployment.
 Local bundles remain a separate path because they short-circuit package network
 I/O (proven by the air-gap E2E test).
 
@@ -57,10 +58,7 @@ def install_local_bundle(
     targets, deploys files, and persists ``local_deployed_files`` to the
     (project or user) lockfile.  Cleans up tarball extraction on exit.
     """
-    from ..bundle.local_bundle import (
-        check_target_mismatch,
-        verify_bundle_integrity,
-    )
+    from ..bundle.local_bundle import check_target_mismatch
     from ..core.scope import InstallScope, get_manifest_path, get_source_root
     from ..core.target_detection import (
         EffectiveTargetDecision,
@@ -206,54 +204,22 @@ def install_local_bundle(
             logger=logger,
             user_scope=global_,
         )
-        from ..policy.install_preflight import run_policy_preflight
+        from .bundle_admission import admit_bundle, plugin_bundle_integrity
 
         deployment_decision = EffectiveTargetDecision(
             [resolved.name for resolved in targets], "bundle deployment targets"
         )
-        policy_fetch, _enforcement_active = run_policy_preflight(
-            project_root=source_root,
+        admit_bundle(
+            policy_root=source_root,
             apm_deps=(),
             mcp_deps=bundle_mcp_deps,
+            target_decision=deployment_decision,
+            integrity_check=plugin_bundle_integrity(bundle_info, logger),
             no_policy=no_policy,
             logger=logger,
             dry_run=dry_run,
-            effective_target=deployment_decision.canonical_targets,
-            effective_target_source=deployment_decision.source,
             fetch_result=policy_fetch_result,
         )
-        policy = policy_fetch.policy if policy_fetch is not None else None
-        from .integrity import require_hashes_enabled
-
-        require_bundle_hashes = require_hashes_enabled(
-            policy.security.integrity if policy is not None else None
-        )
-        # Integrity verification (skipped when bundle has no lockfile).
-        if bundle_info.lockfile is None:
-            if require_bundle_hashes:
-                from .errors import InstallFailureAlreadyRendered
-
-                logger.error(
-                    "Bundle has no apm.lock.yaml, but org policy requires "
-                    "integrity hashes. Repack it with the current APM version "
-                    "and retry."
-                )
-                raise InstallFailureAlreadyRendered(
-                    "Org policy requires integrity hashes for this bundle"
-                )
-            logger.warning(
-                "Bundle has no apm.lock.yaml -- skipping integrity check. "
-                "It was produced by an older APM version or by another tool; "
-                "repack it with 'apm pack' to embed an integrity manifest."
-            )
-        else:
-            errors = verify_bundle_integrity(bundle_info.source_dir, bundle_info.lockfile)
-            if errors:
-                logger.error("Bundle integrity check failed:")
-                for err in errors:
-                    logger.error_detail(err)
-                raise click.Abort()
-            logger.verbose_detail("Bundle integrity verified")
 
         # Warn on bundle/install target mismatch.
         warning = check_target_mismatch(

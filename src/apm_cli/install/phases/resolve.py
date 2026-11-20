@@ -23,6 +23,7 @@ from apm_cli.install.helpers.ref_reuse import (
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.install.presentation.resolution import report_resolved_dependencies
 from apm_cli.install.repository_access import not_found_next_step
+from apm_cli.install.source_helpers import download_registry_package
 from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.models.dependency import materialization as _materialization
@@ -562,10 +563,9 @@ def _resolve_dependencies(
                                 None,
                             )
                         return replacement_path
-                registry_resolver.download_package(dep_ref, replacement_path)
+                download_registry_package(ctx, dep_ref, replacement_path, _locked_reg)
                 _annotate_registry_dep_ref(dep_ref, registry_resolver)
-                # Mark as already-downloaded so the parallel pre-download
-                # phase skips this dep. No SHA for registry deps.
+                # Mark as downloaded so pre-download skips it; registry deps have no SHA.
                 with callback_lock:
                     pending_callback_downloads[replacement_path] = (
                         dep_ref.get_unique_key(),
