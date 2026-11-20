@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm targets` now shows `apm.yml` in the SOURCE column (and JSON `source`) for targets declared in apm.yml. (#4217)
 - `apm install` names every destination folder on integration lines for three or more targets instead of printing 'N targets' (#4217)
 - `apm install --dry-run plugin@marketplace` no longer writes the marketplace ref-pin file under APM_HOME (#4217)
+- `apm install --mcp` and `apm uninstall` name the manifest as `apm.yml` or `~/.apm/apm.yml` instead of its absolute path (#4217)
+- `apm marketplace add OWNER/REPO#ref` and `HOST/OWNER/REPO#ref` register the named ref instead of tracking `main` (#4217)
+- `apm pack --format apm` now includes skills deployed under `.agents/skills/` for Copilot, Cursor, Gemini and OpenCode projects instead of packing an empty bundle. (#4217)
+- `apm lock` keeps the recorded `exec_status` of packages whose executables await approval, so `apm lock` and `apm install` no longer rewrite each other's lockfile (#4217)
 
 ## [0.37.0] - 2026-11-20
 

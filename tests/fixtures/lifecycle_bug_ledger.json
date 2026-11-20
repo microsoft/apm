@@ -559,6 +559,22 @@
       ]
     },
     {
+      "issue": 4190,
+      "fixed_in": "0.37.0",
+      "summary": "apm install --mcp and apm uninstall printed the absolute apm.yml path while every other command printed project-relative paths.",
+      "failure_modes": [
+        "observation",
+        "portability"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "portability.byte_deterministic"
+      ],
+      "regression_tests": [
+        "tests/integration/test_manifest_rewrite_preservation_lifecycle.py::test_manifest_rewrites_name_the_manifest_by_relative_path"
+      ]
+    },
+    {
       "issue": 4191,
       "fixed_in": "0.37.0",
       "summary": "Plain apm audit printed an [x] Drift detected error line for advisory drift while exiting 0, so the line severity contradicted the documented exit contract.",
@@ -591,6 +607,25 @@
       ]
     },
     {
+      "issue": 4200,
+      "fixed_in": "0.37.0",
+      "summary": "apm marketplace add OWNER/REPO#ref kept the #ref inside the stored repository URL, tracked main, failed the fetch, and printed an unpinned warning suggesting OWNER/REPO#ref#v1.0.0.",
+      "failure_modes": [
+        "reference",
+        "outcome"
+      ],
+      "properties": [
+        "source.ref_cache_coherent",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_marketplace_registered_ref_lifecycle.py::test_shorthand_fragment_ref_registers_the_named_ref[owner-repo]",
+        "tests/integration/test_marketplace_registered_ref_lifecycle.py::test_shorthand_fragment_ref_registers_the_named_ref[host-owner-repo]",
+        "tests/unit/marketplace/test_marketplace_commands.py::test_registration_source_honors_shorthand_fragment_ref",
+        "tests/unit/marketplace/test_marketplace_commands.py::test_registration_source_keeps_hash_in_local_paths"
+      ]
+    },
+    {
       "issue": 4201,
       "fixed_in": "0.37.0",
       "summary": "apm marketplace outdated ran git ls-remote for a local source: ./ entry, printed a [x] ls-remote failure row and then reported that all packages were up to date, while apm marketplace check treated the entry as OK.",
@@ -603,6 +638,22 @@
       ],
       "regression_tests": [
         "tests/integration/test_marketplace_authoring_lifecycle.py::test_outdated_skips_local_source_entry_without_ls_remote"
+      ]
+    },
+    {
+      "issue": 4202,
+      "fixed_in": "0.37.0",
+      "summary": "apm pack --format apm filtered deployed files by the target root only, so skills a copilot project deployed under .agents/skills/ were dropped and the bundle was empty.",
+      "failure_modes": [
+        "routing",
+        "outcome"
+      ],
+      "properties": [
+        "routing.authorized_targets_only",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_pack_bundle_roundtrip_lifecycle.py::test_apm_format_pack_carries_skills_deployed_under_agents"
       ]
     },
     {
@@ -743,6 +794,23 @@
       "regression_tests": [
         "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_install_dry_run_of_marketplace_plugin_writes_no_ref_pin",
         "tests/unit/install/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
+      ]
+    },
+    {
+      "issue": 4213,
+      "fixed_in": "0.37.0",
+      "summary": "apm lock dropped exec_status: gated_pending_approval from rows whose executables were parked, so lock and install kept rewriting the lockfile of a converged project.",
+      "failure_modes": [
+        "idempotency",
+        "outcome"
+      ],
+      "properties": [
+        "idempotency.byte_stable",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lock_parked_exec_status_lifecycle.py::test_lock_keeps_parked_exec_status_and_converges",
+        "tests/integration/test_executables_gate_integration.py::TestLockfileExecStatusIntegration::test_lock_only_carries_recorded_exec_status_forward"
       ]
     }
   ],
