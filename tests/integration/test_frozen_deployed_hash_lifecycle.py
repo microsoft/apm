@@ -51,7 +51,10 @@ _OLD_RENDERINGS = {
         '[ext](https://example.com/x.md) and [anchor](#top)."\n'
     ),
 }
-_REMEDY = "Rerun 'apm install' without --frozen"
+_KEPT_REMEDY = (
+    "Move it aside, then run 'apm install' to restore it; or run 'apm install --force' "
+    "to overwrite it."
+)
 
 
 def _git(cwd: Path, env: dict[str, str], *args: str) -> str:
@@ -137,6 +140,8 @@ def test_frozen_replay_of_previous_cli_output_fails_closed_and_names_paths(
     for relative, old in _OLD_RENDERINGS.items():
         assert f"Kept {relative}: it differs from what APM renders" in text, text
         assert (clone / relative).read_text(encoding="ascii") == old
+    # Every refusal prints its runnable next step: move the files aside, then install.
+    assert _KEPT_REMEDY in text, text
     assert "Deployed files verified" not in text
     assert (clone / "apm.lock.yaml").read_bytes() == lock_before
     scenario.run("audit", "--ci", "--no-policy", cwd=clone, env=env, expect=1)
