@@ -983,6 +983,105 @@ def test_w3_core_models_remediation_clears_the_reported_state(
 # -- W4 frozen-policy proofs --
 # -- end W4 frozen-policy proofs --
 # -- W4 drift-trust proofs --
+#
+# Drift replay, native plugin cache admission, agent-source planning and the
+# hook gate report a state on an installed project; the advised command (after
+# the manual step the advice names) clears it.
+
+_W4_AGENT = ".claude/agents/linked.md"
+
+
+def _w4_symlinked_agent_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = _publish(scenario, "advice-kit", instruction="advice")
+    consumer = scenario.consumers.create("agent-consumer", targets=("claude",))
+    real = consumer.root / "agents"
+    real.mkdir()
+    (real / "linked.agent.md").write_text(
+        "---\nname: linked\ndescription: A linked agent.\n---\n\nBody.\n", encoding="ascii"
+    )
+    (consumer.root / ".apm").mkdir(exist_ok=True)
+    (consumer.root / ".apm" / "agents").symlink_to("../agents", target_is_directory=True)
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+def _w4_materialize_agents(world: _World) -> None:
+    import shutil
+
+    link = world.consumer.root / ".apm" / "agents"
+    link.unlink()
+    shutil.copytree(world.consumer.root / "agents", link)
+
+
+def _w4_agent_deployed(world: _World, result) -> None:
+    _expect_ok(world, result)
+    assert (world.consumer.root / _W4_AGENT).is_file(), _result_evidence(result)
+
+
+def _w4_tamper_native_cache(world: _World) -> None:
+    skills = sorted((world.consumer.root / "apm_modules").rglob("skills/native/SKILL.md"))
+    assert skills, "native plugin cache holds no skill"
+    for skill in skills:
+        skill.write_text(skill.read_text(encoding="utf-8") + "\ntampered\n", encoding="utf-8")
+
+
+def _w4_audit_ci(_world: _World) -> tuple[str, ...]:
+    return ("audit", "--no-policy", "--ci")
+
+
+def _w4_hook_slug() -> str:
+    from tests.integration.test_required_lifecycle_state_machine import _OWNER
+
+    return f"{_OWNER}/{_HOOKED}"
+
+
+W4_DRIFT_TRUST_PROOFS: tuple[_TextProof | _BoundProof, ...] = (
+    _TextProof(
+        "replay-cache-missing",
+        _installed_world,
+        _remove_modules,
+        lambda _world: ("export-patch", "--dry-run"),
+        1,
+        _expect_ok,
+    ),
+    _TextProof(
+        "agent-source-symlinked",
+        _w4_symlinked_agent_world,
+        lambda _world: None,
+        lambda _world: _INSTALL_ARGS,
+        0,
+        _w4_agent_deployed,
+        before=_w4_materialize_agents,
+    ),
+    _TextProof(
+        "native-plugin-cache-differs",
+        _agent_plugin_world,
+        _w4_tamper_native_cache,
+        _w4_audit_ci,
+        1,
+        _expect_ok,
+    ),
+    _BoundProof(
+        "hooks-unapproved",
+        lambda tmp, binary: _hooked_world(tmp, binary, approved=False),
+        lambda _world: None,
+        _INSTALL_ARGS,
+        0,
+        values=(("package", _w4_hook_slug()),),
+    ),
+)
+
+
+@pytest.mark.parametrize("proof", W4_DRIFT_TRUST_PROOFS, ids=lambda proof: proof.remediation_id)
+def test_w4_drift_trust_remediation_clears_the_reported_state(
+    tmp_path: Path, apm_binary_path: Path, proof: _TextProof | _BoundProof
+) -> None:
+    if isinstance(proof, _BoundProof):
+        test_w2_integration_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+    else:
+        test_command_remediation_clears_the_reported_state(tmp_path, apm_binary_path, proof)
+
+
 # -- end W4 drift-trust proofs --
 # -- W4 phases-targets proofs --
 # -- end W4 phases-targets proofs --

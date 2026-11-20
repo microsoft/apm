@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from apm_cli.core.remediation import BUNDLE_HOOKS_RETIRED
+
 REASON_UNRECORDED = "no approval record"
 REASON_NOT_GRANTED = "approval no longer granted"
 
@@ -250,7 +252,7 @@ def retire_unadmitted_bundle_hooks(
             verb = "Would retire" if dry_run else "Retired"
             logger.warning(
                 f"{verb} hooks from local bundle '{item.slug}' ({item.reason}). "
-                "To keep them, approve the bundle and rerun 'apm install <bundle>'."
+                f"To keep them, {BUNDLE_HOOKS_RETIRED.clause()}."
             )
     if retired_files and lock_dir is not None:
         _drop_lock_rows(lock_dir, retired_files)

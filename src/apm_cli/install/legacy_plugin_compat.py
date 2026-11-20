@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.constants import APM_DIR, APM_YML_FILENAME
+from apm_cli.core.remediation import CLAUDE_PLUGIN_CACHE_INVALID
 from apm_cli.deps.plugin_parser import has_normalized_plugin_skill_sources_receipt
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.resolution_staging import ResolutionStagingSession
@@ -258,7 +259,7 @@ def _invalid_plugin_error(
     details = "; ".join(errors) or "validator returned no package"
     return DirectDependencyError(
         f"Cached Claude Plugin '{dep_key}' at '{package_path}' is invalid: {details}. "
-        "Remove the cached directory or run 'apm deps clean --yes', then retry."
+        f"Remove the cached directory, or {CLAUDE_PLUGIN_CACHE_INVALID.clause()}."
     )
 
 
@@ -300,5 +301,5 @@ def _unsafe_upgrade_error(
 ) -> DirectDependencyError:
     return DirectDependencyError(
         f"Cached Claude Plugin '{dep_key}' at '{package_path}' cannot be upgraded safely: "
-        f"{reason}. Remove the cached directory or run 'apm deps clean --yes', then retry."
+        f"{reason}. Remove the cached directory, or {CLAUDE_PLUGIN_CACHE_INVALID.clause()}."
     )

@@ -166,7 +166,7 @@ class TestE1PositionalPackagesMixedWithMcp:
 
 class TestE3OnlyApmConflictsWithMcp:
     def test_only_apm_raises(self) -> None:
-        with pytest.raises(click.UsageError, match=r"cannot use --only apm with --mcp"):
+        with pytest.raises(click.UsageError, match=r"--only apm cannot be combined with --mcp"):
             _call(only="apm")
 
     def test_only_other_value_ok(self) -> None:

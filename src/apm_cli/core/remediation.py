@@ -1022,6 +1022,103 @@ GITHUB_GITLAB_HOST_CONFLICT = _entry(
 # -- W4 frozen-policy --
 # -- end W4 frozen-policy --
 # -- W4 drift-trust --
+# Advice printed by install/ drift replay, audit replay, cache pins, executable
+# gates, local bundles, native plugin admission, install/mcp and install/helpers.
+REPLACEMENT_SOURCES_UNRECORDED = _entry(
+    "replacement-sources-unrecorded",
+    "apm install",
+    "record the selected sources in apm.lock.yaml",
+)
+USER_PACKAGE_COPIES_STALE = _entry(
+    "user-package-copies-stale",
+    "apm install --global",
+    "refresh the user-scope package copies from apm.lock.yaml",
+)
+USER_PACKAGE_MATERIALIZATION_MISSING = _entry(
+    "user-package-materialization-missing",
+    "apm install --global",
+    "restore the user-scope package materialization",
+)
+REMOTE_DEPENDENCY_UNPINNED = _entry(
+    "remote-dependency-unpinned",
+    "apm install",
+    "record its resolved commit in apm.lock.yaml",
+    before="pin the dependency to a commit, tag, or specific branch HEAD",
+)
+REPLAY_CACHE_MISSING = _entry(
+    "replay-cache-missing", "apm install", "populate the apm_modules cache"
+)
+REPLAY_CACHE_STALE = _entry(
+    "replay-cache-stale", "apm install", "refresh the apm_modules cache to the locked commit"
+)
+HOOKS_UNAPPROVED = _entry(
+    "hooks-unapproved",
+    "apm approve {package}",
+    "approve its hooks",
+)
+BIN_EXECUTABLES_UNAPPROVED = _entry(
+    "bin-executables-unapproved",
+    "apm approve {package}",
+    "approve its bin/ executables",
+)
+BIN_EXECUTABLES_UNTRUSTED = _entry(
+    "bin-executables-untrusted",
+    "apm install --trust-bin {package}",
+    "deploy its bin/ executables",
+)
+BIN_EXECUTABLES_NOT_RETRUSTED = _entry(
+    "bin-executables-not-retrusted",
+    "apm install --trust-bin {package}",
+    "restore its bin/ executables",
+)
+ABSENCE_UNCONFIRMED = _entry(
+    "absence-unconfirmed",
+    "apm install",
+    "confirm the absence and release its ownership",
+    before="check the path permissions",
+)
+AGENT_SOURCE_SYMLINKED = _entry(
+    "agent-source-symlinked",
+    "apm install",
+    "deploy the agent sources",
+    before="use real files and directories in .apm/agents/ (or real *.agent.md files at "
+    "the package root)",
+)
+CLAUDE_PLUGIN_CACHE_INVALID = _entry(
+    "claude-plugin-cache-invalid",
+    "apm deps clean --yes",
+    "remove every cached dependency",
+    then="retry",
+)
+BUNDLE_INSTRUCTIONS_STAGED = _entry(
+    "bundle-instructions-staged",
+    "apm compile",
+    "merge the staged instructions into AGENTS.md / GEMINI.md / equivalent",
+)
+BUNDLE_HOOKS_RETIRED = _entry(
+    "bundle-hooks-retired",
+    "apm install <bundle>",
+    "redeploy its hooks",
+    before="approve the bundle",
+)
+MCP_UPDATE_FLAG = _entry("mcp-update-flag", "apm update", "update MCP entries")
+MCP_REGISTRY_URL_INVALID = _entry(
+    "mcp-registry-url-invalid",
+    "apm config unset mcp-registry-url",
+    "drop the invalid configured registry URL",
+    then="retry",
+)
+AGENT_PLUGIN_EXECUTABLES_UNAPPROVED = _entry(
+    "agent-plugin-executables-unapproved",
+    "apm approve {package}",
+    "trust its executables for GitHub Copilot registration",
+)
+NATIVE_PLUGIN_HASH_MISSING = _entry(
+    "native-plugin-hash-missing", "apm install", "regenerate its integrity baseline"
+)
+NATIVE_PLUGIN_CACHE_DIFFERS = _entry(
+    "native-plugin-cache-differs", "apm install", "restore the package"
+)
 # -- end W4 drift-trust --
 # -- W4 phases-targets --
 # -- end W4 phases-targets --
