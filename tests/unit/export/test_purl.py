@@ -136,17 +136,6 @@ def test_purl_percent_encodes_crafted_name_segments():
     assert purl.rsplit("@", 1)[1] == "def789ghi012"
 
 
-def test_purl_encoding_is_noop_for_clean_slugs():
-    # Normal forge slugs are already purl-safe; encoding must not alter them
-    # (keeps existing identities and golden fixtures byte-stable).
-    dep = LockedDependency(
-        repo_url="github.com/acme/git-utils",
-        host_type="github",
-        resolved_commit="def789ghi012",
-    )
-    assert build_purl(dep) == "pkg:github/acme/git-utils@def789ghi012"
-
-
 def test_scrub_url_removes_userinfo():
     scrubbed = scrub_url("https://user:secret@registry.example.com/path/x.tgz")
     parts = urlsplit(scrubbed)

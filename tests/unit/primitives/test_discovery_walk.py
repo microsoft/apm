@@ -102,14 +102,6 @@ class TestGlobMatch(unittest.TestCase):
             )
         )
 
-    def test_doublestar_middle_zero(self):
-        """Leading **/ should also match zero segments when pattern has a middle path."""
-        self.assertTrue(
-            _glob_match(
-                ".apm/instructions/style.instructions.md", "**/.apm/instructions/*.instructions.md"
-            )
-        )
-
     # -- no match --
     def test_no_match_extension(self):
         self.assertFalse(_glob_match("src/app.js", "**/*.py"))

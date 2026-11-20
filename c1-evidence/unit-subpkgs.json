@@ -1,0 +1,9 @@
+{
+  "partition": "unit remaining subpackages",
+  "steps_done": [1],
+  "folds": {},
+  "decisions": [
+    "step1: D5 report listed 2 in-scope copies (export/test_purl.py, primitives/test_discovery_walk.py); deleted the copies, kept the listed twins"
+  ],
+  "counts_left": {"same_body_groups": 9, "unclassified_modules": 75, "placement_offenders": 24, "weak_tests": 53}
+}
