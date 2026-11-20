@@ -342,7 +342,7 @@ UNINSTALL_EVIDENCE_REINSTALL = _entry(
     "apm install",
     "re-establish deployment evidence (once, with access to the package source)",
     before="move aside any listed file that holds your edits",
-    then="rerun 'apm uninstall{flag}'",
+    then="rerun '{uninstall}'",
 )
 UNINSTALL_EVIDENCE_REMOVE = _entry(
     "uninstall-evidence-remove",
