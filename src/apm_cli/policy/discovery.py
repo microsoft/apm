@@ -985,7 +985,7 @@ def _auto_discover(
     is_ado = is_azure_devops_hostname(host)
     masked_private_hint: str | None = None
 
-    for candidate_repo in candidates:
+    for index, candidate_repo in enumerate(candidates):
         logger.debug("Trying org policy repo candidate %s on host %s", candidate_repo, host)
         if is_ado:
             result = _fetch_ado_org_policy(
@@ -1035,6 +1035,17 @@ def _auto_discover(
             if candidate_repo == ".github-private" and _is_github_host(host) and result.not_found:
                 masked_private_hint = _masked_private_policy_hint(org, candidate_repo)
             continue
+
+        if not (is_ado or is_gitlab_hostname(host)):
+            from apm_cli.policy import _cached_candidates as resolved
+
+            # A recorded resolution lets an unreachable candidate that was absent
+            # when the policy was cached fall through to that policy (#4456).
+            refs = resolved.candidate_refs(org, host, candidates)
+            resolved.record(result, refs, index, project_root)
+            if not (no_cache or cache_only):
+                fallback = resolved.after_failure(result, refs, index, project_root, expected_hash)
+                result = fallback or result
 
         # Any other outcome (found, error, malformed, etc.) -> return immediately
         if result.outcome == "cache_miss_fetch_fail" and _rejected_pinned_cache(
@@ -1222,17 +1233,7 @@ def _fetch_from_repo(
     if not no_cache:
         cache_entry = _read_cache_entry(repo_ref, project_root, expected_hash=expected_hash)
         if cache_entry is not None and not cache_entry.stale:
-            outcome = "empty" if _is_policy_empty(cache_entry.policy) else "found"
-            return PolicyFetchResult(
-                policy=cache_entry.policy,
-                source=cache_entry.source,
-                cached=True,
-                cache_age_seconds=cache_entry.age_seconds,
-                outcome=outcome,
-                raw_bytes_hash=cache_entry.raw_bytes_hash or None,
-                expected_hash=expected_hash,
-                warnings=cache_entry.warnings,
-            )
+            return _cached_entry_result(cache_entry, expected_hash, "")
 
     if cache_only:
         return _cache_only_policy_result(
@@ -1415,17 +1416,7 @@ def _fetch_from_ado_repo(
     if not no_cache:
         cache_entry = _read_cache_entry(repo_ref, project_root, expected_hash=expected_hash)
         if cache_entry is not None and not cache_entry.stale:
-            outcome = "empty" if _is_policy_empty(cache_entry.policy) else "found"
-            return PolicyFetchResult(
-                policy=cache_entry.policy,
-                source=cache_entry.source,
-                cached=True,
-                cache_age_seconds=cache_entry.age_seconds,
-                outcome=outcome,
-                raw_bytes_hash=cache_entry.raw_bytes_hash or None,
-                expected_hash=expected_hash,
-                warnings=cache_entry.warnings,
-            )
+            return _cached_entry_result(cache_entry, expected_hash, "")
 
     if cache_only:
         return _cache_only_policy_result(
@@ -1660,6 +1651,30 @@ def _get_cache_dir(project_root: Path) -> Path:
 def _cache_key(repo_ref: str) -> str:
     """Generate a deterministic cache filename from repo ref."""
     return hashlib.sha256(repo_ref.encode()).hexdigest()[:16]
+
+
+def _resolution_record_path(refs: list[str], project_root: Path) -> Path:
+    """Where discovery records which candidate resolved, and those absent above it."""
+    key = _cache_key("resolution:" + "|".join(refs))
+    return _get_cache_dir(project_root) / f"{key}.resolution.json"
+
+
+def _cached_entry_result(
+    entry: _CacheEntry, expected_hash: str | None, fetch_error: str
+) -> PolicyFetchResult:
+    """Serve one cache entry: fresh as found, stale with *fetch_error* (#4456)."""
+    if entry.stale:
+        return _stale_fallback_or_error(entry, fetch_error, entry.source, "cache_miss_fetch_fail")
+    return PolicyFetchResult(
+        policy=entry.policy,
+        source=entry.source,
+        cached=True,
+        cache_age_seconds=entry.age_seconds,
+        outcome="empty" if _is_policy_empty(entry.policy) else "found",
+        raw_bytes_hash=entry.raw_bytes_hash or None,
+        expected_hash=expected_hash,
+        warnings=entry.warnings,
+    )
 
 
 def _cache_entry_files_exist(repo_ref: str, project_root: Path) -> bool:

@@ -3990,6 +3990,22 @@
         "tests/lifecycle/world/test_world.py::test_each_package_installs_through_the_real_cli",
         "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_codex_bundle_parks_until_the_printed_command_approves_it"
       ]
+    },
+    {
+      "issue": 4456,
+      "fixed_in": "Unreleased",
+      "summary": "An org policy cached under 7 days was not applied offline: the unreachable .github-private candidate hid the cached .github policy, so install, MCP install, lifecycle scripts and dry-run ran without it.",
+      "failure_modes": [
+        "cache",
+        "routing"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome",
+        "tests/unit/policy/test_discovery.py::TestAutoDiscover::test_unreachable_github_private_serves_the_recorded_stale_github_cache"
+      ]
     }
   ],
   "lifecycle_contracts": [
