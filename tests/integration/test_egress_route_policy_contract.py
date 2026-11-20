@@ -98,6 +98,11 @@ def _run(
     git_log = isolated.root / "git-network.log"
     bin_dir = isolated.root / "shim-bin"
     _install_git_shim(bin_dir, git_log)
+    # A host-installed Azure CLI sends its own telemetry; credential lookup
+    # must see "no az" so the snapshot records only APM's egress.
+    az = bin_dir / "az"
+    az.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    az.chmod(0o755)
 
     with _recording_proxy() as proxy:
         proxy_url = f"http://127.0.0.1:{proxy.server_port}"
