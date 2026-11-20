@@ -245,14 +245,37 @@ def test_root_must_exist(tmp_path: Path) -> None:
         build_inventory(missing)
 
 
-def test_a_directory_vanishing_mid_walk_is_skipped_not_fatal(tmp_path, monkeypatch) -> None:
-    """A concurrently removed scratch directory does not crash the inventory."""
+def test_walk_errors_fail_closed_including_missing_directories(tmp_path) -> None:
+    """Every traversal error, a vanished directory included, aborts the inventory."""
     from scripts.architecture_linter import inventory as inventory_module
 
-    error = FileNotFoundError(2, "No such file or directory", str(tmp_path / "gone"))
-    inventory_module._raise_walk_error(error)
-    with pytest.raises(inventory_module.InventoryError):
-        inventory_module._raise_walk_error(PermissionError(13, "denied", str(tmp_path)))
+    for error in (
+        FileNotFoundError(2, "No such file or directory", str(tmp_path / "gone")),
+        PermissionError(13, "denied", str(tmp_path)),
+    ):
+        with pytest.raises(InventoryError, match="cannot inventory repository"):
+            inventory_module._raise_walk_error(error)
+
+
+def test_source_subtree_vanishing_mid_walk_fails_the_inventory(tmp_path, monkeypatch) -> None:
+    """A source directory removed between listing and descent is never silently omitted."""
+    import os
+
+    _write_minimal_repo(tmp_path)
+    vanishing = tmp_path / "src" / "apm_cli" / "vanishing"
+    vanishing.mkdir(parents=True)
+    (vanishing / "module.py").write_text("", encoding="utf-8")
+    real_scandir = os.scandir
+
+    def _scandir(path=".", *args, **kwargs):
+        if Path(path) == vanishing.resolve():
+            (vanishing / "module.py").unlink()
+            vanishing.rmdir()
+        return real_scandir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "scandir", _scandir)
+    with pytest.raises(InventoryError, match="cannot inventory repository"):
+        build_inventory(tmp_path)
 
 
 def test_root_apm_modules_is_never_walked(tmp_path) -> None:

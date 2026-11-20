@@ -966,7 +966,10 @@ def test_agentrc_probe_never_poisons_the_git_executable_cache(tmp_path, monkeypa
     with _agentrc_on_path("/usr/bin/agentrc"):
         result = CliRunner().invoke(cli, ["init", "--yes", "demo"])
     assert result.exit_code == 0, result.output
-    assert git_env._git_executable != "/usr/bin/agentrc"
+    # init swallows a failed git call, so assert on the cache itself; compare
+    # resolved paths because Windows drive-qualifies the cached value.
+    assert git_env._git_executable is not None
+    assert Path(git_env._git_executable).resolve() != Path("/usr/bin/agentrc").resolve()
 
 
 class TestInitAgentrcSuggestion:
