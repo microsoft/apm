@@ -12,7 +12,22 @@
     "tests/integration/test_mcp_install_phase3w4.py::TestExcludeRuntime::test_exclude_all_runtimes_returns_zero": "tests/integration/test_mcp_install_flow.py::TestExcludeRuntime::test_exclude_all_runtimes_returns_zero",
     "tests/integration/test_github_downloader_phase3w4.py::TestDownloadVirtualFilePackage::test_frontmatter_description_extracted": "tests/integration/test_github_downloader_validation_flow.py::TestDownloadVirtualFilePackage::test_frontmatter_description_extracted",
     "tests/integration/test_github_downloader_phase3w4.py::TestDownloadSubdirectoryPersistentCache::test_persistent_cache_hit_used": "tests/integration/test_github_downloader_validation_flow.py::TestDownloadSubdirectoryPersistentCache::test_persistent_cache_hit_used",
-    "tests/integration/test_github_downloader_phase3w4.py::TestBuildNoninteractiveGitEnv::test_delegates_to_git_auth_env_builder": "tests/integration/test_github_downloader_validation_flow.py::TestBuildNoninteractiveGitEnv::test_delegates_with_downloader_git_environment"
+    "tests/integration/test_github_downloader_phase3w4.py::TestBuildNoninteractiveGitEnv::test_delegates_to_git_auth_env_builder": "tests/integration/test_github_downloader_validation_flow.py::TestBuildNoninteractiveGitEnv::test_delegates_with_downloader_git_environment",
+    "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_prompts_copilot_aliased": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_agents_copilot_aliased": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_instructions_copilot_aliased": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_instructions_cursor_aliased": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_instructions_claude_aliased": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_commands_claude_aliased": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_no_alias_falls_through": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_no_alias_opencode": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_data_driven_dispatch.py::TestPartitionBucketKey::test_copilot_prompts_alias": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_data_driven_dispatch.py::TestPartitionBucketKey::test_copilot_agents_alias": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_data_driven_dispatch.py::TestPartitionBucketKey::test_claude_commands_alias": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_data_driven_dispatch.py::TestPartitionBucketKey::test_cursor_instructions_alias": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_data_driven_dispatch.py::TestPartitionBucketKey::test_claude_instructions_alias": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/integration/test_data_driven_dispatch.py::TestPartitionBucketKey::test_unaliased_key_passthrough": "tests/unit/integration/test_base_integrator.py::TestPartitionBucketKey::test_bucket_key",
+    "tests/unit/install/test_skill_path_migration.py::TestPathTraversalRejection::test_regex_near_miss_rejects": "tests/unit/install/test_skill_path_migration.py::TestLegacySkillPattern::test_rejects_non_legacy"
   },
   "decisions": [
     "Step 1: deleted 216 D5 equal copies in scope; test_install_sources_phase3w4.py left with no tests and was removed.",

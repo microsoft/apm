@@ -2142,16 +2142,6 @@ class TestConfigCommandFinalPaths:
         assert result.exit_code == 0
         assert "false" in result.output.lower()
 
-    def test_config_get_audit_on_install_when_set(
-        self, runner: CliRunner, isolated_config: Path
-    ) -> None:
-        """apm config get shows audit-on-install in get-all when external_scanners enabled and set."""
-
-        with patch("apm_cli.core.experimental.is_enabled", return_value=True):
-            result = runner.invoke(cli, ["config", "get"])
-        assert result.exit_code == 0
-        assert "audit-on-install" in result.output
-
 
 # ---------------------------------------------------------------------------
 # update.py: global and check-only paths
