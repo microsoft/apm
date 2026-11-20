@@ -131,6 +131,10 @@ class IntegrationResult:
     # done in adopt-only runs instead of looking like a no-op.
     files_adopted: int = 0
 
+    # Hook files whose entries are registered after this call, written or
+    # unchanged; adoption display (RA-007) never changes it (#4033).
+    hooks_registered: int = 0
+
     # Hook transparency: per-file display metadata populated by HookIntegrator.
     # Each entry is a dict with keys: target_label, output_path, source_hook_file,
     # actions (list of {event, summary}), rendered_json.
