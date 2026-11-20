@@ -1,0 +1,17 @@
+{
+  "changelog": "`apm run` with an unknown script now ends with one runnable next step, `Run 'apm list'`, instead of a placeholder install command. (#4217)",
+  "ledger_row": {
+    "issue": 4205,
+    "fixed_in": "Unreleased",
+    "summary": "apm run with an unknown script listed the scripts but ended with a placeholder 'apm install <owner>/<repo>/...' line instead of a runnable next step.",
+    "failure_modes": ["observation", "outcome"],
+    "properties": ["outcome.status_matches_state", "transaction.failed_command_preserves_state"],
+    "regression_tests": [
+      "tests/integration/test_failure_next_step_lifecycle.py::test_run_unknown_script_lists_scripts_and_prints_runnable_next_step"
+    ]
+  },
+  "red": "APM_BINARY_PATH=\"$(uv run which apm)\" uv run --extra dev pytest tests/integration/test_failure_next_step_lifecycle.py::test_run_unknown_script_lists_scripts_and_prints_runnable_next_step -n 0 -p no:cacheprovider -q -> FAILED: assert len(steps) == 1 (assert 0 == 1; stdout ended with 'apm install <owner>/<repo>/path/to/prompt.prompt.md')",
+  "green": "same command -> 1 passed",
+  "owner": "src/apm_cli/core/script_runner.py (ScriptRunner.run_script not-found error)",
+  "notes": "Hint executed in the test: 'apm list' exits 0 and lists start/review with their commands. 'apm list' is a read-only navigation command, so the line stays compatible with PR #4143's contracts-tooling-remediation-advice rule (navigation hints are exempt); no catalog entry needed. Unit test tests/test_runnable_prompts.py updated (it pinned the placeholder). Docs: troubleshooting/common-errors.md Run section names the new next step."
+}
