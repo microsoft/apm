@@ -331,6 +331,8 @@ def install_local_bundle(
                 lockfile=lockfile,
                 lockfile_root=lockfile_path.parent,
                 diagnostics=migration_diagnostics,
+                # Not an integrating install: nothing was kept this run.
+                kept=(),
             )
             DeploymentLedgerCodec.record_local_bundle_files(
                 lockfile,

@@ -80,7 +80,7 @@ class DeploymentEvidence:
         render: Callable[[str | None], Path | None] | None,
         owners: Mapping[str, tuple[str, ...]] | None = None,
         user_scope: bool = False,
-        kept: Iterable[str] = (),
+        kept: Iterable[str],
     ) -> None:
         self._deploy_root = deploy_root
         self.user_scope = user_scope
@@ -99,7 +99,7 @@ class DeploymentEvidence:
     @classmethod
     def none(cls, deploy_root: Path) -> DeploymentEvidence:
         """Evidence that authorizes nothing: every lockfile-listed file is kept."""
-        return cls(deploy_root=deploy_root, receipts={}, render=None)
+        return cls(deploy_root=deploy_root, receipts={}, render=None, kept=())
 
     @classmethod
     def collect(
@@ -110,7 +110,7 @@ class DeploymentEvidence:
         lockfile: LockFile | None,
         lockfile_root: Path,
         diagnostics,
-        kept: Iterable[str] = (),
+        kept: Iterable[str],
     ) -> DeploymentEvidence:
         """Load this installation's receipts and bind a lazy render of *lockfile*.
 

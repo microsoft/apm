@@ -58,6 +58,7 @@ def _receipt_evidence(root: Path):
         lockfile=None,
         lockfile_root=root,
         diagnostics=DiagnosticCollector(),
+        kept=(),
     )
 
 

@@ -654,6 +654,7 @@ def test_synced_removal_retires_receipts_in_the_evidence_scope(
         receipts={target.resolve().as_posix(): compute_file_hash(target)},
         render=None,
         user_scope=user_scope,
+        kept=(),
     )
 
     result = remove_synced_files(

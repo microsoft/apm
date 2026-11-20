@@ -22,7 +22,7 @@ def receipted_evidence(*roots: Path, deploy_root: Path | None = None) -> Deploym
             if path.is_file() and not path.is_symlink():
                 receipts[path.resolve().as_posix()] = compute_file_hash(path)
     base = deploy_root if deploy_root is not None else (roots[0] if roots else Path.cwd())
-    return DeploymentEvidence(deploy_root=base, receipts=receipts, render=None)
+    return DeploymentEvidence(deploy_root=base, receipts=receipts, render=None, kept=())
 
 
 def seed_receipts(
