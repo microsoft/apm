@@ -506,9 +506,9 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
 
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
     recommend = tuple(getattr(getattr(policy, "executables", None), "recommend", None) or ())
+    user_scope = is_user_scope(getattr(ctx, "scope", None))
     if os.environ.get("APM_NON_INTERACTIVE") or os.environ.get("CI") or not sys.stdin.isatty():
         first = ctx.blocked_executables[0].package_name
-        user_scope = is_user_scope(ctx.scope)
         msg = (
             f"{len(ctx.blocked_executables)} package(s) have executable primitives "
             "parked pending approval; install completed without deploying them."
@@ -569,9 +569,9 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
             symbol="info",
         )
         logger.info(
-            f"Deploy later: {approve_command(first, user_scope=is_user_scope(ctx.scope))} "
-            f"(then re-run apm install{' -g' if is_user_scope(ctx.scope) else ''})  |  "
-            f"Why parked?: {explain_command(first, user_scope=is_user_scope(ctx.scope))}",
+            f"Deploy later: {approve_command(first, user_scope=user_scope)} "
+            f"(then re-run apm install{' -g' if user_scope else ''})  |  "
+            f"Why parked?: {explain_command(first, user_scope=user_scope)}",
             symbol="info",
         )
 

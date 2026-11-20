@@ -918,7 +918,8 @@ class TestApproveDenyCommandsIntegration:
         runner = CliRunner()
         result = runner.invoke(approve_cmd, ["nonexistent"])
 
-        assert result.exit_code == 0
+        # Approving nothing exits 1 (#4154).
+        assert result.exit_code == 1
         assert "not found" in result.output
 
     def test_approve_safe_package_no_executables(self, tmp_path: Path, monkeypatch) -> None:
@@ -932,7 +933,8 @@ class TestApproveDenyCommandsIntegration:
         runner = CliRunner()
         result = runner.invoke(approve_cmd, ["safe-pkg"])
 
-        assert result.exit_code == 0
+        # Approving nothing exits 1 (#4154).
+        assert result.exit_code == 1
         # safe-pkg has no executables so _scan_installed_packages skips it
         assert "not found" in result.output
 

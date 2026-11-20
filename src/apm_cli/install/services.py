@@ -668,14 +668,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     if skill_result.bin_deployed > 0 or skill_result.bin_skipped_reason:
         from apm_cli.install.exec_gate import log_bin_status
 
-        log_bin_status(
-            skill_result,
-            _skill_suffix,
-            package_name,
-            package_info,
-            _log_integration,
-            user_scope=is_user_scope(scope),
-        )
+        _bin_args = (skill_result, _skill_suffix, package_name, package_info, _log_integration)
+        log_bin_status(*_bin_args, user_scope=is_user_scope(scope))
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
     deployed.extend(

@@ -792,8 +792,8 @@ def parked_plugin_message(
         return (
             f"Parked native plugin {package}: a transitive plugin with MCP servers needs "
             "a pinned approval; 'mcp: true' is not enough\n"
-            f"    Review: {approve_command('--pending', user_scope=user_scope)}  |  "
-            f"Pin: {approve_command(package, user_scope=user_scope)}"
+            f"    Pin: {approve_command(package, user_scope=user_scope)}  |  "
+            "This run only: --trust-transitive-mcp"
         )
     why = (
         "content changed since approval" if reason == REASON_DEFINITION_CHANGED else "not approved"
