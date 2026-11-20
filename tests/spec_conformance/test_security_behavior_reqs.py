@@ -12,6 +12,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import tarfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -21,11 +22,13 @@ from types import SimpleNamespace
 import pytest
 import requests
 
+from apm_cli.bundle.packer import pack_bundle
 from apm_cli.core.auth import AuthResolver, _redact_secrets
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.registry.extractor import UnsafeTarballError, extract_tarball
 from apm_cli.install.phases.integrate import _run_executable_approval_prompt
+from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.policy.policy_checks import (
     _check_required_executable_untrusted,
@@ -39,6 +42,7 @@ from apm_cli.utils.http_credentials import (
     RedirectRefusedError,
     origin_bounded_request,
 )
+from tests.unit.test_packer import _setup_project
 
 _FAKE_PAT = "ghp_" + "Q" * 36
 
@@ -245,6 +249,66 @@ def test_unsafe_archive_entry_is_rejected(tmp_path: Path, bad: tuple) -> None:
     with pytest.raises(UnsafeTarballError):
         extract_tarball(data, hashlib.sha256(data).hexdigest(), tmp_path / "out")
     assert not (tmp_path / "escape.txt").exists()
+
+
+@pytest.mark.req("req-sc-002")
+@pytest.mark.xfail(strict=True, reason="#4235: archive extraction is not cleaned up on failure")
+def test_rejected_archive_leaves_no_partial_extraction(tmp_path: Path) -> None:
+    data = _tarball(("first.txt", None, b"ok"), ("../escape.txt", None, b"x"))
+    out = tmp_path / "out"
+    with pytest.raises(UnsafeTarballError):
+        extract_tarball(data, hashlib.sha256(data).hexdigest(), out)
+    assert not out.exists() or not any(out.iterdir())
+
+
+@pytest.mark.req("req-sc-005")
+@pytest.mark.xfail(strict=True, reason="S-pending")
+@pytest.mark.usefixtures("isolated_credentials")
+def test_token_scoped_to_its_host_class() -> None:
+    """A credential for one registrable domain is not resolved for another."""
+    context = AuthResolver().resolve("acme.ghe.com")
+    assert context.token != _FAKE_PAT
+
+
+# --- req-sc-006: plaintext registry URLs ---------------------------------------
+
+_V01_SCHEMA = "https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json"
+
+
+@pytest.mark.req("req-sc-006")
+@pytest.mark.xfail(strict=True, reason="#4286: http:// registry URLs are not gated at parse")
+@pytest.mark.parametrize("schema", [None, _V01_SCHEMA], ids=["default", "openapm-v0.1"])
+def test_plaintext_registry_url_needs_insecure_or_private_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: str | None
+) -> None:
+    import apm_cli.deps.registry.feature_gate as gate
+
+    monkeypatch.setattr(gate, "is_package_registry_enabled", lambda **_kw: True)
+    base: dict = {"name": "p", "version": "1.0.0"}
+    if schema:
+        base["$schema"] = schema
+
+    def load(entry: dict) -> APMPackage:
+        return APMPackage.from_mapping(
+            {**base, "registries": {"corp": entry}}, package_path=tmp_path, create_config=False
+        )
+
+    for url in ("http://127.0.0.1:8080", "http://10.0.0.5", "http://192.168.1.2"):
+        assert load({"url": url}).registries == {"corp": url}
+    assert load({"url": "http://r.example.com", "insecure": True}).registries
+    with pytest.raises(ValueError, match="corp"):
+        load({"url": "http://r.example.com"})
+
+
+@pytest.mark.req("req-sc-007")
+@pytest.mark.xfail(strict=True, reason="S-pending")
+@pytest.mark.parametrize("name", [".env", "server.pem", "id_ed25519"])
+def test_pack_refuses_credential_files(tmp_path: Path, name: str) -> None:
+    deployed = [".github/instructions/rules.md", f".github/skills/tool/{name}"]
+    project = _setup_project(tmp_path, deployed, target="vscode")
+    with pytest.raises(Exception, match=re.escape(name)):
+        pack_bundle(project, tmp_path / "build", fmt="apm")
+    assert not (tmp_path / "build").exists()
 
 
 def test_token_text_is_redacted_from_diagnostics() -> None:
