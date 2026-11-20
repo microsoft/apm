@@ -634,6 +634,7 @@ install-deployment-bundle-user-scope-root
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cleanup-ownership-release
+install-deployment-cleanup-target-roots
 install-deployment-cached-claude-skill-metadata
 install-deployment-codex-agent-link-resolution
 install-deployment-agent-render-then-adopt

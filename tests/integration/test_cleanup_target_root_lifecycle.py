@@ -1,0 +1,81 @@
+"""Installed-CLI proof: cleanup never removes a target root (#4132).
+
+Retiring the last file APM deployed under a target root (``.github/``) must
+leave that root in place: it existed before APM ran, and removing it makes
+the next install recreate it, so the retiring install is not a fixed point.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.lifecycle_state import LifecycleStateSnapshot
+from tests.utils.local_package import LocalPackageFactory
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.requires_e2e_mode,
+]
+
+_RULE = "---\napplyTo: '**'\ndescription: Retired rule\n---\nRetire me.\n"
+
+
+def _evidence(result: CommandResult) -> str:
+    return f"command={result.command!r}\nstdout={result.stdout!r}\nstderr={result.stderr!r}"
+
+
+def _tree(root: Path) -> dict[str, bytes | None]:
+    return {
+        path.relative_to(root).as_posix(): (path.read_bytes() if path.is_file() else None)
+        for path in sorted(root.rglob("*"))
+        if "apm_modules" not in path.relative_to(root).parts
+    }
+
+
+def test_retiring_the_last_deployed_file_keeps_the_target_root(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    isolated = IsolatedApmEnvironment.create(tmp_path / "roots", base_env=dict(os.environ))
+    packages = LocalPackageFactory(isolated.work_root)
+    project = packages.create("root-consumer", targets=("copilot",))
+    root = project.root
+    (root / ".github").mkdir()
+    dependencies = LocalPackageFactory(root / "packages")
+    dependency = dependencies.create("retired-rules")
+    dependencies.add_instruction(dependency, "retired", _RULE)
+    packages.replace_apm_dependencies(
+        project, ({"path": "./packages/retired-rules", "alias": dependency.name},)
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+    env = isolated.subprocess_env()
+
+    def install(label: str) -> CommandResult:
+        result = runner.run(("install",), cwd=root, env=env, scenario_id=f"roots-{label}")
+        assert result.returncode == 0, _evidence(result)
+        return result
+
+    install("deploy")
+    assert (root / ".github/instructions/retired.instructions.md").is_file()
+
+    packages.replace_apm_dependencies(project, ())
+    before = LifecycleStateSnapshot.capture(root, targets=("copilot",))
+    install("retire")
+    after = LifecycleStateSnapshot.capture(root, targets=("copilot",))
+
+    assert not (root / ".github/instructions/retired.instructions.md").exists()
+    assert (root / ".github").is_dir(), "the pre-existing target root was removed"
+    changed = {state.relative_path for state in after.files} ^ {
+        state.relative_path for state in before.files
+    }
+    assert ".github" not in changed
+
+    converged = _tree(root)
+    install("repeat")
+    assert _tree(root) == converged

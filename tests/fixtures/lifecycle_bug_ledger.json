@@ -590,6 +590,16 @@
       ]
     },
     {
+      "issue": 4132,
+      "fixed_in": "0.37.0",
+      "summary": "Retiring the last file deployed under a target root removed the root itself (for example a pre-existing .github/), so the next install recreated it and the retiring install was not a fixed point.",
+      "failure_modes": ["cleanup", "idempotency"],
+      "properties": ["idempotency.byte_stable", "ownership.preserve_unowned"],
+      "regression_tests": [
+        "tests/integration/test_cleanup_target_root_lifecycle.py::test_retiring_the_last_deployed_file_keeps_the_target_root"
+      ]
+    },
+    {
       "issue": 4153,
       "fixed_in": "Unreleased",
       "summary": "A user-scope install refused every relative local_path, including one declared by a dependency, and dropped that transitive dependency without a diagnostic while exiting 0; an unresolvable transitive local dependency also exited 0 at project scope.",

@@ -209,6 +209,7 @@
       "guards": [
         "install-deployment-base-integrator",
         "install-deployment-cleanup-ownership-release",
+        "install-deployment-cleanup-target-roots",
         "install-deployment-codex-agent-link-resolution",
         "install-deployment-agent-render-then-adopt"
       ]
