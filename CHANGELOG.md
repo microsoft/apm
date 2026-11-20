@@ -89,6 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - After `apm deny`, `--frozen` names the executables gate, `apm approve` clears the deny and says so, and `apm deny --user` works outside a project. (closes #3957, #3988)
 - `apm targets` lists the targets `apm.yml` declares as active, as install resolves them. (closes #3792, #3988)
 - Messages name `targets:`, `executables.allow` and "marketplace", and generated `apm.yml` headers and target errors no longer list the deprecated `vscode`. (#3988)
+- `apm install` reports pinned hooks denied by org policy or `apm deny --user` as denied, pointing to `apm policy explain`, instead of suggesting `apm approve`. (closes #4044, #4055)
 
 ### Security
 

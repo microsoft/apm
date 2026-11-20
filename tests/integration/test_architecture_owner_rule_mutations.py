@@ -806,8 +806,13 @@ def test_local_bundle_hooks_must_use_canonical_owner(path: str, old: str, new: s
         ),
         (
             "src/apm_cli/install/exec_gate.py",
-            "denied = denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
-            "denied = frozenset(unapproved)",
+            "denied |= denied_exec_types(ctx.exec_trust_ctx, candidate_keys, unapproved)",
+            "denied |= frozenset(unapproved)",
+        ),
+        (
+            "src/apm_cli/install/exec_gate.py",
+            "denied = frozenset(t for t, status in pinned_status.items() if status == TRUST_DENIED)",
+            "denied = frozenset()",
         ),
     ],
 )
