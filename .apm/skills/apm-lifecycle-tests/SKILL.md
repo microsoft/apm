@@ -54,8 +54,9 @@ orphan handling.
 Run `ls tests/lifecycle/conftest.py`.
 
 - Present: use the target family (world, driver, model, oracles,
-  receipts, machines, replay rows). Read the TARGET section of
-  `references/family.md`.
+  receipts, replay rows in `tests/lifecycle/replay/rows/*.yaml` run by
+  `tests/lifecycle/rows.py`). Read the TARGET section of
+  `references/family.md` and verify each name there with `ls`/`grep`.
 - Absent (today): use the current harness: `ApmLifecycleRunner`,
   `IsolatedApmEnvironment`, `LifecycleStateSnapshot`,
   `LocalPackageFactory`, the `tests/integration/_*_kit.py` worlds, and
@@ -72,8 +73,10 @@ Run `ls tests/lifecycle/conftest.py`.
   `tests/fixtures/lifecycle_bug_ledger.json`); OpenAPM `req-*` ids
   (`CONFORMANCE.json`); owner decisions
   (`.apm/architecture/owners/*.json`); `CHANGELOG.md` guarantees; docs
-  claims with must / never / fails / exits wording. If a promise
-  catalog exists under `tests/quality/`, use its ids. Write:
+  claims with must / never / fails / exits wording. When
+  `tests/lifecycle/` is present, rows use `P-INV-I1`..`P-INV-I9` and
+  `P-LAW-<ledger property id>`; owner ids (`P-OWN-*`) resolve only
+  once a promise catalog exists. Write:
   `PROMISE: <id> -- <sentence> (source: <path>)`.
 - CELL. A factor tuple. Factors: OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED,
   GATE, TGT, NET; modifiers FROZEN, DRYRUN, FORCE, SELECT, UPDATE,
@@ -109,11 +112,11 @@ unexplained, not automatically deletable.
 
 | Situation | Today (no `tests/lifecycle/`) | Target family |
 |---|---|---|
-| one cell, fixed steps | `ApmLifecycleRunner` test or parametrize case in the matching `tests/integration/*lifecycle*.py` | replay row YAML |
-| transition that must hold from many states | case in `test_required_lifecycle_state_machine.py` or rule in `test_generated_lifecycle_state_machine.py` | rule in a `machines/test_m_*` machine |
-| history, ownership of unmanaged assets, platform, failure phase, cache, graph or version, concurrency | scenario on a `_*_kit.py` world | `scenarios/` suite |
-| trust, policy outcomes, integrity, egress, origin, credentials | table-driven E2E with egress log or snapshot-absence oracle | `security/` table row |
-| docs golden path or user-visible transcript | real-CLI journey with every printed hint executed | `journeys/` step + golden |
+| one cell, fixed steps | `ApmLifecycleRunner` test or parametrize case in the matching `tests/integration/*lifecycle*.py` | replay row in `tests/lifecycle/replay/rows/*.yaml` |
+| transition that must hold from many states | case in `test_required_lifecycle_state_machine.py` or rule in `test_generated_lifecycle_state_machine.py` | state-machine rule, where the family provides machines (verify with `ls`) |
+| history, ownership of unmanaged assets, platform, failure phase, cache, graph or version, concurrency | scenario on a `_*_kit.py` world | planned scenario suite; today's harness until present |
+| trust, policy outcomes, integrity, egress, origin, credentials | table-driven E2E with egress log or snapshot-absence oracle | planned security table; today's harness until present |
+| docs golden path or user-visible transcript | real-CLI journey with every printed hint executed | planned journey step + golden; today's harness until present |
 | flag combination the command must refuse | ONE refusal test (exit code + unchanged snapshot) | same |
 | owner decision | table-driven test at the owner symbol (owner not patched) + one E2E | same |
 
@@ -128,10 +131,14 @@ Start from `assets/templates.md`. Mandatory properties:
 - Hermetic world: isolated HOME and APM_HOME, local packages or local
   git remotes, local marketplace or MCP registry when needed. No
   network, no credentials.
-- Real CLI: the packaged binary (`apm_binary_path`). The engine
-  command (`apm_engine_command`, `python -m apm_cli.cli`) only for
-  exploration or engine contracts. Never CliRunner for a lifecycle
+- Real CLI (today): the packaged binary (`apm_binary_path`). The
+  engine command (`apm_engine_command`, `python -m apm_cli.cli`) only
+  for exploration or engine contracts. Never CliRunner for a lifecycle
   promise.
+- Real CLI (when `tests/lifecycle/` is present): run every command
+  through `driver.run(world, argv, scope=...)`; never choose the entry
+  point yourself. `APM_LIFECYCLE_DRIVER` selects `engine` (PR default)
+  or `binary` (nightly).
 - Capture stdout, stderr and exit code separately.
 - Snapshot `LifecycleStateSnapshot` before and after each mutating
   command; assert the exact changed set and that nothing else changed.
@@ -181,7 +188,7 @@ lint contract before pushing.
   `assets/templates.md`), sorted by issue. Validate with
   `uv run --extra dev pytest tests/quality/test_lifecycle_bug_ledger.py -q`.
   Every Fixed line in `CHANGELOG.md` maps to a ledger row.
-- New promise: if a promise catalog exists, add its id there.
+- New promise: when a promise catalog exists, add its id there.
 
 ### Step 9 -- execute every printed hint
 

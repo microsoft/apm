@@ -30,6 +30,14 @@ before and after (`tests/utils/artifact_snapshot.py`).
 | I8 exit contract | the documented codes hold: 0 success, 1 error, 2 usage; `apm pack` also documents 3, 4, 5 in `apm pack --help` | `assert result.returncode == expected_exit`, never just `!= 0` |
 | I9 no noise | each status line (`[+]`, `[!]`, `[x]`, `[i]`, `[*]`, `[>]`) appears once per cause; no tracebacks; no warnings for absent features | count status lines per stream (table borders may repeat) |
 
+Target strength. When `tests/lifecycle/` is present, its oracles are
+currently weaker than this table: I3 compares exit codes only, not
+remediation yet; I7 announcements are checked only through a row's
+`announce` field; I9 checks consecutive duplicate lines, duplicate
+integrated lines and tracebacks, with no per-cause count; I8 uses the
+family's exit contracts (audit 0-3, pack 0-5, default 0-2). Add the
+missing strength in your test when the promise depends on it.
+
 Route every `CommandResult` through one helper that applies I6 and I9
 (see `_assert_output_oracles` in `assets/templates.md`), so a new
 command cannot skip them.
@@ -77,10 +85,11 @@ Before claiming coverage, delete or invert the decisive assertion (or
 the oracle call) and rerun: the test must stop detecting the defect.
 Restore it and record the command and result.
 
-## Receipts (TARGET family only)
+## Receipts (TARGET family, when present)
 
-When `tests/lifecycle/receipts.py` exists, credit is issued by the
-oracle helper, never by the test body or a marker. A receipt records
+When `tests/lifecycle/receipts.py` is present, credit is issued only
+through `receipts.emit` from the oracles (any other caller raises
+`ReceiptForgeryError`), never by the test body or a marker. A receipt records
 node and parameters, pre-state digest, argv and scope, post-state
 evidence (snapshot digest, egress log or transcript), oracle id,
 outcome and CI lane. Skips, early returns, labels, markers and

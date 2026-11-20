@@ -121,11 +121,17 @@ directory (`_new_scenario(tmp_path / "world", apm_binary_path)`;
 `IsolatedApmEnvironment.create` refuses an existing root), and do not
 reuse its `_INSTALL_ARGS`, which carries `--no-policy`.
 
-## B. Replay row (only when `tests/lifecycle/replay/` exists)
+## B. Replay row (only when `tests/lifecycle/replay/rows/` is present)
+
+Save as `tests/lifecycle/replay/rows/<id-slug>.yaml`; `tests/lifecycle/rows.py`
+(`RowReplay`) runs it. Until a promise catalog exists, promise ids
+resolve only as `P-INV-I1`..`P-INV-I9` and `P-LAW-<ledger property id>`;
+owner ids (`P-OWN-*`) resolve once the catalog exists. Scope is
+`project` only for now.
 
 ```yaml
 id: T1/update/revoked/lsp
-promises: [P-INV-I4, P-OWN-executable-trust-context]   # ids must resolve in the promise catalog
+promises: [P-INV-I4, P-LAW-outcome.status_matches_state]
 cell: {OP: update, SRC: git, PRIM: lsp, SCOPE: project, GATE: revoked-after-deploy}
 world: {packages: [p-lsp, p-skill], targets: [copilot, claude], scope: project}
 given:
@@ -134,12 +140,16 @@ given:
   - apm install
 when:
   - apm deny p-lsp
-  - apm update --yes
+  - {run: apm update --yes, exit: 0}
+  - {pair: [apm audit --ci, apm install --frozen]}   # I3 probe
 then:
   exit: 0
   deployed: expected        # reference model: LSP config gone, skill kept
-  announce: retired         # I7
+  announce: "<substring of the line announcing the removal>"   # I7
 ```
+
+A step is a plain command line, `{run, exit}`, or
+`{pair: [<audit --ci line>, <install --frozen line>]}`.
 
 ## C. Bug-ledger row
 

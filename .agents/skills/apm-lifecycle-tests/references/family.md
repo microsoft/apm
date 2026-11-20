@@ -47,48 +47,58 @@ Placement: `tests/integration/test_<promise>_lifecycle.py`, or extend
 the module that already owns the promise
 (`grep -rln '<promise words>' tests/integration`).
 
-## TARGET -- `tests/lifecycle/` (in progress; use only if it exists)
+## TARGET -- `tests/lifecycle/` (in progress; use only when present)
 
 Until `ls tests/lifecycle/conftest.py` succeeds this section describes
-intent, not code. Do not cite these files as present.
+intent, not code. When it is present, verify each name below with
+`ls`/`grep` before citing it.
 
 ```text
 tests/lifecycle/
-  conftest.py  driver selection, world fixture, receipts plugin, global output oracle
-  world/       builder.py: template world built once per xdist worker
-               packages.py: p-skill, p-exec (hooks + bin + MCP stdio), p-lsp,
-                 p-parent / p-parent2 -> p-child, p-native-claude,
-                 p-native-codex, p-canvas
-               services.py: local git HTTPS server, local marketplace, local
-                 MCP registry, policy repo variants, scripted HTTPS proxy
-                 with egress log, host aliases
-               clone.py: copy-on-write clone per test
-  model/       state.py ModelState; expected.py expected_deployed(),
-               expected_lock_rows(), expected_exit()
-  driver.py    APM_LIFECYCLE_DRIVER=engine|binary
-  oracles.py   check_cross_cutting(before, after, result, model, op) for I1-I9
-  receipts.py  written by the oracle only, never by the caller
-  machines/    test_m_spine, test_m_gate, test_m_source, test_m_scope_lock
-               (<= 10 rules each; deployed == expected_deployed(model) and
-               I1-I9 after every step)
-  replay/      rows/*.yaml (given / when / then) + test_covering_replay.py
-  scenarios/   history_upgrade, ownership_siblings, platform, failure_phase,
-               cache_presence, graph_version, concurrency
-  security/    gate removal, policy outcomes, integrity, egress,
-               origin and credentials tables
-  journeys/    consumer/, producer/, enterprise/ *.yaml, goldens/*.txt,
-               test_journeys.py, regen_goldens.py
-tests/quality/test_promise_obligations.py   quality gate
+  conftest.py   world fixture, receipts plugin, global output hook
+  world/        template world built once per xdist worker, cloned
+                copy-on-write per test; packages (skill, executables with
+                hooks + bin + MCP stdio, LSP, parent/child graph, native
+                Claude and Codex plugins, canvas) and local services (git
+                HTTPS server, marketplace, MCP registry, policy repo
+                variants, scripted HTTPS proxy with egress log, host aliases)
+  driver.py     driver.run(world, argv, scope=...); APM_LIFECYCLE_DRIVER
+                selects engine (PR default) or binary (nightly)
+  model/
+    state.py    ModelState (pure)
+    expected.py expected_deployed, expected_lock_rows, expected_exit,
+                EXIT_CONTRACTS
+  oracles.py    operation_for(args); check_output (global output hook);
+                cross-cutting I1-I9 checks
+  receipts.py   receipts.emit, callable only by the oracles; any other
+                caller raises ReceiptForgeryError
+  obligations.py  promise catalog, required/baseline ratchet, witness check
+  rows.py       RowReplay, the replay-row runner
+  replay/rows/*.yaml   replay rows
+tests/quality/promise_obligations.json   P-INV-I1..I9 obligations
 ```
 
-Where a new test goes in the target family:
+Planned, not yet present: state machines, scenario suites (history,
+ownership, platform, failure phase, cache, graph/version,
+concurrency), security tables and docs journeys. Use today's harness
+for those until `ls` shows them.
 
-- an uncovered cell: a replay row;
-- a transition rule: the matching machine;
-- a defect outside the factor vocabulary: a scenario suite;
-- a documented flow: a journey step.
+Rules when present:
 
-Rules: every replay row names promise ids that resolve in the promise
-catalog; no `--no-policy` unless it is the subject; a new command,
-flag, target, source kind or owner regenerates obligations, and new
-obligations fail the quality gate until covered.
+- Run commands only through `driver.run`; never pick the entry point.
+- Row promise ids resolve only as `P-INV-I1`..`P-INV-I9` and
+  `P-LAW-<ledger property id>` until a promise catalog exists; owner
+  ids (`P-OWN-*`) resolve once it does.
+- Row schema: `id`, `promises`, `cell`, `world{packages, targets,
+  scope}`, `given`, `when`, `then{exit, deployed: expected, announce:
+  <substring>}`. A step is a plain command line, `{run, exit}`, or
+  `{pair: [<audit --ci line>, <install --frozen line>]}` (the I3
+  probe). Scope is `project` only for now. Template in
+  `assets/templates.md`.
+- No `--no-policy` unless it is the subject.
+- A new command, flag, target, source kind or owner regenerates
+  obligations; new obligations fail the ratchet until covered.
+
+Where a new test goes: an uncovered cell -> a replay row; anything
+the row schema cannot express -> today's harness until the matching
+suite exists.
