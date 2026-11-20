@@ -6,7 +6,8 @@ newer APM generated before changing anything (source:
 deps/lockfile_generator.py).
 PROMISE: P-OWN-legacy-mcp-ownership-key-migration -- the first install after an
 upgrade moves APM-written copilot MCP entries out of the retired
-``.github/mcp.json`` into ``.mcp.json`` and keeps the file (source:
+``.github/mcp.json`` into ``.mcp.json``; a retired file APM wrote that the
+move leaves empty is deleted while Copilot stays selected (#4524) (source:
 install/mcp/retired_destinations.py, install/mcp/ownership.py).
 
 Prior generators come from ``tests/fixtures/upgrade_0361/t2``: the consumer
@@ -115,7 +116,9 @@ def test_upgrade_from_prior_generator(lifecycle_world, generator) -> None:
     assert data["apm_version"] == _running_version(scenario)
     assert {path: (project / path).read_bytes() for path in DEPLOYED} == deployed
     assert "srv" in _servers(project / ".mcp.json")
-    assert "srv" not in _servers(project / ".github/mcp.json"), "the retired entry is healed"
+    # The fixture's retired file holds only APM's entry and Copilot stays
+    # declared, so the healed, emptied file is deleted (#4524).
+    assert not (project / ".github/mcp.json").exists(), "the emptied retired file is deleted"
 
     scenario.pair()
     rerun = scenario.run("install")
