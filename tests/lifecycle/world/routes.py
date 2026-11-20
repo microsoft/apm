@@ -7,9 +7,11 @@
   GitHub-style zip archives (``{repo}-{ref}/`` root) of the world's git
   repositories, bearer token required.
 - ``forbid_direct``: the "unproxied route" mode. Every direct content host
-  (git, APIs, raw, marketplace and MCP registry) answers 403 and is still
-  recorded, so a test proves ``PROXY_REGISTRY_ONLY`` never goes direct. Org
-  policy repositories stay reachable: policy fetches are direct by design.
+  (git, APIs, raw, marketplace) answers 403 and is still recorded, so a test
+  proves ``PROXY_REGISTRY_ONLY`` never goes direct. Sanctioned routes stay
+  reachable: org policy repositories (policy fetches are direct by design),
+  the operator-configured MCP registry (``MCP_REGISTRY_URL``) and the package
+  registry bound in user config.
 """
 
 from __future__ import annotations

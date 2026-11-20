@@ -306,7 +306,11 @@ class WorldServices:
         self.script(host, path_prefix, status, {"Location": location})
 
     def forbid_direct(self, forbidden: bool = True) -> None:
-        """Proxy-only mode: every direct content host answers 403 (still recorded)."""
+        """Proxy-only mode: every direct content host answers 403 (still recorded).
+
+        Sanctioned routes stay open: the registry proxy, the operator-configured
+        MCP registry and package registry, and org policy fetches.
+        """
         self.routes.direct_forbidden = forbidden
 
     def _bare_for(self, slug: str) -> Path:
@@ -399,14 +403,21 @@ class WorldServices:
 
     def handlers(self) -> dict[str, Handler]:
         direct: dict[str, Handler] = {GITHUB_HOST: self._git, RAW_HOST: self._raw}
-        direct[REGISTRY_HOST] = self._registry
-        direct[package_registry.HOST] = self.package_registry.handle
         for host in _API_HOSTS:
             direct[host] = self._api
         for host, _prefix in HOST_ALIASES.values():
             direct[host] = self._git
         handlers = {host: self._routed(handler, direct=True) for host, handler in direct.items()}
-        handlers[routes.PROXY_HOST] = self._routed(self.registry_proxy.handle, direct=False)
+        # Operator-configured registries stay reachable in proxy-only mode:
+        # PROXY_REGISTRY_ONLY sanctions the MCP registry named by MCP_REGISTRY_URL
+        # (registry/client.py) and the package registry bound in user config.
+        sanctioned: dict[str, Handler] = {
+            REGISTRY_HOST: self._registry,
+            package_registry.HOST: self.package_registry.handle,
+            routes.PROXY_HOST: self.registry_proxy.handle,
+        }
+        for host, handler in sanctioned.items():
+            handlers[host] = self._routed(handler, direct=False)
         for host in routes.MIRROR_HOSTS:
             handlers[host] = self._routed(lambda _request: _not_found(), direct=False)
         return handlers
