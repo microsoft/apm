@@ -554,8 +554,9 @@ coupled edits in the same PR:
    `tests/spec_conformance/`. If a real assertion is not yet possible, call
    `waive("...")` from `_helpers.py` with a one-line rationale. The waiver
    appears in `CONFORMANCE.md` as visible debt, not test coverage.
-   Only a behavioral test counts as coverage: one that reaches `apm_cli`,
-   `tests.integration`, `tests.unit` or `tests.utils`, or takes the
+   Only a behavioral test counts as coverage: one that reaches `apm_cli`
+   (not its constants or YAML helpers), `tests.integration`, `tests.unit` or
+   the CLI runner `tests.utils.apm_lifecycle_runner`, or takes the
    `apm_binary_path` fixture. A requirement whose tests only assert spec text or
    fixture shape is reported `text-only` (rule:
    `tests/spec_conformance/_test_kind.py`).

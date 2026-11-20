@@ -183,7 +183,7 @@ def test_concurrent_lifecycle_trust_keeps_every_trust_record(
     records = _records(workspace.store)
     assert str((workspace.holder_project / "apm.yml").resolve()) in records
     assert str((workspace.command_project / "apm.yml").resolve()) in records, (
-        "apm lifecycle trust reported success but its record was lost to a "
+        "the trust record apm lifecycle trust reported must be present after a "
         f"concurrent lifecycle writer:\n{output}"
     )
     assert _WAITING_MARKER in output
@@ -203,7 +203,7 @@ def test_concurrent_lifecycle_untrust_keeps_the_revocation(
     records = _records(workspace.store)
     assert str((workspace.holder_project / "apm.yml").resolve()) in records
     assert command_key not in records, (
-        "apm lifecycle untrust reported a revocation that a concurrent lifecycle "
-        f"writer undid:\n{output}"
+        "the revocation apm lifecycle untrust reported must hold after a concurrent "
+        f"lifecycle writer:\n{output}"
     )
     assert _WAITING_MARKER in output

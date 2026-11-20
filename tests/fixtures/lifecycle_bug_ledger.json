@@ -594,7 +594,7 @@
     {
       "issue": 4091,
       "fixed_in": "0.37.0",
-      "summary": "apm lifecycle trust and untrust wrote the script trust store outside the cross-process lifecycle serialization owner, so a concurrent lifecycle writer could drop a recorded trust or restore a revoked one while the command reported success.",
+      "summary": "apm lifecycle trust and untrust write the script trust store inside the cross-process lifecycle serialization owner, so a concurrent lifecycle writer keeps every recorded trust and revocation.",
       "failure_modes": [
         "transaction",
         "outcome"
@@ -608,9 +608,41 @@
       ]
     },
     {
+      "issue": 4179,
+      "fixed_in": "0.37.0",
+      "summary": "apm install --mcp under policy.fetch_failure_default: block exits 1 with the policy refusal reason, and the --no-policy retry it names works.",
+      "failure_modes": ["outcome", "observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_mcp_policy_block_reason_lifecycle.py::test_blocked_mcp_install_prints_the_reason"
+      ]
+    },
+    {
+      "issue": 4182,
+      "fixed_in": "0.37.0",
+      "summary": "A command frontmatter key the target format cannot carry (for example mode: for Claude commands) is a verbose note on install and install --frozen, never a [!] warning.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_command_frontmatter_note_lifecycle.py::test_dropped_command_key_is_a_verbose_note"
+      ]
+    },
+    {
+      "issue": 4183,
+      "fixed_in": "0.37.0",
+      "summary": "apm install warns about unpinned dependencies the user's apm.yml declares, with the exact pin; a transitive one is a verbose note naming the declaring package, and a converged run repeats no notice.",
+      "failure_modes": ["observation", "outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_unpinned_hint_lifecycle.py::test_unpinned_transitive_hint_names_a_working_pin",
+        "tests/unit/install/test_finalize_phase.py::TestFinalizeUnpinnedWarning::test_transitive_unpinned_is_verbose_only_and_names_its_parent",
+        "tests/unit/install/test_finalize_phase.py::TestFinalizeUnpinnedWarning::test_converged_run_repeats_no_unpinned_notice"
+      ]
+    },
+    {
       "issue": 4184,
       "fixed_in": "0.37.0",
-      "summary": "A converged apm install reported unchanged commands, skills and hooks as integrated and claimed to install dependencies, local packages and the project root's own .apm content always counted as installed dependencies, and uninstall counted one package once per store with internal names and an absolute manifest path.",
+      "summary": "A converged apm install changes no bytes, reports no integrated item, warning or installed count, and ends with 'No changes -- install state already up to date'; local packages and the project's own .apm content count only when they change; uninstall counts each package once with its manifest spelling and a relative apm.yml path.",
       "failure_modes": ["idempotency", "observation", "outcome"],
       "properties": ["idempotency.byte_stable", "outcome.status_matches_state"],
       "regression_tests": [

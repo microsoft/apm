@@ -2,7 +2,7 @@
 
 Promise (install summary, deployment owner): a second plain ``apm install`` on
 a converged project changes no bytes, prints no "integrated" line for any
-package, and does not claim to have installed anything; the project root's own
+package, repeats no warning, and does not claim to have installed anything; the project root's own
 ``.apm/`` content is never counted as an installed APM dependency.
 """
 
@@ -40,7 +40,7 @@ def _project(root: Path) -> Path:
     )
     _write(
         package / ".apm" / "prompts" / "review.prompt.md",
-        "---\ndescription: Review the change\n---\n\nReview $ARGUMENTS.\n",
+        "---\ndescription: Review the change\nmode: agent\n---\n\nReview $ARGUMENTS.\n",
     )
     _write(
         package / ".apm" / "instructions" / "style.instructions.md",
@@ -101,3 +101,4 @@ def test_converged_install_reports_no_change(apm_binary_path: Path, tmp_path: Pa
     assert "integrated" not in second, second
     assert "Installed" not in second, second
     assert "already up to date" in second, second
+    assert "[!]" not in second, second

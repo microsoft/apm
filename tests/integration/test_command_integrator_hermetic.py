@@ -350,9 +350,9 @@ class TestIntegrateCommand:
             )
 
         assert (links_resolved, written, had_dropped) == (0, True, True)
-        diagnostics.warn.assert_called_once()
-        assert "frontmatter keys not supported" in diagnostics.warn.call_args.kwargs["message"]
-        assert "author" in diagnostics.warn.call_args.kwargs["message"]
+        diagnostics.warn.assert_not_called()
+        assert "frontmatter keys not supported" in diagnostics.info.call_args.kwargs["message"]
+        assert "author" in diagnostics.info.call_args.kwargs["message"]
 
     def test_emits_mapped_arguments_info(self, tmp_path: Path) -> None:
         package_info = _make_package_info(tmp_path)
