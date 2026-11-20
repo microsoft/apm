@@ -1448,10 +1448,9 @@ def _sync_integrations_after_uninstall(
     from ...security.executables import closed_exec_map, resolve_project_exec_allow_map
 
     # Trust is resolved only when survivors are rebuilt; nothing else consumes it.
-    _allow_executables = None
-    if target_survivor_plan:
-        # The command resolved survivor trust before its first write (#4185).
-        _allow_executables = resolve_project_exec_allow_map(
+    # The command resolved survivor trust before its first write (#4185).
+    _allow_executables = (
+        resolve_project_exec_allow_map(
             project_root,
             apm_package,
             user_scope=user_scope,
