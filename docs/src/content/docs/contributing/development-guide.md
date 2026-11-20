@@ -389,6 +389,23 @@ files, or `apm.lock.yaml`. Each owner entry has `id`, `decision`, `owner`,
 `selectors`, and `guards` fields; this metadata is an ownership registry, not a
 rule DSL.
 
+An owner may also carry the blast-radius overlay that PR test selection reads.
+The four fields are all-or-none:
+
+- `modules`: repo-relative globs under `src/apm_cli/` (`fnmatch`, `*` crosses
+  `/`) that the owner answers for. They must cover the owner's own `src/`
+  selectors, and each must match a file.
+- `families`: globs under `tests/integration/` naming the test modules that
+  prove the owner's promises.
+- `state`: sorted durable-state surfaces from `approvals`, `cache`,
+  `compiled-output`, `credentials`, `deployed-files`, `egress`, `lockfile`,
+  `manifest`, `mcp-config`, `user-scope`.
+- `promises`: sorted ids from `tests/quality/promise-catalog.json`
+  (`P-INV-I<n>`, `P-LAW-<ledger property id>`, `P-OWN-<owner id>`). Without the
+  catalog, the lifecycle bug ledger's `property_catalog` is the fallback.
+
+A changed `src/` file that no owner's `modules` match is unowned.
+
 When centralizing behavior, add a behavioral test and register a semantic static
 guard. Run the stable architecture check with:
 
