@@ -539,6 +539,18 @@
       "regression_tests": [
         "tests/quality/test_ci_topology.py::test_pr_windows_gate_runs_every_windows_unit_node"
       ]
+    },
+    {
+      "issue": 4118,
+      "fixed_in": "Unreleased",
+      "summary": "PERF-H5: apm --help imported every command module and GitPython (767 modules, spawning git version); verbs now load lazily under an installed-CLI import budget with help output and exit codes unchanged.",
+      "failure_modes": ["outcome"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/integration/test_cli_startup_import_budget.py::test_installed_cli_startup_stays_within_import_budget",
+        "tests/unit/test_cli_lazy_dispatch.py::test_root_help_from_stubs_matches_resolved_commands",
+        "tests/unit/test_cli_lazy_dispatch.py::test_lazy_stub_short_help_matches_resolved_command"
+      ]
     }
   ],
   "lifecycle_contracts": [
