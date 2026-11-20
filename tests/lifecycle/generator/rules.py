@@ -180,7 +180,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         (
             Ev(
                 "src/apm_cli/install/manifest_reconcile.py",
-                766,
+                696,
                 "canonical target-contraction owner",
             ),
         ),
