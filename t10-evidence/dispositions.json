@@ -1869,7 +1869,9 @@
    "why": "Traps org executables.deny matching every package spelling over project allow; needs org policy HTTPS fixture and spelling variants."
   },
   {
+   "absorb_note": "Row is not a superset of the source param (lock field values and per-step output text), so the param stays; the row earns uncovered obligations P-INV-I7|op:uninstall, P-INV-I7|op:update, P-INV-I7|op:approve-deny.",
    "absorb_row": null,
+   "absorb_superset": false,
    "absorbed_cells": [
     "test_audit_and_update_honor_the_current_executables_decision[copilot] -> tests/lifecycle/replay/rows/absorbed_update_executables_decision.yaml"
    ],
@@ -8144,7 +8146,12 @@
    "why": "Deletion fault injection validates transactional cleanup behavior."
   },
   {
+   "absorb_note": "Row is not a superset of the source param (lock field values and per-step output text), so the param stays; the row earns uncovered obligations P-INV-I7|op:uninstall, P-INV-I7|op:update, P-INV-I7|op:approve-deny.",
    "absorb_row": null,
+   "absorb_superset": false,
+   "absorbed_cells": [
+    "test_lsp_only_uninstall_removes_the_server_and_keeps_survivors[project] (LSP-only scope uninstall part; survivor assertion stays) -> tests/lifecycle/replay/rows/absorbed_uninstall_lsp_only_scope.yaml"
+   ],
    "commands": [
     "install",
     "uninstall"

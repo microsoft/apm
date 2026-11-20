@@ -13,6 +13,9 @@ given:
 when:
   - apm approve p-exec
   - apm update --yes
+  - apm approve p-exec
+  - {run: apm deny --no-such-flag, exit: 2}
+  - {run: apm update --no-such-flag, exit: 2}
   - apm deny p-exec
   - {run: apm audit --ci, exit: 1}
   - apm update --dry-run
