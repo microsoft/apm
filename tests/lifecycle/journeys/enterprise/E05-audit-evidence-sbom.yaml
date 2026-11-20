@@ -1,0 +1,59 @@
+# E05 Audit evidence and SBOM; nightly (#4110). Schema: test_journeys.py.
+# The lockfile comes from a real install of the world package lifecycle/p-skill.
+# Step 4: 'apm deps list' has no --json flag (reference/cli/deps.md documents
+# --json on 'apm deps why'), so the JSON evidence comes from 'deps why --json'.
+schema: 1
+id: E05
+persona: enterprise
+title: Audit evidence and SBOM
+docs: [reference/cli/lock.md, reference/cli/audit.md, enterprise/security.md]
+# O4 runs on JSON documents too: their structural lines repeat by design.
+allow_repeat: ['{', '}', ']', '"is_direct": true,']
+world:
+  setup:
+    - apm install lifecycle/p-skill#v1.0.0
+steps:
+  - n: 1
+    run:
+      - apm audit -o report.sarif
+      - apm audit -f json -o results.json
+      - apm audit -f markdown -o report.md
+    exit: 0
+    docs:
+      page: reference/cli/audit.md
+      commands: [apm audit -o report.sarif, apm audit -f json -o results.json]
+    files: [report.sarif, results.json, report.md]
+    key_lines:
+      - "[+] No drift detected"
+      - "[*] Audit report written to report.sarif"
+      - "[*] Audit report written to results.json"
+      - "[*] Audit report written to report.md"
+    forbidden_lines: ["[x]", "[!]"]
+  - n: 2
+    run: [apm lock export --format cyclonedx -o sbom.json]
+    exit: 0
+    docs:
+      page: reference/cli/lock.md
+      commands: [apm lock export --format cyclonedx -o sbom.json]
+    files: [sbom.json]
+    key_lines: ["[+] SBOM written to sbom.json (format=cyclonedx)"]
+  - n: 3
+    run: [apm lock export --format spdx -o sbom.spdx.json]
+    exit: 0
+    files: [sbom.spdx.json]
+    key_lines: ["[+] SBOM written to sbom.spdx.json (format=spdx)"]
+  - n: 4
+    run:
+      - apm deps list
+      - apm deps why lifecycle/p-skill --json
+      - apm find --source .agents/skills/p-skill/SKILL.md
+    exit: 0
+    files: []
+    key_lines: ["lifecycle/p-skill  lifecycle/p-skill@v1.0.0"]
+known_cells:
+  # O11 (vendor schema validation) has no hermetic implementation in the runner yet.
+  - id: e05-o11-not-implemented
+    law: O11
+    tracking: "#0"
+    step: 1
+    match: "O11 vendor shape has no hermetic implementation yet"

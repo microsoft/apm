@@ -1,0 +1,75 @@
+# E03 Proxy-only and air-gapped; nightly (#4110). Schema: test_journeys.py.
+# The registry proxy (an Artifactory-style archive mirror) and the release
+# metadata mirror are served by twins_enterprise.py under ghes.lifecycle.test;
+# every request still goes through the world's recording proxy (O12).
+# MCP_REGISTRY_URL already points at the world's MCP registry, so step 2 takes
+# the "0 via configured MCP_REGISTRY_URL" branch of the index.
+schema: 1
+id: E03
+persona: enterprise
+title: Proxy-only and air-gapped
+docs: [enterprise/registry-proxy.md, getting-started/installation.md, troubleshooting/ssl-issues.md]
+world:
+  env:
+    PROXY_REGISTRY_URL: https://ghes.lifecycle.test/artifactory/github
+    PROXY_REGISTRY_ONLY: "1"
+steps:
+  - n: 1
+    edit:
+      - {replace: apm.yml, old: "  apm: []\n", new: "  apm:\n  - lifecycle/p-skill#v1.0.0\n"}
+    run: [apm install]
+    exit: 0
+    files: [apm.lock.yaml, .gitignore, apm_modules/, .agents/skills/p-skill/SKILL.md]
+    key_lines: ["[+] lifecycle/p-skill #v1.0.0", "Skill integrated -> .agents/skills/"]
+    forbidden_lines: ["[x]"]
+  - n: 2
+    run: [apm install --mcp io.github.lifecycle/p-registry]
+    exit: 0
+    files: [apm.yml, .mcp.json]
+    key_lines:
+      - "[i] Using MCP registry: https://mcp-registry.lifecycle.test (from MCP_REGISTRY_URL)"
+      - "[+] Added MCP server 'io.github.lifecycle/p-registry'"
+  - n: 3
+    run: [apm marketplace add lifecycle/marketplace]
+    exit: 0
+    key_lines: ["[+] Marketplace 'lifecycle-market' registered (2 plugins)"]
+  - n: 4
+    run: [apm update --yes]
+    exit: 0
+    key_lines: ["[+] All dependencies already at their latest matching refs."]
+    forbidden_lines: ["[x]"]
+  - n: 5
+    env:
+      HTTPS_PROXY: http://127.0.0.1:9
+      https_proxy: http://127.0.0.1:9
+    run: [apm install --frozen]
+    exit: 0
+    files: []
+    note: network off (a dead proxy); the lockfile was written through the registry proxy
+  - n: 6
+    env:
+      APM_RELEASE_METADATA_URL: https://ghes.lifecycle.test/generic/apm-releases/latest.json
+    run: [apm self-update --check]
+    exit: 0
+    docs:
+      page: getting-started/installation.md
+      commands: [apm self-update --check]
+    key_lines:
+      - "[i] APM_RELEASE_METADATA_URL override active -- using mirrored metadata"
+      - "[+] You're already on the latest version"
+known_cells:
+  # A lockfile written through PROXY_REGISTRY_URL records no resolved_commit,
+  # so every later --frozen install refuses it (network on or off).
+  - id: e03-frozen-refuses-proxy-lockfile
+    law: O5
+    tracking: "#4172"
+    step: 5
+    match: "'apm install --frozen' exited 1, step expects 0"
+  # RUNNER GAP, not a CLI defect: 'apm marketplace add' registers the catalog in
+  # $APM_HOME (marketplaces.json, cache/marketplace/) by design, but the runner
+  # gives project-scope commands an empty HOME write set.
+  - id: e03-runner-gap-marketplace-home-writes
+    law: I5
+    tracking: "#0"
+    step: 3
+    match: 'marketplace wrote home:\[.*\.apm/marketplaces\.json'

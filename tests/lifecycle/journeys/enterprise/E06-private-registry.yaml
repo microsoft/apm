@@ -1,0 +1,88 @@
+# E06 Private registry (experimental registries); nightly (#4110). Schema: test_journeys.py.
+# The registry is a Registry HTTP API v1 server served by twins_enterprise.py
+# at https://ghes.lifecycle.test/registry/corp-main; it publishes every world
+# repository at version 1.0.0. Workstation-only setup (reference/registries.md):
+# URL, token and default live in $APM_HOME/config.json, apm.yml has no
+# registries: block. The token is a placeholder.
+schema: 1
+id: E06
+persona: enterprise
+title: Private registry (experimental registries)
+docs: [reference/registries.md, reference/registry-http-api.md, reference/cli/experimental.md]
+steps:
+  - n: 1
+    run: [apm experimental enable registries]
+    exit: 0
+    docs:
+      page: reference/registries.md
+      commands: [apm experimental enable registries]
+    key_lines: [registries]
+  - n: 2
+    run:
+      - apm config set registry.corp-main.url https://ghes.lifecycle.test/registry/corp-main
+      - apm config set registry.corp-main.token e06-registry-token-555
+      - apm config set registry.corp-main.default true
+    exit: 0
+    files: []
+    key_lines:
+      - "[*] registry.corp-main.url set"
+      - "[*] registry.corp-main.token set"
+      - "[*] registry.corp-main.default set"
+    forbidden_lines: [e06-registry-token-555]
+  - n: 3
+    run: [apm install lifecycle/p-skill#1.0.0]
+    exit: 0
+    files: [apm.yml, apm.lock.yaml, .gitignore, apm_modules/, .agents/skills/p-skill/SKILL.md]
+    key_lines: ["[+] lifecycle/p-skill #1.0.0", "Skill integrated -> .agents/skills/"]
+    forbidden_lines: [e06-registry-token-555, Traceback]
+  - n: 4
+    run: [apm config get registry.corp-main.token]
+    exit: 0
+    docs:
+      page: reference/registries.md
+      commands: [apm config get registry.corp-main.token]
+    key_lines: [registry.corp-main.token]
+    forbidden_lines: [e06-registry-token-555]
+  - n: 5
+    run: [apm experimental disable registries, apm install --frozen]
+    exit: [0, 1]
+    key_lines:
+      - "[+] Disabled experimental feature: registries"
+      - "Registry configuration requires the experimental registries feature."
+    remediate:
+      - {advice: apm experimental enable registries}
+    rerun: [apm install --frozen]
+known_cells:
+  # RUNNER GAP, not a CLI defect: 'apm experimental' and 'apm config set' write
+  # $APM_HOME/config.json by design, but the runner gives project-scope
+  # commands an empty HOME write set.
+  - id: e06-runner-gap-config-home-writes-step1
+    law: I5
+    tracking: "#0"
+    step: 1
+    match: 'wrote home:\[.\.apm/config\.json.\]'
+  - id: e06-runner-gap-config-home-writes-step2
+    law: I5
+    tracking: "#0"
+    step: 2
+    match: 'wrote home:\[.\.apm/config\.json.\]'
+  - id: e06-runner-gap-config-home-writes-step5
+    law: I5
+    tracking: "#0"
+    step: 5
+    match: 'wrote home:\[.\.apm/config\.json.\]'
+  # Credential values shown in config output. S-12 (pending neutral issue).
+  - id: e06-config-get-credential-value-shown
+    law: FORBID
+    tracking: "#0"
+    step: 4
+    match: "registry\\.corp-main\\.token: e06-registry-token-555"
+  # With registries disabled, '--frozen' blames apm.yml (which has no
+  # registries: block; the registry lives in $APM_HOME/config.json) and gives the
+  # fix as 'Enable with: apm experimental enable registries', not in the
+  # "Run 'apm ...'" form. Following it does make the re-run pass.
+  - id: e06-disabled-registries-advice-form
+    law: O8
+    tracking: "#4175"
+    step: 5
+    match: "advice 'apm experimental enable registries' is not printed"
