@@ -202,9 +202,20 @@ JOURNEY_LANES = {"consumer": "T-8a", "producer": "T-8b", "enterprise": "T-8c"}
 SPACE_LANES = {"G": "T-7a", "P": "T-7b", "I": "T-7c", "E": "T-7c", "M": "T-7c", "C": "T-7c"}
 
 
-def excluded_obligations(export: dict | None = None) -> dict[str, dict]:
-    """Reviewed ids folded into a shape witness (rule and witness per id), not obligations."""
-    return (export or load_export()).get("excluded", {})
+def excluded_obligations(
+    export: dict | None = None, src_root: Path | None = None
+) -> dict[str, dict]:
+    """Reviewed ids folded into a shape witness (rule and witness per id), not obligations.
+
+    The U-BIN exclusions lapse (every id is required again) when the source
+    elements pinned by ``tests/lifecycle/security/u_bin.py`` change.
+    """
+    from tests.lifecycle.security import u_bin
+
+    excluded = (export or load_export()).get("excluded", {})
+    if not u_bin.pin_holds(src_root):
+        excluded = {key: rec for key, rec in excluded.items() if "U-BIN" not in rec["rules"]}
+    return excluded
 
 
 def security_obligations(export: dict | None = None) -> dict[str, dict[str, str]]:
