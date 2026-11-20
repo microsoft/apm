@@ -144,7 +144,9 @@ def run(ctx: InstallContext) -> None:
 
     if has_blocking:
         raise PolicyViolationError(
-            "Install blocked by org policy -- see violations above",
+            "Install blocked by org policy -- see violations above. Remove or replace "
+            "the blocked dependencies in apm.yml (run 'apm policy status' to see the "
+            "active policy), then re-run the install.",
             audit_result=audit_result,
             policy_source=source or "unknown",
         )

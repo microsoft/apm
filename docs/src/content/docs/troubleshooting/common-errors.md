@@ -161,7 +161,7 @@ See also: [Install failures](../install-failures/), [Lockfile specification](../
 ### `Install blocked by org policy -- see violations above`
 
 ```
-[x] Install blocked by org policy -- see violations above
+[x] Install blocked by org policy -- see violations above. Remove or replace the blocked dependencies in apm.yml (run 'apm policy status' to see the active policy), then re-run the install.
 ```
 
 Cause: an org-level policy (compilation target, dependency allowlist, security baseline) rejected one or more dependencies. The per-violation lines printed above this message identify the offending packages and rules.

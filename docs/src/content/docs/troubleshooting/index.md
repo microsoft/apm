@@ -106,7 +106,7 @@ private sources. See [Run in CI](../consumer/run-in-ci/).
 
 ## Policy blocked my install
 
-**What you see:** `Install blocked by org policy -- see violations above`.
+**What you see:** `Install blocked by org policy -- see violations above. Remove or replace the blocked dependencies in apm.yml (run 'apm policy status' to see the active policy), then re-run the install.`
 
 Your organization's `apm-policy.yml` does not allow a source or package you added. The lines
 above the error name the rule, for example `dependency-allowlist`. Check which policy applied

@@ -45,7 +45,8 @@ _XFAIL = {
         f"G|{path}|{change}|native": _NOT_APPROVABLE
         for path in ("install", "frozen", "update", "uninstall-prune-rebuild", "audit-ci")
         for change in _ALL
-        if change != "org-enables-gate"
+        # #4404: the frozen install's missing next step was this row's last failure.
+        if change != "org-enables-gate" and (path, change) != ("audit-ci", "policy-dep-deny")
     },
     "G|uninstall-prune-rebuild|org-enables-gate|native": _UNINSTALL_SIBLING,
     **{f"G|native-plugin|{change}|native": _PLUGIN_UNLOCKED for change in _PLUGIN_CHANGES},
