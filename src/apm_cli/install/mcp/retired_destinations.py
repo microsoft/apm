@@ -11,10 +11,15 @@ removes the entries APM wrote to those files:
   write fingerprint matches, or it equals the render that release wrote for
   the same self-defined declaration. Anything else (a user-authored or
   user-edited entry) stays where it is and is reported once.
-* Other keys and the file itself are kept. ``.vscode/mcp.json`` is deleted
-  only when APM created it: every server it held was removed by this heal and
+* Other keys and the file itself are kept. A retired file is deleted only
+  when APM created it: every server it held was removed by this heal and
   nothing but empty scaffolding (VS Code's ``inputs: []``) remains in it.
-  ``.github/mcp.json`` is never deleted (it is a target-detection signal).
+  ``.github/mcp.json`` is also a ``copilot`` target-detection signal, so it is
+  deleted only when ``copilot`` stays selected without it: ``apm.yml``
+  declares it, or another ``copilot`` signal remains (#4524). Its presence is
+  also the evidence that a ``--frozen`` install moved a pre-0.37 claim (the
+  lock is not restamped), so ``--frozen`` keeps it emptied and the next
+  install, which records the move, deletes it.
 
 The heal runs after the install wrote ``.mcp.json``, so an entry leaves its
 retired file only once its replacement exists (:func:`healable_names`).
@@ -39,8 +44,10 @@ class RetiredMcpDestination:
     """One project MCP file APM no longer writes.
 
     ``deletable``: whether the heal may delete the file once APM's entries are
-    gone. ``.github/mcp.json`` is kept, because it is a ``copilot``
-    target-detection signal for projects that declare no targets.
+    gone. ``detection_signal``: the file also selects ``runtime`` for
+    projects that declare no targets, so it is deleted only while that
+    runtime stays selected without it, and never by a ``--frozen`` heal,
+    whose unrestamped lock still needs the file as proof of the move.
     """
 
     runtime: str
@@ -48,6 +55,7 @@ class RetiredMcpDestination:
     servers_key: str
     adapter: Callable[[Path], Any]
     deletable: bool
+    detection_signal: bool = False
 
 
 def _legacy_copilot_adapter(project_root: Path) -> Any:
@@ -68,7 +76,8 @@ RETIRED_PROJECT_MCP_DESTINATIONS: tuple[RetiredMcpDestination, ...] = (
         ".github/mcp.json",  # architecture-authority-exempt: retired MCP destination
         "mcpServers",
         _legacy_copilot_adapter,
-        deletable=False,
+        deletable=True,
+        detection_signal=True,
     ),
     RetiredMcpDestination(
         "vscode",
@@ -126,6 +135,26 @@ def lock_holds_untranslated_mcp_claims(
     )
 
 
+def _selected_without(destination: RetiredMcpDestination, project_root: Path) -> bool:
+    """Whether ``destination.runtime`` stays selected once its retired file is gone."""
+    from apm_cli.core.target_detection import detect_signals
+    from apm_cli.models.manifest_targets import read_manifest_target_declaration
+
+    declaration = read_manifest_target_declaration(project_root / "apm.yml", lenient=True)
+    from apm_cli.core.errors import TargetResolutionError
+
+    try:
+        declared = declaration.restriction() if declaration is not None else None
+    except (TargetResolutionError, ValueError):
+        declared = None  # an unreadable declaration keeps the signal file
+    if declared and destination.runtime in declared:
+        return True
+    return any(
+        signal.target == destination.runtime and signal.source != destination.relative_path
+        for signal in detect_signals(project_root)
+    )
+
+
 @dataclass
 class RetiredMcpHeal:
     """What one heal pass removed and kept, per runtime."""
@@ -168,8 +197,14 @@ def heal_retired_project_mcp_destinations(
     stored_configs: Mapping[str, dict],
     native_hashes: Mapping[str, Mapping[str, str]],
     project_root: Path,
+    frozen: bool = False,
 ) -> RetiredMcpHeal:
-    """Remove APM-written entries from retired project MCP files (never user entries)."""
+    """Remove APM-written entries from retired project MCP files (never user entries).
+
+    A retired file left with nothing but scaffolding is deleted when APM
+    created it: this heal removed every server it held, or it holds none and
+    the lock claims names there (an earlier ``--frozen`` heal emptied it).
+    """
     from apm_cli.utils.atomic_io import atomic_write_text
 
     heal = RetiredMcpHeal(removed={}, kept={}, deleted_files=[])
@@ -199,14 +234,21 @@ def heal_retired_project_mcp_destinations(
             else:
                 heal.kept.setdefault(destination.runtime, set()).add(name)
         removed_here = total - len(servers)
-        if not removed_here:
-            continue
         scaffolding_only = all(
             value in ([], {}) for key, value in data.items() if key != destination.servers_key
         )
-        if destination.deletable and not servers and removed_here == total and scaffolding_only:
+        if (
+            destination.deletable
+            and not servers
+            and removed_here == total
+            and scaffolding_only
+            and not (destination.detection_signal and frozen)
+            and (not destination.detection_signal or _selected_without(destination, project_root))
+        ):
             path.unlink()
             heal.deleted_files.append(destination.relative_path)
+            continue
+        if not removed_here:
             continue
         text = json.dumps(data, indent=2)
         if raw.endswith("\n"):
