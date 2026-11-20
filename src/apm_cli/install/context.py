@@ -173,6 +173,9 @@ class InstallContext:
     # Cleanup refusals retain the original lockfile hash, not a hash of
     # user-edited bytes. Lockfile assembly consumes this after cleanup.
     package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    # Managed files install kept without deployment evidence: (owner, entry) (#4360).
+    kept_overwrites: list[tuple[str, str]] = field(default_factory=list)
+    kept_overwrite_written: list[str] = field(default_factory=list)
     orphan_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
     # Package content hashes in the stream the existing lockfile records

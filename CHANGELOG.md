@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes and upgrade notes
+
+- `apm install` keeps a managed file it cannot prove it deployed (no receipt, not render-equal), names it and exits 1. Files committed by APM 0.35.x or earlier (for example cursor rules, codex agents) may be refused once: move them aside and rerun `apm install`. (#4382)
+
 ### Changed
 
 - Docs: `GITHUB_APM_PAT` is sent to `github.com` and any `*.ghe.com` host a dependency names; a closed-world architecture guard pins that credential class. (#4092, #4371)

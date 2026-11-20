@@ -98,6 +98,10 @@ from scripts.architecture_linter.checks.install_orphan_removal import (
     GUARD_ORPHAN_SELECTION,
     check_orphan_selection,
 )
+from scripts.architecture_linter.checks.install_overwrite_evidence import (
+    GUARD_OVERWRITE_EVIDENCE,
+    check_overwrite_evidence,
+)
 from scripts.architecture_linter.checks.install_package_content_hash import (
     GUARD as _GUARD_PACKAGE_CONTENT_HASH,
 )
@@ -372,6 +376,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_AGENT_RENDER_ADOPT,
         "Agent writers render first and adopt only via _check_adopt_or_skip on that text.",
         check_agent_render_then_adopt,
+    ),
+    _rule(
+        GUARD_OVERWRITE_EVIDENCE,
+        "Managed files are replaced only with a deployment receipt or locked-render evidence.",
+        check_overwrite_evidence,
     ),
     _rule(
         GUARD_CONSUMER_MANIFEST_REWRITE,

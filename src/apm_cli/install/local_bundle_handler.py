@@ -332,6 +332,13 @@ def install_local_bundle(
                 lockfile_root=lockfile_path.parent,
                 diagnostics=migration_diagnostics,
             )
+            # The bytes just deployed from this bundle are its render (#4360).
+            migration_evidence.add_rendered(
+                {
+                    Path(record) if Path(record).is_absolute() else project_root / record: value
+                    for record, value in deployed_hashes.items()
+                }
+            )
             DeploymentLedgerCodec.record_local_bundle_files(
                 lockfile,
                 deployed,
@@ -342,67 +349,17 @@ def install_local_bundle(
                 staged_fallback_hashes=staged_fallbacks,
             )
 
-            # Auto-migrate legacy per-client skill paths (#737).
-            # After deploying new .agents/skills/ files, detect and clean up
-            # any legacy paths (e.g. .github/skills/) still recorded in the
-            # lockfile from a previous --legacy-skill-paths install.
-            if not legacy_skill_paths:
-                from ..utils.console import _rich_error, _rich_info
-                from .skill_path_migration import (
-                    COLLISION_DETAIL_TEMPLATE,
-                    COLLISION_HEADER_TEMPLATE,
-                    COLLISION_HINT,
-                    MIGRATION_SUMMARY_TEMPLATE,
+            _kept_legacy = (
+                []
+                if legacy_skill_paths
+                else _migrate_legacy_skills(
+                    lockfile, project_root, migration_evidence, migration_diagnostics, logger
                 )
-                from .skill_path_migration import (
-                    check_collisions as _check_coll,
-                )
-                from .skill_path_migration import (
-                    detect_legacy_skill_deployments as _detect_legacy,
-                )
-                from .skill_path_migration import (
-                    execute_migration as _exec_mig,
-                )
-
-                _plans = _detect_legacy(lockfile, project_root)
-                if _plans:
-                    _colls = _check_coll(_plans, project_root)
-                    if _colls:
-                        # H2: collision is an error.
-                        _rich_error(
-                            COLLISION_HEADER_TEMPLATE.format(count=len(_colls)),
-                            symbol="error",
-                        )
-                        # M2: enumerate each collision (parity with pipeline).
-                        for _plan in _plans:
-                            for _cd in _colls:
-                                if _plan.dst_path in _cd:
-                                    _rich_error(
-                                        COLLISION_DETAIL_TEMPLATE.format(
-                                            dst_path=_plan.dst_path,
-                                            src_path=_plan.src_path,
-                                            dep_name=_plan.dep_name,
-                                        ),
-                                        symbol="error",
-                                    )
-                                    break
-                        _rich_info(COLLISION_HINT, symbol="info")
-                    else:
-                        _mig_result = _exec_mig(
-                            _plans, lockfile, project_root, evidence=migration_evidence
-                        )
-                        migration_diagnostics.render_summary()
-                        _total = len(_mig_result.deleted) + len(_mig_result.skipped_no_file)
-                        if _total:
-                            _rich_info(
-                                MIGRATION_SUMMARY_TEMPLATE.format(count=_total),
-                                symbol="info",
-                            )
-                        if getattr(logger, "verbose", False) and _mig_result.deleted:
-                            for _dp in _mig_result.deleted:
-                                _rich_info(f"  removed {_dp}", symbol="info")
+            )
 
             lockfile.write(lockfile_path)
+            if _kept_legacy:
+                _refuse_unproven_legacy(_kept_legacy, logger, user_scope=global_)
 
         msg = f"Installed {len(deployed) + len(staged_instructions)} file(s) from local bundle"
         if skipped:
@@ -430,6 +387,92 @@ def install_local_bundle(
         # Tarball cleanup (caller-owned per LocalBundleInfo contract).
         if bundle_info.temp_dir is not None and bundle_info.temp_dir.exists():
             shutil.rmtree(bundle_info.temp_dir, ignore_errors=True)
+
+
+def _migrate_legacy_skills(
+    lockfile, project_root: Path, migration_evidence, migration_diagnostics, logger
+) -> list[str]:
+    """Auto-migrate legacy per-client skill paths (#737); return the kept ones (#4360).
+
+    After deploying new .agents/skills/ files, detect and clean up any legacy
+    paths (e.g. .github/skills/) still recorded in the lockfile from a
+    previous --legacy-skill-paths install.
+    """
+    from ..utils.console import _rich_error, _rich_info
+    from .skill_path_migration import (
+        COLLISION_DETAIL_TEMPLATE,
+        COLLISION_HEADER_TEMPLATE,
+        COLLISION_HINT,
+        MIGRATION_SUMMARY_TEMPLATE,
+    )
+    from .skill_path_migration import (
+        check_collisions as _check_coll,
+    )
+    from .skill_path_migration import (
+        detect_legacy_skill_deployments as _detect_legacy,
+    )
+    from .skill_path_migration import (
+        execute_migration as _exec_mig,
+    )
+
+    _plans = _detect_legacy(lockfile, project_root)
+    if _plans:
+        _colls = _check_coll(_plans, project_root)
+        if _colls:
+            # H2: collision is an error.
+            _rich_error(
+                COLLISION_HEADER_TEMPLATE.format(count=len(_colls)),
+                symbol="error",
+            )
+            # M2: enumerate each collision (parity with pipeline).
+            for _plan in _plans:
+                for _cd in _colls:
+                    if _plan.dst_path in _cd:
+                        _rich_error(
+                            COLLISION_DETAIL_TEMPLATE.format(
+                                dst_path=_plan.dst_path,
+                                src_path=_plan.src_path,
+                                dep_name=_plan.dep_name,
+                            ),
+                            symbol="error",
+                        )
+                        break
+            _rich_info(COLLISION_HINT, symbol="info")
+            # A legacy copy unlike this bundle's render may hold edits (#4360).
+            return [
+                _plan.src_path
+                for _plan in _plans
+                if any(_plan.dst_path in _cd for _cd in _colls)
+                and not migration_evidence.authorizes(_plan.src_path, project_root / _plan.src_path)
+            ]
+        else:
+            _mig_result = _exec_mig(_plans, lockfile, project_root, evidence=migration_evidence)
+            migration_diagnostics.render_summary()
+            _total = len(_mig_result.deleted) + len(_mig_result.skipped_no_file)
+            if _total:
+                _rich_info(
+                    MIGRATION_SUMMARY_TEMPLATE.format(count=_total),
+                    symbol="info",
+                )
+            if getattr(logger, "verbose", False) and _mig_result.deleted:
+                for _dp in _mig_result.deleted:
+                    _rich_info(f"  removed {_dp}", symbol="info")
+            return _mig_result.failed
+
+    return []
+
+
+def _refuse_unproven_legacy(kept: list[str], logger, *, user_scope: bool) -> None:
+    """Fail on legacy skill files no evidence proves APM deployed (#4360).
+
+    The lockfile keeps their rows; the files stay on disk for the user.
+    """
+    from ..integration.base_integrator import unproven_overwrite_message
+    from .errors import InstallFailureAlreadyRendered
+
+    for path in kept:
+        logger.error(unproven_overwrite_message(path, user_scope=user_scope))
+    raise InstallFailureAlreadyRendered(f"{len(kept)} legacy skill file(s) kept")
 
 
 def _parse_legacy_bundle_mcp_servers(

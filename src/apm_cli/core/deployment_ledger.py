@@ -7,7 +7,7 @@ import json
 import os
 import sys
 import uuid
-from collections.abc import Collection, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -32,6 +32,7 @@ from apm_cli.utils.paths import portable_relpath
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.skill_adoption import LockedSkillSources
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -121,6 +122,10 @@ class DeploymentMaterializationSession:
         self._state_present = False
         # Update-only locked-version sources for receipt-less skill adoption (#3625).
         self.locked_sources: LockedSkillSources | None = None
+        # The install's locked-render evidence for receipt-less overwrites (#4360).
+        self.render_evidence: DeploymentEvidence | None = None
+        # Managed files kept because nothing proved APM wrote them: (owner, path).
+        self.kept_overwrites: list[tuple[str, Path]] = []
         self._load()
 
     def _validate_paths(self) -> None:
@@ -296,9 +301,32 @@ class DeploymentMaterializationSession:
 
     def baseline(self, path: Path, targets: Sequence[TargetProfile]) -> str | None:
         """Return a prior rendered hash only for a currently authorized physical member."""
+        return self._trusted_hash(path, targets, self._locator)
+
+    def overwrite_authorized(
+        self, path: Path, claim: str, targets: Sequence[TargetProfile]
+    ) -> bool:
+        """Whether replacing an existing managed file has deployment evidence (#4360).
+
+        This checkout's trusted receipt for the file, or its bytes equal to what
+        the locked versions render. A lockfile hash alone never authorizes it.
+        """
+        from apm_cli.integration.cleanup import AUTHORIZED
+
+        if self._trusted_hash(path, targets, self._write_locator) is not None:
+            return True
+        evidence = self.render_evidence
+        return evidence is not None and evidence.verdict(claim, path) == AUTHORIZED
+
+    def _trusted_hash(
+        self,
+        path: Path,
+        targets: Sequence[TargetProfile],
+        locate: Callable[[Path, Sequence[TargetProfile]], DeploymentLocator | None],
+    ) -> str | None:
         from apm_cli.install.deployed_paths import deployed_path_entry
 
-        locator = self._locator(path, targets)
+        locator = locate(path, targets)
         if locator is None:
             return None
         key = self._physical_keys.get(path.resolve().as_posix())
@@ -317,7 +345,7 @@ class DeploymentMaterializationSession:
                 if profile
                 else None
             )
-        if recorded_target is None or self._locator(path, [recorded_target]) != record.locator:
+        if recorded_target is None or locate(path, [recorded_target]) != record.locator:
             return None
         if key in self._written:
             return record.content_hash
@@ -394,6 +422,10 @@ class DeploymentMaterializationSession:
             ]
             self._written[key] = value
         self._dirty = True
+
+    def written_entries(self) -> list[str]:
+        """Return the deployed entries this session wrote, sorted."""
+        return sorted(set(self._written.values()))
 
     def flush(self) -> None:
         """Publish successful writes once, including those preceding another package's failure."""
@@ -512,12 +544,47 @@ def recorded_writes(
     APM's bytes too and are recorded.
     """
     record_rendered_writes(None, integrator, targets=(), package_info=package_info)
+    session = getattr(skill_integrator, "_materialization_session", None)
+    integrator._overwrite_gate = OverwriteGate(
+        session if isinstance(session, DeploymentMaterializationSession) else None,
+        tuple(targets),
+        DeploymentMaterializationSession.receipt_owner(package_info),
+    )
     try:
         yield
     finally:
+        integrator._overwrite_gate = None
         record_rendered_writes(
             skill_integrator, integrator, targets=targets, package_info=package_info
         )
+
+
+@dataclass(frozen=True)
+class OverwriteGate:
+    """The evidence one integrator call needs to replace a deployed file (#4360).
+
+    Without an installation-bound session nothing is authorized.
+    """
+
+    session: DeploymentMaterializationSession | None
+    targets: tuple[TargetProfile, ...]
+    owner: str
+
+    def authorizes(self, path: Path, claim: str) -> bool:
+        return self.session is not None and self.session.overwrite_authorized(
+            path, claim, self.targets
+        )
+
+    def keep(self, path: Path) -> bool:
+        """Record a kept dependency file; its prior lock entry stays (reported at finalize)."""
+        if self.session is None or self.owner == ".":
+            return False
+        self.session.kept_overwrites.append((self.owner, path))
+        return True
+
+    @property
+    def user_scope(self) -> bool:
+        return self.session is not None and self.session.scope.value == "user"
 
 
 def record_rendered_writes(

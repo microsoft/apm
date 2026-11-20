@@ -23,7 +23,7 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
 )
 from apm_cli.utils.diagnostics import CATEGORY_ERROR, CATEGORY_WARNING, DiagnosticCollector
-from tests.utils.deployment_evidence import receipted_evidence
+from tests.utils.deployment_evidence import prove_overwrites, receipted_evidence
 
 
 def _make_package_info(
@@ -648,8 +648,9 @@ def test_kiro_agents_idempotent_second_deploy(tmp_path: Path) -> None:
     assert first_content == second_content
 
 
-def test_kiro_agents_update_replaces_stale_file(tmp_path: Path) -> None:
+def test_kiro_agents_update_replaces_stale_file(tmp_path: Path, monkeypatch) -> None:
     """Updated source replaces the stale deployed agent."""
+    prove_overwrites(monkeypatch)
     (tmp_path / ".kiro").mkdir()
     package_dir = tmp_path / "pkg"
     apm_agents = package_dir / ".apm" / "agents"

@@ -282,7 +282,8 @@ def _run_cleanup(
                 path for path in cleanup_result.retained if path not in new_deployed
             )
             if cleanup_result.retained:
-                package_cleanup_retained[dep_key] = {
+                # Merge: integrate may already keep this package's unproven files (#4360).
+                package_cleanup_retained[dep_key] = package_cleanup_retained.get(dep_key, {}) | {
                     path: prev_dep.deployed_file_hashes.get(path)
                     for path in cleanup_result.retained
                 }

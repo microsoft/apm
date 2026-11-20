@@ -16,6 +16,7 @@ from apm_cli.utils.diagnostics import (
     DiagnosticCollector,
 )
 from apm_cli.utils.yaml_io import yaml_to_str
+from tests.utils.deployment_evidence import prove_overwrites
 
 
 class TestAgentIntegrator:
@@ -1618,8 +1619,9 @@ class TestCodexAgentIntegration:
         self._assert_guide_link_reaches(copilot_file, copilot_text, skill)
         assert codex.links_resolved == copilot.links_resolved == 1
 
-    def test_codex_relative_link_survives_reinstall_and_update(self) -> None:
+    def test_codex_relative_link_survives_reinstall_and_update(self, monkeypatch) -> None:
         """Reinstall and source update rewrite links again from the new body."""
+        prove_overwrites(monkeypatch)
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         package_dir, skill = self._linked_package()
@@ -1672,8 +1674,9 @@ class TestCodexAgentIntegration:
         assert second.files_integrated == 0
         assert second.files_skipped == 0
 
-    def test_codex_stale_unresolved_link_is_repaired_on_reinstall(self) -> None:
+    def test_codex_stale_unresolved_link_is_repaired_on_reinstall(self, monkeypatch) -> None:
         """A managed TOML written before #2966 is repaired by the next install."""
+        prove_overwrites(monkeypatch)
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         package_dir, skill = self._linked_package()

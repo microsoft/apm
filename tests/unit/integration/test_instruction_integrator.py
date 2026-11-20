@@ -16,7 +16,7 @@ from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 from apm_cli.utils.yaml_io import loads_frontmatter
-from tests.utils.deployment_evidence import receipted_evidence
+from tests.utils.deployment_evidence import prove_overwrites, receipted_evidence
 
 
 def _make_package_info(package_dir, name="test-pkg"):
@@ -316,8 +316,9 @@ class TestInstructionIntegrator:
         assert result.files_skipped == 1
         assert (target_dir / "python.instructions.md").read_text() == "# User version"
 
-    def test_integrate_overwrites_managed_file(self):
+    def test_integrate_overwrites_managed_file(self, monkeypatch):
         """Overwrites file when managed_files includes it (APM-owned)."""
+        prove_overwrites(monkeypatch)
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
@@ -578,8 +579,9 @@ class TestInstructionNameCollision:
             installed_at=datetime.now().isoformat(),
         )
 
-    def test_install_overwrites_when_managed(self):
+    def test_install_overwrites_when_managed(self, monkeypatch):
         """APM-managed file with same name is overwritten."""
+        prove_overwrites(monkeypatch)
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
@@ -598,8 +600,9 @@ class TestInstructionNameCollision:
         assert result.files_integrated == 1
         assert (target_dir / "python.instructions.md").read_text() == "# APM Python standards"
 
-    def test_two_packages_same_instruction_name_last_wins(self):
+    def test_two_packages_same_instruction_name_last_wins(self, monkeypatch):
         """When two packages deploy the same filename, last-installed wins (managed file update)."""
+        prove_overwrites(monkeypatch)
         target_dir = self.project_root / ".github" / "instructions"
         target_dir.mkdir(parents=True)
 
@@ -905,8 +908,9 @@ class TestCursorRulesIntegration:
         assert result.files_skipped == 1
         assert (rules_dir / "python.mdc").read_text() == "# Stale rules"
 
-    def test_overwrites_managed_file(self):
+    def test_overwrites_managed_file(self, monkeypatch):
         """Overwrites file when it's in managed_files."""
+        prove_overwrites(monkeypatch)
         (self.project_root / ".cursor").mkdir()
         rules_dir = self.project_root / ".cursor" / "rules"
         rules_dir.mkdir()
@@ -1264,8 +1268,9 @@ class TestClaudeRulesIntegration:
         assert result.files_skipped == 1
         assert (rules_dir / "python.md").read_text() == "# Stale rules"
 
-    def test_overwrites_managed_file(self):
+    def test_overwrites_managed_file(self, monkeypatch):
         """Overwrites file when it's in managed_files."""
+        prove_overwrites(monkeypatch)
         (self.project_root / ".claude").mkdir()
         rules_dir = self.project_root / ".claude" / "rules"
         rules_dir.mkdir()
@@ -1342,7 +1347,7 @@ class TestClaudeRulesIntegration:
         assert "# General" in deployed
         assert "Always lint." in deployed
 
-    def test_crlf_rule_file_rewritten_to_lf_not_adopted(self):
+    def test_crlf_rule_file_rewritten_to_lf_not_adopted(self, monkeypatch):
         """A stale CRLF rule file is rewritten to LF, not adopted (apm#1889).
 
         read_text() collapses CRLF->LF, so a text-mode equality check would
@@ -1350,6 +1355,7 @@ class TestClaudeRulesIntegration:
         platform-dependent hash in the lockfile. The adopt check compares the
         on-disk bytes against the LF output, so the file is re-written as LF.
         """
+        prove_overwrites(monkeypatch)
         (self.project_root / ".claude").mkdir()
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"

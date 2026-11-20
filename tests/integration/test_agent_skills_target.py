@@ -820,7 +820,7 @@ def test_auto_migration_collision_skips_gracefully(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When a hand-authored file at .agents/skills/ has different content from
-    the legacy file, migration skips with an actionable error message and exit 0.
+    the legacy file, migration keeps it with an actionable error message and exit 1 (#4360).
 
     The test simulates:
     1. Legacy install -> .github/skills/ with content A
@@ -848,7 +848,7 @@ def test_auto_migration_collision_skips_gracefully(
     monkeypatch.delenv("APM_LEGACY_SKILL_PATHS", raising=False)
     r2 = _invoke(project, ["install", str(bundle), "--target", "copilot"], monkeypatch)
 
-    assert r2.exit_code == 0, f"output={r2.output!r}"
+    assert r2.exit_code == 1, f"output={r2.output!r}"
     # Legacy file must be preserved (migration was skipped due to collision):
     assert legacy.is_file(), "Legacy file should NOT be deleted on collision"
     assert "HAND-EDITED" in legacy.read_text(encoding="utf-8")
