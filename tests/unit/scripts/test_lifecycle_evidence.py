@@ -41,6 +41,7 @@ from tests.utils.lifecycle_evidence import (
     _physical_roots,
     check_cli_output,
     expect_output_violation,
+    output_violations,
     snapshot,
 )
 
@@ -1269,6 +1270,13 @@ def _cli(args: tuple[str, ...], stdout: str = "", stderr: str = "", code: int = 
         (("install",), "[!] Skipped x\n[+] b\n[!] Skipped x\n", "", 0, "I9: stdout repeats a"),
         (("install",), "[+] p\n  |-- 1 skill\n  [i] n\n  |-- 1 skill\n", "", 0, "I9: stdout"),
         (("install",), "[i] t\n  [+] p\n  [+] q\n  [+] p\n", "", 0, "I9: stdout repeats a"),
+        (
+            ("install",),
+            "[!] Policy off. This\ndoes not\n[i] x\n[!] Policy off. This\ndoes not\n",
+            "",
+            0,
+            "I9: stdout repeats a",
+        ),
     ],
 )
 def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, code, law) -> None:
@@ -1292,7 +1300,9 @@ def test_output_oracle_rejects_each_output_law_violation(args, stdout, stderr, c
             _APM,
         ),
         (("deps", "list"), "+------+\n|  a   |\n+------+\n+------+\n", 0, _APM),
+        (("install",), "[>] Resolving \n/tmp/work/a...\n[>] Resolving \n/tmp/work/b...\n", 0, _APM),
         (("audit", "--json"), '{"ok": true}\n', 3, ("/opt/bin/apm",)),
+        (("audit", "--format", "json", "--output", "r.json"), "[+] wrote r.json\n", 0, _APM),
         (("audit", "--json"), "", 2, _APM),
         (
             ("--version",),
@@ -1333,3 +1343,49 @@ def test_expect_output_violation_suspends_only_the_named_laws() -> None:
         check_cli_output(("install",), crash)
     with pytest.raises(ValueError, match="reason"), expect_output_violation("I9", reason=" "):
         pass
+
+
+def test_output_oracle_reports_one_violation_per_duplicated_cause() -> None:
+    stdout = "[!] Policy off\n[i] a\n[!] Policy off\n[i] Targeting x\n[i] Targeting x\n"
+    found = [v.message for v in output_violations(("install",), _cli(("install",), stdout))]
+    assert found == [
+        "stdout repeats a line: '[i] Targeting x'",
+        "stdout repeats a diagnostic: '[!] Policy off'",
+    ]
+    policy_cell = KnownOutputCell(
+        "policy-twice", "I9", "#1", lambda args, _scenario: True, "Policy off"
+    )
+    with pytest.raises(OutputOracleError, match=r"I9: stdout repeats a line: '\[i\] Targeting x'"):
+        check_cli_output(("install",), _cli(("install",), stdout), known_cells=(policy_cell,))
+
+
+def test_known_output_cell_output_shape_narrows_where_it_is_strict() -> None:
+    cell = KnownOutputCell(
+        "twice-with-mcp",
+        "I9",
+        "#1",
+        lambda args, _scenario: args[:1] == ("install",),
+        "Policy off",
+        output=r"^\+- MCP Servers",
+    )
+    twice = "[!] Policy off\n[i] a\n[!] Policy off\n+- MCP Servers (1)\n"
+    check_cli_output(("install",), _cli(("install",), twice), known_cells=(cell,))
+    check_cli_output(("install",), _cli(("install",), "[!] Policy off\n"), known_cells=(cell,))
+    with pytest.raises(OutputOracleError, match=r"twice-with-mcp \(#1\) did not fail"):
+        check_cli_output(
+            ("install",),
+            _cli(("install",), "[!] Policy off\n+- MCP Servers (1)\n"),
+            known_cells=(cell,),
+        )
+
+
+def test_known_output_cells_are_well_formed() -> None:
+    from tests.utils.lifecycle_evidence import KNOWN_OUTPUT_CELLS
+
+    ids = [cell.id for cell in KNOWN_OUTPUT_CELLS]
+    assert len(ids) == len(set(ids))
+    for cell in KNOWN_OUTPUT_CELLS:
+        assert cell.law in {"I6", "I8", "I9"}, cell.id
+        assert re.fullmatch(r"#[1-9][0-9]*", cell.issue), cell.id
+        re.compile(cell.message)
+        re.compile(cell.output)

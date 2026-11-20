@@ -325,6 +325,8 @@ class LifecycleEvidencePlugin:
 _TRACEBACK = "Traceback (most recent call last)"
 _STATUS_PREFIXES = ("[+]", "[!]", "[x]", "[i]", "[*]", "[>]")
 _TREE_PREFIXES = ("|--", "+--", "`--", "\\--")
+# Starts of a printed line (status, tree or box row) as opposed to a wrap continuation.
+_LINE_OPENERS = (*_STATUS_PREFIXES, "|", "+", "`", "\\")
 _ALLOWED_CONTROL = frozenset("\n\r\t")
 
 
@@ -338,9 +340,11 @@ class OutputViolation:
 class KnownOutputCell:
     """A STRICT expected output failure of the product, tracked by *issue*.
 
-    Where ``applies(args, scenario_id)`` holds, a violation of *law* whose
-    message matches *message* is excused; if none occurs the cell fails,
-    because the defect is fixed and the cell must be removed.
+    Where ``applies(args, scenario_id)`` holds and stdout matches *output*
+    (a multiline regex naming the output shape that triggers the defect), a
+    violation of *law* whose message matches *message* is excused; if none
+    occurs the cell fails, because the defect is fixed and the cell must be
+    removed.
     """
 
     id: str
@@ -348,10 +352,111 @@ class KnownOutputCell:
     issue: str
     applies: Callable[[tuple[str, ...], str], bool]
     message: str
+    output: str = ""
+
+    def covers(self, args: tuple[str, ...], scenario_id: str, stdout: str) -> bool:
+        return self.applies(args, scenario_id) and (
+            not self.output or re.search(self.output, stdout, re.MULTILINE | re.DOTALL) is not None
+        )
 
 
-# Product defects the oracle observes on main; each one names its issue.
-KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = ()
+def _runs(command: str, *flags: str) -> Callable[[tuple[str, ...], str], bool]:
+    """Cell predicate: the command is *command* and every flag in *flags* is passed."""
+    return lambda args, _scenario: _command_name(args) == command and all(f in args for f in flags)
+
+
+def _scenario(*ids: str) -> Callable[[tuple[str, ...], str], bool]:
+    """Cell predicate: the lifecycle scenario id is one of *ids*."""
+    return lambda _args, scenario_id: scenario_id in ids
+
+
+def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], bool]:
+    """Cell predicate: *command* runs inside one of the lifecycle scenarios *ids*."""
+    return lambda args, scenario_id: _command_name(args) == command and scenario_id in ids
+
+
+# Product defects the oracle observes on main; each one names its issue and
+# is keyed by the surface family (command, flags, output shape) it occurs in.
+KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
+    KnownOutputCell(
+        "audit-json-replay-error-has-no-json",
+        "I6",
+        "#4287",
+        _scenario_runs("audit", "root-source-replacement"),
+        r"JSON mode printed invalid JSON",
+        output=r"\A\Z",
+    ),
+    KnownOutputCell(
+        "install-no-policy-warning-per-phase",
+        "I9",
+        "#4241",
+        _runs("install", "--no-policy"),
+        r"Policy enforcement disabled by --no-policy",
+        output=r"^  \[\+\] .*^\+- MCP Servers",
+    ),
+    KnownOutputCell(
+        "install-org-policy-banner-per-phase",
+        "I9",
+        "#4241",
+        _runs("install"),
+        r"\[!\] Policy: org:",
+        output=(
+            r"\A(?=.*^\[!\] Policy: org:)"
+            r".*^  \[\+\] .*(^  \[x\] \d+ dependenc\w* blocked by org policy|^\+- MCP Servers)"
+        ),
+    ),
+    KnownOutputCell(
+        "install-frozen-mcp-targeting-twice",
+        "I9",
+        "#4196",
+        _runs("install", "--frozen"),
+        r"\[i\] Targeting (declared targets?|specific runtimes?)",
+        output=r"^\+- MCP Servers",
+    ),
+    KnownOutputCell(
+        "uninstall-unattributed-survivor-lines",
+        "I9",
+        "#4219",
+        _runs("uninstall"),
+        r"repeats a diagnostic: '\|-- ",
+        # Survivor tree lines with no package line naming them, one of them repeated.
+        output=r"\A(?!.*^  \[\+\] ).*^  (\|-- [^\n]*)$.*^  \1$",
+    ),
+    KnownOutputCell(
+        "install-hook-line-per-target",
+        "I9",
+        "#4243",
+        _scenario("target-contraction-install-a-b"),
+        r"PreToolUse: runs echo scope",
+    ),
+    KnownOutputCell(
+        "install-registry-lookup-per-registry",
+        "I9",
+        "#4244",
+        _runs("install"),
+        r"Looking up 1 MCP server in registry",
+        output=r"^\[i\] Using MCP registry: .*^\[i\] Using MCP registry: ",
+    ),
+    KnownOutputCell(
+        "install-mcp-passthrough-warning-per-parse",
+        "I9",
+        "#4242",
+        _runs("install", "hermes"),
+        r"'hermes-stdio': unknown key\(s\) preserved in extra",
+        output=(
+            r"^\+- MCP Servers.*'hermes-stdio': unknown key"
+            r"|^\[\*\] Validating 1 package.*'hermes-stdio': unknown key"
+        ),
+    ),
+    KnownOutputCell(
+        "install-frozen-trust-notice-repeats",
+        "I9",
+        "#4256",
+        _runs("install", "--frozen"),
+        r"Trusting direct dependency MCP",
+        output=r"^\[i\] Trusting direct dependency MCP",
+    ),
+)
 
 _EXPECTED_VIOLATIONS: ContextVar[frozenset[str]] = ContextVar(
     "apm_expected_output_violations", default=frozenset()
@@ -381,11 +486,19 @@ def expect_output_violation(*laws: str, reason: str) -> Iterator[None]:
 
 
 def is_apm_entry_point(prefix: Sequence[str]) -> bool:
-    """True when *prefix* runs APM (``-m apm_cli.cli`` or an ``apm`` binary)."""
+    """True when *prefix* runs APM.
+
+    That is ``-m apm_cli.cli``, an ``apm`` binary, or a recorded mutant
+    launcher under ``tests/fixtures/*_mutants/`` (it runs the real CLI).
+    """
     if not prefix:
         return False
-    last = prefix[-1]
-    return last == "apm_cli.cli" or Path(last).name.lower() in {"apm", "apm.exe"}
+    last = Path(prefix[-1])
+    return (
+        prefix[-1] == "apm_cli.cli"
+        or last.name.lower() in {"apm", "apm.exe"}
+        or (last.suffix == ".py" and last.parent.name.endswith("_mutants"))
+    )
 
 
 def _command_name(args: Sequence[str]) -> str:
@@ -393,6 +506,9 @@ def _command_name(args: Sequence[str]) -> str:
 
 
 def _json_mode(args: Sequence[str]) -> bool:
+    """True when the JSON document goes to stdout (``--output FILE`` sends it to a file)."""
+    if any(a in {"-o", "--output"} or a.startswith("--output=") for a in args):
+        return False
     return (
         "--json" in args
         or "--format=json" in args
@@ -407,19 +523,50 @@ def _ascii_violations(stream: str, text: str) -> list[OutputViolation]:
     return [OutputViolation("I6", f"{stream} has characters outside printable ASCII {bad[:5]}")]
 
 
+def _logical_lines(text: str) -> list[str]:
+    """Non-blank lines with terminal wraps undone.
+
+    The console wraps a long status or tree line at its width; the
+    continuation starts at column 0 with no status, tree or box prefix.
+    Joining it back keeps two different wrapped paths from comparing equal
+    on their shared first half ("[>] Resolving").
+    """
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+        if (
+            lines
+            and not line[:1].isspace()
+            and not line.startswith(_LINE_OPENERS)
+            and lines[-1].strip().startswith(_LINE_OPENERS)
+        ):
+            lines[-1] = f"{lines[-1]} {line}"
+            continue
+        lines.append(line)
+    return lines
+
+
 def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
+    """One I9 violation per distinct duplicated line (one per cause), plus tracebacks."""
     found: list[OutputViolation] = []
     if _TRACEBACK in text:
         found.append(OutputViolation("I9", f"{stream} has a Python traceback"))
-    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
-    for first, second in itertools.pairwise(lines):
-        # Rules and table borders legitimately repeat; diagnostics carry words.
-        if first == second and any(c.isalnum() for c in first):
-            found.append(OutputViolation("I9", f"{stream} repeats a line: {first.strip()!r}"))
-            break
+    lines = _logical_lines(text)
+    # Rules and table borders legitimately repeat; diagnostics carry words.
+    consecutive = dict.fromkeys(
+        first.strip()
+        for first, second in itertools.pairwise(lines)
+        if first == second and any(c.isalnum() for c in first)
+    )
+    found.extend(
+        OutputViolation("I9", f"{stream} repeats a line: {line!r}") for line in consecutive
+    )
     # A top-level status line opens a block; indented status and tree lines are
     # compared only within their block, because per-package blocks repeat them.
     seen: set[tuple[int, str]] = set()
+    repeated: dict[str, None] = {}
     block = 0
     for line in lines:
         stripped = line.strip()
@@ -435,10 +582,12 @@ def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
             key = (block, stripped)
         else:
             continue
-        if key in seen:
-            found.append(OutputViolation("I9", f"{stream} repeats a diagnostic: {stripped!r}"))
-            break
+        if key in seen and stripped not in consecutive:
+            repeated[stripped] = None
         seen.add(key)
+    found.extend(
+        OutputViolation("I9", f"{stream} repeats a diagnostic: {line!r}") for line in repeated
+    )
     return found
 
 
@@ -478,7 +627,7 @@ def check_cli_output(
     violations = [v for v in output_violations(args, result) if v.law not in expected]
     problems: list[str] = []
     for cell in KNOWN_OUTPUT_CELLS if known_cells is None else known_cells:
-        if cell.law in expected or not cell.applies(args, scenario_id):
+        if cell.law in expected or not cell.covers(args, scenario_id, result.stdout):
             continue
         owned = [v for v in violations if v.law == cell.law and re.search(cell.message, v.message)]
         if not owned:
