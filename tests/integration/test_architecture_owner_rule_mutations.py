@@ -1248,6 +1248,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Policy cache serializer stops routing through the canonical shape helper.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-ci-shard-file-lists",
+        rule_id="contracts-tooling-ci-shard-file-lists",
+        path="tests/quality/test_ci_topology.py",
+        old="assert not dropped, (",
+        new="assert dropped or not dropped, (",
+        intent="The shard drift guard stops failing when a file list drops a selected test.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-ci-validation-topology",
         rule_id="contracts-tooling-ci-validation-topology",
         path=".github/workflows/ci.yml",

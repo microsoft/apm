@@ -1668,7 +1668,9 @@ def _assert_unit_shard_layout(ci: WorkflowNode) -> None:
     assert job["strategy"]["matrix"]["shard"] == [1, 2]
     tokens = shlex.split(workflow_step(job, UNIT_SHARD_STEP)["run"].replace("\\\n", " "))
     pairs = list(pairwise(tokens))
-    assert ("--shard-count", "2") in pairs
+    assert ("--shard-count", "2") in pairwise(
+        shard_file_list_args(workflow_step(job, SHARD_SELECT_STEP))
+    )
     worker_flags = [t for t in tokens if t.startswith(("-n", "--numprocesses", "--dist"))]
     assert worker_flags == ["-n", "--dist"], "PR unit shards must set xdist exactly once"
     assert ("-n", "auto") in pairs and ("--dist", "worksteal") in pairs
@@ -1753,8 +1755,10 @@ def test_shard_layout_matches_issue_4030() -> None:
 def test_unit_shard_layout_drift_fails(
     provisional_ci: WorkflowNode, before: str, after: str
 ) -> None:
-    step = workflow_step(workflow_job(provisional_ci, "build-and-test-shard"), UNIT_SHARD_STEP)
-    step["run"] = step["run"].replace(before, after)
+    job = workflow_job(provisional_ci, "build-and-test-shard")
+    for name in (SHARD_SELECT_STEP, UNIT_SHARD_STEP):
+        step = workflow_step(job, name)
+        step["run"] = step["run"].replace(before, after)
     with pytest.raises(AssertionError):
         _assert_unit_shard_layout(provisional_ci)
 
@@ -1829,8 +1833,14 @@ SHARDED_ROOTS = (
 
 
 def shard_file_list_args(step: WorkflowNode) -> list[str]:
-    """Arguments of the one `scripts.ci_sharding files` command in a step."""
-    commands = [tokens for tokens in shell_commands(step) if "scripts.ci_sharding" in tokens]
+    """Arguments of the one `scripts.ci_sharding files` command in a step.
+
+    A `${{ ... }}` expression stays one token (its inner spaces dropped).
+    """
+    run = re.sub(r"\$\{\{\s*(.*?)\s*\}\}", lambda match: "${{" + match.group(1) + "}}", step["run"])
+    commands = [
+        tokens for tokens in shell_commands({**step, "run": run}) if "scripts.ci_sharding" in tokens
+    ]
     assert len(commands) == 1, f"{step.get('name')!r} must run the shard file-list emitter once"
     command = commands[0]
     index = command.index("scripts.ci_sharding")
@@ -1854,8 +1864,8 @@ def _resolve_job_tokens(args: Sequence[str], job: WorkflowNode, job_id: str) -> 
     env = {key: str(value) for key, value in (job.get("env") or {}).items()}
     resolved: list[str] = []
     for token in _resolved_index(args):
-        for key, value in env.items():
-            token = token.replace("${{ env." + key + " }}", value).replace("$" + key, value)
+        for key in sorted(env, key=len, reverse=True):
+            token = token.replace("${{env." + key + "}}", env[key]).replace("$" + key, env[key])
         if token.startswith("${{ needs.integration-plan.outputs."):
             token = str(PLANNED_SHARD_COUNTS[job_id])
         # scripts/ci-shard-durations.sh seeds shard-plan/ from the committed seeds.
