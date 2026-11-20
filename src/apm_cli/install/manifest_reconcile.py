@@ -52,7 +52,7 @@ if TYPE_CHECKING:
         DeploymentLedger,
     )
     from apm_cli.deps.lockfile import LockFile
-    from apm_cli.integration.cleanup import CleanupResult
+    from apm_cli.integration.cleanup import CleanupResult, DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -577,6 +577,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     active_targets: list[TargetProfile],
     declared_targets: list[TargetProfile] | None,
     diagnostics: DiagnosticCollector,
+    evidence: DeploymentEvidence,
     on_ghost_drop: Callable[[str], None] | None = None,
     on_cleanup: Callable[[CleanupResult], None] | None = None,
     prior_ledger: DeploymentLedger | None = None,
@@ -700,6 +701,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         dep_key=dep_key,
         targets=None,
         diagnostics=diagnostics,
+        evidence=evidence,
         recorded_hashes=prior_hashes,
         user_scope=user_scope,
         live_paths=files,
@@ -746,6 +748,7 @@ def reconcile_target_deployed_files(
     active_targets: list[TargetProfile],
     declared_targets: list[TargetProfile] | None,
     diagnostics: DiagnosticCollector,
+    evidence: DeploymentEvidence,
     dependency_keys: set[str] | None = None,
     remove_selected_ownership: bool = False,
     selected_outcome: SelectedCleanupOutcome | None = None,
@@ -852,6 +855,7 @@ def reconcile_target_deployed_files(
             active_targets=active_targets,
             declared_targets=declared_targets,
             diagnostics=diagnostics,
+            evidence=evidence,
             prior_ledger=dependency_ledger,
             on_cleanup=partial(surface_target_cleanup, logger, dep_key),
             desired_owners=desired_owners,
@@ -902,6 +906,7 @@ def reconcile_target_deployed_files(
             active_targets=active_targets,
             declared_targets=declared_targets,
             diagnostics=diagnostics,
+            evidence=evidence,
             prior_ledger=local_ledger,
             on_cleanup=partial(surface_target_cleanup, logger, "<local .apm/>"),
             user_scope=user_scope,
@@ -920,6 +925,7 @@ def reconcile_deployed_state(
     active_targets: list[TargetProfile],
     declared_targets: list[TargetProfile] | None,
     diagnostics: DiagnosticCollector,
+    evidence: DeploymentEvidence,
     user_scope: bool = False,
 ) -> bool:
     """Reconcile target-scoped deployed files and merge-hook state."""
@@ -929,6 +935,7 @@ def reconcile_deployed_state(
         active_targets=active_targets,
         declared_targets=declared_targets,
         diagnostics=diagnostics,
+        evidence=evidence,
         user_scope=user_scope,
     )
     reconcile_dropped_merge_hook_targets(
@@ -978,12 +985,21 @@ def reconcile_project_deployed_state(
             active_targets=targets,
             diagnostics=diagnostics,
         )
+    from apm_cli.integration.cleanup import DeploymentEvidence
+
     changed = reconcile_deployed_state(
         project_root=deploy_root,
         lockfile=lockfile,
         active_targets=targets,
         declared_targets=declared,
         diagnostics=diagnostics,
+        evidence=DeploymentEvidence.collect(
+            deploy_root,
+            user_scope=user_scope,
+            lockfile=lockfile,
+            lockfile_root=lock_path.parent,
+            diagnostics=diagnostics,
+        ),
         user_scope=user_scope,
     )
     if changed:

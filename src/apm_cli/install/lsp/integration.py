@@ -194,6 +194,11 @@ def _target_server_sets(lockfile: "LockFile") -> dict[str, set[str]]:
     return {runtime: set(server_names) for runtime, server_names in target_servers.items()}
 
 
+def recorded_lsp_targets(lockfile: "LockFile") -> tuple[str, ...]:
+    """Return the LSP targets *lockfile* records APM writing servers to."""
+    return tuple(sorted(name for name, servers in _target_server_sets(lockfile).items() if servers))
+
+
 def package_lsp_owner(resolved_by: str) -> str:
     """Return the ``lsp_config_provenance`` token for a package's LSP servers."""
     return f"{_PACKAGE_LSP_OWNER_PREFIX}{resolved_by}"
@@ -348,6 +353,13 @@ def run_owned_lsp_integration(
     return count
 
 
+def has_recorded_lsp_state(lockfile: "LockFile | None") -> bool:
+    """Return whether *lockfile* records LSP servers APM may need to reconcile."""
+    return lockfile is not None and bool(
+        lockfile.lsp_servers or lockfile.lsp_target_servers or lockfile.lsp_config_provenance
+    )
+
+
 def reconcile_lsp_after_uninstall(
     *,
     apm_package: "APMPackage",
@@ -359,9 +371,7 @@ def reconcile_lsp_after_uninstall(
     logger,
 ) -> bool:
     """Recompute trusted LSP state from every surviving declaration."""
-    if lockfile is None or not (
-        lockfile.lsp_servers or lockfile.lsp_target_servers or lockfile.lsp_config_provenance
-    ):
+    if not has_recorded_lsp_state(lockfile):
         return False
     if apm_package is None:
         raise ValueError("Cannot reconcile existing LSP state without a valid project manifest")
@@ -372,15 +382,27 @@ def reconcile_lsp_after_uninstall(
         dict(lockfile.lsp_config_provenance),
     )
     from apm_cli.core.scope import InstallScope
-    from apm_cli.core.target_detection import resolve_package_target_decision
-    from apm_cli.models.apm_package import canonical_package_target_config
+    from apm_cli.core.target_detection import (
+        resolve_deployment_target_decision,
+        resolve_package_target_decision,
+    )
+    from apm_cli.models.apm_package import (
+        canonical_package_target_config,
+        package_target_selection,
+    )
 
     scope = InstallScope.USER if user_scope else InstallScope.PROJECT
-    target_decision = resolve_package_target_decision(
-        project_root,
-        package=apm_package,
-        explicit_target=None,
-        user_scope=user_scope,
+    # Survivors stay where APM recorded writing them (#4059): a saved default
+    # or harness detection decides only when the lock records no LSP target.
+    target_decision = resolve_deployment_target_decision(
+        manifest_target=package_target_selection(apm_package),
+        recorded_targets=recorded_lsp_targets(lockfile),
+        fallback=lambda: resolve_package_target_decision(
+            project_root,
+            package=apm_package,
+            explicit_target=None,
+            user_scope=user_scope,
+        ),
     )
     apm_config = {"scripts": apm_package.scripts or {}}
     apm_config.update(canonical_package_target_config(apm_package))

@@ -430,6 +430,21 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-lk-024",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 5,
+      "tests": [
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_file_differing_from_its_evidence_is_kept",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_forged_lockfile_hash_keeps_the_file_and_names_it",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[locked-render]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[receipt]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_spec_states_hash_alone_never_authorizes_deletion"
+      ]
+    },
+    {
       "conformance_class": "producer",
       "id": "req-mf-001",
       "keyword": "MUST",
@@ -2117,7 +2132,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 111,
+      "active": 112,
       "skipped": 3,
       "unbound": 0,
       "xfail": 0
@@ -2141,5 +2156,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 148
+  "total_requirements": 149
 }

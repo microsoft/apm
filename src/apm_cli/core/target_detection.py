@@ -23,7 +23,7 @@ family for Copilot is still spelled "vscode".
 """
 
 import warnings
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from functools import cached_property
 from pathlib import Path
 from typing import Literal, Union
@@ -1032,6 +1032,30 @@ def resolve_package_target_decision(
     )
 
 
+def resolve_deployment_target_decision(
+    *,
+    manifest_target: str | list[str] | None,
+    recorded_targets: tuple[str, ...],
+    fallback: Callable[[], EffectiveTargetDecision] | None = None,
+) -> EffectiveTargetDecision:
+    """Reconcile current manifest intent with an existing deployment's recorded targets.
+
+    Shared by commands that act on what APM already deployed (``apm audit``,
+    uninstall-time LSP reconciliation): the manifest's ``targets:`` wins, as
+    it does for install, then the targets the lockfile records. A saved
+    install default and harness autodetection never retarget an existing
+    deployment; *fallback* (default: unrestricted ``auto-detect``) runs only
+    when nothing is declared or recorded.
+    """
+    if manifest_target:
+        return EffectiveTargetDecision(manifest_target, MANIFEST_TARGET_SOURCE)
+    if recorded_targets:
+        return EffectiveTargetDecision(list(recorded_targets), "deployment ledger")
+    if fallback is not None:
+        return fallback()
+    return EffectiveTargetDecision(None, "auto-detect")
+
+
 def resolve_audit_target_decision(
     *,
     manifest_target: str | list[str] | None,
@@ -1042,11 +1066,9 @@ def resolve_audit_target_decision(
     A saved install default is not a request to retarget an existing deployment.
     Without declared or recorded intent, preserve audit's discovery fallback.
     """
-    if manifest_target:
-        return EffectiveTargetDecision(manifest_target, MANIFEST_TARGET_SOURCE)
-    if recorded_targets:
-        return EffectiveTargetDecision(list(recorded_targets), "deployment ledger")
-    return EffectiveTargetDecision(None, "auto-detect")
+    return resolve_deployment_target_decision(
+        manifest_target=manifest_target, recorded_targets=recorded_targets
+    )
 
 
 def read_manifest_target(project_root: Path) -> list[str] | None:

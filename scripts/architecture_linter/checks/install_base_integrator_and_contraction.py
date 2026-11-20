@@ -1398,7 +1398,7 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "session.record({path: written_hashes[entry(path)] for path in written}",
             "materialization_session.flush()",
             "self._materialization_session = None",
-            "removed_paths.append(target)",
+            "receipt_retirements=removed_paths,",
         ),
         _BASE_INTEGRATOR_OWNER: (
             'self.__dict__.setdefault("_rendered_writes", []).append(path)',
@@ -1470,6 +1470,31 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             )
         },
     }
+    # Every lockfile-driven deletion needs deployment evidence and routes
+    # through the cleanup owner; no sync or migration deletes on its own (#3701).
+    write_reports.update(
+        {
+            "src/apm_cli/integration/cleanup.py": (
+                "    evidence: DeploymentEvidence,\n    recorded_hashes",
+                "verdict = evidence.verdict(stale_path, stale_target)",
+                "if evidence.verdict(child_rel, child) != AUTHORIZED:",
+            ),
+            _BASE_INTEGRATOR_OWNER: (
+                "from apm_cli.integration.cleanup import remove_synced_files",
+            ),
+            "src/apm_cli/integration/hook_integrator.py": (
+                "note_rendered_write(",
+                "cleanup = remove_synced_files(",
+            ),
+            "src/apm_cli/integration/skill_integrator.py": (
+                "note_rendered_write(",
+                "cleanup = remove_synced_files(",
+            ),
+            "src/apm_cli/install/skill_path_migration.py": (
+                "if not evidence.authorizes(plan.src_path, abs_path, rendered_as=plan.dst_path):",
+            ),
+        }
+    )
     for path, snippets in write_reports.items():
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)
