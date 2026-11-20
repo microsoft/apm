@@ -120,7 +120,6 @@ def run_mcp_policy_preflight(
     logger,
     target_decision: EffectiveTargetDecision,
     registry: tuple[str | None, str | None] = (None, None),
-    user_scope: bool = False,
 ) -> None:
     """Judge a direct MCP install through the commit gate before any persistent write.
 
@@ -152,12 +151,14 @@ def run_mcp_policy_preflight(
             allow_http=registry_source == "flag",
             source=registry_source,
         ):
+            # APM writes this server on every selected runtime, so it is always
+            # a policy subject; target policy judges the selection itself.
             enforce_mcp_policy(
                 [dependency],
                 brought_in_by=None,
                 runtime=None,
-                target_decision=target_decision,
-                user_scope=user_scope,
+                target_decision=None,
+                user_scope=False,
                 project_root=Path.cwd(),
                 no_policy=no_policy,
                 logger=logger,
