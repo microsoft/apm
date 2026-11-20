@@ -32,12 +32,13 @@
   "step5: AQ002 narrowed to HashMismatchError in registry resolver tests; AQ003 fixed by asserting durable cache/lock/file state left behind",
   "step5: mixed modules split by moving whole test classes (same Class::name) so pure-logic tests sit in unit modules and filesystem tests in component modules: primitives/test_discovery_walk.py and test_primitives.py are now unit; their filesystem classes moved into test_discovery_parser.py",
   "step5: security/test_executables.py is now unit; its filesystem classes (TestLocalBundleApprovalKey, TestScanPackageExecutables, TestWriteAllowExecutables, TestSaveUserExecutablesAtomic) moved into test_exec_vocab_unification.py",
-  "step5: models/test_dependency_uninstall_selection.py is now unit (its one filesystem dry-run test moved to regressions/test_issue_2549_global_dry_run.py with its lock helper); resolve_user_invocable direct cases moved to primitives/test_primitives.py; TestParseProjectExecutables moved to security/test_executables.py"
+  "step5: models/test_dependency_uninstall_selection.py is now unit (its one filesystem dry-run test moved to regressions/test_issue_2549_global_dry_run.py with its lock helper); resolve_user_invocable direct cases moved to primitives/test_primitives.py; TestParseProjectExecutables moved to security/test_executables.py",
+  "step5: models/test_manifest_targets.py is now unit; its six on-disk tests moved to models/test_manifest_io.py with the _declaration helper and the warning re-arm fixture"
  ],
  "counts_left": {
   "same_body_groups": 6,
   "unclassified_modules": 7,
   "placement_offenders": 8,
-  "weak_tests": 435
+  "weak_tests": 426
  }
 }
