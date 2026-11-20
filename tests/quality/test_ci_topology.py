@@ -74,6 +74,9 @@ LIFECYCLE_SMOKE_SHARD_JOBS = (
     "lifecycle-smoke-shard-4",
 )
 LIFECYCLE_SMOKE_SHARDS = tuple(range(1, len(LIFECYCLE_SMOKE_SHARD_JOBS) + 1))
+# The aggregate also requires the cross-shard GATE cell coverage check (#4031).
+LIFECYCLE_SMOKE_GATE_COVERAGE_JOB = "gate-cell-coverage"
+LIFECYCLE_SMOKE_AGGREGATE_NEEDS = (*LIFECYCLE_SMOKE_SHARD_JOBS, LIFECYCLE_SMOKE_GATE_COVERAGE_JOB)
 LIFECYCLE_SMOKE_AGGREGATE_STEP = "Require every lifecycle shard"
 LIFECYCLE_SMOKE_DURATIONS = ".github/ci-durations/linux-x86_64.json"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
@@ -942,7 +945,7 @@ def _assert_lifecycle_smoke_aggregate(ci: WorkflowNode) -> None:
     """Require every explicit shard result, including fail-closed absent results."""
     job = workflow_job(ci, LIFECYCLE_SMOKE_JOB)
     assert job["name"] == LIFECYCLE_SMOKE_CHECK
-    assert job["needs"] == list(LIFECYCLE_SMOKE_SHARD_JOBS)
+    assert job["needs"] == list(LIFECYCLE_SMOKE_AGGREGATE_NEEDS)
     assert job["if"] == "always()"
     assert job["permissions"] == {}
     assert "continue-on-error" not in job
@@ -951,11 +954,18 @@ def _assert_lifecycle_smoke_aggregate(ci: WorkflowNode) -> None:
     assert "if" not in step
     assert "continue-on-error" not in step
     assert step["env"] == {
-        f"SHARD_{index}_RESULT": "${{ needs." + job_id + ".result }}"
-        for index, job_id in enumerate(LIFECYCLE_SMOKE_SHARD_JOBS, 1)
+        **{
+            f"SHARD_{index}_RESULT": "${{ needs." + job_id + ".result }}"
+            for index, job_id in enumerate(LIFECYCLE_SMOKE_SHARD_JOBS, 1)
+        },
+        "GATE_COVERAGE_RESULT": "${{ needs." + LIFECYCLE_SMOKE_GATE_COVERAGE_JOB + ".result }}",
     }
     _assert_success_results(
-        step, tuple(f"SHARD_{shard}_RESULT" for shard in LIFECYCLE_SMOKE_SHARDS)
+        step,
+        (
+            *(f"SHARD_{shard}_RESULT" for shard in LIFECYCLE_SMOKE_SHARDS),
+            "GATE_COVERAGE_RESULT",
+        ),
     )
 
 
@@ -999,7 +1009,7 @@ def test_lifecycle_shard_partition_drift_fails(shards: list[list[str]]) -> None:
         _assert_lifecycle_shard_partition(["a", "b", "c", "d"], shards)
 
 
-@pytest.mark.parametrize("missing_job", LIFECYCLE_SMOKE_SHARD_JOBS)
+@pytest.mark.parametrize("missing_job", LIFECYCLE_SMOKE_AGGREGATE_NEEDS)
 def test_lifecycle_aggregate_missing_dependency_fails(
     provisional_ci: WorkflowNode, missing_job: str
 ) -> None:
