@@ -180,3 +180,83 @@ def test_canvas_skip_line_names_the_deny(tmp_path: Path, apm_binary_path: Path, 
     assert _approve_hint(package) not in denied, denied
     assert not deployed.exists()
     assert _exec_status(project / "apm.lock.yaml") == "denied"
+
+
+# -- user scope: no project-only 'apm policy explain' hint (#4296) ------------
+
+
+def _hook_package(root: Path) -> None:
+    hooks = root / ".apm" / "hooks"
+    (hooks / "scripts").mkdir(parents=True)
+    dump_yaml({"name": "hooky", "version": "1.0.0"}, root / "apm.yml")
+    command = {"type": "command", "command": "bash ./scripts/guard-4296.sh"}
+    document = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [command]}]}}
+    (hooks / "guard.json").write_text(json.dumps(document) + "\n", encoding="ascii")
+    (hooks / "scripts" / "guard-4296.sh").write_text("#!/bin/bash\necho guard\n", encoding="ascii")
+
+
+def _residue(root: Path, marker: str) -> list[str]:
+    return sorted(
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and (path.name == marker or marker in path.read_text(errors="ignore"))
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "label", "target", "deploy_root", "marker"),
+    [
+        ("canvas", "canvas extension(s)", "copilot", ".copilot", "extension.mjs"),
+        ("hooks", "hooks", "claude", ".claude", "guard-4296.sh"),
+    ],
+)
+def test_user_scope_deny_line_omits_the_project_only_explain_hint(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    kind: str,
+    label: str,
+    target: str,
+    deploy_root: str,
+    marker: str,
+) -> None:
+    """At -g a denied canvas or hook is named as denied, without 'apm policy explain'.
+
+    'apm policy explain' resolves only the current project, so it cannot explain
+    a user-scope installation; the deny line stops at the deny.
+    """
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    isolated = world.isolated
+    source = isolated.work_root / "pkg"
+    (_canvas_package if kind == "canvas" else _hook_package)(source)
+    package = str(source)
+    dump_yaml(
+        {
+            "name": "user",
+            "version": "1.0.0",
+            "targets": [target],
+            "dependencies": {"apm": [package]},
+            "executables": {"allow": {package: {kind: True}}},
+        },
+        isolated.config_root / "apm.yml",
+    )
+    root = isolated.home / deploy_root
+    root.mkdir(parents=True, exist_ok=True)
+    env = {**isolated.subprocess_env(), "COLUMNS": "1000"}
+    env.pop("COPILOT_HOME", None)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=900)
+
+    def apm(*args: str, step: str) -> str:
+        result = run_step(runner, args, cwd=isolated.work_root, env=env, step=step)
+        return _flat(output(result))
+
+    if kind == "canvas":
+        apm("experimental", "enable", "canvas", step="0-enable-canvas")
+    first = apm("install", "-g", "--no-policy", step="1-install")
+    assert _residue(root, marker), first
+
+    apm("deny", "--user", package, step="2-deny")
+    denied = apm("install", "-g", "--no-policy", step="3-install-denied")
+    assert f"{package}: {label} skipped (denied)." in denied, denied
+    assert "policy explain" not in denied, denied
+    assert _approve_hint(package) not in denied, denied
+    assert _residue(root, marker) == []

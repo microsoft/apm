@@ -532,17 +532,37 @@ def bin_deploy_denial(package_info: Any, policy: Any) -> str | None:
     return "bin_deploy.deny" if package_key in denied else None
 
 
+def explain_hint_applies(ctx: InstallContext | None) -> bool:
+    """Whether ``apm policy explain`` can explain this run's decisions.
+
+    It resolves only the current project, so it cannot explain a user-scope
+    (``-g``) installation (#4296).
+    """
+    from apm_cli.core.scope import InstallScope
+
+    return getattr(ctx, "scope", None) is not InstallScope.USER
+
+
 def executable_skip_reason(
-    ctx: InstallContext | None, package_name: str, label: str, exec_type: str, kind: str
+    ctx: InstallContext | None,
+    package_name: str,
+    label: str,
+    exec_type: str,
+    kind: str,
+    *,
+    explain_hint: bool = True,
 ) -> str:
     """Return why *kind* of *package_name* was skipped, with the next step.
 
     The gate records hard-denied types in ``ctx.package_denied_exec_types``;
     a denied type points to ``apm policy explain`` because approving cannot
-    lift a deny. Any other skip is approvable.
+    lift a deny. ``explain_hint=False`` omits that pointer where it does not
+    apply. Any other skip is approvable.
     """
     denied = getattr(ctx, "package_denied_exec_types", None) or {}
     if exec_type in denied.get(package_name, frozenset()):
+        if not explain_hint:
+            return f"{kind} skipped (denied)."
         return (
             f"{kind} skipped (denied). Run 'apm policy explain {label}' to see which deny applies."
         )
@@ -617,7 +637,9 @@ def log_hooks_skip(
     from apm_cli.security.executables import EXEC_TYPE_HOOKS
 
     label = package_name or getattr(package_info, "name", "unknown")
-    reason = executable_skip_reason(ctx, package_name, label, EXEC_TYPE_HOOKS, "hooks")
+    reason = executable_skip_reason(
+        ctx, package_name, label, EXEC_TYPE_HOOKS, "hooks", explain_hint=explain_hint_applies(ctx)
+    )
     logger.warning(f"{label}: {reason}", symbol="warning")
 
 

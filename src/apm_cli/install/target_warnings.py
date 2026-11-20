@@ -50,6 +50,7 @@ def log_canvas_skip(
     """Warn about skipped canvas extensions when the package ships them.
 
     A hard-denied canvas is named as denied (#4052); approving cannot lift it.
+    At user scope the deny line omits the project-only ``apm policy explain``.
     """
     _install = Path(package_info.install_path)
     extensions_root = _install / ".apm" / "extensions"
@@ -63,11 +64,16 @@ def log_canvas_skip(
         return
     _pkg_label = package_name or getattr(package_info, "name", "unknown")
     if logger:
-        from apm_cli.install.exec_gate import executable_skip_reason
+        from apm_cli.install.exec_gate import executable_skip_reason, explain_hint_applies
         from apm_cli.security.executables import EXEC_TYPE_CANVAS
 
         reason = executable_skip_reason(
-            ctx, package_name, _pkg_label, EXEC_TYPE_CANVAS, "canvas extension(s)"
+            ctx,
+            package_name,
+            _pkg_label,
+            EXEC_TYPE_CANVAS,
+            "canvas extension(s)",
+            explain_hint=explain_hint_applies(ctx),
         )
         logger.warning(f"{_pkg_label}: {reason}", symbol="warning")
 
