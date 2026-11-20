@@ -29,6 +29,8 @@ from tests.workflow_contracts import (
     workflow_step,
 )
 
+pytest_plugins = ["pytester"]
+
 RATCHET_TEST_SCOPE = "repository"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -84,7 +86,8 @@ LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
 LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 15
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
-LIFECYCLE_SMOKE_ROOT = "tests/integration"
+# The lifecycle family core (#4093) runs beside the integration lifecycle modules.
+LIFECYCLE_SMOKE_ROOTS = ("tests/integration", "tests/lifecycle")
 LIFECYCLE_SMOKE_E2E_ENV = "APM_E2E_TESTS"
 LIFECYCLE_SMOKE_E2E_VALUE = "1"
 LIFECYCLE_SMOKE_FULL_EXPRESSION = "lifecycle_smoke"
@@ -92,6 +95,7 @@ LIFECYCLE_SMOKE_MERGE_GROUP_MARKER = "lifecycle_merge_group"
 LIFECYCLE_SMOKE_REQUIRED_EXPRESSION = (
     f"{LIFECYCLE_SMOKE_FULL_EXPRESSION} and not {LIFECYCLE_SMOKE_MERGE_GROUP_MARKER}"
 )
+LIFECYCLE_MARKER_IMPLICATION_HOOK = "tests/conftest.py:pytest_collection_modifyitems"
 MERGE_GROUP_INTEGRATION_WORKFLOW = REPO_ROOT / ".github/workflows/ci-integration.yml"
 MERGE_GROUP_INTEGRATION_JOB = "integration-tests-shard"
 MERGE_GROUP_INTEGRATION_STEP = "Run integration tests (sharded + parallelized)"
@@ -736,8 +740,8 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
     marker_index = tokens.index("-m")
     assert tokens[marker_index + 1] == LIFECYCLE_SMOKE_REQUIRED_EXPRESSION
     targets = [token for token in tokens if token.startswith("tests/")]
-    assert targets == [LIFECYCLE_SMOKE_ROOT], (
-        f"lifecycle-smoke must bound marker collection to {LIFECYCLE_SMOKE_ROOT!r}"
+    assert targets == list(LIFECYCLE_SMOKE_ROOTS), (
+        f"lifecycle-smoke must bound marker collection to {LIFECYCLE_SMOKE_ROOTS!r}"
     )
 
 
@@ -824,7 +828,7 @@ def _assert_marker_collection_non_empty(marker: str) -> None:
             "--strict-markers",
             "-m",
             marker,
-            LIFECYCLE_SMOKE_ROOT,
+            *LIFECYCLE_SMOKE_ROOTS,
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -867,7 +871,7 @@ def _collect_lifecycle_nodes(expression: str, shard: int | None = None) -> tuple
             ),
             "-m",
             expression,
-            LIFECYCLE_SMOKE_ROOT,
+            *LIFECYCLE_SMOKE_ROOTS,
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -900,7 +904,12 @@ def _assert_lifecycle_partition_sets(
     full = _validated_lifecycle_node_set(full_nodes, "full")
     merge_group = _validated_lifecycle_node_set(merge_group_nodes, "merge-group")
     required = _validated_lifecycle_node_set(required_nodes, "required")
-    assert merge_group < full, "merge-group lifecycle selection must be a strict subset of full"
+    assert merge_group < full, (
+        "merge-group lifecycle selection must be a strict subset of full; "
+        f"{sorted(merge_group - full)[:5]} carry {LIFECYCLE_SMOKE_MERGE_GROUP_MARKER} "
+        f"but are not collected by -m {LIFECYCLE_SMOKE_FULL_EXPRESSION}. Fix: the auto-add in "
+        f"{LIFECYCLE_MARKER_IMPLICATION_HOOK} was removed or bypassed; restore it."
+    )
     assert required.isdisjoint(merge_group), (
         "required lifecycle selection must be disjoint from merge-group"
     )
@@ -1176,7 +1185,7 @@ def test_lifecycle_smoke_unbounded_root_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
     step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace("tests/integration", "tests")
+    step["run"] = step["run"].replace(" ".join(LIFECYCLE_SMOKE_ROOTS), "tests")
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_command(provisional_lifecycle_job)
@@ -1722,3 +1731,32 @@ def test_heavy_pr_workflows_spare_the_shared_actions_api_quota() -> None:
         if "POLL_SEC" in step.get("env", {})
     ]
     assert poll and all(int(value) >= 30 for value in poll), poll
+
+
+def test_merge_group_only_node_is_collected_as_lifecycle_smoke(
+    pytester: pytest.Pytester,
+) -> None:
+    """A node marked only lifecycle_merge_group is selected by -m lifecycle_smoke."""
+    pytester.makeini(
+        "[pytest]\nmarkers =\n"
+        f"    {LIFECYCLE_SMOKE_MARKER}: smoke\n"
+        f"    {LIFECYCLE_SMOKE_MERGE_GROUP_MARKER}: merge group\n"
+    )
+    pytester.makeconftest("from tests.conftest import pytest_collection_modifyitems\n")
+    pytester.makepyfile(
+        f"""
+        import pytest
+
+        @pytest.mark.{LIFECYCLE_SMOKE_MERGE_GROUP_MARKER}
+        def test_merge_group_only():
+            pass
+
+        def test_unmarked():
+            pass
+        """
+    )
+    result = pytester.runpytest(
+        "--collect-only", "-q", "--strict-markers", "-m", LIFECYCLE_SMOKE_FULL_EXPRESSION
+    )
+    result.stdout.fnmatch_lines(["*::test_merge_group_only"])
+    result.stdout.no_fnmatch_line("*::test_unmarked")

@@ -1822,6 +1822,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="BaseIntegrator drops a mandatory file-level deploy/sync/cleanup method.",
     ),
     MutationCase(
+        guard_id="install-deployment-bundle-admission-owner",
+        rule_id="install-deployment-bundle-admission-owner",
+        path="src/apm_cli/commands/pack.py",
+        old="            admit=apm_bundle_admission(Path(output), logger, dry_run=dry_run),\n",
+        new="            admit=lambda candidate: None,\n",
+        intent="apm unpack deploys a bundle without the shared bundle admission owner.",
+    ),
+    MutationCase(
         guard_id="install-deployment-bundle-compile-staging",
         rule_id="install-deployment-bundle-compile-staging",
         path="src/apm_cli/install/local_bundle_handler.py",
@@ -1918,6 +1926,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="InstallService stops owning the frozen-install mutation preflight.",
     ),
     MutationCase(
+        guard_id="install-deployment-hook-pin-frozen-audit-parity",
+        rule_id="install-deployment-hook-pin-frozen-audit-parity",
+        path="src/apm_cli/install/service.py",
+        old="mismatches = locked_hook_pin_mismatches(lockfile, modules_dir, trust_ctx)",
+        new="mismatches = []",
+        intent="install --frozen stops verifying locked hook pins while audit --ci still does.",
+    ),
+    MutationCase(
         guard_id="install-deployment-immutable-requirements",
         rule_id="install-deployment-immutable-requirements",
         path="src/apm_cli/deps/apm_resolver.py",
@@ -1956,6 +1972,18 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    legacy = lockfile.replacements is None\n",
         new=("    legacy = lockfile.replacements is None\n    parent_depth = target.depth - 1\n"),
         intent="deps why re-derives legacy lockfile parents by depth outside the owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-locked-content-verdict",
+        rule_id="install-deployment-locked-content-verdict",
+        path="src/apm_cli/install/drift.py",
+        old=(
+            "    if locked_content_mismatch(\n"
+            "        key, lock_dep, candidate, lockfile=lockfile, package_info=package_info\n"
+            "    ):\n"
+        ),
+        new="    if False:\n",
+        intent="The audit --ci scratch replay stops asking install's locked content verdict.",
     ),
     MutationCase(
         guard_id="install-deployment-locked-copy-validity",
@@ -2294,6 +2322,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old='    return bool(commit not in (None, "", "cached") and commit == locked_commit)\n',
         new="    return False\n",
         intent="apm update treats every locked commit as moved and skips the content-hash check.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-update-registry-integrity",
+        rule_id="install-deployment-update-registry-integrity",
+        path="src/apm_cli/install/sources.py",
+        old="                    package_info = download_registry_package(\n",
+        new="                    package_info = _registry_resolver.download_package(\n",
+        intent="A registry update download skips the locked-hash check for an unchanged version.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-agent-plugin-contract",
@@ -4706,8 +4742,8 @@ def test_host_credential_guard_rejects_proxy_route_bypass(path: str, old: str, n
             id="mcp-install-raw-selection",
         ),
         pytest.param(
-            "src/apm_cli/install/local_bundle_handler.py",
-            "effective_target=deployment_decision.canonical_targets,",
+            "src/apm_cli/install/bundle_admission.py",
+            "effective_target=target_decision.canonical_targets,",
             "effective_target=[resolved.name for resolved in targets],",
             id="local-bundle-raw-names",
         ),

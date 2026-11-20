@@ -64,6 +64,16 @@ jobs:
         uv run --frozen --extra dev python scripts/check_complexity_ratchet.py \
           --base-ref "$BASE_SHA"
 
+    - name: Taxonomy allowance ratchet (shrink-only vs base)
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      run: |
+        # Unclassified, misplaced and promise-less allowances may only shrink;
+        # an added entry is accepted only as a validated move of a removed one.
+        git fetch --no-tags --depth=1 origin "$BASE_SHA"
+        uv run --frozen --extra dev python scripts/check_taxonomy_allowances.py \
+          --base-ref "$BASE_SHA"
+
     - name: Check YAML encoding safety
       run: |
         # Ensure YAML file I/O goes through yaml_io helpers.
@@ -408,6 +418,8 @@ jobs:
           tests/quality/test_quality_baselines.py \
           tests/quality/test_lifecycle_bug_ledger.py \
           tests/quality/test_ci_topology.py \
+          tests/quality/test_promise_obligations.py \
+          tests/quality/test_cli_docs_surface.py \
           tests/quality/test_journey_index.py
 
   test-architecture-scaling:
@@ -829,7 +841,7 @@ jobs:
           -p scripts.ci_sharding --shard-count 4 --shard-index "$LIFECYCLE_SHARD" \
           --shard-durations .github/ci-durations/linux-x86_64.json \
           -n 4 --dist loadgroup --durations=20 \
-          -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
+          -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration tests/lifecycle
 
     # The M-GATE spines write their visited cells to build/gate-cells/;
     # gate-cell-coverage merges every shard's set.

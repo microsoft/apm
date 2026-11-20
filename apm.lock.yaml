@@ -373,7 +373,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:d2a23bceb7560b4aed263825dc54ecb9c882b0ea03b4dface753961608139686
+  content_hash: sha256:0c3df9e1a451a77778e5b321022de33f46f6e75859c2635294883c7cceadcb33
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-lifecycle-tests/assets/templates.md
@@ -418,7 +418,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:8ef17a26f6be6dee5e4503bca9ac585acfed21faa6ac86f5b187e322db1b851a
+  content_hash: sha256:90629e76fc524b80b40351e5ef2658750406e2765f11e28ad27819df1bef189d
 - kind: project-relative
   target: copilot
   value: .agents/skills/apm-lifecycle-tests/references/migrate-and-merge.md
@@ -3244,7 +3244,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:f17ad9816741566d7af3d30680647fe8949bfb82dca182188c20427dd887010d
+  content_hash: sha256:7bec6db056edd3a50b63d87ed7d048aaddbea2286af4a9ae8afd0e5e3a420d50
 local_deployed_files:
 - .agents/skills/apm-lifecycle-tests
 - .agents/skills/apm-lifecycle-tests/SKILL.md
@@ -3457,12 +3457,12 @@ local_deployed_files:
 - .github/instructions/python.instructions.md
 - .github/instructions/tests.instructions.md
 local_deployed_file_hashes:
-  .agents/skills/apm-lifecycle-tests/SKILL.md: sha256:d2a23bceb7560b4aed263825dc54ecb9c882b0ea03b4dface753961608139686
+  .agents/skills/apm-lifecycle-tests/SKILL.md: sha256:0c3df9e1a451a77778e5b321022de33f46f6e75859c2635294883c7cceadcb33
   .agents/skills/apm-lifecycle-tests/assets/templates.md: sha256:4c667790e491026e93fcd6e1d8303f2a60ddf050d6e5cf1e471182064f5d3219
   .agents/skills/apm-lifecycle-tests/evals/README.md: sha256:a21a6da3a317e27d6d52d6f1680c7235ab05af15b67db1c73d31eb9fb86749c8
   .agents/skills/apm-lifecycle-tests/evals/content-evals.json: sha256:97825cf74f804c8e898e0a9b2ba599f7d79f9b4e47415d5327667a0591223694
   .agents/skills/apm-lifecycle-tests/evals/trigger-evals.json: sha256:f09262490c734ca81770cf85d78caea0999ea965e4839809915f2ee503e69c96
-  .agents/skills/apm-lifecycle-tests/references/family.md: sha256:8ef17a26f6be6dee5e4503bca9ac585acfed21faa6ac86f5b187e322db1b851a
+  .agents/skills/apm-lifecycle-tests/references/family.md: sha256:90629e76fc524b80b40351e5ef2658750406e2765f11e28ad27819df1bef189d
   .agents/skills/apm-lifecycle-tests/references/migrate-and-merge.md: sha256:b2e7afbae904ee986ca309ed1a2d509a0c1feb5f2794ab07b4b268d978559fd6
   .agents/skills/apm-lifecycle-tests/references/oracles.md: sha256:f63fce20f7c44b94531e8622a3b2f909d148804aedeee91532df43e3bf0ff9bd
   .agents/skills/apm-spec-guardian/SKILL.md: sha256:a17a88097bdd4414ca2aa2d4956e7fd99b8eb06c843af7cfeffd3c6702e412de
@@ -3729,4 +3729,4 @@ local_deployed_file_hashes:
   .github/instructions/integrators.instructions.md: sha256:19919cbd04031a8a09be8aa0860aa941640b8313df74439e7bfac31310aa1b13
   .github/instructions/linting.instructions.md: sha256:42ee2a5aa3bd0a81e4c54e1900d96f4fb5118597367cd34b4ac34a8d0adffa5c
   .github/instructions/python.instructions.md: sha256:8acd2bb824eb8d70a1977dfef309a5a122b49320d22222dd8d3544ca08712bca
-  .github/instructions/tests.instructions.md: sha256:f17ad9816741566d7af3d30680647fe8949bfb82dca182188c20427dd887010d
+  .github/instructions/tests.instructions.md: sha256:7bec6db056edd3a50b63d87ed7d048aaddbea2286af4a9ae8afd0e5e3a420d50
