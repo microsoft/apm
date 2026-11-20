@@ -19,9 +19,20 @@ _ALL = (
 )
 # Plain files of the plugin survive an executable-level gate change.
 _SKILL = {"project": (".claude/skills/p-native-claude",)}
-_NOT_APPROVABLE = (
-    "#4154 apm approve does not find a Claude plugin installed from a local path, so "
-    "its executables cannot be approved"
+_UPDATE_KEEPS_CHANGED = (
+    "#4444 apm update keeps a native Claude plugin's executables deployed after their "
+    "definition changed since approval"
+)
+_UPDATE_IGNORES_DENY = (
+    "#4445 apm update exits 0 under an org policy that denies an installed native Claude plugin"
+)
+_UNINSTALL_KEEPS_GATED = (
+    "#4446 apm uninstall of another package leaves a native Claude plugin deployed after "
+    "it is no longer allowed"
+)
+_AUDIT_FROZEN_LOCAL_DRIFT = (
+    "#4447 audit --ci passes a local dependency whose content changed since the lock, "
+    "which install --frozen refuses"
 )
 # gate_paths/native_plugin.py: the git-served p-native-claude-bin at user scope; the
 # approved plugin lands whole under ~/.agents/plugins and goes as one unit.
@@ -35,17 +46,11 @@ _PLUGIN_CHANGES = (
     "revoke-approval",
 )
 _USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
-_UNINSTALL_SIBLING = (
-    "S-pending (neutral issue to follow): uninstall rebuild agreement on gated surfaces"
-)
 _XFAIL = {
-    **{
-        f"G|{path}|{change}|native": _NOT_APPROVABLE
-        for path in ("install", "frozen", "update", "uninstall-prune-rebuild", "audit-ci")
-        for change in _ALL
-        if change != "org-enables-gate"
-    },
-    "G|uninstall-prune-rebuild|org-enables-gate|native": _UNINSTALL_SIBLING,
+    "G|update|definition-changed|native": _UPDATE_KEEPS_CHANGED,
+    "G|update|policy-dep-deny|native": _UPDATE_IGNORES_DENY,
+    **{f"G|uninstall-prune-rebuild|{change}|native": _UNINSTALL_KEEPS_GATED for change in _ALL},
+    "G|audit-ci|definition-changed|native": _AUDIT_FROZEN_LOCAL_DRIFT,
     **{
         f"G|native-plugin|{change}|native": _USER_ORG
         for change in ("org-deny", "org-enables-gate", "policy-dep-deny")
