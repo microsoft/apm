@@ -101,10 +101,9 @@ def duplicate_origin_warning(source: MarketplaceSource, existing: MarketplaceSou
 
 _PROVENANCE_FIELDS = ("discovered_via", "marketplace_plugin_name", "source_url", "source_digest")
 _CATALOG_FIELDS = ("source_url", "source_digest")
-# Origin evidence (source_url/source_digest) and lockfile_version 4 are first
+# Origin evidence (source_url/source_digest) and its lock format are first
 # written by APM 0.37; an older generator stamp is the only legacy evidence.
 _ORIGIN_RECORDING_RELEASE = (0, 37)
-_ORIGIN_ONLY_LOCK_VERSION = "4"
 _RELEASE = re.compile(r"^\s*v?(\d+)\.(\d+)")
 _NEXT_STEP = (
     "Nothing was changed. Re-add the marketplace with 'apm marketplace add', or run a "
@@ -125,7 +124,7 @@ def _legacy_lock(lockfile: LockFile) -> bool:
     if not _predates_origin_recording(lockfile.apm_version):
         return False
     rows = lockfile.dependencies.values()
-    if lockfile.lockfile_version == _ORIGIN_ONLY_LOCK_VERSION or any(
+    if lockfile.is_origin_recording_format() or any(
         getattr(dep, field) for dep in rows for field in _CATALOG_FIELDS
     ):
         raise MarketplaceProvenanceError(
