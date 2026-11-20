@@ -93,17 +93,16 @@ File primitives resolve targets in this order: `--target`, manifest
 `--runtime` / `--target`, then manifest targets, saved config, then
 auto-detection only when `apm.yml` declares no targets.
 
-[Copilot Agent Plugin registration](../../../consumer/copilot-agent-plugins/#requirements)
-does not discover or execute the Copilot CLI; APM owns materialization and
-target-file generation. Use a supported Copilot runtime for that registration.
-
-Plugins installed with `--global --target claude` are copied intact to
-`~/.agents/plugins/<plugin>/` and declared in Claude's `settings.json`
-(`extraKnownMarketplaces` and `enabledPlugins`); APM never runs the `claude`
-CLI. A plugin is enabled only when its executables are approved; otherwise it is
-not declared, with a warning. Rejected capabilities fail without loose-file
-fallback. See
-[Claude admission and qualification](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
+Native plugins (Claude plugins targeting `claude`, or `copilot` at project
+scope, and Agent Plugins targeting `copilot`) are copied intact to
+`.agents/plugins/<plugin>/` (`~/.agents/plugins/` with `--global`) and declared
+in `.claude/settings.json` and `.github/copilot/settings.json`
+(`~/.claude/settings.json` and `~/.copilot/settings.json` with `--global`).
+Commit `.agents/plugins/`, those settings files and `apm.lock.yaml` so a fresh
+clone loads the plugins without APM. APM never runs the `claude` or `copilot`
+CLI. A plugin is enabled only when its executables are approved; otherwise it
+is parked with a warning naming the next step, without loose-file fallback. See
+[Native plugins](../../../consumer/install-plugins/#native-plugins).
 
 ### Policy and trust
 
@@ -235,10 +234,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   retains recovery data; the prior package may no longer be active.
   Follow [Windows recovery guidance](../../../troubleshooting/install-failures/#windows-file-locks-and-incomplete-recovery)
   before retrying.
-  If updating Claude settings for native plugins fails, the settings file and
+  If updating harness settings for native plugins fails, the settings files and
   deployed plugin roots are left as they were and the previous lockfile is
   restored. Registration success is not runtime proof. See
-  [Claude user plugins](../../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
+  [Native plugins](../../../consumer/install-plugins/#native-plugins).
 - **Git-hook isolation.** Dependency Git operations ignore repository-locating
   hook variables, preserving the caller's branch and HEAD. APM allows safe URL
   rewrites but rejects credentials, insecure transports including `http://` and
@@ -426,10 +425,10 @@ the same hook merge a source install uses, once the exact bundle key printed by
 `apm install` is approved in `executables.allow`; until then they are skipped
 with one warning. `apm uninstall` does not remove local-bundle content. A
 portable Agent Plugins v1 package installs declaratively instead:
-declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
-whole and registers it without locating or executing Copilot. Stable Copilot
-CLI 1.0.81 or newer is required when loading the projection. See
-[Install Agent Plugins for Copilot](../../../consumer/copilot-agent-plugins/).
+declare it in `apm.yml` and run `apm install --target copilot`, which deploys
+it whole to `.agents/plugins/` without locating or executing Copilot. Stable
+Copilot CLI 1.0.81 or newer is required to load it. See
+[Native plugins](../../../consumer/install-plugins/#native-plugins).
 :::
 
 ### Install only a subset of skills from a bundle

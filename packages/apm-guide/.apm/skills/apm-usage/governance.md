@@ -318,12 +318,10 @@ executable-trust configuration under either `executables` or the deprecated
 > `executables.deny` (bin type only) and honored as an alias for one minor
 > cycle. Prefer `executables.deny` for new policies.
 
-When a `marketplace_plugin` package ships a `bin/` directory, a global
-install (`apm install -g`) deploys those executables into
-`~/.claude/skills/<name>/bin/` so Claude Code invokes them as bare
-commands (the skills-directory plugin contract). Deployment is
-Claude-only and user-scope only; project-scope installs never deploy
-executables.
+When a `marketplace_plugin` package ships a `bin/` directory, `apm install`
+with the `claude` target keeps it inside the plugin deployed whole to
+`.agents/plugins/<plugin>/` (`~/.agents/plugins/` with `-g`), so Claude Code
+invokes the scripts as bare commands. A denied `bin/` parks the whole plugin.
 
 ```yaml
 # .github/apm-policy.yml

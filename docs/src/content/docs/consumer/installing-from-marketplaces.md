@@ -82,9 +82,9 @@ Use the native command for a personal tool. Use `apm install` when the plugin
 belongs to the project.
 
 
-A Claude Code plugin installed with `apm install -g --target claude <plugin>@<marketplace>`
-is deployed whole and registered in Claude Code's settings; see
-[Claude Code plugins at user scope](../install-plugins/#claude-code-plugins-at-user-scope).
+A Claude Code plugin installed with `apm install <plugin>@<marketplace>` for
+`claude` or `copilot` is deployed whole to `.agents/plugins/` and declared in
+the harness settings; see [Native plugins](../install-plugins/#native-plugins).
 
 ## How marketplace installs lock
 

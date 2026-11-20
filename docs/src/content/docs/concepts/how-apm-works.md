@@ -129,7 +129,9 @@ into a patch for the package's author; `apm install --force` puts the locked ver
 **Should I commit the files APM writes?**
 Always commit `apm.yml` and `apm.lock.yaml`, never `apm_modules/`. Deployed files are
 optional: a clone rebuilds them with `apm install --frozen`. Commit them when something reads
-the repository without running APM, such as a cloud coding agent. [Run in CI](../../consumer/run-in-ci/).
+the repository without running APM, such as a cloud coding agent. Commit native plugins
+(`.agents/plugins/`, `.claude/settings.json`, `.github/copilot/settings.json`) as well: harnesses
+load them from the repository. [Run in CI](../../consumer/run-in-ci/).
 
 **Where did this file come from?**
 `apm find .claude/skills/style-checker/SKILL.md` prints the package that wrote it; add `--source`
