@@ -674,3 +674,43 @@ def test_policy_explain_agrees_with_a_deny_by_install_spec(lifecycle_world) -> N
     )
     assert explained.returncode == 0, explained.stdout + explained.stderr
     assert "verdict: blocked" in explained.stdout, explained.stdout
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="#4245 apm approve with a marketplace install spec reports not found and exits 0",
+)
+def test_approve_by_marketplace_install_spec_approves_or_refuses(lifecycle_world) -> None:
+    world = lifecycle_world
+    spec = world.packages["p-exec:marketplace"].spec
+    for args, scope in (
+        (("marketplace", "add", world.services.marketplace_url), "project"),
+        (("install", spec), "user"),
+    ):
+        result = driver.run(world, args, scope=scope)
+        assert result.returncode == 0, f"{args}: {result.stdout}{result.stderr}"
+    approved = driver.run(world, ("approve", spec), scope="user")
+    if approved.returncode == 0:
+        driver.run(world, ("install",), scope="user")
+        assert (world.home / _USER_HOOK).is_file(), (
+            "approve exited 0 but approved nothing:\n" + approved.stdout + approved.stderr
+        )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="#4246 apm policy explain suggests approving a package the user denied",
+)
+def test_policy_explain_of_a_denied_package_does_not_suggest_approving_it(lifecycle_world) -> None:
+    world = lifecycle_world
+    _marketplace_exec_deployed(world)
+    denied = driver.run(world, ("deny", f"{ORG}/p-exec"), scope="user")
+    assert denied.returncode == 0, denied.stdout + denied.stderr
+    runner = ApmLifecycleRunner(driver.driver_command())
+    explained = runner.run(
+        ("policy", "explain", f"{ORG}/p-exec"), cwd=world.apm_home, env=world.env
+    )
+    assert "verdict: blocked" in explained.stdout, explained.stdout
+    assert "apm approve" not in explained.stdout, explained.stdout
