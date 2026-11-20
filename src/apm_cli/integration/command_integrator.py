@@ -648,6 +648,7 @@ class CommandIntegrator(BaseIntegrator):
             files_integrated += 1
             total_links_resolved += links_resolved
             target_paths.append(target_path)
+            self.note_rendered_write(target_path)
 
         # One-shot install-time notice for cursor-style targets that
         # actually dropped at least one frontmatter key in this batch.

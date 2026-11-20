@@ -10,7 +10,7 @@ import json
 import os
 import stat
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal, TypeAlias
 
@@ -53,6 +53,48 @@ class LifecycleStateRoot:
 
 
 @dataclass(frozen=True)
+class LifecycleSurfaceRoots:
+    """Durable roots outside the workspace that gate decisions read or write.
+
+    ``deploy_root`` is the project root at project scope and ``$HOME`` at user
+    scope; ``apm_home`` is ``$APM_HOME`` (it may live outside ``$HOME``).
+    """
+
+    deploy_root: Path
+    apm_home: Path
+    cache_root: Path
+    user_scope: bool = False
+
+
+# Native Agent Plugin activation surfaces and catalogs, per scope.
+_PROJECT_NATIVE_REGISTRIES = (
+    ".github/copilot/settings.local.json",
+    ".github/copilot/settings.json",
+    "apm_modules/.github/plugin/marketplace.json",
+    "apm_modules/.github/plugin/apm-registration.json",
+)
+_USER_NATIVE_REGISTRIES = (".copilot/settings.json",)
+_USER_HOME_NATIVE_REGISTRIES = (
+    "apm_modules/.github/plugin/marketplace.json",
+    "apm_modules/.github/plugin/apm-registration.json",
+)
+# Per-adapter MCP configuration files APM may write, per scope.
+_PROJECT_MCP_CONFIGS = (
+    ".mcp.json",
+    ".vscode/mcp.json",
+    ".cursor/mcp.json",
+    ".codex/config.toml",
+    "opencode.json",
+)
+_USER_MCP_CONFIGS = (
+    ".copilot/mcp-config.json",
+    ".claude.json",
+    ".codex/config.toml",
+    ".cursor/mcp.json",
+)
+
+
+@dataclass(frozen=True)
 class LifecycleFileState:
     """Exact bytes and classification for one explicitly bounded root path."""
 
@@ -84,6 +126,11 @@ class LifecycleStateSnapshot:
     lsp_state_bytes: bytes
     files: tuple[LifecycleFileState, ...]
     semantic_bytes: bytes
+    # Gate surfaces, captured only when ``surfaces`` roots are supplied.
+    approval_stores: tuple[tuple[str, bytes], ...] = ()
+    policy_cache: tuple[tuple[str, str], ...] = ()
+    native_registries: tuple[tuple[str, bytes | None], ...] = ()
+    mcp_config_files: tuple[tuple[str, bytes | None], ...] = ()
 
     @classmethod
     def capture(
@@ -93,8 +140,28 @@ class LifecycleStateSnapshot:
         targets: Sequence[str] = (),
         config_paths: Sequence[PurePosixPath] = (),
         external_roots: Sequence[LifecycleStateRoot] = (),
+        surfaces: LifecycleSurfaceRoots | None = None,
     ) -> LifecycleStateSnapshot:
         """Capture deterministic durable state from explicit non-overlapping roots."""
+        snapshot = cls._capture_workspace(
+            workspace_root,
+            targets=targets,
+            config_paths=config_paths,
+            external_roots=external_roots,
+        )
+        if surfaces is None:
+            return snapshot
+        return replace(snapshot, **_capture_surfaces(workspace_root.absolute(), surfaces))
+
+    @classmethod
+    def _capture_workspace(
+        cls,
+        workspace_root: Path,
+        *,
+        targets: Sequence[str],
+        config_paths: Sequence[PurePosixPath],
+        external_roots: Sequence[LifecycleStateRoot],
+    ) -> LifecycleStateSnapshot:
         root = workspace_root.absolute()
         if root.is_symlink():
             raise ValueError(f"Lifecycle workspace root must not be a symlink: {root}")
@@ -310,6 +377,47 @@ class LifecycleStateSnapshot:
             f"Lifecycle snapshot path {relative_path!r} is not tracked in "
             f"root {root_id!r}; tracked paths: {tracked}"
         )
+
+
+def _capture_surfaces(workspace_root: Path, surfaces: LifecycleSurfaceRoots) -> dict[str, tuple]:
+    """Capture approval stores, policy cache, native registries and MCP configs."""
+    manifest = _read_optional_file(workspace_root / "apm.yml")
+    manifest_data = load_yaml_str(manifest.decode("utf-8")) if manifest is not None else None
+    user_config = _read_optional_file(surfaces.apm_home / "config.json")
+    user_data = json.loads(user_config.decode("utf-8")) if user_config is not None else None
+    approval_stores = (
+        ("manifest", _canonical_json_bytes(_executables_block(manifest_data))),
+        ("user-config", _canonical_json_bytes(_executables_block(user_data))),
+    )
+    policy_root = surfaces.cache_root / "policy_v1"
+    policy_cache = tuple(
+        (portable_relpath(path, policy_root), hashlib.sha256(path.read_bytes()).hexdigest())
+        for path in sorted(policy_root.rglob("*") if policy_root.is_dir() else ())
+        if path.is_file()
+    )
+    if surfaces.user_scope:
+        registries = [
+            *((f"deploy:{rel}", surfaces.deploy_root / rel) for rel in _USER_NATIVE_REGISTRIES),
+            *((f"apm-home:{rel}", surfaces.apm_home / rel) for rel in _USER_HOME_NATIVE_REGISTRIES),
+        ]
+        mcp_configs = [(f"deploy:{rel}", surfaces.deploy_root / rel) for rel in _USER_MCP_CONFIGS]
+    else:
+        registries = [(f"deploy:{rel}", workspace_root / rel) for rel in _PROJECT_NATIVE_REGISTRIES]
+        mcp_configs = [(f"deploy:{rel}", workspace_root / rel) for rel in _PROJECT_MCP_CONFIGS]
+    return {
+        "approval_stores": approval_stores,
+        "policy_cache": policy_cache,
+        "native_registries": tuple((label, _read_surface(path)) for label, path in registries),
+        "mcp_config_files": tuple((label, _read_surface(path)) for label, path in mcp_configs),
+    }
+
+
+def _executables_block(data: object) -> object:
+    return data.get("executables") if isinstance(data, dict) else None
+
+
+def _read_surface(path: Path) -> bytes | None:
+    return path.read_bytes() if path.is_file() and not path.is_symlink() else None
 
 
 def _bounded_legacy_absolute_path(

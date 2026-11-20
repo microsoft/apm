@@ -7,8 +7,8 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.commands._helpers import _build_expected_install_paths
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install.orphans import _build_expected_install_paths
 from apm_cli.models.apm_package import clear_apm_yml_cache
 from apm_cli.models.dependency.reference import DependencyReference
 from tests.helpers.prune_casing import (

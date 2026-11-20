@@ -8,11 +8,12 @@ There is no embedded copy and no fallback: if neither exists the loader
 refuses with "catalogue unavailable" (exit 3).
 
 Accepted shapes, normalized to one record per journey:
-  - index.yaml: {"journeys": [{"id", "persona", "steps": [...]}]}
-  - devx-journeys.json (program deliverable): same keys plus "title",
-    "golden", "tier", "docs", "families", "fixtures".
-Each step must carry "cmd"; "n", "exit", "must_print", "must_not_print",
-"files" and "oracles" are optional.
+  - index.yaml (schema_version 1, Stream T): steps carry "key_lines",
+    "forbidden_lines", "kind" (apm|shell|edit|manual) and "argv";
+  - devx-journeys.json (the program's source deliverable): steps carry
+    "must_print" and "must_not_print".
+Each step must carry "cmd"; every other step field is optional. Both
+shapes normalize to the same record, so one code path reads either.
 
 stdout: JSON {"source": path, "journeys": [...], "counts": {...}}.
 """
@@ -73,9 +74,13 @@ def normalize(data: object, source: str) -> list[dict]:
                 {
                     "id": f"{jid}.{step.get('n', sindex)}",
                     "cmd": step["cmd"],
+                    "kind": step.get("kind", "apm" if step["cmd"].startswith("apm ") else "manual"),
+                    "argv": list(step.get("argv") or []),
                     "exit": step.get("exit"),
-                    "must_print": list(step.get("must_print") or []),
-                    "must_not_print": list(step.get("must_not_print") or []),
+                    "must_print": list(step.get("key_lines", step.get("must_print")) or []),
+                    "must_not_print": list(
+                        step.get("forbidden_lines", step.get("must_not_print")) or []
+                    ),
                     "files": list(step.get("files") or []),
                     "oracles": list(step.get("oracles") or []),
                 }
