@@ -918,7 +918,6 @@ def _repack_changed_bundle(world: World, stack: contextlib.ExitStack) -> None:
 
 
 _BUNDLE_PARKED = r"hooks are executable and not approved for this exact bundle content"
-_BUNDLE_RETIRES = _pending("bundle reinstall retires a hook whose approval no longer matches")
 
 BUNDLE_APPROVAL_PINS = _bundle_slice(
     tampers={
@@ -928,14 +927,10 @@ BUNDLE_APPROVAL_PINS = _bundle_slice(
     },
     cells={
         # I4: the deployed hook is no longer approved, so the install removes it.
-        ("bundle-install", "disk-or-cache"): Expect(
-            0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,), xfail=_BUNDLE_RETIRES
-        ),
-        ("bundle-install", "lock-edited"): Expect(
-            0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,), xfail=_BUNDLE_RETIRES
-        ),
+        ("bundle-install", "disk-or-cache"): Expect(0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,)),
+        ("bundle-install", "lock-edited"): Expect(0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,)),
         ("bundle-install", "upstream-or-proxy"): Expect(
-            0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,), xfail=_BUNDLE_RETIRES
+            0, (_BUNDLE_PARKED,), absent=(BUNDLE_HOOK,)
         ),
     },
 )
