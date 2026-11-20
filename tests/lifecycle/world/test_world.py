@@ -31,7 +31,31 @@ from tests.lifecycle.world.services import (
     policy_org,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.lifecycle_smoke]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.integration,
+    pytest.mark.lifecycle_smoke,
+    pytest.mark.promise(
+        "P-INV-I5",
+        "P-INV-I7",
+        "P-OWN-install-command-scope-selection",
+        "P-OWN-apm-home-resolution",
+        "P-OWN-executable-trust-context",
+        "P-OWN-copilot-cli-mcp-config-paths",
+        "P-OWN-lsp-target-contract",
+        "P-OWN-post-uninstall-dependency-reachability",
+        "P-OWN-claude-native-plugin-registration",
+        "P-OWN-codex-native-plugin-lifecycle",
+        "P-OWN-git-transport-selection",
+        "P-OWN-host-reference-coordinates",
+        "P-OWN-marketplace-catalog-origin",
+        "P-OWN-local-bundle-hook-trust",
+        "P-OWN-policy-remote-origin-reader",
+        "P-OWN-policy-content-hash",
+        "P-OWN-mcp-registry-url-resolution",
+        "P-OWN-network-host-loopback-classification",
+    ),
+]
 
 # A clone must stay well under a second; the median pins the steady cost.
 CLONE_BUDGET_SECONDS = 0.25
