@@ -15,33 +15,23 @@ from apm_cli.utils.paths import portable_relpath
 class TestPortableRelpath:
     """Tests for portable_relpath()."""
 
-    def test_simple_relative(self, tmp_path):
-        """Basic child path returns forward-slash relative string."""
-        child = tmp_path / "sub" / "file.md"
-        child.parent.mkdir(parents=True, exist_ok=True)
-        child.touch()
-        result = portable_relpath(child, tmp_path)
-        assert result == "sub/file.md"
-
-    def test_deeply_nested(self, tmp_path):
-        """Deeply nested paths use forward slashes throughout."""
-        child = tmp_path / "a" / "b" / "c" / "d.txt"
-        child.parent.mkdir(parents=True, exist_ok=True)
-        child.touch()
-        result = portable_relpath(child, tmp_path)
-        assert result == "a/b/c/d.txt"
-
-    def test_same_directory(self, tmp_path):
-        """Path equal to base returns '.'."""
-        result = portable_relpath(tmp_path, tmp_path)
-        assert result == "."
-
-    def test_file_in_base(self, tmp_path):
-        """File directly in base returns just the filename."""
-        child = tmp_path / "README.md"
-        child.touch()
-        result = portable_relpath(child, tmp_path)
-        assert result == "README.md"
+    @pytest.mark.parametrize(
+        ("parts", "expected"),
+        [
+            (("sub", "file.md"), "sub/file.md"),
+            (("a", "b", "c", "d.txt"), "a/b/c/d.txt"),
+            ((), "."),
+            (("README.md",), "README.md"),
+        ],
+        ids=["simple-relative", "deeply-nested", "same-directory", "file-in-base"],
+    )
+    def test_relative_to_base(self, tmp_path, parts, expected):
+        """Paths under base return forward-slash relative strings ('.' for base)."""
+        child = tmp_path.joinpath(*parts)
+        if parts:
+            child.parent.mkdir(parents=True, exist_ok=True)
+            child.touch()
+        assert portable_relpath(child, tmp_path) == expected
 
     def test_fallback_when_not_under_base(self, tmp_path):
         """Returns POSIX-style resolved path when path is not under base."""

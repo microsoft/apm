@@ -149,17 +149,15 @@ class TestMutators:
 class TestNormaliseFlagName:
     """Tests for the name-normalisation helper."""
 
-    def test_hyphens_converted_to_underscores(self) -> None:
-        """verbose-version (kebab) normalises to verbose_version (snake)."""
+    @pytest.mark.parametrize(
+        "raw",
+        ["verbose-version", "verbose_version"],
+        ids=["kebab-to-snake", "snake-idempotent"],
+    )
+    def test_normalises_to_snake_case(self, raw) -> None:
         from apm_cli.core.experimental import normalise_flag_name
 
-        assert normalise_flag_name("verbose-version") == "verbose_version"
-
-    def test_underscores_are_idempotent(self) -> None:
-        """verbose_version (already snake) normalises to the same string."""
-        from apm_cli.core.experimental import normalise_flag_name
-
-        assert normalise_flag_name("verbose_version") == "verbose_version"
+        assert normalise_flag_name(raw) == "verbose_version"
 
 
 # ---------------------------------------------------------------------------
@@ -514,14 +512,10 @@ class TestResetReturnType:
 class TestCoworkFlagRegistration:
     """Tests for the 'cowork' experimental flag registration."""
 
-    def test_cowork_flag_is_registered(self) -> None:
+    def test_cowork_flag_is_registered_with_false_default(self) -> None:
         from apm_cli.core.experimental import FLAGS
 
         assert "copilot_cowork" in FLAGS
-
-    def test_cowork_flag_default_is_false(self) -> None:
-        from apm_cli.core.experimental import FLAGS
-
         assert FLAGS["copilot_cowork"].default is False
 
     def test_cowork_flag_is_disabled_by_default(self, inject_config: Any) -> None:

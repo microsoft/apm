@@ -610,10 +610,6 @@ class TestTargetParamType:
         """VALID_TARGET_VALUES contains 'all'."""
         assert "all" in VALID_TARGET_VALUES
 
-    def test_valid_target_values_includes_intellij(self):
-        """VALID_TARGET_VALUES contains 'intellij' (MCP-only target, #1957)."""
-        assert "intellij" in VALID_TARGET_VALUES
-
     # -- None passthrough -------------------------------------------------
 
     def test_none_returns_none(self):
@@ -961,17 +957,15 @@ class TestIntelliJConstantGuards:
     expansion must never include it.
     """
 
-    def test_intellij_not_in_all_canonical_targets(self):
-        """'intellij' must NOT appear in ALL_CANONICAL_TARGETS.
+    def test_intellij_is_valid_mcp_only_target(self):
+        """'intellij' is a valid --target value that lives in MCP_ONLY_TARGETS.
 
-        ALL_CANONICAL_TARGETS drives the 'all' expansion. IntelliJ is
-        MCP-only and must live in MCP_ONLY_TARGETS instead.
+        ALL_CANONICAL_TARGETS drives the 'all' expansion, so IntelliJ must
+        NOT appear there.
         """
-        assert "intellij" not in ALL_CANONICAL_TARGETS
-
-    def test_intellij_in_mcp_only_targets(self):
-        """'intellij' must appear in MCP_ONLY_TARGETS (constant guard)."""
+        assert "intellij" in VALID_TARGET_VALUES
         assert "intellij" in MCP_ONLY_TARGETS
+        assert "intellij" not in ALL_CANONICAL_TARGETS
 
     def test_all_expansion_excludes_intellij(self):
         """normalize_target_list('all') must NOT include 'intellij'.

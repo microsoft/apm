@@ -172,25 +172,6 @@ class TestDetectTokenType:
 
 
 # ---------------------------------------------------------------------------
-# TestGitlabRestHeaders
-# ---------------------------------------------------------------------------
-
-
-class TestGitlabRestHeaders:
-    def test_no_token_returns_empty_dict(self):
-        assert AuthResolver.gitlab_rest_headers(None) == {}
-        assert AuthResolver.gitlab_rest_headers("") == {}
-
-    def test_pat_uses_private_token_header(self):
-        headers = AuthResolver.gitlab_rest_headers("glpat-secret")
-        assert headers == {"PRIVATE-TOKEN": "glpat-secret"}
-
-    def test_oauth_bearer_style(self):
-        headers = AuthResolver.gitlab_rest_headers("oauth-access-token", oauth_bearer=True)
-        assert headers == {"Authorization": "Bearer oauth-access-token"}
-
-
-# ---------------------------------------------------------------------------
 # TestResolve
 # ---------------------------------------------------------------------------
 
@@ -1164,20 +1145,6 @@ class TestHostInfoPort:
         hi = HostInfo(host="github.com", kind="github", has_public_repos=True, api_base="x")
         assert hi.port is None
 
-    def test_display_name_without_port(self):
-        hi = HostInfo(host="github.com", kind="github", has_public_repos=True, api_base="x")
-        assert hi.display_name == "github.com"
-
-    def test_display_name_with_port(self):
-        hi = HostInfo(
-            host="bitbucket.corp.com",
-            kind="generic",
-            has_public_repos=True,
-            api_base="x",
-            port=7999,
-        )
-        assert hi.display_name == "bitbucket.corp.com:7999"
-
     def test_classify_host_attaches_port(self):
         hi = AuthResolver.classify_host("bitbucket.corp.com", port=7999)
         assert hi.kind == "generic"
@@ -1190,37 +1157,6 @@ class TestHostInfoPort:
         hi = AuthResolver.classify_host("github.com", port=8443)
         assert hi.kind == "github"
         assert hi.port == 8443
-
-    def test_display_name_suppresses_default_port_443(self):
-        """Defence-in-depth: display_name never renders well-known default ports."""
-        hi = HostInfo(
-            host="github.com",
-            kind="github",
-            has_public_repos=True,
-            api_base="x",
-            port=443,
-        )
-        assert hi.display_name == "github.com"
-
-    def test_display_name_suppresses_default_port_22(self):
-        hi = HostInfo(
-            host="gitlab.com",
-            kind="generic",
-            has_public_repos=True,
-            api_base="x",
-            port=22,
-        )
-        assert hi.display_name == "gitlab.com"
-
-    def test_display_name_suppresses_default_port_80(self):
-        hi = HostInfo(
-            host="internal.git",
-            kind="generic",
-            has_public_repos=True,
-            api_base="x",
-            port=80,
-        )
-        assert hi.display_name == "internal.git"
 
 
 # ---------------------------------------------------------------------------

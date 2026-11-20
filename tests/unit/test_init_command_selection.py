@@ -27,32 +27,24 @@ from click.testing import CliRunner
 
 
 class TestParseToggleInput:
-    def test_empty_response_returns_empty(self):
+    @pytest.mark.parametrize(
+        ("raw", "total", "expected"),
+        [
+            ("", 5, []),
+            ("3", 5, [2]),
+            ("1,3,5", 5, [0, 2, 4]),
+            ("2-4", 5, [1, 2, 3]),
+            ("all", 4, [0, 1, 2, 3]),
+            ("none", 4, [0, 1, 2, 3]),
+            ("  2  ", 5, [1]),
+        ],
+        ids=["empty", "single-number", "csv-numbers", "range", "all", "none", "whitespace"],
+    )
+    def test_valid_selection(self, raw, total, expected):
         from apm_cli.commands.init import _parse_toggle_input
 
-        indices, err = _parse_toggle_input("", 5)
-        assert indices == []
-        assert err is None
-
-    def test_single_number(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("3", 5)
-        assert indices == [2]  # 0-based
-        assert err is None
-
-    def test_csv_numbers(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("1,3,5", 5)
-        assert indices == [0, 2, 4]
-        assert err is None
-
-    def test_range(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("2-4", 5)
-        assert indices == [1, 2, 3]
+        indices, err = _parse_toggle_input(raw, total)
+        assert indices == expected
         assert err is None
 
     def test_mixed_range_and_csv(self):
@@ -60,20 +52,6 @@ class TestParseToggleInput:
 
         indices, err = _parse_toggle_input("1,3-5,7", 7)
         assert set(indices) == {0, 2, 3, 4, 6}
-        assert err is None
-
-    def test_all_keyword(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("all", 4)
-        assert indices == [0, 1, 2, 3]
-        assert err is None
-
-    def test_none_keyword(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("none", 4)
-        assert indices == [0, 1, 2, 3]
         assert err is None
 
     def test_invalid_range_non_numeric(self):
@@ -115,13 +93,6 @@ class TestParseToggleInput:
         assert indices == []
         assert err is not None
 
-    def test_whitespace_ignored(self):
-        from apm_cli.commands.init import _parse_toggle_input
-
-        indices, err = _parse_toggle_input("  2  ", 5)
-        assert indices == [1]
-        assert err is None
-
 
 # ---------------------------------------------------------------------------
 # _read_existing_targets
@@ -129,11 +100,17 @@ class TestParseToggleInput:
 
 
 class TestReadExistingTargets:
-    def test_no_apm_yml_returns_empty(self, tmp_path):
+    @pytest.mark.parametrize(
+        "content",
+        [None, "- list\n- items\n", "name: test\n", "{{{{invalid yaml"],
+        ids=["no-apm-yml", "non-dict-yaml", "no-target-field", "invalid-yaml"],
+    )
+    def test_unusable_manifest_returns_empty(self, tmp_path, content):
         from apm_cli.commands.init import _read_existing_targets
 
-        result = _read_existing_targets(tmp_path)
-        assert result == []
+        if content is not None:
+            (tmp_path / "apm.yml").write_text(content)
+        assert _read_existing_targets(tmp_path) == []
 
     def test_plural_targets_list(self, tmp_path):
         from apm_cli.commands.init import _read_existing_targets
@@ -162,27 +139,6 @@ class TestReadExistingTargets:
         (tmp_path / "apm.yml").write_text(yaml.safe_dump({"target": ["copilot", "cursor"]}))
         result = _read_existing_targets(tmp_path)
         assert result == ["copilot", "cursor"]
-
-    def test_non_dict_yaml_returns_empty(self, tmp_path):
-        from apm_cli.commands.init import _read_existing_targets
-
-        (tmp_path / "apm.yml").write_text("- list\n- items\n")
-        result = _read_existing_targets(tmp_path)
-        assert result == []
-
-    def test_no_target_field_returns_empty(self, tmp_path):
-        from apm_cli.commands.init import _read_existing_targets
-
-        (tmp_path / "apm.yml").write_text(yaml.safe_dump({"name": "test"}))
-        result = _read_existing_targets(tmp_path)
-        assert result == []
-
-    def test_invalid_yaml_returns_empty(self, tmp_path):
-        from apm_cli.commands.init import _read_existing_targets
-
-        (tmp_path / "apm.yml").write_text("{{{{invalid yaml")
-        result = _read_existing_targets(tmp_path)
-        assert result == []
 
     @pytest.mark.parametrize(
         ("declared", "expected"),

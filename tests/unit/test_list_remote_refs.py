@@ -108,8 +108,11 @@ class TestParseLsRemoteOutput:
         assert "v1.0.0^{}" not in tag_map
         assert "v2.0.0^{}" not in tag_map
 
-    def test_empty_output(self):
-        assert GitHubPackageDownloader._parse_ls_remote_output("") == []
+    @pytest.mark.parametrize(
+        "output", ["", "\n\n", "no-tab-here\n"], ids=["empty", "blank-lines", "malformed"]
+    )
+    def test_output_without_refs_returns_empty(self, output):
+        assert GitHubPackageDownloader._parse_ls_remote_output(output) == []
 
     def test_blank_lines_ignored(self):
         output = "\n\naaa1111111111111111111111111111111111111\trefs/heads/main\n\n"
