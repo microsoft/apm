@@ -1,0 +1,17 @@
+{
+  "changelog": "After `apm deny`, `apm install` names each hook file it removes and no longer reports those removed files as retained historical claims (#4217)",
+  "ledger_row": {
+    "issue": 4173,
+    "fixed_in": "Unreleased",
+    "summary": "After apm deny, install deleted the package's hook files without naming them and warned that the deleted paths were retained historical dependency claims.",
+    "failure_modes": ["observation", "outcome"],
+    "properties": ["outcome.status_matches_state"],
+    "regression_tests": [
+      "tests/integration/test_executables_deny_retires_hooks_lifecycle.py::test_deny_names_each_retired_hook_file_and_never_reports_it_retained"
+    ]
+  },
+  "red": "APM_BINARY_PATH=$(uv run which apm) uv run --extra dev pytest tests/integration/test_executables_deny_retires_hooks_lifecycle.py -k never_reports -n 0 -> 3 failed: assert 'Historical dependency claims retained' not in output ('[!] [../hooky] Historical dependency claims retained: ... +- .github/hooks/hooky-guard.json, .github/hooks/scripts/hooky/scripts/g.sh'). Before the #4193 commit the same test also failed with '.github/hooks/hooky-guard.json was deleted but not named' ('[i] Cleaned 2 stale deployed files for ../hooky').",
+  "green": "same command -> 3 passed (copilot, claude, cursor); module -> 16 passed; obsolete-claim lifecycle, absent-claim unit tests, lifecycle reconciliation and lockfile spec conformance -> passed",
+  "owner": "Removal naming: CommandLogger.stale_cleanup + CleanupResult.announced_paths (shared with #4193). Retained warning: src/apm_cli/core/deployment_state.py DeploymentReconciler.reconcile now warns (via _warn_unconfirmed_absent) only for unconfirmed absent claims whose prior records were actually retained; claims removed in the same reconciliation (stale active-target rows) are no longer reported as retained.",
+  "notes": "The architecture rule install-absent-dependency-claims requires the literals 'obsolete_absent = self._obsolete_absent_values(' and 'return frozenset(candidates & proven_skill_values)'; both are kept (the unconfirmed set is passed in as an accumulator); scripts/lint_architecture_boundaries.py --root . exits 0. For merged-config targets (claude, cursor) the hook entry leaves settings.json/hooks.json and the ownership sidecar apm-hooks.json is deleted; the sidecar is APM bookkeeping and is still not named (test excludes it explicitly) - follow-up candidate if the journey O6 law flags it. Journey E02 s5 known cell e02-deny-retired-hook-not-announced should flip. Pre-existing failures on main seen in neighbours (unrelated): tests/integration/test_uninstall_hook_cleanup_failure.py (4 tests, verified failing with main's src), tests/integration/test_architecture_install_compound_mutations.py::test_each_install_compound_subcheck_has_mutation_proof[target-consumer-rejects-unrelated-getattr-sink] (targets an untouched services file)."
+}
