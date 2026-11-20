@@ -150,18 +150,6 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
         match=r"^recorded file is missing: .*hook-kit-session\.json$",
     ),
     KnownCell(
-        "gate-cell-c-pair",
-        "I3",
-        "#4043",
-        lambda machine, op, before, after, result: (
-            op.name == "install-frozen"
-            and bool(op.paired)
-            and _frozen_after_tightening(machine, op, before, after, result)
-        ),
-        match=r"^audit --ci exited 1 but install --frozen exited 0$",
-        scopes=("project",),
-    ),
-    KnownCell(
         "gate-cell-g",
         "I3",
         "#4050",

@@ -227,3 +227,64 @@ def test_audit_and_update_honor_the_current_executables_decision(
     assert _hook_residue(project) == []
     apm("audit", "--ci", "--no-policy")
     assert "already at their latest" in apm("update", "--yes")
+
+
+@pytest.mark.parametrize("gate_off", ["deny", "revoke"])
+def test_frozen_fails_when_a_gated_hook_retires_but_the_lock_still_claims_it(
+    tmp_path: Path, apm_binary_path: Path, gate_off: str
+) -> None:
+    """Frozen and audit agree once a gated hook leaves disk under an unchanged lock (#4043)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    _hook_package(isolated.work_root / "hooky")
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    manifest = {
+        "name": "consumer",
+        "version": "0.1.0",
+        "targets": ["copilot"],
+        "dependencies": {"apm": ["../hooky"]},
+    }
+    if gate_off == "revoke":
+        manifest["executables"] = {"allow": {"../hooky": {"hooks": True}}}
+    dump_yaml(manifest, project / "apm.yml")
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+    lock_path = project / "apm.lock.yaml"
+
+    def apm(*args: str, expect: int = 0) -> str:
+        result = runner.run(args, cwd=project, env=env)
+        output = result.stdout + result.stderr
+        assert result.returncode == expect, f"apm {' '.join(args)}\n{output}"
+        return output
+
+    def claimed() -> set[str]:
+        lock = LockFile.read(lock_path)
+        assert lock is not None
+        (dependency,) = lock.dependencies.values()
+        return set(dependency.deployed_files)
+
+    apm("install", "--no-policy")
+    hook_paths = set(_hook_residue(project))
+    assert hook_paths, "the hook must deploy before it is gated"
+    assert hook_paths <= claimed()
+
+    if gate_off == "deny":
+        apm("deny", "../hooky")
+    else:
+        dump_yaml({**manifest, "executables": {}}, project / "apm.yml")
+    lock_bytes = lock_path.read_bytes()
+
+    frozen = " ".join(apm("install", "--frozen", "--no-policy", expect=1).split())
+    for path in sorted(hook_paths):
+        assert path in frozen, frozen
+    assert "run 'apm install' without --frozen" in frozen, frozen
+    assert "commit apm.lock.yaml" in frozen, frozen
+    assert _hook_residue(project) == []
+    assert lock_path.read_bytes() == lock_bytes
+    apm("audit", "--ci", "--no-policy", expect=1)
+
+    apm("install", "--no-policy")
+    assert not hook_paths & claimed()
+    assert _exec_status(project) == ("denied" if gate_off == "deny" else "gated_pending_approval")
+    apm("install", "--frozen", "--no-policy")
+    apm("audit", "--ci", "--no-policy")

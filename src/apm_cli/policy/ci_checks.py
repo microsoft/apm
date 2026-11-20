@@ -244,17 +244,18 @@ def _resolve_deployed_file_path(
     return None
 
 
-def _check_deployed_files_present(
+def find_missing_deployed_files(
     project_root: Path,
     lock: LockFile,
     targets: Sequence[TargetProfile] = (),
-) -> CheckResult:
-    """Verify all files listed in lockfile deployed_files exist on disk.
+) -> tuple[list[str], bool]:
+    """Return the recorded deployed files absent from disk, and whether any were gitignored.
 
-    Paths that are gitignored are considered absent by design (the repo owner
-    deliberately chose not to commit them) and are excluded from the missing
-    count.  This prevents false positives on fresh checkouts of repos that
-    gitignore one or more deploy directories.
+    Single owner shared by ``apm audit`` deployed-files-present and the
+    ``apm install --frozen`` post-deploy check, so both give one answer.
+    URI claims are skipped. Paths that are gitignored are absent by design
+    (the repo owner chose not to commit them) and are not reported, which
+    avoids false positives on fresh checkouts that gitignore a deploy directory.
     """
     missing: list[str] = []
     for _dep_key, dep in lock.dependencies.items():
@@ -268,12 +269,19 @@ def _check_deployed_files_present(
                 or (Path(rel_path).is_absolute() and abs_path.is_symlink())
             ):
                 missing.append(rel_path)
+    if not missing:
+        return missing, False
+    filtered = _filter_gitignored(project_root, missing)
+    return filtered, len(filtered) < len(missing)
 
-    gitignored_skipped = False
-    if missing:
-        filtered = _filter_gitignored(project_root, missing)
-        gitignored_skipped = len(filtered) < len(missing)
-        missing = filtered
+
+def _check_deployed_files_present(
+    project_root: Path,
+    lock: LockFile,
+    targets: Sequence[TargetProfile] = (),
+) -> CheckResult:
+    """Verify all files listed in lockfile deployed_files exist on disk."""
+    missing, gitignored_skipped = find_missing_deployed_files(project_root, lock, targets)
 
     if not missing:
         msg = (
