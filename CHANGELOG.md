@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci` drift replay and lifecycle scripts now apply org policy outcomes as `apm install` does. (#4079, #4151)
 - `apm audit --ci` and `apm approve` now handle every org policy outcome as `apm install` does; `apm approve` exits 1 when the policy outcome blocks. (#4084, #4151)
 - An org policy field of the wrong type is reported as a malformed policy instead of stopping the command with an internal error. (#4140, #4151)
-- Cached org policy content is verified against its pin before any command uses it. (#4218)
+- Cached org policy content is verified against its pin before any command uses it. (#4218, #4315)
 
 ## [0.37.0] - 2026-11-20
 
