@@ -45,6 +45,7 @@ from apm_cli.integration.skill_integrator import (
 )
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.validation import PackageType
+from tests.utils.deployment_evidence import receipted_evidence
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -1030,7 +1031,7 @@ class TestSyncIntegrationHooks:
         hook_file = github_hooks / "my-pkg-hooks.json"
         hook_file.write_text("{}")
 
-        # Stale cleanup deletes only on a matching recorded hash (#3663).
+        # Deletion needs deployment evidence, never a lockfile hash alone (#3701).
         managed = {".github/hooks/my-pkg-hooks.json"}
         integrator = HookIntegrator()
         stats = integrator.sync_integration(
@@ -1038,6 +1039,7 @@ class TestSyncIntegrationHooks:
             project_root=tmp_path,
             managed_files=managed,
             managed_file_hashes=compute_deployed_hashes(managed, tmp_path),
+            evidence=receipted_evidence(hook_file, deploy_root=tmp_path),
         )
         assert stats["files_removed"] == 1
         assert not hook_file.exists()
@@ -1659,11 +1661,14 @@ class TestSkillIntegratorSyncIntegration:
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         integrator = SkillIntegrator()
+        # The lockfile records the skill directory and its members; deleting a
+        # member needs deployment evidence (#3701).
         stats = integrator.sync_integration(
             apm_package=None,
             project_root=tmp_path,
-            managed_files={".agents/skills/old-skill"},
+            managed_files={".agents/skills/old-skill", ".agents/skills/old-skill/SKILL.md"},
             targets=[KNOWN_TARGETS["copilot"]],
+            evidence=receipted_evidence(skill_dir, deploy_root=tmp_path),
         )
         assert stats["files_removed"] >= 1
         assert not skill_dir.exists()

@@ -48,6 +48,7 @@ def pipeline_preview(run_pipeline: Any, logger: Any) -> PipelinePreview | None:
     """
     import click
 
+    from apm_cli.config import config_creation_suppressed
     from apm_cli.install.errors import (
         AuthenticationError,
         FrozenInstallError,
@@ -57,7 +58,8 @@ def pipeline_preview(run_pipeline: Any, logger: Any) -> PipelinePreview | None:
     from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
 
     try:
-        result = run_pipeline()
+        with config_creation_suppressed():
+            result = run_pipeline()
     except (
         AuthenticationError,
         FrozenInstallError,

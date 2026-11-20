@@ -67,8 +67,8 @@ class TestUpdateCommand(unittest.TestCase):
     @patch("requests.get")
     @patch("subprocess.run")
     @patch("apm_cli.commands.self_update.get_version", return_value="0.6.3")
-    @patch("apm_cli.commands.self_update.shutil.which", return_value="powershell.exe")
-    @patch("apm_cli.commands.self_update.os.chmod")
+    @patch("shutil.which", return_value="powershell.exe")
+    @patch("os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="0.7.0")
     def test_update_uses_powershell_installer_on_windows(
         self,
@@ -110,7 +110,7 @@ class TestUpdateCommand(unittest.TestCase):
     @patch("requests.get")
     @patch("subprocess.run")
     @patch("apm_cli.commands.self_update.get_version", return_value="0.6.3")
-    @patch("apm_cli.commands.self_update.shutil.which", return_value="powershell.exe")
+    @patch("shutil.which", return_value="powershell.exe")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="0.7.0")
     def test_windows_update_does_not_forward_parent_psmodulepath(
         self,
@@ -141,7 +141,7 @@ class TestUpdateCommand(unittest.TestCase):
     @patch("requests.get")
     @patch("subprocess.run")
     @patch("apm_cli.commands.self_update.get_version", return_value="0.6.3")
-    @patch("apm_cli.commands.self_update.os.chmod")
+    @patch("os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="0.7.0")
     def test_update_uses_shell_installer_on_unix(
         self,
@@ -350,7 +350,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
     @patch("requests.get")
     @patch("subprocess.run")
     @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
-    @patch("apm_cli.commands.self_update.os.chmod")
+    @patch("os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
     def test_update_installer_failure_exits_1(
         self, mock_latest, mock_chmod, mock_version, mock_run, mock_get
@@ -363,7 +363,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
 
         with (
             patch.object(update_module.sys, "platform", "linux"),
-            patch("apm_cli.commands.self_update.os.path.exists", return_value=True),
+            patch("os.path.exists", return_value=True),
         ):
             result = self.runner.invoke(cli, ["self-update"])
 
@@ -394,7 +394,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
 
     @patch("requests.get")
     @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
-    @patch("apm_cli.commands.self_update.os.chmod")
+    @patch("os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
     def test_update_network_error_exits_1(self, mock_latest, mock_chmod, mock_version, mock_get):
         mock_get.side_effect = OSError("Network error")
@@ -408,7 +408,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
     @patch("requests.get")
     @patch("subprocess.run")
     @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
-    @patch("apm_cli.commands.self_update.os.chmod")
+    @patch("os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="1.1.0")
     def test_update_temp_file_cleanup_on_success(
         self, mock_latest, mock_chmod, mock_version, mock_run, mock_get
@@ -429,7 +429,7 @@ class TestUpdateCommandLogic(unittest.TestCase):
 
         with (
             patch.object(update_module.sys, "platform", "linux"),
-            patch("apm_cli.commands.self_update.os.path.exists", return_value=True),
+            patch("os.path.exists", return_value=True),
             patch.object(update_module.os, "unlink", side_effect=tracking_unlink),
         ):
             result = self.runner.invoke(cli, ["self-update"])

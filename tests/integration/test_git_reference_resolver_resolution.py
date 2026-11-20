@@ -495,9 +495,7 @@ class TestResolve:
 
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
-            patch(
-                "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
-            ),
+            patch("tempfile.mkdtemp", return_value=str(temp_dir)),
             patch(
                 "apm_cli.utils.git_env.git_resolve_commit",
                 return_value="b" * 40,
@@ -520,9 +518,7 @@ class TestResolve:
 
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
-            patch(
-                "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
-            ),
+            patch("tempfile.mkdtemp", return_value=str(temp_dir)),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             with pytest.raises(
@@ -544,9 +540,7 @@ class TestResolve:
 
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
-            patch(
-                "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
-            ),
+            patch("tempfile.mkdtemp", return_value=str(temp_dir)),
             patch(
                 "apm_cli.utils.git_env.git_worktree_head",
                 return_value="c" * 40,
@@ -575,9 +569,7 @@ class TestResolve:
 
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
-            patch(
-                "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
-            ),
+            patch("tempfile.mkdtemp", return_value=str(temp_dir)),
             patch(
                 "apm_cli.utils.git_env.git_worktree_head",
                 return_value="d" * 40,
@@ -607,9 +599,7 @@ class TestResolve:
 
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
-            patch(
-                "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
-            ),
+            patch("tempfile.mkdtemp", return_value=str(temp_dir)),
             patch(
                 "apm_cli.utils.git_env.git_resolve_commit",
                 return_value="e" * 40,
@@ -636,9 +626,7 @@ class TestResolve:
 
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
-            patch(
-                "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
-            ),
+            patch("tempfile.mkdtemp", return_value=str(temp_dir)),
             patch(
                 "apm_cli.utils.git_env.git_resolve_commit",
                 side_effect=[
@@ -668,9 +656,7 @@ class TestResolve:
 
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
-            patch(
-                "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
-            ),
+            patch("tempfile.mkdtemp", return_value=str(temp_dir)),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             with pytest.raises(
@@ -692,9 +678,7 @@ class TestResolve:
 
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
-            patch(
-                "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
-            ),
+            patch("tempfile.mkdtemp", return_value=str(temp_dir)),
             patch("apm_cli.deps.github_downloader._rmtree"),
         ):
             with pytest.raises(
@@ -722,9 +706,7 @@ class TestResolve:
 
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
-            patch(
-                "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
-            ),
+            patch("tempfile.mkdtemp", return_value=str(temp_dir)),
             patch("apm_cli.deps.github_downloader._rmtree"),
             pytest.raises(RuntimeError, match="sanitized failure"),
         ):
@@ -737,9 +719,7 @@ class TestResolve:
 
         with (
             patch("apm_cli.config.get_apm_temp_dir", return_value=tmp_path),
-            patch(
-                "apm_cli.deps.git_reference_resolver.tempfile.mkdtemp", return_value=str(temp_dir)
-            ),
+            patch("tempfile.mkdtemp", return_value=str(temp_dir)),
             patch("apm_cli.deps.github_downloader._rmtree") as mock_rmtree,
         ):
             result = GitReferenceResolver(host).resolve(dep)
