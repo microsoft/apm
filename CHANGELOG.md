@@ -7,9 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- A plugin with a root `skills/` bundle is recorded as `skill_bundle` again, and native Claude plugin files deploy owner-only, without setuid bits. (#4126)
 ### Changed
 
 - Contributors: new and changed functions must now meet the Stage 2 Ruff complexity limits. Existing violators are grandfathered in the shrink-only `tests/quality/complexity_baseline.json`, which the CI `Lint` job enforces. (#3615)
@@ -17,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A plugin with a root `skills/` bundle is recorded as `skill_bundle` again, and native Claude plugin files deploy owner-only, without setuid bits. (#4126)
 - Internal: Windows CI no longer flakes on MCP registry parallelism tests, which now prove concurrency with an in-flight counter instead of wall time. (closes #4029, #4036)
 
 ## [0.37.0] - 2026-11-20
