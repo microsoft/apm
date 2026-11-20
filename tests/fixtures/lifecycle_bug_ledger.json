@@ -2377,6 +2377,22 @@
       ]
     },
     {
+      "issue": 4166,
+      "fixed_in": "Unreleased",
+      "summary": "apm update compared the resolver's default-branch name with the absent ref the lockfile records for a dependency declared without a ref, so every update reported 1 updated and re-integrated an unchanged commit.",
+      "failure_modes": [
+        "idempotency",
+        "outcome"
+      ],
+      "properties": [
+        "idempotency.byte_stable",
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_update_ref_less_dependency_lifecycle.py::test_update_of_a_ref_less_dependency_reports_nothing_and_changes_no_bytes"
+      ]
+    },
+    {
       "issue": 4171,
       "fixed_in": "Unreleased",
       "summary": "Redact credential values in command output: stored tokens render through one owner as a fixed mask with presence reported, and URL userinfo, URL query values and credential flag values are redacted across config reads, diagnostics, SBOM export and registry error messages.",

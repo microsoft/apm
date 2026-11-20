@@ -1,4 +1,4 @@
-"""Guard the update plan's ref comparison for ref-less dependencies (RA-007).
+"""Guard the update plan's ref comparison for ref-less dependencies (#4166).
 
 ``install/plan.build_update_plan`` compares the ref the lockfile RECORDS, not
 the branch name the resolver reports. A dependency declared without a ref is

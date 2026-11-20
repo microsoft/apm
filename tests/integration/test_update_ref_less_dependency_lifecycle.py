@@ -1,7 +1,7 @@
-"""APMLifecycle: `apm update` converges on a dependency declared without a ref (RA-007).
+"""APMLifecycle: `apm update` converges on a dependency declared without a ref (#4166).
 
-PROMISE: outcome.status_matches_state -- an update that changes nothing reports
-nothing updated and leaves every byte in place (source: red-team RA-007).
+PROMISE: outcome.status_matches_state + idempotency.byte_stable -- an update that changes nothing reports
+nothing updated and leaves every byte in place (source: issue #4166).
 CELL: OP=update SRC=git(ref absent -> remote default branch) PRIM=skill
 SCOPE={project,user} LOCK=present
 owner: dependency-identity-materialization (install/plan.py build_update_plan)
