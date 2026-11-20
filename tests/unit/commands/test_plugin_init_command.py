@@ -1,8 +1,6 @@
-"""Tests for the new ``apm plugin init`` surface and deprecation
-warnings on ``apm init --plugin`` / ``apm init --marketplace``.
-
-Wave 3 v3: noun-verb consolidation. Legacy flags continue to work
-during the deprecation window (removal scheduled for v0.16).
+"""Tests for the ``apm plugin init`` surface and the refusal of the
+``apm init --plugin`` / ``apm init --marketplace`` flags removed in 0.37
+(#4073).
 """
 
 from __future__ import annotations
@@ -282,9 +280,11 @@ class TestPluginInitCommand:
                 os.chdir(self.original_dir)
 
 
-class TestInitDeprecationWarnings:
-    """Legacy ``apm init --plugin`` / ``--marketplace`` flags still work
-    but print a one-line deprecation redirect on stderr.
+class TestRemovedInitFlags:
+    """``apm init --plugin`` / ``--marketplace`` were removed in 0.37 (#4073).
+
+    They stay as hidden stubs that write nothing, exit 2 and name the
+    replacement command.
     """
 
     def setup_method(self) -> None:
@@ -301,39 +301,143 @@ class TestInitDeprecationWarnings:
         except (FileNotFoundError, OSError):
             os.chdir(str(Path(__file__).resolve().parents[3]))
 
-    def test_init_plugin_flag_prints_deprecation(self):
+    @pytest.mark.parametrize(
+        ("flag", "replacement"),
+        [("--plugin", "apm plugin init"), ("--marketplace", "apm marketplace init")],
+    )
+    def test_removed_flag_exits_2_names_replacement_and_writes_nothing(
+        self, flag: str, replacement: str
+    ):
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                result = self.runner.invoke(cli, ["init", "demo", "--plugin", "--yes"])
-                assert result.exit_code == 0, result.output
-                # Deprecation lives on stderr so it does not pollute pipes
-                assert "deprecated" in result.stderr.lower()
-                assert "apm plugin init" in result.stderr
-                assert "v0.16" in result.stderr
-                # And the legacy flag STILL works (cwd is now demo/)
-                assert Path("plugin.json").exists()
-                # The deprecated producer flag keeps shipped legacy behavior.
-                import json
-
-                pj = json.loads(Path("plugin.json").read_text(encoding="utf-8"))
-                assert "$schema" not in pj
-                assert "extensions" not in pj
+                result = self.runner.invoke(cli, ["init", "demo", flag, "--yes"])
+                assert result.exit_code == 2, result.output
+                assert f"Run: {replacement}" in result.stderr
+                assert "removed" in result.stderr
+                assert list(Path(tmp).iterdir()) == []
             finally:
                 os.chdir(self.original_dir)
 
-    def test_init_marketplace_flag_prints_deprecation(self):
+    def test_removed_flags_are_hidden_from_help(self):
+        result = self.runner.invoke(cli, ["init", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "--plugin" not in result.output
+        assert "--marketplace" not in result.output
+
+    def test_plugin_init_writes_metadata_flags(self):
+        """``apm plugin init`` covers what ``apm init --plugin`` offered (#4073)."""
+        import json
+
+        import yaml
+
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                result = self.runner.invoke(cli, ["init", "demo", "--marketplace", "--yes"])
+                result = self.runner.invoke(
+                    cli,
+                    [
+                        "plugin",
+                        "init",
+                        "demo",
+                        "--yes",
+                        "--version",
+                        "2.3.4",
+                        "--author",
+                        "Ada",
+                        "--description",
+                        "Says hi",
+                    ],
+                )
                 assert result.exit_code == 0, result.output
-                assert "deprecated" in result.stderr.lower()
-                assert "apm marketplace init" in result.stderr
-                assert "v0.16" in result.stderr
-                # And the legacy flag STILL writes the marketplace block (cwd is now demo/)
-                content = Path("apm.yml").read_text()
-                assert "marketplace:" in content
+                manifest = yaml.safe_load(Path("apm.yml").read_text(encoding="utf-8"))
+                assert manifest["version"] == "2.3.4"
+                assert manifest["author"] == "Ada"
+                assert manifest["description"] == "Says hi"
+                plugin = json.loads(Path("plugin.json").read_text(encoding="utf-8"))
+                assert plugin["version"] == "2.3.4"
+                assert plugin["description"] == "Says hi"
+                assert "Ada" in json.dumps(plugin["author"])
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_removed_plugin_flag_prints_the_full_replacement_command(self):
+        """The refusal keeps the user's arguments so recovery is one paste."""
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                result = self.runner.invoke(
+                    cli,
+                    [
+                        "init",
+                        "my-skill",
+                        "--plugin",
+                        "--yes",
+                        "--target",
+                        "claude",
+                        "--version",
+                        "2.0.0",
+                        "--author",
+                        "Ada L",
+                    ],
+                )
+                assert result.exit_code == 2, result.output
+                assert (
+                    "Run: apm plugin init my-skill --yes --target claude "
+                    "--version 2.0.0 --author 'Ada L'"
+                ) in result.stderr
+                assert list(Path(tmp).iterdir()) == []
+            finally:
+                os.chdir(self.original_dir)
+
+    def test_both_removed_flags_print_both_replacement_steps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                result = self.runner.invoke(
+                    cli, ["init", "demo", "--plugin", "--marketplace", "--yes"]
+                )
+                assert result.exit_code == 2, result.output
+                assert "'apm init --plugin' and 'apm init --marketplace'" in result.stderr
+                assert "Run: apm plugin init demo --yes" in result.stderr
+                assert "Then run (inside demo/): apm marketplace init" in result.stderr
+                assert list(Path(tmp).iterdir()) == []
+            finally:
+                os.chdir(self.original_dir)
+
+    @pytest.mark.parametrize(
+        ("flags", "expected"),
+        [
+            (
+                ["--version", "2.3.4", "--author", "Ada", "--description", "Says hi"],
+                ("2.3.4", "Ada", "Says hi"),
+            ),
+            (["--author", "Ada", "--description", "Says hi"], ("1.0.0", "Ada", "Says hi")),
+        ],
+    )
+    def test_plugin_init_metadata_flags_seed_interactive_prompts(self, flags, expected):
+        """Outside --yes the flags seed the prompts; the default version stays 1.0.0."""
+        import json
+
+        import yaml
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                # Accept the name, version, description and author defaults, then confirm.
+                result = self.runner.invoke(
+                    cli, ["plugin", "init", "demo", *flags], input="\n\n\n\ny\n"
+                )
+                assert result.exit_code == 0, result.output
+                project = Path(tmp) / "demo"
+                manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+                assert (manifest["version"], manifest["author"], manifest["description"]) == (
+                    expected
+                )
+                plugin = json.loads((project / "plugin.json").read_text(encoding="utf-8"))
+                assert (plugin["version"], plugin["author"]["name"], plugin["description"]) == (
+                    expected
+                )
             finally:
                 os.chdir(self.original_dir)
 
