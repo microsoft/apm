@@ -703,6 +703,9 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         recorded_hashes=prior_hashes,
         user_scope=user_scope,
         live_paths=files,
+        # A departing owner (selected removal) releases a skill directory left
+        # holding only user content, as prune and install cleanup do (#4162).
+        failed_path_retained=desired_owners is None,
     )
     if on_cleanup is not None:
         on_cleanup(cleanup)
