@@ -2788,6 +2788,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Helper credentials are erased after a 403 or a sign-in redirect, not only a 401.",
     ),
     MutationCase(
+        guard_id="transport-platform-credential-value-rendering",
+        rule_id="transport-platform-credential-value-rendering",
+        path="src/apm_cli/commands/config.py",
+        old='                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")\n',
+        new=(
+            '                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")\n'
+            '                click.echo(body["token"])\n'
+        ),
+        intent="apm config echoes a stored registry token outside the owner's mask.",
+    ),
+    MutationCase(
         guard_id="transport-platform-git-cache-identity",
         rule_id="transport-platform-git-cache-identity",
         path="src/apm_cli/deps/shared_clone_cache.py",
