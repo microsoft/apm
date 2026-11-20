@@ -33,6 +33,7 @@ from apm_cli.install.services import (
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
 
 def _to_bundle(d: dict) -> IntegratorBundle:
@@ -179,6 +180,7 @@ class TestIntegratePackagePrimitivesNoTargets:
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert result["prompts"] == 0
@@ -218,6 +220,7 @@ class TestIntegratePackagePrimitivesScratchRoot:
                 force=False,
                 managed_files=None,
                 scratch_root=scratch,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert isinstance(result, dict)
@@ -250,6 +253,7 @@ class TestIntegratePackagePrimitivesScratchRoot:
                 force=False,
                 managed_files=None,
                 scratch_root=scratch,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
     def test_invalid_scratch_root_fails_before_target_cleanup(self, tmp_path: Path) -> None:
@@ -286,6 +290,7 @@ class TestIntegratePackagePrimitivesScratchRoot:
                 force=False,
                 managed_files=None,
                 scratch_root=scratch,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert config.read_bytes() == original
@@ -337,6 +342,7 @@ class TestIntegratePackagePrimitivesFormatTargetCollapse:
                 managed_files=None,
                 logger=logger,
                 ctx=ctx,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
     def test_zero_skill_paths_collapsed_to_empty(self, tmp_path: Path) -> None:
@@ -408,6 +414,7 @@ class TestIntegratePackagePrimitivesSubSkills:
                 force=False,
                 managed_files=None,
                 logger=logger,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert result["sub_skills"] == 2
@@ -438,6 +445,7 @@ class TestIntegratePackagePrimitivesSubSkills:
                 force=False,
                 managed_files=None,
                 logger=logger,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         all_log_calls = "".join(str(c) for c in logger.tree_item.call_args_list)
@@ -486,6 +494,7 @@ class TestSkillPathOutsideProject:
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert result["skills"] == 1
@@ -833,6 +842,7 @@ class TestCopilotAppWorkflowHint:
                 force=False,
                 managed_files=None,
                 logger=logger,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         all_log = " ".join(str(c) for c in logger.tree_item.call_args_list)

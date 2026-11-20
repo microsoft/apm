@@ -128,7 +128,9 @@ def policy_documents() -> dict[str, dict[str, object]]:
         "deny-native": {
             "name": "deny-native",
             **base,
-            "dependencies": {"deny": ["**/p-native-claude", "**/p-native-codex"]},
+            "dependencies": {
+                "deny": ["**/p-native-claude", "**/p-native-codex", "**/p-native-claude-bin"]
+            },
         },
         "exec-gate-on": {
             "name": "exec-gate-on",
@@ -171,6 +173,7 @@ class WorldServices:
         self._proxy: ScriptedHttpsProxy | None = None
         self.package_registry = package_registry.PackageRegistry()
         self.ado_auth_required = False
+        self._unserved: dict[str, Path] = {}
 
     @property
     def proxy(self) -> ScriptedHttpsProxy:
@@ -216,6 +219,8 @@ class WorldServices:
         """Clear the egress log and every per-test mode (services are shared per worker)."""
         self.proxy.clear()
         self.ado_auth_required = False
+        for slug in list(self._unserved):
+            self.restore(slug)
 
     def require_ado_auth(self, required: bool = True) -> None:
         """Make dev.azure.com refuse anonymous git and REST requests with 401."""
@@ -231,6 +236,22 @@ class WorldServices:
         if not owner or not repo or "/" in repo:
             raise ValueError(f"slug must be owner/repo, got {slug!r}")
         self._repositories[slug] = origin
+
+    def unserve(self, slug: str) -> None:
+        """Stop serving repository *slug*: every host answers 404 for it until ``restore``.
+
+        Simulates a deleted or renamed upstream. ``reset`` restores every
+        unserved repository, so the next world sees them again.
+        """
+        if slug not in self._repositories:
+            raise KeyError(f"{slug!r} is not served; served: {sorted(self._repositories)}")
+        self._unserved[slug] = self._repositories.pop(slug)
+
+    def restore(self, slug: str) -> None:
+        """Serve an ``unserve``d repository again."""
+        if slug not in self._unserved:
+            raise KeyError(f"{slug!r} is not unserved")
+        self._repositories[slug] = self._unserved.pop(slug)
 
     def start(self, directory: Path) -> WorldServices:
         """Start the proxy; ``directory`` receives its private CA material."""

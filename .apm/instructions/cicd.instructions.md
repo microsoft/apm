@@ -15,14 +15,14 @@ integration suite runs only at merge time via GitHub Merge Queue
    - Uploads Linux x86_64 binary artifact for downstream integration testing.
    - Runs in both PR context (fast feedback for contributors) and merge_group
      context (against the tentative merge commit before queue auto-merges).
-2. **`ci-integration.yml`** - Tier 2, `merge_group` trigger only
+2. **`ci-integration.yml`** - Tier 2, `merge_group`; also `workflow_dispatch` and PRs labeled `full-integration` (merge-gate.yml then requires its checks at PR time)
    - **Linux-only**. Builds binary inline, then runs smoke + integration +
      release-validation against the tentative merge commit.
    - Trust boundary is the write-access grant (only users with write can
      enqueue a PR). No environment approval gate.
    - Inlines the binary build instead of fetching from `ci.yml` to avoid
      cross-workflow artifact plumbing across triggers.
-   - **Never add a `pull_request` or `pull_request_target` trigger here.**
+   - **Never add `pull_request_target` or `push` here; `pull_request` stays label-gated on every job.**
      This file holds production secrets (`GH_CLI_PAT`, `ADO_APM_PAT`).
      Required-check satisfaction at PR time is handled by `merge-gate.yml`,
      which aggregates all required signals into a single `gate` check.
