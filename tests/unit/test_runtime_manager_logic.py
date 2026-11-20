@@ -27,7 +27,7 @@ class TestFrozenLoaderEnvIsolation:
         monkeypatch.setenv("DYLD_LIBRARY_PATH", "/bundle/_internal")
         monkeypatch.delenv("DYLD_LIBRARY_PATH_ORIG", raising=False)
         manager = RuntimeManager()
-        with patch("apm_cli.runtime.manager.subprocess.run") as mock_run:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = Mock(returncode=0)
             assert manager.run_embedded_script("echo setup", "", [])
         env = mock_run.call_args.kwargs["env"]
@@ -36,11 +36,37 @@ class TestFrozenLoaderEnvIsolation:
         assert "DYLD_LIBRARY_PATH" not in env
 
 
+class TestRuntimeManagerInit:
+    def test_init_supported_runtimes_keys(self):
+        manager = RuntimeManager()
+        assert set(manager.supported_runtimes.keys()) == {"copilot", "codex", "llm", "gemini"}
+
+    def test_init_script_extension_unix(self):
+        with patch("apm_cli.runtime.manager.sys") as mock_sys:
+            mock_sys.platform = "linux"
+            manager = RuntimeManager()
+        for info in manager.supported_runtimes.values():
+            assert info["script"].endswith(".sh")
+
+    def test_init_script_extension_windows(self):
+        with patch("apm_cli.runtime.manager.sys") as mock_sys:
+            mock_sys.platform = "win32"
+            manager = RuntimeManager()
+        for info in manager.supported_runtimes.values():
+            assert info["script"].endswith(".ps1")
+
+
 class TestRuntimeManagerGetRuntimePreference:
     def test_returns_expected_order(self):
         manager = RuntimeManager()
         pref = manager.get_runtime_preference()
         assert pref == ["copilot", "codex", "gemini", "llm"]
+
+
+class TestRuntimeManagerIsRuntimeAvailable:
+    def test_unknown_runtime_returns_false(self):
+        manager = RuntimeManager()
+        assert manager.is_runtime_available("unknown") is False
 
 
 class TestRuntimeManagerGetAvailableRuntime:
@@ -111,6 +137,53 @@ class TestRuntimeManagerSetupRuntime:
                 mock_sys.platform = "linux"
                 manager.setup_runtime("codex", vanilla=True)
         mock_run.assert_called_once_with("s", "c", ["--vanilla"])
+
+
+class TestRuntimeManagerRemoveRuntime:
+    def test_unknown_runtime_returns_false(self):
+        manager = RuntimeManager()
+        assert manager.remove_runtime("unknown") is False
+
+    def test_copilot_npm_success(self):
+        manager = RuntimeManager()
+        with patch("subprocess.run") as mock_run:
+            proc = MagicMock()
+            proc.returncode = 0
+            mock_run.return_value = proc
+            assert manager.remove_runtime("copilot") is True
+        mock_run.assert_called_once_with(
+            ["npm", "uninstall", "-g", "@github/copilot"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=ANY,
+        )
+
+    def test_copilot_npm_failure(self):
+        manager = RuntimeManager()
+        with patch("subprocess.run") as mock_run:
+            proc = MagicMock()
+            proc.returncode = 1
+            proc.stderr = "error"
+            mock_run.return_value = proc
+            assert manager.remove_runtime("copilot") is False
+
+    def test_copilot_npm_exception(self):
+        manager = RuntimeManager()
+        with patch(
+            "subprocess.run",
+            side_effect=Exception("npm not found"),
+        ):
+            assert manager.remove_runtime("copilot") is False
+
+
+class TestRuntimeManagerGetEmbeddedScript:
+    def test_script_not_found_raises(self):
+        manager = RuntimeManager()
+        with patch("apm_cli.runtime.manager.getattr", return_value=False):
+            pass
+        with pytest.raises(RuntimeError, match="Could not load setup script"):
+            manager.get_embedded_script("definitely-does-not-exist.sh")
 
 
 # ---------------------------------------------------------------------------

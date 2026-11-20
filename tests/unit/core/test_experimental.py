@@ -420,6 +420,93 @@ class TestGetMalformedFlagKeys:
 # ---------------------------------------------------------------------------
 
 
+class TestCoworkFlagRegistration:
+    """Tests for the 'cowork' experimental flag registration."""
+
+    def test_cowork_flag_is_registered_with_false_default(self) -> None:
+        from apm_cli.core.experimental import FLAGS
+
+        assert "copilot_cowork" in FLAGS
+        assert FLAGS["copilot_cowork"].default is False
+
+    def test_cowork_flag_is_disabled_by_default(self, inject_config: Any) -> None:
+        inject_config({})
+        from apm_cli.core.experimental import is_enabled
+
+        assert is_enabled("copilot_cowork") is False
+
+    def test_cowork_flag_hint_contains_docs_url(self) -> None:
+        """Verify the hint URL is a valid https URL using urlparse."""
+        from urllib.parse import urlparse
+
+        from apm_cli.core.experimental import FLAGS
+
+        hint = FLAGS["copilot_cowork"].hint
+        assert hint is not None
+        # Extract URL portion from the hint string
+        import re as _re
+
+        urls = _re.findall(r"https?://\S+", hint)
+        assert urls, "hint must contain at least one URL"
+        parsed = urlparse(urls[0])
+        assert parsed.scheme == "https"
+        assert parsed.hostname is not None
+        assert parsed.path != ""
+
+    def test_cowork_flag_description_is_printable_ascii(self) -> None:
+        import string
+
+        from apm_cli.core.experimental import FLAGS
+
+        desc = FLAGS["copilot_cowork"].description
+        assert len(desc) <= 80
+        assert all(c in string.printable for c in desc)
+
+    def test_cowork_key_equals_name(self) -> None:
+        from apm_cli.core.experimental import FLAGS
+
+        assert FLAGS["copilot_cowork"].name == "copilot_cowork"
+
+
 # ---------------------------------------------------------------------------
 # Package registry flag registration
 # ---------------------------------------------------------------------------
+
+
+class TestPackageRegistryFlagRegistration:
+    """Tests for the registries experimental flag registration."""
+
+    def test_package_registry_flag_is_registered(self) -> None:
+        from apm_cli.core.experimental import FLAGS
+
+        assert "registries" in FLAGS
+
+    def test_package_registry_flag_default_is_false(self) -> None:
+        from apm_cli.core.experimental import FLAGS
+
+        assert FLAGS["registries"].default is False
+
+    def test_package_registry_flag_is_disabled_by_default(self, inject_config: Any) -> None:
+        inject_config({})
+        from apm_cli.core.experimental import is_enabled
+
+        assert is_enabled("registries") is False
+
+    def test_package_registry_flag_hint_contains_docs_url(self) -> None:
+        from urllib.parse import urlparse
+
+        from apm_cli.core.experimental import FLAGS
+
+        hint = FLAGS["registries"].hint
+        assert hint is not None
+        urls = re.findall(r"https?://\S+", hint)
+        assert urls, "hint must contain at least one URL"
+        parsed = urlparse(urls[0])
+        assert parsed.scheme == "https"
+        assert parsed.hostname is not None
+        assert parsed.path.endswith("/reference/registries/")
+
+    def test_package_registry_key_equals_name(self) -> None:
+        from apm_cli.core.experimental import FLAGS
+
+        assert FLAGS["registries"].name == "registries"

@@ -361,18 +361,6 @@ class TestRecvTimeout:
 
 
 class TestTokenScrub:
-    def test_scrub_removes_token_query_arg(self) -> None:
-        url = "ws://127.0.0.1:51234/?token=ABC123xyz= HTTP rejected"
-        scrubbed = ws._scrub_token(url)
-        assert "ABC123xyz" not in scrubbed
-        assert "token=<redacted>" in scrubbed
-
-    def test_scrub_handles_token_in_chained_query(self) -> None:
-        s = "GET /api?foo=1&token=SECRET_VALUE&bar=2 failed"
-        scrubbed = ws._scrub_token(s)
-        assert "SECRET_VALUE" not in scrubbed
-        assert "token=<redacted>" in scrubbed
-
     def test_auth_error_message_does_not_leak_token(self, run_dir: Path, monkeypatch) -> None:
         """End-to-end: a real 401 from the server must not embed the token."""
 

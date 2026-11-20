@@ -61,3 +61,35 @@ class TestAutoDetectPathWithPayload:
             side_effect=lambda source, path, **kw: CATALOG if path == "marketplace.json" else None,
         ):
             assert mp_client._auto_detect_path(_github_source()) == "marketplace.json"
+
+
+class TestFetchMarketplaceDiscoveryPayload:
+    def test_discovery_payload_skips_duplicate_fetch(self) -> None:
+        source = _github_source()
+
+        with (
+            patch.object(mp_client, "_fetch_file") as fetch_mock,
+            patch.object(mp_client, "_write_cache") as write_mock,
+        ):
+            manifest = mp_client.fetch_marketplace(
+                source,
+                force_refresh=True,
+                discovery_payload=CATALOG,
+            )
+
+        fetch_mock.assert_not_called()
+        write_mock.assert_called_once()
+        assert manifest.name == "catalog"
+        assert [p.name for p in manifest.plugins] == ["skill-creator"]
+
+    def test_discovery_payload_none_fetches_normally(self) -> None:
+        source = _github_source()
+
+        with (
+            patch.object(mp_client, "_fetch_file", return_value=CATALOG) as fetch_mock,
+            patch.object(mp_client, "_write_cache"),
+        ):
+            manifest = mp_client.fetch_marketplace(source, force_refresh=True)
+
+        fetch_mock.assert_called_once()
+        assert manifest.name == "catalog"

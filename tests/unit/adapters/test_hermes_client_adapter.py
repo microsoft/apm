@@ -37,30 +37,12 @@ class TestHermesClientFactory(unittest.TestCase):
         client = ClientFactory.create_client("hermes")
         self.assertIsInstance(client, HermesClientAdapter)
 
-    def test_create_hermes_client_case_insensitive(self):
-        client = ClientFactory.create_client("Hermes")
-        self.assertIsInstance(client, HermesClientAdapter)
-
-    def test_hermes_uses_snake_case_servers_key(self):
-        self.assertEqual(HermesClientAdapter.mcp_servers_key, "mcp_servers")
-
-    def test_hermes_supports_user_scope(self):
-        self.assertTrue(HermesClientAdapter.supports_user_scope)
-
     def test_hermes_target_name(self):
         self.assertEqual(HermesClientAdapter.target_name, "hermes")
 
 
 class TestHermesConfigPath(unittest.TestCase):
     """Config path resolution honours $HERMES_HOME and defaults to ~/.hermes."""
-
-    def test_default_config_path(self):
-        adapter = HermesClientAdapter()
-        fake_home = Path("/fake/home")
-        with patch.object(Path, "home", staticmethod(lambda: fake_home)):
-            path = Path(adapter.get_config_path())
-        expected = (fake_home / ".hermes" / "config.yaml").resolve(strict=False)
-        self.assertEqual(path, expected)
 
     @pytest.mark.windows_compat
     def test_hermes_home_override(self):

@@ -420,6 +420,59 @@ class TestApplyOverlayExtra:
         assert "_extra" not in cache["my-server"]
 
 
+class TestAdapterRealPathExtraRender:
+    """End-to-end: extra reaches the FINAL rendered config via a real adapter path.
+
+    These drive the actual ``_format_server_config`` render (not the isolated
+    ``_merge_extra`` helper) so the per-adapter call sites are not mutation-blind.
+    Covers stdio + remote on two adapters (Codex, Copilot).
+    """
+
+    def test_copilot_stdio_renders_extra(self):
+        from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+        adapter = CopilotClientAdapter()
+        server_info = {
+            "name": "slack",
+            "_raw_stdio": {"command": "my-cmd", "args": ["--flag"], "env": {}},
+            "_extra": {"oauth": {"clientId": "abc"}},
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert cfg["oauth"] == {"clientId": "abc"}
+
+    def test_copilot_remote_renders_extra(self):
+        from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+        adapter = CopilotClientAdapter()
+        server_info = {
+            "name": "slack",
+            "id": "uuid-2",
+            "remotes": [{"transport_type": "http", "url": "https://mcp.slack.com/mcp"}],
+            "_extra": {"oauth": {"clientId": "abc"}},
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert cfg["url"] == "https://mcp.slack.com/mcp"
+        assert cfg["oauth"] == {"clientId": "abc"}
+
+
+class TestAdapterRealPathShadowGuard:
+    """End-to-end: extra cannot shadow/redirect adapter-set fields on a real path."""
+
+    def test_copilot_stdio_extra_cannot_redirect_command(self):
+        """A denylisted ``command`` in extra must not overwrite the real command."""
+        from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+        adapter = CopilotClientAdapter()
+        server_info = {
+            "name": "slack",
+            "_raw_stdio": {"command": "real-cmd", "args": [], "env": {}},
+            "_extra": {"command": "/bin/evil", "oauth": {"clientId": "abc"}},
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert cfg["command"] == "real-cmd"
+        assert cfg["oauth"] == {"clientId": "abc"}
+
+
 class TestExtraReservedKeyDenylist:
     """Reserved modeled-field names cannot pass through 'extra' at either layer."""
 

@@ -8,7 +8,7 @@ import pytest
 
 from apm_cli.entrypoint import main
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)

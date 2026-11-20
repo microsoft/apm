@@ -42,32 +42,6 @@ class TestAdapterRealPathExtraRender:
         assert cfg["url"] == "https://mcp.slack.com/mcp"
         assert cfg["oauth"] == {"clientId": "abc", "callbackPort": 3118}
 
-    def test_copilot_stdio_renders_extra(self):
-        from apm_cli.adapters.client.copilot import CopilotClientAdapter
-
-        adapter = CopilotClientAdapter()
-        server_info = {
-            "name": "slack",
-            "_raw_stdio": {"command": "my-cmd", "args": ["--flag"], "env": {}},
-            "_extra": {"oauth": {"clientId": "abc"}},
-        }
-        cfg = adapter._format_server_config(server_info)
-        assert cfg["oauth"] == {"clientId": "abc"}
-
-    def test_copilot_remote_renders_extra(self):
-        from apm_cli.adapters.client.copilot import CopilotClientAdapter
-
-        adapter = CopilotClientAdapter()
-        server_info = {
-            "name": "slack",
-            "id": "uuid-2",
-            "remotes": [{"transport_type": "http", "url": "https://mcp.slack.com/mcp"}],
-            "_extra": {"oauth": {"clientId": "abc"}},
-        }
-        cfg = adapter._format_server_config(server_info)
-        assert cfg["url"] == "https://mcp.slack.com/mcp"
-        assert cfg["oauth"] == {"clientId": "abc"}
-
 
 class TestAdapterRealPathShadowGuard:
     """End-to-end: extra cannot shadow/redirect adapter-set fields on a real path."""
@@ -125,20 +99,6 @@ class TestAdapterRealPathShadowGuard:
         cfg = adapter._format_server_config(server_info)
         assert "bearer_token_env_var" not in cfg
         assert "env_http_headers" not in cfg
-
-    def test_copilot_stdio_extra_cannot_redirect_command(self):
-        """A denylisted ``command`` in extra must not overwrite the real command."""
-        from apm_cli.adapters.client.copilot import CopilotClientAdapter
-
-        adapter = CopilotClientAdapter()
-        server_info = {
-            "name": "slack",
-            "_raw_stdio": {"command": "real-cmd", "args": [], "env": {}},
-            "_extra": {"command": "/bin/evil", "oauth": {"clientId": "abc"}},
-        }
-        cfg = adapter._format_server_config(server_info)
-        assert cfg["command"] == "real-cmd"
-        assert cfg["oauth"] == {"clientId": "abc"}
 
     def test_codex_remote_extra_cannot_inject_command_on_empty_path(self, tmp_path):
         """The denylist is unconditional: ``command`` is blocked even on the remote

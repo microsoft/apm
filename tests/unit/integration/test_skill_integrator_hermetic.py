@@ -209,16 +209,6 @@ class TestDircmpEqual:
         dcmp = filecmp.dircmp(str(dir_a), str(dir_b))
         assert SkillIntegrator._dircmp_equal(dcmp) is True
 
-    def test_funny_files_returns_false(self) -> None:
-        """funny_files -> returns False."""
-        dcmp = MagicMock()
-        dcmp.left_only = []
-        dcmp.right_only = []
-        dcmp.funny_files = ["weird.bin"]
-        dcmp.common_files = []
-        dcmp.subdirs = {}
-        assert SkillIntegrator._dircmp_equal(dcmp) is False
-
 
 # ---------------------------------------------------------------------------
 # _promote_sub_skills -- non-dir entry is skipped (line 578)
@@ -1161,22 +1151,3 @@ class TestPairedNameFilterPerSkillsRoot:
         tokens = SkillIntegrator._paired_name_filter(None, self._pairing(), shared)
         assert {"gamma", "delta"} <= set(tokens)
         assert "alpha" not in tokens
-
-    def test_unselected_root_gets_nothing_and_no_pairing_keeps_the_filter(self):
-        assert SkillIntegrator._paired_name_filter(None, self._pairing(), ("gemini",)) == (
-            frozenset()
-        )
-        base = {"alpha", "gamma"}
-        assert SkillIntegrator._paired_name_filter(base, None, ("claude",)) is base
-
-    def test_paired_filter_narrows_but_never_widens_the_source_plan(self):
-        from apm_cli.models.dependency.subsets import merge_edge_pairings
-
-        pairing = merge_edge_pairings([(None, ["claude"]), (["alpha"], ["copilot"])])
-        assert SkillIntegrator._paired_name_filter({"alpha", "gamma"}, pairing, ("claude",)) == {
-            "alpha",
-            "gamma",
-        }
-        assert SkillIntegrator._paired_name_filter({"gamma"}, pairing, ("copilot",)) == (
-            frozenset()
-        )

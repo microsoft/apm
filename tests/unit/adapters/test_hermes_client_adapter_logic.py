@@ -3,12 +3,29 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from apm_cli.adapters.client.hermes import HermesClientAdapter
+from apm_cli.factory import ClientFactory
 
 pytestmark = pytest.mark.unit
+
+
+class TestHermesClientFactory(unittest.TestCase):
+    """Factory registration for the hermes runtime."""
+
+    def test_create_hermes_client_case_insensitive(self):
+        client = ClientFactory.create_client("Hermes")
+        self.assertIsInstance(client, HermesClientAdapter)
+
+    def test_hermes_uses_snake_case_servers_key(self):
+        self.assertEqual(HermesClientAdapter.mcp_servers_key, "mcp_servers")
+
+    def test_hermes_supports_user_scope(self):
+        self.assertTrue(HermesClientAdapter.supports_user_scope)
 
 
 class TestToHermesFormat(unittest.TestCase):
@@ -80,6 +97,18 @@ class TestToHermesFormat(unittest.TestCase):
         result = HermesClientAdapter._to_hermes_format(copilot)
         self.assertEqual(result["url"], "https://example.com/mcp")
         self.assertEqual(result["headers"], {"X-Custom-Header": "foo"})
+
+
+class TestHermesConfigPath(unittest.TestCase):
+    """Config path resolution honours $HERMES_HOME and defaults to ~/.hermes."""
+
+    def test_default_config_path(self):
+        adapter = HermesClientAdapter()
+        fake_home = Path("/fake/home")
+        with patch.object(Path, "home", staticmethod(lambda: fake_home)):
+            path = Path(adapter.get_config_path())
+        expected = (fake_home / ".hermes" / "config.yaml").resolve(strict=False)
+        self.assertEqual(path, expected)
 
 
 # --- #3749: documented Hermes keys survive the render -------------------------

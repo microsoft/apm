@@ -39,12 +39,6 @@ class TestIsVscodeAvailable:
         with patch("shutil.which", return_value=None):
             assert _is_vscode_available(tmp_path) is False
 
-    def test_uses_cwd_when_none(self):
-        from apm_cli.integration.mcp_integrator import _is_vscode_available
-
-        with patch("shutil.which", return_value="/usr/bin/code"):
-            assert _is_vscode_available(None) is True
-
 
 # ---------------------------------------------------------------------------
 # MCPIntegrator._build_self_defined_info

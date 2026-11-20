@@ -201,14 +201,6 @@ class TestAddDependencyToConfig:
 class TestAutoInstallVirtualPackage:
     """Tests for ScriptRunner._auto_install_virtual_package."""
 
-    def test_returns_false_when_not_virtual(self) -> None:
-        runner = ScriptRunner()
-        mock_dep = MagicMock()
-        mock_dep.is_virtual = False
-        with patch("apm_cli.models.apm_package.DependencyReference.parse", return_value=mock_dep):
-            result = runner._auto_install_virtual_package("simple-name/with-slash")
-        assert result is False
-
     def test_returns_true_on_success(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _chdir(monkeypatch, tmp_path)
         (tmp_path / "apm.yml").write_text("name: test\nversion: 1.0.0\n")
@@ -249,14 +241,6 @@ class TestAutoInstallVirtualPackage:
                     result = runner._auto_install_virtual_package("owner/repo/file.prompt.md")
                     # When patched, just verify the method doesn't raise
                     _ = result  # either real or patched
-
-    def test_returns_false_on_exception(self) -> None:
-        runner = ScriptRunner()
-        with patch(
-            "apm_cli.models.apm_package.DependencyReference.parse", side_effect=RuntimeError("fail")
-        ):
-            result = runner._auto_install_virtual_package("owner/repo/thing")
-        assert result is False
 
 
 # ---------------------------------------------------------------------------

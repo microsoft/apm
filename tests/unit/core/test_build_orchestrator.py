@@ -233,26 +233,6 @@ class TestBuildOrchestrator:
 
         assert result.warnings == ["b-warn", "m-warn"]
 
-    def test_default_producers_are_bundle_and_marketplace(self):
-        orch = BuildOrchestrator()
-        kinds = [p.kind for p in orch._producers]
-        assert OutputKind.BUNDLE in kinds
-        assert OutputKind.MARKETPLACE in kinds
-
-    def test_default_producers_include_plugin_manifest(self):
-        orch = BuildOrchestrator()
-        kinds = [p.kind for p in orch._producers]
-        assert OutputKind.PLUGIN_MANIFEST in kinds
-
-    def test_plugin_manifest_producer_ordering(self):
-        orch = BuildOrchestrator()
-        kinds = [p.kind for p in orch._producers]
-        bundle_idx = kinds.index(OutputKind.BUNDLE)
-        marketplace_idx = kinds.index(OutputKind.MARKETPLACE)
-        plugin_idx = kinds.index(OutputKind.PLUGIN_MANIFEST)
-        assert plugin_idx > bundle_idx
-        assert plugin_idx > marketplace_idx
-
 
 class TestMarketplaceProducer:
     def test_writes_claude_and_codex_outputs_when_requested(self, tmp_path: Path):

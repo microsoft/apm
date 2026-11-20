@@ -8,6 +8,7 @@ from apm_cli.bundle.plugin_exporter import (
     _deep_merge,
     _deployed_path_parts,
     _plugin_rel_for_deployed_path,
+    _reconcile_plugin_json_version,
     _rename_prompt,
     _update_plugin_json_paths,
     _validate_output_rel,
@@ -236,6 +237,69 @@ class TestUpdatePluginJsonPaths:
 
         _update_plugin_json_paths(pj, [], logger=_StubLogger())
         assert captured == []
+
+
+class _CapturingLogger:
+    """Record pack warnings; absorb info/debug so tests stay quiet."""
+
+    def __init__(self):
+        self.warnings: list[str] = []
+
+    def warning(self, msg, *_args, **_kwargs):
+        self.warnings.append(msg)
+
+    def info(self, _msg, *_args, **_kwargs):
+        pass
+
+    def debug(self, _msg, *_args, **_kwargs):
+        pass
+
+    def success(self, _msg, *_args, **_kwargs):
+        pass
+
+
+class TestReconcilePluginJsonVersion:
+    """Every ``plugin.json`` inside a bundle must agree with the apm.yml version (#3351)."""
+
+    def test_forces_apm_yml_version_when_authored_is_stale(self):
+        logger = _CapturingLogger()
+
+        result = _reconcile_plugin_json_version(
+            {"name": "pkg", "version": "1.0.2"},
+            "1.0.3",
+            source_label=".claude-plugin/plugin.json",
+            logger=logger,
+        )
+
+        assert result == {"name": "pkg", "version": "1.0.3"}
+        assert len(logger.warnings) == 1
+        assert ".claude-plugin/plugin.json declares version 1.0.2" in logger.warnings[0]
+        assert "apm.yml declares 1.0.3" in logger.warnings[0]
+
+    def test_matching_version_is_untouched_and_silent(self):
+        logger = _CapturingLogger()
+
+        result = _reconcile_plugin_json_version(
+            {"name": "pkg", "version": "1.0.3"}, "1.0.3", logger=logger
+        )
+
+        assert result["version"] == "1.0.3"
+        assert logger.warnings == []
+
+    def test_missing_version_is_filled_silently(self):
+        logger = _CapturingLogger()
+
+        result = _reconcile_plugin_json_version({"name": "pkg"}, "1.0.3", logger=logger)
+
+        assert result["version"] == "1.0.3"
+        assert logger.warnings == []
+
+    def test_input_is_not_mutated(self):
+        authored = {"name": "pkg", "version": "1.0.2"}
+
+        _reconcile_plugin_json_version(authored, "1.0.3", logger=_CapturingLogger())
+
+        assert authored["version"] == "1.0.2"
 
 
 # ---------------------------------------------------------------------------

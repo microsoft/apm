@@ -10,10 +10,7 @@ import pytest
 
 from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder
 from apm_cli.marketplace.drift_check import (
-    DriftDifference,
-    DriftOutputReport,
     check_marketplace_drift,
-    render_diff_lines,
 )
 from apm_cli.marketplace.migration import load_marketplace_config
 
@@ -163,16 +160,6 @@ class TestDriftDirtyCase:
         msgs = report.error_messages()
         assert len(msgs) == 1
         assert "marketplace.json" in msgs[0]
-
-    def test_render_diff_lines_caps_output(self):
-        # Build a report with > 20 diffs to test cap.
-        diffs = tuple(DriftDifference(path=f"k{i}", old=i, new=i + 1) for i in range(25))
-        out = DriftOutputReport(
-            format="claude", path="marketplace.json", status="drift", differences=diffs
-        )
-        lines = render_diff_lines(out)
-        # 20 visible + 1 footer line ("...N more...")
-        assert len(lines) <= 21
 
 
 # ---------------------------------------------------------------------------

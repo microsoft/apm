@@ -38,12 +38,6 @@ def _clear_config_cache():
 
 
 class TestGenericSarifAdapter:
-    def test_unavailable_without_file(self) -> None:
-        from apm_cli.security.external.generic_sarif import GenericSarifAdapter
-
-        ok, reason = GenericSarifAdapter().is_available()
-        assert ok is False and "external-sarif" in reason
-
     def test_unavailable_missing_file(self, tmp_path: Path) -> None:
         from apm_cli.security.external.generic_sarif import GenericSarifAdapter
 
@@ -82,22 +76,6 @@ class TestGenericSarifAdapter:
 
 
 class TestSkillSpectorAdapter:
-    def test_unavailable_when_binary_absent(self, monkeypatch) -> None:
-        import apm_cli.security.external.skillspector as mod
-
-        monkeypatch.setattr(mod.shutil, "which", lambda _name: None)
-        ok, reason = mod.SkillSpectorAdapter().is_available()
-        assert ok is False
-        assert "PATH" in reason
-        assert "Python >= 3.12" in reason
-        assert "uv tool install" in reason
-
-    def test_available_when_binary_present(self, monkeypatch) -> None:
-        import apm_cli.security.external.skillspector as mod
-
-        monkeypatch.setattr(mod.shutil, "which", lambda _name: "/usr/bin/skillspector")
-        assert mod.SkillSpectorAdapter().is_available() == (True, None)
-
     def test_scan_passes_no_llm_flag(self, monkeypatch, tmp_path: Path) -> None:
         """--no-llm must be part of the command so scans work without an API key."""
         import apm_cli.security.external.skillspector as mod

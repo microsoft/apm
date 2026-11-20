@@ -2,15 +2,34 @@
 
 from __future__ import annotations
 
+from pathlib import PureWindowsPath
+from unittest.mock import patch
+
 import pytest
 
 from apm_cli.deps.installed_package import InstalledPackage, extensions_from_resolved_package
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import (
     DependencyReference,
+    _warn_unknown_manifest_keys,
 )
 
 pytestmark = pytest.mark.unit
+
+_WARN_PATH = "apm_cli.utils.console._rich_warning"
+
+
+class TestParsedExtensions:
+    @pytest.mark.windows_compat
+    def test_windows_warning_path_is_portable_and_ascii(self) -> None:
+        path = PureWindowsPath("C:/Users/caf\u00e9/project/apm.yml")
+        with patch(_WARN_PATH) as warned:
+            _warn_unknown_manifest_keys(["unknown"], path)
+
+        message = warned.call_args[0][0]
+        assert "C:/Users/caf\\xe9/project/apm.yml" in message
+        assert "\\\\" not in message
+        assert message.isascii()
 
 
 class TestLockfileExtensions:

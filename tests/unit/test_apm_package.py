@@ -312,16 +312,6 @@ class TestTargetField:
         assert pkg.target == "copilot"
         assert isinstance(pkg.target, str)
 
-    def test_target_direct_construction_string(self):
-        """APMPackage can be constructed with target as string."""
-        pkg = APMPackage(name="t", version="1.0.0", target="claude")
-        assert pkg.target == "claude"
-
-    def test_target_direct_construction_list(self):
-        """APMPackage can be constructed with target as list."""
-        pkg = APMPackage(name="t", version="1.0.0", target=["claude", "copilot"])
-        assert pkg.target == ["claude", "copilot"]
-
 
 class TestClearCache:
     """Tests for clear_apm_yml_cache."""

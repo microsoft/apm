@@ -9,7 +9,6 @@ import pytest
 from apm_cli.integration import mcp_transport_resolution as resolution
 from apm_cli.integration.mcp_transport_resolution import write_transports
 from apm_cli.models.dependency.mcp import MCPDependency
-from apm_cli.policy.policy_checks import run_dependency_policy_checks
 from apm_cli.policy.schema import ApmPolicy, McpPolicy, McpTransportPolicy
 
 pytestmark = pytest.mark.component
@@ -21,11 +20,6 @@ SSE_SERVER = {
 HTTP_SERVER = {
     "name": "io.example/http-server",
     "remotes": [{"type": "streamable-http", "url": "https://http.example/mcp"}],
-}
-DUAL_SERVER = {
-    "name": "io.example/dual-server",
-    "packages": [{"registry_name": "npm", "name": "dual-server"}],
-    "remotes": [{"type": "sse", "url": "https://dual.example/sse"}],
 }
 
 
@@ -64,15 +58,6 @@ def _transport_check(result):
 
 
 class TestPolicyInstallParity:
-    def test_first_declaration_wins_like_install(self, fake_registry):
-        fake_registry["servers"][DUAL_SERVER["name"]] = DUAL_SERVER
-        production = MCPDependency.from_dict({"name": DUAL_SERVER["name"], "transport": "stdio"})
-        development = MCPDependency.from_string(DUAL_SERVER["name"])
-        result = run_dependency_policy_checks(
-            [], policy=_policy("stdio"), mcp_deps=[production, development]
-        )
-        assert _transport_check(result).passed
-
     @pytest.mark.parametrize("dep_registry", [None, "https://corp.example/"])
     def test_install_writes_the_snapshot_policy_judged(
         self, fake_registry, tmp_path, monkeypatch, dep_registry

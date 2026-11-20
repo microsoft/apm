@@ -14,6 +14,7 @@ import pytest
 
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.apm_package import DependencyReference
+from apm_cli.utils.git_env import get_git_executable
 
 pytestmark = pytest.mark.unit
 
@@ -344,6 +345,126 @@ class TestParseFromDict:
 # ===========================================================================
 # _validate_package_exists env scoping for generic hosts
 # ===========================================================================
+
+
+class TestValidatePackageExistsEnv:
+    """Verify _validate_package_exists uses the right env for generic hosts.
+
+    Bug: previously, all non-GitHub.com hosts got the locked-down git_env
+    (GIT_ASKPASS=echo, etc.), blocking credential helpers for generic hosts
+    like GitLab. Explicit HTTP probes also need to keep git config isolation so
+    git cannot rewrite them to SSH before the first transport attempt.
+    """
+
+    @patch(
+        "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+        return_value=None,
+    )
+    @patch("subprocess.run")
+    @patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat_lsremote_test"}, clear=True)
+    def test_gitlab_host_validation_uses_locked_env_with_pat(self, mock_run, _mock_cred):
+        """git ls-remote for GitLab with PAT uses locked-down git env like clone."""
+        from apm_cli.commands.install import _validate_package_exists
+
+        mock_run.return_value = Mock(returncode=0)
+        _validate_package_exists("gitlab.com/acme/rules")
+
+        assert mock_run.called
+        call_kwargs = mock_run.call_args
+        env_used = call_kwargs.kwargs.get("env") or call_kwargs[1].get("env", {})
+        assert env_used.get("GIT_ASKPASS") == "echo"
+        assert env_used.get("GIT_CONFIG_NOSYSTEM") == "1"
+        cmd = mock_run.call_args[0][0]
+        url_arg = cmd[-1]
+        parsed_url = urlparse(url_arg)
+        assert parsed_url.username is None
+        assert parsed_url.password is None
+        assert parsed_url.hostname == "gitlab.com"
+        assert any(
+            value.startswith("Authorization: Basic ")
+            for key, value in env_used.items()
+            if key.startswith("GIT_CONFIG_VALUE_")
+        )
+
+    @patch(
+        "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+        return_value=None,
+    )
+    @patch("subprocess.run")
+    @patch.dict(os.environ, {}, clear=True)
+    def test_explicit_http_validation_preserves_config_isolation(self, mock_run, _mock_cred):
+        """Explicit HTTP validation must block credential helpers and SSH rewrites."""
+        from apm_cli.commands.install import _validate_package_exists
+
+        mock_run.return_value = Mock(returncode=0)
+        _validate_package_exists("http://gitlab.company.internal/acme/rules.git")
+
+        assert mock_run.called
+        call_kwargs = mock_run.call_args
+        env_used = call_kwargs.kwargs.get("env") or call_kwargs[1].get("env", {})
+
+        assert env_used.get("GIT_ASKPASS") == "echo"
+        assert env_used.get("GIT_CONFIG_NOSYSTEM") == "1"
+        assert "GIT_CONFIG_GLOBAL" in env_used
+        entries = [
+            (
+                env_used.get(f"GIT_CONFIG_KEY_{index}", ""),
+                env_used.get(f"GIT_CONFIG_VALUE_{index}", ""),
+            )
+            for index in range(int(env_used.get("GIT_CONFIG_COUNT", "0")))
+        ]
+        assert [value for key, value in entries if key.lower() == "credential.helper"] == [""]
+        assert [value for key, value in entries if key.lower().endswith(".extraheader")] == [""]
+        assert env_used.get("GIT_TERMINAL_PROMPT") == "0"
+
+    @patch(
+        "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+        return_value=None,
+    )
+    @patch("subprocess.run")
+    @patch.dict(os.environ, {}, clear=True)
+    @pytest.mark.windows_compat
+    def test_gitlab_virtual_subdirectory_uses_git_ls_remote(self, mock_run, _mock_cred):
+        """Dict git+path subdirectory on GitLab validates the repo root via git ls-remote."""
+        from apm_cli.commands.install import _validate_package_exists
+
+        mock_run.return_value = Mock(returncode=0)
+        dep_ref = DependencyReference.parse_from_dict(
+            {
+                "git": "https://gitlab.com/acme/monorepo.git",
+                "path": "skills/foo",
+            }
+        )
+        assert dep_ref.is_virtual_subdirectory()
+        ok = _validate_package_exists(
+            "gitlab.com/acme/monorepo/skills/foo",
+            dep_ref=dep_ref,
+        )
+        assert ok is True
+        assert mock_run.called
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == get_git_executable()
+        assert cmd[1:3] == ["ls-remote", "--heads"]
+
+    @patch(
+        "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
+        return_value=None,
+    )
+    @patch("subprocess.run")
+    @patch.dict(os.environ, {"ADO_APM_PAT": "test-ado-token"}, clear=True)
+    def test_ado_host_validation_uses_locked_env(self, mock_run, _mock_cred):
+        """git ls-remote for ADO should use the locked-down env (APM manages auth)."""
+        from apm_cli.commands.install import _validate_package_exists
+
+        mock_run.return_value = Mock(returncode=0)
+        _validate_package_exists("dev.azure.com/myorg/myproject/myrepo")
+
+        assert mock_run.called
+        call_kwargs = mock_run.call_args
+        env_used = call_kwargs.kwargs.get("env") or call_kwargs[1].get("env", {})
+
+        # ADO should keep the locked-down env
+        assert "GIT_ASKPASS" in env_used or "GIT_CONFIG_NOSYSTEM" in env_used
 
 
 # ===========================================================================

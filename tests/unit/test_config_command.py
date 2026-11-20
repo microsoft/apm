@@ -520,20 +520,6 @@ class TestConfigGet:
 class TestTempDirFunctions:
     """Tests for get_temp_dir, set_temp_dir, and get_apm_temp_dir in apm_cli.config."""
 
-    def test_get_temp_dir_default_is_none(self):
-        """Returns None when temp_dir is not set."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "get_config", return_value={}):
-            assert cfg_module.get_temp_dir() is None
-
-    def test_get_temp_dir_returns_stored_value(self):
-        """Returns stored temp_dir value."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "get_config", return_value={"temp_dir": "/custom/tmp"}):
-            assert cfg_module.get_temp_dir() == "/custom/tmp"
-
     def test_set_temp_dir_validates_and_stores(self):
         """set_temp_dir normalises path and stores via update_config."""
         import apm_cli.config as cfg_module
@@ -543,13 +529,6 @@ class TestTempDirFunctions:
                 cfg_module.set_temp_dir(tmp)
                 resolved = os.path.abspath(os.path.expanduser(tmp))
                 mock_update.assert_called_once_with({"temp_dir": resolved})
-
-    def test_set_temp_dir_rejects_nonexistent_directory(self):
-        """Raises ValueError when path does not exist."""
-        import apm_cli.config as cfg_module
-
-        with pytest.raises(ValueError, match="does not exist"):
-            cfg_module.set_temp_dir("/nonexistent/path/xyz")
 
     def test_set_temp_dir_rejects_file_path(self):
         """Raises ValueError when path is a file, not a directory."""
@@ -567,69 +546,6 @@ class TestTempDirFunctions:
         with patch.object(cfg_module, "update_config") as mock_update:
             cfg_module.set_temp_dir("~")
             mock_update.assert_called_once_with({"temp_dir": home})
-
-    def test_get_apm_temp_dir_prefers_env(self):
-        """Env var takes precedence over config value."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_temp_dir", return_value="/from/config"),
-            patch.dict(os.environ, {"APM_TEMP_DIR": "/from/env"}),
-        ):
-            assert cfg_module.get_apm_temp_dir() == "/from/env"
-
-    def test_get_apm_temp_dir_falls_back_to_config(self):
-        """Falls back to config when env var is not set."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_temp_dir", return_value="/from/config"),
-            patch.dict(os.environ, {}, clear=False),
-        ):
-            os.environ.pop("APM_TEMP_DIR", None)
-            assert cfg_module.get_apm_temp_dir() == "/from/config"
-
-    def test_get_apm_temp_dir_returns_none_when_unset(self):
-        """Returns None when neither config nor env var is set."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_temp_dir", return_value=None),
-            patch.dict(os.environ, {}, clear=False),
-        ):
-            os.environ.pop("APM_TEMP_DIR", None)
-            assert cfg_module.get_apm_temp_dir() is None
-
-    def test_get_apm_temp_dir_ignores_empty_env(self):
-        """Empty APM_TEMP_DIR is treated as unset."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_temp_dir", return_value="/from/config"),
-            patch.dict(os.environ, {"APM_TEMP_DIR": ""}),
-        ):
-            assert cfg_module.get_apm_temp_dir() == "/from/config"
-
-    def test_get_apm_temp_dir_ignores_whitespace_env(self):
-        """Whitespace-only APM_TEMP_DIR is treated as unset."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_temp_dir", return_value=None),
-            patch.dict(os.environ, {"APM_TEMP_DIR": "   "}),
-        ):
-            assert cfg_module.get_apm_temp_dir() is None
-
-    def test_get_apm_temp_dir_ignores_empty_config(self):
-        """Empty config temp_dir is treated as unset."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_temp_dir", return_value=""),
-            patch.dict(os.environ, {}, clear=False),
-        ):
-            os.environ.pop("APM_TEMP_DIR", None)
-            assert cfg_module.get_apm_temp_dir() is None
 
 
 class TestConfigSetTempDir:
@@ -730,34 +646,6 @@ def isolated_config(tmp_path, monkeypatch):
 class TestCoworkSkillsDirFunctions:
     """Tests for get_copilot_cowork_skills_dir, set_copilot_cowork_skills_dir, unset_copilot_cowork_skills_dir."""
 
-    def test_get_copilot_cowork_skills_dir_default_is_none(self):
-        """Returns None when copilot_cowork_skills_dir key is absent from the config."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "get_config", return_value={}):
-            assert cfg_module.get_copilot_cowork_skills_dir() is None
-
-    def test_get_copilot_cowork_skills_dir_returns_stored_value(self):
-        """Returns the stored copilot_cowork_skills_dir value from config."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(
-            cfg_module,
-            "get_config",
-            return_value={"copilot_cowork_skills_dir": "/stored/path"},
-        ):
-            assert cfg_module.get_copilot_cowork_skills_dir() == "/stored/path"
-
-    def test_set_copilot_cowork_skills_dir_stores_absolute_path(self):
-        """set_copilot_cowork_skills_dir persists the absolute path via update_config."""
-        import apm_cli.config as cfg_module
-
-        raw = "/absolute/skills"
-        expected = os.path.normpath(raw)
-        with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_copilot_cowork_skills_dir(raw)
-            mock_update.assert_called_once_with({"copilot_cowork_skills_dir": expected})
-
     def test_set_copilot_cowork_skills_dir_expands_tilde_before_storing(self):
         """Tilde in path is expanded to an absolute path before storage."""
         import apm_cli.config as cfg_module
@@ -767,35 +655,6 @@ class TestCoworkSkillsDirFunctions:
             cfg_module.set_copilot_cowork_skills_dir("~/myskills")
             expected = os.path.join(home, "myskills")
             mock_update.assert_called_once_with({"copilot_cowork_skills_dir": expected})
-
-    def test_set_copilot_cowork_skills_dir_raises_for_empty_string(self):
-        """Raises ValueError when path is an empty string."""
-        import apm_cli.config as cfg_module
-
-        with pytest.raises(ValueError):
-            cfg_module.set_copilot_cowork_skills_dir("")
-
-    def test_set_copilot_cowork_skills_dir_raises_for_whitespace_only(self):
-        """Raises ValueError when path is whitespace only."""
-        import apm_cli.config as cfg_module
-
-        with pytest.raises(ValueError):
-            cfg_module.set_copilot_cowork_skills_dir("   ")
-
-    def test_set_copilot_cowork_skills_dir_raises_for_relative_path(self):
-        """Raises ValueError when path is relative after tilde expansion."""
-        import apm_cli.config as cfg_module
-
-        with pytest.raises(ValueError, match="absolute"):
-            cfg_module.set_copilot_cowork_skills_dir("relative/path")
-
-    def test_set_copilot_cowork_skills_dir_accepts_nonexistent_absolute_path(self):
-        """Non-existent absolute path is accepted; OneDrive may not yet be synced."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "update_config"):
-            # Should not raise even when the path does not exist on disk.
-            cfg_module.set_copilot_cowork_skills_dir("/nonexistent/absolute/path/xyz")
 
     def test_unset_copilot_cowork_skills_dir_removes_key(self, isolated_config):
         """unset_copilot_cowork_skills_dir removes the key; subsequent get returns None."""

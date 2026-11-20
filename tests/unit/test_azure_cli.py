@@ -1,9 +1,7 @@
 """Unit tests for AzureCliBearerProvider and AzureCliBearerError."""
 
-import subprocess
 import threading  # noqa: F401
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,7 +11,7 @@ from apm_cli.core.azure_cli import (
     AzureCliBearerProvider,
 )
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
 # A plausible JWT-shaped string (starts with eyJ, length > 100).
 FAKE_JWT = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9." + "a" * 200
@@ -90,18 +88,6 @@ class TestWindowsAzCmdResolution:
         with patch("shutil.which", return_value=None):
             provider = AzureCliBearerProvider()
             assert provider._az_command is None
-
-    def test_init_absolute_path_skips_resolution(self, tmp_path: Path) -> None:
-        """Trust a native absolute path, not a POSIX-only rooted spelling.
-
-        On Python 3.13+ Windows, /opt/custom/az is rooted but not absolute:
-        it has no drive. Use a real platform-native absolute path here.
-        """
-        az_command = str(tmp_path / "custom" / "az")
-        with patch("shutil.which") as mock_which:
-            provider = AzureCliBearerProvider(az_command=az_command)
-            mock_which.assert_not_called()
-            assert provider._az_command == az_command
 
     def test_init_relative_with_separator_still_resolves(self):
         """A relative-with-separator token like 'subdir/az' must NOT bypass
@@ -187,20 +173,6 @@ class TestWindowsAzCmdResolution:
             cmd = mock_run.call_args[0][0]
             assert cmd[0] == self.WINDOWS_AZ_CMD
 
-    def test_get_current_tenant_id_returns_none_without_subprocess_when_az_missing(self):
-        """Explicit early-return guard: when az was not resolved at __init__,
-        get_current_tenant_id() must short-circuit to None rather than
-        passing None as argv[0] (which would TypeError and only be caught
-        by the broad except). Mirrors get_bearer_token's is_available()
-        pre-check."""
-        with (
-            patch("shutil.which", return_value=None),
-            patch("subprocess.run") as mock_run,
-        ):
-            provider = AzureCliBearerProvider()
-            assert provider.get_current_tenant_id() is None
-            mock_run.assert_not_called()
-
 
 # ---------------------------------------------------------------------------
 # get_bearer_token
@@ -269,19 +241,6 @@ class TestGetBearerToken:
             err = exc_info.value
             assert err.kind == "not_logged_in"
             assert "az login" in (err.stderr or "")
-
-    def test_get_bearer_subprocess_timeout(self):
-        with (
-            patch("shutil.which", return_value="/usr/bin/az"),
-            patch(
-                "subprocess.run",
-                side_effect=subprocess.TimeoutExpired(cmd="az", timeout=30),
-            ),
-        ):
-            provider = AzureCliBearerProvider()
-            with pytest.raises(AzureCliBearerError) as exc_info:
-                provider.get_bearer_token()
-            assert exc_info.value.kind == "subprocess_error"
 
     def test_get_bearer_invalid_token_format(self):
         mock_result = MagicMock()

@@ -53,14 +53,6 @@ class TestForScope:
         assert result is not None
         assert result.resolved_deploy_root == tmp_path
 
-    def test_for_scope_resolver_returns_none(self) -> None:
-        with patch(
-            "apm_cli.integration.targets._resolve_copilot_app_root",
-            return_value=None,
-        ):
-            result = KNOWN_TARGETS["copilot-app"].for_scope(user_scope=True)
-        assert result is None
-
 
 class TestActiveTargetsGating:
     def test_absent_when_flag_off_auto_detect(self, tmp_path: Path, inject_config: Any) -> None:

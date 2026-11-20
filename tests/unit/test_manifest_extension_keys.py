@@ -5,7 +5,7 @@ Spec bind: tests/spec_conformance/test_manifest_extension_reqs.py (req-ext-003).
 
 from __future__ import annotations
 
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -18,7 +18,6 @@ from apm_cli.models.apm_package import (
     _KNOWN_TOP_LEVEL_KEYS,
     APMPackage,
     _collect_manifest_extensions,
-    _warn_unknown_manifest_keys,
     clear_apm_yml_cache,
 )
 
@@ -124,17 +123,6 @@ class TestParsedExtensions:
         assert package.name == "plugin"
         assert package.extensions == {}
         warned.assert_not_called()
-
-    @pytest.mark.windows_compat
-    def test_windows_warning_path_is_portable_and_ascii(self) -> None:
-        path = PureWindowsPath("C:/Users/caf\u00e9/project/apm.yml")
-        with patch(_WARN_PATH) as warned:
-            _warn_unknown_manifest_keys(["unknown"], path)
-
-        message = warned.call_args[0][0]
-        assert "C:/Users/caf\\xe9/project/apm.yml" in message
-        assert "\\\\" not in message
-        assert message.isascii()
 
     def test_custom_warning_handler_preserves_extensions(self, tmp_path: Path) -> None:
         handler = Mock()

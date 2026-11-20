@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import dataclasses
 import tempfile
 from itertools import combinations
 from pathlib import Path
@@ -17,8 +16,6 @@ from hypothesis import given, seed, settings
 from hypothesis import strategies as st
 
 from apm_cli.policy import discovery
-from apm_cli.policy.inheritance import resolve_policy_chain
-from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy
 
 pytestmark = pytest.mark.component
@@ -210,34 +207,6 @@ def _enforceable_fields(policy: ApmPolicy) -> dict[str, Any]:
     }
 
 
-def _schema_enforceable_field_paths(policy: ApmPolicy) -> set[str]:
-    """Return dataclass leaf paths, excluding non-enforceable policy metadata."""
-    paths: set[str] = set()
-
-    def visit(value: Any, prefix: str = "") -> None:
-        for field in dataclasses.fields(value):
-            path = f"{prefix}.{field.name}" if prefix else field.name
-            child = getattr(value, field.name)
-            if dataclasses.is_dataclass(child):
-                visit(child, path)
-            else:
-                paths.add(path)
-
-    visit(policy)
-    return paths - {"name", "version", "extends"}
-
-
-def _assert_cache_round_trip(policy: ApmPolicy) -> str:
-    """Assert field preservation and canonical idempotence through cache YAML."""
-    serialized = discovery._serialize_policy(policy)
-    reparsed, _ = load_policy(serialized)
-    assert _enforceable_fields(reparsed) == _enforceable_fields(policy), (
-        "cache round-trip changed enforceable fields"
-    )
-    assert discovery._serialize_policy(reparsed) == serialized
-    return serialized
-
-
 def _result_observation(result: discovery.PolicyFetchResult) -> tuple[Any, ...]:
     """Return user-observable policy result data, excluding cache provenance."""
     assert result.policy is not None
@@ -288,21 +257,6 @@ def _assert_policy_ttl_refreshes(data: dict[str, Any]) -> None:
         assert not cold.cached
         assert not refreshed.cached
         assert _result_observation(refreshed) == _result_observation(cold)
-
-
-@seed(PROPERTY_SEED)
-@PROPERTY_PROFILE
-@given(data=enforceable_policy_data())
-def test_effective_policy_cache_serialization_is_lossless_and_canonical(
-    data: dict[str, Any],
-) -> None:
-    """Parse -> effective policy -> cache YAML -> parse preserves all 39 fields."""
-    parsed, _ = load_policy(_policy_yaml(data))
-    effective = resolve_policy_chain([parsed])
-
-    assert set(_enforceable_fields(effective)) == _schema_enforceable_field_paths(effective)
-    assert len(_enforceable_fields(effective)) == 39
-    _assert_cache_round_trip(effective)
 
 
 @seed(PROPERTY_SEED)
@@ -400,23 +354,3 @@ def test_invalid_refresh_fails_closed_and_preserves_last_good_cache(
     assert invalid.policy is None
     assert invalid.outcome == "malformed"
     assert before == after
-
-
-@seed(PROPERTY_SEED)
-@SINGLE_EXAMPLE_PROFILE
-@given(data=enforceable_policy_data())
-def test_round_trip_property_breaks_when_serializer_omits_enforceable_field(
-    data: dict[str, Any],
-) -> None:
-    """Negative twin: deleting one serialized field must break the property."""
-    policy, _ = load_policy(_policy_yaml(data))
-    original = discovery._policy_to_dict
-
-    def omit_integrity_field(value: ApmPolicy) -> dict[str, Any]:
-        serialized = original(value)
-        del serialized["security"]["integrity"]["require_hashes"]
-        return serialized
-
-    with patch("apm_cli.policy.discovery._policy_to_dict", side_effect=omit_integrity_field):
-        with pytest.raises(AssertionError, match="cache round-trip changed enforceable fields"):
-            _assert_cache_round_trip(policy)

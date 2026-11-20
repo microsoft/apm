@@ -155,3 +155,110 @@ class TestDefaultSkillRouting:
         profiles = [KNOWN_TARGETS["copilot"]]
         apply_legacy_skill_paths(profiles)
         assert KNOWN_TARGETS["copilot"].primitives["skills"].deploy_root == original_root
+
+
+def _converged_skill_profiles():
+    """Yield (profile, legacy profile) for every scope with a distinct legacy skill root."""
+    from apm_cli.integration.targets import apply_legacy_skill_paths
+
+    for name, base in sorted(KNOWN_TARGETS.items()):
+        for user_scope in (False, True):
+            profile = None if base.user_root_resolver else base.for_scope(user_scope=user_scope)
+            if profile is None or profile.primitives.get("skills") is None:
+                continue
+            legacy = apply_legacy_skill_paths([profile])[0]
+            if legacy.skills_rel_root != profile.skills_rel_root:
+                yield pytest.param(profile, legacy, id=f"{name}-{user_scope}")
+
+
+class TestRecordedSkillLayout:
+    """Re-integration recovers the skill layout the install recorded (#3773)."""
+
+    @staticmethod
+    def _roots(profiles):
+        return {p.name: p.skills_rel_root for p in profiles}
+
+    def test_legacy_recorded_paths_restore_per_client_skill_root(self):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        profiles = [KNOWN_TARGETS["copilot"], KNOWN_TARGETS["cursor"], KNOWN_TARGETS["claude"]]
+        resolved = resolve_skill_layout(
+            profiles,
+            recorded_paths=[".github/skills/alpha/SKILL.md", ".claude/skills/alpha/SKILL.md"],
+        )
+        assert self._roots(resolved) == {
+            "copilot": ".github/skills",
+            "cursor": ".agents/skills",
+            "claude": ".claude/skills",
+        }
+
+    def test_default_recorded_paths_keep_converged_skill_root(self):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        profiles = [KNOWN_TARGETS["copilot"]]
+        for recorded in ([], [".agents/skills/alpha/SKILL.md", ".github/prompts/x.prompt.md"]):
+            resolved = resolve_skill_layout(profiles, recorded_paths=recorded)
+            assert self._roots(resolved) == {"copilot": ".agents/skills"}
+
+    def test_user_scope_legacy_recorded_paths_use_scoped_root(self):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        scoped = [KNOWN_TARGETS["copilot"].for_scope(user_scope=True)]
+        resolved = resolve_skill_layout(scoped, recorded_paths=[".copilot/skills/alpha/SKILL.md"])
+        assert self._roots(resolved) == {"copilot": ".copilot/skills"}
+
+    def test_install_flag_selects_legacy_layout_for_every_target(self):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        resolved = resolve_skill_layout(
+            [KNOWN_TARGETS["copilot"], KNOWN_TARGETS["cursor"]], legacy_skill_paths=True
+        )
+        assert self._roots(resolved) == {"copilot": ".github/skills", "cursor": ".cursor/skills"}
+
+    @pytest.mark.parametrize(("profile", "legacy"), list(_converged_skill_profiles()))
+    def test_every_converged_target_recovers_its_recorded_layout(self, profile, legacy):
+        from apm_cli.integration.skill_layout import resolve_skill_layout
+
+        for root in (legacy.skills_rel_root, profile.skills_rel_root):
+            recovered = resolve_skill_layout([profile], recorded_paths=[f"{root}/alpha/SKILL.md"])
+            assert recovered[0].skills_rel_root == root
+
+
+class TestGrokCloudTarget:
+    """Registry and gating invariants for the grok-cloud target."""
+
+    def test_grok_cloud_in_known_targets(self):
+        assert "grok-cloud" in KNOWN_TARGETS
+
+    def test_grok_cloud_profile_shape(self):
+        profile = KNOWN_TARGETS["grok-cloud"]
+        assert profile.name == "grok-cloud"
+        assert profile.root_dir == ".grok"
+        assert profile.user_supported is True
+        assert profile.user_root_dir == ".grok"
+        assert profile.detect_by_dir is False
+        assert profile.auto_create is True
+        assert profile.requires_flag == "grok_cloud"
+        assert profile.compile_family is None
+        assert set(profile.primitives) == {"skills"}
+        skills_pm = profile.primitives["skills"]
+        assert skills_pm.subdir == "skills"
+        assert skills_pm.extension == "/SKILL.md"
+        assert skills_pm.format_id == "skill_standard"
+        assert skills_pm.deploy_root is None
+
+
+class TestGrokBuildTarget:
+    """Registry and resolution invariants for the stable Grok Build target."""
+
+    def test_grok_build_profile_shape(self):
+        profile = KNOWN_TARGETS["grok-build"]
+        assert profile.name == "grok-build"
+        assert profile.root_dir == ".grok"
+        assert profile.user_supported is True
+        assert profile.user_root_dir == ".grok"
+        assert profile.detect_by_dir is True
+        assert profile.auto_create is False
+        assert profile.requires_flag is None
+        assert profile.compile_family == "agents"
+        assert set(profile.primitives) == {"instructions", "agents", "commands", "skills"}

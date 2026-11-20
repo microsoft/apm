@@ -9,7 +9,6 @@ import pytest
 
 from apm_cli.marketplace.errors import MarketplaceYmlError
 from apm_cli.marketplace.yml_schema import (
-    MarketplaceBuild,
     MarketplaceOwner,  # noqa: F401
     MarketplaceYml,  # noqa: F401
     PackageEntry,  # noqa: F401
@@ -242,11 +241,6 @@ class TestFrozenDataclasses:
         result = load_marketplace_yml(yml)
         with pytest.raises(AttributeError):
             result.packages[0].name = "nope"
-
-    def test_build_frozen(self):
-        b = MarketplaceBuild()
-        with pytest.raises(AttributeError):
-            b.tag_pattern = "nope"
 
 
 # ---------------------------------------------------------------------------

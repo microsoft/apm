@@ -695,6 +695,86 @@ def _make_registry_dep(repo_url: str, registry_name: str, reference: str = "^1.0
     )
 
 
+class TestRegistrySourcePolicyWiring:
+    """Verify gap #5: does ``registries=`` flow correctly into the check?
+
+    Each test calls ``run_dependency_policy_checks`` with the same args
+    used by the install pipeline (``policy_gate``) and varies only the
+    ``registries=`` kwarg. The behavior difference IS the bug.
+    """
+
+    def test_no_registries_kwarg_still_fails_closed(self):
+        """When the caller does NOT pass ``registries=`` (legacy callers
+        or callers without manifest access), the check must fail-closed:
+        any ``policy.require`` name is treated as unconfigured.
+
+        This is correct fail-closed behavior. Callers with manifest
+        access (install pipeline, audit --ci) should always pass
+        ``registries=`` so users with correctly-wired registries are
+        not falsely blocked -- see the next test.
+        """
+        deps = [_make_registry_dep("acme/foo", "corp-main")]
+        policy = ApmPolicy(
+            registry_source=RegistrySourcePolicy(require=("corp-main",)),
+        )
+        result = run_dependency_policy_checks(deps, policy=policy)
+        reg_checks = [c for c in result.checks if c.name == "registry-source"]
+        assert reg_checks, "registry-source check should have run"
+        assert not reg_checks[0].passed
+        assert any("corp-main" in d for d in (reg_checks[0].details or []))
+
+    def test_correctly_configured_registry_passes_when_registries_passed(self):
+        """Fix path: passing ``registries={'corp-main': '<url>'}`` lets
+        the check distinguish 'configured' from 'unreachable' and the
+        install proceeds.
+        """
+        deps = [_make_registry_dep("acme/foo", "corp-main")]
+        policy = ApmPolicy(
+            registry_source=RegistrySourcePolicy(require=("corp-main",)),
+        )
+        result = run_dependency_policy_checks(
+            deps,
+            policy=policy,
+            registries={"corp-main": "https://registry.corp.example.com"},
+        )
+        reg_checks = [c for c in result.checks if c.name == "registry-source"]
+        assert reg_checks, "registry-source check should have run"
+        assert reg_checks[0].passed, (
+            "with registries= passed, a correctly-routed dep should pass; "
+            "got: " + str(reg_checks[0].details)
+        )
+
+    def test_unconfigured_required_registry_blocks_with_clear_message(self):
+        """Spec behavior: forgot to configure ``corp-main`` in apm.yml.
+        Caller passes an empty registries map. The check must fail-closed
+        with a message naming the missing registry.
+        """
+        deps = [_make_registry_dep("acme/foo", "corp-main")]
+        policy = ApmPolicy(
+            registry_source=RegistrySourcePolicy(require=("corp-main",)),
+        )
+        result = run_dependency_policy_checks(
+            deps,
+            policy=policy,
+            registries={},  # caller plumbed the map; it's just empty
+        )
+        reg_checks = [c for c in result.checks if c.name == "registry-source"]
+        assert reg_checks and not reg_checks[0].passed
+        assert any("corp-main" in d for d in (reg_checks[0].details or [])), (
+            "violation message should name the missing registry"
+        )
+
+    def test_no_op_when_policy_empty(self):
+        """Sanity: empty policy.require + allow_non_registry=True is no-op
+        regardless of registries= argument.
+        """
+        deps = _make_dep_refs(["owner/git-pkg"])
+        policy = ApmPolicy()  # default RegistrySourcePolicy()
+        result = run_dependency_policy_checks(deps, policy=policy)
+        reg_checks = [c for c in result.checks if c.name == "registry-source"]
+        assert reg_checks and reg_checks[0].passed
+
+
 class TestRegistrySourcePolicyTransitive:
     """Verify gap #5: ``registry_source`` policy applies transitively
     across the resolved dep graph (the governance-primitive requirement).

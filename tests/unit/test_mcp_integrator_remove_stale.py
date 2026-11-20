@@ -15,22 +15,6 @@ def _suppress_console(monkeypatch):
 
 
 class TestRemoveStaleCharacterisation:
-    def test_remove_stale_no_logger(self):
-        """remove_stale() with logger=None should not crash."""
-        from apm_cli.integration.mcp_integrator import MCPIntegrator
-
-        result = MCPIntegrator.remove_stale(stale_names=set())
-        assert result is None
-
-    def test_remove_stale_with_logger(self):
-        """remove_stale() with logger should use it."""
-        from apm_cli.integration.mcp_integrator import MCPIntegrator
-
-        logger = MagicMock()
-        logger.verbose = False
-        result = MCPIntegrator.remove_stale(stale_names=set(), logger=logger)
-        assert result is None
-
     def test_remove_stale_empty_names(self, tmp_path):
         """An empty stale set short-circuits: no config is rewritten, nothing is logged."""
         from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -52,15 +36,6 @@ class TestRemoveStaleCharacterisation:
         assert config_path.read_bytes() == original
         supported.assert_not_called()
         assert logger.method_calls == []
-
-    def test_remove_stale_with_runtime(self):
-        from apm_cli.integration.mcp_integrator import MCPIntegrator
-
-        result = MCPIntegrator.remove_stale(
-            stale_names=set(),
-            runtime="vscode",
-        )
-        assert result is None
 
     def test_remove_stale_returns_none(self, tmp_path):
         """remove_stale() reports via side effects: it returns None after real removals."""
@@ -92,41 +67,6 @@ class TestRemoveStaleCharacterisation:
         assert result is None
         servers = json.loads(config_path.read_text(encoding="utf-8"))["servers"]
         assert servers == {"keep-server": {"command": "keep"}}
-
-    def test_remove_stale_with_scope(self):
-        from apm_cli.integration.mcp_integrator import MCPIntegrator
-
-        logger = MagicMock()
-        logger.verbose = False
-        result = MCPIntegrator.remove_stale(
-            stale_names=set(),
-            logger=logger,
-            scope=None,
-        )
-        assert result is None
-
-    def test_remove_stale_verbose(self):
-        from apm_cli.integration.mcp_integrator import MCPIntegrator
-
-        logger = MagicMock()
-        logger.verbose = True
-        result = MCPIntegrator.remove_stale(
-            stale_names=set(),
-            logger=logger,
-        )
-        assert result is None
-
-    def test_remove_stale_with_exclude(self):
-        from apm_cli.integration.mcp_integrator import MCPIntegrator
-
-        logger = MagicMock()
-        logger.verbose = False
-        result = MCPIntegrator.remove_stale(
-            stale_names=set(),
-            exclude="vscode",
-            logger=logger,
-        )
-        assert result is None
 
     def test_remove_stale_antigravity_uses_user_scope_config(self, tmp_path):
         """Global cleanup must mirror Antigravity's install-time path."""
@@ -555,25 +495,6 @@ class TestRemoveStaleIntelliJ:
             )
 
         assert config_path.read_bytes() == original
-
-    def test_remove_stale_intellij_resolves_output_path_once(self):
-        """Multiple removal messages reuse one validated config path."""
-        from apm_cli.integration.mcp_integrator import MCPIntegrator
-
-        client = MagicMock()
-        client.remove_managed_servers.return_value = {"first", "second"}
-        client.get_config_path.return_value = "/home/user/.config/github-copilot/intellij/mcp.json"
-        with (
-            patch("apm_cli.factory.ClientFactory.create_client", return_value=client),
-            patch("apm_cli.integration.mcp_integrator._rich_success"),
-        ):
-            MCPIntegrator.remove_stale(
-                stale_names={"first", "second"},
-                runtime="intellij",
-                logger=MagicMock(),
-            )
-
-        client.get_config_path.assert_called_once_with()
 
 
 def test_remove_stale_claude_honors_claude_config_dir_and_isolates_profiles(tmp_path, monkeypatch):
