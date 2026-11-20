@@ -7,6 +7,8 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.formats import BundleFormat, cli_format_choices, resolve_bundle_format
 from ..bundle.unpacker import unpack_bundle
 from ..core.build_orchestrator import (
@@ -18,6 +20,7 @@ from ..core.build_orchestrator import (
 )
 from ..core.command_logger import CommandLogger
 from ..core.target_detection import TargetParamType
+from ..install.locking import serialized_lifecycle_unless
 
 MARKETPLACE_DOCS_URL = (
     "https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#install-patterns"
@@ -381,7 +384,7 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
     if not json_output:
         from ..export.authoring import warn_if_license_undeclared
 
-        warn_if_license_undeclared(project_root / "apm.yml", logger.warning)
+        warn_if_license_undeclared(manifest_file(project_root), logger.warning)
     # Issue #1207 D1: when --target is not given, detect the project's
     # actual target so the embedded ``pack.target`` reflects what was
     # tested rather than a hardcoded "copilot".  ``pack.target`` is now
@@ -406,7 +409,7 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
         effective_target = target
     options = BuildOptions(
         project_root=project_root,
-        apm_yml_path=project_root / "apm.yml",
+        apm_yml_path=manifest_file(project_root),
         bundle_format=bundle_format,
         bundle_target=effective_target,
         bundle_archive=archive,
@@ -946,9 +949,14 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed unpacking information")
 @click.pass_context
+@serialized_lifecycle_unless("dry_run")
 def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     """Extract an APM bundle into the project."""
-    logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
+    from ..core.command_logger import InstallLogger
+    from ..install.bundle_admission import apm_bundle_admission, record_unpacked_files
+    from ..install.errors import InstallFailureAlreadyRendered, PolicyViolationError
+
+    logger = InstallLogger(verbose=verbose, dry_run=dry_run, command="unpack")
     logger.warning(
         "'apm unpack' is deprecated and will be removed in a future release. "
         "Repack with the default plugin format and use 'apm install <bundle-path>'.",
@@ -962,6 +970,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
             skip_verify=skip_verify,
             dry_run=dry_run,
             force=force,
+            admit=apm_bundle_admission(Path(output), logger, dry_run=dry_run),
         )
 
         # Surface bundle metadata and warn on target mismatch
@@ -1004,7 +1013,15 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
                 )
             verified_msg = " (verified)" if result.verified else ""
             logger.success(f"Unpacked {len(result.files)} file(s){verified_msg}")
+        record_unpacked_files(Path(output), result.written_files, logger)
+        logger.render_summary()
 
+    except PolicyViolationError as exc:
+        logger.refusal(str(exc))
+        logger.render_summary()
+        sys.exit(1)
+    except InstallFailureAlreadyRendered:
+        sys.exit(1)
     except (FileNotFoundError, ValueError) as exc:
         logger.error(str(exc))
         sys.exit(1)

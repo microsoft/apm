@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.install.request import InstallRequest
 from apm_cli.models.results import InstallDisposition
 
@@ -385,6 +386,23 @@ class InstallService:
             )
 
     @staticmethod
+    def enforce_frozen_hook_pins(lockfile: LockFile, modules_dir: Path, trust_ctx: Any) -> None:
+        """Before deploying, refuse locked hooks their pin no longer admits, as audit --ci does."""
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.exec_gate import locked_hook_pin_mismatches
+
+        mismatches = locked_hook_pin_mismatches(lockfile, modules_dir, trust_ctx)
+        if mismatches:
+            raise FrozenInstallError(
+                "--frozen: apm.lock.yaml records hooks their approval no longer admits.",
+                reasons=[f"  - {mismatch.describe()}" for mismatch in mismatches],
+                tip=(
+                    "Tip: re-approve the package, or run 'apm install' without --frozen "
+                    "to retire the hooks, then commit apm.yml and apm.lock.yaml."
+                ),
+            )
+
+    @staticmethod
     def reject_frozen_mutation(frozen: bool, operation: str) -> None:
         """Reject an add-style install operation before it can mutate state."""
         if not frozen:
@@ -616,8 +634,8 @@ class InstallService:
                 # Only selected, verified local manifests can introduce further
                 # local declarations. Do not inspect orphan lock entries or
                 # expand local paths declared by untrusted remote packages.
-                if (source / "apm.yml").is_file():
-                    package = APMPackage.from_apm_yml(source / "apm.yml", source_path=source)
+                if manifest_file(source).is_file():
+                    package = APMPackage.from_apm_yml(manifest_file(source), source_path=source)
                     for child in package.get_apm_dependencies():
                         child = rules.bind(
                             child,

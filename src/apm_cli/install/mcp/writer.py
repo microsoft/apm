@@ -14,7 +14,8 @@ from typing import Any, Union
 
 import click
 
-from ...constants import APM_YML_FILENAME
+from apm_cli.core.scope import manifest_file
+
 from ...core.null_logger import NullCommandLogger
 
 MCPEntry = Union[str, dict[str, Any]]  # noqa: UP007
@@ -67,7 +68,7 @@ def add_mcp_to_apm_yml(
     from ...utils.yaml_io import dump_yaml_roundtrip
 
     log = logger if logger is not None else NullCommandLogger()
-    apm_yml_path = manifest_path or Path(APM_YML_FILENAME)
+    apm_yml_path = manifest_path or manifest_file(Path("."))
     if not apm_yml_path.exists():
         raise click.UsageError(f"{apm_yml_path}: no apm.yml found. Run 'apm init' first.")
     # Round-trip keeps the user's comments and layout (#2000, #2012).

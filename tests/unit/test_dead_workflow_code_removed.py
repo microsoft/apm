@@ -10,6 +10,8 @@ import pytest
 
 from apm_cli import deps
 
+pytestmark = pytest.mark.unit
+
 REMOVED_MODULES = (
     "apm_cli.workflow",
     "apm_cli.workflow.discovery",

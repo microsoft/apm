@@ -108,6 +108,40 @@ production code must follow (see
   (`uv run pytest tests/unit/install/test_X.py -x`) before running the
   full suite (`uv run pytest tests/unit tests/test_console.py`).
 
+## Test module markers (tm006)
+
+Every new test module declares its behavioral marker and the promises it
+protects in one module-level `pytestmark`:
+
+```python
+import pytest
+
+pytestmark = [pytest.mark.<behavioral>, pytest.mark.promise("<catalog id>")]
+```
+
+- `<behavioral>`: exactly one of `unit`, `component` or `e2e`, chosen by
+  the boundary the tests cross (see "Behavioral classification authority"
+  below). Directory names are not evidence.
+- `<catalog id>`: one or more ids from `tests/quality/promise-catalog.json`
+  (`P-OWN-*`, `P-INV-*`, `P-LAW-*`, `P-DOC-*`); spec-conformance modules use
+  their OpenAPM `req-*` ids. Add a missing promise to the catalog in the
+  same pull request.
+- Local check before push: `uv run --extra dev python -m tests.quality.taxonomy --changed`
+  checks only the test modules you changed (committed, staged, unstaged or
+  untracked, against the merge base with `origin/main`) in well under 5
+  seconds. The full gate is
+  `uv run --extra dev pytest -p no:cacheprovider -q tests/quality/test_test_taxonomy.py`.
+  A failure for a missing marker or promise prints the exact line to add, for
+  example `Suggested: pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-...")]`:
+  the behavioral marker is inferred from the path (`tests/lifecycle` -> e2e;
+  `tests/integration` -> e2e when the module drives the installed CLI, else
+  component; `tests/unit` -> unit; elsewhere component) and the promise is the
+  best catalog match (req-* ids the module mentions, then ids sharing words
+  with the module name), with up to two other candidates. Check the
+  suggestion against the boundary the tests cross before you accept it.
+- When resolving a merge conflict, never resolve a modify/delete by dropping
+  main's tests; keep main's test and re-apply your change.
+
 ## Integration tests: placement and markers
 
 The integration suite uses **declarative gating** via pytest markers,
@@ -230,6 +264,57 @@ validation are strict and reject `provisional` metadata. Do not pass the
 internal provisional flag manually; remove the metadata after remeasurement
 and review.
 
+### Test corpus ratchets
+
+Three no-growth ratchets keep the test corpus from getting worse. Each
+records today's debt in a baseline and fails only on new debt. A baseline
+entry whose test or module is gone or fixed is reported as stale (`[i]`) and
+never fails, so parallel cleanups do not conflict. Baselines are sorted JSON
+with one entry per line; entries may only be removed.
+
+1. **Duplicate tests** (`scripts/check_exact_test_duplicates.py`, baseline
+   `tests/quality/exact_test_duplicates.json`). Each test body is hashed as a
+   normalized AST (`ast-body-v1`: docstrings, comments and formatting ignored,
+   literals kept). A test whose body equals another test's body, or whose
+   `Class::name` also exists in another file, fails unless the baseline lists
+   it. Fix: delete the copy, parametrize it, or rename it after the distinct
+   contract it checks.
+2. **Classification and placement** (`tests/quality/test_test_taxonomy.py`,
+   baseline `tests/quality/test_taxonomy_baseline.json`). A module with no
+   behavioral marker, a `unit` module under `tests/integration`, or a
+   `tests/unit` module that spawns processes fails unless listed. Fix: add the
+   marker, or move the module.
+3. **Promise links** (same contract and baseline). Every new test module
+   names the promises it protects in its module-level `pytestmark`, using ids
+   from `tests/quality/promise-catalog.json`: OpenAPM `req-*` ids,
+   `P-OWN-<owner id>` architecture owners, `P-INV-I1`..`P-INV-I9` lifecycle
+   invariants, `P-LAW-<id>` lifecycle laws and `P-DOC-<id>` documented-surface
+   promises. Add a missing promise to the
+   catalog in the same pull request. A new id family (`P-<FAMILY>-<id>`) must
+   first be declared in the catalog's `families`; undeclared families fail.
+
+```python
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-accepted-target-vocabulary")]
+```
+
+`scripts/check_test_assertions.py` (baseline
+`tests/quality/assertion_quality_baseline.json`) ratchets per-file counts the
+same way: AQ001 constant assertions, AQ002 `pytest.raises(Exception)`, AQ003
+component or e2e tests that assert no user-visible output, exit code or durable
+state, AQ004 tests that patch a symbol defined in an owner module they import,
+and AQ006 e2e modules that do not drive the real CLI (they use `CliRunner`,
+patch an owner module, or never run `apm` through `ApmLifecycleRunner`, the
+`apm_binary_path` or `apm_engine_command` fixtures, or the lifecycle `driver`).
+
+For consolidation, `uv run --frozen python scripts/check_exact_test_duplicates.py
+--report-equal-copies` lists equal copies that are safe to delete. A copy
+qualifies only if body, decorators, fixtures, class context, module bindings and
+CI lane all match its kept twin. The report never fails and never edits files.
+
+Moving a listed test or module to another directory under the same name keeps
+its allowance and is reported as moved. Prune stale or moved duplicate entries
+with `--update-baseline`; edit stale or moved taxonomy entries by hand.
+
 ### Anti-patterns (will land as `recommended` findings on review)
 
 - **Editing `scripts/test-integration.sh` per file.** The orchestrator
@@ -286,7 +371,7 @@ assert the cross-platform contract, unless (per module) virtually
 every test in the file already exercises that same code path (in
 which case a module-level `pytestmark = pytest.mark.windows_compat`
 is the right level of granularity -- see
-`tests/unit/test_shepherd_owner_touch_gate.py` for an example where
+`tests/integration/test_shepherd_owner_touch_gate.py` for an example where
 nearly every test goes through the same git-executable-resolution
 helper).
 
@@ -314,7 +399,7 @@ helper).
    ```bash
    uv run --extra dev pytest -m windows_compat tests/unit --collect-only -q
    ```
-5. `tests/unit/test_windows_compat_gate_workflow.py` asserts the
+5. `tests/integration/test_windows_compat_gate_workflow.py` asserts the
    *shape* of the gate (marker-scoped, bounded, non-empty, required,
    non-duplicative of the Linux full suite) -- it does not enumerate
    file names, so it does not need editing when you add or remove a

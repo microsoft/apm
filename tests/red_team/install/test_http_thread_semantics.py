@@ -12,6 +12,8 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+import pytest
+
 from apm_cli.core.lifecycle_scripts import (
     LifecycleEvent,
     LifecycleScriptRunner,
@@ -20,6 +22,8 @@ from apm_cli.core.lifecycle_scripts import (
 )
 
 from .conftest import make_command_entry, touch_cmd
+
+pytestmark = pytest.mark.component
 
 
 def _event(wd: str) -> LifecycleEvent:

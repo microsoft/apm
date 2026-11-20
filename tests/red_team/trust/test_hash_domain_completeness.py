@@ -19,6 +19,8 @@ import yaml
 
 from apm_cli.core.script_trust import is_project_scripts_trusted, trust_project_scripts
 
+pytestmark = pytest.mark.component
+
 BASELINE = {
     "name": "pkg",
     "lifecycle": {

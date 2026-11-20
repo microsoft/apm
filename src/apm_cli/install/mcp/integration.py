@@ -442,8 +442,10 @@ def run_mcp_integration(  # noqa: PLR0913
         if not active_runtimes or not set(active_runtimes) <= native_runtimes_of(dep)
     ]
     if should_install and policy_deps:
+        from apm_cli.core.scope import manifest_root
+
         run_policy_preflight(
-            project_root=project_root,
+            project_root=manifest_root(project_root, user_scope=user_scope),
             mcp_deps=policy_deps,
             mcp_brought_in_by=(current_view.brought_in_by if current_view is not None else None),
             no_policy=no_policy,

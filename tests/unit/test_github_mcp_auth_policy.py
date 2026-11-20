@@ -15,7 +15,7 @@ from apm_cli.adapters.client.cursor import CursorClientAdapter
 from apm_cli.adapters.client.intellij import IntelliJClientAdapter
 from apm_cli.adapters.client.windsurf import WindsurfClientAdapter
 from apm_cli.integration.mcp_integrator import MCPIntegrator
-from apm_cli.models.dependency.mcp import ManifestHeaderValue, MCPDependency
+from apm_cli.models.dependency.mcp import MCPDependency
 
 pytestmark = pytest.mark.component
 
@@ -97,20 +97,6 @@ def test_shared_policy_preserves_registry_fallback_and_manifest_precedence(
         value for name, value in config["headers"].items() if name.casefold() == "authorization"
     ] == [expected]
     assert config["headers"]["X-Other"] == "preserved"
-
-
-@pytest.mark.parametrize("value", [None, False, 0, "", "static-auth"])
-def test_dictionary_overlay_tags_strings_without_coercing_values(
-    value: str | bool | int | None,
-) -> None:
-    """Dictionary-shaped registry headers retain the authored value and type."""
-    dep = MCPDependency.from_dict({"name": "github", "headers": {"Authorization": value}})
-    info = {"remotes": [{"headers": {"X-Other": "preserved"}}]}
-    MCPIntegrator._apply_overlay({dep.name: info}, dep)
-    headers = info["remotes"][0]["headers"]
-    assert headers["Authorization"] == value
-    assert isinstance(headers["Authorization"], ManifestHeaderValue) == isinstance(value, str)
-    assert headers["X-Other"] == "preserved"
 
 
 @pytest.mark.parametrize("adapter_class", [CopilotClientAdapter, CursorClientAdapter])

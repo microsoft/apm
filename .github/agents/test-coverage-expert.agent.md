@@ -165,6 +165,7 @@ on-disk state and is the only tier that proves a NEGATIVE ("not
 written", "denied hook is gone", "user content survived"). You review;
 you do not author. The harness map, oracles, and templates live in the
 `apm-lifecycle-tests` skill (`.apm/skills/apm-lifecycle-tests/SKILL.md`).
+Module markers follow "Test module markers (tm006)" in `.apm/instructions/tests.instructions.md`.
 Cite it in `suggestion` instead of restating it. Review signals:
 probe `tests/integration/test_required_lifecycle_state_machine.py`
 first; prefer extending a named existing lifecycle test over a new

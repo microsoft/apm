@@ -604,6 +604,8 @@ contracts-tests-taxonomy-classification
 contracts-tooling-ado-lock-coordinates
 contracts-tooling-apply-to-placement
 contracts-tooling-cached-policy-shape
+contracts-tooling-ci-merge-queue-freshness
+contracts-tooling-ci-merge-time-topology
 contracts-tooling-dependency-identity
 contracts-tooling-frontmatter-yaml
 contracts-tooling-generation-footer
@@ -627,6 +629,7 @@ contracts-tooling-strip-charset
 install-deployment-approval-outcome-routing
 install-deployment-audit-policy-discovery
 install-deployment-audit-replay
+install-deployment-bundle-admission-owner
 install-deployment-bundle-compile-staging
 install-deployment-bundle-user-scope-root
 install-deployment-bundle-native-layout
@@ -647,11 +650,13 @@ install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority
 install-deployment-gitlab-facade-orchestration
 install-deployment-gitlab-policy-adapter
+install-deployment-hook-pin-frozen-audit-parity
 install-deployment-incomplete-chain-routing
 install-deployment-install-scope-selection
 install-deployment-local-bundle-policy-preflight
 install-deployment-local-identity-anchor
 install-deployment-lock-parent-placement
+install-deployment-locked-content-verdict
 install-deployment-locked-copy-validity
 install-deployment-package-content-hash
 install-deployment-skill-layout
@@ -702,6 +707,7 @@ install-deployment-uninstall-reachability
 install-deployment-uninstall-selection
 install-deployment-unpack-executable-refusal
 install-deployment-update-content-integrity
+install-deployment-update-registry-integrity
 install-deployment-update-plan-ref-annotation
 marketplace-integrations-agent-plugin-contract
 marketplace-integrations-authoring-source
@@ -781,6 +787,7 @@ registry_delegation.policy_target_projection
 registry_delegation.process_interrupt_signals
 registry_delegation.root_cli_output_mode
 registry_delegation.runtime_descriptors
+registry_delegation.scope_manifest_path
 registry_delegation.target_vocabulary
 registry_delegation.user_invocable_resolution
 registry_delegation.version_rendering
@@ -793,6 +800,8 @@ transport-platform-cache-cleanup-outcome
 transport-platform-clone-connect-retry
 transport-platform-credential-origin-scope
 transport-platform-credential-report-owner
+transport-platform-credential-value-rendering
+transport-platform-egress-route-policy
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight
@@ -800,6 +809,7 @@ transport-platform-github-throttle
 transport-platform-gitlab-sparse-plan
 transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
+transport-platform-http-session-construction
 transport-platform-ls-remote-tag-commits
 transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
@@ -813,6 +823,7 @@ transport-platform-self-update-resolution
 transport-platform-sparse-symlink-validation
 transport-platform-tls-trust-injection
 transport-platform-unix-install-ownership
+transport-platform-url-builder-credential-free
 transport-platform-url-path-security
 transport-platform-windows-stable-path
 """

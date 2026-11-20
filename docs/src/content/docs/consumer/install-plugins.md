@@ -28,7 +28,7 @@ Commit `apm.yml` and `apm.lock.yaml`. Teammates run `apm install`.
 | Lock | `apm.lock.yaml` pins the plugin's commit and records a SHA-256 hash for every file APM deployed. `apm audit` reports drift. |
 | Scan | Every file is scanned for hidden Unicode at install; critical findings block. APM does not inspect what the code does. |
 | Policy | Your organization's `apm-policy.yml` can allow or deny the source before anything is written. |
-| Approve | Hooks, MCP servers, LSP servers and `bin/` deploy unless your project or organization turns on the approval gate; then they wait for `apm approve`. A Claude Code plugin installed whole at user scope is enabled only when one approval pinned to its content covers it ([Approve hooks and MCP servers](../approve-executables/)). |
+| Approve | Hooks, MCP servers, LSP servers and `bin/` (user scope, Claude target only) deploy unless your project or organization turns on the approval gate; then they wait for `apm approve`. A Claude Code plugin installed whole at user scope is enabled only when one approval pinned to its content covers it ([Approve hooks and MCP servers](../approve-executables/)). |
 
 APM decides what gets installed. The harness decides what runs, with its own
 permissions; APM is not a sandbox.
@@ -41,7 +41,7 @@ What APM does depends on the plugin format:
 |---|---|
 | Claude Code plugin at user scope (`apm install -g --target claude`) | Deploys the publisher's files whole to `~/.agents/plugins/<plugin>/` and registers them in Claude Code's settings, so Claude Code loads a real plugin. See [Claude Code plugins at user scope](#claude-code-plugins-at-user-scope). |
 | Claude Code plugin at project scope (`.claude-plugin/plugin.json`, or `plugin.json` without `$schema`) | Splits it into primitives for each selected harness: skills to `.claude/skills/` and `.agents/skills/`, agents and commands to `.claude/`, hooks into `.claude/settings.json` with their scripts under `.claude/hooks/<plugin>/`, MCP servers into `.mcp.json`. Claude Code sees the pieces, not a plugin. |
-| Agent Plugin (`plugin.json` with the Agent Plugins `$schema`) | For GitHub Copilot: keeps it whole in `apm_modules/` and registers it in `.github/copilot/settings.local.json`, so Copilot CLI 1.0.81 or later loads it live. A target list without `copilot` refuses it. |
+| Agent Plugin (`plugin.json` with the Agent Plugins `$schema`) | For GitHub Copilot: keeps it whole in `apm_modules/` and registers it in `.github/copilot/settings.local.json`, so Copilot CLI 1.0.81 or later loads it live. A target list without `copilot` refuses it. Its root `mcp.json` is an executable (`mcp`, plus `bin` for a server that runs a command); approve the whole plugin with `apm approve <package>` ([details](../../reference/cli/approve/)). |
 | Codex bundle (`.codex-plugin/plugin.json`) | With `apm install -g --target codex` and Codex CLI 0.163.0 or later: registers the whole bundle with Codex at user scope, disabled until you enable it ([details](../installing-from-marketplaces/#codex-compatibility-bundles-through-apm)). |
 
 Exact paths per harness: [Targets matrix](../../reference/targets-matrix/).

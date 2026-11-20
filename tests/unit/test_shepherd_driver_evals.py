@@ -6,6 +6,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 ROOT = Path(__file__).parents[2]
 EVALS = ROOT / "tests/fixtures/autopilot_pr_merge_worker/functional_evidence_evals.json"
 PROMPT = ROOT / "packages/autopilot/autopilot-pr-merge-worker/assets/worker-prompt.md"

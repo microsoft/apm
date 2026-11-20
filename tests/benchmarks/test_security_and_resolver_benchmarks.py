@@ -31,6 +31,8 @@ from apm_cli.utils.exclude import (
     validate_exclude_patterns,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

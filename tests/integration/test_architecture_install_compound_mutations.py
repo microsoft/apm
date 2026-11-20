@@ -273,10 +273,10 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
                 '            getattr(observer, "record")(_target)\n',
             ),
             (
-                "            _int_result = getattr(_integrator, _entry.integrate_method)(\n"
-                "                _target,\n",
-                "            _int_result = getattr(_integrator, _entry.integrate_method)(\n"
-                "                rogue_target,\n",
+                "_int_result = getattr(_integrator, _entry.integrate_method)(\n"
+                "                    _target, package_info,",
+                "_int_result = getattr(_integrator, _entry.integrate_method)(\n"
+                "                    rogue_target, package_info,",
             ),
         ),
     ),

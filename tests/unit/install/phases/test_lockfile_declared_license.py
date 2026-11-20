@@ -9,8 +9,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases.lockfile import LockfileBuilder
+
+pytestmark = pytest.mark.unit
 
 
 def test_attaches_declared_license_to_matching_entry():
