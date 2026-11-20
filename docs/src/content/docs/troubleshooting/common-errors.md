@@ -303,7 +303,7 @@ See also: [`apm targets` reference](../../reference/cli/targets/), [Targets matr
 
 Cause: APM found markers for more than one harness and cannot pick.
 
-Fix: pin a target with `--target <harness>` or declare `targets:` in `apm.yml`. Use `apm install --dry-run` to preview each option.
+Fix: deploy to every detected harness with `apm install --target <a>,<b>`, or declare them once under `targets:` in `apm.yml` so plain `apm install` works. Add `--dry-run` to preview.
 
 See also: [`apm targets` reference](../../reference/cli/targets/)
 
