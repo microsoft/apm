@@ -121,10 +121,9 @@ trust anchor.
 APM also remembers, under `APM_HOME`, which git ref each plugin version
 resolved to the first time an install committed it. If the marketplace later
 points that same version at another ref, `apm install` (with or without `-g`)
-refuses and names both refs. It keeps refusing until you remove the named
-entry from `cache/marketplace/version-pins.json`, so do that only when the
-publisher confirms the re-tag. A failed or `--dry-run` install records
-nothing.
+refuses and names both refs. Run `apm update` to accept
+the new ref, only once the publisher confirms the change. A failed or
+`--dry-run` install records nothing.
 
 ## Declare marketplaces in your user manifest
 
@@ -173,8 +172,8 @@ The plugin appears with its primitive counts. Commit `apm.yml` and
 ## When things go wrong
 
 - **`ref changed: was '...', now '...'`.** The marketplace moved a plugin
-  version you already installed to another ref. Confirm with the publisher
-  before removing the named pin entry.
+  version you already installed to another ref. Confirm with the publisher,
+  then run `apm update` to accept it.
 - **`marketplace.json` changed but my install did not.** Expected: run
   `apm outdated` to see it, then `apm update`.
 - **Refused bare cross-repo source on `*.ghe.com`.** The entry would fall back
