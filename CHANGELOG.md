@@ -115,6 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The policy docs no longer call `apm-policy.yml` an experimental feature. (#3948, #3992)
 - `apm uninstall` and `apm prune` print `Run 'apm compile' to update AGENTS.md` (or `GEMINI.md`) when a removed package's instructions are still compiled there for Codex, Gemini or OpenCode. (#3992)
 - `apm compile --clean` reports the orphaned `AGENTS.md` it removes (or, with `--dry-run`, would remove) instead of telling you to run `apm compile --clean` to remove it. (#3992)
+- `apm run` labels a script with no detected runtime as `Shell script` instead of `Unknown`. (#3992)
 - `apm audit --ci` applies org MCP policy to every server the lock keeps, including transitive and local-bundle servers, and accepts a `bundle:` server only when the lock records its deployment. (#3989)
 - `apm install -g <bundle>` reads executables approvals from the user manifest (`~/.apm/apm.yml`), never the current directory's `apm.yml`, and its skip hint names that file. (#3989)
 - A cold `apm install` of a locked marketplace package with catalog-defined MCP or LSP servers reads only server metadata from the catalog and keeps the locked commit; if the catalog now selects another commit it fails with an `apm update <name>@<marketplace>` hint instead of re-pinning. (#3989)
