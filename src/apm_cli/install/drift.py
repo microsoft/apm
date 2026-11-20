@@ -30,6 +30,7 @@ Design constraints (see ``WIP/drift/06-final-plan.md``):
 from __future__ import annotations
 
 import atexit
+import json
 import tempfile
 import tracemalloc
 from dataclasses import dataclass
@@ -124,10 +125,48 @@ class DriftFinding:
     kind: str
     package: str = ""
     inline_diff: str = ""
-    # The drift lies only in APM-owned entries of a config shared with the
-    # user (merged hooks): 'apm install' re-merges them, so it is never a
-    # local edit to a managed file (RA-028).
+    # The drift in a config shared with the user (merged hooks) is only
+    # APM-owned entries of packages the current gate no longer deploys:
+    # 'apm install' retires them, so it is never a local edit (RA-028).
     owned_entries_only: bool = False
+
+
+def _owned_entries_by_source(canonical: bytes) -> dict[str | None, list[str]]:
+    """Group canonical hook-ownership JSON (``{event: [entries]}``) by ``_apm_source``.
+
+    Entries without a string marker, and malformed events, group under ``None``.
+    """
+    grouped: dict[str | None, list[str]] = {}
+    data = json.loads(canonical or b"{}")
+    for event_name, entries in data.items() if isinstance(data, dict) else ():
+        for entry in entries if isinstance(entries, list) else [entries]:
+            source = entry.get("_apm_source") if isinstance(entry, dict) else None
+            grouped.setdefault(source if isinstance(source, str) else None, []).append(
+                event_name + json.dumps(entry, sort_keys=True)
+            )
+    return {source: sorted(items) for source, items in grouped.items()}
+
+
+def _only_retired_sources_differ(replayed: bytes, on_disk: bytes) -> bool:
+    """Return whether every differing owner is on disk but absent from the replay.
+
+    The replay applies the current executables gate, so an owner it no longer
+    deploys at all was retired by the gate. A user edit to an APM entry drops
+    that entry's ownership marker instead, so its owner stays in the replay:
+    that drift keeps its local-edit classification.
+    """
+    expected = _owned_entries_by_source(replayed)
+    actual = _owned_entries_by_source(on_disk)
+    changed = {
+        source
+        for source in expected.keys() | actual.keys()
+        if expected.get(source) != actual.get(source)
+    }
+    return (
+        bool(changed)
+        and None not in changed
+        and all(source in actual and source not in expected for source in changed)
+    )
 
 
 # Errors
@@ -1017,7 +1056,9 @@ def diff_scratch_against_project(
                     kind="unmanaged-conflict" if unmanaged else "modified",
                     package=tracked.get(rel, ""),
                     inline_diff=_inline_diff_for(scratch_path, project_path),
-                    owned_entries_only=not unmanaged and rel in merge_config_specs,
+                    owned_entries_only=not unmanaged
+                    and (projection_spec is not None or rel in merge_sidecar_paths)
+                    and _only_retired_sources_differ(s_bytes, p_bytes),
                 )
             )
         elif claims.unclaimed(rel):
