@@ -398,10 +398,12 @@ jobs:
             source.write_bytes(original)
 
   # Separate the two unchanged workloads so setup and cleanup fit each cap.
+  # The contract corpus grew past 5 minutes; a job that hits its cap ends as
+  # "cancelled", hiding the ratchet result, so the cap keeps ample headroom.
   test-architecture-contracts:
     name: Architecture Ratchet Contracts
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: read
 
