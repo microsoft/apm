@@ -170,7 +170,9 @@ def test_frozen_names_user_registry_config_when_registries_disabled(
 
     refused = world.apm("install", "--frozen", expected=1)
 
-    output = " ".join(refused.stdout.split())
+    # Errors go to stderr; stdout carries no error line.
+    output = " ".join(refused.stderr.split())
+    assert "[x]" not in refused.stdout, _evidence(refused)
     assert (
         f"[x] Registry configuration in {config} requires the experimental registries "
         "feature. Run 'apm experimental enable registries' to enable it." in output

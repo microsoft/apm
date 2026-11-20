@@ -546,7 +546,7 @@ class TestEmitInstallRunSummaryLegacyAngle(unittest.TestCase):
     def test_legacy_angle_offenders_warning_emitted(self) -> None:
         """Lines 463-473: legacy angle offenders trigger deprecation warning."""
         CopilotClientAdapter._legacy_angle_offenders_by_server["legacy-srv"] = {"OLD_VAR"}
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
         self.assertIn("Deprecated", joined)
@@ -554,7 +554,7 @@ class TestEmitInstallRunSummaryLegacyAngle(unittest.TestCase):
 
     def test_no_warnings_when_all_state_empty(self) -> None:
         """emit_install_run_summary emits nothing when all buckets are empty."""
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         mock_warn.assert_not_called()
         self.assertTrue(CopilotClientAdapter._install_run_summary_emitted)
@@ -576,7 +576,7 @@ class TestEmitInstallRunSummaryLegacyAngle(unittest.TestCase):
     def test_singular_noun_for_single_unset_var(self) -> None:
         """The unset-env warning uses 'variable' (singular) for one var."""
         CopilotClientAdapter._unset_env_keys_by_server["s"] = ["SOLO"]
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
         self.assertIn("variable", joined)
@@ -585,7 +585,7 @@ class TestEmitInstallRunSummaryLegacyAngle(unittest.TestCase):
     def test_plural_noun_for_multiple_unset_vars(self) -> None:
         """The unset-env warning uses 'variables' (plural) for multiple vars."""
         CopilotClientAdapter._unset_env_keys_by_server["s"] = ["A", "B"]
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
         self.assertIn("variables", joined)

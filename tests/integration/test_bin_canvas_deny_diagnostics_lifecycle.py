@@ -45,7 +45,7 @@ def _denied_line(kind: str, package: str) -> str:
 
 
 def _approve_hint(package: str) -> str:
-    return f"Run 'apm approve {package}' to approve."
+    return f"Run 'apm approve {package}' to approve its"
 
 
 def _exec_status(lock_path: Path) -> str | None:

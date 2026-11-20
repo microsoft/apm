@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from apm_cli.deps.egress_route import EgressSurface, is_proxy_only
 from apm_cli.install.errors import DirectDependencyError
+from apm_cli.install.outcome import integration_changed_files
 from apm_cli.install.phases._skip_logic import _compute_skip_download
 from apm_cli.install.phases.heal import run_heal_chain
 from apm_cli.install.services import _targets_explicitly_requested, integrate_local_content
@@ -395,24 +396,14 @@ def _integrate_root_project(
             ctx, _root_result.get("deployed_files", [])
         )
 
-        _local_total = sum(
-            _root_result.get(k, 0)
-            for k in (
-                "prompts",
-                "agents",
-                "skills",
-                "sub_skills",
-                "instructions",
-                "commands",
-                "hooks",
-                "canvases",
-            )
-        )
-        if _local_total > 0 and logger:
-            logger.verbose_detail(f"Deployed {_local_total} local primitive(s) from .apm/")
+        _local_changed = integration_changed_files(_root_result)
+        if _local_changed > 0 and logger:
+            logger.verbose_detail(f"Deployed {_local_changed} local primitive(s) from .apm/")
+            # Project-owned content is never an APM dependency (#4184): it is
+            # reported separately and only when its deployed files changed.
+            logger.record_local_content_updated()
 
         return {
-            "installed": int(_local_total > 0),
             "prompts": _root_result["prompts"],
             "agents": _root_result["agents"],
             "skills": _root_result.get("skills", 0),
@@ -562,10 +553,10 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
         save_user_executables(updated, deny_exec)
         if ctx.logger:
             from apm_cli import config
+            from apm_cli.core.remediation import EXECUTABLES_APPROVED
 
             ctx.logger.info(
-                f"Updated {config.CONFIG_FILE}. "
-                "Run 'apm install' again to deploy approved executables.",
+                f"Updated {config.CONFIG_FILE}. {EXECUTABLES_APPROVED.sentence()}",
                 symbol="info",
             )
 
@@ -583,9 +574,13 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
             f"{len(parked)} package(s) left parked. Their executables will not run until trusted.",
             symbol="info",
         )
+        from apm_cli.core.remediation import EXECUTABLES_PARKED
+
+        deploy = EXECUTABLES_PARKED.bind(package=first).with_command(
+            approve_command(first, user_scope=user_scope)
+        )
         logger.info(
-            f"Deploy later: {approve_command(first, user_scope=user_scope)} "
-            f"(then re-run apm install{' -g' if user_scope else ''})  |  "
+            f"Deploy later: {deploy.clause()}  |  "
             f"Why parked?: {explain_command(first, user_scope=user_scope)}",
             symbol="info",
         )
@@ -852,7 +847,6 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     root_deltas = _integrate_root_project(ctx, deployment_plan=local_plan)
     if root_deltas:
-        installed_count += root_deltas.get("installed", 0)
         total_prompts_integrated += root_deltas.get("prompts", 0)
         total_agents_integrated += root_deltas.get("agents", 0)
         total_skills_integrated += root_deltas.get("skills", 0)

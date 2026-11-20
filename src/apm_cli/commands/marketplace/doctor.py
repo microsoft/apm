@@ -5,6 +5,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from apm_cli.core.remediation import (
+    MARKETPLACE_CONFIG_LEGACY,
+)
 from apm_cli.core.scope import manifest_file
 
 from ...core.command_logger import CommandLogger
@@ -251,8 +254,7 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
             try:
                 yml_obj = load_marketplace_yml(legacy_path)
                 config_detail = (
-                    "marketplace.yml found (legacy). Run 'apm marketplace "
-                    "migrate' to fold it into apm.yml."
+                    f"marketplace.yml found (legacy). {MARKETPLACE_CONFIG_LEGACY.sentence()}"
                 )
             except MarketplaceYmlError as exc:
                 config_passed = False

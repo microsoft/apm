@@ -25,6 +25,7 @@ from apm_cli.install.local_edits import (
     count_local_edits,
     is_upstream_package,
     local_edit_hint,
+    overwrite_notice,
     rendering_change_hint,
     unedited_modified_paths,
 )
@@ -197,10 +198,10 @@ def _run_pipeline(tmp_path: Path, edited: int, **kwargs) -> tuple[MagicMock, Mag
         elif name == "targets":
             ctx.integrators["skill"] = MagicMock()
 
-    counter = MagicMock(return_value=edited)
+    counter = MagicMock(return_value=[f".github/agents/a{i}.agent.md" for i in range(edited)])
     with (
         patch("apm_cli.install.pipeline._run_phase", side_effect=_phase),
-        patch("apm_cli.install.local_edits.count_local_edits", counter),
+        patch("apm_cli.install.local_edits.local_edit_paths", counter),
     ):
         stack = _pipeline_patches(tmp_path, lockfile)
         for cm in stack:
@@ -216,7 +217,7 @@ def _run_pipeline(tmp_path: Path, edited: int, **kwargs) -> tuple[MagicMock, Mag
 def _hint_calls(logger: MagicMock) -> list[str]:
     return [
         str(call.args[0])
-        for call in logger.info.call_args_list
+        for call in logger.warning.call_args_list
         if call.args and "apm export-patch" in str(call.args[0])
     ]
 
@@ -224,7 +225,9 @@ def _hint_calls(logger: MagicMock) -> list[str]:
 class TestInstallPipelineHint:
     def test_project_install_shows_hint_once(self, tmp_path: Path) -> None:
         logger, counter = _run_pipeline(tmp_path, 3, scope=InstallScope.PROJECT)
-        assert _hint_calls(logger) == [local_edit_hint(3, installing=True)]
+        assert _hint_calls(logger) == [
+            overwrite_notice([f".github/agents/a{i}.agent.md" for i in range(3)])
+        ]
         _, _, keys = counter.call_args.args
         assert set(keys) == {"org/pkg"}
 

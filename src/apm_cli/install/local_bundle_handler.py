@@ -29,6 +29,7 @@ import click
 
 from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
 from ..bundle.formats import BundleFormat
+from ..core.remediation import BUNDLE_INSTRUCTIONS_STAGED
 from .deployed_paths import log_bundle_deployed
 
 if TYPE_CHECKING:
@@ -372,8 +373,8 @@ def install_local_bundle(
             target_names = ", ".join(sorted({t.name for t in targets}))
             logger.warning(
                 f"Bundle staged {len(staged_instructions)} instruction(s) "
-                f"for compile (target: {target_names}). Run 'apm compile' "
-                "to merge them into AGENTS.md / GEMINI.md / equivalent. "
+                f"for compile (target: {target_names}). "
+                f"{BUNDLE_INSTRUCTIONS_STAGED.sentence()} "
                 "Reference: https://microsoft.github.io/apm/consumer/choose-harnesses/#compiled-outputs"
             )
 

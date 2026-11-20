@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 
 import apm_cli.update_policy as policy_mod
+from apm_cli.core.remediation import CLI_BINARY_OUTDATED
 from apm_cli.update_policy import (
     DEFAULT_SELF_UPDATE_DISABLED_MESSAGE,
     _is_printable_ascii,
@@ -163,7 +164,7 @@ class TestGetUpdateHintMessage:
     def test_returns_run_apm_self_update_when_enabled(self) -> None:
         with patch.object(policy_mod, "SELF_UPDATE_ENABLED", True):
             result = get_update_hint_message()
-        assert result == "Run apm self-update to upgrade"
+        assert result == CLI_BINARY_OUTDATED.sentence()
 
     def test_returns_disabled_message_when_disabled(self) -> None:
         custom = "Use your package manager to update."
