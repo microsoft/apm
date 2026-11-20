@@ -214,7 +214,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/commands/uninstall/engine.py", 884, "was not found in apm.yml"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 729, "cannot remove local-bundle"),
             Ev("src/apm_cli/commands/update.py", 457, "No APM dependencies to update"),
-            Ev("src/apm_cli/commands/prune.py", 208, "Nothing to prune"),
+            Ev("src/apm_cli/core/command_logger.py", 524, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
     ),
@@ -317,7 +317,8 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     # p-exec ships only executables the gate parks, so its bundle install records
     # nothing: update has no bundle to name (#4318 names a recorded one).
     LOCAL_BUNDLE_REFUSALS["update"]: (0, r"No APM dependencies"),
-    LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"Nothing to prune"),
+    # One canonical no-op line (#4460); the retired wordings must not match.
+    LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"No orphaned packages found\. Nothing to prune\."),
 }
 # Refusal rule cells whose current message is a defect: (tracking issue, a regex
 # the fixed output matches). The cell is known-failing until that output appears.
