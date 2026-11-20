@@ -2428,6 +2428,53 @@
         "tests/integration/test_claude_native_hook_lifecycle.py::test_plugin_with_root_skills_deploys_bin_natively_after_approve_and_trust",
         "tests/integration/test_frozen_remote_plugin_lifecycle.py::test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type"
       ]
+    },
+    {
+      "issue": 4353,
+      "fixed_in": "Unreleased",
+      "summary": "A refused install keeps every apm_modules package copy as it was before the command, including when it re-fetched the package.",
+      "failure_modes": [
+        "transaction"
+      ],
+      "properties": [
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_locked_source_cache_parity_lifecycle.py::test_audit_ci_and_frozen_refuse_alike_when_every_copy_differs",
+        "tests/lifecycle/security/test_integrity.py::test_integrity_row"
+      ]
+    },
+    {
+      "issue": 4356,
+      "fixed_in": "Unreleased",
+      "summary": "audit --ci reads locked git sources through the same cache as install --frozen, so both reach one verdict on package copies that differ from the lock.",
+      "failure_modes": [
+        "observation",
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state",
+        "source.ref_cache_coherent"
+      ],
+      "regression_tests": [
+        "tests/integration/test_locked_source_cache_parity_lifecycle.py::test_audit_ci_and_frozen_refuse_alike_when_every_copy_differs",
+        "tests/lifecycle/security/test_integrity.py::test_integrity_row"
+      ]
+    },
+    {
+      "issue": 4363,
+      "fixed_in": "Unreleased",
+      "summary": "A refused apm update names the content hash mismatch with an error line.",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_locked_source_cache_parity_lifecycle.py::test_update_refusal_names_the_mismatch_as_an_error",
+        "tests/lifecycle/security/test_integrity.py::test_integrity_row"
+      ]
     }
   ],
   "lifecycle_contracts": [

@@ -76,6 +76,12 @@ from scripts.architecture_linter.checks.install_locked_copy_validity import (
 from scripts.architecture_linter.checks.install_locked_copy_validity import (
     check_locked_copy_validity,
 )
+from scripts.architecture_linter.checks.install_locked_source_cache import (
+    GUARD as _GUARD_LOCKED_SOURCE_CACHE,
+)
+from scripts.architecture_linter.checks.install_locked_source_cache import (
+    check_locked_source_cache,
+)
 from scripts.architecture_linter.checks.install_lsp_capability_gate import (
     GUARD_LSP_CAPABILITY_GATE,
     check_lsp_capability_gate,
@@ -197,6 +203,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_LOCKED_COPY_VALIDITY,
         "apm_modules copy validity against the lock is owned by drift.locked_copy_proof.",
         check_locked_copy_validity,
+    ),
+    _rule(
+        _GUARD_LOCKED_SOURCE_CACHE,
+        "Install, update and audit --ci replay read locked git sources through one cache.",
+        check_locked_source_cache,
     ),
     _rule(
         _GUARD_PACKAGE_CONTENT_HASH,
