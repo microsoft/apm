@@ -248,17 +248,18 @@ def _resolve_deployed_file_path(
     return None
 
 
-def _check_deployed_files_present(
+def find_missing_deployed_files(
     project_root: Path,
     lock: LockFile,
     targets: Sequence[TargetProfile] = (),
-) -> CheckResult:
-    """Verify all files listed in lockfile deployed_files exist on disk.
+) -> tuple[list[str], bool]:
+    """Return the recorded deployed files absent from disk, and whether any were gitignored.
 
-    Paths that are gitignored are considered absent by design (the repo owner
-    deliberately chose not to commit them) and are excluded from the missing
-    count.  This prevents false positives on fresh checkouts of repos that
-    gitignore one or more deploy directories.
+    Single owner shared by ``apm audit`` deployed-files-present and the
+    ``apm install --frozen`` post-deploy check, so both give one answer.
+    URI claims are skipped. Paths that are gitignored are absent by design
+    (the repo owner chose not to commit them) and are not reported, which
+    avoids false positives on fresh checkouts that gitignore a deploy directory.
     """
     missing: list[str] = []
     for _dep_key, dep in lock.dependencies.items():
@@ -272,12 +273,19 @@ def _check_deployed_files_present(
                 or (Path(rel_path).is_absolute() and abs_path.is_symlink())
             ):
                 missing.append(rel_path)
+    if not missing:
+        return missing, False
+    filtered = _filter_gitignored(project_root, missing)
+    return filtered, len(filtered) < len(missing)
 
-    gitignored_skipped = False
-    if missing:
-        filtered = _filter_gitignored(project_root, missing)
-        gitignored_skipped = len(filtered) < len(missing)
-        missing = filtered
+
+def _check_deployed_files_present(
+    project_root: Path,
+    lock: LockFile,
+    targets: Sequence[TargetProfile] = (),
+) -> CheckResult:
+    """Verify all files listed in lockfile deployed_files exist on disk."""
+    missing, gitignored_skipped = find_missing_deployed_files(project_root, lock, targets)
 
     if not missing:
         msg = (
@@ -297,6 +305,64 @@ def _check_deployed_files_present(
         passed=False,
         message=(f"{n} deployed {noun} missing -- run 'apm install' to restore"),
         details=missing,
+    )
+
+
+def _check_exec_status_current(
+    project_root: Path,
+    lock: LockFile,
+    manifest: APMPackage,
+    targets: Sequence[TargetProfile],
+    *,
+    user_scope: bool,
+    modules_root: Path,
+    policy_provider: Callable[[], Any] | None,
+) -> CheckResult:
+    """Fail when a locked ``exec_status`` is no longer the gate's decision (#4053).
+
+    Routes through the staleness owner ``apm update`` and ``apm install
+    --frozen`` use; audit never re-derives trust here. The gate's decision
+    depends on org policy, so without a *policy_provider* (``--no-policy``)
+    the check is not evaluated. Indeterminate answers (the provider raising
+    ``ExecPolicyUnavailable``, an unreadable package) are not failures.
+    """
+    from ..core.scope import scope_manifest_path
+    from ..install.exec_gate import stale_exec_decisions
+
+    if policy_provider is None:
+        return CheckResult(
+            name="exec-status-current",
+            passed=True,
+            message="Executables decisions not verified: org policy not consulted (--no-policy)",
+        )
+    stale, indeterminate = stale_exec_decisions(
+        lock,
+        modules_root,
+        scope_manifest_path(project_root, user_scope=user_scope),
+        policy_provider=policy_provider,
+        targets=list(targets),
+        fallback_allow_executables=getattr(manifest, "allow_executables", None),
+    )
+    if not stale:
+        return CheckResult(
+            name="exec-status-current",
+            passed=True,
+            message=(
+                "Executables decisions not verified: org policy unavailable or a package unreadable"
+                if indeterminate
+                else "Recorded executables decisions match the executables gate"
+            ),
+        )
+    n = len(stale)
+    noun = "package records" if n == 1 else "packages record"
+    return CheckResult(
+        name="exec-status-current",
+        passed=False,
+        message=(
+            f"{n} {noun} an executables decision the gate no longer makes -- "
+            "run 'apm install' without --frozen and commit apm.lock.yaml"
+        ),
+        details=[decision.describe() for decision in stale],
     )
 
 
@@ -1257,6 +1323,7 @@ def run_baseline_checks(
     prepared_replay: PreparedCiAuditReplay | None = None,
     prepared_replay_error: str | None = None,
     no_policy: bool = False,
+    policy_provider: Callable[[], Any] | None = None,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.
 
@@ -1267,6 +1334,7 @@ def run_baseline_checks(
     anything; otherwise it is an advisory warning only when APM artifacts exist.
     Returns :class:`CIAuditResult` with individual check results.
     """
+    from ..constants import APM_MODULES_DIR
     from ..deps.lockfile import LockFile, get_lockfile_path
     from ._shared import _parse_apm_yml_safe
 
@@ -1416,6 +1484,23 @@ def run_baseline_checks(
                 user_scope=user_scope,
                 no_policy=no_policy,
                 prepared_replay=prepared_replay,
+            )
+        )
+        or _run(
+            # 8d: recorded executables decisions are still the gate's (#4053),
+            # after the pins, so audit and --frozen name the same first cause.
+            _check_exec_status_current(
+                project_root,
+                lock,
+                manifest,
+                resolved_targets,
+                user_scope=user_scope,
+                modules_root=(
+                    prepared_replay.modules_root
+                    if prepared_replay is not None
+                    else project_root / APM_MODULES_DIR
+                ),
+                policy_provider=policy_provider,
             )
         )
     ):

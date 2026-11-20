@@ -289,7 +289,7 @@ class InstallService:
         # diagnostics and an unreliable ledger, so raising here would
         # replace the real cause with a confusing lockfile complaint.
         if withheld is not None and install_worked:
-            self._enforce_frozen_no_rewrite(request, withheld)
+            self._enforce_frozen_no_rewrite(request, withheld, result.active_package_keys)
 
         if install_worked:
             post_event = self._build_event("post-install", request)
@@ -786,10 +786,12 @@ class InstallService:
             )
 
     @staticmethod
-    def _enforce_frozen_no_rewrite(request: InstallRequest, withheld: list[str]) -> None:
+    def _enforce_frozen_no_rewrite(
+        request: InstallRequest, withheld: list[str], active_keys: frozenset[str] | None = None
+    ) -> None:
         """Fail a frozen install whose result does not match the committed lockfile.
 
-        Two post-deploy checks share this owner:
+        Three post-deploy checks share this owner:
 
         * **Unrecorded claims.** Each lockfile the frozen install *would*
           have written is compared against the committed ``apm.lock.yaml``.
@@ -800,12 +802,10 @@ class InstallService:
           ``--only``, a removed dependency) do not fail.  Equivalence ignores
           ``generated_at`` and ``apm_version`` (Section 5.5).  The refusal
           first removes the unrecorded files this install wrote (#4309).
+        * **Deployed presence and exec decisions** of the graph (#4043, #4053).
         * **Deployed hashes (req-lk-017).** Every ``deployed_file_hashes``
-          entry is re-verified against the on-disk bytes through the same
-          verifier ``apm audit`` uses, so ``install --frozen`` and
-          ``audit --ci`` give one answer.  This catches a user edit the
-          install kept and an APM upgrade that renders a locked file
-          differently (#3654).
+          entry is re-verified through audit's verifier, so ``install --frozen``
+          and ``audit --ci`` agree on kept user edits and re-renders (#3654).
 
         Native target files are outside the install transaction, so recorded
         files already deployed stay on disk; only the lockfile write is withheld.
@@ -813,6 +813,7 @@ class InstallService:
         from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
         from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.frozen_retirement import enforce_frozen_presence
 
         # Re-read rather than reuse the copy `enforce_frozen` loaded: this
         # judges what is on disk now.  `--frozen` is a CI primitive with a
@@ -856,6 +857,7 @@ class InstallService:
                 withheld, unclaimed, committed, lockfile_path.parent
             )
 
+        enforce_frozen_presence(request, committed, withheld, lockfile_path.parent, active_keys)
         InstallService._enforce_frozen_deployed_hashes(request, committed, deployed=True)
 
     @staticmethod

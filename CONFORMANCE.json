@@ -158,7 +158,7 @@
       "keyword": "MUST",
       "section": "5.5",
       "status": "active",
-      "test_count": 34,
+      "test_count": 35,
       "tests": [
         "tests/spec_conformance/test_codex_mcp_reqs.py::test_frozen_mcp_drift_precedes_codex_legacy_repair[False-http]",
         "tests/spec_conformance/test_codex_mcp_reqs.py::test_frozen_mcp_drift_precedes_codex_legacy_repair[False-stdio]",
@@ -182,6 +182,7 @@
         "tests/spec_conformance/test_lockfile_reqs.py::TestFrozenInstallNeverWritesLockfile::test_frozen_refusal_keeps_unrecorded_files_it_cannot_prove_it_wrote",
         "tests/spec_conformance/test_lockfile_reqs.py::test_cold_dependency_evidence_cannot_defer_direct_mcp_drift[False]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_cold_dependency_evidence_cannot_defer_direct_mcp_drift[True]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_fails_rather_than_keep_a_stale_executables_decision",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_preserves_conflicted_lockfile_bytes[crlf]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_preserves_conflicted_lockfile_bytes[lf]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_lock_withholding_is_decided_once_and_cannot_be_omitted",
@@ -288,9 +289,10 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lock_top_level_vendor_keys_survive_rewrite",
+        "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_install_rewrite_keeps_top_level_vendor_keys",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_unknown_hash_algorithm_rejected"
       ]
     },
@@ -339,10 +341,11 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 4,
+      "test_count": 5,
       "tests": [
         "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_deployed_file_fails_closed_naming_both_hashes[audit-ci]",
         "tests/spec_conformance/test_lockfile_cli_behavior_reqs.py::test_tampered_deployed_file_fails_closed_naming_both_hashes[install-frozen]",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_fails_closed_when_a_recorded_deployed_file_is_missing",
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_install_reverifies_deployed_file_hashes_and_fails_closed",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_deployed_file_hash_mismatch_fails_closed"
       ]
@@ -773,8 +776,9 @@
       "keyword": "MUST",
       "section": "4.8",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_top_level_workspaces_key_warns_reserved_and_installs",
         "tests/spec_conformance/test_manifest_reqs.py::test_producer_workspaces_must_not_use_in_v0_1"
       ]
     },
@@ -1649,8 +1653,9 @@
       "keyword": "MUST",
       "section": "7.2",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_cli_behavior_reqs.py::test_conflict_resolution_nest_refuses_install_and_writes_nothing",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_fails_closed_on_ambiguous_resolution"
       ]
     },

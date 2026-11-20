@@ -70,7 +70,8 @@ ORACLE_LAWS: Mapping[str, OracleLaw] = {
     ),
     "I6": OracleLaw("output is ASCII; JSON mode prints valid JSON", ()),
     "I7": OracleLaw(
-        "no silent success; a failed command preserves durable state",
+        "no silent success; a failed command preserves durable state "
+        "(I7-X1: except retiring an executable it denies or revoked)",
         ("transaction.failed_command_preserves_state",),
     ),
     "I8": OracleLaw(
@@ -113,6 +114,9 @@ class Observation:
     # Service -> server names configured in the managed adapter configs
     # ({"lsp": {"kit-lsp"}}); I1 reconciles them with the lock's URI claims.
     services: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # Surface -> the artifact paths ("<root id>:<path>") it deploys, so I7-X1
+    # can tell a retired executable's files from any other write.
+    surface_paths: Mapping[str, frozenset[str]] = field(default_factory=dict)
     # True when deploy_root is the user deploy root, where native plugin roots live.
     user_scope: bool = False
 
@@ -567,7 +571,6 @@ def _i6_ascii(
 def _i7_failure_preserves_state(
     before: Observation, after: Observation, result: CommandResult | None, model, op: Operation
 ) -> list[Violation] | None:
-    del model
     if result is None or result.returncode == 0 or op.edit_only:
         return None
     found = []
@@ -575,8 +578,10 @@ def _i7_failure_preserves_state(
         found.append(Violation("I7", f"failed {op.name} changed the manifest"))
     if after.state.lockfile_bytes != before.state.lockfile_bytes:
         found.append(Violation("I7", f"failed {op.name} changed the lockfile"))
-    if after.deployed != before.deployed:
+    retirement = _i7_x1_retirement(before, after, model)
+    if retirement is None:
         found.append(Violation("I7", f"failed {op.name} changed deployed surfaces"))
+        retirement = frozenset()
     report = _requested_report(result.command)
     changed = [
         path
@@ -584,6 +589,8 @@ def _i7_failure_preserves_state(
         if path.split(":", 1)[1].rsplit("/", 1)[-1] not in {"apm.yml", "apm.lock.yaml"}
         and not any(_bookkeeping(path.split(":", 1)[1], prefix) for prefix in _FAILURE_BOOKKEEPING)
         and path.split(":", 1)[1] != report
+        and not _within_retirement(path, retirement)
+        and not (retirement and _RETIREMENT_BOOKKEEPING in path)
     ]
     if changed:
         found.append(Violation("I7", f"failed {op.name} changed durable files: {changed}"))
@@ -615,6 +622,32 @@ def _requested_report(command) -> str | None:
 def _bookkeeping(path: str, prefix: str) -> bool:
     """*path* is bookkeeping under *prefix*, or a directory created on the way to it."""
     return _within(path, prefix) or _within(prefix, path)
+
+
+# Retiring a file rewrites its receipt (under APM_HOME at user scope).
+_RETIREMENT_BOOKKEEPING = "deployment-receipts/"
+
+
+def _within_retirement(path: str, retirement: frozenset[str]) -> bool:
+    """A retired file, or an ancestor directory its cleanup left empty and removed."""
+    return path in retirement or any(retired.startswith(path + "/") for retired in retirement)
+
+
+def _i7_x1_retirement(before: Observation, after: Observation, model) -> frozenset[str] | None:
+    """I7-X1: the files a failed command may still remove, or None when it changed more.
+
+    Deny wins (#3944): removing a deployed executable whose current decision
+    is deny or revoked is applied even when the command then fails (for
+    example ``install --frozen``, #4043). The exception is closed: no surface
+    may appear and no allowed surface may go; only the retired surfaces' own
+    files (and the directories their cleanup emptied) may change.
+    """
+    if after.deployed == before.deployed:
+        return frozenset()
+    retired = before.deployed - after.deployed
+    if after.deployed - before.deployed or retired & model.allowed_surfaces():
+        return None
+    return frozenset().union(*(before.surface_paths.get(kind, ()) for kind in retired))
 
 
 # Bookkeeping a failed command may still write: receipts, logs, caches, CLI state.

@@ -149,6 +149,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A partly successful `apm install` of marketplace plugins records ref pins only for the plugins it installs. (closes #4322, #4419)
 - The repository not-found diagnostic names every credential source tried, in order, never their values. (#4322, #4419)
 - `apm install --frozen` that refuses because it deployed files `apm.lock.yaml` does not record now removes those files again, so the project matches the lockfile. (#4309, #4394)
+- `apm install --frozen` now fails like `apm audit --ci` when a denied or unapproved hook was removed but `apm.lock.yaml` still records it, naming each missing file. (closes #4043, #4054)
+- `apm install --frozen` and `apm audit --ci` fail when `apm deny` or org policy changed a package's executables decision since `apm.lock.yaml` recorded it. (closes #4053, #4065)
 
 ## [0.37.0] - 2026-11-20
 

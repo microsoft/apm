@@ -16,6 +16,7 @@ $ apm audit --ci --policy org
 | [+]      | content-integrity        | No critical hidden Unicode or hash drift detected           |
 | [+]      | local-bundle-hooks       | Local bundle hooks are approved                             |
 | [+]      | hook-approval-pins       | Deployed hooks match their approval pins                    |
+| [+]      | exec-status-current      | Recorded executables decisions match the executables gate   |
 | [+]      | includes-consent         | No local content deployed -- includes consent check skipped |
 | [!]      | dependency-allowlist     | 1 dependency(ies) not in allow list (enforcement: warn)     |
 | [+]      | drift                    | no drift detected against lockfile                          |
@@ -24,7 +25,7 @@ $ apm audit --ci --policy org
   dependency-allowlist details:
     - github.com/github/awesome-copilot/skills/review-and-refactor: not in allowed sources
 
-13 check(s) passed; 1 reports violations under 'enforcement: warn' and fail once the policy switches to block.
+14 check(s) passed; 1 reports violations under 'enforcement: warn' and fail once the policy switches to block.
 --- stderr
 [>] Replaying install (cache-only)...
 [+] Replayed 2 package(s)

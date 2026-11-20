@@ -77,10 +77,10 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 1033, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 475, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 485, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 506, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 533, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 490, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 500, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 521, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 548, '"--target"'),
     ),
     "uninstall": (
         Ev("src/apm_cli/commands/uninstall/cli.py", 723, 'argument("packages"'),
@@ -108,9 +108,9 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_APPROVE, 296, 'argument("packages"'),
     ),
     "audit": (
-        Ev("src/apm_cli/commands/audit.py", 1374, 'argument("package"'),
-        Ev("src/apm_cli/commands/audit.py", 1393, '"--dry-run"'),
-        Ev("src/apm_cli/commands/audit.py", 1431, '"--no-policy"'),
+        Ev("src/apm_cli/commands/audit.py", 1404, 'argument("package"'),
+        Ev("src/apm_cli/commands/audit.py", 1423, '"--dry-run"'),
+        Ev("src/apm_cli/commands/audit.py", 1461, '"--no-policy"'),
     ),
     "marketplace": (
         Ev("src/apm_cli/commands/marketplace/__init__.py", 351, "def add(source, name"),
@@ -227,9 +227,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 497, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 498, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 501, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 678, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 679, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 682, 'target.name == "claude"'),
         ),
     ),
     "U9": (
@@ -481,7 +481,7 @@ U_BIN_PIN = "a2fb54bea5abdfe3d5aababbe1a10461fc5a89ec357c94f0dbca9e21b57e6851"
 
 
 def u_bin_applies(cell: Mapping[str, str]) -> bool:
-    """bin/ at project scope: the shape U-BIN defines away (exec_gate.py:498)."""
+    """bin/ at project scope: the shape U-BIN defines away (exec_gate.py:679)."""
     return cell.get("PRIM") == "bin" and cell.get("SCOPE") == "project"
 
 

@@ -369,12 +369,91 @@ def test_context_protection_cannot_regress_to_root_only(
             "hash_mismatches, unresolved_hash_paths = _local_hash_loop(",
             id="audit-bypasses-shared-verifier",
         ),
+        pytest.param(
+            "src/apm_cli/install/frozen_retirement.py",
+            "missing, _gitignored = find_missing_deployed_files(deploy_root, committed, targets)",
+            "missing, _gitignored = [], False",
+            id="frozen-skips-presence-verification",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "missing, gitignored_skipped = find_missing_deployed_files(project_root, lock, targets)",
+            "missing, gitignored_skipped = _local_presence_loop(project_root, lock, targets)",
+            id="audit-bypasses-shared-presence-verifier",
+        ),
+        pytest.param(
+            "src/apm_cli/install/service.py",
+            "enforce_frozen_presence(request, committed, withheld,",
+            "_local_presence_check(request, committed, withheld,",
+            id="frozen-owner-skips-presence-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/frozen_retirement.py",
+            "raise frozen_missing_files_error(",
+            "raise _local_missing_files_error(",
+            id="frozen-refusal-skips-retirement-owner",
+        ),
+        pytest.param(
+            "tests/lifecycle/oracles.py",
+            "if after.deployed - before.deployed or retired & model.allowed_surfaces():",
+            "if after.deployed - before.deployed:",
+            id="i7-x1-widened-to-allowed-surfaces",
+        ),
+        pytest.param(
+            "tests/lifecycle/oracles.py",
+            "if after.state.lockfile_bytes != before.state.lockfile_bytes:",
+            "if False:",
+            id="i7-x1-widened-to-lock-writes",
+        ),
+        pytest.param(
+            "tests/lifecycle/oracles.py",
+            "and not _within_retirement(path, retirement)",
+            "and True",
+            id="i7-x1-widened-to-any-file",
+        ),
+        pytest.param(
+            "tests/lifecycle/oracles.py",
+            "and not (retirement and _RETIREMENT_BOOKKEEPING in path)",
+            "and _RETIREMENT_BOOKKEEPING not in path",
+            id="i7-x1-widened-to-receipts-without-retirement",
+        ),
+        pytest.param(
+            "tests/lifecycle/oracles.py",
+            'return path in retirement or any(retired.startswith(path + "/") for retired in retirement)',
+            "return True",
+            id="i7-x1-widened-beyond-retired-ancestors",
+        ),
+        pytest.param(
+            "src/apm_cli/install/frozen_retirement.py",
+            "stale, _indeterminate = stale_exec_decisions(",
+            "stale, _indeterminate = _local_exec_status_check(",
+            id="frozen-bypasses-exec-status-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            "stale, indeterminate = stale_exec_decisions(",
+            "stale, indeterminate = _local_exec_status_check(",
+            id="audit-bypasses-exec-status-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/audit.py",
+            "else lambda: exec_policy_from_discovery(fetch_policy)",
+            "else replay_policy",
+            id="audit-exec-status-ignores-unavailable-policy",
+        ),
+        pytest.param(
+            "src/apm_cli/policy/ci_checks.py",
+            '    if not stale:\n        return CheckResult(\n            name="exec-status-current",',
+            "    if not stale or recorded_exec_status_is_stale(None, None):\n"
+            '        return CheckResult(\n            name="exec-status-current",',
+            id="audit-rederives-exec-status",
+        ),
     ],
 )
 def test_frozen_and_audit_share_deployed_hash_verifier(
     path: str, original: str, replacement: str
 ) -> None:
-    """``install --frozen`` and ``audit --ci`` re-verify hashes through one owner (#3654)."""
+    """Frozen and ``audit --ci`` share presence, exec_status and hash owners (#3654, #4043, #4053)."""
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(original) == 1
     rule = "install-deployment-frozen-mutation-eligibility"
