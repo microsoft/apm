@@ -135,9 +135,9 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
 ) -> None:
     """Edits in 2 packages -> 2 patches; audit and install point at export-patch.
 
-    Per primitive kind (RA-009): an edited agent is overwritten by a plain
-    install, so audit and install point at ``apm export-patch`` first; edited
-    skills are kept by the install, so audit names delete-then-install instead.
+    Per primitive kind (RA-009): a plain install keeps every edit (#4360);
+    an edited agent is named and the install exits 1, edited skills are kept
+    with a warning, and audit points at ``apm export-patch``.
     """
     world, commits = _build_world(tmp_path, apm_binary_path)
     project = world.consumer(
@@ -160,11 +160,9 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
 
     audit = world.apm(project, "audit", "--ci", "--no-policy", expect=1)
     audit_text = " ".join(output(audit).split())
-    # Two kept skill edits and one agent edit export; only the agent is overwritten.
-    assert (
-        "3 local edit(s) to managed files (1 of them the next 'apm install' overwrites)"
-        in audit_text
-    )
+    # Every edit is kept by the next install (#4360); all three export.
+    assert "3 local edit(s) to managed files;" in audit_text
+    assert "the next 'apm install' overwrites" not in audit_text
     assert LOCAL_EDITS_EXPORT.clause() in audit_text
     assert "apm export-patch" in audit_text
     assert RESTORE_EDITED_SKILL.bind(subject="the edited skill files").sentence() in audit_text
@@ -174,12 +172,14 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
     assert len(patches) == 2, [p.name for p in patches]
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
 
-    install = world.apm(project, "install", "--no-policy")
+    install = world.apm(project, "install", "--no-policy", expect=1)
     install_text = " ".join(output(install).split())
-    assert "overwrites 1 locally edited managed file(s): .claude/agents/ra.md" in install_text
-    assert "apm export-patch" in install_text
+    assert "overwrites" not in install_text
+    assert "Kept .claude/agents/ra.md:" in install_text
+    assert "Move it aside, then run 'apm install'" in install_text
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
-    assert agent.read_bytes() == agent_before
+    assert agent.read_bytes() != agent_before
+    assert agent.read_text().endswith("agent edit\n")
     for rel in skills:
         assert (project / rel).read_text().endswith("two-package edit\n")
 

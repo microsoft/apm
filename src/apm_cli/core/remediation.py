@@ -161,8 +161,8 @@ RESTORE_EDITED = _entry(
 RESTORE_EDITED_OVERWRITE = _entry(
     "drift-restore-edited-overwrite",
     "apm install",
-    "restore the locked content (a plain 'apm install' also overwrites these edited "
-    "instructions, agents, prompts, commands and rules)",
+    "restore the locked content (a plain 'apm install' keeps these edited "
+    "instructions, agents, prompts, commands and rules, and exits 1)",
     before="delete {subject}",
     then="commit the result",
 )

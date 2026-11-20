@@ -28,9 +28,10 @@ class TestLocalEditHint:
         assert "run 'apm export-patch'" in text
         assert text.isascii()
 
-    def test_skills_are_kept_by_install_other_kinds_are_not(self) -> None:
+    def test_install_keeps_an_edit_of_every_kind(self) -> None:
+        # Skills refuse a modified member; other kinds need deployment evidence (#4360).
         assert install_keeps_edit(".agents/skills/kit/SKILL.md")
-        assert not install_keeps_edit(".github/instructions/kit.instructions.md")
+        assert install_keeps_edit(".github/instructions/kit.instructions.md")
 
 
 class TestDriftTextHint:
@@ -41,7 +42,7 @@ class TestDriftTextHint:
                 DriftFinding(path=".github/b.md", kind="modified", package="org/pkg"),
             ]
         )
-        assert local_edit_hint(2) in out
+        assert local_edit_hint(2, overwritten=0) in out
         # The hint must precede the restore advice that would overwrite edits,
         # which deletes the edited files first (#3994, RA-009).
         assert out.index("apm export-patch") < out.index("Delete the edited files")
