@@ -513,42 +513,26 @@ def test_frozen_root_declaration_keeps_precedence(tmp_path: Path, apm_binary_pat
         _assert_mcp_matches_producer(scenario)
 
 
-@pytest.mark.parametrize("problem", ["invalid-shape", "present-mcp-mismatch", "missing-local"])
-def test_frozen_does_not_defer_present_or_local_sources(
-    tmp_path: Path, apm_binary_path: Path, problem: str
+def test_frozen_does_not_defer_a_missing_local_source(
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """Cold remote restoration cannot waive current-source or local-source safeguards."""
+    """Cold remote restoration cannot waive a local source it cannot restore."""
     scenario = _scenario(tmp_path, apm_binary_path)
-    if problem == "missing-local":
-        local = LocalPackageFactory(scenario.producer).create("local")
-        manifest = load_yaml(scenario.producer / "apm.yml")
-        manifest["dependencies"]["apm"].append({"path": "./local"})
-        dump_yaml(manifest, scenario.producer / "apm.yml")
-        scenario.runner.run_sequence(
-            (("install", "--no-policy"),),
-            expected_returncodes=(0,),
-            scenario_id="local-source-producer",
-            cwd=scenario.producer,
-            env=scenario.producer_environment,
-        )
-        assert local.root.is_dir()
-        for name in ("apm.yml", "apm.lock.yaml"):
-            (scenario.consumer / name).write_bytes((scenario.producer / name).read_bytes())
-        assert not (scenario.consumer / "local").exists()
-    else:
-        present = scenario.consumer / "apm_modules/frozen/plugin"
-        present.mkdir(parents=True)
-        if problem == "present-mcp-mismatch":
-            dump_yaml(
-                {
-                    "name": "frozen-plugin",
-                    "version": "1.0.0",
-                    "dependencies": {
-                        "mcp": [{**_ROOT_MCP, "name": "plugin-server", "command": "changed"}]
-                    },
-                },
-                present / "apm.yml",
-            )
+    local = LocalPackageFactory(scenario.producer).create("local")
+    manifest = load_yaml(scenario.producer / "apm.yml")
+    manifest["dependencies"]["apm"].append({"path": "./local"})
+    dump_yaml(manifest, scenario.producer / "apm.yml")
+    scenario.runner.run_sequence(
+        (("install", "--no-policy"),),
+        expected_returncodes=(0,),
+        scenario_id="local-source-producer",
+        cwd=scenario.producer,
+        env=scenario.producer_environment,
+    )
+    assert local.root.is_dir()
+    for name in ("apm.yml", "apm.lock.yaml"):
+        (scenario.consumer / name).write_bytes((scenario.producer / name).read_bytes())
+    assert not (scenario.consumer / "local").exists()
     native = scenario.consumer / ".mcp.json"
     native.write_text('{"mcpServers":{"user-owned":{"command":"keep"}}}\n', encoding="utf-8")
     previous = native.read_bytes()
@@ -556,6 +540,51 @@ def test_frozen_does_not_defer_present_or_local_sources(
     assert "--frozen" in output
     assert native.read_bytes() == previous
     assert not (scenario.consumer / ".agents/skills/frozen-skill").exists()
+
+
+@pytest.mark.parametrize("problem", ["invalid-shape", "present-mcp-mismatch"])
+def test_frozen_restores_and_verifies_a_drifted_present_source(
+    tmp_path: Path, apm_binary_path: Path, problem: str
+) -> None:
+    """A present copy that drifted from the lock is restored from the pin and verified.
+
+    The pinned source is reachable, so --frozen replaces the drifted copy with
+    the verified locked bytes and succeeds (#4401): the lock and manifest stay
+    byte-identical, the deployed skill and MCP servers match the producer, and
+    the user's own MCP entry stays. An unreachable or unverifiable source still
+    fails closed (test_frozen_refuses_unverifiable_source_evidence).
+    """
+    scenario = _scenario(tmp_path, apm_binary_path)
+    present = scenario.consumer / "apm_modules/frozen/plugin"
+    present.mkdir(parents=True)
+    if problem == "present-mcp-mismatch":
+        dump_yaml(
+            {
+                "name": "frozen-plugin",
+                "version": "1.0.0",
+                "dependencies": {
+                    "mcp": [{**_ROOT_MCP, "name": "plugin-server", "command": "changed"}]
+                },
+            },
+            present / "apm.yml",
+        )
+    native = scenario.consumer / ".mcp.json"
+    native.write_text('{"mcpServers":{"user-owned":{"command":"keep"}}}\n', encoding="utf-8")
+    producer_servers = json.loads((scenario.producer / ".mcp.json").read_text(encoding="utf-8"))[
+        "mcpServers"
+    ]
+
+    for _ in range(2):
+        scenario.freeze()
+        assert (scenario.consumer / ".agents/skills/frozen-skill/SKILL.md").read_bytes() == _SKILL
+        assert (present / ".claude-plugin/plugin.json").read_bytes() == (
+            scenario.repository.worktree / ".claude-plugin/plugin.json"
+        ).read_bytes()
+        # The drifted declaration is gone; APM may keep its normalized apm.yml.
+        assert b"changed" not in (present / "apm.yml").read_bytes()
+        servers = json.loads(native.read_text(encoding="utf-8"))["mcpServers"]
+        assert servers.pop("user-owned") == {"command": "keep"}
+        assert servers == producer_servers
 
 
 def test_frozen_services_only_cannot_defer_without_hydration(
