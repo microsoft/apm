@@ -182,8 +182,21 @@ def _output(result) -> str:
     return " ".join((result.stdout + result.stderr).split())
 
 
-@pytest.mark.parametrize("edit", ["tamper", "clear"])
-@pytest.mark.parametrize("field", _PROVENANCE)
+_REFUSE_ONLY = {
+    # A current-format lock with all origin evidence cleared (S-lead rule 3).
+    ("origin", "clear"),
+    # An older generator stamp on a lock whose rows carry origin evidence (rule 1).
+    ("apm_version", "downgrade"),
+}
+
+
+@pytest.mark.parametrize(
+    ("field", "edit"),
+    [
+        *((field, edit) for field in _PROVENANCE for edit in ("tamper", "clear")),
+        *sorted(_REFUSE_ONLY),
+    ],
+)
 def test_update_restores_or_refuses_altered_marketplace_provenance(
     tmp_path: Path, apm_binary_path: Path, field: str, edit: str
 ) -> None:
@@ -239,7 +252,12 @@ def test_update_restores_or_refuses_altered_marketplace_provenance(
     assert all(before.get(name) for name in _PROVENANCE), before
 
     lock = load_yaml(lock_path)
-    if edit == "tamper":
+    if edit == "downgrade":
+        lock["apm_version"] = "0.36.0"
+    elif field == "origin":
+        del lock["dependencies"][0]["source_url"]
+        del lock["dependencies"][0]["source_digest"]
+    elif edit == "tamper":
         lock["dependencies"][0][field] = _TAMPERED[field]
     else:
         del lock["dependencies"][0][field]
@@ -251,7 +269,11 @@ def test_update_restores_or_refuses_altered_marketplace_provenance(
 
     update = run("update", "--yes", "--target", "codex", "--parallel-downloads", "0")
 
-    if update.returncode == 0:
+    if (field, edit) in _REFUSE_ONLY:
+        assert update.returncode == 1, _output(update)
+        assert "[x]" in _output(update) and "apm install" in _output(update), _output(update)
+        assert lock_path.read_bytes() == altered
+    elif update.returncode == 0:
         after = _locked_dependency(lock_path)
         assert {name: after.get(name) for name in _PROVENANCE} == {
             name: before[name] for name in _PROVENANCE
