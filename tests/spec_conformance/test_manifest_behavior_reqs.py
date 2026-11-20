@@ -190,49 +190,6 @@ def test_registry_entry_rejects_typos_but_keeps_vendor_keys(tmp_path: Path, sche
         _load(tmp_path, typo)
 
 
-# --- req-sc-006: registry URL scheme -----------------------------------
-
-
-@pytest.mark.req("req-sc-006")
-@pytest.mark.parametrize("schema", [None, _V01_SCHEMA], ids=["default", "openapm-v0.1"])
-@pytest.mark.parametrize(
-    ("entry", "accepted"),
-    [
-        ({"url": "http://registry.example.com/apm"}, False),
-        ({"url": "http://registry.example.com/apm", "insecure": True}, True),
-        ({"url": "http://127.0.0.1:8080/apm"}, True),
-        ({"url": "http://[::1]:8080/apm"}, True),
-        ({"url": "http://10.0.0.5/apm"}, True),
-        ({"url": "http://172.16.0.5/apm"}, True),
-        ({"url": "http://192.168.0.5/apm"}, True),
-        ({"url": "https://registry.example.com/apm"}, True),
-    ],
-    ids=[
-        "public-http",
-        "insecure",
-        "loopback-v4",
-        "loopback-v6",
-        "rfc1918-10",
-        "rfc1918-172",
-        "rfc1918-192",
-        "https",
-    ],
-)
-@pytest.mark.usefixtures("_registries_enabled")
-def test_http_registry_url_needs_local_host_or_insecure(
-    tmp_path: Path, schema, entry: dict, accepted: bool
-) -> None:
-    """Plain http:// is a parse error naming the registry unless local or insecure: true."""
-    data: dict = {"name": "p", "version": "1.0.0", "registries": {"corp": entry}}
-    if schema:
-        data["$schema"] = schema
-    if accepted:
-        assert _load(tmp_path, data).registries == {"corp": entry["url"]}
-    else:
-        with pytest.raises(ValueError, match="'corp'"):
-            _load(tmp_path, data)
-
-
 # --- req-mf-017: marketplace package sources -----------------------------
 
 

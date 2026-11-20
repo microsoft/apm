@@ -291,7 +291,6 @@ def _load_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema, entr
 
 
 @pytest.mark.req("req-sc-006")
-@pytest.mark.xfail(strict=True, reason="#4286: a public http:// registry URL is accepted at parse")
 @_CONTRACTS
 def test_public_plaintext_registry_url_is_rejected_naming_the_registry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: str | None
@@ -310,23 +309,8 @@ def test_private_plaintext_registry_url_is_accepted(
     assert loaded.registries == {"corp": url}
 
 
-@pytest.mark.parametrize(
-    "schema",
-    [
-        pytest.param(
-            None,
-            id="default",
-            marks=[
-                pytest.mark.req("req-sc-006"),
-                pytest.mark.xfail(
-                    strict=True, reason="S-pending: the default contract rejects the insecure field"
-                ),
-            ],
-        ),
-        # Passing under the v0.1 contract; unmarked so the id reports the xfail above.
-        pytest.param(_V01_SCHEMA, id="openapm-v0.1"),
-    ],
-)
+@pytest.mark.req("req-sc-006")
+@_CONTRACTS
 def test_insecure_opt_in_admits_a_public_plaintext_registry_url(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, schema: str | None
 ) -> None:

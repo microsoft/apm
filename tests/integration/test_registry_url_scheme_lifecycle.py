@@ -16,7 +16,16 @@ import pytest
 from tests.integration._dependency_graph_world import NO_POLICY, World, write
 from tests.integration._policy_scope_kit import tree_snapshot
 
-pytestmark = [pytest.mark.integration, pytest.mark.e2e, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.promise(
+        "req-sc-006",
+        "P-LAW-transaction.failed_command_preserves_state",
+        "P-LAW-outcome.status_matches_state",
+    ),
+]
 
 _V01_SCHEMA = "https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json"
 _CONTRACTS = pytest.mark.parametrize(

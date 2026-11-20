@@ -710,7 +710,8 @@
         "tests/integration/test_registry_url_scheme_lifecycle.py::test_http_registry_to_public_host_is_refused_with_nothing_written",
         "tests/integration/test_registry_url_scheme_lifecycle.py::test_loopback_or_insecure_http_registry_is_accepted",
         "tests/unit/test_apm_yml_registries.py::TestRegistryUrlScheme::test_http_to_public_host_is_a_parse_error",
-        "tests/spec_conformance/test_manifest_behavior_reqs.py::test_http_registry_url_needs_local_host_or_insecure"
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_public_plaintext_registry_url_is_rejected_naming_the_registry",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_insecure_opt_in_admits_a_public_plaintext_registry_url"
       ]
     }
   ],
