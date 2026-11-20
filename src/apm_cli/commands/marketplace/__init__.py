@@ -502,6 +502,14 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
                 "Omit --offline to register a JSON or repository source."
             )
             sys.exit(1)
+        # A hosted catalog registered with --name binds that name to the URL
+        # for its APM_MARKETPLACE_* credential. Check before any network access.
+        credential_bound = is_direct_url and name is not None
+        if credential_bound:
+            from ...marketplace.catalog_binding import require_binding_available
+            from ...marketplace.registry import get_registered_marketplaces
+
+            require_binding_available(name, url, get_registered_marketplaces())
         try:
             fetch_source, manifest = probe_registration(
                 probe_name,
@@ -510,6 +518,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
                 is_direct_url=is_direct_url,
                 offline=offline,
                 explicit_path=explicit_path,
+                credential_bound=credential_bound,
             )
         except (MarketplaceManifestNotFoundError, MarketplaceCatalogPathError) as exc:
             logger.error(str(exc), symbol="error")
@@ -571,6 +580,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
             url=url,
             ref="" if is_direct_url else effective_ref,
             path=detected_path,
+            credential_bound=credential_bound,
         )
         _warn_if_replacing_catalog(logger, final_source, explicit_path is not None)
         _warn_if_duplicate_origin(logger, final_source)
