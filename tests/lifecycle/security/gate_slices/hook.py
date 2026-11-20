@@ -17,11 +17,9 @@ _ALL = (
 _LOCAL = ("definition-changed", "local-deny", "revoke-approval")
 _BUNDLE = tuple(change for change in _ALL if change != "policy-dep-deny")
 _UPDATE_REDEFINED = "#4444 update and install agreement on gated surfaces after a definition change"
-_UPDATE_DEP_DENY = "#4445 update and install agreement on a policy-denied dependency"
 _UNINSTALL_SIBLING = "#4446 uninstall rebuild agreement on gated surfaces"
 _XFAIL = {
     "G|update|definition-changed|hook": _UPDATE_REDEFINED,
-    "G|update|policy-dep-deny|hook": _UPDATE_DEP_DENY,
     **{f"G|uninstall-prune-rebuild|{change}|hook": _UNINSTALL_SIBLING for change in _ALL},
 }
 # A bundle approval pins the whole bundle digest: a changed definition reads as

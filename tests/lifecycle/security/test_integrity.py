@@ -45,6 +45,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from apm_cli.core.remediation import UNINSTALL_EVIDENCE_REMOVE
 from tests.lifecycle import driver, oracles
 from tests.lifecycle.model.expected import expected_exit
 from tests.lifecycle.obligation_space import security_obligations
@@ -375,7 +376,8 @@ _FROZEN_HASHES = r"--frozen: deployed files do not match the hashes recorded in 
 _RETAINED = r"Uninstall could not remove tracked target files"
 # Uninstall refuses before any change when a file lacks deletion evidence (#3701).
 _REFUSED = r"Uninstall refused: deleting these tracked files needs deployment evidence"
-_REFUSAL_NEXT_STEP = r"move each listed file aside or delete it, then rerun 'apm uninstall'"
+# The refusal's next step is the remediation catalog's sentence, matched literally.
+_REFUSAL_NEXT_STEP = re.escape(UNINSTALL_EVIDENCE_REMOVE.sentence())
 
 DEPLOYED_FILE_HASHES = ArtifactSlice(
     packages=("p-skill",),
