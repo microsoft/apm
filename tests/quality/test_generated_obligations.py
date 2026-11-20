@@ -161,6 +161,21 @@ def test_generated_file_names_only_known_ids_and_real_witnesses() -> None:
         assert re.search(rf"def {re.escape(name.split('[')[0])}\b", (root / path).read_text()), key
 
 
+def test_generated_witnesses_match_the_collected_tables_and_journeys() -> None:
+    """generated_obligations.json is current: a dropped or added known cell needs --write."""
+    root = Path(__file__).parents[2]
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.lifecycle.witnesses"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[+] up to date:" in result.stdout, result.stdout
+
+
 def test_catalog_witness_index_includes_generated_rows() -> None:
     catalog = load_catalog()
     for key, witness in catalog.generated_required.items():
