@@ -44,6 +44,11 @@ from apm_cli.utils.http_credentials import (
 )
 from tests.unit.test_packer import _setup_project
 
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("req-sc-002", "req-sc-003", "req-sc-007", "req-sc-010", "req-sc-012"),
+]
+
 _FAKE_PAT = "ghp_" + "Q" * 36
 
 

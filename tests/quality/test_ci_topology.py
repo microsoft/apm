@@ -86,7 +86,8 @@ LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
 LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 15
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
-LIFECYCLE_SMOKE_ROOT = "tests/integration"
+# The lifecycle family core (#4093) runs beside the integration lifecycle modules.
+LIFECYCLE_SMOKE_ROOTS = ("tests/integration", "tests/lifecycle")
 LIFECYCLE_SMOKE_E2E_ENV = "APM_E2E_TESTS"
 LIFECYCLE_SMOKE_E2E_VALUE = "1"
 LIFECYCLE_SMOKE_FULL_EXPRESSION = "lifecycle_smoke"
@@ -739,8 +740,8 @@ def _assert_lifecycle_smoke_command(job: WorkflowNode) -> None:
     marker_index = tokens.index("-m")
     assert tokens[marker_index + 1] == LIFECYCLE_SMOKE_REQUIRED_EXPRESSION
     targets = [token for token in tokens if token.startswith("tests/")]
-    assert targets == [LIFECYCLE_SMOKE_ROOT], (
-        f"lifecycle-smoke must bound marker collection to {LIFECYCLE_SMOKE_ROOT!r}"
+    assert targets == list(LIFECYCLE_SMOKE_ROOTS), (
+        f"lifecycle-smoke must bound marker collection to {LIFECYCLE_SMOKE_ROOTS!r}"
     )
 
 
@@ -827,7 +828,7 @@ def _assert_marker_collection_non_empty(marker: str) -> None:
             "--strict-markers",
             "-m",
             marker,
-            LIFECYCLE_SMOKE_ROOT,
+            *LIFECYCLE_SMOKE_ROOTS,
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -870,7 +871,7 @@ def _collect_lifecycle_nodes(expression: str, shard: int | None = None) -> tuple
             ),
             "-m",
             expression,
-            LIFECYCLE_SMOKE_ROOT,
+            *LIFECYCLE_SMOKE_ROOTS,
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -1184,7 +1185,7 @@ def test_lifecycle_smoke_unbounded_root_fails(
     provisional_lifecycle_job: WorkflowNode,
 ) -> None:
     step = workflow_step(provisional_lifecycle_job, LIFECYCLE_SMOKE_RUN_STEP)
-    step["run"] = step["run"].replace("tests/integration", "tests")
+    step["run"] = step["run"].replace(" ".join(LIFECYCLE_SMOKE_ROOTS), "tests")
 
     with pytest.raises(AssertionError):
         _assert_lifecycle_smoke_command(provisional_lifecycle_job)

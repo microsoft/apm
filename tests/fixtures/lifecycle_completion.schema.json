@@ -23,12 +23,12 @@
         "enum": [
           "tests/integration/test_required_lifecycle_state_machine.py::test_required_global_audit_rule_matrix_for_external_roots[False]",
           "tests/integration/test_required_lifecycle_state_machine.py::test_required_global_audit_rule_matrix_for_external_roots[True]",
-          "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay[project]",
-          "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay[global-canonical]",
-          "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_mandatory_replay[global-aliased]",
-          "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_sequences_preserve_reference_model[project]",
-          "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_sequences_preserve_reference_model[global-canonical]",
-          "tests/integration/test_generated_lifecycle_state_machine.py::test_generated_lifecycle_sequences_preserve_reference_model[global-aliased]",
+          "tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_mandatory_replay[project]",
+          "tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_mandatory_replay[global-canonical]",
+          "tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_mandatory_replay[global-aliased]",
+          "tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_sequences_preserve_reference_model[project]",
+          "tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_sequences_preserve_reference_model[global-canonical]",
+          "tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_sequences_preserve_reference_model[global-aliased]",
           "tests/integration/test_required_lifecycle_state_machine.py::test_required_frozen_semver_transport_refusal_recovers"
         ]
       }

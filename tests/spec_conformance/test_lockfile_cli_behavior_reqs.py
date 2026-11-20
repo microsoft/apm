@@ -8,6 +8,7 @@ test_lockfile_behavior_reqs.py.
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,11 @@ from tests.utils.hermetic_packaged_sample import (
     create_hermetic_packaged_sample,
 )
 
-pytestmark = [pytest.mark.e2e, pytest.mark.requires_apm_binary]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.requires_apm_binary,
+    pytest.mark.promise("req-lk-015", "req-lk-017", "req-lk-018"),
+]
 
 _AGENT = Path(".apm") / "agents" / "fixture-agent.agent.md"
 _DEPLOYED_AGENT = ".github/agents/fixture-agent.agent.md"
@@ -46,6 +51,13 @@ def _text(result) -> str:
 def _locked_entry(project: Path) -> dict:
     lock = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
     return next(entry for entry in lock["dependencies"] if DEPENDENCY in entry["repo_url"])
+
+
+def _deployed_bytes(project: Path) -> dict[str, bytes]:
+    lock = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    paths = sorted(_locked_entry(project)["deployed_file_hashes"])
+    assert paths, lock
+    return {path: (project / path).read_bytes() for path in paths}
 
 
 # --- req-lk-017: deployed file hashes are re-verified --------------------------
@@ -81,24 +93,58 @@ def test_tampered_deployed_file_fails_closed_naming_both_hashes(
 
 
 @pytest.mark.req("req-lk-015")
-@pytest.mark.xfail(
-    strict=True,
-    reason="#4187: tampered locked package content passes install --frozen and audit --ci",
-)
 @pytest.mark.parametrize("command", sorted(_VERIFY))
-def test_tampered_package_content_fails_closed_naming_the_entry(
+def test_cached_copy_contradicting_the_lock_is_named_and_verified_from_source(
     tmp_path: Path, apm_binary_path: Path, command: str
 ) -> None:
+    """A cached copy that contradicts the lock is named, then verified from the locked source."""
     sample = _installed(tmp_path, apm_binary_path)
     project = sample.project.root
+    expected = _locked_entry(project)["content_hash"]
     content = project / "apm_modules" / DEPENDENCY / _AGENT
-    content.write_bytes(content.read_bytes() + b"\ntampered\n")
+    content.write_bytes(content.read_bytes() + b"\nedited\n")
+    lock_before = (project / "apm.lock.yaml").read_bytes()
+    deployed_before = _deployed_bytes(project)
 
     result = sample.run(_VERIFY[command], scenario_id=f"lk-015-content-{command}")
 
     output = _text(result)
+    assert result.returncode == 0, output
+    named = re.search(
+        rf"Content hash mismatch for {re.escape(DEPENDENCY)}: "
+        rf"expected {re.escape(expected)}, got (sha256:[0-9a-f]{{64}})\.",
+        output,
+    )
+    assert named is not None and named.group(1) != expected, output
+    assert (project / "apm.lock.yaml").read_bytes() == lock_before
+    assert _deployed_bytes(project) == deployed_before
+
+
+@pytest.mark.req("req-lk-015")
+@pytest.mark.parametrize("command", sorted(_VERIFY))
+def test_locked_content_hash_is_recomputed_and_names_both_envelopes(
+    tmp_path: Path, apm_binary_path: Path, command: str
+) -> None:
+    """Both verifiers recompute the tree at the locked commit and name the entry and both envelopes."""
+    sample = _installed(tmp_path, apm_binary_path)
+    project = sample.project.root
+    lock_path = project / "apm.lock.yaml"
+    lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    entry = next(row for row in lock["dependencies"] if DEPENDENCY in row["repo_url"])
+    observed = entry["content_hash"]
+    expected = "sha256:" + "0" * 64
+    entry["content_hash"] = expected
+    lock_path.write_text(yaml.safe_dump(lock, sort_keys=False), encoding="utf-8")
+    lock_before = lock_path.read_bytes()
+
+    result = sample.run(_VERIFY[command], scenario_id=f"lk-015-lock-{command}")
+
+    output = _text(result)
     assert result.returncode == 1, output
-    assert DEPENDENCY in output and "content_hash" in output
+    assert (
+        f"Content hash mismatch for {DEPENDENCY}: expected {expected}, got {observed}." in output
+    ), output
+    assert lock_path.read_bytes() == lock_before
 
 
 # --- req-lk-018: frozen by default under CI ------------------------------------
