@@ -476,6 +476,33 @@ def _require_local_bundle_hash(path: str, content_hash: str | None) -> None:
         )
 
 
+def trusted_receipt_baselines(
+    project_root: Path,
+    scope: InstallScope,
+    lockfile: LockFile | None,
+    paths: Sequence[Path],
+    targets: Sequence[TargetProfile],
+) -> dict[Path, str]:
+    """Read-only: map each path to the hash this installation last wrote there.
+
+    Only trusted receipts count (current ownership, bound installation).
+    Invalid receipt state yields nothing; nothing is written or promoted.
+    """
+    try:
+        session = DeploymentMaterializationSession(project_root, scope, lockfile)
+    except (OSError, ValueError):
+        return {}
+    baselines: dict[Path, str] = {}
+    for path in paths:
+        try:
+            baseline = session.baseline(path, targets)
+        except (OSError, ValueError):
+            continue
+        if baseline is not None:
+            baselines[path] = baseline
+    return baselines
+
+
 class DeploymentLedgerCodec:
     """Translate canonical deployment records to and from lockfile views."""
 

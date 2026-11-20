@@ -207,22 +207,19 @@ def unedited_apm_output(
     A trusted local receipt proves such a file is stale APM output (for
     example after a branch switch), not a local edit, so a frozen install
     may replace it. Without a trusted receipt every mismatch counts as an
-    edit. Invalid receipt state proves nothing.
+    edit.
     """
-    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.deployment_ledger import trusted_receipt_baselines
     from apm_cli.core.scope import InstallScope
 
-    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
-    try:
-        session = DeploymentMaterializationSession(deploy_root, scope, lockfile)
-    except (OSError, ValueError):
-        return frozenset()
-    stale: set[str] = set()
-    for drift in drifted:
-        try:
-            baseline = session.baseline(deploy_root / drift.path, list(targets))
-        except (OSError, ValueError):
-            continue
-        if baseline is not None and baseline == drift.actual:
-            stale.add(drift.path)
-    return frozenset(stale)
+    actual = {deploy_root / drift.path: (drift.path, drift.actual) for drift in drifted}
+    baselines = trusted_receipt_baselines(
+        deploy_root,
+        InstallScope.USER if user_scope else InstallScope.PROJECT,
+        lockfile,
+        list(actual),
+        list(targets),
+    )
+    return frozenset(
+        relative for path, (relative, observed) in actual.items() if baselines.get(path) == observed
+    )
