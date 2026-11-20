@@ -36,15 +36,6 @@ def _resolved_key(
     return (locked or dependency).get_unique_key()
 
 
-class _SilentLogger:
-    """Discard the MCP resolver's progress lines while dry-run previews its choice."""
-
-    verbose = False
-
-    def __getattr__(self, _name: str) -> Any:
-        return lambda *_args, **_kwargs: None
-
-
 @dataclass(frozen=True)
 class ProspectiveInstallPlan:
     """Represent the install state that dry-run would use without persisting it."""
@@ -181,7 +172,10 @@ class ProspectiveInstallPlan:
         dependencies = (
             tuple(
                 selected_subtree_dependencies(
-                    self.only_packages, graph.dependency_tree, resolved_dependencies
+                    self.only_packages,
+                    graph.dependency_tree,
+                    resolved_dependencies,
+                    locked_keys=lockfile.dependencies if lockfile is not None else {},
                 )
             )
             if self.only_packages is not None
@@ -215,7 +209,7 @@ class ProspectiveInstallPlan:
             return self
         from apm_cli.core.target_detection import resolve_package_target_decision
         from apm_cli.install.lsp.integration import lsp_target_config
-        from apm_cli.integration.mcp_integrator_install import _resolve_target_runtimes
+        from apm_cli.integration.mcp_integrator_install import select_target_runtimes_quietly
 
         explicit_target = ctx.target or ctx.runtime
         try:
@@ -225,7 +219,7 @@ class ProspectiveInstallPlan:
                 explicit_target=explicit_target,
                 create_config=False,
             )
-            runtimes = _resolve_target_runtimes(
+            runtimes = select_target_runtimes_quietly(
                 runtime=ctx.runtime,
                 exclude=ctx.exclude,
                 verbose=False,
@@ -235,8 +229,6 @@ class ProspectiveInstallPlan:
                 explicit_target=decision.value,
                 target_decision=decision,
                 scope=ctx.scope,
-                logger=_SilentLogger(),
-                console=None,
             )
         except (KeyError, RuntimeError, ValueError):
             return self

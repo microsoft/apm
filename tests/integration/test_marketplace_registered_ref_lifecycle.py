@@ -343,3 +343,77 @@ def test_gitlab_registered_branch_installs_pilot_artifacts(
     default_alpha = _locked(default_project, "plugins/alpha")
     assert "resolved_ref" not in default_alpha
     assert default_alpha["resolved_commit"] == default.sha
+
+
+def _registration(isolated: IsolatedApmEnvironment, name: str) -> dict[str, object]:
+    registry = json.loads((isolated.config_root / "marketplaces.json").read_text("utf-8"))
+    (entry,) = [item for item in registry["marketplaces"] if item["name"] == name]
+    return entry
+
+
+@pytest.mark.parametrize(
+    "source_args",
+    [
+        (_GITLAB_PROJECT, "--host", _GITLAB_HOST),
+        (f"{_GITLAB_HOST}/{_GITLAB_PROJECT}",),
+    ],
+    ids=["owner-repo", "host-owner-repo"],
+)
+def test_shorthand_fragment_ref_registers_the_named_ref(
+    tmp_path: Path, apm_binary_path: Path, source_args: tuple[str, ...]
+) -> None:
+    """#4200: ``OWNER/REPO#ref`` shorthand registers the ref, as a full URL does."""
+    catalog_plugins: list[dict[str, object]] = [{"name": "alpha", "source": "./plugins/alpha"}]
+    isolated = IsolatedApmEnvironment.create(tmp_path / "shorthand", base_env=dict(os.environ))
+    repositories, repository, _default, pilot_sha = _publish_default_and_pilot(
+        isolated, catalog_plugins
+    )
+    env = repositories.url_rewrite_subprocess_env(repository, _GITLAB_REMOTE)
+    project = _consumer(isolated, "consumer")
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=240)
+    source, *host_flag = source_args
+
+    added = _run(
+        runner,
+        ("marketplace", "add", f"{source}#{_PILOT}", *host_flag, "--name", _MARKETPLACE),
+        cwd=project,
+        env=env,
+        scenario_id="shorthand-fragment-ref-add",
+    )
+    output = added.stdout + added.stderr
+    assert output.isascii(), output
+    assert "[!]" not in output, output
+    registered = _registration(isolated, _MARKETPLACE)
+    assert registered["url"] == _GITLAB_REMOTE
+    assert registered["ref"] == _PILOT
+    _run(
+        runner,
+        (*_INSTALL, f"alpha@{_MARKETPLACE}"),
+        cwd=project,
+        env=env,
+        scenario_id="shorthand-fragment-ref-install",
+    )
+    assert _deployed_skill(project, "alpha") == _skill("alpha", _PILOT).encode("utf-8")
+    assert _locked(project, "plugins/alpha")["resolved_commit"] == pilot_sha
+
+    # The unpinned-source warning names a shorthand #ref form; run it as printed.
+    _git(isolated.subprocess_env(), repository.worktree, "tag", "v1.0.0", pilot_sha)
+    _git(isolated.subprocess_env(), repository.worktree, "push", "origin", "refs/tags/v1.0.0")
+    unpinned = _run(
+        runner,
+        ("marketplace", "add", source, *host_flag, "--name", "hinted"),
+        cwd=project,
+        env=env,
+        scenario_id="shorthand-unpinned-add",
+    )
+    hint = f"{source}#v1.0.0"
+    assert hint in " ".join(unpinned.stdout.split()), unpinned.stdout
+    pinned = _run(
+        runner,
+        ("marketplace", "add", hint, *host_flag, "--name", "hinted"),
+        cwd=project,
+        env=env,
+        scenario_id="shorthand-hinted-add",
+    )
+    assert "Pin this git marketplace" not in pinned.stdout + pinned.stderr, pinned.stdout
+    assert _registration(isolated, "hinted")["ref"] == "v1.0.0"

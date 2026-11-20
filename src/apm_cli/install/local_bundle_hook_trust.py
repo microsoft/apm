@@ -242,24 +242,117 @@ def retire_unadmitted_bundle_hooks(
     )
     if not unadmitted:
         return []
+    for item in unadmitted:
+        if not dry_run:
+            retire_bundle_hooks(
+                project_root,
+                targets,
+                item.slug,
+                lock_dir=lock_dir,
+                reason=item.reason,
+                logger=logger,
+            )
+        elif logger is not None:
+            logger.warning(
+                f"Would retire hooks from local bundle '{item.slug}' ({item.reason}). "
+                "To keep them, approve the bundle and rerun 'apm install <bundle>'."
+            )
+    return unadmitted
+
+
+def retire_merged_bundle_entries(project_root: Path, targets: Any, slug: str) -> None:
+    """Drop one bundle's merged hook entries before an approved reinstall rewrites them."""
     from apm_cli.integration.hook_integrator import HookIntegrator
 
     hook_targets = [target for target in targets if target.supports("hooks")]
-    retired_files: set[str] = set()
-    for item in unadmitted:
-        if not dry_run:
-            HookIntegrator().retire_local_bundle_hooks(item.slug, project_root, hook_targets)
-            _retire_per_file(project_root, targets, item)
-            retired_files.update(item.hook_files)
-        if logger is not None:
-            verb = "Would retire" if dry_run else "Retired"
-            logger.warning(
-                f"{verb} hooks from local bundle '{item.slug}' ({item.reason}). "
-                "To keep them, approve the bundle and rerun 'apm install <bundle>'."
-            )
-    if retired_files and lock_dir is not None:
-        _drop_lock_rows(lock_dir, retired_files)
-    return unadmitted
+    HookIntegrator().retire_local_bundle_hooks(slug, project_root, hook_targets)
+
+
+def _bundle_script_rows(
+    lock_paths: Collection[str], targets: Any, slug: str, project_root: Path
+) -> set[str]:
+    """Return the lock rows of hook scripts the hook integrator copied for *slug*."""
+    prefixes = tuple(
+        f"{target.root_dir}/hooks/{middle}{slug}/"
+        for target in targets or ()
+        if callable(getattr(target, "supports", None)) and target.supports("hooks")
+        for middle in ("", "scripts/")
+    )
+    return {
+        value
+        for value in lock_paths
+        if _relative_value(value, project_root).startswith(prefixes) and prefixes
+    }
+
+
+def _relative_value(value: str, project_root: Path) -> str:
+    path = Path(value)
+    return _record_value(path, project_root) if path.is_absolute() else value
+
+
+def _remove_unedited(project_root: Path, rows: Collection[str], recorded: dict[str, str]) -> None:
+    """Remove deployed files whose bytes still match the lock; edits are kept."""
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    for value in rows:
+        path = Path(value) if Path(value).is_absolute() else project_root / value
+        if not path.is_file() or path.is_symlink():
+            continue
+        digest = recorded.get(value)
+        if digest is None or digest == compute_file_hash(path):
+            path.unlink()
+
+
+def retire_bundle_hooks(
+    project_root: Path,
+    targets: Any,
+    slug: str,
+    *,
+    lock_dir: Path | None,
+    reason: str | None,
+    logger: Any = None,
+    diagnostics: Any = None,
+) -> bool:
+    """Retire every hook one local bundle deployed earlier; its reinstall registers none.
+
+    Removes merged entries, per-file hook files with their approval record,
+    the hook scripts copied for *slug*, and their lockfile rows. A *reason*
+    announces the retirement; ``None`` retires silently (the new bundle ships
+    no hooks). Returns whether anything was deployed.
+    """
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+    project_root = Path(project_root)
+    lockfile = LockFile.read(get_lockfile_path(lock_dir)) if lock_dir is not None else None
+    lock_paths = _lock_bundle_paths(lock_dir)
+    state = deployed_bundle_hook_keys(project_root, targets, lock_paths).get(slug)
+    hook_files = {
+        _relative_value(value, project_root) for value in (state.hook_files if state else ())
+    }
+    scripts = _bundle_script_rows(lock_paths, targets, slug, project_root)
+    rows = scripts | {
+        value for value in lock_paths if _relative_value(value, project_root) in hook_files
+    }
+    retire_merged_bundle_entries(project_root, targets, slug)
+    if state is None and not rows:
+        return False
+    # Hook configs register executables and always go; an edited script is kept.
+    configs = tuple(sorted(state.hook_files)) if state else ()
+    _retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))
+    recorded = dict(lockfile.local_deployed_file_hashes) if lockfile is not None else {}
+    _remove_unedited(project_root, scripts, recorded)
+    if rows and lock_dir is not None:
+        _drop_lock_rows(lock_dir, rows)
+    if reason is not None:
+        message = (
+            f"Retired hooks from local bundle '{slug}' ({reason}). "
+            "To keep them, approve the bundle and rerun 'apm install <bundle>'."
+        )
+        if diagnostics is not None:
+            diagnostics.warn(message=message, package=slug)
+        elif logger is not None:
+            logger.warning(message)
+    return True
 
 
 def _lock_bundle_paths(lock_dir: Path | None) -> frozenset[str]:

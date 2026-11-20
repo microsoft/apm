@@ -121,7 +121,10 @@ certify `outcome: passed`:
 Use `lifecycle-state-machine` for durable-state evidence and `e2e` for
 other end-to-end evidence. Certify `lifecycle-state-machine` only when
 the quoted assertion is a state fact (snapshot equality or absence,
-bytes, egress log) backed by `run_evidence`; otherwise it is `missing`.
+bytes, egress log) backed by `run_evidence`. A lifecycle test whose
+assertion is not a state fact is `missing`. A lifecycle test with a
+state-fact assertion that you could not run in this review is
+`unknown` (say why), not `missing`: `missing` means no such test exists.
 
 Three disciplines follow from this table:
 

@@ -972,7 +972,7 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
         (
             "install-deployment-local-bundle-hook-trust",
             "src/apm_cli/install/local_bundle_hook_trust.py",
-            "            _retire_per_file(project_root, targets, item)\n",
+            '    _retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))\n',
             "",
         ),
         (
@@ -2044,6 +2044,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="@serialized_lifecycle\ndef set(",
         new="def set(",
         intent="Config mutation stops routing through the canonical lifecycle lock.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-local-bundle-hook-retirement",
+        rule_id="install-deployment-local-bundle-hook-retirement",
+        path="src/apm_cli/install/local_bundle_hooks.py",
+        old="        retire_merged_bundle_entries(project_root, targets, slug)\n",
+        new="        HookIntegrator().retire_local_bundle_hooks(slug, project_root, targets)\n",
+        intent="A bundle reinstall retires merged hook entries outside the hook trust owner.",
     ),
     MutationCase(
         guard_id="install-deployment-local-bundle-hook-trust",

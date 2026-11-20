@@ -259,13 +259,15 @@ def test_pack_silent_when_license_declared(tmp_path):
         assert "the SBOM will record NOASSERTION" not in combined
 
 
-def test_pack_silent_under_json(tmp_path):
+def test_pack_json_reports_license_warning_in_warnings(tmp_path):
+    """--json keeps the nudge as a JSON warning, not a stderr log line (#4203)."""
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):
         Path("apm.yml").write_text("name: demo\nversion: 1.0.0\n")
         result = runner.invoke(pack_cmd, ["--dry-run", "--json"])
-        combined = result.output + (result.stderr or "")
-        assert "the SBOM will record NOASSERTION" not in combined
+        warnings = _json.loads(result.stdout)["warnings"]
+        assert sum("the SBOM will record NOASSERTION" in w for w in warnings) == 1, warnings
+        assert "the SBOM will record NOASSERTION" not in (result.stderr or "")
 
 
 def test_pack_help_recommends_manifest_marketplace_output_config() -> None:

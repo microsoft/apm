@@ -395,6 +395,12 @@ def _dependency_parts_for_skill_subpath(dep_ref) -> tuple[str, str]:
     return base.rstrip("/"), f"{separator}{reference}" if separator else ""
 
 
+def _reinstall_spec(dep_ref) -> str:
+    """Return the ``apm install`` argument that reinstalls *dep_ref*."""
+    dep_base, ref_suffix = _dependency_parts_for_skill_subpath(dep_ref)
+    return f"{dep_base}{ref_suffix}"
+
+
 def _agent_plugin_skill_name_for_hint(
     source: DependencySource,
     materialization: Materialization,
@@ -502,6 +508,7 @@ def _integrate_materialization(
             requested=ctx.skill_subset,
             available=available_skills,
             package=dep_key,
+            install_spec=_reinstall_spec(dep_ref),
         ):
             ctx.package_deployed_files[dep_key] = []
             return deltas

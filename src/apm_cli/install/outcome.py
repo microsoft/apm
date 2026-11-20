@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import shlex
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import TYPE_CHECKING, NoReturn
@@ -22,6 +24,9 @@ class InstallCommandOutcome:
     success_summary_allowed: bool
 
 
+# Characters a POSIX shell takes literally mid-word; '#' starts a comment
+# only at the start of a word, so ``owner/repo#v1`` needs no quoting.
+_UNQUOTED_ARG = re.compile(r"[\w@%+=:,./#^~-]+")
 _SUCCESS_SUMMARY_DISPOSITIONS = frozenset(
     {
         InstallDisposition.SUCCESS,
@@ -99,8 +104,14 @@ def require_requested_components(
     requested: Iterable[str],
     available: Collection[str],
     package: str,
+    install_spec: str | None = None,
 ) -> bool:
-    """Record one canonical failure when requested components are unavailable."""
+    """Record one canonical failure when requested components are unavailable.
+
+    *install_spec* is the ``apm install`` argument that reinstalls *package*;
+    when given, the failure ends with one runnable ``apm install`` command
+    that selects available components instead of free-text advice.
+    """
     requested_values = tuple(str(value) for value in requested)
     available_names = frozenset(_component_value(str(value)) for value in available)
     missing = missing_requested_components(
@@ -115,10 +126,49 @@ def require_requested_components(
     message = (
         f"{option} {qualifier} {component}s in '{package}'. "
         f"Requested: {', '.join(missing)}. Available: {available_display}. "
-        f"Choose an available {component} or update the package manifest, then reinstall."
     )
+    if install_spec:
+        message += _available_components_next_step(
+            option=option,
+            component=component,
+            install_spec=install_spec,
+            requested=requested_values,
+            available=available_names,
+        )
+    else:
+        message += (
+            f"Choose an available {component} or update the package manifest, then reinstall."
+        )
     diagnostics.error(message, package=package)
     return False
+
+
+def _available_components_next_step(
+    *,
+    option: str,
+    component: str,
+    install_spec: str,
+    requested: tuple[str, ...],
+    available: frozenset[str],
+) -> str:
+    """Return the one runnable install command that selects available components."""
+    kept = [
+        value
+        for value in dict.fromkeys(_component_value(value) for value in requested)
+        if value in available
+    ]
+    selection = kept or sorted(available)[:1]
+    argv = ["apm", "install", install_spec]
+    for value in selection:
+        argv.extend((option, value))
+    command = " ".join(
+        arg if _UNQUOTED_ARG.fullmatch(arg) and not arg.startswith("#") else shlex.quote(arg)
+        for arg in argv
+    )
+    if not selection:
+        return f"Run '{command}' to install the package without {option}."
+    noun = component if len(selection) == 1 else f"{component}s"
+    return f"Run '{command}' to install the available {noun}."
 
 
 def result_from_install_context(ctx: InstallContext) -> InstallResult:

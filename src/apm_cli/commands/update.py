@@ -854,8 +854,10 @@ def _run_dep_update_locked(
             _rich_echo(revision_plan)
             _rich_echo("")
 
-        if plan.has_changes:
-            rendered = render_plan_text(plan, verbose=verbose)
+        # A moved revision pin is already listed above; list each package once (#4208).
+        unpinned_plan = plan.excluding(update.dep_key for update in revision_pin_updates)
+        if unpinned_plan.has_changes:
+            rendered = render_plan_text(unpinned_plan, verbose=verbose)
             if rendered:
                 _rich_echo(rendered)
                 _rich_echo("")
@@ -881,9 +883,9 @@ def _run_dep_update_locked(
                 return False
             plan_state.cache_rehydration_requested = True
 
-        if revision_pin_updates and plan.has_changes:
+        if revision_pin_updates and unpinned_plan.has_changes:
             pin_count = len(revision_pin_updates)
-            dep_count = len(plan.entries)
+            dep_count = len(unpinned_plan.changed_entries)
             pin_noun = "pin rewrite" if pin_count == 1 else "pin rewrites"
             dep_noun = "dependency change" if dep_count == 1 else "dependency changes"
             logger.info(f"Total: {pin_count} revision {pin_noun} + {dep_count} {dep_noun}.")

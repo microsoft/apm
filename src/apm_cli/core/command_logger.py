@@ -25,6 +25,7 @@ from apm_cli.utils.console import (
 if TYPE_CHECKING:
     from apm_cli.deps.revision_pins import RevisionPinSkip
     from apm_cli.install.failure_residue import FailedInstallResidue
+    from apm_cli.integration.cleanup import CleanupResult
     from apm_cli.policy.models import PolicyRemedy
 
 
@@ -165,12 +166,23 @@ class CommandLogger:
         if self.verbose:
             _rich_echo(message, color="dim")
 
-    def stale_cleanup(self, dep_key: str, count: int):
-        """Log target-scoped stale-file cleanup at default verbosity."""
-        if count <= 0:
-            return
-        noun = "file" if count == 1 else "files"
-        _rich_info(f"Cleaned {count} stale deployed {noun} for {dep_key}", symbol="info")
+    def stale_cleanup(self, dep_key: str, cleanup: CleanupResult) -> int:
+        """Name each deployed path a cleanup pass removed; return how many were named."""
+        return self._removed_paths(
+            cleanup.announced_paths, lambda noun: f"stale deployed {noun} for {dep_key}"
+        )
+
+    @staticmethod
+    def _removed_paths(paths: Sequence[str], describe: Callable[[str], str]) -> int:
+        """Render one cleanup header whose count matches the paths listed under it."""
+        if not paths:
+            return 0
+        noun = "path" if any(path.endswith("/") for path in paths) else "file"
+        noun += "" if len(paths) == 1 else "s"
+        _rich_info(f"Cleaned {len(paths)} {describe(noun)}:", symbol="info")
+        for path in paths:
+            _rich_info(f"  - {path}", soft_wrap=True)
+        return len(paths)
 
     def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str):
         """Explain that a user-edited managed file was retained."""
@@ -273,6 +285,8 @@ class InstallLogger(CommandLogger):
         # MCP servers this run removed from native config; a change on their own.
         self._mcp_removed: set[str] = set()
         self._failed_install_residue_note = ""
+        # Policy banners already shown; the package and MCP phases share them.
+        self._policy_banners: set[tuple[str, ...]] = set()
 
     def failed_install_residue(self, residue: FailedInstallResidue) -> None:
         """List native target output a failed install left behind, with one next step.
@@ -660,21 +674,16 @@ class InstallLogger(CommandLogger):
 
     # --- Cleanup phase (stale and orphan file removal) ---
 
-    def stale_cleanup(self, dep_key: str, count: int):
-        """Log per-package stale-file cleanup outcome at default verbosity.
+    def stale_cleanup(self, dep_key: str, cleanup: CleanupResult) -> int:
+        """Name per-package stale cleanup at default verbosity.
 
         Stale-file deletion is a destructive operation in the user's
-        tracked workspace (unlike npm's ``node_modules``); it must be
-        visible without ``--verbose``. Rendered as an info line so it
-        groups visually with other phase messages, not as a tree item
-        (the originating package line was emitted earlier in the install
-        sequence and is no longer adjacent).
+        tracked workspace (unlike npm's ``node_modules``); every removed
+        path must be visible without ``--verbose``.
         """
-        if count <= 0:
-            return
+        count = super().stale_cleanup(dep_key, cleanup)
         self._stale_cleaned_total += count
-        noun = "file" if count == 1 else "files"
-        _rich_info(f"Cleaned {count} stale deployed {noun} for {dep_key}", symbol="info")
+        return count
 
     def frozen_orphans_kept(self, dep_keys: list[str]) -> None:
         """Name undeclared packages a frozen install left in place (#3662)."""
@@ -684,20 +693,18 @@ class InstallLogger(CommandLogger):
             symbol="info",
         )
 
-    def orphan_cleanup(self, count: int):
-        """Log post-install orphan-file cleanup outcome at default verbosity.
+    def orphan_cleanup(self, cleanups: Sequence[CleanupResult]) -> int:
+        """Name post-install orphan cleanup at default verbosity.
 
         Same visibility rationale as :meth:`stale_cleanup`: file deletion
         in the user's workspace must be visible by default.
         """
-        if count <= 0:
-            return
-        self._stale_cleaned_total += count
-        noun = "file" if count == 1 else "files"
-        _rich_info(
-            f"Cleaned {count} {noun} from packages no longer in apm.yml",
-            symbol="info",
+        paths = [path for cleanup in cleanups for path in cleanup.announced_paths]
+        count = self._removed_paths(
+            paths, lambda noun: f"{noun} from packages no longer in apm.yml"
         )
+        self._stale_cleaned_total += count
+        return count
 
     @property
     def stale_cleaned_total(self) -> int:
@@ -738,6 +745,8 @@ class InstallLogger(CommandLogger):
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
+        if not self._first_policy_banner("resolved", source, enforcement):
+            return
         parts = [f"Policy: {source}"]
         if chain and len(chain) > 1:
             # The leaf is already the source; show its ancestors root first.
@@ -795,6 +804,8 @@ class InstallLogger(CommandLogger):
             hint: Optional discovery diagnostic (``PolicyFetchResult.
                 discovery_hint``), shown with ``absent`` in verbose mode only.
         """
+        if not self._first_policy_banner("miss", outcome, source):
+            return
         err_text = error or "unknown"
 
         if outcome == "absent":
@@ -954,13 +965,27 @@ class InstallLogger(CommandLogger):
                     err=True,
                 )
 
+    def _first_policy_banner(self, *key: str) -> bool:
+        """Record a policy banner; False when this invocation already showed it.
+
+        The package phase and the MCP phase both route the same policy
+        outcome, so every policy banner is printed once per invocation.
+        """
+        if key in self._policy_banners:
+            return False
+        self._policy_banners.add(key)
+        return True
+
     def policy_disabled(self, reason: str):
         """Log a loud warning that policy enforcement is disabled.
 
         Emitted when ``--no-policy`` or ``APM_POLICY_DISABLE=1`` is
         active.  Always visible (never silenceable) -- matches the
-        ``--allow-insecure`` pattern.
+        ``--allow-insecure`` pattern.  Shown once per invocation even when
+        several install phases check the escape hatch.
         """
+        if not self._first_policy_banner("disabled", reason):
+            return
         _rich_warning(
             f"Policy enforcement disabled by {reason} for this invocation. "
             "This does NOT bypass apm audit --ci. "

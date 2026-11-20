@@ -10,6 +10,7 @@ from scripts.architecture_linter.checks.install_deployment_shared import (
     _count_re,
     _duplicate_definition_lines,
     _facts_for,
+    _lines,
     _present,
     _summary,
 )
@@ -23,6 +24,10 @@ _RENDERER = "src/apm_cli/install/presentation/dry_run.py"
 _SELECTION_OWNER = "src/apm_cli/install/package_selection.py"
 _RESOLVE = "src/apm_cli/install/phases/resolve.py"
 _RESOLVER = "src/apm_cli/deps/apm_resolver.py"
+_SUBTREE_CALL = re.compile(
+    r"selected_subtree_dependencies\(\s*self\.only_packages,\s*graph\.dependency_tree,"
+    r"\s*resolved_dependencies\b"
+)
 
 
 def _selection_uses_interpreted_identity(provider: FactsProvider) -> bool:
@@ -132,7 +137,7 @@ def check_prospective_dry_run_plan(provider: FactsProvider) -> tuple[Violation, 
         and _present(owner, "read_only=True,")
         and _present(owner, "resolver.resolve_dependencies(project_root, root_package=apm_package)")
         and _present(owner, "graph.flattened_dependencies.get_installation_list()")
-        and _present(owner, "self.only_packages, graph.dependency_tree, resolved_dependencies")
+        and _SUBTREE_CALL.search("\n".join(_lines(owner))) is not None
         and _present(resolve, "ctx.deps_to_install = selected_subtree_dependencies(")
         and _present(owner, "selected_subtree_dependencies(")
         and _present(owner, "self.resolved_apm_dependencies")

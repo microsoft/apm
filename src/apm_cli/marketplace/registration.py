@@ -69,10 +69,15 @@ def is_valid_alias(value: str) -> bool:
 
 
 def split_source_fragment_ref(source: str) -> tuple[str, str]:
-    """Split an HTTPS git URL #ref fragment from the URL stored in the registry."""
+    """Split a ``#ref`` from an HTTPS git URL or OWNER/REPO shorthand source."""
+    from .source_identity import is_shorthand_marketplace_source
+
     raw = (source or "").strip()
     if raw.lower().startswith("ssh://") and "#" in raw:
         raise ValueError("SSH URL fragments are not supported; use --ref REF instead.")
+    if is_shorthand_marketplace_source(raw):
+        base, _, fragment = raw.partition("#")
+        return (base, fragment) if fragment else (raw, "")
     if not raw.lower().startswith("https://"):
         return raw, ""
     parsed = urlsplit(raw)

@@ -88,18 +88,22 @@ def render_drift_text(
     *,
     lockfile: LockFile | None = None,
     project_root: Path | None = None,
+    advisory: bool = False,
 ) -> str:
     """Render drift findings as grouped terminal text.
 
     *lockfile* lets the export-patch hint skip local-path packages; with
     *project_root* it also tells local edits from rendering changes.
+    *advisory* marks drift that does not fail the run, so the header is a
+    warning rather than an error.
     """
     if not findings:
         return f"{STATUS_SYMBOLS['check']} No drift detected"
 
     status = (
         "error"
-        if any(
+        if not advisory
+        and any(
             finding.kind in {"modified", "unrecorded", "unmanaged-conflict"} for finding in findings
         )
         else "warning"

@@ -450,6 +450,11 @@ def _validate_ado_git_package(
     )
     attempts: list[tuple[object, str, dict[str, str]]] = []
     org = dependency_repository_owner(dep_ref)
+    if verbose_log and dep_ctx is not None:
+        verbose_log(
+            f"Auth resolved: host={dep_ctx.host_info.display_name}, org={org}, "
+            f"source={dep_ctx.source}, type={dep_ctx.token_type}"
+        )
     for attempt in transport_plan.attempts:
         if attempt.requested_url is not None:
             probe_url = attempt.requested_url

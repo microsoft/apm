@@ -178,6 +178,11 @@ class UpdatePlan:
     def changed_entries(self) -> tuple[PlanEntry, ...]:
         return tuple(e for e in self.entries if e.has_changes)
 
+    def excluding(self, dep_keys: Iterable[str]) -> UpdatePlan:
+        """Return the plan without *dep_keys* (shown elsewhere, e.g. as pin rewrites)."""
+        skip = frozenset(dep_keys)
+        return UpdatePlan(entries=tuple(e for e in self.entries if e.dep_key not in skip))
+
     @property
     def summary_counts(self) -> dict[str, int]:
         counts = {

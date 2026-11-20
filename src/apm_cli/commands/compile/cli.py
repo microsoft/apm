@@ -1084,6 +1084,9 @@ def _run_compilation(
                 elif result.stats.get("claude_native_rules_only"):
                     # Claude reads .claude/rules/ directly; nothing to warn about (#3994).
                     pass
+                elif result.stats.get("agents_md_suppressed_by_dedup"):
+                    # The compiler already explained the deduplicated AGENTS.md skip (#4209).
+                    pass
                 elif result.stats.get("primitives_found") == 0:
                     # Nothing to compile is not a misconfigured target (#3994).
                     logger.progress("No instructions to compile -- nothing written.", symbol="info")

@@ -264,8 +264,9 @@ class DeploymentReconciler:
         handoffs: list[tuple[str, str, str]] = []
         successful_by_value = self._successful_by_value(successful)
         failed_values = {locator.value for locator in failed_by_key.values()}
+        unconfirmed_absent: set[str] = set()
         obsolete_absent = self._obsolete_absent_values(
-            previous, intent, successful_by_value, failed_values
+            previous, intent, successful_by_value, failed_values, unconfirmed_absent
         )
         superseded_success_keys: set[str] = set()
 
@@ -323,6 +324,7 @@ class DeploymentReconciler:
                 continue
             next_records[key] = record
 
+        self._warn_unconfirmed_absent(intent, unconfirmed_absent, retained)
         next_ledger = DeploymentLedger(records=next_records)
         return DeploymentReconcileResult(
             ledger=next_ledger,
@@ -377,8 +379,12 @@ class DeploymentReconciler:
         intent: DeploymentIntent,
         successful_by_value: Mapping[str, list[MaterializationResult]],
         failed_values: set[str],
+        unconfirmed: set[str],
     ) -> frozenset[str]:
-        """Retire absent dependency claims only with complete owner-scoped evidence."""
+        """Retire absent dependency claims only with complete owner-scoped evidence.
+
+        Absent claims that lack that proof are added to *unconfirmed*.
+        """
         from apm_cli.core.deployment_ledger import UNATTRIBUTED_TARGET
 
         completed = intent.completed_reintegration
@@ -409,16 +415,25 @@ class DeploymentReconciler:
         if not candidates:
             return frozenset()
         proven_skill_values = self._proven_skill_values(completed, candidates, successful_by_value)
-        unresolved = candidates - proven_skill_values
-        if unresolved:
+        unconfirmed.update(candidates - proven_skill_values)
+        return frozenset(candidates & proven_skill_values)
+
+    def _warn_unconfirmed_absent(
+        self,
+        intent: DeploymentIntent,
+        unconfirmed: set[str],
+        retained: list[DeploymentLocator],
+    ) -> None:
+        """Name absent claims this run actually kept; removed claims are not retained."""
+        kept = unconfirmed & {locator.value for locator in retained}
+        if kept and intent.completed_reintegration is not None:
             self.diagnostics.warn(
                 "Historical dependency claims retained: APM cannot confirm these paths "
                 "belong to a current skill. Use --verbose for retained paths and check "
                 "which files the dependency currently deploys.",
-                package=completed.owner,
-                detail=", ".join(sorted(unresolved)),
+                package=intent.completed_reintegration.owner,
+                detail=", ".join(sorted(kept)),
             )
-        return frozenset(candidates & proven_skill_values)
 
     def _proven_skill_values(
         self,

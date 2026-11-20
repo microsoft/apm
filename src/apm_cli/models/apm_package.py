@@ -393,12 +393,25 @@ def _ascii_token(value: object) -> str:
     return ascii(text)[1:-1]
 
 
+# OpenAPM req-mf-021: reserved for v0.2; named as such, ignored, never fatal.
+_RESERVED_V02_KEYS = frozenset({"workspaces"})
+
+
 def _warn_unknown_manifest_keys(keys: list[str], manifest_path: Path) -> None:
     """Warn once, naming every ignored top-level key."""
     from ..utils.console import _rich_warning
 
-    safe_keys = ", ".join(_ascii_token(key) for key in keys)
     safe_path = _ascii_token(manifest_path.as_posix())
+    for key in sorted(_RESERVED_V02_KEYS.intersection(keys)):
+        _rich_warning(
+            f"Top-level key '{key}' in {safe_path} is reserved for OpenAPM v0.2; "
+            "its value is ignored in v0.1.",
+            symbol="warning",
+        )
+    keys = [key for key in keys if key not in _RESERVED_V02_KEYS]
+    if not keys:
+        return
+    safe_keys = ", ".join(_ascii_token(key) for key in keys)
     _rich_warning(
         f"Unknown top-level key(s) in {safe_path}: {safe_keys}. "
         "These keys were ignored. Rename each to match x-[a-z][a-z0-9-]* "
@@ -431,6 +444,16 @@ def _collect_manifest_extensions(
     if unknown and warning_handler is not None:
         warning_handler(unknown, manifest_path)
     return extensions
+
+
+def _refuse_reserved_conflict_resolution(raw_deps: Mapping[str, Any], manifest: Path) -> None:
+    """Refuse ``conflict_resolution: nest``, reserved for v0.2 (OpenAPM req-rs-013)."""
+    if raw_deps.get("conflict_resolution") == "nest":
+        raise ValueError(
+            f"'dependencies.conflict_resolution: nest' in {_ascii_token(manifest.as_posix())} "
+            "is reserved for OpenAPM v0.2 and cannot be installed (OpenAPM v0.1 "
+            "Section 7.2, clause (3)). Remove the key or set it to 'intersection-pick'."
+        )
 
 
 def _iter_apm_dependency_lists(
@@ -621,6 +644,7 @@ class APMPackage:
                     "    apm:\n"
                     "      - owner/repo"
                 )
+            _refuse_reserved_conflict_resolution(raw_deps, source_manifest)
             dependencies = cls._parse_dependency_dict(raw_deps, label="")
 
         # Parse devDependencies (same structure as dependencies)
@@ -739,8 +763,12 @@ class APMPackage:
                 bind_plugin_roots((parsed_group or {}).get(kind), package_path)
 
         # Merge user/policy registry URLs and config.json default routing.
-        from ..deps.registry.config_loader import resolve_effective_registries
+        from ..deps.registry.config_loader import (
+            resolve_effective_registries,
+            user_registry_config_path,
+        )
 
+        project_registries = registries
         registries, default_registry = resolve_effective_registries(
             registries,
             default_registry,
@@ -749,9 +777,13 @@ class APMPackage:
         if registries or default_registry:
             from ..deps.registry.feature_gate import require_package_registry_enabled
 
+            user_source = None
+            if not project_registries:
+                user_source = user_registry_config_path(create_config=create_config)
             require_package_registry_enabled(
                 "Registry configuration",
                 create_config=create_config,
+                config_source=str(user_source) if user_source else None,
             )
 
         # Route unscoped deps to the effective default registry when configured.

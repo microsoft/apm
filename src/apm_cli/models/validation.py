@@ -300,8 +300,9 @@ def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:
 
     Used by ``_validate_apm_package_with_yml`` to accept a dep-only
     ``apm.yml`` (no ``.apm/`` directory) as a valid curated aggregator
-    (#1094). Any non-empty ``apm`` or ``mcp`` list under ``dependencies``
-    OR ``devDependencies`` qualifies. Tolerant of malformed YAML /
+    (#1094). Any non-empty ``apm``, ``mcp`` or ``lsp`` list under
+    ``dependencies`` OR ``devDependencies`` qualifies, so an LSP-only
+    package is accepted from every source kind (#4214, #4257). Tolerant of malformed YAML /
     missing keys: returns False on any parse problem so callers fall
     back to the legacy "missing .apm/" diagnostic instead of silently
     accepting a malformed manifest.
@@ -318,13 +319,13 @@ def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:
     def _has_listed_deps(block: object) -> bool:
         if not isinstance(block, dict):
             return False
-        # Schema requires `apm` and `mcp` to be lists of strings or dicts
+        # Schema requires `apm`, `mcp` and `lsp` to be lists of strings or dicts
         # (see APMPackage._parse_dependency_dict). Non-list values, or
         # lists with no parseable entries, are malformed; treat them as
         # "no declared dependencies" so the caller falls through to the
         # legacy "missing .apm/" diagnostic instead of silently accepting
         # a malformed manifest.
-        for key in ("apm", "mcp"):
+        for key in ("apm", "mcp", "lsp"):
             value = block.get(key)
             if isinstance(value, list) and any(isinstance(entry, (str, dict)) for entry in value):
                 return True

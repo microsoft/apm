@@ -79,6 +79,9 @@ Sample output in a project with `CLAUDE.md` and `.cursor/`:
   kiro         inactive   needs .kiro/                             .kiro/
 ```
 
+When `targets:` is declared in `apm.yml`, each declared target shows
+`apm.yml` as its source.
+
 Machine-readable form:
 
 ```bash

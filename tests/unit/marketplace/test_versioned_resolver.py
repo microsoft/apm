@@ -209,7 +209,7 @@ class TestResolveMarketplacePlugin:
                 side_effect=_fake_resolve,
             ),
             patch("apm_cli.marketplace.version_pins.check_ref_pin", return_value=None),
-            patch("apm_cli.marketplace.version_pins.record_ref_pin"),
+            patch("apm_cli.marketplace.version_pins.stage_ref_pin"),
             patch(
                 "apm_cli.marketplace.shadow_detector.detect_shadows",
                 return_value=[],
@@ -293,7 +293,7 @@ class TestWarningHandler:
                 return_value="old-ref-abc",  # pretend ref changed
             ),
             patch(
-                "apm_cli.marketplace.version_pins.record_ref_pin",
+                "apm_cli.marketplace.version_pins.stage_ref_pin",
             ),
         ):
             resolve_marketplace_plugin(
@@ -337,7 +337,7 @@ class TestWarningHandler:
                 return_value=None,
             ),
             patch(
-                "apm_cli.marketplace.version_pins.record_ref_pin",
+                "apm_cli.marketplace.version_pins.stage_ref_pin",
             ),
         ):
             resolve_marketplace_plugin(
@@ -372,7 +372,7 @@ class TestWarningHandler:
                 return_value="old-ref",
             ),
             patch(
-                "apm_cli.marketplace.version_pins.record_ref_pin",
+                "apm_cli.marketplace.version_pins.stage_ref_pin",
             ),
             caplog.at_level(logging.WARNING, logger="apm_cli.marketplace.resolver"),
         ):

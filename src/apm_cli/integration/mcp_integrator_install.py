@@ -22,7 +22,7 @@ from apm_cli.core.apm_yml import (
     EmptyTargetsListError,
     UnknownTargetError,
 )
-from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.core.null_logger import NullCommandLogger, SilentLogger
 from apm_cli.core.scope import manifest_file
 from apm_cli.core.target_catalog import accepted_target_values
 from apm_cli.install.errors import (
@@ -1338,6 +1338,11 @@ def _resolve_target_runtimes(
             return None
 
     return target_runtimes
+
+
+def select_target_runtimes_quietly(**selection: Any) -> list[str] | None:
+    """Select MCP runtimes for a pre-check; the install run announces them once (#4196)."""
+    return _resolve_target_runtimes(**selection, logger=SilentLogger(), console=None)
 
 
 def _print_user_wide_configs(console: Any, runtimes: list[str]) -> None:

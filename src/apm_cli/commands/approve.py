@@ -640,19 +640,52 @@ def _show_pending(manifest: Path, *, logger: CommandLogger) -> None:
     from dataclasses import replace
 
     pending = _pending_declarations(manifest, logger=logger)
-    if not pending:
+    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
+    bundles = _pending_bundles(manifest, ctx)
+    if not pending and not bundles:
         _rich_success("All packages with executables are approved.")
         return
 
-    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
-    _rich_warning(f"{len(pending)} package(s) with unapproved or changed executables:")
-    for decl in pending:
-        pins = _pins_for(decl)
-        _rich_echo(f"  {_identity(decl)}: {decl.summary_line()}")
-        _echo_pins(decl, pins, _item_states(ctx, decl, pins))
+    if pending:
+        _rich_warning(f"{len(pending)} package(s) with unapproved or changed executables:")
+        for decl in pending:
+            pins = _pins_for(decl)
+            _rich_echo(f"  {_identity(decl)}: {decl.summary_line()}")
+            _echo_pins(decl, pins, _item_states(ctx, decl, pins))
+        _rich_echo("")
+        _rich_info(
+            "Review each definition, then run 'apm approve <package>' to pin it.",
+            symbol="info",
+        )
+    if bundles:
+        _show_pending_bundles(manifest, bundles)
+
+
+def _pending_bundles(manifest: Path, ctx) -> list:
+    """Installed local bundles whose parked executables are still not approved (#4221)."""
+    from ..install.local_bundle_pending import pending_bundles
+    from ..security.executables import materialize_exec_map, package_type_approved
+
+    allow_map = materialize_exec_map(ctx)
+    return pending_bundles(
+        manifest.parent,
+        lambda key, exec_type: package_type_approved(allow_map, (key,), exec_type),
+    )
+
+
+def _show_pending_bundles(manifest: Path, bundles: list) -> None:
+    _rich_warning(f"{len(bundles)} local bundle(s) with parked executables:")
+    for bundle in bundles:
+        _rich_echo(
+            f"  local bundle '{bundle.slug}': {', '.join(bundle.exec_types)} not approved; "
+            "approval key:"
+        )
+        # The key is copied into apm.yml, so it is never wrapped.
+        _rich_echo(f'    "{bundle.approval_key}"', soft_wrap=True)
     _rich_echo("")
     _rich_info(
-        "Review each definition, then run 'apm approve <package>' to pin it.",
+        f"Review the bundle, add its approval key under executables.allow in {manifest.name}, "
+        "then rerun 'apm install <bundle>'.",
         symbol="info",
     )
 

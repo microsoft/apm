@@ -11,17 +11,36 @@ from apm_cli.utils.paths import portable_relpath
 
 
 def format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
-    """Format one target path, two paths, or a collapsed multi-target count."""
+    """Name every destination folder: inline, or one line each when verbose (#4211)."""
     deduped = list(dict.fromkeys(paths))
     if verbose and len(deduped) >= 2:
         return "", [f"  |     -> {path}" for path in deduped]
-    if not deduped:
-        return "", []
-    if len(deduped) == 1:
-        return deduped[0], []
-    if len(deduped) == 2:
-        return f"{deduped[0]}, {deduped[1]}", []
-    return f"{len(deduped)} targets", []
+    return ", ".join(deduped), []
+
+
+def destination_tree_lines(phrase: str, paths: list[str], verbose: bool) -> list[str]:
+    """Return the ``|-- <phrase> -> <folders>`` install tree lines for *paths*."""
+    suffix, expansion = format_target_collapse(paths, verbose)
+    if expansion:
+        return [f"  |-- {phrase}:", *expansion]
+    return [f"  |-- {phrase} -> {suffix}"]
+
+
+def destination_folders(records: list[str], targets: Any) -> list[str]:
+    """Return the primitive folders (``.github/agents/``) holding *records*, in order.
+
+    A record outside every target primitive folder is named by its parent.
+    """
+    roots = [
+        f"{mapping.deploy_root or target.root_dir}/{mapping.subdir}/".replace("//", "/")
+        for target in targets
+        for mapping in (target.primitives or {}).values()
+    ]
+    folders: list[str] = []
+    for record in records:
+        owner = max((root for root in roots if record.startswith(root)), key=len, default=None)
+        folders.append(owner or f"{record.rsplit('/', 1)[0]}/")
+    return list(dict.fromkeys(folders))
 
 
 def deployed_path_entry(

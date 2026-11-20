@@ -72,3 +72,30 @@ def test_dry_run_preview_matches_the_retired_heal(
     assert not (chain.project / ".vscode" / "mcp.json").exists()
     assert set(chain.servers("copilot")) == root
     assert set(chain.servers("cursor")) == cursor
+
+
+@pytest.mark.parametrize("recorded", ["0.35.1", "unknown"])
+def test_unknown_generator_version_heals_the_retired_file_like_a_known_one(
+    tmp_path: Path, apm_binary_path: Path, recorded: str
+) -> None:
+    """#4169: a lock stamped ``apm_version: unknown`` heals .github/mcp.json and says so."""
+    fixture = _FIXTURE.parent / "v0.35.1"
+    chain = Chain(tmp_path / "world", apm_binary_path)
+    shutil.copytree(fixture / "pkg", chain.isolated.work_root / "pkg")
+    shutil.copytree(fixture / "plural", chain.project, dirs_exist_ok=True)
+    lock_path = chain.project / "apm.lock.yaml"
+    lock_path.write_text(
+        lock_path.read_text(encoding="utf-8").replace(
+            "apm_version: 0.35.1", f"apm_version: {recorded}"
+        ),
+        encoding="utf-8",
+    )
+    retired = chain.project / ".github" / "mcp.json"
+    assert "srv" in retired.read_text(encoding="utf-8")
+
+    result = chain.ok("install", "--no-policy")
+
+    text = " ".join((result.stdout + result.stderr).split())
+    assert not retired.exists() or "srv" not in retired.read_text(encoding="utf-8"), text
+    assert ".github/mcp.json" in text, text
+    assert set(chain.servers("copilot")) == {"srv"}

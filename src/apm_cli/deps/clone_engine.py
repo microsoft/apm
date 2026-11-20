@@ -32,7 +32,11 @@ from urllib.parse import urlsplit
 from git.exc import GitCommandError
 
 from ..core.auth_chain import AdoAuthChainExhaustedError
-from ..core.auth_outcome import classify_auth_outcome
+from ..core.auth_outcome import (
+    RepositoryNotFoundError,
+    classify_auth_outcome,
+    is_repository_not_found,
+)
 from ..models.apm_package import DependencyReference
 from ..models.dependency.host_virtual import repository_owner
 from ..utils.github_host import (
@@ -464,6 +468,7 @@ class CloneEngine:
                 if plan.strict:
                     break
 
+        repository_not_found = last_error is not None and is_repository_not_found(last_error)
         error_msg = build_clone_failure_message(
             repo_url_base=repo_url_base,
             plan=plan,
@@ -487,6 +492,9 @@ class CloneEngine:
                     public_github_anonymous=True,
                 ).is_auth_failure
             ),
+            repository_not_found=repository_not_found,
         )
 
+        if repository_not_found:
+            raise RepositoryNotFoundError(error_msg) from last_error
         raise RuntimeError(error_msg)

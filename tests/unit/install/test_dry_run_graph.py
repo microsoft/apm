@@ -107,6 +107,37 @@ def test_selected_subtree_keeps_distinct_nodes_with_the_same_identity() -> None:
 
 
 @pytest.mark.parametrize(
+    ("locked_keys", "expected"),
+    [
+        (None, ["owner/root"]),
+        ((), ["owner/root", "./local"]),
+        (("./local",), ["owner/root"]),
+    ],
+    ids=["no-lock-evidence", "unlocked-local", "locked-local"],
+)
+def test_selected_subtree_adds_unlocked_direct_local_dependencies(
+    locked_keys: tuple[str, ...] | None, expected: list[str]
+) -> None:
+    """A partial install also locks declared local deps the lock lacks (#4198)."""
+    root = DependencyReference.parse("owner/root")
+    other = DependencyReference.parse("owner/other")
+    local = DependencyReference.parse_from_dict({"path": "./local"})
+    nested = DependencyReference.parse_from_dict({"path": "./nested"})
+    nested_node = SimpleNamespace(dependency_ref=nested, children=[], depth=2)
+    nodes = [
+        SimpleNamespace(dependency_ref=root, children=[], depth=1),
+        SimpleNamespace(dependency_ref=other, children=[], depth=1),
+        SimpleNamespace(dependency_ref=local, children=[], depth=1),
+        nested_node,
+    ]
+    tree = SimpleNamespace(nodes=dict(enumerate(nodes)))
+    selected = selected_subtree_dependencies(
+        ["owner/root"], tree, [root, other, local, nested], locked_keys=locked_keys
+    )
+    assert [dependency.get_unique_key() for dependency in selected] == expected
+
+
+@pytest.mark.parametrize(
     "dependency",
     ["../missing", "owner/missing", {"name": "plugin", "marketplace": "unregistered"}],
 )
@@ -210,6 +241,7 @@ def test_positional_preview_resolves_full_graph_before_selection(
         dependency_graph=graph,
         deps_to_install=graph.flattened_dependencies.get_installation_list(),
         only_packages=["../parent"],
+        existing_lockfile=None,
     )
     _apply_only_filter(install)
     plan = _preview(consumer.root, only_packages=install.only_packages)

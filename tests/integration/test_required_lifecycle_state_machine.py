@@ -1562,13 +1562,17 @@ def test_required_target_widen_then_narrow_reconciles_owned_state(
     state_a = LifecycleStateSnapshot.capture(consumer.root, targets=("claude",))
 
     scenario.consumers.set_targets(consumer, ("claude", "windsurf"))
-    _run_success(
+    widened = _run_success(
         scenario,
         consumer,
         _INSTALL_ARGS,
         environment=source.environment,
         scenario_id="target-contraction-install-a-b",
     )
+    # I9 (#4243): one hook summary line, not one per target.
+    hook_line = "|   PreToolUse: runs echo scope (pretool.json)"
+    widened_output = widened.stdout + widened.stderr
+    assert widened_output.count(hook_line) == 1, _result_evidence(widened)
     state_ab = LifecycleStateSnapshot.capture(
         consumer.root,
         targets=("claude", "windsurf"),
@@ -4412,7 +4416,9 @@ def test_required_deleting_all_local_content_cleans_its_deployments(
         scenario_id="tree-deleted-install",
     )
 
-    assert "Cleaned 4 stale files" in result.stdout
+    # Each removed skill directory is named once; its SKILL.md is folded in (#4193).
+    assert "  - .agents/skills/only/\n  - .claude/skills/only/\n" in result.stdout
+    assert "Cleaned 2 stale files" in result.stdout
     assert _local_skill_rows(root, "only") == {}
     assert not _skill_on_disk(root, ".agents", "only")
     assert not _skill_on_disk(root, ".claude", "only")

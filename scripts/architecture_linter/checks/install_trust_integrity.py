@@ -15,6 +15,9 @@
 * Every bundle deploy entry point admits the bundle through
   ``install/bundle_admission.py`` (org policy and integrity) and records what
   it deployed through the shared local-bundle lockfile owner (#4080).
+* A bundle reinstall retires the hooks it deployed earlier through
+  ``install/local_bundle_hook_trust.py`` (#4216): closed world, only that
+  owner calls ``HookIntegrator.retire_local_bundle_hooks``.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ GUARD_UPDATE_REGISTRY_INTEGRITY = "install-deployment-update-registry-integrity"
 GUARD_UNPACK_EXECUTABLES = "install-deployment-unpack-executable-refusal"
 GUARD_BUNDLE_USER_SCOPE_ROOT = "install-deployment-bundle-user-scope-root"
 GUARD_LOCAL_BUNDLE_HOOK_TRUST = "install-deployment-local-bundle-hook-trust"
+GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT = "install-deployment-local-bundle-hook-retirement"
 GUARD_BUNDLE_ADMISSION = "install-deployment-bundle-admission-owner"
 
 _OWNER = "src/apm_cli/policy/outcome_routing.py"
@@ -362,9 +366,10 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         "parse_local_bundle_hook_source(",
         "package_type_approved(allow_map, (key,), EXEC_TYPE_HOOKS)",
         "if None in keys:",
-        "HookIntegrator().retire_local_bundle_hooks(item.slug, project_root, hook_targets)",
-        "_retire_per_file(project_root, targets, item)",
-        "_drop_lock_rows(lock_dir, retired_files)",
+        "HookIntegrator().retire_local_bundle_hooks(slug, project_root, hook_targets)",
+        '_retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))',
+        "_drop_lock_rows(lock_dir, rows)",
+        "            retire_bundle_hooks(",
     ),
     _INSTALL_COMMAND: ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/update.py": ("reconcile_scope_bundle_hooks(",),
@@ -586,5 +591,42 @@ def check_update_marketplace_provenance(provider: FactsProvider) -> tuple[Violat
             )
             for number, line in enumerate(_lines(facts), start=1)
             if _PROVENANCE_WRITE.search(line)
+        )
+    return tuple(findings)
+
+
+_RETIRE_CALL = ".retire_local_bundle_hooks("
+_BUNDLE_HOOKS = "src/apm_cli/install/local_bundle_hooks.py"
+
+
+def check_local_bundle_hook_retirement(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Bundle hook retirement has one owner; the reinstall path routes through it."""
+    findings: list[Violation] = []
+    facts, failures = _facts_for(provider, _BUNDLE_HOOKS, GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT)
+    findings.extend(failures)
+    if not failures and not _present(facts, "return retire_bundle_hooks("):
+        findings.append(
+            _summary(
+                GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT,
+                _BUNDLE_HOOKS,
+                "A bundle reinstall must retire earlier hooks through retire_bundle_hooks",
+            )
+        )
+    for path in _python_paths(provider, "src/apm_cli/"):
+        if path in {_BUNDLE_HOOK_TRUST, _HOOK_INTEGRATOR}:
+            continue
+        facts, failures = _facts_for(provider, path, GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT)
+        if failures:
+            continue
+        findings.extend(
+            violation(
+                GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT,
+                path,
+                "Retire local-bundle hooks through install.local_bundle_hook_trust, "
+                "which also removes hook files, scripts and lock rows",
+                line=number,
+            )
+            for number, line in enumerate(_lines(facts), start=1)
+            if _RETIRE_CALL in line
         )
     return tuple(findings)
