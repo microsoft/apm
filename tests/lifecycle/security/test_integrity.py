@@ -53,6 +53,7 @@ from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED, _RECONCILING, Row, RowRe
 from tests.lifecycle.world import World
 from tests.lifecycle.world.builder import TAG
 from tests.utils.apm_lifecycle_runner import CommandResult
+from tests.utils.lockfile_write_counter import INOTIFY_AVAILABLE, count_lockfile_writes
 
 pytestmark = [
     pytest.mark.e2e,
@@ -1412,6 +1413,30 @@ def _refused_digest_update(world: World, tamper: Callable[[World], None]) -> Com
         result.stdout + result.stderr
     ), result.stdout + result.stderr
     return result
+
+
+def test_missing_digest_with_a_matching_registration_is_restored_in_one_write(
+    lifecycle_world: World,
+) -> None:
+    """The restore line is on stdout only, and the lock is written exactly once."""
+    world = lifecycle_world
+    with contextlib.ExitStack() as stack:
+        MARKETPLACE_ORIGIN.setup(world, stack)
+        replay = _arranged(world, MARKETPLACE_ORIGIN, "marketplace-origin(source_url/digest)")
+        _drop_locked_digest(world, stack)
+        replay.tampered = True
+        world.services.reset()
+        if INOTIFY_AVAILABLE:
+            with count_lockfile_writes(world.project) as counter:
+                replay._run("apm update --yes", pinned_exit=0)
+            assert counter.writes == 1, counter.events
+            assert counter.in_place_writes == 0, counter.events
+        else:
+            replay._run("apm update --yes", pinned_exit=0)
+        result = replay.last
+    assert re.search(_RESTORED, result.stdout), result.stdout
+    assert not re.search(_RESTORED, result.stderr), result.stderr
+    _digest_restored_and_stable(world)
 
 
 def _converges_after(world: World, remedy: str) -> None:
