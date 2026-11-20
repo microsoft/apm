@@ -197,7 +197,8 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                 ),
                 _AUDIT_COMMAND: ("policy_provider=replay_policy",),
                 _LOCAL_BUNDLE: (
-                    "bundle_approval_key = local_bundle_approval_key(",
+                    "bundle_approval_key = _bundle_approval_key(bundle_info, allow_executables)",
+                    "    return local_bundle_approval_key(",
                     "approval_key=bundle_approval_key,",
                     "grants_manifest = project_manifest_path(manifest_root(project_root, "
                     "user_scope=user_scope))",

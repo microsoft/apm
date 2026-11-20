@@ -174,16 +174,7 @@ def install_local_bundle(
             if bundle_info.source_dir is not None
             else []
         )
-        from ..security.executables import exec_map_authorizes_all, local_bundle_approval_key
-
-        bundle_approval_key = None
-        if not exec_map_authorizes_all(allow_executables):
-            bundle_approval_key = local_bundle_approval_key(
-                bundle_info.package_id,
-                str(bundle_info.plugin_json.get("version") or ""),
-                bundle_info.source_dir,
-                bundle_info.lockfile,
-            )
+        bundle_approval_key = _bundle_approval_key(bundle_info, allow_executables)
         _record_parked_bundle_executables(
             bundle_info,
             str(alias or bundle_info.package_id),
@@ -414,15 +405,7 @@ def install_local_bundle(
         if skipped:
             msg += f" ({skipped} skipped)"
         logger.success(msg)
-        if deployed:
-            from .deployed_paths import destination_folders, destination_tree_lines
-
-            for line in destination_tree_lines(
-                f"{len(deployed)} file(s) deployed",
-                destination_folders(deployed, targets),
-                bool(getattr(logger, "verbose", False)),
-            ):
-                logger.tree_item(line)
+        _report_deployed_destinations(logger, deployed, targets)
 
         # Issue #1207 D2.b: post-install compile hint for staged instructions.
         if staged_instructions and not dry_run:
@@ -590,6 +573,34 @@ def _filter_bundle_executables(
         + local_bundle_approval_hint(approval_key, exec_type, user_scope=user_scope)
     )
     return []
+
+
+def _bundle_approval_key(bundle_info, allow_executables) -> str | None:
+    """The exact-content approval key, or None when the gate admits everything."""
+    from ..security.executables import exec_map_authorizes_all, local_bundle_approval_key
+
+    if exec_map_authorizes_all(allow_executables):
+        return None
+    return local_bundle_approval_key(
+        bundle_info.package_id,
+        str(bundle_info.plugin_json.get("version") or ""),
+        bundle_info.source_dir,
+        bundle_info.lockfile,
+    )
+
+
+def _report_deployed_destinations(logger, deployed: list[str], targets) -> None:
+    """Name the destination folders the bundle deployed into."""
+    if not deployed:
+        return
+    from .deployed_paths import destination_folders, destination_tree_lines
+
+    for line in destination_tree_lines(
+        f"{len(deployed)} file(s) deployed",
+        destination_folders(deployed, targets),
+        bool(getattr(logger, "verbose", False)),
+    ):
+        logger.tree_item(line)
 
 
 def _declared_bundle_exec_types(bundle_info, mcp_deps: list, lsp_deps: list) -> tuple[str, ...]:
