@@ -67,15 +67,10 @@ def _print_list_footer(flags_shown: list, logger: "CommandLogger") -> None:
     # Unknown or retired flags in config are ignored; say so once, in verbose mode.
     stale = get_stale_config_keys()
     if stale:
-<<<<<<< HEAD
-        logger.progress(
-            f"Note: {len(stale)} unknown flag(s) in config ({EXPERIMENTAL_FLAGS_UNKNOWN.clause()})"
-=======
         logger.verbose_detail(
             f"Ignoring {len(stale)} unknown or retired flag(s) in config: "
             f"{', '.join(display_name(key) for key in stale)} "
-            "(run 'apm experimental reset' to clean up)"
->>>>>>> origin/danielmeppiel-bookish-train
+            f"({EXPERIMENTAL_FLAGS_UNKNOWN.clause()})"
         )
 
 
