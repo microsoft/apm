@@ -695,6 +695,7 @@ install-deployment-target-file-contraction
 install-deployment-trust-fingerprint
 install-deployment-trust-policy-outcome
 install-deployment-local-bundle-hook-trust
+install-deployment-local-bundle-hook-retirement
 install-deployment-uninstall-reachability
 install-deployment-uninstall-selection
 install-deployment-unpack-executable-refusal

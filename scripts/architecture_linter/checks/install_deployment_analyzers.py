@@ -146,11 +146,13 @@ from scripts.architecture_linter.checks.install_skills_root_derivation import (
 )
 from scripts.architecture_linter.checks.install_trust_integrity import (
     GUARD_BUNDLE_USER_SCOPE_ROOT,
+    GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT,
     GUARD_LOCAL_BUNDLE_HOOK_TRUST,
     GUARD_TRUST_POLICY_OUTCOME,
     GUARD_UNPACK_EXECUTABLES,
     GUARD_UPDATE_CONTENT_INTEGRITY,
     check_bundle_user_scope_root,
+    check_local_bundle_hook_retirement,
     check_local_bundle_hook_trust,
     check_trust_policy_outcome,
     check_unpack_executable_refusal,
@@ -201,6 +203,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_LOCAL_BUNDLE_HOOK_TRUST,
         "Local-bundle hooks are re-checked against their recorded approval on every command.",
         check_local_bundle_hook_trust,
+    ),
+    _rule(
+        GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT,
+        "A bundle reinstall retires earlier hooks through the local-bundle hook trust owner.",
+        check_local_bundle_hook_retirement,
     ),
     _rule(
         GUARD_UNPACK_EXECUTABLES,

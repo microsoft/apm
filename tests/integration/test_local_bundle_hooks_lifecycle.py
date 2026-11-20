@@ -192,7 +192,7 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     world.apm(consumer, "install", str(dep), "--no-policy")
     unapproved, _ = _repack(world, producer, tmp_path, "1.0.1", "#!/bin/sh\necho v2\n")
     text = output(world.apm(consumer, "install", str(unapproved), "--no-policy"))
-    assert "Skipped 2 bundle hook file(s) from hookpkg" in text, text
+    assert "Retired hooks from local bundle 'hookpkg'" in text, text  # #4216
     assert _hook_entries(consumer) == {"PreToolUse": ["Write"]}
     world.apm(consumer, "install", str(bundle), "--no-policy")
     assert _hook_entries(consumer) == {"PreToolUse": ["Write", "Bash"]}
