@@ -203,6 +203,18 @@ def manifest_root(project_root: Path, *, user_scope: bool) -> Path:
     return get_apm_home() if user_scope else Path(project_root)
 
 
+def is_user_scope_root(root: Path) -> bool:
+    """Return whether *root* is the user-scope manifest directory (``$APM_HOME``).
+
+    User scope has no project repository, so callers that derive project
+    facts (such as an org from a git remote) skip this root.
+    """
+    try:
+        return Path(root).resolve() == get_apm_home().resolve()
+    except (OSError, ValueError):
+        return False
+
+
 def get_modules_dir(scope: InstallScope) -> Path:
     """Return the ``apm_modules`` directory for *scope*."""
     from ..constants import APM_MODULES_DIR

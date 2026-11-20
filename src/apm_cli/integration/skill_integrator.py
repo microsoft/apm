@@ -1656,7 +1656,9 @@ class SkillIntegrator(BaseIntegrator):
 
         if package_info.package_type is _PackageType.MARKETPLACE_PLUGIN:
             if skip_bin:
-                bin_skip_reason = bin_skip_reason_override or "not_approved"
+                # Report a skipped bin/ only for a plugin that ships one.
+                if (Path(package_path) / "bin").is_dir():
+                    bin_skip_reason = bin_skip_reason_override or "not_approved"
             else:
                 bin_paths, bin_skip_reason = self._deploy_plugin_bin(
                     package_info,

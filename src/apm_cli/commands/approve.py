@@ -48,22 +48,37 @@ _POLICY_HASH_MISMATCH_WARNING = (
 )
 
 
-def _find_manifest(user_scope: bool = False) -> Path:
+def _find_manifest(user_scope: bool = False, global_scope: bool = False) -> Path:
     """Return the project's ``apm.yml`` path or exit.
 
+    ``-g`` reads the user-scope manifest that ``apm install -g`` wrote
+    (``$APM_HOME/apm.yml``) and the packages installed next to it (#4154).
     ``--user`` writes only the user store, so outside a project it reads the
     user-scope manifest (``APM_HOME/apm.yml``, which may not exist) and the
     packages ``apm install -g`` installed next to it (#3957).
     """
+    from ..core.scope import InstallScope, get_manifest_path
+
+    if global_scope:
+        manifest = get_manifest_path(InstallScope.USER)
+        if manifest.is_file():
+            return manifest
+        _rich_error("No user-scope apm.yml found. Install packages with 'apm install -g' first.")
+        sys.exit(1)
     manifest = Path.cwd() / "apm.yml"
     if manifest.is_file():
         return manifest
     if user_scope:
-        from ..core.scope import InstallScope, get_manifest_path
-
         return get_manifest_path(InstallScope.USER)
     _rich_error("No apm.yml found in the current directory.")
     sys.exit(1)
+
+
+def _install_command(manifest: Path) -> str:
+    """Return the install command that deploys *manifest*'s approvals."""
+    from ..core.scope import is_user_scope_root
+
+    return "apm install -g" if is_user_scope_root(manifest.parent) else "apm install"
 
 
 def _load_store(
@@ -152,6 +167,14 @@ def load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> 
     help="Persist to your personal APM user config (lowest authority) "
     "instead of the shared project apm.yml.",
 )
+@click.option(
+    "-g",
+    "--global",
+    "global_scope",
+    is_flag=True,
+    help="Approve packages installed at user scope (apm install -g); records the "
+    "grant in the user-scope apm.yml.",
+)
 @serialized_lifecycle
 def approve_cmd(
     packages: tuple[str, ...],
@@ -160,6 +183,7 @@ def approve_cmd(
     recommended: bool,
     list_decisions: bool,
     user_scope: bool,
+    global_scope: bool,
 ) -> None:
     """Approve executable primitives (hooks, MCP, LSP, bin, canvas) for packages.
 
@@ -176,10 +200,12 @@ def approve_cmd(
         apm approve --list
 
         apm approve --user owner/repo
+
+        apm approve -g owner/repo
     """
     logger = CommandLogger("approve")
     try:
-        manifest = _find_manifest(user_scope)
+        manifest = _find_manifest(user_scope, global_scope)
 
         if list_decisions:
             _list_decisions(manifest, logger=logger)
@@ -216,8 +242,15 @@ def approve_cmd(
     is_flag=True,
     help="Record the deny in your personal APM user config instead of apm.yml.",
 )
+@click.option(
+    "-g",
+    "--global",
+    "global_scope",
+    is_flag=True,
+    help="Deny packages installed at user scope (apm install -g).",
+)
 @serialized_lifecycle
-def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
+def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) -> None:
     """Deny executable primitives for packages (a narrowing override).
 
     Writes a deny entry to the project ``executables.deny`` (default) or your
@@ -227,7 +260,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
 
         apm deny owner/repo
     """
-    manifest = _find_manifest(user_scope)
+    manifest = _find_manifest(user_scope, global_scope)
     allow, deny = _load_store(manifest, user_scope)
 
     declarations = _scan_installed_packages(manifest)
@@ -266,7 +299,10 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
         _save_store(manifest, user_scope, allow, deny)
         _rich_info(f"Updated {_store_label(user_scope)} ({changed} denied).", symbol="info")
         # Deployed hooks keep firing until install retires them (#3924).
-        _rich_info("Run 'apm install' to remove executables already deployed.", symbol="info")
+        _rich_info(
+            f"Run '{_install_command(manifest)}' to remove executables already deployed.",
+            symbol="info",
+        )
 
 
 def _effective_trust_context(manifest: Path, *, logger: CommandLogger):
@@ -525,15 +561,17 @@ def _approve_packages(
     *,
     logger: CommandLogger,
 ) -> None:
-    """Approve specific packages by name."""
+    """Approve specific packages by name; exit 1 when any name matches nothing."""
     declarations = _scan_installed_packages(manifest)
 
     selected = []
+    missing = 0
     for pkg in packages:
         decl = _find_declaration(declarations, pkg)
 
         if decl is None:
-            _rich_warning(f"{pkg}: not found in installed packages")
+            missing += 1
+            _report_not_found(declarations, pkg, manifest)
             continue
 
         if not decl.has_executables:
@@ -542,6 +580,24 @@ def _approve_packages(
         selected.append(decl)
     if selected:
         _record_and_save(manifest, user_scope, allow, deny, selected, logger=logger)
+    if missing:
+        sys.exit(1)
+
+
+def _report_not_found(declarations, pkg: str, manifest: Path) -> None:
+    """Explain why *pkg* matched nothing and name the command that works."""
+    base = pkg.split("#", 1)[0]
+    decl = _find_declaration(declarations, base) if base != pkg else None
+    scope_flag = "-g " if _install_command(manifest).endswith("-g") else ""
+    if decl is not None:
+        _rich_error(
+            f"{pkg}: approve the installed package by identity, not a ref: "
+            f"apm approve {scope_flag}{_identity(decl)}"
+        )
+        return
+    _rich_error(
+        f"{pkg}: not found in installed packages. Review: apm approve {scope_flag}--pending"
+    )
 
 
 def _identity(decl: ExecutableDeclaration) -> str:
@@ -790,10 +846,11 @@ def _record_and_save(
         for line in successes:
             _rich_success(line, symbol="check")
     if successes:
-        share = "" if user_scope else "; commit apm.yml to share"
+        install = _install_command(manifest)
+        share = "" if user_scope or install.endswith("-g") else "; commit apm.yml to share"
         _rich_info(
             f"Updated {_store_label(user_scope)} ({len(successes)} approved). "
-            f"Run 'apm install' to deploy{share}.",
+            f"Run '{_install_command(manifest)}' to deploy{share}.",
             symbol="info",
         )
         if not user_scope and not had_pins and has_any_pins(allow):
@@ -913,7 +970,11 @@ def scan_installed_executable_packages(manifest: Path) -> list:
         locked_dependency_approval,
         scan_package_executables,
     )
-    from ..security.trust import installed_content_matches_lock, native_declaration
+    from ..security.trust import (
+        approval_scan_dir,
+        installed_content_matches_lock,
+        native_declaration,
+    )
 
     apm_modules = manifest.parent / "apm_modules"
     results: list[ExecutableDeclaration] = []
@@ -938,10 +999,11 @@ def scan_installed_executable_packages(manifest: Path) -> list:
             ) from exc
         for locked in lockfile.get_package_dependencies():
             try:
+                installed_dir = locked.to_dependency_ref().get_install_path(apm_modules)
                 package_dir = (
-                    local_dependency_dirs[locked.get_unique_key()]
+                    approval_scan_dir(local_dependency_dirs[locked.get_unique_key()], installed_dir)
                     if locked.is_local_source
-                    else locked.to_dependency_ref().get_install_path(apm_modules)
+                    else installed_dir
                 )
             except (OSError, ValueError):
                 continue

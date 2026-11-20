@@ -484,8 +484,11 @@ def log_bin_status(
     package_name: str,
     package_info: Any,
     log_fn,
+    *,
+    user_scope: bool = False,
 ) -> None:
     """Emit integration-tree lines for bin/ deployment or skip reasons."""
+    from apm_cli.security.trust import approve_command
     from apm_cli.utils.diagnostics import printable_ascii_text
 
     package_label = printable_ascii_text(package_name or getattr(package_info, "name", "unknown"))
@@ -506,7 +509,7 @@ def log_bin_status(
     elif skill_result.bin_skipped_reason == "not_approved":
         log_fn(
             f"  |-- bin/ executables skipped (not approved in executables.allow). "
-            f"Run 'apm approve {package_label}' to approve."
+            f"Run '{approve_command(package_label, user_scope=user_scope)}' to approve."
         )
     elif skill_result.bin_skipped_reason == "not_trusted":
         log_fn(
@@ -548,9 +551,13 @@ def log_hooks_skip(
             f"Run 'apm policy explain {label}' to see which deny applies."
         )
     else:
+        from apm_cli.core.scope import is_user_scope
+        from apm_cli.security.trust import approve_command
+
+        command = approve_command(label, user_scope=is_user_scope(getattr(ctx, "scope", None)))
         message = (
             f"{label}: hooks skipped (not approved in executables.allow). "
-            f"Run 'apm approve {label}' to approve."
+            f"Run '{command}' to approve."
         )
     logger.warning(message, symbol="warning")
 

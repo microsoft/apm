@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.scope import is_user_scope
+
 from .exec_gate import check_executable_approval, plugin_bin_deployable, resolve_bin_skip
 from .target_filter import log_package_target_restriction, resolve_effective_package_targets
 
@@ -57,7 +59,12 @@ def _warn_parked_plugin(package_name, package_info, allow_executables, diagnosti
     from apm_cli.security.trust import parked_plugin_message
 
     package = _strip_version(resolve_package_key(package_info, package_name))
-    message = parked_plugin_message(package, str(verdict.reason), verdict.detail)
+    message = parked_plugin_message(
+        package,
+        str(verdict.reason),
+        verdict.detail,
+        user_scope=is_user_scope(getattr(ctx, "scope", None)),
+    )
     if diagnostics is not None:
         diagnostics.warn(message)
     elif logger is not None:
@@ -154,7 +161,9 @@ def prepare_package_deployment(  # noqa: PLR0913
 
         package = _strip_version(resolve_package_key(package_info, package_name))
         for item, parked_reason in hook_filter.parked:
-            message = parked_hook_message(package, item, parked_reason)
+            message = parked_hook_message(
+                package, item, parked_reason, user_scope=is_user_scope(scope)
+            )
             if diagnostics is not None:
                 diagnostics.warn(message)
             elif logger is not None:

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
+from apm_cli.core.scope import is_user_scope
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import format_target_collapse as _format_target_collapse
@@ -123,7 +124,9 @@ def _emit_integration_hints(prim_name: str, info: dict, log_integration) -> None
         log_integration("  |-- reload the Copilot session (/clear) or restart to load the canvas")
 
 
-def _log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger | None) -> None:
+def _log_canvas_skip(
+    package_name: str, package_info: Any, logger: InstallLogger | None, user_scope: bool = False
+) -> None:
     """Warn about skipped canvas extensions when the package ships them."""
     _install = Path(package_info.install_path)
     extensions_root = _install / ".apm" / "extensions"
@@ -137,9 +140,11 @@ def _log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger
         return
     _pkg_label = package_name or getattr(package_info, "name", "unknown")
     if logger:
+        from apm_cli.security.trust import approve_command
+
         logger.warning(
             f"{_pkg_label}: canvas extension(s) skipped (not approved in executables.allow). "
-            f"Run 'apm approve {_pkg_label}' to approve.",
+            f"Run '{approve_command(_pkg_label, user_scope=user_scope)}' to approve.",
             symbol="warning",
         )
 
@@ -467,7 +472,7 @@ def integrate_package_primitives(  # noqa: PLR0913
                     allow_executables, _rpk(package_info, package_name), EXEC_TYPE_CANVAS
                 ) or is_package_approved(allow_executables, package_name, EXEC_TYPE_CANVAS)
             if not _dep_canvas_ok:
-                _log_canvas_skip(package_name, package_info, logger)
+                _log_canvas_skip(package_name, package_info, logger, is_user_scope(scope))
                 continue
         _integrator = _INTEGRATOR_KWARGS[_prim_name]
         # A primitive can be statically present on a target (e.g. the
@@ -651,7 +656,14 @@ def integrate_package_primitives(  # noqa: PLR0913
     if skill_result.bin_deployed > 0 or skill_result.bin_skipped_reason:
         from apm_cli.install.exec_gate import log_bin_status
 
-        log_bin_status(skill_result, _skill_suffix, package_name, package_info, _log_integration)
+        log_bin_status(
+            skill_result,
+            _skill_suffix,
+            package_name,
+            package_info,
+            _log_integration,
+            user_scope=is_user_scope(scope),
+        )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
     deployed.extend(

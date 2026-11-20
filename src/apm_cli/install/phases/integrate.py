@@ -479,16 +479,19 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     """
     if not ctx.blocked_executables:
         return
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.security.trust import approve_command
 
     if os.environ.get("APM_NON_INTERACTIVE") or os.environ.get("CI") or not sys.stdin.isatty():
         first = ctx.blocked_executables[0].package_name
+        user_scope = is_user_scope(ctx.scope)
         msg = (
             f"{len(ctx.blocked_executables)} package(s) have executable primitives "
             "parked pending approval; install completed without deploying them."
         )
         remedy = (
-            "Trust the org-vetted set: apm approve --recommended  |  "
-            f"Trust one: apm approve {first}  |  "
+            f"Trust the org-vetted set: {approve_command('--recommended', user_scope=user_scope)}"
+            f"  |  Trust one: {approve_command(first, user_scope=user_scope)}  |  "
             f"Inspect: apm policy explain {first}"
         )
         if ctx.logger:
@@ -545,7 +548,8 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
             symbol="info",
         )
         logger.info(
-            f"Deploy later: apm approve {first} (then re-run apm install)  |  "
+            f"Deploy later: {approve_command(first, user_scope=is_user_scope(ctx.scope))} "
+            f"(then re-run apm install{' -g' if is_user_scope(ctx.scope) else ''})  |  "
             f"Why parked?: apm policy explain {first}",
             symbol="info",
         )
