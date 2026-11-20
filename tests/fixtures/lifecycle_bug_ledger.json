@@ -1022,6 +1022,20 @@
       "regression_tests": [
         "tests/integration/test_policy_install_enforcement_lifecycle.py::test_no_policy_warning_prints_once_with_mcp_servers"
       ]
+    },
+    {
+      "issue": 4249,
+      "fixed_in": "Unreleased",
+      "summary": "apm install printed the org policy status line once per phase when MCP servers were also installed",
+      "failure_modes": [
+        "outcome"
+      ],
+      "properties": [
+        "outcome.status_matches_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_policy_install_enforcement_lifecycle.py::test_policy_status_line_prints_once_with_mcp_servers"
+      ]
     }
   ],
   "lifecycle_contracts": [

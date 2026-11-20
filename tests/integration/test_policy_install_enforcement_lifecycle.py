@@ -400,3 +400,34 @@ def test_no_policy_warning_prints_once_with_mcp_servers(
         assert deployed_skills(gov.project) == {"pkg-a-skill"}
         servers = json.loads((gov.project / ".mcp.json").read_text(encoding="utf-8"))
         assert set(servers["mcpServers"]) == {"policy-echo"}, servers
+
+
+@pytest.mark.parametrize(
+    ("policy", "line"),
+    [
+        pytest.param(
+            _policy("block", deny=["contoso/pkg-other"]),
+            "[!] Policy: org:contoso/.github",
+            id="block-policy",
+        ),
+        pytest.param(
+            _policy("block"),
+            "[!] Org policy at org:contoso/.github is present but empty",
+            id="empty-policy",
+        ),
+    ],
+)
+def test_policy_status_line_prints_once_with_mcp_servers(
+    tmp_path: Path, apm_binary_path: Path, policy: dict[str, object], line: str
+) -> None:
+    """I9 (#4249): the package and MCP phases share one policy status line."""
+    with _governed(tmp_path, apm_binary_path, policy=policy, mcp=(_STDIO_SERVER,)) as gov:
+        for step in ("install-cold-policy", "install-cached-policy"):
+            result = gov.install(step=step, expected=0)
+            out = _flat(output(result))
+            assert out.count(line) == 1, out
+        if "deny" in policy.get("dependencies", {}):
+            assert "[!] Policy: org:contoso/.github (cached, fetched" in out, out
+        assert lock_repo_urls(gov.project) == {"contoso/pkg-a"}
+        servers = json.loads((gov.project / ".mcp.json").read_text(encoding="utf-8"))
+        assert set(servers["mcpServers"]) == {"policy-echo"}, servers
