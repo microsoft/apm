@@ -554,3 +554,185 @@ def _within(path: str, prefix: str) -> bool:
     if prefix == "*":
         return True
     return path == prefix or path.startswith(prefix.rstrip("/") + "/")
+
+
+# --- Generated obligations (security tables and journey step oracles) -------
+#
+# ``check_obligation`` is the one entry point that credits a generated
+# obligation id (``tests/lifecycle/obligation_space.py``). The caller passes
+# the facts to check; the oracle checks them itself against the snapshots,
+# the egress log and the command result, and writes the receipt only when
+# every fact holds. Required strengths: ``unit`` needs an owner-level value
+# comparison; ``e2e`` needs a CLI result; ``e2e-evidence`` also needs a state
+# fact (snapshot paths, unchanged bytes, egress log or persisted-secret scan).
+
+OBLIGATION_ORACLE = "OBLIGATION"
+_UNSET = object()
+
+
+@dataclass(frozen=True)
+class Evidence:
+    """Facts ``check_obligation`` verifies for one generated obligation."""
+
+    # Root id -> relative paths that must be absent / present after the step.
+    absent: Mapping[str, Collection[str]] = field(default_factory=dict)
+    present: Mapping[str, Collection[str]] = field(default_factory=dict)
+    # Root id -> path prefixes whose entries must be byte-identical before and after.
+    unchanged: Mapping[str, Collection[str]] = field(default_factory=dict)
+    # Egress log entries of the step (dicts with at least ``host``).
+    egress: tuple[Mapping[str, object], ...] | None = None
+    egress_absent_hosts: Collection[str] = ()
+    egress_present_hosts: Collection[str] = ()
+    # Values that must appear in no file under the after roots and in no output.
+    secrets_absent: Collection[str] = ()
+    exit: int | Collection[int] | None = None
+    # Regexes that must / must not match the combined output.
+    output_matches: Collection[str] = ()
+    output_forbids: Collection[str] = ()
+    ascii_output: bool = False
+    # Owner-level value comparison (``unit`` strength, golden transcripts).
+    expected: object = _UNSET
+    observed: object = _UNSET
+
+    def state_facts(self) -> bool:
+        return bool(
+            self.absent
+            or self.present
+            or self.unchanged
+            or self.egress is not None
+            or self.secrets_absent
+        )
+
+
+def _artifacts(value: Observation | ArtifactSnapshotSet | None) -> ArtifactSnapshotSet | None:
+    return value.artifacts if isinstance(value, Observation) else value
+
+
+def check_obligation(
+    cell_id: str,
+    *,
+    strength: str,
+    before: Observation | ArtifactSnapshotSet | None = None,
+    after: Observation | ArtifactSnapshotSet | None = None,
+    result: CommandResult | None = None,
+    evidence: Evidence,
+    scope: str = "project",
+) -> None:
+    """Check *evidence* for generated obligation *cell_id*; emit its receipt if it holds."""
+    problems = _strength_problems(strength, before, after, result, evidence)
+    problems += _evidence_problems(_artifacts(before), _artifacts(after), result, evidence)
+    assert not problems, f"{cell_id}:\n" + "\n".join(problems) + _evidence(result)
+    pre, post = _artifacts(before), _artifacts(after)
+    receipts.emit(
+        receipts.Receipt(
+            node=receipts.current_node(),
+            params={"obligation": cell_id, "strength": strength},
+            pre_digest=_artifact_digest(pre),
+            argv=tuple(result.command) if result is not None else (),
+            scope=scope,
+            post_digest=_artifact_digest(post),
+            oracle_id=OBLIGATION_ORACLE,
+            outcome="refusal" if result is not None and result.returncode != 0 else "success",
+            lane=receipts.current_lane(),
+        )
+    )
+
+
+def _strength_problems(strength, before, after, result, evidence: Evidence) -> list[str]:
+    if strength == "unit":
+        if evidence.expected is _UNSET or evidence.observed is _UNSET:
+            return ["unit strength needs an expected/observed owner value"]
+        return []
+    if strength not in ("e2e", "e2e-evidence"):
+        return [f"unknown strength {strength!r}"]
+    problems = [] if result is not None else [f"{strength} strength needs a CLI result"]
+    if strength == "e2e-evidence":
+        if not evidence.state_facts():
+            problems.append("e2e-evidence needs a snapshot, egress or persisted-secret fact")
+        needs_pair = evidence.absent or evidence.present or evidence.unchanged
+        if needs_pair and (before is None or after is None):
+            problems.append("snapshot facts need both before and after")
+    return problems
+
+
+def _evidence_problems(
+    before: ArtifactSnapshotSet | None,
+    after: ArtifactSnapshotSet | None,
+    result: CommandResult | None,
+    evidence: Evidence,
+) -> list[str]:
+    problems: list[str] = []
+    for root_id, paths in evidence.absent.items():
+        present = sorted(set(paths) & after.snapshot(root_id).paths) if after else []
+        problems += [f"{root_id}:{path} must be absent" for path in present]
+    for root_id, paths in evidence.present.items():
+        missing = sorted(set(paths) - after.snapshot(root_id).paths) if after else sorted(paths)
+        problems += [f"{root_id}:{path} must be present" for path in missing]
+    for root_id, prefixes in evidence.unchanged.items():
+        if before is None or after is None:
+            break
+        difference = before.snapshot(root_id).diff(after.snapshot(root_id))
+        moved = difference.added | difference.removed | difference.changed
+        problems += [
+            f"{root_id}:{path} changed"
+            for path in sorted(moved)
+            if any(_within(path, prefix) for prefix in prefixes)
+        ]
+    if evidence.egress is not None:
+        hosts = {str(entry.get("host", "")) for entry in evidence.egress}
+        problems += [
+            f"egress reached {host}" for host in sorted(hosts & set(evidence.egress_absent_hosts))
+        ]
+        problems += [
+            f"egress never reached {host}"
+            for host in sorted(set(evidence.egress_present_hosts) - hosts)
+        ]
+    output = "" if result is None else result.stdout + result.stderr
+    problems += _secret_problems(after, output, evidence.secrets_absent)
+    if evidence.exit is not None and result is not None:
+        wanted = {evidence.exit} if isinstance(evidence.exit, int) else set(evidence.exit)
+        if result.returncode not in wanted:
+            problems.append(f"exit {result.returncode}, wanted {sorted(wanted)}")
+    problems += [
+        f"output lacks /{rx}/" for rx in evidence.output_matches if not re.search(rx, output, re.M)
+    ]
+    problems += [
+        f"output has /{rx}/" for rx in evidence.output_forbids if re.search(rx, output, re.M)
+    ]
+    if evidence.ascii_output and not output.isascii():
+        problems.append("output is not ASCII")
+    if evidence.expected is not _UNSET and evidence.expected != evidence.observed:
+        problems.append(f"observed {evidence.observed!r}, expected {evidence.expected!r}")
+    return problems
+
+
+def _secret_problems(
+    after: ArtifactSnapshotSet | None, output: str, secrets: Collection[str]
+) -> list[str]:
+    if not secrets:
+        return []
+    problems = [
+        f"output carries secret #{index}" for index, value in enumerate(secrets) if value in output
+    ]
+    for root_id, snapshot in after.snapshots if after else ():
+        for path in sorted(snapshot.paths):
+            file = snapshot.root / path
+            if not file.is_file():
+                continue
+            data = file.read_bytes()
+            problems += [
+                f"{root_id}:{path} carries secret #{index}"
+                for index, value in enumerate(secrets)
+                if value.encode() in data
+            ]
+    return problems
+
+
+def _artifact_digest(artifacts: ArtifactSnapshotSet | None) -> str:
+    if artifacts is None:
+        return ""
+    digest = hashlib.sha256()
+    for root_id, snapshot in artifacts.snapshots:
+        for entry in snapshot.entries:
+            digest.update(f"{root_id}:{entry.relative_path}:{entry.fingerprint}\n".encode())
+    return "sha256:" + digest.hexdigest()
