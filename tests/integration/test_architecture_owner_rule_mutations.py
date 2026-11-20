@@ -1452,6 +1452,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Policy cache serializer stops routing through the canonical shape helper.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-ci-merge-queue-freshness",
+        rule_id="contracts-tooling-ci-merge-queue-freshness",
+        path="scripts/merge_queue_freshness.py",
+        old="return 0 if verdict.fresh else 1",
+        new="return 0",
+        intent="The freshness alarm reports a bypassed merge queue but never fails.",
+    ),
+    MutationCase(
+        guard_id="contracts-tooling-ci-merge-time-topology",
+        rule_id="contracts-tooling-ci-merge-time-topology",
+        path="tests/quality/test_ci_topology.py",
+        old="    assert not missing, (",
+        new="    assert missing or not missing, (",
+        intent="The guard stops failing when merge_group waits for a check no merge_group job produces.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-compile-inventory",
         rule_id="registry_delegation.compile_inventory_authority",
         path="src/apm_cli/compilation/inventory.py",

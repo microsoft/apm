@@ -22,9 +22,13 @@ from tests.quality.repository_python_inventory import (
 )
 from tests.workflow_contracts import (
     WorkflowNode,
+    assert_exact_command,
+    assert_unconditional,
+    effective_env,
     load_workflow,
     run_bash,
     shell_commands,
+    shell_tokens,
     workflow_job,
     workflow_step,
 )
@@ -39,6 +43,8 @@ RATCHET_CHECK = "Test Architecture Ratchets"
 RATCHET_CONTRACT_JOB = "test-architecture-contracts"
 RATCHET_SCALING_JOB = "test-architecture-scaling"
 RATCHET_EXECUTION_JOBS = (RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB)
+RATCHET_AGGREGATE_STEP = "Require the architecture contracts"
+RATCHET_SCALING_CHECK = "Architecture Scaling (Linux)"
 ARCHITECTURE_SCALING_TARGET = (
     "tests/perf/test_architecture_linter_scaling.py::"
     "test_ci_real_catalog_work_scales_below_fifteen_x_after_fixed_cost_subtraction"
@@ -322,23 +328,27 @@ def _assert_ratchet_execution(ci: WorkflowNode, job_id: str) -> None:
 
 
 def _assert_ratchet_split(ci: WorkflowNode) -> None:
-    """Preserve the original signal while independently bounding both jobs."""
+    """The required aggregate gates only the contracts; scaling stays separate.
+
+    The wall-clock scaling ratio is a non-required signal (timing asserts
+    flake), so the required aggregate must not depend on its result.
+    """
     aggregate = workflow_job(ci, RATCHET_JOB)
-    assert aggregate.get("needs") == list(RATCHET_EXECUTION_JOBS), (
-        "ratchet contracts and scaling must execute in separate jobs"
+    assert aggregate.get("needs") == [RATCHET_CONTRACT_JOB], (
+        "the required ratchet aggregate must depend only on the contracts job"
     )
     assert aggregate["name"] == RATCHET_CHECK
     assert aggregate["if"] == "always()"
     assert aggregate["permissions"] == {}
     assert "continue-on-error" not in aggregate
     assert len(aggregate["steps"]) == 1
-    step = workflow_step(aggregate, "Require both architecture executions")
+    step = workflow_step(aggregate, RATCHET_AGGREGATE_STEP)
     assert "if" not in step and "continue-on-error" not in step
     assert step["env"] == {
         "CONTRACT_RESULT": "${{ needs.test-architecture-contracts.result }}",
-        "SCALING_RESULT": "${{ needs.test-architecture-scaling.result }}",
     }
-    _assert_success_results(step, ("CONTRACT_RESULT", "SCALING_RESULT"))
+    assert RATCHET_SCALING_JOB not in str(aggregate), "the aggregate must not read scaling"
+    _assert_success_results(step, ("CONTRACT_RESULT",))
     for job_id in RATCHET_EXECUTION_JOBS:
         _assert_ratchet_execution(ci, job_id)
 
@@ -373,7 +383,9 @@ def _assert_topology(root: Path, inventory: dict[str, str]) -> None:
     wait_step = workflow_step(gate, "Wait for all required checks")
     expected_checks = wait_step["env"]["EXPECTED_CHECKS"]
     assert isinstance(expected_checks, str)
-    assert RATCHET_CHECK not in expected_checks
+    contexts = _expected_checks(merge_gate)
+    for context, names in contexts.items():
+        assert RATCHET_CHECK in names, f"{RATCHET_CHECK} must gate {context}"
     for required_check in REQUIRED_SHARD_CHECKS:
         assert required_check in expected_checks
 
@@ -398,7 +410,7 @@ def repository_inventory(
     return _ratchet_test_inventory(repository_python_inventory)
 
 
-def test_test_architecture_ratchets_remain_non_required(
+def test_test_architecture_ratchets_are_required_in_every_context(
     repository_inventory: dict[str, str],
 ) -> None:
     _assert_topology(REPO_ROOT, repository_inventory)
@@ -634,8 +646,9 @@ def test_ratchet_execution_step_cannot_skip_or_suppress(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("needs", [RATCHET_CONTRACT_JOB]),
+        ("needs", []),
         ("needs", [RATCHET_SCALING_JOB]),
+        ("needs", [RATCHET_CONTRACT_JOB, RATCHET_SCALING_JOB]),
         ("if", "success()"),
         ("name", "Renamed ratchet signal"),
         ("continue-on-error", True),
@@ -649,22 +662,33 @@ def test_ratchet_aggregate_topology_drift_fails(
         _assert_ratchet_split(provisional_ci)
 
 
-@pytest.mark.parametrize("result_name", ["CONTRACT_RESULT", "SCALING_RESULT"])
-def test_ratchet_aggregate_cannot_ignore_either_execution(
-    provisional_ci: WorkflowNode, result_name: str
-) -> None:
-    step = workflow_step(
-        workflow_job(provisional_ci, RATCHET_JOB), "Require both architecture executions"
-    )
-    step["run"] = step["run"].replace(f'[ "${result_name}" != success ]', "false")
+def test_ratchet_aggregate_cannot_ignore_the_contracts(provisional_ci: WorkflowNode) -> None:
+    step = workflow_step(workflow_job(provisional_ci, RATCHET_JOB), RATCHET_AGGREGATE_STEP)
+    step["run"] = step["run"].replace('[ "$CONTRACT_RESULT" != success ]', "false")
     with pytest.raises(AssertionError, match="invalid results"):
         _assert_ratchet_split(provisional_ci)
 
 
-def test_ratchet_aggregate_cannot_suppress_failure(provisional_ci: WorkflowNode) -> None:
-    step = workflow_step(
-        workflow_job(provisional_ci, RATCHET_JOB), "Require both architecture executions"
+def test_ratchet_aggregate_reading_the_scaling_result_fails(provisional_ci: WorkflowNode) -> None:
+    """Negative control: gating the required aggregate on the timing ratio fails."""
+    step = workflow_step(workflow_job(provisional_ci, RATCHET_JOB), RATCHET_AGGREGATE_STEP)
+    step["env"]["SCALING_RESULT"] = "${{ needs.test-architecture-scaling.result }}"
+    step["run"] = step["run"].replace(
+        '[ "$CONTRACT_RESULT" != success ]',
+        '[ "$CONTRACT_RESULT" != success ] || [ "$SCALING_RESULT" != success ]',
     )
+    with pytest.raises(AssertionError):
+        _assert_ratchet_split(provisional_ci)
+
+
+def test_architecture_scaling_is_never_required() -> None:
+    merge_gate = load_workflow(REPO_ROOT / ".github" / "workflows" / "merge-gate.yml")
+    for context, names in _expected_checks(merge_gate).items():
+        assert RATCHET_SCALING_CHECK not in names, f"{RATCHET_SCALING_CHECK} gates {context}"
+
+
+def test_ratchet_aggregate_cannot_suppress_failure(provisional_ci: WorkflowNode) -> None:
+    step = workflow_step(workflow_job(provisional_ci, RATCHET_JOB), RATCHET_AGGREGATE_STEP)
     step["run"] = step["run"].replace("exit 1", ":")
     with pytest.raises(AssertionError, match="invalid results"):
         _assert_ratchet_split(provisional_ci)
@@ -1570,6 +1594,480 @@ def test_macos_arm_split_drift_fails(release_workflow: WorkflowNode, mutation: s
         jobs[MACOS_ARM_BUILD_JOB]["steps"].append({"run": MACOS_UNIT_COMMAND})
     with pytest.raises((AssertionError, KeyError)):
         _assert_macos_arm_split(release_workflow)
+
+
+# ---------------------------------------------------------------------------
+# Merge-time gate liveness (#4116): merge-gate.yml's merge_group
+# EXPECTED_CHECKS is the merge-time authority. Every name it waits for must
+# be produced by a job that actually runs on merge_group, ci-integration.yml
+# must shard with the build-release planner and stay secret-safe, the global
+# coverage floor must gate the merge, and a scheduled alarm must fail when
+# main moves without the queue.
+# ---------------------------------------------------------------------------
+WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
+MERGE_GATE_WAIT_STEP = "Wait for all required checks"
+MERGE_GROUP_EVENT = "merge_group"
+MERGE_TIME_TRIGGERS = frozenset({MERGE_GROUP_EVENT, "workflow_dispatch", "pull_request"})
+MERGE_TIME_PLAN_JOB = "integration-plan"
+MERGE_TIME_NETWORK_JOB = "integration-network"
+MERGE_TIME_FAN_IN_JOB = "integration-tests"
+MERGE_TIME_PLAN_STEP = "Plan shards"
+MERGE_TIME_NETWORK_STEP = "Run network-dependent integration tests"
+MERGE_TIME_SHARD_MATRIX = "${{ fromJSON(needs.integration-plan.outputs.shards) }}"
+MERGE_TIME_SHARD_COUNT = "--shard-count ${{ needs.integration-plan.outputs.count }}"
+MERGE_TIME_MAX_SHARDS = "16"
+PLANNER_MARK_ENV = ("HERMETIC_MARK_EXPR", "NETWORK_MARK_EXPR")
+GLOBAL_COVERAGE_CHECK = "Coverage Combine (Linux)"
+GLOBAL_COVERAGE_JOB = "coverage-combine"
+GLOBAL_COVERAGE_STEP = "Enforce unit coverage gate"
+FRESHNESS_WORKFLOW = "merge-queue-freshness.yml"
+FRESHNESS_JOB = "freshness"
+FRESHNESS_STEP = "Require a recent merge_group run"
+FRESHNESS_SCRIPT = "scripts/merge_queue_freshness.py"
+FRESHNESS_WINDOW_DAYS = "3"
+_EXPECTED_CHECKS_EXPRESSION = re.compile(
+    r"^\$\{\{\s*github\.event_name == 'merge_group' && '([^']+)' \|\| "
+    r"contains\(github\.event\.pull_request\.labels\.\*\.name, 'full-integration'\) "
+    r"&& '([^']+)' \|\| '([^']+)'\s*\}\}$"
+)
+_MATRIX_REFERENCE = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}")
+
+
+def _expected_checks(merge_gate: WorkflowNode) -> dict[str, tuple[str, ...]]:
+    """Split merge-gate.yml's EXPECTED_CHECKS into its two event contexts."""
+    wait_step = workflow_step(workflow_job(merge_gate, "gate"), MERGE_GATE_WAIT_STEP)
+    expression = wait_step["env"]["EXPECTED_CHECKS"]
+    match = _EXPECTED_CHECKS_EXPRESSION.match(str(expression).strip())
+    assert match, f"EXPECTED_CHECKS must branch on merge_group explicitly: {expression!r}"
+    contexts = {
+        MERGE_GROUP_EVENT: tuple(name.strip() for name in match.group(1).split(",")),
+        "pull_request_labeled": tuple(name.strip() for name in match.group(2).split(",")),
+        "pull_request": tuple(name.strip() for name in match.group(3).split(",")),
+    }
+    for event, names in contexts.items():
+        assert all(names), f"{event} EXPECTED_CHECKS contains an empty name"
+        duplicates = sorted(name for name, count in Counter(names).items() if count > 1)
+        assert not duplicates, f"{event} EXPECTED_CHECKS repeats {duplicates}"
+    return contexts
+
+
+def _workflow_events(workflow: WorkflowNode) -> frozenset[str]:
+    triggers = workflow.get("on")
+    if isinstance(triggers, str):
+        return frozenset({triggers})
+    if isinstance(triggers, list):
+        return frozenset(str(event) for event in triggers)
+    if isinstance(triggers, dict):
+        return frozenset(str(event) for event in triggers)
+    return frozenset()
+
+
+def _runs_on_merge_group(job: WorkflowNode) -> bool:
+    """Only conditions known to let the job run on merge_group count.
+
+    No condition, `always()`, the `full-integration` label gate, or
+    `always() && (<label gate>)`. Anything else (`${{ false }}`,
+    `github.event_name == 'workflow_dispatch'`, an unknown expression) is not
+    a merge_group producer, because a skipped check would still pass the gate.
+    """
+    condition = str(job.get("if", "")).strip()
+    if condition.startswith("${{") and condition.endswith("}}"):
+        condition = condition[3:-2].strip()
+    return condition in {
+        "",
+        "always()",
+        FULL_INTEGRATION_GATE,
+        f"always() && ({FULL_INTEGRATION_GATE})",
+    }
+
+
+def _check_names(job_id: str, job: WorkflowNode) -> tuple[str, ...]:
+    """Expand a job's check-run names over a static matrix; dynamic ones expand to nothing."""
+    name = str(job.get("name", job_id))
+    references = _MATRIX_REFERENCE.findall(name)
+    if not references:
+        return (name,)
+    strategy = job.get("strategy")
+    matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+    if not isinstance(matrix, dict):
+        return ()
+    values: list[list[object]] = []
+    for reference in references:
+        axis = matrix.get(reference)
+        if not isinstance(axis, list):
+            return ()
+        values.append(axis)
+    names = []
+    for combination in product(*values):
+        rendered = name
+        for reference, value in zip(references, combination, strict=True):
+            rendered = _MATRIX_REFERENCE.sub(
+                lambda m, ref=reference, val=value: str(val) if m.group(1) == ref else m.group(0),
+                rendered,
+            )
+        names.append(rendered)
+    return tuple(names)
+
+
+def _merge_group_producers(
+    workflows: dict[str, WorkflowNode],
+) -> dict[str, list[str]]:
+    """Every check-run name a merge_group event produces, with its producers."""
+    producers: dict[str, list[str]] = {}
+    for workflow_name, workflow in sorted(workflows.items()):
+        if MERGE_GROUP_EVENT not in _workflow_events(workflow):
+            continue
+        jobs = workflow.get("jobs")
+        if not isinstance(jobs, dict):
+            continue
+        for job_id, job in jobs.items():
+            if not isinstance(job, dict) or not _runs_on_merge_group(job):
+                continue
+            for check_name in _check_names(job_id, job):
+                producers.setdefault(check_name, []).append(f"{workflow_name}:{job_id}")
+    return producers
+
+
+def _assert_merge_group_checks_are_produced(
+    merge_gate: WorkflowNode, workflows: dict[str, WorkflowNode]
+) -> None:
+    """The merge-time gate may only wait for checks merge_group really runs."""
+    contexts = _expected_checks(merge_gate)
+    merge_time = contexts[MERGE_GROUP_EVENT]
+    producers = _merge_group_producers(workflows)
+    assert "gate" not in merge_time, "the gate would deadlock waiting for itself"
+    missing = sorted(name for name in merge_time if name not in producers)
+    assert not missing, (
+        f"merge_group EXPECTED_CHECKS waits for checks no merge_group job produces: {missing}"
+    )
+    ambiguous = {name: producers[name] for name in merge_time if len(producers[name]) > 1}
+    assert not ambiguous, f"merge_group checks produced by more than one job: {ambiguous}"
+    weaker = sorted(
+        (set(contexts["pull_request"]) | set(contexts["pull_request_labeled"])) - set(merge_time)
+    )
+    assert not weaker, f"PR-time required checks missing from the merge-time gate: {weaker}"
+
+
+def _assert_merge_time_integration_authority(
+    integration: WorkflowNode, release: WorkflowNode
+) -> None:
+    """ci-integration.yml shards with the build-release planner on merge_group."""
+    events = _workflow_events(integration)
+    assert events == MERGE_TIME_TRIGGERS, (
+        f"ci-integration.yml must trigger on exactly {sorted(MERGE_TIME_TRIGGERS)}; "
+        f"got {sorted(events)} (secrets must never reach pull_request code)"
+    )
+    for key in PLANNER_MARK_ENV:
+        assert integration["env"][key] == release["env"][key], (
+            f"{key} must match build-release.yml so both lanes partition the same corpus"
+        )
+
+    plan_step = workflow_step(workflow_job(integration, MERGE_TIME_PLAN_JOB), MERGE_TIME_PLAN_STEP)
+    plan = " ".join(shell_tokens(plan_step))
+    for needle in (
+        "-p scripts.ci_sharding",
+        "--shard-plan-out",
+        "--shard-workers 4",
+        f"--shard-max {MERGE_TIME_MAX_SHARDS}",
+        "-m $HERMETIC_MARK_EXPR",
+    ):
+        assert needle in plan, f"merge-time shard plan lost {needle!r}"
+
+    shard_job = workflow_job(integration, MERGE_GROUP_INTEGRATION_JOB)
+    assert shard_job["strategy"]["matrix"]["shard"] == MERGE_TIME_SHARD_MATRIX
+    assert MERGE_TIME_PLAN_JOB in shard_job["needs"]
+    shard_step = workflow_step(shard_job, MERGE_GROUP_INTEGRATION_STEP)
+    shard_env = effective_env(integration, shard_job, shard_step)
+    assert shard_env["PYTEST_MARK_EXPR"] == release["env"]["HERMETIC_MARK_EXPR"]
+    shard_args = " ".join(str(shard_env["PYTEST_EXTRA_ARGS"]).split())
+    for needle in (MERGE_TIME_SHARD_COUNT, "--shard-index ${{ matrix.shard }}", "--cov"):
+        assert needle in shard_args, f"merge-time shard lost {needle!r}"
+
+    network_job = workflow_job(integration, MERGE_TIME_NETWORK_JOB)
+    network_step = workflow_step(network_job, MERGE_TIME_NETWORK_STEP)
+    network_env = effective_env(integration, network_job, network_step)
+    assert network_env["PYTEST_MARK_EXPR"] == release["env"]["NETWORK_MARK_EXPR"]
+
+    fan_in = workflow_job(integration, MERGE_TIME_FAN_IN_JOB)
+    assert str(fan_in.get("if", "")).startswith("always() && ")
+    assert set(fan_in["needs"]) >= {
+        MERGE_TIME_PLAN_JOB,
+        MERGE_GROUP_INTEGRATION_JOB,
+        MERGE_TIME_NETWORK_JOB,
+    }
+    aggregate = workflow_step(fan_in, "Aggregate shard results")
+    for job_id in (MERGE_TIME_PLAN_JOB, MERGE_GROUP_INTEGRATION_JOB, MERGE_TIME_NETWORK_JOB):
+        assert f"needs.{job_id}.result" in str(aggregate["run"]), (
+            f"the integration fan-in ignores {job_id}"
+        )
+
+
+def _assert_global_coverage_floor_gates_merge(merge_gate: WorkflowNode, ci: WorkflowNode) -> None:
+    """The pyproject.toml floor is enforced by a check the merge-time gate requires."""
+    with PYPROJECT.open("rb") as handle:
+        floor = tomllib.load(handle)["tool"]["coverage"]["report"]["fail_under"]
+    assert GLOBAL_COVERAGE_CHECK in _expected_checks(merge_gate)[MERGE_GROUP_EVENT]
+    job = workflow_job(ci, GLOBAL_COVERAGE_JOB)
+    assert job["name"] == GLOBAL_COVERAGE_CHECK
+    step = workflow_step(job, GLOBAL_COVERAGE_STEP)
+    assert_exact_command(
+        shell_commands(step),
+        ["coverage", "report", f"--fail-under={floor}"],
+        label=GLOBAL_COVERAGE_STEP,
+    )
+
+
+def _assert_merge_queue_freshness_alarm(freshness: WorkflowNode) -> None:
+    """A schedule fails when main moves but no merge_group run completed."""
+    assert {"schedule", "workflow_dispatch"} <= _workflow_events(freshness)
+    job = workflow_job(freshness, FRESHNESS_JOB)
+    assert_unconditional(job, label=FRESHNESS_JOB)
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    step = workflow_step(job, FRESHNESS_STEP)
+    assert_unconditional(step, label=FRESHNESS_STEP)
+    assert "continue-on-error" not in step
+    assert_exact_command(shell_commands(step), ["python3", FRESHNESS_SCRIPT], label=FRESHNESS_STEP)
+    env = effective_env(freshness, job, step)
+    assert env["WINDOW_DAYS"] == FRESHNESS_WINDOW_DAYS
+    assert env["BRANCH"] == "main"
+
+
+def _load_workflows() -> dict[str, WorkflowNode]:
+    return {path.name: load_workflow(path) for path in sorted(WORKFLOWS_DIR.glob("*.yml"))}
+
+
+@pytest.fixture(scope="module")
+def repository_workflows() -> dict[str, WorkflowNode]:
+    return _load_workflows()
+
+
+def test_merge_group_expected_checks_are_produced_by_merge_group_jobs(
+    repository_workflows: dict[str, WorkflowNode],
+) -> None:
+    _assert_merge_group_checks_are_produced(
+        repository_workflows["merge-gate.yml"], repository_workflows
+    )
+
+
+def test_merge_time_integration_uses_the_release_planner(
+    repository_workflows: dict[str, WorkflowNode],
+) -> None:
+    _assert_merge_time_integration_authority(
+        repository_workflows["ci-integration.yml"], repository_workflows["build-release.yml"]
+    )
+
+
+def test_global_coverage_floor_gates_the_merge(
+    repository_workflows: dict[str, WorkflowNode],
+) -> None:
+    _assert_global_coverage_floor_gates_merge(
+        repository_workflows["merge-gate.yml"], repository_workflows["ci.yml"]
+    )
+
+
+def test_merge_queue_freshness_alarm_is_scheduled(
+    repository_workflows: dict[str, WorkflowNode],
+) -> None:
+    _assert_merge_queue_freshness_alarm(repository_workflows[FRESHNESS_WORKFLOW])
+
+
+@pytest.fixture
+def mutable_workflows(repository_workflows: dict[str, WorkflowNode]) -> dict[str, WorkflowNode]:
+    return deepcopy(repository_workflows)
+
+
+def _gate_merge_time_checks(workflows: dict[str, WorkflowNode], names: str) -> None:
+    wait_step = workflow_step(
+        workflow_job(workflows["merge-gate.yml"], "gate"), MERGE_GATE_WAIT_STEP
+    )
+    contexts = _expected_checks(workflows["merge-gate.yml"])
+    labeled = ",".join(contexts["pull_request_labeled"])
+    unlabeled = ",".join(contexts["pull_request"])
+    wait_step["env"]["EXPECTED_CHECKS"] = (
+        f"${{{{ github.event_name == 'merge_group' && '{names}' || "
+        "contains(github.event.pull_request.labels.*.name, 'full-integration') "
+        f"&& '{labeled}' || '{unlabeled}' }}}}"
+    )
+
+
+def test_merge_group_check_without_a_producer_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    merge_time = _expected_checks(mutable_workflows["merge-gate.yml"])[MERGE_GROUP_EVENT]
+    _gate_merge_time_checks(mutable_workflows, ",".join((*merge_time, "Phantom Check (Linux)")))
+
+    with pytest.raises(AssertionError, match="no merge_group job produces"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+def test_merge_group_check_from_a_pull_request_only_workflow_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    del mutable_workflows["ci-integration.yml"]["on"][MERGE_GROUP_EVENT]
+
+    with pytest.raises(AssertionError, match="no merge_group job produces"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+def test_merge_group_check_skipped_by_a_job_condition_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    job = workflow_job(mutable_workflows["ci-integration.yml"], "release-validation")
+    job["if"] = "github.event_name == 'workflow_dispatch'"
+
+    with pytest.raises(AssertionError, match="no merge_group job produces"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+@pytest.mark.parametrize("condition", ["${{ false }}", "false", "github.repository == 'x/y'"])
+def test_merge_group_check_from_an_always_false_producer_fails(
+    mutable_workflows: dict[str, WorkflowNode], condition: str
+) -> None:
+    workflow_job(mutable_workflows["ci-integration.yml"], "release-validation")["if"] = condition
+
+    with pytest.raises(AssertionError, match="no merge_group job produces"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+def test_merge_group_check_from_a_dynamic_matrix_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    merge_time = _expected_checks(mutable_workflows["merge-gate.yml"])[MERGE_GROUP_EVENT]
+    shard_check = "Integration Tests Shard 1 (Linux)"
+    _gate_merge_time_checks(mutable_workflows, ",".join((*merge_time, shard_check)))
+
+    with pytest.raises(AssertionError, match="no merge_group job produces"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+def test_merge_group_check_with_two_producers_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    jobs = mutable_workflows["ci-integration.yml"]["jobs"]
+    jobs["shadow-build"] = deepcopy(jobs["build"])
+
+    with pytest.raises(AssertionError, match="more than one job"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+def test_pr_time_check_missing_from_merge_time_gate_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    merge_time = _expected_checks(mutable_workflows["merge-gate.yml"])[MERGE_GROUP_EVENT]
+    _gate_merge_time_checks(
+        mutable_workflows, ",".join(name for name in merge_time if name != "APM Self-Check")
+    )
+
+    with pytest.raises(AssertionError, match="PR-time required checks missing"):
+        _assert_merge_group_checks_are_produced(
+            mutable_workflows["merge-gate.yml"], mutable_workflows
+        )
+
+
+@pytest.mark.parametrize("event", ["pull_request_target", "push"])
+def test_merge_time_integration_secret_reaching_trigger_fails(
+    mutable_workflows: dict[str, WorkflowNode], event: str
+) -> None:
+    mutable_workflows["ci-integration.yml"]["on"][event] = {"branches": ["main"]}
+
+    with pytest.raises(AssertionError, match="must trigger on exactly"):
+        _assert_merge_time_integration_authority(
+            mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
+        )
+
+
+def test_merge_time_integration_without_dispatch_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    del mutable_workflows["ci-integration.yml"]["on"]["workflow_dispatch"]
+
+    with pytest.raises(AssertionError, match="must trigger on exactly"):
+        _assert_merge_time_integration_authority(
+            mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
+        )
+
+
+def test_merge_time_static_shard_matrix_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    job = workflow_job(mutable_workflows["ci-integration.yml"], MERGE_GROUP_INTEGRATION_JOB)
+    job["strategy"]["matrix"]["shard"] = [1, 2, 3, 4]
+
+    with pytest.raises(AssertionError):
+        _assert_merge_time_integration_authority(
+            mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
+        )
+
+
+def test_merge_time_selection_drift_from_release_planner_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    mutable_workflows["ci-integration.yml"]["env"]["HERMETIC_MARK_EXPR"] = "not live"
+
+    with pytest.raises(AssertionError, match=r"must match build-release\.yml"):
+        _assert_merge_time_integration_authority(
+            mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
+        )
+
+
+def test_merge_time_fan_in_ignoring_the_network_lane_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    fan_in = workflow_job(mutable_workflows["ci-integration.yml"], MERGE_TIME_FAN_IN_JOB)
+    step = workflow_step(fan_in, "Aggregate shard results")
+    step["run"] = step["run"].replace(f"needs.{MERGE_TIME_NETWORK_JOB}.result", "needs.x.result")
+
+    with pytest.raises(AssertionError, match="ignores integration-network"):
+        _assert_merge_time_integration_authority(
+            mutable_workflows["ci-integration.yml"], mutable_workflows["build-release.yml"]
+        )
+
+
+def test_global_coverage_floor_drift_fails(mutable_workflows: dict[str, WorkflowNode]) -> None:
+    job = workflow_job(mutable_workflows["ci.yml"], GLOBAL_COVERAGE_JOB)
+    step = workflow_step(job, GLOBAL_COVERAGE_STEP)
+    step["run"] = step["run"].replace("--fail-under=80", "--fail-under=70")
+
+    with pytest.raises(AssertionError, match="must contain exact command"):
+        _assert_global_coverage_floor_gates_merge(
+            mutable_workflows["merge-gate.yml"], mutable_workflows["ci.yml"]
+        )
+
+
+def test_global_coverage_floor_dropped_from_merge_gate_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    merge_time = _expected_checks(mutable_workflows["merge-gate.yml"])[MERGE_GROUP_EVENT]
+    _gate_merge_time_checks(
+        mutable_workflows, ",".join(name for name in merge_time if name != GLOBAL_COVERAGE_CHECK)
+    )
+
+    with pytest.raises(AssertionError):
+        _assert_global_coverage_floor_gates_merge(
+            mutable_workflows["merge-gate.yml"], mutable_workflows["ci.yml"]
+        )
+
+
+def test_merge_queue_freshness_alarm_suppressed_fails(
+    mutable_workflows: dict[str, WorkflowNode],
+) -> None:
+    job = workflow_job(mutable_workflows[FRESHNESS_WORKFLOW], FRESHNESS_JOB)
+    workflow_step(job, FRESHNESS_STEP)["continue-on-error"] = True
+
+    with pytest.raises(AssertionError):
+        _assert_merge_queue_freshness_alarm(mutable_workflows[FRESHNESS_WORKFLOW])
 
 
 # Opt-in full integration before the queue (#4116): ci-integration.yml runs on
