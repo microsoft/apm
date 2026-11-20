@@ -13,7 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils import apm_lifecycle_runner
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
+from tests.utils.lifecycle_evidence import OutputOracleError
 
 
 def test_runner_executes_injected_apm_binary(
@@ -317,3 +319,57 @@ def test_command_result_is_immutable(tmp_path: Path) -> None:
 
     with pytest.raises(FrozenInstanceError):
         result.returncode = 1
+
+
+def _crashing_apm(tmp_path: Path) -> tuple[str, ...]:
+    """An entry point named ``apm`` that prints a traceback and exits 0."""
+    script = tmp_path / "apm"
+    script.write_text(
+        "import sys\nprint('Traceback (most recent call last):', file=sys.stderr)\n",
+        encoding="utf-8",
+    )
+    return (sys.executable, str(script))
+
+
+def test_runner_passes_every_apm_result_through_the_output_oracle(tmp_path: Path) -> None:
+    runner = ApmLifecycleRunner(_crashing_apm(tmp_path))
+
+    with pytest.raises(OutputOracleError, match="I9: stderr has a Python traceback"):
+        runner.run(("install",), cwd=tmp_path, env=os.environ)
+    with pytest.raises(OutputOracleError, match="scenario='seq'"):
+        runner.run_sequence(
+            (("install",),),
+            expected_returncodes=(0,),
+            scenario_id="seq",
+            cwd=tmp_path,
+            env=os.environ,
+        )
+
+
+def test_disabling_the_runner_output_hook_lets_a_violation_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Mutation control: without the hook the same violating result is returned.
+    monkeypatch.setattr(apm_lifecycle_runner, "_check_output", lambda *_a, **_k: None)
+    runner = ApmLifecycleRunner(_crashing_apm(tmp_path))
+
+    result = runner.run(("install",), cwd=tmp_path, env=os.environ)
+
+    assert result.returncode == 0
+    assert "Traceback (most recent call last)" in result.stderr
+
+
+_NON_ASCII_MUTANT = (
+    Path(__file__).parents[1] / "fixtures" / "output_mutants" / "non_ascii_status_line.py"
+)
+
+
+def test_output_oracle_kills_the_recorded_non_ascii_mutant(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    real = ApmLifecycleRunner((str(apm_binary_path),))
+    assert real.run(("--version",), cwd=tmp_path, env=os.environ).returncode == 0
+
+    mutant = ApmLifecycleRunner((sys.executable, str(_NON_ASCII_MUTANT)))
+    with pytest.raises(OutputOracleError, match=r"I6: stdout has characters outside printable"):
+        mutant.run(("--version",), cwd=tmp_path, env=os.environ)

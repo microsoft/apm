@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-DOC-journey-index")]
+
 RATCHET_TEST_SCOPE = "repository"
 
 _ROOT = Path(__file__).parents[2]
