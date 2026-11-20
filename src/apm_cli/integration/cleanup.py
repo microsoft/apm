@@ -329,7 +329,10 @@ def _render_locked(
     )
     try:
         snapshot.parent.mkdir()
-        (lockfile if owner is None else _locked_subset(lockfile, owner)).write(snapshot)
+        from apm_cli.deps.lockfile_write_authority import lockfile_scratch_writes
+
+        with lockfile_scratch_writes():
+            (lockfile if owner is None else _locked_subset(lockfile, owner)).write(snapshot)
         with contextlib.redirect_stdout(io.StringIO()):
             with contextlib.redirect_stderr(io.StringIO()):
                 return run_replay(config, CheckLogger(verbose=False))

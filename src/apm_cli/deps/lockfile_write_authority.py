@@ -227,6 +227,25 @@ def restore_lockfile_bytes(path: Path, data: bytes) -> None:
     atomic_write_text(path, data.decode("utf-8"), normalize_line_endings=False)
 
 
+@contextmanager
+def lockfile_scratch_writes() -> Iterator[None]:
+    """Write a private scratch snapshot now, outside the command's lockfile.
+
+    A replay renders a copy of the lockfile into a scratch tree it reads back
+    at once; that copy is never the project's lockfile, so it is neither
+    staged nor withheld by ``--frozen``.
+    """
+    from .lockfile import _suppressed_writes
+
+    writer = _active_writer.set(None)
+    suppressed = _suppressed_writes.set(None)
+    try:
+        yield
+    finally:
+        _suppressed_writes.reset(suppressed)
+        _active_writer.reset(writer)
+
+
 def flush_lockfile_writes() -> None:
     """Commit what this command staged now; it keeps staging afterwards."""
     scope = _scope()

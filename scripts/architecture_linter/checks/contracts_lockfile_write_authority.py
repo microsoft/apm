@@ -58,6 +58,8 @@ COMMIT_SITES = frozenset(
         ("src/apm_cli/install/mcp/integration.py", "run_mcp_integration"),
         ("src/apm_cli/integration/mcp_integrator.py", "update_lockfile"),
         ("src/apm_cli/integration/lsp_integrator.py", "update_lockfile"),
+        # A private replay snapshot, written at once under lockfile_scratch_writes.
+        ("src/apm_cli/integration/cleanup.py", "_render_locked"),
         # Local-bundle and --mcp handlers, inside their own writer scopes until
         # #4085 runs them through the install pipeline.
         ("src/apm_cli/install/local_bundle_handler.py", "install_local_bundle"),
@@ -71,6 +73,7 @@ _ROUTES = (
     (_LOCKFILE, "write", "staged_lockfile_text"),
     (_LOCKFILE, "read", "has_staged_lockfile"),
     (_OWNER, "_commit", "ensure_lockfile_writable"),
+    ("src/apm_cli/integration/cleanup.py", "_render_locked", "lockfile_scratch_writes"),
 )
 _SCOPE_OPENERS = frozenset({"lockfile_writer", "lockfile_write_scope"})
 _WRITE_METHODS = frozenset({"write", "save"})
