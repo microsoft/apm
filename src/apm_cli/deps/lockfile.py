@@ -1459,9 +1459,12 @@ class LockFile:
 
     def _required_lockfile_version(self) -> str:
         """Return the minimum schema version required by current lock state."""
-        if self.framed_content_hashes and any(
-            dep.content_hash for dep in self.dependencies.values()
-        ):
+        hashed = any(dep.content_hash for dep in self.dependencies.values())
+        if self.framed_content_hashes and hashed:
+            return FRAMED_CONTENT_HASH_VERSION
+        # Local deployed-file hashes are plain file hashes, framing-independent:
+        # a lock recording them and no unframed package hash is current (RA-018).
+        if self.local_deployed_file_hashes and not hashed:
             return FRAMED_CONTENT_HASH_VERSION
         if self._needs_v3():
             return "3"

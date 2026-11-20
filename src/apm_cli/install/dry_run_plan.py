@@ -154,10 +154,15 @@ class ProspectiveInstallPlan:
         dependencies = preview.dependencies
         resolved_keys = {dependency.get_unique_key() for dependency in dependencies}
         marketplace_index = lockfile.marketplace_index() if lockfile is not None else None
+        resolved_plugins = preview.resolved_marketplace_plugins
         dependencies += tuple(
             dependency
             for dependency in self.selected_apm_dependencies
             if _resolved_key(dependency, lockfile, marketplace_index) not in resolved_keys
+            # An unlocked {name, marketplace} declaration resolved to its plugin's
+            # package; listing its coordinate too would preview a phantom (RA-036).
+            and (dependency.marketplace_name, dependency.marketplace_plugin_name)
+            not in resolved_plugins
         )
         return replace(
             plan,
