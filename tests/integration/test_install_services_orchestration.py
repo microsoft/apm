@@ -550,7 +550,7 @@ class TestIntegratePackagePrimitives:
         integrators["prompt_integrator"].integrate_prompts_for_target.assert_not_called()
         assert result["prompts"] == 0
 
-    def test_adopted_only_is_silent_without_incrementing_counter(self, tmp_path: Path) -> None:
+    def test_adopted_only_logs_adopted_without_incrementing_counter(self, tmp_path: Path) -> None:
         target = make_target(primitives={"prompts": make_mapping(subdir="prompts")})
         entry = make_dispatch_entry(counter_key="prompts")
 

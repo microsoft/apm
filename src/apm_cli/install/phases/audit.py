@@ -105,13 +105,18 @@ def run(ctx: InstallContext) -> None:
     blocking = decision.mode == "block" and has_critical and not ctx.force
 
     if blocking:
-        from apm_cli.core.remediation import HIDDEN_CHARACTERS_FLAGGED, INSTALL_AUDIT_FORCE, either
+        from apm_cli.core.remediation import (
+            HIDDEN_CHARACTERS_FLAGGED,
+            SECURITY_FINDINGS_REVIEW,
+            either,
+        )
         from apm_cli.install.errors import PolicyViolationError
 
-        advice = either(HIDDEN_CHARACTERS_FLAGGED, INSTALL_AUDIT_FORCE)
+        # Review, never bypass: no --force or --no-policy hint (RA-008, RA-015).
+        advice = either(HIDDEN_CHARACTERS_FLAGGED, SECURITY_FINDINGS_REVIEW)
         raise PolicyViolationError(
             f"Install-time audit blocked: {summary}. {advice[:1].upper()}{advice[1:]}"
-            + f" (mode set by {decision.source})."
+            f" (mode set by {decision.source})."
         )
 
     # warn mode, or block downgraded by --force: record without halting.

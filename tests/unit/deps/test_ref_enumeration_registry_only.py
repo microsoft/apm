@@ -49,7 +49,9 @@ class TestViewVersionsRegistryOnly:
         message = logger.error.call_args.args[0]
         assert "registry-only mode" in message
         assert "exact version" in message
-        assert "unset PROXY_REGISTRY_ONLY" not in message
+        # RA-014: state the enterprise policy, never advise lifting it.
+        assert "disabled because PROXY_REGISTRY_ONLY is set (enterprise proxy policy)" in message
+        assert "unset" not in message.lower()
 
     def test_without_the_flag_remote_refs_are_listed(self, tmp_path):
         with patch.dict(os.environ, _mode_off_env(), clear=True):
@@ -101,11 +103,7 @@ class TestOutdatedRegistryOnly:
         assert result.exit_code == 0, result.output
         git_module.cmd.Git.assert_not_called()
         assert "unknown" in result.output
-        output = " ".join(result.output.split())
-        assert "PROXY_REGISTRY_ONLY is set" in output
-        assert "Exact pins still install through the proxy." in output
-        # The note never advises leaving registry-only mode.
-        assert "unset PROXY_REGISTRY_ONLY" not in output
+        assert "PROXY_REGISTRY_ONLY is set" in " ".join(result.output.split())
 
     def test_without_the_flag_ls_remote_runs_and_no_hint(self, tmp_path, monkeypatch):
         monkeypatch.delenv("PROXY_REGISTRY_ONLY", raising=False)
@@ -115,3 +113,19 @@ class TestOutdatedRegistryOnly:
         assert result.exit_code == 0, result.output
         git_module.cmd.Git.assert_called()
         assert "PROXY_REGISTRY_ONLY is set" not in " ".join(result.output.split())
+
+
+def test_no_source_string_advises_unsetting_the_proxy_policy() -> None:
+    """RA-014: PROXY_REGISTRY_ONLY is enterprise policy; no output says to unset it."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[3] / "src" / "apm_cli"
+    pattern = re.compile(r"unset\W+(?:PROXY_REGISTRY_ONLY|ARTIFACTORY_ONLY)", re.I)
+    offenders = [
+        f"{path.relative_to(src)}:{number}"
+        for path in sorted(src.rglob("*.py"))
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if pattern.search(line)
+    ]
+    assert offenders == []

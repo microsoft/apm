@@ -118,7 +118,8 @@ def run(ctx: InstallContext) -> None:
         fail_fast=(enforcement == "block"),
         direct_dep_keys={d.get_unique_key() for d in getattr(ctx, "all_apm_deps", []) or []},
         declared_refs=getattr(ctx, "declared_direct_refs", None) or None,
-        require_locked_presence=bool(getattr(ctx, "frozen", False)),
+        # This install locks deps_to_install; a required one it adds is not absent.
+        installing=True,
         **extra_kwargs,
     )
 

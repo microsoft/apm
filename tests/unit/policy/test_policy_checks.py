@@ -205,15 +205,23 @@ class TestRequiredPackagesDeployed:
 
     def test_fail_absent_from_lockfile(self):
         """A required package in the manifest but absent from the lockfile is a
-        genuine presence failure; the hint is a plain install, never a bypass."""
+        genuine presence failure; the hint is the plain install, never a bypass."""
         deps = _make_dep_refs(["org/pkg"])
         lock = _make_lockfile([{"repo_url": "other/pkg", "deployed_files": ["x.md"]}])
         policy = DependencyPolicy(require=["org/pkg"])
         result = _check_required_packages_deployed(deps, lock, policy)
         assert not result.passed
         assert "org/pkg" in result.details[0]
-        assert "apm install" in result.message
+        assert "Run 'apm install' to record the required packages" in result.message
         assert "--no-policy" not in result.message
+
+    def test_install_that_locks_the_required_package_is_not_blocked(self):
+        """The install gate must not refuse the install that satisfies the check."""
+        deps = _make_dep_refs(["org/pkg"])
+        lock = _make_lockfile([{"repo_url": "other/pkg", "deployed_files": ["x.md"]}])
+        policy = DependencyPolicy(require=["org/pkg"])
+        result = _check_required_packages_deployed(deps, lock, policy, installing=True)
+        assert result.passed
 
     def test_fail_if_not_in_manifest(self):
         """An entry naming no declared package is not skipped (#3993)."""

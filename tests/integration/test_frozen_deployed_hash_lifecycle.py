@@ -64,7 +64,8 @@ _ADOPT_LINE = (
     "'apm install' to re-render them for this version."
 )
 _KEPT_REMEDY = (
-    "Move it aside, then run 'apm install' to restore it, or 'apm install --force' to overwrite it."
+    "Move it aside, then run 'apm install' to restore it, or 'apm export-patch' to export "
+    "the local edits as upstream patches."
 )
 
 

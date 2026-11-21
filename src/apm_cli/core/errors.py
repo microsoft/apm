@@ -133,7 +133,13 @@ def render_unknown_target_error(
         if "copilot" in visible_sorted
         else (visible_sorted[0] if visible_sorted else "claude")
     )
-    valid_csv = ", ".join(visible_sorted) if visible_sorted else suggestion
+    from apm_cli.core.target_catalog import target_value_label
+
+    valid_csv = (
+        ", ".join(target_value_label(value) for value in visible_sorted)
+        if visible_sorted
+        else suggestion
+    )
     # Strip bracket/quote noise that can leak in from misparsed tokens
     # (e.g. "['copilot'"). Defense-in-depth: callers should pass clean
     # values, but this keeps the headline readable if they don't. Fall

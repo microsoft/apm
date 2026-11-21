@@ -633,6 +633,9 @@ def _validate_and_add_packages_to_apm_yml(
         if not should_continue:
             return [], outcome
 
+    if logger is not None and hasattr(logger, "record_adding"):
+        # A refused add is never kept in apm.yml; policy hints must not name it (RA-015b).
+        logger.record_adding(validated_packages)
     if not validated_packages:
         if dry_run:
             if logger:

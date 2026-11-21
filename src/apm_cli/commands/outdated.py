@@ -684,10 +684,10 @@ def outdated(global_, verbose, parallel_checks):
         from ..deps.egress_route import EgressSurface, is_refused
 
         if is_refused(EgressSurface.SOURCE_ENUMERATION):
+            # State the enterprise policy only; never advise lifting it (RA-014).
             logger.info(
-                "PROXY_REGISTRY_ONLY is set: git dependencies cannot be checked for "
-                "newer versions because APM does not list versions through the registry proxy. "
-                "Exact pins still install through the proxy."
+                "Source-host checks are disabled because PROXY_REGISTRY_ONLY is set "
+                "(enterprise proxy policy)."
             )
     if any(row.status == "not-comparable" for row in rows):
         logger.progress("Local replacement sources are not remotely comparable")

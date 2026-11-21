@@ -94,7 +94,7 @@ class TestCliFailureAfterNativeDeploy:
         # The skill directory may hold unrelated files; it is not listed as removable.
         assert ".claude/skills/demo" not in listed
         assert "native target files on disk" in output
-        assert "Remove these files, or re-run 'apm install' (add --force" in output
+        assert "Remove these files, then re-run 'apm install'." in output
         _assert_no_rollback_claim(result.output)
         # Existing apm.yml and lockfile behavior on failure is unchanged.
         assert (project / "apm.yml").read_bytes() == manifest

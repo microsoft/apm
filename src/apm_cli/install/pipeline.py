@@ -188,6 +188,10 @@ def _preview_install(ctx: InstallContext, *, run_gates: bool) -> InstallResult:
             mcp_dependencies=ctx.preview_mcp_dependencies,
             errors=tuple(ctx.preview_errors),
             declaration_errors=tuple(ctx.preview_declaration_errors),
+            resolved_marketplace_plugins=frozenset(
+                (row.get("discovered_via"), row.get("marketplace_plugin_name"))
+                for row in (ctx.marketplace_provenance or {}).values()
+            ),
         ),
     )
 

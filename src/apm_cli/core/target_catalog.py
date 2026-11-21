@@ -398,3 +398,18 @@ def target_all_exclusion_help() -> str:
 def target_error_values(command: str) -> tuple[str, ...]:
     """Return accepted target values in deterministic error-display order."""
     return tuple(sorted(accepted_target_values(command)))
+
+
+def target_value_label(value: str) -> str:
+    """Return *value* as an error lists it: an alias names the target it selects.
+
+    A deprecated alias is marked deprecated, so no listing presents it as a
+    target in its own right (RA-037).
+    """
+    replacement = DEPRECATED_TARGET_ALIASES.get(value)
+    if replacement is not None:
+        return f"{value} (deprecated alias of {replacement})"
+    for capability in TARGET_CAPABILITIES.values():
+        if value in capability.aliases:
+            return f"{value} (alias of {capability.name})"
+    return value

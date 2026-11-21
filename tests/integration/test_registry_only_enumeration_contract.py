@@ -218,8 +218,11 @@ def test_view_versions_aborts_without_contacting_source_host(
 
     assert scenario.result.returncode == 1, scenario.output
     assert "registry-only mode" in scenario.output
-    assert "pin an exact version tag in apm.yml" in scenario.output
-    assert "unset PROXY_REGISTRY_ONLY" not in scenario.output
+    assert (
+        "version listing from the source host is disabled because PROXY_REGISTRY_ONLY "
+        "is set (enterprise proxy policy)"
+    ) in " ".join(scenario.result.stderr.split()), scenario.output
+    assert "unset" not in scenario.output.lower(), scenario.output
     assert scenario.git_network_calls == []
     assert scenario.upstream_requests == []
 
@@ -246,8 +249,8 @@ def test_install_range_fails_with_remedy_without_contacting_source_host(
 
     assert scenario.result.returncode != 0, scenario.output
     assert "Cannot resolve the range '^1.0.0'" in scenario.output
-    assert "Pin one exact version" in scenario.output
-    assert "unset PROXY_REGISTRY_ONLY" not in scenario.output
+    assert "Pin one exact version" in " ".join(scenario.output.split()), scenario.output
+    assert "unset" not in scenario.output.lower(), scenario.output
     assert scenario.git_network_calls == []
     assert scenario.upstream_requests == []
     assert not (scenario.project / "apm.lock.yaml").exists()
@@ -293,7 +296,7 @@ def test_install_exact_pin_lists_source_tags_when_mode_is_off(
     assert any("ls-remote" in call for call in scenario.git_network_calls), scenario.output
 
 
-def test_outdated_names_remedy_without_contacting_source_host(
+def test_outdated_states_the_policy_without_contacting_source_host(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     scenario = _run(
@@ -307,7 +310,12 @@ def test_outdated_names_remedy_without_contacting_source_host(
 
     assert scenario.result.returncode == 0, scenario.output
     assert "unknown" in scenario.output
-    assert "PROXY_REGISTRY_ONLY is set" in scenario.output
+    # RA-014: state the enterprise policy only; never advise lifting it.
+    assert (
+        "[i] Source-host checks are disabled because PROXY_REGISTRY_ONLY is set "
+        "(enterprise proxy policy)."
+    ) in scenario.result.stdout.splitlines(), scenario.output
+    assert "unset" not in scenario.output.lower(), scenario.output
     assert scenario.git_network_calls == []
     assert scenario.upstream_requests == []
 

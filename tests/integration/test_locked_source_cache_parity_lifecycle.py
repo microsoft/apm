@@ -136,3 +136,89 @@ def test_update_refusal_names_the_mismatch_as_an_error(
     assert any("test/pkg" in line for line in errors), _evidence(update)
     assert _names_mismatch(update, expected), _evidence(update)
     assert _durable(world) == before, "I7: refused update changed durable state"
+
+
+def _mismatch_count(result: CommandResult) -> int:
+    text = re.sub(r"\s+", " ", result.stdout + result.stderr)
+    return text.count("Content hash mismatch for test/pkg:")
+
+
+def _assert_restore_only(result: CommandResult) -> None:
+    """RA-004 rule B: the refusal offers only restores, never a lock edit."""
+    text = re.sub(r"\s+", " ", result.stdout + result.stderr)
+    assert "run 'apm cache clean --yes' to discard the cached package copies" in text, text
+    assert "from version control (for example 'git checkout -- " in text, text
+    for forbidden in ("entry from", "re-pin", "aside"):
+        assert forbidden not in text, (forbidden, text)
+
+
+def test_content_hash_refusal_remedy_converges_non_interactively(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """RA-004/RA-005: one mismatch report; the printed cache restore converges."""
+    world = _installed(tmp_path, apm_binary_path)
+    _edit_every_copy(world)
+
+    audit = world.apm("audit", "--ci", expect=1)
+    # RA-005: one finding prints once, under its owning check.
+    assert _mismatch_count(audit) == 1, _evidence(audit)
+    assert "drift details:" in audit.stdout + audit.stderr, _evidence(audit)
+    refused = world.apm("install", expect=1)
+    _assert_restore_only(refused)
+
+    # The printed remedy, as printed: no TTY (stdin is /dev/null), then retry.
+    world.apm("cache", "clean", "--yes")
+    world.apm("install")
+    world.apm("audit", "--ci")
+
+
+def test_content_hash_refusal_lock_restore_converges(tmp_path: Path, apm_binary_path: Path) -> None:
+    """RA-004: a changed lock is restored from version control, never edited."""
+    world = _installed(tmp_path, apm_binary_path)
+    world.git(world.project, "init", "-q", "--initial-branch=main")
+    world.git(world.project, "add", "apm.yml", "apm.lock.yaml")
+    world.git(world.project, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "lock")
+    lock = world.project / "apm.lock.yaml"
+    expected = _locked_content_hash(world)
+    lock.write_text(
+        lock.read_text(encoding="utf-8").replace(expected, "sha256:" + "0" * 64),
+        encoding="utf-8",
+    )
+
+    refused = world.apm("install", expect=1)
+    _assert_restore_only(refused)
+
+    world.git(world.project, "checkout", "--", "apm.lock.yaml")
+    world.apm("install")
+    world.apm("audit", "--ci")
+
+
+def test_kept_file_remedies_converge_without_force(tmp_path: Path, apm_binary_path: Path) -> None:
+    """RA-008: a Kept file offers export-patch or move-aside, never --force; both converge."""
+    world = _installed(tmp_path, apm_binary_path)
+    deployed = world.project / ".github" / "instructions" / "glob.instructions.md"
+    original = deployed.read_bytes()
+    deployed.write_bytes(original + b"\nLocal edit.\n")
+
+    kept = world.apm("install", expect=None)
+    text = re.sub(r"\s+", " ", kept.stdout + kept.stderr)
+    assert "Kept .github/instructions/glob.instructions.md: " in text, _evidence(kept)
+    assert (
+        "Move it aside, then run 'apm install' to restore it, or 'apm export-patch' to "
+        "export the local edits as upstream patches."
+    ) in text, _evidence(kept)
+    assert "--force" not in text, _evidence(kept)
+
+    # Keep the edit, as printed: the patch carries it upstream.
+    world.apm("export-patch")
+    patches = "".join(
+        path.read_text(encoding="utf-8") for path in (world.project / "patches").rglob("*.patch")
+    )
+    assert "+Local edit." in patches, patches
+
+    # Restore, as printed: move it aside, then install.
+    deployed.rename(deployed.with_name(f"{deployed.name}.aside"))
+    restored = world.apm("install")
+    assert "Kept " not in restored.stdout + restored.stderr, _evidence(restored)
+    assert deployed.read_bytes() == original
+    world.apm("audit", "--ci")

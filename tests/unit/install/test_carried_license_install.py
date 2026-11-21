@@ -98,7 +98,9 @@ def test_carried_mismatch_with_lock_fails_closed(tmp_path: Path) -> None:
 
     with pytest.raises(DirectDependencyError, match="Licence file mismatch") as exc_info:
         ensure_carried_licenses_match(ctx, "k", package, SimpleNamespace(carried_licenses=forged))
-    assert "remove the 'k' entry from" in str(exc_info.value)
+    assert "run 'apm cache clean --yes' to discard the cached package copies" in " ".join(
+        str(exc_info.value).split()
+    )
     assert not package.exists()
 
 
@@ -106,7 +108,7 @@ def test_carried_mismatch_with_lock_fails_closed(tmp_path: Path) -> None:
     ("scope", "command"),
     [(InstallScope.PROJECT, "apm install"), (InstallScope.USER, "apm install -g")],
 )
-def test_carried_mismatch_hint_names_the_deliberate_re_pin(tmp_path: Path, scope, command) -> None:
+def test_carried_mismatch_hint_names_only_restore_remedies(tmp_path: Path, scope, command) -> None:
     package, _legacy_hash, records = _package(tmp_path)
     forged = (CarriedLicense("LICENSE", "LICENSE", "sha256:" + "0" * 64),)
     ctx = _ctx(
@@ -122,7 +124,13 @@ def test_carried_mismatch_hint_names_the_deliberate_re_pin(tmp_path: Path, scope
         )
     message = " ".join(str(exc_info.value).split())
     lockfile = tmp_path / "apm-root" / "apm.lock.yaml"
-    assert f"remove the 'owner/repo/sub' entry from {lockfile}, then run '{command}'" in message
+    restore = (
+        f"restore {lockfile} from your backup"
+        if scope is InstallScope.USER
+        else f"restore {lockfile} from version control (for example 'git checkout -- {lockfile}')"
+    )
+    assert f"If {lockfile} changed, {restore}, then run '{command}' to verify" in message
+    assert "entry from" not in message and "aside" not in message
 
 
 def test_update_keeps_the_carried_check_for_an_unchanged_commit(tmp_path: Path) -> None:

@@ -122,7 +122,7 @@ locked.
 ## Send local edits upstream
 
 When a team has improved an installed skill in place, save the edit before
-`apm install --force` restores the locked file:
+`apm install` restores the locked file:
 
 ```bash frame="terminal"
 apm export-patch
@@ -134,7 +134,7 @@ apm export-patch
 [*] Exported 1 edit(s) into 1 patch file(s) under <repo>/patches. Apply each with 'git apply' from the package repository root at the base noted in the patch header.
 ```
 
-Send the patch to the package owner, then run `apm install --force` to restore the locked file.
+Send the patch to the package owner, then move the edited file aside and run `apm install` to restore the locked file.
 
 ## Export an inventory
 
