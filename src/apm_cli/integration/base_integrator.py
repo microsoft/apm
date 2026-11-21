@@ -864,7 +864,9 @@ class BaseIntegrator:
         # deployment evidence; the lockfile hash alone never authorizes it (#4360).
         gate = self._overwrite_gate
         if force or not target_path.is_file() or (gate and gate.authorizes(target_path, rel_path)):
-            return plan is not None, False
+            if plan is not None:
+                return True, False
+            return False, False
         if gate is not None and (
             gate.legacy_adoptable(target_path, rel_path)
             if plan is not None

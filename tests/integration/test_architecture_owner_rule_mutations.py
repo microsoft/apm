@@ -824,6 +824,18 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
             "            pass\n",
             id="transaction-not-listening",
         ),
+        pytest.param(
+            "src/apm_cli/integration/cleanup.py",
+            "            write_seam.unlink(stale_target)\n",
+            "            with write_seam.private_scratch():\n                write_seam.unlink(stale_target)\n",
+            id="scratch-outside-the-locked-render",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    with write_seam.planning():\n                        write_seam.copy2(source_file, target_file)\n",
+            id="planning-outside-the-commit-gate",
+        ),
     ],
 )
 def test_integrator_writes_cannot_bypass_the_deploy_write_seam(
@@ -2367,7 +2379,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-install-commit-order",
         rule_id="install-deployment-install-commit-order",
         path="src/apm_cli/install/phases/integrate.py",
-        old="        check_before_deploy(ctx)\n",
+        old="        check_before_deploy(ctx, _write_plan(ctx, materialized, deployment_plans, local_plan))\n",
         new="        pass\n",
         intent="Integration deploys before the commit gate checks the install.",
     ),

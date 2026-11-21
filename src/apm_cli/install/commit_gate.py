@@ -298,18 +298,17 @@ def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[Planne
     records the files ``OverwriteGate`` would keep instead of writing. The
     gate stays the per-file backstop for anything the plan cannot see.
     """
-    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
     from apm_cli.core.scope import InstallScope
     from apm_cli.install.deployed_paths import deployed_path_entry
     from apm_cli.integration.base_integrator import kept_edit_message
 
-    session = getattr(ctx.integrators.get("skill"), "_materialization_session", None)
-    if not isinstance(session, DeploymentMaterializationSession) or ctx.diagnostics is None:
+    skill = ctx.integrators.get("skill")
+    if getattr(skill, "_materialization_session", None) is None or ctx.diagnostics is None:
         return
     kept = [
         (owner, path, edit)
         for package_info, plan, managed in write_plan
-        for owner, path, edit in _planned_keeps(ctx, session, package_info, plan, managed)
+        for owner, path, edit in _planned_keeps(ctx, skill, package_info, plan, managed)
     ]
     user_scope = ctx.scope is InstallScope.USER
     for owner, path, edit in kept:
@@ -321,14 +320,14 @@ def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[Planne
 
 def _planned_keeps(
     ctx: InstallContext,
-    session: Any,
+    skill: Any,
     package_info: Any,
     plan: Any,
     managed: set[str] | None,
 ) -> list[tuple[str, Path, str | None]]:
     """Plan one package's gated file writes; a package the plan cannot render is left to its run."""
     from apm_cli.copilot_plugins.capability import admits_native_plugin
-    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession, OverwriteGate
+    from apm_cli.core.deployment_ledger import recorded_writes
     from apm_cli.integration import write_seam
     from apm_cli.integration.dispatch import get_dispatch_table
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -337,7 +336,6 @@ def _planned_keeps(
         return []
     if admits_native_plugin(package_info):
         return []
-    owner = DeploymentMaterializationSession.receipt_owner(package_info)
     targets = [t for t in plan.target_selection.targets if t in plan.projection_targets]
     table = get_dispatch_table()
     kept: list[tuple[str, Path, str | None]] = []
@@ -349,10 +347,13 @@ def _planned_keeps(
             if target.primitives.get(primitive) is None:
                 continue
             planned: list[tuple[Path, str | None]] = []
-            integrator._overwrite_gate = OverwriteGate(session, (target,), owner)
             integrator._overwrite_plan = planned
             try:
-                with write_seam.planning():
+                with (
+                    write_seam.planning(),
+                    recorded_writes(skill, integrator, [target], package_info),
+                ):
+                    owner = integrator._overwrite_gate.owner
                     getattr(integrator, table[primitive].integrate_method)(
                         target,
                         package_info,
@@ -367,7 +368,6 @@ def _planned_keeps(
                 # The real run reports this package's own failure.
                 return []
             finally:
-                integrator._overwrite_gate = None
                 integrator._overwrite_plan = None
             kept.extend((owner, path, edit) for path, edit in planned)
     return kept

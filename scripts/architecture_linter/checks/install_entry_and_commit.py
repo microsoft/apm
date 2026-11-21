@@ -264,7 +264,7 @@ def check_install_commit_order(provider: FactsProvider) -> tuple[Violation, ...]
     if failures:
         return tuple(failures)
     found: list[Violation] = []
-    if not _ordered(loaded[_INTEGRATE], "check_before_deploy(ctx)", "run_integration_template("):
+    if not _ordered(loaded[_INTEGRATE], "check_before_deploy(ctx", "run_integration_template("):
         found.append(
             _summary(rule_id, _INTEGRATE, "check_before_deploy must run before any deploy")
         )
