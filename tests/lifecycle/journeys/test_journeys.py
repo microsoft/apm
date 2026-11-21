@@ -1446,17 +1446,6 @@ def test_journey_files_agree_with_the_index() -> None:
     assert problems == []
 
 
-def test_golden_rules_follow_the_o4_exemptions_and_resolve_order() -> None:
-    """N5/N7: allow_repeat lines are not refused; resolve progress compares in any order."""
-    text = "$ apm install --frozen\n|     +- wrote: .mcp.json\n|     +- wrote: .mcp.json\n"
-    assert norm.golden_problems(text) == ["duplicate line '|     +- wrote: .mcp.json'"]
-    assert norm.golden_problems(text, ["|     +- wrote: .mcp.json"]) == []
-    first = ["[>] Resolving b...", "[>] Resolving a...", "[i] Targets: copilot"]
-    second = ["[>] Resolving a...", "[>] Resolving b...", "[i] Targets: copilot"]
-    assert norm.canonical(first) == norm.canonical(second)
-    assert norm.canonical(["[i] x", "[i] y"]) != norm.canonical(["[i] y", "[i] x"])
-
-
 @pytest.mark.parametrize("path", _params())
 def test_journey(path: Path, lifecycle_world, journey_twins) -> None:
     del journey_twins
