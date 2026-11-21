@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.context import InstallContext
     from apm_cli.install.exec_gate import WithheldExecutables
     from apm_cli.install.request import InstallRequest
 
@@ -121,13 +122,15 @@ def enforce_frozen_presence(
 
 
 def refuse_stale_exec_decisions(
-    request: InstallRequest, committed: LockFile, lockfile_dir: Path
+    request: InstallRequest | InstallContext, committed: LockFile, lockfile_dir: Path
 ) -> None:
     """Refuse ``--frozen`` before any write when a recorded executables decision changed.
 
-    The same staleness owner the post-deploy check asks (#4053), run in the
-    preflight so a deny or revoked approval keeps every deployed file until a
-    plain ``apm install`` retires it (RA-024).
+    The same staleness owner the post-deploy check asks (#4053), run once the
+    frozen content, selection, MCP and hook-pin checks pass and before any
+    executable deploys or retires, so a deny or revoked approval keeps every
+    deployed file until a plain ``apm install`` retires it (RA-024). Only
+    *request*'s ``scope`` and ``no_policy`` are read.
     """
     from apm_cli.policy.ci_checks import resolve_audit_scope
 

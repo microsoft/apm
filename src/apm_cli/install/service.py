@@ -597,12 +597,6 @@ class InstallService:
                 "--frozen: apm.lock.yaml is out of sync with apm.yml.",
                 reasons=reasons,
             )
-        # A deny, a revoked approval or a policy change since the lock refuses
-        # here, before install retires any deployed executable (RA-024).
-        from apm_cli.install.frozen_retirement import refuse_stale_exec_decisions
-
-        refuse_stale_exec_decisions(request, lockfile, lockfile_path.parent)
-
         InstallService._refuse_frozen_dropped_targets(request, lockfile, lockfile_path)
         InstallService._verify_frozen_local_content(request, lockfile, manifest_deps)
 

@@ -175,7 +175,8 @@ def _recorded(observation: Observation) -> frozenset[str]:
     return frozenset(keys)
 
 
-# gate-cell-c-lock (#4043) passes on the train and is no longer a known cell.
+# gate-cell-c-lock (#4043) is fixed: install --frozen refuses a tightened gate
+# before any write, so no recorded hook goes missing (RA-024).
 KNOWN_CELLS: tuple[KnownCell, ...] = ()
 
 
