@@ -75,7 +75,9 @@ parse_prs_from_git_log() {
             elif [[ "$subject" =~ \(#([0-9]+)\)$ ]]; then
                 num="${BASH_REMATCH[1]}"
             fi
-            [[ -n "$num" ]] && printf '%s\t%s\n' "$num" "$sha"
+            if [[ -n "$num" ]]; then
+                printf '%s\t%s\n' "$num" "$sha"
+            fi
         done | awk -F'\t' '!seen[$1]++'
 }
 
@@ -92,6 +94,7 @@ list_prs_from_gh() {
     total=$(jq 'length' <<< "$raw") || return 1
     if [[ "$total" -ge 500 ]]; then
         echo "[!] gh returned $total PRs (limit 500); list may be truncated" >&2
+        return 1
     fi
     while IFS=$'\t' read -r num oid; do
         [[ -z "$num" ]] && continue
@@ -112,7 +115,7 @@ list_prs_from_gh() {
 
 SELF_TEST_TMP=""
 run_self_test() {
-    local tmp found rc=0
+    local tmp found none rc=0
     # Abort before any git command unless we are inside a fresh temp dir:
     # otherwise the self-test would commit into the caller's repository.
     if ! tmp=$(mktemp -d "${TMPDIR:-/tmp}/list-changes-self-test.XXXXXX") \
@@ -136,6 +139,8 @@ run_self_test() {
         g init -q -b main .
         g commit -q --allow-empty -m "chore: before tag (#10)"
         g tag v0.0.1
+        g commit -q --allow-empty -m "chore: direct push without a PR"
+        g tag no-pr
         g commit -q --allow-empty -m "fix: squash-merged change (#11)"
         g checkout -q -b feature
         g commit -q --allow-empty -m "feat: work on branch (#99)"
@@ -145,7 +150,15 @@ run_self_test() {
         echo "[x] self-test: cannot build the throwaway repository" >&2
         return 1
     fi
-    found=$(cd "$tmp" && parse_prs_from_git_log "v0.0.1..HEAD" | cut -f1 | sort -n | tr '\n' ' ')
+    # The oldest commit in the window has no PR number: must not abort.
+    if ! found=$(cd "$tmp" && parse_prs_from_git_log "v0.0.1..HEAD" | cut -f1 | sort -n | tr '\n' ' '); then
+        echo "[x] self-test: parser failed on a mixed history" >&2
+        return 1
+    fi
+    if ! none=$(cd "$tmp" && parse_prs_from_git_log "v0.0.1..no-pr") || [[ -n "$none" ]]; then
+        echo "[x] self-test: parser failed on a history with no PRs (got: ${none:-error})" >&2
+        rc=1
+    fi
     for want in 11 12; do
         if [[ " $found" != *" $want "* ]]; then
             echo "[x] self-test: PR #$want not found (got: ${found:-none})" >&2
@@ -215,7 +228,7 @@ if [[ $HAVE_GH -eq 1 ]] && PR_LINES=$(list_prs_from_gh "$LAST_TAG"); then
     :
 else
     if [[ $HAVE_GH -eq 1 ]]; then
-        echo "[!] gh pr list failed; falling back to git log subject parsing" >&2
+        echo "[!] gh pr list failed or hit its cap; falling back to git log subject parsing" >&2
     else
         echo "[!] gh not found; falling back to git log subject parsing" >&2
     fi
