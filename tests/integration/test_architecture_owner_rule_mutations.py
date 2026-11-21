@@ -745,21 +745,21 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
     [
         pytest.param(
             "src/apm_cli/install/pipeline.py",
-            "        transaction.snapshot_deploy_targets(ctx)\n",
+            "        transaction.journal_deploy_writes()\n",
             "",
-            id="commit-order-snapshot-removed",
+            id="commit-order-journal-never-opened",
         ),
         pytest.param(
             "src/apm_cli/install/pipeline.py",
-            "        transaction.snapshot_deploy_targets(ctx)\n",
-            "        capture_audit_gated_snapshot(ctx)\n",
-            id="commit-order-snapshot-outside-transaction",
+            "        transaction.journal_deploy_writes()\n",
+            "        DeployJournal(ctx.apm_modules_dir)\n",
+            id="commit-order-journal-outside-transaction",
         ),
         pytest.param(
             "src/apm_cli/install/pipeline.py",
             "        transaction.release_deploy_targets()\n",
             "",
-            id="commit-order-snapshot-never-released",
+            id="commit-order-journal-never-released",
         ),
         pytest.param(
             "src/apm_cli/install/transaction.py",
@@ -787,16 +787,79 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
         ),
     ],
 )
-def test_audit_gated_deploy_snapshot_is_owned_by_the_transaction(
-    path: str, old: str, new: str
-) -> None:
-    """Dropping or bypassing the transaction's deploy snapshot fails the guard."""
+def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: str) -> None:
+    """Dropping or bypassing the transaction's deploy journal fails the guard."""
     rule_id = "install-deployment-install-commit-order"
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
     assert report.failures == ()
     assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/integration/cleanup.py",
+            "            write_seam.unlink(stale_target)\n",
+            "            stale_target.unlink()\n",
+            id="raw-path-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    shutil.copy2(source_file, target_file)\n",
+            id="raw-shutil-copy",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            '                with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:\n',
+            '                with open(json_path, "w", encoding="utf-8") as f:\n',
+            id="raw-open-for-write",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/cleanup.py",
+            "            write_seam.unlink(stale_target)\n",
+            '            stale_target.open("w").close()\n',
+            id="raw-path-open-for-write",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    source_file.replace(target_file)\n",
+            id="raw-path-replace",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/write_seam.py",
+            "    record_before_write(destination, follow=True)\n    return shutil.copy2(",
+            "    return shutil.copy2(",
+            id="seam-writer-skips-record",
+        ),
+        pytest.param(
+            "src/apm_cli/install/transaction.py",
+            "            write_seam.listen(self._record_deploy_write)\n",
+            "            pass\n",
+            id="transaction-not-listening",
+        ),
+    ],
+)
+def test_integrator_writes_cannot_bypass_the_deploy_write_seam(
+    path: str, old: str, new: str
+) -> None:
+    """A raw write in an integrator is never journaled, so rollback could not restore it."""
+    rule_id = "install-deployment-deploy-write-seam"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert {(violation.rule_id, violation.path) for violation in report.violations} == {
+        (rule_id, path)
+    }
 
 
 def test_marketplace_source_parsing_guard_covers_packed_sources() -> None:
@@ -2237,6 +2300,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="dump_yaml_roundtrip(data, apm_yml_path)",
         new="dump_yaml(data, apm_yml_path)",
         intent="apm install --mcp strips user comments from apm.yml again.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-deploy-write-seam",
+        rule_id="install-deployment-deploy-write-seam",
+        path="src/apm_cli/integration/agent_integrator.py",
+        old="from apm_cli.integration.write_seam import write_text_lf",
+        new="from apm_cli.utils.atomic_io import write_text_lf",
+        intent="An integrator writes deploy files without the seam the transaction journals.",
     ),
     MutationCase(
         guard_id="install-deployment-drift-claim-classification",
