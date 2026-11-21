@@ -2,7 +2,10 @@
 
 On 2026-11-21, 21 strict known cells cited closed issues: their fixes had
 landed, yet the cells kept failing for other reasons that a bare strict xfail
-could not see. This gate is offline. It checks the tracking issues against
+could not see. A known cell is a lifecycle known cell or any strict xfail
+in ``tests/``; a deferred design (``KnownFailure(kind="deferred-design")``)
+also needs its tracker open. This gate is offline. It checks the tracking
+issues against
 ``known_cell_issue_states.json`` (``python -m tests.quality.known_cell_issues
 --write`` refreshes it). It also requires every strict xfail in
 ``tests/lifecycle`` to come from ``KnownFailure`` (``tests/lifecycle/known.py``),
@@ -103,3 +106,5 @@ def test_a_known_cell_failing_for_another_reason_fails(pytester: pytest.Pytester
     result.stdout.fnmatch_lines(["*failed for a different reason*", "*test_new_cause*"])
     with pytest.raises(AssertionError):
         KnownFailure("#0", "unfiled", "x")
+    with pytest.raises(AssertionError):
+        KnownFailure("#4543", "deferred", "x", kind="wontfix")

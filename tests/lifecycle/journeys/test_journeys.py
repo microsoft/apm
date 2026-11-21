@@ -127,7 +127,17 @@ from tests.utils.local_scripted_https_proxy import ScriptedResponse
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.integration,
-    pytest.mark.promise(*(f"P-INV-I{i}" for i in range(1, 10))),
+    pytest.mark.promise(
+        "P-INV-I1",
+        "P-INV-I2",
+        "P-INV-I3",
+        "P-INV-I4",
+        "P-INV-I5",
+        "P-INV-I6",
+        "P-INV-I7",
+        "P-INV-I8",
+        "P-INV-I9",
+    ),
 ]
 
 HERE = Path(__file__).parent
