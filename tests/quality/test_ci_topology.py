@@ -3675,6 +3675,51 @@ def test_train_gate_passes_only_when_every_job_is_green(
     assert "| ref | sha | scope | base |" in (tmp_path / "s.md").read_text(encoding="utf-8")
 
 
+def test_train_gate_excuses_failed_jobs_only_when_every_failure_is_inherited(
+    tmp_path: Path,
+) -> None:
+    """INHERITED_ONLY (the baseline step's output, #4704) turns a failed full-scope job
+    green; it never excuses a scope failure, a cancelled or skipped job, or guard scope."""
+    gate = workflow_job(_train_workflows()[MERGE_TRAIN_WORKFLOW], TRAIN_GATE_JOB)
+    step = workflow_step(gate, TRAIN_GATE_STEP)
+    assert step["env"]["INHERITED_ONLY"] == "${{ steps.baseline.outputs.inherited_only }}"
+    green = ("success",) * len(TRAIN_GATE_RESULTS)
+    for index in range(1, len(TRAIN_GATE_RESULTS)):
+        for outcome, excused in (("failure", True), ("cancelled", False), ("skipped", False)):
+            env = dict(zip(TRAIN_GATE_RESULTS, green, strict=True))
+            env[TRAIN_GATE_RESULTS[index]] = outcome
+            for inherited in ("true", "false"):
+                code = _run_train_gate(
+                    step, tmp_path, {"SCOPE": "full", "INHERITED_ONLY": inherited, **env}
+                )
+                assert (code == 0) == (excused and inherited == "true"), (index, outcome)
+    scope_failed = dict(zip(TRAIN_GATE_RESULTS, green, strict=True)) | {"SCOPE_RESULT": "failure"}
+    assert _run_train_gate(
+        step, tmp_path, {"SCOPE": "full", "INHERITED_ONLY": "true", **scope_failed}
+    )
+    guard_only = dict(
+        zip(TRAIN_GATE_RESULTS, ("success", "success") + ("failure",) * 4, strict=True)
+    )
+    assert _run_train_gate(
+        step, tmp_path, {"SCOPE": "guard", "INHERITED_ONLY": "true", **guard_only}
+    )
+
+
+def test_train_gate_aggregate_jobs_match_the_called_workflows() -> None:
+    """gate.py ignores an id-less failure of a job that only aggregates others; its
+    list must be exactly the always()+needs jobs of the workflows a full train calls."""
+    from scripts.merge_queue import gate
+
+    workflows = _train_workflows()
+    aggregates = {
+        job["name"]
+        for name in TRAIN_TIERS.values()
+        for job in workflows[name]["jobs"].values()
+        if job.get("needs") and "always()" in str(job.get("if", ""))
+    }
+    assert aggregates == set(gate.AGGREGATES)
+
+
 TRAIN_SCOPE_CASES = [
     ("queue/t0001/p1-guard", "guard"),
     ("queue/t0001/p3-full", "full"),

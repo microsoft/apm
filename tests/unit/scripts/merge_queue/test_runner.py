@@ -113,12 +113,63 @@ def test_a_green_proof_logs_would_land_per_member_and_cleans_the_build_ref() -> 
     assert current.window == 5
 
 
-def test_a_red_proof_halves_the_window_and_lands_nothing() -> None:
+UNATTRIBUTED = {"residual": ["tests/unit/test_elsewhere.py::t"], "unidentified_jobs": []}
+
+
+def test_an_unattributed_red_is_rerun_once_then_bisected() -> None:
     api, current, log = _repo("failure"), state.State(window=6), runner.Log(None, _clock())
     runner.tick(api, current, log, depth=1)
-    runner.tick(api, current, log, depth=0)
+    runner.tick(api, current, log, depth=0, read_report=lambda run: UNATTRIBUTED)
+    assert current.trains[1].status == state.TESTING and current.trains[1].reruns == 1
+    assert f"POST repos/{REPO}/actions/runs/99/rerun-failed-jobs " in _writes(api)
+    runner.tick(api, current, log, depth=0, read_report=lambda run: UNATTRIBUTED)
     assert current.trains[1].status == state.RED and current.window == 3
+    assert current.split == [21]
     assert not [e for e in log.events if e["event"] == "would-land"]
+    runner.tick(api, current, log, depth=1, read_report=lambda run: UNATTRIBUTED)
+    assert [m.pr for m in current.trains[2].members] == [21] and current.split == []
+
+
+def test_an_attributed_red_ejects_its_member_and_rebuilds_without_it() -> None:
+    api, current, log = _repo("failure"), state.State(window=6), runner.Log(None, _clock())
+    report = {"residual": ["tests/unit/test_f22.py::t"], "unidentified_jobs": []}
+    runner.tick(api, current, log, depth=1)
+    runner.tick(api, current, log, depth=1, read_report=lambda run: report)
+    assert current.trains[1].status == state.RED and current.trains[1].ejected == 22
+    assert current.ejected == {22: HEADS[22]} and current.window == 6
+    assert [m.pr for m in current.trains[2].members] == [21]
+    assert not [w for w in _writes(api) if "/labels/" in w]
+
+
+def test_with_landing_on_an_ejection_removes_the_ready_label() -> None:
+    api, current, log = _repo("failure"), state.State(), runner.Log(None, _clock())
+    report = {"residual": ["tests/unit/test_f22.py::t"], "unidentified_jobs": []}
+    runner.tick(api, current, log, depth=1)
+    runner.tick(api, current, log, depth=0, landing_on=True, read_report=lambda run: report)
+    assert f"DELETE repos/{REPO}/issues/22/labels/queue%3Aready " in _writes(api)
+
+
+def test_a_second_infra_red_halts_launches() -> None:
+    api, current, log = _repo("failure"), state.State(), runner.Log(None, _clock())
+    infra = {"residual": [], "unidentified_jobs": ["tier2 / Integration Tests Shard 3 (Linux)"]}
+    runner.tick(api, current, log, depth=1)
+    runner.tick(api, current, log, depth=0, read_report=lambda run: infra)
+    runner.tick(api, current, log, depth=2, read_report=lambda run: infra)
+    assert current.trains[1].status == state.RED and "infra" in current.halted
+    assert list(current.trains) == [1] and [e for e in log.events if e["event"] == "needs-input"]
+
+
+def test_a_rerun_that_passes_is_a_flake_and_lands() -> None:
+    api, current, log = _repo("failure"), state.State(), runner.Log(None, _clock())
+    runner.tick(api, current, log, depth=1)
+    runner.tick(api, current, log, depth=0, read_report=lambda run: UNATTRIBUTED)
+    api.routes[f"repos/{REPO}/actions/workflows/merge-train.yml/runs"]["workflow_runs"][0][
+        "conclusion"
+    ] = "success"
+    runner.tick(api, current, log, depth=0)
+    assert current.trains[1].status == state.GREEN
+    flakes = [e for e in log.events if e["event"] == "flake"]
+    assert [e["nodes"] for e in flakes] == [UNATTRIBUTED["residual"]]
 
 
 def test_queued_prs_are_not_composed_twice() -> None:
@@ -139,6 +190,7 @@ def test_queued_prs_are_not_composed_twice() -> None:
         ("delete", f"repos/{REPO}/git/refs/heads/main", None),
         ("delete", f"repos/{REPO}/git/refs/tags/v1", None),
         ("patch", f"repos/{REPO}/issues/7", {"state": "closed"}),
+        ("post", f"repos/{REPO}/actions/runs/99/cancel", {}),
     ],
 )
 def test_the_shadow_guard_refuses_every_write_outside_queue_refs(method, path, body) -> None:

@@ -343,21 +343,24 @@ def test_a_green_train_waits_behind_an_earlier_train_still_testing() -> None:
 def test_ejection_notices_still_go_out_while_landing_is_halted() -> None:
     world = World({11: ()}, {})
     item = world.train(1, [11])
-    item.status, item.run_id = state.RED, 5
+    item.status, item.run_id, item.ejected = state.RED, 5, 11
     current = state.State(trains={1: item})
     lander, log = landing.LandingState(halted="main moved"), Log()
     _run(world, current, lander, log)
     assert [e["pr"] for e in log.of("ejection-notice")] == [11] and log.of("halted")
 
 
-def test_a_red_train_posts_one_ejection_notice_per_member() -> None:
+def test_only_the_ejected_member_of_a_red_train_gets_a_notice_once() -> None:
     world = World({11: (), 12: ()}, {})
     item = world.train(1, [11, 12])
-    item.status, item.run_id = state.RED, 77
+    item.status, item.run_id, item.ejected = state.RED, 77, 12
+    item.red_class, item.residual = "own-attributed", ["tests/unit/test_b.py::t"]
     current, lander, log = state.State(trains={1: item}), landing.LandingState(), Log()
     _run(world, current, lander, log)
     _run(world, current, lander, log)
-    assert [(e["pr"], e["run"]) for e in log.of("ejection-notice")] == [(11, 77), (12, 77)]
+    notices = log.of("ejection-notice")
+    assert [(e["pr"], e["run"], e["klass"]) for e in notices] == [(12, 77, "own-attributed")]
+    assert "tests/unit/test_b.py::t" in notices[0]["body"]
 
 
 def test_landing_state_round_trips(tmp_path) -> None:

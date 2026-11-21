@@ -340,21 +340,23 @@ def settle_pending(api: Api, current: LandingState, log: Any) -> None:
 
 
 def notify_ejections(runner_state: state.State, current: LandingState, log: Any) -> None:
-    """One ejection notice per member of each red train, for autopilot-comment to post."""
+    """One ejection notice per ejected PR, for autopilot-comment to post."""
     for item in sorted(runner_state.trains.values(), key=lambda t: t.train_id):
-        if item.status != state.RED or item.train_id in current.notified:
+        if item.ejected is None or item.train_id in current.notified:
             continue
-        for member in item.members:
-            log.emit(
-                "ejection-notice",
-                train=item.train_id,
-                pr=member.pr,
-                run=item.run_id,
-                body=(
-                    f"Merge train t{item.train_id:04d} went red (run {item.run_id}); "
-                    f"#{member.pr} was not landed. Re-ticket it once the cause is fixed."
-                ),
-            )
+        evidence = ", ".join(item.residual[:10]) or "-"
+        log.emit(
+            "ejection-notice",
+            train=item.train_id,
+            pr=item.ejected,
+            run=item.run_id,
+            klass=item.red_class,
+            body=(
+                f"Merge train t{item.train_id:04d} went red ({item.red_class}, run "
+                f"{item.run_id}) and #{item.ejected} was ejected. Evidence: {evidence}. "
+                "Push a fix and re-ticket the new head."
+            ),
+        )
         current.notified.append(item.train_id)
 
 

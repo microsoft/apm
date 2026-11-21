@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -21,12 +22,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from scripts.merge_queue import landing, metrics, proof, refs, state, tickets, train
+from scripts.merge_queue import classify, landing, metrics, proof, red, refs, state, tickets, train
 from scripts.merge_queue.api import REPO, Api, GhApi, Response, get_all
 
 DEFAULT_STATE_DIR = Path.home() / ".apm-queue"
 CODEQL_PREFIX = "Analyze ("
 EXIT_LOCKED = 3
+
+
+_RERUN = re.compile(rf"repos/{re.escape(REPO)}/actions/runs/\d+/rerun-failed-jobs")
 
 
 class ShadowViolation(RuntimeError):
@@ -36,7 +40,8 @@ class ShadowViolation(RuntimeError):
 class ShadowApi:
     """Wraps an Api and refuses every write except creating, merging into and deleting
     queue refs: ``git/refs`` may only create ``queue/*`` or ``queue-build/*``, ``merges``
-    may only target ``queue-build/*``, and deletes only remove those branches."""
+    may only target ``queue-build/*``, and deletes only remove those branches. It also
+    allows rerunning a train run's failed jobs (red handling)."""
 
     _REFS = f"repos/{REPO}/git/refs"
     _MERGES = f"repos/{REPO}/merges"
@@ -52,6 +57,8 @@ class ShadowApi:
             target = str(body.get("ref", ""))
             if not target.startswith(("refs/heads/queue/", "refs/heads/queue-build/")):
                 raise ShadowViolation(f"shadow runner refused to create {target!r}")
+        elif _RERUN.fullmatch(path):
+            pass
         elif path == self._MERGES:
             target = str(body.get("base", ""))
             if not target.startswith("queue-build/"):
@@ -136,19 +143,31 @@ def ready_tickets(api: Api, log: Log, skip: set[int]) -> list[tickets.Ticket]:
     return ready
 
 
-def poll(api: Api, current: state.State, log: Log) -> None:
-    """Record verdicts for in-flight trains; log the landings a real runner would make."""
+def poll(
+    api: Api,
+    current: state.State,
+    log: Log,
+    writer: Api | None = None,
+    read_report: red.ReportReader = classify.read_report,
+) -> None:
+    """Record verdicts for in-flight trains; a red one is classified and handled
+    (red.py). Log the landings a real runner would make."""
     for item in current.in_flight():
         result, run_id = proof.verdict(api, item.head_ref, item.head_sha)
         if result not in (proof.GREEN, proof.RED):
             continue
-        item.move(state.GREEN if result == proof.GREEN else state.RED)
-        item.run_id, item.verdict_at = run_id, log.clock()
+        item.run_id = run_id
         log.emit("verdict", train=item.train_id, verdict=result, run=run_id)
-        current.window = train.next_window(
-            current.window, "green" if result == proof.GREEN else "red-unattributed"
-        )
-        if result == proof.GREEN:
+        if result == proof.RED:
+            action = red.handle(api, writer, current, item, log, read_report)
+            if action == classify.RERUN:
+                continue
+            outcome = "red-unattributed" if action == classify.BISECT else "red-attributed"
+        else:
+            item.move(state.GREEN)
+            item.verdict_at, outcome = log.clock(), "green"
+            if item.reruns:
+                log.emit("flake", train=item.train_id, run=run_id, nodes=item.residual)
             for member in item.members:
                 log.emit(
                     "would-land",
@@ -158,6 +177,7 @@ def poll(api: Api, current: state.State, log: Log) -> None:
                     commit=member.sha,
                     tree=member.tree,
                 )
+        current.window = train.next_window(current.window, outcome)
         api.delete(f"repos/{REPO}/git/refs/heads/{refs.build_ref(item.train_id)}")
 
 
@@ -195,10 +215,18 @@ def launch(
 
     When landing is on, a proven train that has not landed yet is still ahead of main,
     so new trains stack on it too (``State.chain``)."""
-    if len(current.in_flight()) >= depth:
+    if current.halted or len(current.in_flight()) >= depth:
         return
     flying = current.chain() if landing_on else current.in_flight()
-    ready = ready_tickets(api, log, current.queued_prs())
+    ready = [
+        t
+        for t in ready_tickets(api, log, current.queued_prs())
+        if current.ejected.get(t.pr) != t.head
+    ]
+    if current.split:
+        # Bisect: the next train is the first half only; the rest wait a cycle.
+        ready = [t for t in ready if t.pr in current.split]
+        current.split = []
     landed = satisfied_dependencies(api, ready, flying)
     members = train.compose(ready, current.window, landed=landed)
     if not members:
@@ -269,9 +297,10 @@ def tick(
     depth: int = 2,
     now: datetime | None = None,
     landing_on: bool = False,
+    read_report: red.ReportReader = classify.read_report,
 ) -> state.State:
     shadow = ShadowApi(api)
-    poll(shadow, current, log)
+    poll(shadow, current, log, writer=api if landing_on else None, read_report=read_report)
     for name in sweep(shadow, current, now or datetime.now(UTC)):
         log.emit("janitor", ref=name)
     main_sha = shadow.get(f"repos/{REPO}/commits/main")["sha"]

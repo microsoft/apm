@@ -28,6 +28,9 @@
 # (#4531). Called ci.yml, ci-integration.yml and spec-conformance.yml jobs run as push events on
 # the queue branch, so any cache they save lands in that branch's scope only.
 #
+# train-gate subtracts the inherited baseline (#4704): failing node ids that the
+# base probe's train-failures.json already lists do not block the train.
+#
 # cleanup deletes the train branch after train-gate; it is the only job with
 # contents: write and never feeds the verdict. tests/quality/test_ci_topology.py
 # pins triggers, scope coverage, the gate, cleanup and the cache contract.
@@ -212,11 +215,30 @@ jobs:
     needs: [scope, guard, tier1, tier2, spec, owner]
     if: always() && github.event.deleted != true
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
-    permissions: {}
+    timeout-minutes: 10
+    # actions: read lists this run's jobs, reads failed job logs and downloads the
+    # base probe's train-failures artifact (the inherited baseline, #4704).
+    permissions:
+      actions: read
     steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        sparse-checkout: scripts/merge_queue
+        persist-credentials: false
+
+    # Failing node ids minus the base probe's train-failures.json. It never fails
+    # the job: on any error inherited_only is false and the next step decides alone.
+    - name: Subtract the inherited baseline
+      id: baseline
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RUN_ID: ${{ github.run_id }}
+        BASE_SHA: ${{ needs.scope.outputs.base_sha }}
+      run: python3 scripts/merge_queue/gate.py --run-id "$RUN_ID" --base-sha "$BASE_SHA" --out train-failures.json
+
     - name: Require every train job
       env:
+        INHERITED_ONLY: ${{ steps.baseline.outputs.inherited_only }}
         REF: ${{ github.ref_name }}
         SHA: ${{ github.sha }}
         SCOPE: ${{ needs.scope.outputs.scope }}
@@ -242,11 +264,23 @@ jobs:
           guard) tiers=skipped ;;
           *) echo "::error::Unknown train scope '$SCOPE'."; exit 1 ;;
         esac
-        if [ "$SCOPE_RESULT" != success ] || [ "$GUARD_RESULT" != success ] || [ "$TIER1_RESULT" != "$tiers" ] || [ "$TIER2_RESULT" != "$tiers" ] || [ "$SPEC_RESULT" != "$tiers" ] || [ "$OWNER_RESULT" != "$tiers" ]; then
+        # A job that ran and failed only on inherited node ids counts as green.
+        ok() { [ "$1" = "$2" ] || { [ "${INHERITED_ONLY:-false}" = true ] && [ "$2" = success ] && [ "$1" = failure ]; }; }
+        if [ "$SCOPE_RESULT" != success ] || ! ok "$GUARD_RESULT" success || ! ok "$TIER1_RESULT" "$tiers" || ! ok "$TIER2_RESULT" "$tiers" || ! ok "$SPEC_RESULT" "$tiers" || ! ok "$OWNER_RESULT" "$tiers"; then
           echo "::error::Train is not green: scope=$SCOPE_RESULT guard=$GUARD_RESULT tier1=$TIER1_RESULT tier2=$TIER2_RESULT spec=$SPEC_RESULT owner=$OWNER_RESULT ($SCOPE scope)."
           exit 1
         fi
-        echo "Train green at $SHA ($SCOPE scope)."
+        echo "Train green at $SHA ($SCOPE scope, inherited_only=${INHERITED_ONLY:-false})."
+
+    # The next train on this SHA, and the runner's classifier, read this report.
+    - name: Publish train-failures.json
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: train-failures
+        path: train-failures.json
+        retention-days: 14
+        if-no-files-found: ignore
 
   # Deletes the train branch once train-gate has reported. Its result is not
   # part of the verdict: train-gate does not need it.

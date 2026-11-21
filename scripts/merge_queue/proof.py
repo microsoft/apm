@@ -20,6 +20,17 @@ def verdict(api: Api, branch: str, sha: str) -> tuple[str, int | None]:
     parsed = parse_train_ref(branch)
     if parsed is None or parsed.scope != "full":
         raise ValueError(f"{branch} is not a -full train ref; it cannot prove a train")
+    return _newest(api, branch, sha)
+
+
+def prefix_verdict(api: Api, branch: str, sha: str) -> tuple[str, int | None]:
+    """A guard or full prefix's run, for red attribution only: never proof of a train."""
+    if parse_train_ref(branch) is None:
+        raise ValueError(f"{branch} is not a train ref")
+    return _newest(api, branch, sha)
+
+
+def _newest(api: Api, branch: str, sha: str) -> tuple[str, int | None]:
     runs = api.get(
         f"repos/{REPO}/actions/workflows/{WORKFLOW}/runs",
         {"branch": branch, "head_sha": sha, "per_page": 5},
