@@ -1498,10 +1498,7 @@ def _sync_integrations_after_uninstall(
             None,
             dep_ref.get_identity(),
         )
-        authorized_targets = []
-        for target in target_selection.targets:
-            if target.name not in native:
-                authorized_targets.append(target)
+        authorized_targets = [t for t in target_selection.targets if t.name not in native]
         target_survivor_plan.append((dep_ref, pkg_info, authorized_targets))
 
     # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
