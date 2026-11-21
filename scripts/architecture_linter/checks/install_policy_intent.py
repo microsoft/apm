@@ -24,6 +24,10 @@ from scripts.architecture_linter.checks.install_policy_deployment_and_ref import
     check_registry_dependency_intent,
     check_resolver_queue_dedup,
 )
+from scripts.architecture_linter.checks.install_policy_explicit_source import (
+    RULE_EXPLICIT_POLICY_SOURCE,
+    check_explicit_policy_source_owner,
+)
 from scripts.architecture_linter.checks.install_policy_gitlab_and_bundle import (
     RULE_GITLAB_ADAPTER,
     RULE_GITLAB_FACADE,
@@ -149,6 +153,16 @@ EXTRA_RULES: tuple[Rule, ...] = (
             "APM_POLICY_DISABLE is read only by policy/discovery.py::policy_disabled_by_env."
         ),
         check=check_policy_disable_switch_owner,
+    ),
+    Rule(
+        id=RULE_EXPLICIT_POLICY_SOURCE,
+        group=GROUP,
+        guard_ids=(RULE_EXPLICIT_POLICY_SOURCE,),
+        description=(
+            "Explicit --policy sources compose with discovery only through "
+            "policy/explicit_source.py."
+        ),
+        check=check_explicit_policy_source_owner,
     ),
     _semantic_rule(
         RULE_LOCAL_BUNDLE_PREFLIGHT,
