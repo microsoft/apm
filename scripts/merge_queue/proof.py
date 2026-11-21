@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from scripts.merge_queue.api import REPO, Api
+from scripts.merge_queue.refs import parse_train_ref
 
 WORKFLOW = "merge-train.yml"
 GREEN, RED, PENDING, MISSING = "green", "red", "pending", "missing"
@@ -11,9 +12,14 @@ GREEN, RED, PENDING, MISSING = "green", "red", "pending", "missing"
 def verdict(api: Api, branch: str, sha: str) -> tuple[str, int | None]:
     """The newest run of merge-train.yml for ``branch`` at ``sha``.
 
-    A proof is a successful run on the -full branch at the exact commit
-    (cicd.instructions: never a train-gate lookup by SHA alone).
+    Only a ``-full`` branch can prove a train: a guard-only run never does
+    (cicd.instructions: never a train-gate lookup by SHA alone). Runs are
+    ordered by creation time and id; the attempt number only orders the
+    attempts of one run.
     """
+    parsed = parse_train_ref(branch)
+    if parsed is None or parsed.scope != "full":
+        raise ValueError(f"{branch} is not a -full train ref; it cannot prove a train")
     runs = api.get(
         f"repos/{REPO}/actions/workflows/{WORKFLOW}/runs",
         {"branch": branch, "head_sha": sha, "per_page": 5},
@@ -25,7 +31,9 @@ def verdict(api: Api, branch: str, sha: str) -> tuple[str, int | None]:
     ]
     if not candidates:
         return MISSING, None
-    newest = max(candidates, key=lambda run: (run.get("run_attempt", 1), run["created_at"]))
+    newest = max(
+        candidates, key=lambda run: (run["created_at"], run["id"], run.get("run_attempt", 1))
+    )
     if newest.get("status") != "completed":
         return PENDING, newest["id"]
     return (GREEN if newest.get("conclusion") == "success" else RED), newest["id"]

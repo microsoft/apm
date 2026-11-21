@@ -42,13 +42,17 @@ def parse_ticket(pr: int, comment_body: str, created_at: str) -> Ticket | None:
     match = _MARKER.search(comment_body)
     if match is None:
         return None
+    try:
+        fixes, depends = _numbers(match["fixes"]), _numbers(match["depends"])
+    except ValueError:
+        return None  # a malformed list is an invalid ticket, never a crash
     return Ticket(
         pr=pr,
         head=match["head"],
         prio=match["prio"],
         ticketed_at=created_at,
-        fixes=_numbers(match["fixes"]),
-        depends=_numbers(match["depends"]),
+        fixes=fixes,
+        depends=depends,
     )
 
 

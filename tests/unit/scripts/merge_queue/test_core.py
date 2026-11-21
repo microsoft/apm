@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from scripts.merge_queue import api as api_mod
 from scripts.merge_queue import proof, refs, state, tickets, train
 from scripts.merge_queue.api import REPO, Response
 from tests.unit.scripts.merge_queue._fake_api import FakeApi
@@ -213,27 +214,116 @@ def test_verdict_reads_the_newest_run_on_the_exact_branch_and_sha(
     ]
 
 
-def test_build_merges_members_in_order_and_defers_a_conflict() -> None:
-    api = FakeApi()
-    shas = iter(["1" * 40, "3" * 40])
+def _merge_handler(conflicts=(), in_base=()):
+    shas = iter(str(n) * 40 for n in range(1, 10))
 
     def handler(path, body):
         if path.endswith("/git/refs"):
             return Response(201, {})
-        return (
-            Response(409, "conflict")
-            if "#2" in body["commit_message"]
-            else Response(201, {"sha": next(shas)})
-        )
+        pr = int(body["commit_message"].split("#", 1)[1].split()[0])
+        if pr in conflicts:
+            return Response(409, "conflict")
+        if pr in in_base:
+            return Response(204, None)
+        sha = next(shas)
+        return Response(201, {"sha": sha, "commit": {"tree": {"sha": "e" + sha[1:]}}})
 
-    api.post_handler = handler
-    result = train.build(api, 4, BASE, [_ticket(1), _ticket(2), _ticket(3)])
-    assert [t.pr for t in result.members] == [1, 3] and result.prefix_shas == ["1" * 40, "3" * 40]
-    assert list(result.deferred) == [2]
+    return handler
+
+
+def test_only_a_full_branch_can_prove_a_train() -> None:
+    with pytest.raises(ValueError, match="not a -full train ref"):
+        proof.verdict(FakeApi(), "queue/t0001/p1-guard", HEAD)
+
+
+def test_a_newer_run_beats_a_retried_older_run() -> None:
+    api = FakeApi()
+    branch = "queue/t0001/p1-full"
+    api.routes[f"repos/{REPO}/actions/workflows/merge-train.yml/runs"] = _runs(
+        {
+            "id": 1,
+            "head_sha": HEAD,
+            "head_branch": branch,
+            "status": "completed",
+            "conclusion": "success",
+            "created_at": "2026-11-21T10:00:00Z",
+            "run_attempt": 2,
+        },
+        {
+            "id": 2,
+            "head_sha": HEAD,
+            "head_branch": branch,
+            "status": "completed",
+            "conclusion": "failure",
+            "created_at": "2026-11-21T11:00:00Z",
+            "run_attempt": 1,
+        },
+    )
+    assert proof.verdict(api, branch, HEAD) == (proof.RED, 2)
+
+
+def test_build_merges_in_order_with_the_main_queue_base_in_every_trailer() -> None:
+    api = FakeApi()
+    api.post_handler = _merge_handler(conflicts={2})
+    tip = "d" * 40
+    result = train.build(api, 4, tip, [_ticket(1), _ticket(2), _ticket(3)], BASE)
+    assert [t.pr for t in result.members] == [1, 3] and list(result.deferred) == [2]
+    assert result.prefix_trees == ["e" + "1" * 39, "e" + "2" * 39]
+    assert api.calls[0][2] == {"ref": "refs/heads/queue-build/t0004", "sha": tip}
     first_merge = api.calls[1][2]
     assert first_merge["base"] == "queue-build/t0004"
     assert f"Apm-Train: t0004 k=1 pr=#1 head={HEAD} base={BASE}" in first_merge["commit_message"]
     assert f"Queue-Base: {BASE}" in first_merge["commit_message"]
+
+
+def test_a_conflict_defers_its_dependents_and_204_counts_as_already_in_base() -> None:
+    api = FakeApi()
+    api.post_handler = _merge_handler(conflicts={1}, in_base={4})
+    members = [
+        _ticket(1),
+        _ticket(2, depends=(1,)),
+        _ticket(3, depends=(2,)),
+        _ticket(4),
+        _ticket(5, depends=(4,)),
+    ]
+    result = train.build(api, 1, BASE, members, BASE)
+    assert sorted(result.deferred) == [1, 2, 3]
+    assert result.in_base == [4] and [t.pr for t in result.members] == [5]
+    merged_prs = [
+        int(b["commit_message"].split("#", 1)[1].split()[0])
+        for m, p, b in api.calls
+        if p.endswith("/merges")
+    ]
+    assert merged_prs == [1, 4, 5]
+
+
+def test_a_malformed_marker_is_an_invalid_ticket_not_a_crash() -> None:
+    body = f"<!-- apm-queue-ticket head={HEAD} prio=P2 fixes=[] depends=[#oops] -->"
+    assert tickets.parse_ticket(3, body, "t") is None
+
+
+def test_a_workflow_change_waits_for_its_unlanded_dependency() -> None:
+    wf = ".github/workflows/ci.yml"
+    ready = [
+        _ticket(1, at="2026-11-21T08:00:00Z", files=(wf,), depends=(9,)),
+        _ticket(2, at="2026-11-21T09:00:00Z"),
+    ]
+    assert [t.pr for t in train.compose(ready, 4, landed=set())] == [2]
+    assert [t.pr for t in train.compose(ready, 4, landed={9})] == [1]
+
+
+def test_included_output_keeps_the_real_http_status() -> None:
+    assert api_mod.parse_included("HTTP/2.0 204 No Content\nX-A: b\n\n") == Response(204, None)
+    created = api_mod.parse_included('HTTP/2.0 201 Created\r\nX: y\r\n\r\n{"sha": "1"}')
+    assert created == Response(201, {"sha": "1"})
+
+
+def test_list_reads_follow_every_page() -> None:
+    api = FakeApi()
+    api.routes["things"] = lambda q: list(range(100)) if q["page"] == ["1"] else [100, 101]
+    assert api_mod.get_all(api, "things", {"state": "open"}) == list(range(102))
+    assert [q["page"] for q in api.queries("things")] == [["1"], ["2"]]
+    assert all(q["per_page"] == ["100"] and q["state"] == ["open"] for q in api.queries("things"))
 
 
 def test_train_status_moves_forward_only() -> None:
@@ -243,23 +333,40 @@ def test_train_status_moves_forward_only() -> None:
         item.move(state.TESTING)
 
 
-def test_state_round_trips_and_rebuilds_from_refs_and_trailers(tmp_path) -> None:
+def _commit(k: int, pr: int, parent: str) -> dict:
+    return {
+        "commit": {
+            "message": f"queue\n\nApm-Train: t0003 k={k} pr=#{pr} head={HEAD} base={BASE}\nQueue-Base: {BASE}",
+            "tree": {"sha": f"{k}" * 40},
+        },
+        "parents": [{"sha": parent}],
+    }
+
+
+def test_rebuild_walks_the_head_ancestry_after_guard_refs_are_deleted(tmp_path) -> None:
+    """Only the -full ref survives; both members come back from its first-parent chain."""
     api = FakeApi()
+    api.routes[f"repos/{REPO}/git/matching-refs/heads/queue-build/t"] = []
     api.routes[f"repos/{REPO}/git/matching-refs/heads/queue/t"] = [
-        {"ref": "refs/heads/queue/t0003/p2-full", "object": {"sha": "2" * 40}},
-        {"ref": "refs/heads/queue/t0003/p1-guard", "object": {"sha": "1" * 40}},
+        {"ref": "refs/heads/queue/t0003/p2-full", "object": {"sha": "2" * 40}}
     ]
-    for k, sha, pr in ((1, "1" * 40, 10), (2, "2" * 40, 11)):
-        api.routes[f"repos/{REPO}/commits/{sha}"] = {
-            "commit": {
-                "message": f"queue\n\nApm-Train: t0003 k={k} pr=#{pr} head={HEAD} base={BASE}\nQueue-Base: {BASE}"
-            }
-        }
+    api.routes[f"repos/{REPO}/commits/{'2' * 40}"] = _commit(2, 11, "1" * 40)
+    api.routes[f"repos/{REPO}/commits/{'1' * 40}"] = _commit(1, 10, BASE)
     rebuilt = state.rebuild(api)
-    assert rebuilt.max_id == 3
     item = rebuilt.trains[3]
-    assert [(m.pr, m.k) for m in item.members] == [(10, 1), (11, 2)]
-    assert item.head_ref == "queue/t0003/p2-full" and item.base == BASE
+    assert [(m.pr, m.k, m.sha) for m in item.members] == [(10, 1, "1" * 40), (11, 2, "2" * 40)]
+    assert item.refs == ["queue/t0003/p1-guard", "queue/t0003/p2-full"] and item.base == BASE
     path = tmp_path / "state.json"
     state.save(rebuilt, path)
     assert state.load(path) == rebuilt
+
+
+def test_reconcile_adopts_live_trains_the_cache_lost() -> None:
+    lost = state.Train(7, BASE, [state.Member(1, HEAD, 1, "1" * 40)], ["queue/t0007/p1-full"])
+    done = state.Train(
+        5, BASE, [state.Member(2, HEAD, 1, "2" * 40)], ["queue/t0005/p1-full"], status=state.GREEN
+    )
+    cached = state.State(trains={5: done}, max_id=5, window=6)
+    merged = state.reconcile(cached, state.State(trains={7: lost}, max_id=7))
+    assert sorted(merged.trains) == [5, 7] and merged.trains[5].status == state.GREEN
+    assert (merged.max_id, merged.window) == (7, 6)

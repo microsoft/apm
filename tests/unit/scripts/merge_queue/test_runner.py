@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from scripts.merge_queue import metrics, runner, state
@@ -24,6 +26,7 @@ def _repo(verdict: str | None = None) -> FakeApi:
     api.routes[f"repos/{REPO}/commits/main"] = {"sha": MAIN}
     api.routes[f"repos/{REPO}/git/matching-refs/heads/queue"] = []
     api.routes[f"repos/{REPO}/git/matching-refs/heads/queue/t"] = []
+    api.routes[f"repos/{REPO}/git/matching-refs/heads/queue-build/t"] = []
     api.routes[f"repos/{REPO}/actions/workflows/merge-train.yml/runs"] = {"workflow_runs": []}
     api.routes[f"repos/{REPO}/issues"] = [{"number": pr, "pull_request": {}} for pr in HEADS] + [
         {"number": 30}
@@ -47,16 +50,21 @@ def _repo(verdict: str | None = None) -> FakeApi:
             }
         ]
         api.routes[f"repos/{REPO}/pulls/{pr}/files"] = [{"filename": f"src/f{pr}.py", "changes": 3}]
-    shas = iter(["1" * 40, "2" * 40])
-    api.post_handler = lambda path, body: (
-        Response(201, {"sha": next(shas)}) if path.endswith("/merges") else Response(201, {})
-    )
+    shas = (f"{n:040x}" for n in range(1, 99))
+
+    def merge(path, body):
+        if not path.endswith("/merges"):
+            return Response(201, {})
+        sha = next(shas)
+        return Response(201, {"sha": sha, "commit": {"tree": {"sha": "f" + sha[1:]}}})
+
+    api.post_handler = merge
     if verdict:
         api.routes[f"repos/{REPO}/actions/workflows/merge-train.yml/runs"] = {
             "workflow_runs": [
                 {
                     "id": 99,
-                    "head_sha": "2" * 40,
+                    "head_sha": f"{2:040x}",
                     "head_branch": "queue/t0001/p2-full",
                     "status": "completed",
                     "conclusion": verdict,
@@ -96,8 +104,11 @@ def test_a_green_proof_logs_would_land_per_member_and_cleans_the_build_ref() -> 
     runner.tick(api, current, log, depth=1)
     runner.tick(api, current, log, depth=0)
     assert current.trains[1].status == state.GREEN and current.trains[1].run_id == 99
-    landings = [(e["pr"], e["tree"]) for e in log.events if e["event"] == "would-land"]
-    assert landings == [(21, "1" * 40), (22, "2" * 40)]
+    landings = [(e["pr"], e["commit"], e["tree"]) for e in log.events if e["event"] == "would-land"]
+    assert landings == [
+        (21, f"{1:040x}", "f" + f"{1:040x}"[1:]),
+        (22, f"{2:040x}", "f" + f"{2:040x}"[1:]),
+    ]
     assert f"DELETE repos/{REPO}/git/refs/heads/queue-build/t0001 " in _writes(api)
     assert current.window == 5
 
@@ -123,6 +134,8 @@ def test_queued_prs_are_not_composed_twice() -> None:
         ("post", f"repos/{REPO}/pulls/21/merge", {}),
         ("post", f"repos/{REPO}/git/refs", {"ref": "refs/heads/main", "sha": MAIN}),
         ("post", f"repos/{REPO}/merges", {"base": "main", "head": MAIN}),
+        ("post", f"repos/{REPO}/merges", {"ref": "refs/heads/queue/t1", "base": "main"}),
+        ("post", f"repos/{REPO}/merges", {"base": "queue/t0001/p1-full", "head": MAIN}),
         ("delete", f"repos/{REPO}/git/refs/heads/main", None),
         ("delete", f"repos/{REPO}/git/refs/tags/v1", None),
     ],
@@ -159,3 +172,81 @@ def test_metrics_summarize_the_shadow_log() -> None:
         "writes_to_main": 0,
         "mean_train_minutes": 25.0,
     }
+
+
+def test_a_stacked_train_starts_on_the_previous_head_but_keeps_main_as_queue_base() -> None:
+    api, current, log = _repo(), state.State(), runner.Log(None, _clock())
+    first = state.Train(1, MAIN, [state.Member(9, "9" * 40, 1, "e" * 40)], ["queue/t0001/p1-full"])
+    current.trains[1], current.max_id = first, 1
+    runner.tick(api, current, log, depth=2)
+    created = [b for m, p, b in api.calls if m == "POST" and p.endswith("/git/refs")]
+    assert created[0] == {"ref": "refs/heads/queue-build/t0002", "sha": "e" * 40}
+    merges = [b["commit_message"] for m, p, b in api.calls if m == "POST" and p.endswith("/merges")]
+    assert all(f"Queue-Base: {MAIN}" in message for message in merges)
+    assert current.trains[2].base == MAIN
+
+
+def test_a_failed_publication_rolls_back_and_records_no_train() -> None:
+    api, current, log = _repo(), state.State(), runner.Log(None, _clock())
+    inner = api.post_handler
+
+    def refuse_full(path, body):
+        if str(body.get("ref", "")).endswith("-full"):
+            return Response(422, "Reference update failed")
+        return inner(path, body)
+
+    api.post_handler = refuse_full
+    runner.tick(api, current, log)
+    assert current.trains == {}
+    deleted = [p.rsplit("/heads/", 1)[1] for m, p, b in api.calls if m == "DELETE"]
+    assert deleted == ["queue/t0001/p1-guard", "queue-build/t0001"]
+    assert [e["reason"] for e in log.events if e["event"] == "launch-failed"] == [
+        "ref publication failed"
+    ]
+
+
+def test_a_merged_dependency_counts_as_satisfied() -> None:
+    api, current, log = _repo(), state.State(), runner.Log(None, _clock())
+    api.routes[f"repos/{REPO}/issues/22/comments"] = [
+        {
+            "body": f"<!-- apm-queue-ticket head={HEADS[22]} prio=P3 fixes=[] depends=[#5] -->",
+            "created_at": "2026-11-21T10:22:00Z",
+        }
+    ]
+    api.routes[f"repos/{REPO}/pulls/5"] = {"merged": True}
+    runner.tick(api, current, log)
+    assert [m.pr for m in current.trains[1].members] == [21, 22]
+
+
+def test_the_janitor_sweeps_old_untracked_queue_refs() -> None:
+    api, current, log = _repo(), state.State(), runner.Log(None, _clock())
+    api.routes[f"repos/{REPO}/git/matching-refs/heads/queue-build/t"] = [
+        {"ref": "refs/heads/queue-build/t0040", "object": {"sha": "4" * 40}}
+    ]
+    api.routes[f"repos/{REPO}/commits/{'4' * 40}"] = {
+        "commit": {"committer": {"date": "2026-11-20T01:00:00Z"}}
+    }
+    now = datetime(2026, 11, 21, 20, tzinfo=UTC)
+    runner.tick(api, current, log, depth=0, now=now)
+    assert f"DELETE repos/{REPO}/git/refs/heads/queue-build/t0040 " in _writes(api)
+    assert [e["ref"] for e in log.events if e["event"] == "janitor"] == ["queue-build/t0040"]
+
+
+def test_a_restart_with_a_stale_cache_adopts_the_live_train(tmp_path) -> None:
+    api = _repo()
+    stale = state.State(max_id=0)
+    state.save(stale, tmp_path / "state.json")
+    api.routes[f"repos/{REPO}/git/matching-refs/heads/queue/t"] = [
+        {"ref": "refs/heads/queue/t0001/p1-full", "object": {"sha": "7" * 40}}
+    ]
+    api.routes[f"repos/{REPO}/commits/{'7' * 40}"] = {
+        "commit": {
+            "message": f"q\n\nApm-Train: t0001 k=1 pr=#21 head={HEADS[21]} base={MAIN}",
+            "tree": {"sha": "8" * 40},
+            "committer": {"date": "2026-11-21T19:00:00Z"},
+        },
+        "parents": [{"sha": MAIN}],
+    }
+    assert runner.main(["tick", "--state-dir", str(tmp_path), "--depth", "1"], api=api) == 0
+    recovered = state.load(tmp_path / "state.json")
+    assert [m.pr for m in recovered.trains[1].members] == [21] and list(recovered.trains) == [1]

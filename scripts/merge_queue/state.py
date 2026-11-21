@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from scripts.merge_queue.api import REPO, Api
-from scripts.merge_queue.refs import parse_train_ref
+from scripts.merge_queue.refs import parse_train_ref, prefix_refs, ref_train_id
 from scripts.merge_queue.train import WINDOW_START
 
 TESTING, GREEN, RED, ABORTED = "TESTING", "GREEN", "RED", "ABORTED"
@@ -31,6 +31,7 @@ class Member:
     head: str
     k: int
     sha: str
+    tree: str = ""
 
 
 @dataclass
@@ -97,27 +98,68 @@ def save(state: State, path: Path) -> None:
     tmp.replace(path)
 
 
-def rebuild(api: Api) -> State:
-    """Recover in-flight trains from the live queue/t* refs and their commit trailers."""
-    refs = api.get(f"repos/{REPO}/git/matching-refs/heads/queue/t") or []
-    by_train: dict[int, list[tuple[int, str, str]]] = {}
-    for ref in refs:
+def _members_from_ancestry(api: Api, head_sha: str) -> tuple[list[Member], str]:
+    """Walk first parents from a train head, reading one Apm-Train trailer per member.
+
+    merge-train.yml deletes each guard ref after its run, so the surviving refs
+    are not the member inventory; the head commit's ancestry is.
+    """
+    members: list[Member] = []
+    base, sha = "", head_sha
+    while True:
+        commit = api.get(f"repos/{REPO}/commits/{sha}")
+        match = _TRAILER.search(commit["commit"]["message"])
+        if match is None:
+            return [], ""
+        base = match["base"]
+        members.append(
+            Member(
+                int(match["pr"]),
+                match["head"],
+                int(match["k"]),
+                sha,
+                commit["commit"]["tree"]["sha"],
+            )
+        )
+        if int(match["k"]) == 1:
+            return list(reversed(members)), base
+        sha = commit["parents"][0]["sha"]
+
+
+def _live_heads(api: Api) -> dict[int, tuple[str, str]]:
+    """train id -> (head ref name, head sha): the -full ref, else the retained build branch."""
+    heads: dict[int, tuple[str, str]] = {}
+    for ref in api.get(f"repos/{REPO}/git/matching-refs/heads/queue-build/t") or []:
+        name = str(ref["ref"]).removeprefix("refs/heads/")
+        train_id = ref_train_id(name)
+        if train_id is not None:
+            heads[train_id] = ("", ref["object"]["sha"])
+    for ref in api.get(f"repos/{REPO}/git/matching-refs/heads/queue/t") or []:
         name = str(ref["ref"]).removeprefix("refs/heads/")
         parsed = parse_train_ref(name)
-        if parsed is not None:
-            by_train.setdefault(parsed.train_id, []).append((parsed.k, name, ref["object"]["sha"]))
-    state = State(max_id=max(by_train, default=0))
-    for train_id, prefixes in by_train.items():
-        prefixes.sort()
-        members, base = [], ""
-        for k, _name, sha in prefixes:
-            message = api.get(f"repos/{REPO}/commits/{sha}")["commit"]["message"]
-            match = next((m for m in _TRAILER.finditer(message) if int(m["k"]) == k), None)
-            if match is None:
-                break
-            base = match["base"]
-            members.append(Member(int(match["pr"]), match["head"], k, sha))
-        if members and len(members) == len(prefixes):
-            refs_sorted = [name for _k, name, _sha in prefixes]
-            state.trains[train_id] = Train(train_id, base, members, refs_sorted)
+        if parsed is not None and parsed.scope == "full":
+            heads[parsed.train_id] = (name, ref["object"]["sha"])
+    return heads
+
+
+def rebuild(api: Api) -> State:
+    """Recover in-flight trains from live refs and their commits' trailers."""
+    state = State()
+    for train_id, (full_ref, head_sha) in sorted(_live_heads(api).items()):
+        state.max_id = max(state.max_id, train_id)
+        members, base = _members_from_ancestry(api, head_sha)
+        if not members:
+            continue
+        refs = prefix_refs(train_id, len(members))
+        if full_ref and full_ref != refs[-1]:
+            continue
+        state.trains[train_id] = Train(train_id, base, members, refs)
     return state
+
+
+def reconcile(cached: State, live: State) -> State:
+    """Add live trains the cache lost (a crash between publish and save); keep cached history."""
+    for train_id, train in live.trains.items():
+        cached.trains.setdefault(train_id, train)
+    cached.max_id = max(cached.max_id, live.max_id)
+    return cached

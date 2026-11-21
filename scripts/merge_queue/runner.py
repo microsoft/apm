@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.merge_queue import metrics, proof, refs, state, tickets, train
-from scripts.merge_queue.api import REPO, Api, GhApi, Response
+from scripts.merge_queue.api import REPO, Api, GhApi, Response, get_all
 
 DEFAULT_STATE_DIR = Path.home() / ".apm-queue"
 CODEQL_PREFIX = "Analyze ("
@@ -30,9 +30,12 @@ class ShadowViolation(RuntimeError):
 
 
 class ShadowApi:
-    """Wraps an Api and refuses every write outside queue refs and the merges API."""
+    """Wraps an Api and refuses every write except creating, merging into and deleting
+    queue refs: ``git/refs`` may only create ``queue/*`` or ``queue-build/*``, ``merges``
+    may only target ``queue-build/*``, and deletes only remove those branches."""
 
-    _ALLOWED_POSTS = (f"repos/{REPO}/git/refs", f"repos/{REPO}/merges")
+    _REFS = f"repos/{REPO}/git/refs"
+    _MERGES = f"repos/{REPO}/merges"
 
     def __init__(self, inner: Api) -> None:
         self.inner = inner
@@ -41,16 +44,22 @@ class ShadowApi:
         return self.inner.get(path, params)
 
     def post(self, path: str, body: Mapping[str, Any]) -> Response:
-        if path not in self._ALLOWED_POSTS:
+        if path == self._REFS:
+            target = str(body.get("ref", ""))
+            if not target.startswith(("refs/heads/queue/", "refs/heads/queue-build/")):
+                raise ShadowViolation(f"shadow runner refused to create {target!r}")
+        elif path == self._MERGES:
+            target = str(body.get("base", ""))
+            if not target.startswith("queue-build/"):
+                raise ShadowViolation(f"shadow runner refused a merge into {target!r}")
+        else:
             raise ShadowViolation(f"shadow runner refused POST {path}")
-        target = str(body.get("ref") or body.get("base") or "")
-        if not target.removeprefix("refs/heads/").startswith(("queue/", "queue-build/")):
-            raise ShadowViolation(f"shadow runner refused a write to {target!r}")
         return self.inner.post(path, body)
 
     def delete(self, path: str) -> Response:
-        name = path.split("/git/refs/heads/", 1)[-1]
-        if "/git/refs/heads/" not in path or not name.startswith(("queue/", "queue-build/")):
+        prefix = f"{self._REFS}/heads/"
+        name = path.removeprefix(prefix)
+        if not path.startswith(prefix) or not name.startswith(("queue/", "queue-build/")):
             raise ShadowViolation(f"shadow runner refused DELETE {path}")
         return self.inner.delete(path)
 
@@ -87,14 +96,11 @@ def pr_facts(api: Api, pr: int) -> tuple[tickets.PrFacts, list[dict]]:
         gate_green=gate.get("conclusion") == "success",
         codeql_done=bool(codeql) and all(run.get("status") == "completed" for run in codeql),
     )
-    comments = api.get(f"repos/{REPO}/issues/{pr}/comments", {"per_page": 100})
-    return facts, comments
+    return facts, get_all(api, f"repos/{REPO}/issues/{pr}/comments")
 
 
 def ready_tickets(api: Api, log: Log, skip: set[int]) -> list[tickets.Ticket]:
-    issues = api.get(
-        f"repos/{REPO}/issues", {"labels": tickets.READY_LABEL, "state": "open", "per_page": 100}
-    )
+    issues = get_all(api, f"repos/{REPO}/issues", {"labels": tickets.READY_LABEL, "state": "open"})
     ready = []
     for issue in issues:
         pr = int(issue["number"])
@@ -106,7 +112,7 @@ def ready_tickets(api: Api, log: Log, skip: set[int]) -> list[tickets.Ticket]:
         if reason is not None:
             log.emit("not-ready", pr=pr, reason=reason)
             continue
-        files = api.get(f"repos/{REPO}/pulls/{pr}/files", {"per_page": 100})
+        files = get_all(api, f"repos/{REPO}/pulls/{pr}/files")
         lines = sum(int(f.get("changes", 0)) for f in files)
         ready.append(
             tickets.Ticket(
@@ -138,9 +144,41 @@ def poll(api: Api, current: state.State, log: Log) -> None:
         if result == proof.GREEN:
             for member in item.members:
                 log.emit(
-                    "would-land", train=item.train_id, pr=member.pr, k=member.k, tree=member.sha
+                    "would-land",
+                    train=item.train_id,
+                    pr=member.pr,
+                    k=member.k,
+                    commit=member.sha,
+                    tree=member.tree,
                 )
         api.delete(f"repos/{REPO}/git/refs/heads/{refs.build_ref(item.train_id)}")
+
+
+def satisfied_dependencies(
+    api: Api, ready: list[tickets.Ticket], flying: list[state.Train]
+) -> set[int]:
+    """Dependencies already in the build base: merged PRs, or members of trains in flight."""
+    aboard = {member.pr for train_ in flying for member in train_.members}
+    wanted = {dep for ticket in ready for dep in ticket.depends} - aboard
+    merged = {dep for dep in wanted if api.get(f"repos/{REPO}/pulls/{dep}").get("merged")}
+    return aboard | merged
+
+
+def _delete_refs(api: Api, names: list[str]) -> None:
+    for name in names:
+        api.delete(f"repos/{REPO}/git/refs/heads/{name}")
+
+
+def _publish(api: Api, names: list[str], shas: list[str]) -> list[str] | None:
+    """Create the prefix refs; on any failure delete what was created and return None."""
+    created: list[str] = []
+    for name, sha in zip(names, shas, strict=True):
+        response = api.post(f"repos/{REPO}/git/refs", {"ref": f"refs/heads/{name}", "sha": sha})
+        if response.status not in (200, 201):
+            _delete_refs(api, created)
+            return None
+        created.append(name)
+    return created
 
 
 def launch(api: Api, current: state.State, log: Log, main_sha: str, depth: int) -> None:
@@ -149,40 +187,76 @@ def launch(api: Api, current: state.State, log: Log, main_sha: str, depth: int) 
     if len(flying) >= depth:
         return
     ready = ready_tickets(api, log, current.queued_prs())
-    members = train.compose(ready, current.window, landed=set())
+    landed = satisfied_dependencies(api, ready, flying)
+    members = train.compose(ready, current.window, landed=landed)
     if not members:
         return
-    base = flying[-1].head_sha if flying else main_sha
+    # A stacked train starts at the previous train's head, but its Queue-Base
+    # stays the merge base with main (merge-train.yml checks the trailer).
+    tip = flying[-1].head_sha if flying else main_sha
+    queue_base = flying[-1].base if flying else main_sha
     live = api.get(f"repos/{REPO}/git/matching-refs/heads/queue") or []
     train_id = refs.next_train_id(
         [str(ref["ref"]).removeprefix("refs/heads/") for ref in live], current.max_id
     )
-    built = train.build(api, train_id, base, members)
+    current.max_id = train_id
+    built = train.build(api, train_id, tip, members, queue_base)
     for pr, why in built.deferred.items():
         log.emit("deferred", train=train_id, pr=pr, reason=why)
-    if built.error or not built.members:
-        log.emit("build-failed", train=train_id, reason=built.error or "no member merged")
-        return
+    for pr in built.in_base:
+        log.emit("already-in-base", train=train_id, pr=pr)
     names = refs.prefix_refs(train_id, len(built.members))
-    for name, sha in zip(names, built.prefix_shas, strict=True):
-        api.post(f"repos/{REPO}/git/refs", {"ref": f"refs/heads/{name}", "sha": sha})
-    current.max_id = train_id
+    published = (
+        None if built.error or not built.members else _publish(api, names, built.prefix_shas)
+    )
+    if published is None:
+        _delete_refs(api, [refs.build_ref(train_id)])
+        reason = built.error or (
+            "no member merged" if not built.members else "ref publication failed"
+        )
+        log.emit("launch-failed", train=train_id, reason=reason)
+        return
     current.trains[train_id] = state.Train(
         train_id,
-        base,
+        queue_base,
         [
-            state.Member(t.pr, t.head, k, sha)
-            for k, (t, sha) in enumerate(zip(built.members, built.prefix_shas, strict=True), 1)
+            state.Member(t.pr, t.head, k, sha, tree)
+            for k, (t, sha, tree) in enumerate(
+                zip(built.members, built.prefix_shas, built.prefix_trees, strict=True), 1
+            )
         ],
         names,
         published_at=log.clock(),
     )
-    log.emit("published", train=train_id, base=base, prs=[t.pr for t in built.members])
+    log.emit(
+        "published", train=train_id, base=queue_base, tip=tip, prs=[t.pr for t in built.members]
+    )
 
 
-def tick(api: Api, current: state.State, log: Log, depth: int = 2) -> state.State:
+def sweep(api: Api, current: state.State, now: datetime) -> list[str]:
+    """Delete queue refs older than 12 h that no tracked train owns (the janitor)."""
+    known = {train_id for train_id, item in current.trains.items() if item.status == state.TESTING}
+    listed = []
+    for prefix in ("queue/t", "queue-build/t"):
+        for ref in api.get(f"repos/{REPO}/git/matching-refs/heads/{prefix}") or []:
+            name = str(ref["ref"]).removeprefix("refs/heads/")
+            commit = api.get(f"repos/{REPO}/commits/{ref['object']['sha']}")
+            stamp = commit["commit"]["committer"]["date"]
+            listed.append(
+                (name, datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC))
+            )
+    stale = refs.janitor(listed, known, now)
+    _delete_refs(api, stale)
+    return stale
+
+
+def tick(
+    api: Api, current: state.State, log: Log, depth: int = 2, now: datetime | None = None
+) -> state.State:
     shadow = ShadowApi(api)
     poll(shadow, current, log)
+    for name in sweep(shadow, current, now or datetime.now(UTC)):
+        log.emit("janitor", ref=name)
     main_sha = shadow.get(f"repos/{REPO}/commits/main")["sha"]
     launch(shadow, current, log, main_sha, depth)
     return current
@@ -217,7 +291,8 @@ def single_instance(lock_path: Path) -> Iterator[bool]:
 
 def _one_tick(api: Api, state_dir: Path, depth: int) -> None:
     state_path = state_dir / "state.json"
-    current = state.load(state_path) if state_path.is_file() else state.rebuild(api)
+    live = state.rebuild(api)
+    current = state.reconcile(state.load(state_path), live) if state_path.is_file() else live
     tick(api, current, Log(state_dir / "events.jsonl"), depth)
     state.save(current, state_path)
     (state_dir / "heartbeat").write_text(_now() + "\n", encoding="utf-8")
