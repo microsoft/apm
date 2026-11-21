@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import json
 import sys
@@ -12,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "run_mutation_pilot.py"
@@ -274,6 +275,9 @@ def test_report_only_skips_mutmut_execution(
             baseline=baseline_path,
             max_children=2,
             output=report_path,
+            owner=[],
+            list_owners=False,
+            negative_control=True,
             report_only=True,
             reuse_cache=False,
             update_baseline=False,
@@ -294,7 +298,9 @@ def test_report_only_skips_mutmut_execution(
 
     assert result == 0
     assert report_path.is_file()
-    assert "metadata only" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "metadata only" in out
+    assert "[+] Negative control: losing one killed mutant fails every owner" in out
 
 
 def _meta_path(pilot: ModuleType, repo_root: Path, owner: object) -> Path:
@@ -462,3 +468,233 @@ def test_write_report_preserves_existing_file_when_atomic_replace_fails(
 
     assert not (report_path.parent / f".{report_path.name}.tmp").exists()
     assert report_path.read_text(encoding="ascii") == "previous\n"
+
+
+# -- #4121: kill-rate floors, equivalent survivors, owner selection -------------------
+
+
+NEW_OWNER = "egress-route-policy"
+
+
+def _survivor(pilot: ModuleType, key: str, n: int = 2) -> str:
+    owner = next(o for o in pilot.OWNERS if o.key == key)
+    return f"{owner.module}.survivor__mutmut_{n}"
+
+
+def _with_survivor(reports: dict, key: str, name: str) -> dict:
+    reports[key]["outcomes"]["survived"] = [name]
+    reports[key]["counts"]["survived"] = 1
+    reports[key]["counts"]["total"] += 1
+    return reports
+
+
+def test_every_owner_seam_exists(pilot: ModuleType) -> None:
+    missing = [
+        seam
+        for owner in pilot.OWNERS
+        for seam in owner.test_seams
+        if not (pilot.REPO_ROOT / seam.split("::")[0]).is_file()
+    ]
+    assert missing == []
+
+
+def test_owner_keys_are_unique_and_legacy_owners_are_known(pilot: ModuleType) -> None:
+    keys = [owner.key for owner in pilot.OWNERS]
+    assert len(keys) == len(set(keys))
+    assert set(keys) > pilot.LEGACY_OWNER_KEYS
+
+
+def test_a_new_owner_survivor_needs_a_test_or_a_reason(pilot: ModuleType) -> None:
+    reports = _with_survivor(_reports(pilot), NEW_OWNER, _survivor(pilot, NEW_OWNER))
+    with pytest.raises(pilot.PilotError, match="no test and no equivalent reason"):
+        pilot._baseline_payload(reports)
+
+
+def test_a_recorded_equivalent_survivor_keeps_its_reason(pilot: ModuleType) -> None:
+    name = _survivor(pilot, NEW_OWNER)
+    reports = _with_survivor(_reports(pilot), NEW_OWNER, name)
+    payload = pilot._baseline_payload(
+        reports, {NEW_OWNER: {"equivalent_survivors": {name: "None and '' are both falsy."}}}
+    )
+    entry = payload["owners"][NEW_OWNER]
+    assert entry["equivalent_survivors"] == {name: "None and '' are both falsy."}
+    assert entry["accepted_survivors"] == []
+    assert entry["kill_rate_floor"] == 0.5
+    baseline = pilot._validate_baseline(payload)
+    comparisons, failed = pilot._compare_with_baseline(reports, baseline)
+    assert failed is False and comparisons[NEW_OWNER]["status"] == "accepted"
+
+
+def test_the_floor_is_rounded_down(pilot: ModuleType) -> None:
+    reports = _reports(pilot)
+    reports[NEW_OWNER]["outcomes"]["killed"] = ["k1", "k2"]
+    reports[NEW_OWNER]["outcomes"]["survived"] = ["s1"]
+    name = "s1"
+    payload = pilot._baseline_payload(
+        reports, {NEW_OWNER: {"equivalent_survivors": {name: "reason"}}}
+    )
+    assert payload["owners"][NEW_OWNER]["kill_rate_floor"] == 0.6666
+
+
+def test_a_kill_rate_below_its_floor_fails(pilot: ModuleType) -> None:
+    baseline = pilot._validate_baseline(pilot._baseline_payload(_reports(pilot)))
+    reports = _reports(pilot)
+    reports["update-plan"]["outcomes"]["killed"] = []
+    reports["update-plan"]["outcomes"]["survived"] = []
+    comparisons, failed = pilot._compare_with_baseline(reports, baseline)
+    assert failed is False  # nothing ran: rate 1.0
+    reports["update-plan"]["outcomes"]["survived"] = []
+    reports["update-plan"]["outcomes"]["killed"] = ["k"]
+    baseline["update-plan"]["kill_rate_floor"] = 1.0
+    reports["update-plan"]["outcomes"]["survived"] = ["x"]
+    baseline["update-plan"]["accepted_survivors"] = ["x"]
+    comparisons, failed = pilot._compare_with_baseline(reports, baseline)
+    assert failed is True
+    assert comparisons["update-plan"]["kill_rate"] == 0.5
+    assert comparisons["update-plan"]["status"] == "regression"
+    assert comparisons["update-plan"]["unexpected_survivors"] == []
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda e: e.update(accepted_survivors=["x"]), "may not accept unexplained survivors"),
+        (lambda e: e.update(equivalent_survivors={"x": " "}), "non-empty reason"),
+        (lambda e: e.update(equivalent_survivors=["x"]), "non-empty reason"),
+        (lambda e: e.update(kill_rate_floor=1.5), "kill_rate_floor must be between 0 and 1"),
+        (lambda e: e.update(kill_rate_floor=True), "kill_rate_floor must be between 0 and 1"),
+        (lambda e: e.pop("kill_rate_floor"), "kill_rate_floor must be between 0 and 1"),
+    ],
+)
+def test_validate_baseline_rejects_malformed_owner_entries(
+    pilot: ModuleType, mutate, message: str
+) -> None:
+    payload = pilot._baseline_payload(_reports(pilot))
+    mutate(payload["owners"][NEW_OWNER])
+    with pytest.raises(pilot.BaselineError, match=message):
+        pilot._validate_baseline(payload)
+
+
+def test_legacy_owners_may_keep_an_unexplained_allowlist(pilot: ModuleType) -> None:
+    payload = pilot._baseline_payload(_reports(pilot, update_survivors=["a.b__mutmut_1"]))
+    assert payload["owners"]["update-plan"]["accepted_survivors"] == ["a.b__mutmut_1"]
+    pilot._validate_baseline(payload)
+
+
+def test_a_legacy_baseline_update_keeps_recorded_equivalents(pilot: ModuleType) -> None:
+    explained, unexplained = "a.b__mutmut_1", "a.b__mutmut_2"
+    reports = _reports(pilot, update_survivors=[explained, unexplained])
+    payload = pilot._baseline_payload(
+        reports, {"update-plan": {"equivalent_survivors": {explained: "reviewed reason"}}}
+    )
+    entry = payload["owners"]["update-plan"]
+    assert entry["equivalent_survivors"] == {explained: "reviewed reason"}
+    assert entry["accepted_survivors"] == [unexplained]
+    pilot._validate_baseline(payload)
+
+
+def test_run_owners_refuses_an_unregistered_owner(
+    pilot: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(pilot, "_run_mutmut", Mock(side_effect=AssertionError("ran mutmut")))
+    custom = dataclasses.replace(pilot.OWNERS[0], key="custom-owner")
+    with pytest.raises(pilot.PilotError, match=r"unregistered owner\(s\): \['custom-owner'\]"):
+        pilot.run_owners((custom,), repo_root=tmp_path)
+
+
+def test_a_failed_negative_control_marks_the_report_a_regression(
+    pilot: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reports = _reports(pilot)
+    payload = pilot._baseline_payload(reports)
+    payload["owners"][NEW_OWNER]["kill_rate_floor"] = 0.0
+    baseline_path, report_path = tmp_path / "baseline.json", tmp_path / "report.json"
+    pilot.write_baseline(baseline_path, payload, label="mutation")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_mutation_pilot.py",
+            "--report-only",
+            "--negative-control",
+            "--baseline",
+            str(baseline_path),
+            "--output",
+            str(report_path),
+        ],
+    )
+    monkeypatch.setattr(pilot, "_owner_report", lambda owner, repo_root: reports[owner.key])
+
+    assert pilot.main() == 1
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "regression"
+    assert report["negative_control"] == {"uncontrolled_owners": [NEW_OWNER]}
+    assert all(c["status"] == "accepted" for c in report["comparisons"].values())
+    assert f"would not fail ['{NEW_OWNER}']" in capsys.readouterr().err
+
+
+def test_negative_control_holds_only_when_the_floor_is_tight(pilot: ModuleType) -> None:
+    reports = _reports(pilot)
+    baseline = pilot._validate_baseline(pilot._baseline_payload(reports))
+    assert pilot.negative_control(reports[NEW_OWNER], baseline[NEW_OWNER]) is True
+    loose = {**baseline[NEW_OWNER], "kill_rate_floor": 0.0}
+    assert pilot.negative_control(reports[NEW_OWNER], loose) is False
+    empty = {**reports[NEW_OWNER], "outcomes": {}}
+    assert pilot.negative_control(empty, baseline[NEW_OWNER]) is True
+    assert pilot.negative_control(empty, loose) is False
+
+
+def test_select_owners_keeps_registry_order_and_refuses_unknown_keys(pilot: ModuleType) -> None:
+    assert pilot.select_owners([]) == pilot.OWNERS
+    selected = pilot.select_owners(["remediation-advice", "update-plan"])
+    assert [owner.key for owner in selected] == ["update-plan", "remediation-advice"]
+    with pytest.raises(pilot.PilotError, match=r"unknown owner\(s\): \['nope'\]"):
+        pilot.select_owners(["nope"])
+
+
+def test_run_owners_mutates_only_the_selected_owner(
+    pilot: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(pilot.shutil, "which", lambda name: f"/venv/bin/{name}")
+    monkeypatch.setattr(pilot.shutil, "rmtree", lambda path, ignore_errors: None)
+    run = Mock(return_value=SimpleNamespace(returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(pilot.subprocess, "run", run)
+    monkeypatch.setattr(pilot, "_owner_report", lambda owner, repo_root: {"key": owner.key})
+    owner = pilot.select_owners([NEW_OWNER])
+
+    assert pilot.run_owners(owner, repo_root=tmp_path) == {NEW_OWNER: {"key": NEW_OWNER}}
+    command = run.call_args.args[0]
+    assert command[1:4] == ["run", "--max-children", "2"]
+    assert command[4:] == list(owner[0].patterns)
+
+
+def test_list_owners_prints_every_key(
+    pilot: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["run_mutation_pilot.py", "--list-owners"])
+    assert pilot.main() == 0
+    assert json.loads(capsys.readouterr().out) == [owner.key for owner in pilot.OWNERS]
+
+
+def test_update_baseline_refuses_a_partial_owner_run(
+    pilot: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_mutation_pilot.py", "--update-baseline", "--owner", NEW_OWNER, "--report-only"],
+    )
+    assert pilot.main() == 1
+    assert "--update-baseline needs every owner" in capsys.readouterr().err
+
+
+def test_the_checked_in_baseline_is_valid_and_floors_every_owner(pilot: ModuleType) -> None:
+    owners = pilot._validate_baseline(pilot.load_baseline(pilot.DEFAULT_BASELINE, label="mutation"))
+    for key, entry in owners.items():
+        assert 0 < entry["kill_rate_floor"] <= 1, key
+        if key not in pilot.LEGACY_OWNER_KEYS:
+            assert entry["accepted_survivors"] == [], key
