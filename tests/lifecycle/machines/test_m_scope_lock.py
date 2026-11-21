@@ -27,6 +27,7 @@ import pytest
 from hypothesis import strategies as st
 from hypothesis.stateful import initialize, precondition, rule, run_state_machine_as_test
 
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.machines._kit import (
     SCOPES,
     Bench,
@@ -94,6 +95,8 @@ _LOCK_NAMED = re.compile(r"lockfile|apm\.lock\.yaml", re.IGNORECASE)
 
 
 KNOWN_CELLS: tuple[KnownCell, ...] = ()
+# T4 cells whose oracle fails on main -> their known failure (generator: known-failing).
+KNOWN_T4: dict[str, KnownFailure] = {}
 
 
 def ops_for(scope: str, names: Collection[str]) -> tuple[str, ...]:

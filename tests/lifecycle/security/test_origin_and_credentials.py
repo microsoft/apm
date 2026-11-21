@@ -40,6 +40,7 @@ import pytest
 import yaml
 
 from tests.lifecycle import driver, oracles
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.obligation_space import security_obligations
 from tests.lifecycle.rows import Row, RowReplay
 from tests.lifecycle.security.test_integrity import _MARKETPLACE_HOME, TamperReplay
@@ -161,7 +162,7 @@ class CredentialRow:
     present: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     presented_path: str = ""
     references: tuple[str, ...] = ()
-    xfail: str | None = None
+    xfail: KnownFailure | None = None
     smoke: bool = False
 
 
@@ -238,7 +239,7 @@ def _credential_rows():
         if row.smoke:
             marks.append(pytest.mark.lifecycle_smoke)
         if row.xfail:
-            marks.append(pytest.mark.xfail(strict=True, reason=row.xfail))
+            marks.append(row.xfail.mark())
         yield pytest.param(cell_id, id=cell_id, marks=marks)
 
 
@@ -517,7 +518,7 @@ class _OriginExpect:
     present: tuple[str, ...] = ()
     # The lock row still records the declared origin after the op.
     keeps_origin: bool = True
-    xfail: str | None = None
+    xfail: KnownFailure | None = None
 
 
 _ORIGIN_BOTH = (
@@ -585,7 +586,7 @@ ORIGIN_ROWS: dict[str, _OriginExpect] = {
 
 def _origin_rows():
     for cell_id, expect in ORIGIN_ROWS.items():
-        marks = [pytest.mark.xfail(strict=True, reason=expect.xfail)] if expect.xfail else []
+        marks = [expect.xfail.mark()] if expect.xfail else []
         yield pytest.param(cell_id, id=cell_id, marks=marks)
 
 

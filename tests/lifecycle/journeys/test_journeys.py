@@ -105,6 +105,7 @@ from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
 from tests.lifecycle.journeys import normalize as norm
 from tests.lifecycle.journeys.twins import RELEASE_TAG, TWINS, publish_twins
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.oracles import (
     MUTATING_COMMANDS,
     ORACLE_LAWS,
@@ -126,7 +127,17 @@ from tests.utils.local_scripted_https_proxy import ScriptedResponse
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.integration,
-    pytest.mark.promise(*(f"P-INV-I{i}" for i in range(1, 10))),
+    pytest.mark.promise(
+        "P-INV-I1",
+        "P-INV-I2",
+        "P-INV-I3",
+        "P-INV-I4",
+        "P-INV-I5",
+        "P-INV-I6",
+        "P-INV-I7",
+        "P-INV-I8",
+        "P-INV-I9",
+    ),
 ]
 
 HERE = Path(__file__).parent
@@ -1398,7 +1409,7 @@ def journey_witnesses() -> tuple[dict[str, str], dict[str, str]]:
 
 
 # Strict Windows-only expected failures of whole journeys, each tracked by an issue.
-_WINDOWS_KNOWN: dict[str, str] = {}
+_WINDOWS_KNOWN: dict[str, KnownFailure] = {}
 
 
 def _params() -> list:
@@ -1408,7 +1419,7 @@ def _params() -> list:
         jid = load_journey(path)["id"]
         marks = [pytest.mark.lifecycle_smoke] if jid in golden else []
         if jid in _WINDOWS_KNOWN and os.name == "nt":
-            marks.append(pytest.mark.xfail(strict=True, reason=_WINDOWS_KNOWN[jid]))
+            marks.append(_WINDOWS_KNOWN[jid].mark())
         params.append(pytest.param(path, id=jid, marks=marks))
     return params
 
