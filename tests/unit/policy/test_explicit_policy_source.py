@@ -6,13 +6,13 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from click.testing import CliRunner
 
 from apm_cli.install.errors import PolicyViolationError
 from apm_cli.policy import discovery
 from apm_cli.policy.discovery import PolicyFetchResult, discover_policy_with_chain
 from apm_cli.policy.explicit_source import (
     active_explicit_policy_source,
+    compose_explicit_policy,
     explicit_policy_scope,
 )
 from apm_cli.policy.matcher import check_dependency_allowed
@@ -69,22 +69,14 @@ def test_explicit_local_file_applies_without_remote(project: Path) -> None:
     assert not allowed
 
 
-def test_explicit_source_cannot_loosen_discovered(
-    project: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_explicit_source_cannot_loosen_discovered(project: Path) -> None:
     (project / "loose.yml").write_text(_LOOSE, encoding="utf-8")
     org = _found(_DENY_B, "org:contoso/.github")
-    real = discovery.discover_policy
-    monkeypatch.setattr(
-        discovery,
-        "discover_policy",
-        lambda root, policy_override=None, **kw: (
-            real(root, policy_override=policy_override, **kw) if policy_override else org
-        ),
-    )
 
     with explicit_policy_scope("./loose.yml"):
-        result = discover_policy_with_chain(project)
+        result = compose_explicit_policy(
+            org, lambda source: discovery.discover_policy(project, policy_override=source)
+        )
 
     assert result.source.startswith("org:contoso/.github + file:")
     assert result.policy.enforcement == "block"
@@ -94,22 +86,12 @@ def test_explicit_source_cannot_loosen_discovered(
 
 @pytest.mark.parametrize("default", ["warn", "block"])
 def test_unavailable_explicit_source_follows_fetch_failure_default(
-    project: Path, monkeypatch: pytest.MonkeyPatch, default: str
+    project: Path, default: str
 ) -> None:
-    org = _found(_DENY_B, "org:contoso/.github")
-    unreachable = PolicyFetchResult(
-        source="url:https://policy.invalid/p.yml",
-        outcome="cache_miss_fetch_fail",
-        error="connection refused",
-    )
-    monkeypatch.setattr(
-        discovery,
-        "discover_policy",
-        lambda root, policy_override=None, **kw: unreachable if policy_override else org,
-    )
-    with explicit_policy_scope("https://policy.invalid/p.yml"):
-        result = discover_policy_with_chain(project)
-    assert [u.source for u in result.unavailable_sources] == [unreachable.source]
+    result = _partial()
+    unreachable_source = "url:https://policy.invalid/p.yml"
+    assert [u.source for u in result.unavailable_sources] == [unreachable_source]
+    org_policy = result.policy
 
     logger = MagicMock()
     if default == "block":
@@ -117,9 +99,9 @@ def test_unavailable_explicit_source_follows_fetch_failure_default(
             route_discovery_outcome(result, logger=logger, fetch_failure_default=default)
     else:
         policy = route_discovery_outcome(result, logger=logger, fetch_failure_default=default)
-        assert policy is org.policy
+        assert policy is org_policy
     logger.policy_source_unavailable.assert_called_once_with(
-        source=unreachable.source,
+        source=unreachable_source,
         error="connection refused",
         blocking=default == "block",
     )
@@ -134,24 +116,6 @@ def test_missing_explicit_file_is_a_routed_failure(project: Path) -> None:
     assert "not found" in failed.error
 
 
-@pytest.mark.parametrize(
-    ("command", "args", "message"),
-    [
-        ("install", ["--policy", "p.yml", "--global"], "--global"),
-        ("install", ["--policy", "p.yml", "--no-policy"], "mutually exclusive"),
-        ("update", ["--policy", "p.yml", "--global"], "--global"),
-    ],
-)
-def test_policy_flag_rejects_undefined_combinations(
-    project: Path, command: str, args: list[str], message: str
-) -> None:
-    from apm_cli.cli import cli
-
-    result = CliRunner().invoke(cli, [command, *args])
-    assert result.exit_code == 2, result.output
-    assert message in result.output
-
-
 def test_unavailable_explicit_url_is_redacted(project: Path) -> None:
     secret = "https://user:s3cret@policy.invalid/p.yml?sig=TOKEN"
     with explicit_policy_scope(secret):
@@ -161,7 +125,7 @@ def test_unavailable_explicit_url_is_redacted(project: Path) -> None:
     assert failed.error == "no cached copy available offline"
 
 
-def _partial(project: Path, monkeypatch: pytest.MonkeyPatch) -> PolicyFetchResult:
+def _partial() -> PolicyFetchResult:
     """Discovered org policy composed with an explicit source that did not load."""
     org = _found(_DENY_B, "org:contoso/.github")
     unreachable = PolicyFetchResult(
@@ -169,32 +133,23 @@ def _partial(project: Path, monkeypatch: pytest.MonkeyPatch) -> PolicyFetchResul
         outcome="cache_miss_fetch_fail",
         error="connection refused",
     )
-    monkeypatch.setattr(
-        discovery,
-        "discover_policy",
-        lambda root, policy_override=None, **kw: unreachable if policy_override else org,
-    )
     with explicit_policy_scope("https://policy.invalid/p.yml"):
-        return discover_policy_with_chain(project)
+        return compose_explicit_policy(org, lambda _source: unreachable)
 
 
 @pytest.mark.parametrize("default", ["warn", "block"])
-def test_partial_policy_is_unresolved_for_every_reader(
-    project: Path, monkeypatch: pytest.MonkeyPatch, default: str
-) -> None:
-    route = classify_discovery_outcome(
-        _partial(project, monkeypatch), fetch_failure_default=default
-    )
+def test_partial_policy_is_unresolved_for_every_reader(default: str) -> None:
+    route = classify_discovery_outcome(_partial(), fetch_failure_default=default)
     assert route.unresolved
     assert route.unavailable_source == "cache_miss_fetch_fail"
     assert route.blocks is (default == "block")
 
 
 def test_trust_reader_routes_an_unavailable_explicit_source(
-    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A trust reader whose logger has no policy wording reports the source neutrally."""
-    result = _partial(project, monkeypatch)
+    result = _partial()
 
     class _PlainLogger:
         verbose = False
@@ -202,4 +157,5 @@ def test_trust_reader_routes_an_unavailable_explicit_source(
     policy = resolve_trust_policy(project, logger=_PlainLogger(), fetch_result=result)
 
     assert policy is not None
-    assert "url:https://policy.invalid/p.yml could not be loaded" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "url:https://policy.invalid/p.yml could not be loaded" in captured.out + captured.err

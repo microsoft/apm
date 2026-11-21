@@ -72,6 +72,10 @@ POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset(
     }
 )
 
+# The source answered but publishes no policy. Normal for auto-discovery; a
+# failure for an explicit ``--policy`` source the caller named (#1925).
+POLICY_NOT_PUBLISHED_OUTCOMES = frozenset({"absent", "no_git_remote"})
+
 
 # How each outcome routes.
 _ENFORCE = "enforce"  # found: enforce the policy
