@@ -1,0 +1,22 @@
+{
+  "issue": 2606,
+  "summary": "Traps per-dependency MCP targets scoping and per-target pruning; needs several targets, user scope, MCP config contents.",
+  "failure_modes": [
+    "outcome",
+    "ownership",
+    "routing"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "ownership.preserve_unowned",
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_global_target_scoped_install_keeps_servers_declared_for_other_targets",
+    "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_project_dependency_targets_scope_servers_per_target",
+    "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_project_exclude_reads_like_target",
+    "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_project_exclude_unknown_value_warns_and_alias_keeps_exit_code",
+    "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_project_retained_claims_survive_exclude_retarget_and_pending_updates",
+    "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_removing_the_last_mcp_server_is_reported_as_a_change"
+  ]
+}

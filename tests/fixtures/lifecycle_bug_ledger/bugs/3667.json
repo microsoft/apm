@@ -1,0 +1,16 @@
+{
+  "issue": 3667,
+  "summary": "Traps audit flagging contained-link instructions from local packages as orphaned (#3667); requires OS symlinks, so not a row.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "filesystem.open_world_observation",
+    "lockfile.frozen_preserves_bytes",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_local_link_audit_replay_lifecycle.py::test_contained_link_installs_audits_and_tracks_target_edits"
+  ]
+}

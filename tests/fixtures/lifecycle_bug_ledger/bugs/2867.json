@@ -1,0 +1,21 @@
+{
+  "issue": 2867,
+  "fixed_in": "Unreleased",
+  "summary": "Lexical HOME/APM_HOME aliases must deploy the same authorized bytes as canonical roots.",
+  "failure_modes": [
+    "routing",
+    "ownership",
+    "reference",
+    "transaction"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "ownership.preserve_unowned",
+    "source.ref_cache_coherent",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_required_lifecycle_state_machine.py::test_required_global_audit_rule_matrix_for_external_roots",
+    "tests/integration/test_required_lifecycle_state_machine.py::test_required_frozen_semver_transport_refusal_recovers"
+  ]
+}

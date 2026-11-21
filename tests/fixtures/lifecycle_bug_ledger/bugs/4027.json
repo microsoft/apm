@@ -1,0 +1,30 @@
+{
+  "issue": 4027,
+  "summary": "Traps trust/integrity consistency across bundle, uninstall, update and unpack; needs org policy, bundles, unpack, user scope.",
+  "failure_modes": [
+    "reference",
+    "routing",
+    "transaction"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "source.ref_cache_coherent",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_approved_bundle_hooks_survive_install_and_alias_follows_its_key",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_audit_flags_a_revoked_bundle_hook_before_install_retires_it",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_bundle_hook_without_a_recorded_key_fails_closed",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_copilot_bundle_hook_without_a_record_fails_closed",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_global_bundle_reads_user_scope_from_apm_home_outside_home",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_local_bundle_applies_org_policy_on_a_cold_cache",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_local_bundle_fails_closed_when_policy_is_unavailable_under_block",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_org_deny_all_retires_deployed_bundle_hooks",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_reinstalling_an_approved_bundle_records_a_missing_key",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_revoked_bundle_grant_retires_its_hooks",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_uninstall_survivor_rebuild_fails_closed_on_unverifiable_policy",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_refuses_executable_content",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_accepts_new_content_for_a_moved_commit",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_refuses_altered_bytes_for_an_unchanged_commit"
+  ]
+}

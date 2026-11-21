@@ -153,8 +153,9 @@ A step is a plain command line, `{run, exit}`, or
 
 ## C. Bug-ledger row
 
-Append to `bugs` in `tests/fixtures/lifecycle_bug_ledger.json`, keeping
-`bugs` sorted by `issue`:
+Add one file per row, `tests/fixtures/lifecycle_bug_ledger/bugs/<issue>.json`
+(the file name is the `issue`; the reader orders rows, so never edit
+another row to make room):
 
 ```json
 {

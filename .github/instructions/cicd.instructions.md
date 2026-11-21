@@ -59,6 +59,9 @@ integration suite runs only at merge time via GitHub Merge Queue
 6. **`main-architecture-ratchets.yml`** - `push` to main only
    - Re-runs ci.yml's `test-architecture-contracts` job (check `Architecture Ratchet Contracts (main)`), so a change that reaches main without a `merge_group` run cannot leave main silently red on the ratchet contracts.
    - Never opts into provisional baselines. `tests/quality/test_ci_topology.py` pins the job to ci.yml's, so the two cannot drift.
+7. **`owner-surface.yml`** - `pull_request` and `merge_group`
+   - `Owner Surface Check` runs the integration slice an owner or install-path change can reach (`scripts/owner_surface.py`: owner-rule mutation cases and `test_architecture_*.py` files naming a changed file or affected owner, guard or rule, plus `test_install_*.py` for install changes), in 3 shards. No `paths:` filter: it always reports, and passes when the slice is skipped and on merge_group.
+   - Advisory: it is not in `EXPECTED_CHECKS`. Making it required is a maintainer gate.
 
 ## Platform Testing Strategy
 - **PR time**: Linux-only combined build-and-test in `ci.yml`. Catches logic bugs and dependency issues before merge. Windows is tested on every push to main; macOS and full integration run nightly, on dispatch and on release tags.
