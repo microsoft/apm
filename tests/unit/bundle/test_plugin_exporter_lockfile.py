@@ -338,8 +338,8 @@ def test_plugin_pack_carries_lsp_servers_in_bundle_lsp_json(tmp_path: Path, caps
     output = " ".join(capsys.readouterr().out.split())
     assert (
         "LSP servers without a complete config (command and extensionToLanguage) are not "
-        "packed: broken, orphan. Declare them in apm.yml dependencies.lsp or .lsp.json, "
-        "then run 'apm install' and pack again."
+        "packed: broken, orphan. Add both fields to each one in apm.yml dependencies.lsp "
+        "or .lsp.json, then pack again."
     ) in output
     assert ".lsp.json" in result.files
     bundle_lsp = json.loads((result.bundle_path / ".lsp.json").read_text(encoding="utf-8"))
