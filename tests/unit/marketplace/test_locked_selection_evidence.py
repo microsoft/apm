@@ -291,3 +291,80 @@ def test_catalog_defined_servers_replay_only_from_a_materialized_copy(
     replayed.get_install_path(tmp_path / "apm_modules").mkdir(parents=True)
     replayed = _resolve_marketplace(monkeypatch, tmp_path, lock, _selection(), frozen=frozen)
     assert replayed.get_unique_key() == locked.get_unique_key()
+
+
+_PLUGIN_DIR = "/catalog/plugins/tool"
+
+
+def _local_locked(**changes: object) -> LockedDependency:
+    return LockedDependency(
+        **{
+            "repo_url": "_local/tool",
+            "source": "local",
+            "local_path": _PLUGIN_DIR,
+            "content_hash": "sha256:" + "c" * 64,
+            "discovered_via": "catalog",
+            "marketplace_plugin_name": "tool",
+            **changes,
+        }
+    )
+
+
+def _plain_selection(**fields: str) -> DependencyReference:
+    return DependencyReference.parse_from_dict({"name": "tool", "marketplace": "catalog", **fields})
+
+
+@pytest.mark.parametrize(
+    ("fields", "changes", "valid"),
+    [
+        ({}, {}, True),
+        ({}, {"content_hash": None}, False),
+        ({}, {"local_path": None}, False),
+        ({"version": "^1.0.0"}, {}, False),
+    ],
+)
+def test_local_catalog_rows_are_locked_by_content_not_commit(
+    fields: dict[str, str], changes: dict[str, object], valid: bool
+) -> None:
+    """A local catalog plugin has no commit: its content evidence satisfies --frozen (#4639)."""
+    declaration = _plain_selection(**fields)
+    locked = _local_locked(**changes)
+    lock = LockFile(dependencies={locked.get_unique_key(): locked})
+    assert (marketplace_ref_mismatch(declaration, locked) is None) is valid
+    assert detect_ref_change(declaration, locked) is not valid
+    assert lockfile_satisfies_manifest(lock, [declaration])[0] is valid
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+@pytest.mark.parametrize("selected", [_PLUGIN_DIR, "/catalog/plugins/moved"])
+def test_local_catalog_rows_reread_the_catalog_and_frozen_keeps_the_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, selected: str, frozen: bool
+) -> None:
+    """A local catalog stays the live source; --frozen refuses a changed selection (#4639)."""
+    locked = _local_locked()
+    lock = LockFile(dependencies={locked.get_unique_key(): locked})
+    resolution = SimpleNamespace(
+        canonical=selected,
+        dependency_reference=None,
+        plugin=SimpleNamespace(manifest=None),
+        provenance=lambda *_args: {},
+    )
+    monkeypatch.setattr(
+        "apm_cli.marketplace.resolver.resolve_marketplace_plugin", lambda *_a, **_k: resolution
+    )
+    monkeypatch.setattr(
+        "apm_cli.marketplace.catalog_origin.require_locked_catalog_origin", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        "apm_cli.marketplace.dependency_confusion.admit_marketplace_resolution", lambda _r: None
+    )
+    resolver = APMDependencyResolver(
+        apm_modules_dir=tmp_path / "apm_modules", existing_lockfile=lock, frozen=frozen
+    )
+    if frozen and selected != _PLUGIN_DIR:
+        with pytest.raises(ValueError, match=r"declared source differs from apm\.lock\.yaml"):
+            resolver._resolve_marketplace_dep(_plain_selection())
+        return
+    resolved = resolver._resolve_marketplace_dep(_plain_selection())
+    assert resolved.is_local
+    assert resolved.local_path == selected

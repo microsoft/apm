@@ -135,11 +135,7 @@ def marketplace_ref_mismatch(
 
     spec = dep_ref.marketplace_version_spec
     if locked_dep.is_local_source:
-        if not locked_dep.local_path or not locked_dep.content_hash:
-            return "missing locked content evidence"
-        if spec:
-            return f"manifest ref '{spec}' cannot select a local catalog plugin"
-        return None
+        return _local_catalog_mismatch(spec, locked_dep)
     if not is_full_revision_pin(locked_dep.resolved_commit):
         return "missing locked commit evidence"
     if not spec:
@@ -162,6 +158,14 @@ def marketplace_ref_mismatch(
             return f"manifest version '{spec}' != lockfile selected version '{locked_dep.version}'"
     elif spec != locked_dep.resolved_ref:
         return f"manifest ref '{spec}' != lockfile ref '{locked_dep.resolved_ref or '(missing)'}'"
+    return None
+
+
+def _local_catalog_mismatch(spec: str | None, locked_dep: LockedDependency) -> str | None:
+    if not locked_dep.local_path or not locked_dep.content_hash:
+        return "missing locked content evidence"
+    if spec:
+        return f"manifest ref '{spec}' cannot select a local catalog plugin"
     return None
 
 
@@ -379,7 +383,6 @@ def local_catalog_refusal(
         locked_dep is not None
         and resolved.is_local
         and resolved.get_unique_key() == locked_dep.get_unique_key()
-        and resolved.local_path == locked_dep.local_path
     ):
         return None
     locked = locked_dep.local_path if locked_dep is not None else "another selection"
