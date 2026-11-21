@@ -287,6 +287,9 @@ def check_before_deploy(ctx: InstallContext, write_plan: Sequence[PlannedPackage
 PlannedPackage = tuple[Any, Any, "set[str] | None"]
 # The file primitives whose managed files OverwriteGate guards (#4360).
 _GATED_PRIMITIVES = ("prompts", "agents", "commands", "instructions")
+# Targets whose primitives deploy outside files (the Copilot App's SQLite
+# workflows): no OverwriteGate applies and planning them would write.
+_UNGATED_TARGETS = frozenset({"copilot-app"})
 
 
 def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[PlannedPackage]) -> None:
@@ -344,7 +347,7 @@ def _planned_keeps(
         if integrator is None:
             continue
         for target in targets:
-            if target.primitives.get(primitive) is None:
+            if target.primitives.get(primitive) is None or target.name in _UNGATED_TARGETS:
                 continue
             planned: list[tuple[Path, str | None]] = []
             integrator._overwrite_plan = planned
