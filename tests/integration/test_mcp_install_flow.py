@@ -25,7 +25,6 @@ from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockFile
-from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
 from apm_cli.models.apm_package import clear_apm_yml_cache
@@ -60,22 +59,17 @@ def test_uninstall_cleanup_preserves_same_named_server_in_other_runtime(
         mcp_servers=["shared-name"],
         mcp_target_servers={"hermes": ["shared-name"]},
     )
-    view = CurrentMcpConfigView(dependencies=(), configs={}, provenance={}, problems=())
-
-    with patch(
-        "apm_cli.integration.mcp_config_view.CurrentMcpConfigView.derive",
-        return_value=view,
-    ):
-        _cleanup_stale_mcp(
-            MagicMock(),
-            lockfile,
-            tmp_path / "apm.lock.yaml",
-            {"shared-name"},
-            modules_dir=tmp_path / "apm_modules",
-            user_scope=True,
-            scope=InstallScope.USER,
-            persist=False,
-        )
+    # The real view owner derives an empty current set (no package declares MCP).
+    _cleanup_stale_mcp(
+        MagicMock(),
+        lockfile,
+        tmp_path / "apm.lock.yaml",
+        {"shared-name"},
+        modules_dir=tmp_path / "apm_modules",
+        user_scope=True,
+        scope=InstallScope.USER,
+        persist=False,
+    )
 
     assert (
         "shared-name"
