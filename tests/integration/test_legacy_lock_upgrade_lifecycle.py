@@ -590,6 +590,9 @@ def test_c3d_upgrade_keeps_the_edit_proof_on_every_install(
     assert aside.read_bytes() == edited_bytes
 
 
+_CLAUDE_ROUTED_036 = frozenset({".claude/rules/everywhere.md"})
+
+
 def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_path: Path) -> None:
     """A project written by a released 0.36.x keeps every deployed byte on upgrade."""
     produced_by = json.loads((FIXTURE_036 / "FIXTURE.json").read_text())["apm_version"]
@@ -597,16 +600,24 @@ def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_p
     expected = _fresh_render(tmp_path, apm_binary_path, FIXTURE_036)
     world = _World(tmp_path / "c5", apm_binary_path, FIXTURE_036)
     before = world.snapshot()
-    deployed = sorted(p for p in before if p not in {"apm.yml", "apm.lock.yaml", ".gitignore"})
+    # The always-on rule moves to AGENTS.md on the first writable install (#3939).
+    assert set(before) >= _CLAUDE_ROUTED_036
+    assert not set(expected) & _CLAUDE_ROUTED_036
+    deployed = sorted(
+        p
+        for p in before
+        if p not in {"apm.yml", "apm.lock.yaml", ".gitignore"} and p not in _CLAUDE_ROUTED_036
+    )
     assert deployed and all(before[p] == expected[p] for p in deployed)
 
     code, out, err = world.run("install")
 
     assert code == 0, f"{out}\n{err}"
     assert _kept_lines(out + err) == []
+    assert "Run 'apm compile'" in out + err
     after = world.snapshot()
     assert {p: after.get(p) for p in deployed} == {p: before[p] for p in deployed}
-    assert set(after) == set(before)
+    assert set(after) == set(before) - _CLAUDE_ROUTED_036
     world.ok("audit", "--ci")
     world.ok("install", "--frozen")
     assert world.snapshot() == after

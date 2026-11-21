@@ -50,7 +50,11 @@ def _write(path: Path, text: str) -> None:
 def _package(root: Path) -> None:
     root.mkdir(parents=True)
     dump_yaml({"name": "prims", "version": "1.0.0"}, root / "apm.yml")
-    _write(root / ".apm/instructions/style.instructions.md", "---\napplyTo: '**'\n---\n# Style\n")
+    # Path-scoped, so Claude still gets a .claude/rules/ file (#3939 routes
+    # always-on instructions to AGENTS.md instead).
+    _write(
+        root / ".apm/instructions/style.instructions.md", "---\napplyTo: '**/*.py'\n---\n# Style\n"
+    )
     _write(root / ".apm/prompts/hello.prompt.md", "---\ndescription: Hello\n---\nHello.\n")
     _write(root / ".apm/agents/helper.agent.md", "---\ndescription: Helper\n---\nHelp.\n")
     hook = {

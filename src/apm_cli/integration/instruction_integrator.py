@@ -242,10 +242,7 @@ class InstructionIntegrator(BaseIntegrator):
         """Render every converted rule without writing target files."""
         plan: dict[Path, tuple[Path, str, int]] = {}
         for source_file in instruction_files:
-            stem = source_file.name
-            if stem.endswith(".instructions.md"):
-                stem = stem[: -len(".instructions.md")]
-            target_path = deploy_dir / f"{stem}{extension}"
+            target_path = deploy_dir / f"{_rule_stem(source_file)}{extension}"
             ensure_path_within(target_path, deploy_dir)
             content, links_resolved = self._render_instruction(
                 source_file,
@@ -409,6 +406,7 @@ class InstructionIntegrator(BaseIntegrator):
             project_root,
             scope,
             diagnostics,
+            frozen_claims=self._frozen_claims(managed_files),
         )
         if not instruction_files:
             return IntegrationResult(0, 0, 0, [])
@@ -519,6 +517,8 @@ class InstructionIntegrator(BaseIntegrator):
         project_root: Path,
         scope,
         diagnostics,
+        *,
+        frozen_claims: frozenset[str] = frozenset(),
     ) -> list[Path]:
         """Drop project instructions Claude loads from AGENTS.md (#3939).
 
@@ -529,6 +529,9 @@ class InstructionIntegrator(BaseIntegrator):
         User scope and projects with a blocking hand-authored root file keep
         every instruction in ``.claude/rules/``. Drift replay writes to a
         scratch root, so scope and the blocker come from the live root it replays.
+        ``apm install --frozen`` deploys what the lock records: an instruction
+        whose ``.claude/rules/`` file the frozen lock still claims keeps it
+        (*frozen_claims*) until a writable install migrates it.
         """
         from apm_cli.compilation.claude_agents_md import (
             claude_agents_md_blocker,
@@ -556,6 +559,13 @@ class InstructionIntegrator(BaseIntegrator):
                 live_root,
             )
         }
+        mapping = target.primitives["instructions"]
+        rules_dir = Path(target.root_dir) / mapping.subdir
+        routed -= {
+            source
+            for source in routed
+            if (rules_dir / f"{_rule_stem(source)}{mapping.extension}").as_posix() in frozen_claims
+        }
         if not routed:
             return instruction_files
         blocker = claude_agents_md_blocker(live_root)
@@ -571,6 +581,13 @@ class InstructionIntegrator(BaseIntegrator):
             if not compiled_agents_md_has(live_root, apply_to, prepared.body):
                 self.agents_md_stale.add(source.name)
         return [source for source in instruction_files if source not in routed]
+
+    def _frozen_claims(self, managed_files: set[str] | None) -> frozenset[str]:
+        """Return the lock-recorded paths a frozen install must keep deploying."""
+        session = getattr(getattr(self, "_overwrite_gate", None), "session", None)
+        if session is None or not session.verify_only or not managed_files:
+            return frozenset()
+        return frozenset(path.replace("\\", "/") for path in managed_files)
 
     def render_agents_md_routed_rules(self, package_info, project_root: Path) -> dict[str, str]:
         """Render the ``.claude/rules/`` files Claude routing left undeployed.
@@ -956,6 +973,11 @@ class InstructionIntegrator(BaseIntegrator):
             project_root,
             managed_files=managed_files,
         )
+
+
+def _rule_stem(source: Path) -> str:
+    """Return the native rule file stem for an instruction source."""
+    return source.name.removesuffix(".instructions.md")
 
 
 def routed_claude_rule_renders(
