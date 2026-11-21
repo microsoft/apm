@@ -2672,17 +2672,29 @@
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class"
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[default-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[empty-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-configured-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-other-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-outside-class]"
       ],
       "conformance_class": "consumer",
       "id": "req-sc-005",
       "keyword": "MUST",
       "section": "10.3",
-      "status": "xfail",
-      "test_count": 2,
+      "status": "active",
+      "test_count": 8,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_host_class_collapse_constrained_to_psl_or_aliases",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class"
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[default-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[empty-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-configured-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-other-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-outside-class]"
       ]
     },
     {
@@ -3303,12 +3315,12 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 109,
+      "active": 110,
       "partial": 1,
       "skipped": 3,
       "text-only": 3,
       "unbound": 0,
-      "xfail": 1
+      "xfail": 0
     },
     "governance": {
       "active": 21,

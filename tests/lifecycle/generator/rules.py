@@ -47,6 +47,7 @@ _INSTALL = "src/apm_cli/commands/install.py"
 _APPROVE = "src/apm_cli/commands/approve.py"
 _COMPILE = "src/apm_cli/commands/compile/cli.py"
 _PACK = "src/apm_cli/commands/pack.py"
+_MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
 
 # -- U1: the modifiers each command accepts -----------------------------------
 
@@ -84,8 +85,8 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/update.py", 710, '"--target"'),
     ),
     "uninstall": (
-        Ev("src/apm_cli/commands/uninstall/cli.py", 789, 'argument("packages"'),
-        Ev("src/apm_cli/commands/uninstall/cli.py", 791, '"--dry-run"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 853, 'argument("packages"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 855, '"--dry-run"'),
     ),
     "prune": (
         Ev("src/apm_cli/commands/prune.py", 85, '"--dry-run"'),
@@ -153,7 +154,7 @@ USER_SCOPE_OPS = frozenset(
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 933, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 675, '"--global"'),
-    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 797, '"--global"'),
+    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 861, '"--global"'),
     "compile": Ev(_COMPILE, 1396, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
     "approve-deny": Ev(_APPROVE, 239, '"--user"'),
@@ -264,6 +265,18 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             ),
         ),
     ),
+    "U-FIRST-PARTY-MCP": (
+        "an MCP server the project declares in its own apm.yml is first-party: the "
+        "executables gate governs servers from dependencies and never parks it, so every "
+        "executable-gate level of an MCP source is one must-cover cell that witnesses it "
+        "(an org policy dependency deny still applies)",
+        (
+            Ev(_MCP_VIEW, 1220, "Parked MCP server '{name}' from transitive package"),
+            Ev(_MCP_VIEW, 1232, "Parked MCP server '{name}' ({package})"),
+            Ev("docs/src/content/docs/enterprise/control-executables.mdx", 19, "from dependencies"),
+            Ev("docs/src/content/docs/consumer/install-mcp-servers.md", 168, "Re-declare it"),
+        ),
+    ),
     "E1": (
         "hosts are equivalent except lock identity (HOSTID)",
         (Ev("src/apm_cli/models/dependency/identity.py", 246, "def build_dependency_unique_key"),),
@@ -351,9 +364,13 @@ RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {}
 # U-MKT: every OP=marketplace x PRIM cell maps here (Q&L ruling 2026-11-21).
 MARKETPLACE_UNTOUCHED = "rule|U-MKT|marketplace-never-touches-deployed"
 
+# U-FIRST-PARTY-MCP: the one cell every executable-gate level of an MCP source maps to.
+FIRST_PARTY_MCP_CELL = "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated"
+
 # Rule cells: must-cover singletons a rule names on its own.
 RULE_CELLS: Mapping[str, str] = {
     MARKETPLACE_UNTOUCHED: "U-MKT",
+    FIRST_PARTY_MCP_CELL: "U-FIRST-PARTY-MCP",
     "rule|U9|approve-list-read-only": "U9",
     "rule|U9|approve-pending-read-only": "U9",
     "rule|U10|compile-validate-reads-mcp": "U10",
@@ -364,6 +381,7 @@ RULE_CELLS: Mapping[str, str] = {
 STATE_FACT_RULE_CELLS = frozenset(
     {
         MARKETPLACE_UNTOUCHED,
+        FIRST_PARTY_MCP_CELL,
         "rule|U9|approve-list-read-only",
         "rule|U9|approve-pending-read-only",
         "rule|U10|compile-render-only-non-mutation",
@@ -443,6 +461,16 @@ def _u8_target(cell: Mapping[str, str]) -> dict[str, str] | str | None:
     return None
 
 
+def _source_mapping(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | None:
+    """(target, rule) of a mapping the source decides: U8, or U-FIRST-PARTY-MCP."""
+    target = _u8_target(cell)
+    if target is not None:
+        return target, "U8"
+    if cell.get("SRC") in MCP_SOURCES and GATE_AUTHORITY.get(cell.get("GATE")) == "executable-gate":
+        return FIRST_PARTY_MCP_CELL, "U-FIRST-PARTY-MCP"
+    return None
+
+
 def _rule_cell_target(cell: Mapping[str, str]) -> tuple[str, str] | None:
     """The rule cell (and rule) U-MKT or U10 maps *cell* onto, or None.
 
@@ -471,9 +499,9 @@ def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | N
     if any(name in cell for name in EXCEPTION_FACTORS):
         return None
     op, prim, gate = cell.get("OP"), cell.get("PRIM"), cell.get("GATE")
-    source_target = _u8_target(cell)
-    if source_target is not None:
-        return source_target, "U8"
+    source = _source_mapping(cell)
+    if source is not None:
+        return source
     rule_target = _rule_cell_target(cell)
     if rule_target is not None:
         return rule_target
