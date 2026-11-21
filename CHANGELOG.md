@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
+
 ### Fixed
 
 - A rebound marketplace refusal under `apm install -g` no longer says to restore `~/.apm/apm.lock.yaml` from version control; it prints runnable re-record steps. (#4555)
