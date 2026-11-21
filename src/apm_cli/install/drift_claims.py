@@ -73,6 +73,23 @@ class ReplayClaims:
         hashed = set(rebase(dict.fromkeys(hashed_claims, "")))
         return cls(tracked, claimed_prefixes(tracked, hashed, project_files), frozenset(shared))
 
+    @staticmethod
+    def rebased(
+        paths: Collection[str],
+        project_root: Path,
+        *,
+        targets: tuple[Any, ...],
+        absolute_only: bool,
+    ) -> frozenset[str]:
+        """Return *paths* rebased onto *project_root* the way :meth:`build` rebases claims."""
+        from apm_cli.install.audit_target_roots import claims_for_root
+
+        return frozenset(
+            claims_for_root(
+                dict.fromkeys(paths, ""), project_root, absolute_only=absolute_only, targets=targets
+            )
+        )
+
     def unclaimed(self, rel: str) -> bool:
         """Return True when no lock entry, directory claim or shared config covers *rel*."""
         return not (rel in self.tracked or rel.startswith(self.prefixes) or rel in self.shared)

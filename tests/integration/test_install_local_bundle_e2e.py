@@ -1306,7 +1306,8 @@ class TestInstallLocalBundleIssue1207:
                 "codex",
                 [
                     ".agents/skills/coding/SKILL.md",
-                    # Markdown agents are skipped for Codex TOML (#3706).
+                    # Markdown agents are rendered to Codex TOML (#3714).
+                    ".codex/agents/reviewer.toml",
                     "apm_modules/test-plugin/.apm/instructions/style.md",
                 ],
             ),
@@ -1353,7 +1354,7 @@ class TestInstallLocalBundleIssue1207:
             assert (project / rel).is_file(), (
                 f"missing {rel} for target={consumer_target} in {result.output!r}"
             )
-        assert not (project / ".codex/agents").exists()
+        assert (project / ".codex/agents").exists() is (consumer_target == "codex")
 
         # D2.a: plugin.json never deployed under the consumer's project
         # tree, regardless of casing.  PR #1217 review: walk the entire

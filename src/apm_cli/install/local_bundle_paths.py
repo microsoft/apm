@@ -25,7 +25,10 @@ _APM_PRIMITIVE_SUFFIXES = (
 
 # Target formats that need a primitive renderer; an opaque bundle copy would
 # write plugin-native Markdown under their extension (#3706).
-_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command", "codex_agent"})
+_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command"})
+# Target formats local bundle install renders from a packed Markdown source
+# instead of copying it (#3714); any other source for them is skipped.
+_RENDERED_PLUGIN_FORMAT_IDS = frozenset({"codex_agent"})
 
 
 def bundle_pack_files(bundle_info: LocalBundleInfo) -> dict[str, str]:
@@ -149,13 +152,47 @@ def bundle_deploy_skip_warning(
     if route is None:
         return None
     _head, _primitive_kind, _spec, mapping = route
-    if mapping.format_id not in _UNSUPPORTED_PLUGIN_FORMAT_IDS:
+    if not _is_unsupported_route(deploy_rel, mapping):
         return None
     return (
         f"Skipped packed bundle path {deploy_rel!r} for target {target.name}: "
         f"local bundle install cannot convert plugin-native files to "
         f"{mapping.format_id} ({mapping.extension}) yet. Repack for that "
         "target or install from source."
+    )
+
+
+def bundle_render_format_id(
+    rel_path: str,
+    allowed_prefixes: frozenset[str],
+    known_deploy_prefixes: frozenset[str],
+    *,
+    target: TargetProfile,
+) -> str | None:
+    """Return the target format a routed bundle path must be rendered to.
+
+    ``None`` means the file is copied as packed. Only a plugin-native Markdown
+    source whose target mapping is a rendered format (``codex_agent``) is
+    rendered; the caller pairs this with :func:`bundle_deploy_relative_path`.
+    """
+    deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
+    if deploy_rel is None:
+        return None
+    route = _plugin_layout_route(deploy_rel, target)
+    if route is None or not _renders_from_markdown(deploy_rel, route[3]):
+        return None
+    return route[3].format_id
+
+
+def _renders_from_markdown(deploy_rel: str, mapping: Any) -> bool:
+    return mapping.format_id in _RENDERED_PLUGIN_FORMAT_IDS and deploy_rel.endswith(".md")
+
+
+def _is_unsupported_route(deploy_rel: str, mapping: Any) -> bool:
+    if mapping.format_id in _UNSUPPORTED_PLUGIN_FORMAT_IDS:
+        return True
+    return mapping.format_id in _RENDERED_PLUGIN_FORMAT_IDS and not _renders_from_markdown(
+        deploy_rel, mapping
     )
 
 
@@ -244,7 +281,7 @@ def _lower_to_target(rel_path: str, target: TargetProfile | None) -> str | None:
             return rel_path
         return None
     _head, _primitive_kind, spec, mapping = route
-    if mapping.format_id in _UNSUPPORTED_PLUGIN_FORMAT_IDS:
+    if _is_unsupported_route(rel_path, mapping):
         return None
     parts = rel_path.split("/", 1)[1].split("/")
     parts[-1] = _retarget_basename(parts[-1], mapping, spec.apm_basename_fn)
