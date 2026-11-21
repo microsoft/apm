@@ -667,6 +667,44 @@ release qualification or change required checks.
 - Allows testing the full build pipeline without creating a release, even when dispatched from a tag ref
 - Useful for validating changes before tagging
 
+### Merge-train proof
+
+`merge-train.yml` proves one exact merge result before it lands. Push the
+merged tree (main plus the queued PRs) to a `queue/*` branch and read the
+single `train-gate` check at that SHA:
+
+| Ref | Runs | Time |
+|---|---|---|
+| `queue/t<id>/p<k>-guard` | `scope`, `guard`, `train-gate` | about 5-10 min |
+| `queue/t<id>/p<k>-full` | the guard plus `tier1` (ci.yml), `tier2` (ci-integration.yml) and `spec` (spec-conformance.yml) | about 30-35 min |
+| `queue/b<sha12>/p0-full` | a full proof of a `main` SHA | about 30-35 min |
+
+`guard` runs the Lint chain (`.github/actions/lint-chain`, shared with the
+`Lint` job), the architecture ratchet contracts, every other `tests/quality`
+module and the NOTICE check. The ratchets compare against the merge base with
+`main`; a `Queue-Base: <sha>` trailer must name exactly that commit. A full
+train runs every check the `merge_group` gate requires. `train-gate` passes only
+when every job is green.
+
+Queue refs are real branches: only write-access users can push them, and every
+job tests the triggering commit. Train jobs restore caches (including `main`'s)
+read-only and never save one. After `train-gate` reports, the `cleanup` job
+deletes the train branch, so push it again to re-run (a manual dispatch with
+`--ref <queue branch>` works only while the branch exists).
+
+A green `train-gate` found by SHA alone is not a full proof: the same SHA can
+also carry a guard-only run. A full proof is a successful merge-train run on the
+`-full` branch (`queue/t<id>/p<k>-full` or `queue/b<sha12>/p0-full`) at that
+exact SHA:
+
+```bash
+git push origin HEAD:refs/heads/queue/t0001/p1-full
+gh run list --workflow merge-train.yml --branch queue/t0001/p1-full \
+  --commit "$(git rev-parse HEAD)" --json conclusion,url
+```
+
+The run must show `"conclusion": "success"`; cite its `url` as the proof.
+
 ### Windows unit hang diagnostics
 
 The Windows unit steps in `.github/workflows/build-release.yml` and the PR

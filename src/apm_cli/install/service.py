@@ -407,6 +407,7 @@ class InstallService:
             trust_bin=request.trust_bin,
             transaction=request.transaction,
             lsp_preflight=request.lsp_preflight,
+            reconcile_services=request.reconcile_services,
         )
 
     # -- Lifecycle script helpers ------------------------------------------
