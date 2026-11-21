@@ -3181,7 +3181,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:d299123a8700d788183ed08967ec2a589d43cd1e1e5902e16af6521bb4bd07a3
+  content_hash: sha256:cf1b7cda246cb966f6d318d78522548de84f6fa2a4762f457b4713bd9386b60d
 - kind: project-relative
   target: copilot
   value: .github/instructions/cli.instructions.md
