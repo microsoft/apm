@@ -220,7 +220,8 @@ The plugin appears with its primitive counts. Commit `apm.yml` and
   to public `github.com`, so APM refuses it as a dependency-confusion risk.
   Ask the publisher to host-qualify the entry. A bare `owner/repo` is accepted
   when your `GITHUB_HOST` is the marketplace host, because it then resolves
-  to that host.
+  to that host. A `default_host:` in `apm.yml` does not admit it: an
+  operator setting, not a manifest, decides which host a bare entry trusts.
 - **The plugin installs but is incomplete in Claude Code.** See
   [Install plugins](../install-plugins/#known-gaps).
 

@@ -391,7 +391,7 @@ as a dependency-confusion risk (#1326)
 before APM contacts the package repository or writes any file. This applies to
 `apm install name@marketplace`, `apm.yml` entries, transitive declarations, and
 `apm update`. Bare entries are admitted when `GITHUB_HOST` is the marketplace
-host. Locked entries replay without the catalog; run
+host; a manifest `default_host:` does not admit them. Locked entries replay without the catalog; run
 `apm update` to re-check entries an older APM locked.
 
 Once the lockfile records an entry, `apm install` and `apm install --frozen`
