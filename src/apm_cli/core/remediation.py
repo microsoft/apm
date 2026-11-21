@@ -173,30 +173,13 @@ RESYNC_UNRECORDED = _entry(
     "record the deployed files in apm.lock.yaml",
     then="commit apm.lock.yaml to restore content-integrity coverage",
 )
+# An edited managed file is restored without destroying the edit (RA-044): the
+# same move-aside step as the Kept line, never a delete.
 RESTORE_EDITED = _entry(
     "drift-restore-edited",
     "apm install",
     "restore the locked content",
-    before="delete {subject}",
-    then="commit the result",
-)
-# What a plain 'apm install' does to an edited managed file depends on its
-# kind (RA-009): it overwrites instructions, agents, prompts, commands and
-# rules, and refuses to overwrite a skill. Deleting first restores both.
-RESTORE_EDITED_OVERWRITE = _entry(
-    "drift-restore-edited-overwrite",
-    "apm install",
-    "restore the locked content (a plain 'apm install' keeps these edited "
-    "instructions, agents, prompts, commands and rules, and exits 1)",
-    before="delete {subject}",
-    then="commit the result",
-)
-RESTORE_EDITED_SKILL = _entry(
-    "drift-restore-edited-skill",
-    "apm install",
-    "restore the locked content (a plain 'apm install' refuses to overwrite an edited skill)",
-    before="delete {subject}",
-    then="commit the result",
+    before="move {subject} aside",
 )
 # A managed file install kept because it may hold local edits (#4360, #4504).
 # Never 'apm install --force': it also deploys despite critical findings (RA-008).
@@ -211,7 +194,7 @@ RESTORE_BUNDLE_EDITED = _entry(
     "drift-restore-bundle-edited",
     "apm install <bundle-path>",
     "reinstall the bundle that deployed them",
-    before="delete {subject}",
+    before="move {subject} aside",
     then="commit the result",
 )
 RESYNC_AFTER_UNMANAGED_CONFLICT = _entry(
@@ -532,7 +515,7 @@ UNPACK_CRITICAL_FINDINGS = _entry(
 
 # Drift finding kind -> the remediation that clears it. A plain 'apm install'
 # keeps a local edit to a managed file, so an edited ("modified") finding is
-# restored only by deleting it first (#3994); re-sync covers the kinds that a
+# restored only by moving it aside first (#3994, RA-044); re-sync covers the kinds that a
 # plain install repairs. Unmanaged conflicts belong to the user: APM cannot
 # repair them, so they map to no command.
 DRIFT_KIND_REMEDIATION: Mapping[str, Remediation | None] = MappingProxyType(

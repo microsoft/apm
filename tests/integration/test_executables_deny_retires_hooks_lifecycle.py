@@ -352,7 +352,7 @@ def test_frozen_fails_when_a_gated_hook_retires_but_the_lock_still_claims_it(
     apm("audit", "--ci", "--no-policy")
 
 
-_LOCAL_EDIT_ADVICE = ("local edit", "export-patch", "Delete the edited files")
+_LOCAL_EDIT_ADVICE = ("local edit", "export-patch", "Move the edited files aside")
 _RESYNC = "Run 'apm install' to re-sync deployed files with the lockfile."
 _RETIRED_CAUSE = "APM-owned hook entries retired by an executables decision"
 

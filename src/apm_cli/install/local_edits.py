@@ -11,7 +11,7 @@ APM version renders them differently).
 from __future__ import annotations
 
 from collections.abc import Collection, Iterable
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -33,10 +33,6 @@ def install_keeps_edit(path: str) -> bool:
     """
     del path
     return True
-
-
-def _is_skill(path: str) -> bool:
-    return "skills" in PurePosixPath(path).parts
 
 
 def local_edit_hint(count: int, *, overwritten: int | None = None) -> str:
@@ -75,26 +71,25 @@ def overwrite_notice(paths: Collection[str]) -> str:
 
 
 def edited_file_remediations(
-    paths: Iterable[str], *, bundle: bool = False
+    *, bundle: bool = False, user_scope: bool = False, exportable: bool = True
 ) -> tuple[Remediation, ...]:
-    """Return the remediations that restore the locked content of edited *paths*.
+    """Return the interchangeable remediations for edited managed files.
 
-    Delete-then-install restores every kind; the promise states what a plain
-    ``apm install`` does to that kind (RA-009): it keeps an edited non-skill
-    file and exits 1 (#4360), and refuses to overwrite an edited skill. Files a local
-    bundle deployed are only restored by reinstalling that bundle (#3994).
+    Never destructive (RA-044): the same choice as the Kept line, move the
+    file aside and reinstall to restore it, or export the edit with
+    ``apm export-patch`` (project scope only: it reads the project lock; and
+    only when an edit is *exportable*, i.e. in an upstream package).
+    Files a local bundle deployed are only restored by reinstalling that
+    bundle (#3994). Render the tuple with :func:`remediation.either`.
     """
     from apm_cli.core import remediation
 
     if bundle:
         return (remediation.RESTORE_BUNDLE_EDITED.bind(subject="the edited bundle files"),)
-    kinds = {_is_skill(path) for path in paths}
-    found: list[Remediation] = []
-    if False in kinds:
-        found.append(remediation.RESTORE_EDITED_OVERWRITE.bind(subject="the edited files"))
-    if True in kinds:
-        found.append(remediation.RESTORE_EDITED_SKILL.bind(subject="the edited skill files"))
-    return tuple(found)
+    restore = remediation.RESTORE_EDITED.bind(subject="the edited files")
+    if user_scope:
+        return (restore.with_command("apm install -g"),)
+    return (restore, remediation.LOCAL_EDITS_EXPORT) if exportable else (restore,)
 
 
 def rendering_change_hint(count: int) -> str:

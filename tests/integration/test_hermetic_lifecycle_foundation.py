@@ -545,7 +545,7 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             assert set(failed_checks) == {"content-integrity", "drift"}
             assert instruction_path in failed_checks["content-integrity"]["details"][0]
             assert (
-                "delete the edited files, then run 'apm install'"
+                "move the edited files aside, then run 'apm install'"
                 in (failed_checks["content-integrity"]["message"])
             )
         elif mutation == "resolved-ref":

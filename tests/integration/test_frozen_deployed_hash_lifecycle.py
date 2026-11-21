@@ -69,6 +69,12 @@ _KEPT_REMEDY = (
 )
 
 
+_MOVE_ASIDE_TIP = (
+    "Move the edited files aside, then run 'apm install' to restore the locked content, "
+    "or 'apm export-patch' to export the local edits as upstream patches."
+)
+
+
 def _git(cwd: Path, env: dict[str, str], *args: str) -> str:
     return subprocess.run(
         ("git", *args), cwd=cwd, env=env, check=True, capture_output=True, text=True, timeout=60
@@ -290,7 +296,18 @@ def test_warm_frozen_with_kept_skill_edit_fails_closed(
     text = output(frozen)
     assert ".claude/skills/helper/SKILL.md: expected sha256:" in text, text
     assert f"observed {compute_file_hash(skill)}" in text, text
-    assert "apm export-patch" in text
+    # RA-044: move aside, never delete. export-patch reads the project lock, so
+    # user scope only restores (as the Kept line).
+    flat = " ".join(text.split())
+    if scope == "user":
+        assert (
+            "Move the edited files aside, then run 'apm install -g' to restore the locked "
+            "content." in flat
+        ), flat
+        assert "apm export-patch" not in flat, flat
+    else:
+        assert _MOVE_ASIDE_TIP in flat, flat
+    assert "Delete" not in flat, flat
     assert skill.read_bytes() == b"Edited skill.\n"
     assert lockfile.read_bytes() == lock_before
 
@@ -336,8 +353,9 @@ def test_frozen_fails_on_edit_of_every_primitive_type(
     frozen = scenario.run("install", "--frozen", "--no-policy", cwd=project, env=env, expect=1)
     text = output(frozen)
     assert f"{relative}: expected sha256:" in text, text
-    # The tip deletes the edited file first, true for every kind (RA-009).
-    assert "nothing was deployed" in text and "Delete the edited" in text, text
+    # The tip moves the edited file aside first, never deletes it (RA-044).
+    assert f"Tip: nothing was deployed. {_MOVE_ASIDE_TIP}" in " ".join(text.split()), text
+    assert "Delete" not in text, text
     assert "apm export-patch" in text, text
     assert edited.read_bytes() == b"Edited.\n"
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
