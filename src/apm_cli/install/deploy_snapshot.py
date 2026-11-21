@@ -11,8 +11,9 @@ first, and removes the directories the install created;
 
 A store a killed process left behind (``deploy-*``) is removed by
 :func:`reap_abandoned_journals` when the next install starts under the
-lifecycle lock. A store kept after a failed restore is renamed
-``retained-*`` so the user can recover from it and no install deletes it.
+lifecycle lock. A store kept after a failed restore is marked retained
+(a ``RETAINED`` file inside it) and then renamed ``retained-*``; the reaper
+never deletes a marked store, so the copies survive even a failed rename.
 :func:`remove_empty_directories` also lets the transaction remove target roots
 a failed install created and left empty (#4159).
 """
@@ -34,6 +35,7 @@ from apm_cli.utils.file_ops import robust_rmtree
 _Kind = Literal["absent", "file", "dir", "symlink"]
 _STORE_PREFIX = "deploy-"
 _RETAINED_PREFIX = "retained-"
+_RETAINED_MARKER = "RETAINED"
 
 
 @dataclass(frozen=True)
@@ -82,7 +84,8 @@ def reap_abandoned_journals(store_parent: Path) -> None:
     """
     with contextlib.suppress(OSError):
         for store in store_parent.glob(f"{_STORE_PREFIX}*"):
-            if store.is_dir() and not store.is_symlink():
+            retained = os.path.lexists(store / _RETAINED_MARKER)
+            if store.is_dir() and not store.is_symlink() and not retained:
                 shutil.rmtree(store, ignore_errors=True)
 
 
@@ -161,6 +164,10 @@ class DeployJournal:
         """Rename the store so no later install reaps the copies a user still needs."""
         if self.store is None:
             raise RuntimeError("no store to retain")
+        # The marker keeps the copies from the reaper even if the rename fails.
+        (self.store / _RETAINED_MARKER).write_text(
+            "Pre-install copies kept after a failed restore.\n", encoding="ascii"
+        )
         retained = self.store.with_name(_RETAINED_PREFIX + self.store.name[len(_STORE_PREFIX) :])
         try:
             self.store.rename(retained)
