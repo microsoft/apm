@@ -43,9 +43,10 @@ class TestDriftTextHint:
             ]
         )
         assert local_edit_hint(2, overwritten=0) in out
-        # The hint must precede the restore advice that would overwrite edits,
-        # which deletes the edited files first (#3994, RA-009).
-        assert out.index("apm export-patch") < out.index("Delete the edited files")
+        # The hint precedes the restore advice, which moves the edited files
+        # aside, never deletes them (#3994, RA-044).
+        assert out.index("apm export-patch") < out.index("Move the edited files aside")
+        assert "Delete" not in out
         assert "Run 'apm install' to re-sync" not in out
 
     def test_bundle_file_restore_names_the_bundle_reinstall(self) -> None:
@@ -85,7 +86,7 @@ def test_shared_hook_config_drift_gets_local_edit_advice_only_for_user_edits(ret
     )
     assert (cause in text) is retired
     if retired:
-        for advice in ("local edit", "export-patch", "Delete the edited files"):
+        for advice in ("local edit", "export-patch", "Move the edited files aside"):
             assert advice not in text
         assert "Run 'apm install' to re-sync deployed files with the lockfile." in text
     else:

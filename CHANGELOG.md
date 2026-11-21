@@ -82,6 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm audit --ci` tells you to move an edited managed file aside or run `apm export-patch`, matching the install Kept line, instead of deleting it. (#4424)
 - A file you edited in a project upgraded from APM 0.36 or earlier stays a proven edit on every later `apm install`, instead of failing from the second install. (#4424)
 - A failed `apm install` that writes no file but upgrades or normalizes `apm.lock.yaml` now says the lockfile was rewritten, instead of claiming it kept the previous entries of the kept files. (#4424)
 - Global `apm audit --ci` passes after `apm install -g` when `APM_HOME` is outside `HOME` or a local native plugin is installed. (closes #3901, #3946)

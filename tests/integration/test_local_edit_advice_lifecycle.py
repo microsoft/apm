@@ -132,7 +132,9 @@ def test_local_edit_advice_is_true_and_restores_each_kind(
     remediation = reported.get("remediation")
     assert isinstance(remediation, dict), f"no structured remediation: {reported}"
     assert remediation["command"] in reported["message"]
-    assert remediation["before"].startswith("delete "), remediation
+    # Never destructive (RA-044): move aside, like the Kept line.
+    assert remediation["before"] == "move the edited files aside", remediation
+    assert "export-patch" in reported["message"], reported
 
     # The advice states what a plain install does to this kind: observe it.
     plain = apm("install", "--no-policy", ok=(0, 1))
@@ -141,19 +143,18 @@ def test_local_edit_advice_is_true_and_restores_each_kind(
     # package brings no new content, so install keeps it and exits 0 (RA-012).
     assert (root / edited).read_bytes().endswith(_EDIT.encode())
     assert "This install overwrites" not in output, output
-    if kind.kept_by_install:
-        assert remediation["id"] == "drift-restore-edited-skill"
-        assert "refuses to overwrite an edited skill" in remediation["fixes"]
-    else:
-        assert remediation["id"] == "drift-restore-edited-overwrite"
-        assert "keeps these edited" in remediation["fixes"]
+    assert remediation["id"] == "drift-restore-edited"
+    if not kind.kept_by_install:
         assert plain.returncode == 0, output
         assert f"Kept {edited}: it was modified since APM deployed it." in output, output
 
-    # Executing the printed remedy (delete, then the command) clears audit --ci.
-    (root / edited).unlink()
+    # Executing the printed remedy (move aside, then the command) clears audit
+    # --ci, and the moved copy still holds the edit (RA-044).
+    aside = tmp_path / "edited-aside"
+    (root / edited).rename(aside)
     argv = shlex.split(remediation["command"])
     assert argv[0] == "apm"
     apm(*argv[1:], "--no-policy")
     assert (root / edited).read_bytes() == locked
+    assert aside.read_bytes() == locked + _EDIT.encode()
     assert _content_integrity(apm)["passed"] is True

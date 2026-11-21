@@ -887,17 +887,11 @@ class InstallService:
                 f"{remediation.LOCAL_EDITS_EXPORT.clause()}, or move them aside."
             )
         else:
-            # True per primitive kind (RA-009): see install/local_edits.py.
-            advice = " ".join(
-                item.sentence()
-                for item in edited_file_remediations(drift.path for drift in drifted)
-            )
-            from apm_cli.core.remediation import LOCAL_EDITS_EXPORT
+            # Never destructive (RA-044): see install/local_edits.py.
+            from apm_cli.core.remediation import either_sentence
 
-            tip = (
-                f"Tip: nothing was deployed. {advice} To keep the edits, "
-                f"{LOCAL_EDITS_EXPORT.clause()} first."
-            )
+            advice = either_sentence(*edited_file_remediations(user_scope=user_scope))
+            tip = f"Tip: nothing was deployed. {advice}"
         raise FrozenInstallError(
             "--frozen: deployed files do not match the hashes recorded in apm.lock.yaml.",
             reasons=[

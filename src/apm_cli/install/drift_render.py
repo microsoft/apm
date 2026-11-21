@@ -13,6 +13,7 @@ from apm_cli.core.remediation import (
     RESYNC_AFTER_UNMANAGED_CONFLICT,
     RESYNC_DEPLOYED,
     RESYNC_UNRECORDED,
+    either_sentence,
 )
 from apm_cli.deps.file_provenance import LOCAL_BUNDLE_OWNER
 from apm_cli.install.local_edits import (
@@ -163,15 +164,10 @@ def render_drift_text(
             for finding in by_kind.get("modified", [])
             if finding.path not in unedited and not finding.owned_entries_only
         ]
-        # True per primitive kind (RA-009): see install/local_edits.py.
+        # Never destructive (RA-044): see install/local_edits.py.
         for bundle in sorted({finding.package == LOCAL_BUNDLE_OWNER for finding in edited}):
-            paths = [
-                finding.path
-                for finding in edited
-                if (finding.package == LOCAL_BUNDLE_OWNER) is bundle
-            ]
-            for remediation in edited_file_remediations(paths, bundle=bundle):
-                lines.append(f"  {STATUS_SYMBOLS['info']} {remediation.sentence()}")
+            choices = edited_file_remediations(bundle=bundle, exportable=bool(exportable))
+            lines.append(f"  {STATUS_SYMBOLS['info']} {either_sentence(*choices)}")
         if len(edited) < len(findings):
             lines.append(f"  {STATUS_SYMBOLS['info']} {RESYNC_DEPLOYED.sentence()}")
     return "\n".join(lines).rstrip() + "\n"

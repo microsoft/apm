@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.core.remediation import LOCAL_EDITS_EXPORT, RESTORE_EDITED_SKILL
+from apm_cli.core.remediation import LOCAL_EDITS_EXPORT, RESTORE_EDITED, either_sentence
 from apm_cli.integration.base_integrator import kept_edit_message
 from tests.integration._marketplace_pack_kit import (
     MarketplacePackWorld,
@@ -166,7 +166,8 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
     assert "the next 'apm install' overwrites" not in audit_text
     assert LOCAL_EDITS_EXPORT.clause() in audit_text
     assert "apm export-patch" in audit_text
-    assert RESTORE_EDITED_SKILL.bind(subject="the edited skill files").sentence() in audit_text
+    restore = RESTORE_EDITED.bind(subject="the edited files")
+    assert either_sentence(restore, LOCAL_EDITS_EXPORT) in audit_text
 
     world.apm(project, "export-patch", "-o", str(tmp_path / "out"))
     patches = sorted((tmp_path / "out").glob("*.patch"))

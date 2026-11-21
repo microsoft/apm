@@ -565,6 +565,14 @@ def test_c3d_upgrade_keeps_the_edit_proof_on_every_install(
     audit, frozen = world.run("audit", "--ci"), world.run("install", "--frozen")
     assert (audit[0], frozen[0]) == (1, 1), (audit, frozen)
     assert _SINGLE in audit[1] + audit[2], audit
+    # RA-044: the content-integrity remedy is the Kept line's, never a delete.
+    flat_audit = " ".join((audit[1] + audit[2]).split())
+    assert (
+        "1 file(s) with hash drift -- move the edited files aside, then run 'apm install' "
+        "to restore the locked content, or 'apm export-patch' to export the local edits as "
+        "upstream patches"
+    ) in flat_audit, flat_audit
+    assert "delete" not in flat_audit.lower(), flat_audit
     assert target.read_bytes() == edited_bytes
     # Remedy: export the edit. The package is a local path whose source already
     # lives on disk, so there is nothing to export upstream; the edit is kept.

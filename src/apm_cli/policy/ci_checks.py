@@ -1110,19 +1110,11 @@ def _check_content_integrity(
         from ..deps.file_provenance import LOCAL_BUNDLE_OWNER
         from ..install.local_edits import edited_file_remediations
 
-        # True per primitive kind (RA-009): see install/local_edits.py.
+        # Never destructive (RA-044): see install/local_edits.py.
         for bundle in sorted({drift.owner == LOCAL_BUNDLE_OWNER for drift in hash_mismatches}):
-            remediations.extend(
-                edited_file_remediations(
-                    (
-                        drift.path
-                        for drift in hash_mismatches
-                        if (drift.owner == LOCAL_BUNDLE_OWNER) is bundle
-                    ),
-                    bundle=bundle,
-                )
-            )
-        remedies.extend(item.clause() for item in remediations)
+            choices = edited_file_remediations(bundle=bundle, user_scope=user_scope)
+            remediations.extend(choices)
+            remedies.append(remediation.either(*choices))
     if local_drift:
         # install --frozen refuses the same local dependencies (#4447).
         parts.extend(local_drift)
