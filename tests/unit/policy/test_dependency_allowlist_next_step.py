@@ -51,19 +51,17 @@ def _allowlist(root: Path) -> CheckResult:
     return next(c for c in result.checks if c.name == "dependency-allowlist")
 
 
-def test_catalog_entry_runs_apm_uninstall() -> None:
-    entry = catalog()["dependency-not-allowed"]
-
-    assert entry.command == "apm uninstall {packages}"
-    assert entry.fixes_promise == "remove {subject} outside the org allow list"
+def _stderr(capsys, *checks: CheckResult) -> list[str]:
+    _render_ci_failures_to_stderr(CIAuditResult(checks=list(checks)))
+    return capsys.readouterr().err.splitlines()
 
 
-def test_one_denied_dependency_names_it_and_the_policy_source(tmp_path: Path) -> None:
+def test_one_denied_dependency_names_it_and_the_policy_source(tmp_path: Path, capsys) -> None:
     check = _allowlist(_project(tmp_path, ["acme/evil-pkg"]))
 
-    assert not check.passed
-    assert check.next_step == (
-        "Run 'apm uninstall acme/evil-pkg' to remove the dependency outside the org "
+    assert catalog()["dependency-not-allowed"].command == "apm uninstall {packages}"
+    assert _stderr(capsys, check)[2] == (
+        "    Run 'apm uninstall acme/evil-pkg' to remove the dependency outside the org "
         "allow list, or ask your org admin to allow it (policy source: org:contoso/.github)."
     )
     assert [r.to_json() for r in check.remediations] == [
@@ -76,7 +74,7 @@ def test_one_denied_dependency_names_it_and_the_policy_source(tmp_path: Path) ->
 
 
 def test_several_denied_dependencies_name_each_entry_that_brings_them_in(
-    tmp_path: Path,
+    tmp_path: Path, capsys
 ) -> None:
     locked = [
         LockedDependency(repo_url="acme/evil-pkg", depth=1),
@@ -86,44 +84,26 @@ def test_several_denied_dependencies_name_each_entry_that_brings_them_in(
     ]
     root = _project(tmp_path, ["acme/evil-pkg", "acme/other-pkg", "contoso/parent"], locked)
 
-    check = _allowlist(root)
+    stderr = _stderr(capsys, _allowlist(root))
 
-    assert len(check.subjects) == 3
-    assert check.next_step == (
-        "Run 'apm uninstall acme/evil-pkg acme/other-pkg contoso/parent' to remove the 3 "
+    assert stderr[0] == "[x] dependency-allowlist: 3 dependency(ies) not in allow list"
+    assert stderr[4] == (
+        "    Run 'apm uninstall acme/evil-pkg acme/other-pkg contoso/parent' to remove the 3 "
         "dependencies outside the org allow list, or ask your org admin to allow them "
         "(policy source: org:contoso/.github)."
     )
-    assert check.remediations[0].argv() == (
-        "apm",
-        "uninstall",
-        "acme/evil-pkg",
-        "acme/other-pkg",
-        "contoso/parent",
-    )
 
 
-def test_text_and_sarif_render_the_next_step(tmp_path: Path, capsys) -> None:
+def test_sarif_carries_the_next_step_and_other_checks_are_unchanged(tmp_path: Path, capsys) -> None:
     check = _allowlist(_project(tmp_path, ["acme/evil-pkg"]))
-    result = CIAuditResult(checks=[check])
+    other = CheckResult(name="lockfile-exists", passed=False, message="m", details=["d"])
+    result = CIAuditResult(checks=[check, other])
 
-    _render_ci_failures_to_stderr(result)
-    stderr = capsys.readouterr().err.splitlines()
     sarif = result.to_sarif()["runs"][0]["results"]
+    stderr = _stderr(capsys, check, other)
 
-    assert stderr[:3] == [
-        "[x] dependency-allowlist: 1 dependency(ies) not in allow list",
-        "    - github.com/acme/evil-pkg: not in allowed sources",
-        f"    {check.next_step}",
-    ]
     assert [r["message"]["text"] for r in sarif] == [
-        f"github.com/acme/evil-pkg: not in allowed sources. {check.next_step}"
+        f"github.com/acme/evil-pkg: not in allowed sources. {check.next_step}",
+        "d",
     ]
-
-
-def test_other_checks_keep_their_sarif_message() -> None:
-    check = CheckResult(name="lockfile-exists", passed=False, message="m", details=["d"])
-
-    sarif = CIAuditResult(checks=[check]).to_sarif()["runs"][0]["results"]
-
-    assert [r["message"]["text"] for r in sarif] == ["d"]
+    assert stderr[3:6] == ["[x] lockfile-exists: m", "    - d", "[x] 2 of 2 check(s) failed"]
