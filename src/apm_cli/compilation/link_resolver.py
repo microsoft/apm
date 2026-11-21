@@ -741,3 +741,63 @@ def _detect_circular_references(
                     continue
 
     return errors
+
+
+def missing_module_link_targets(
+    project_root: Path, package: str | None = None
+) -> builtins.list[tuple[str, str]]:
+    """Return ``(deployed file, target)`` for each link into apm_modules that is missing.
+
+    Installation rewrites a dependency's context links to point under
+    ``apm_modules``, so a committed deployed file is incomplete until
+    ``apm install`` materializes them, for example after a fresh clone
+    (#3143). Scans the markdown files apm.lock.yaml records as deployed,
+    for every dependency or only *package*; both paths are project-relative.
+    """
+    import os
+
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+    lockfile = LockFile.read(get_lockfile_path(project_root))
+    if lockfile is None:
+        return []
+    deployed: builtins.set[str] = builtins.set()
+    for key, dependency in lockfile.dependencies.items():
+        if package is None or key == package:
+            deployed.update(dependency.deployed_files)
+    root = os.path.normpath(str(project_root))
+    missing: builtins.list[tuple[str, str]] = []
+    for relative in sorted(path for path in deployed if path.endswith(".md")):
+        source = project_root / relative
+        try:
+            if source.is_symlink() or not source.is_file():
+                continue
+            content = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for match in UnifiedLinkResolver.LINK_PATTERN.finditer(content):
+            target, _suffix = UnifiedLinkResolver._split_link_target(match.group(2).strip())
+            parts = target.replace("\\", "/").split("/")
+            if "apm_modules" not in parts or "://" in target:
+                continue
+            resolved = os.path.normpath(os.path.join(os.path.dirname(str(source)), target))
+            if os.path.exists(resolved):
+                continue
+            try:
+                shown = os.path.relpath(resolved, root).replace(os.sep, "/")
+            except ValueError:  # another drive (Windows)
+                shown = target
+            if (relative, shown) not in missing:
+                missing.append((relative, shown))
+    return missing
+
+
+def warn_missing_module_links(project_root: Path, logger, package: str | None = None) -> None:
+    """Warn once per deployed file link into apm_modules whose target is missing (#3143)."""
+    from apm_cli.core.remediation import DEPENDENCIES_NOT_INSTALLED
+
+    for deployed, target in missing_module_link_targets(project_root, package):
+        logger.warning(
+            f"{deployed} links to {target}, which is missing. "
+            f"{DEPENDENCIES_NOT_INSTALLED.sentence()}"
+        )
