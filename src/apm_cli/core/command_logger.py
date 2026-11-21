@@ -204,6 +204,13 @@ class CommandLogger:
             lambda noun: f"stale deployed {noun} for {_dependency_label(dep_key)}",
         )
 
+    def receipt_orphan_cleanup(self, cleanup: CleanupResult) -> int:
+        """Name receipted files no lock entry claims any more that cleanup removed (#3188)."""
+        return self._removed_paths(
+            cleanup.announced_paths,
+            lambda noun: f"deployed {noun} no package in apm.lock.yaml claims",
+        )
+
     @staticmethod
     def _removed_paths(paths: Sequence[str], describe: Callable[[str], str]) -> int:
         """Render one cleanup header whose count matches the paths listed under it."""
@@ -788,6 +795,12 @@ class InstallLogger(CommandLogger):
         path must be visible without ``--verbose``.
         """
         count = super().stale_cleanup(dep_key, cleanup)
+        self._stale_cleaned_total += count
+        return count
+
+    def receipt_orphan_cleanup(self, cleanup: CleanupResult) -> int:
+        """Name receipt-bound orphan cleanup at default verbosity and count it (#3188)."""
+        count = super().receipt_orphan_cleanup(cleanup)
         self._stale_cleaned_total += count
         return count
 
