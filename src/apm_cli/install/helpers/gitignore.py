@@ -30,7 +30,9 @@ def update_gitignore_for_apm_modules(logger=None):
 
     # Add apm_modules/ to .gitignore
     try:
-        with open(gitignore_path, "a", encoding="utf-8") as f:
+        from ...integration.write_seam import open_for_write
+
+        with open_for_write(gitignore_path, "a", encoding="utf-8") as f:
             # Add a blank line before our entry if file isn't empty
             if current_content and current_content[-1].strip():
                 f.write("\n")
