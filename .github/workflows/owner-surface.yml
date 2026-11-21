@@ -1,0 +1,139 @@
+# Owner Surface -- a cheap PR check for owner and install-path changes.
+#
+# Today's main reds (the lockfile-read owner test after #4067, the codex
+# bundle e2e after #4007) lived in integration shards that run only on
+# merge_group or dispatch. This workflow runs, on every pull request, only the
+# slice of those shards a change can reach (scripts/owner_surface.py):
+#   - owner surfaces: src/apm_cli/install/*, src/apm_cli/deps/lockfile*,
+#     .apm/architecture/*, scripts/architecture_linter/*,
+#     tests/integration/test_architecture_*.py, tests/integration/test_install_*.py,
+#     and every file an owner registry selector names;
+#   - slice: owner-rule mutation cases and architecture tests that name a
+#     changed file or an affected owner, guard or rule, plus every
+#     tests/integration/test_install_*.py file for install-path changes.
+# The full integration suite still runs once per train head (merge_group,
+# merge-train refs), never per pull request.
+#
+# `Owner Surface Check` always reports, so it can be required: it passes when
+# no owner surface changed (the slice is skipped) and on merge_group, where
+# ci-integration.yml runs the whole suite. It is NOT required yet; making it
+# required is a ruleset edit (a maintainer gate).
+name: Owner Surface
+
+# No paths: filter: a filtered-out run would never report the check.
+on:
+  pull_request:
+    branches: [ main ]
+  merge_group:
+    branches: [ main ]
+    types: [ checks_requested ]
+
+# Superseded pushes to a PR cancel their run; merge_group runs never cancel.
+concurrency:
+  group: owner-surface-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.12'
+  HERMETIC_MARK_EXPR: "not live and not requires_github_token and not requires_network_integration"
+
+jobs:
+  select:
+    name: Owner Surface Select
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Plan the owner-surface slice
+      id: plan
+      env:
+        EVENT: ${{ github.event_name }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        if [ "$EVENT" != pull_request ]; then
+          echo "run=false" >> "$GITHUB_OUTPUT"
+          echo "$EVENT: ci-integration.yml runs the whole integration suite here."
+          exit 0
+        fi
+        python3 -m scripts.owner_surface plan --base "$BASE_SHA" --out owner-surface-changed.txt
+
+  slice:
+    name: Owner Surface Slice (${{ matrix.shard }}/3)
+    needs: [select]
+    if: needs.select.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: true
+        save-cache: false
+
+    - name: Install dependencies
+      run: uv sync --frozen --extra dev
+
+    - name: Run the owner-surface slice
+      env:
+        APM_E2E_TESTS: "1"
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        SHARD: ${{ matrix.shard }}
+      run: |
+        python3 -m scripts.owner_surface plan --base "$BASE_SHA" --out owner-surface-changed.txt
+        uv run --frozen --extra dev python -m scripts.owner_surface run \
+          --base "$BASE_SHA" --changed owner-surface-changed.txt -- \
+          -p no:cacheprovider -m "$HERMETIC_MARK_EXPR" -n 4 --dist loadgroup \
+          -p scripts.ci_sharding --shard-count 3 --shard-index "$SHARD" \
+          --shard-durations .github/ci-durations/linux-x86_64.json --durations=15
+
+  owner-surface:
+    name: Owner Surface Check
+    needs: [select, slice]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+    - name: Require the selected slice
+      env:
+        SELECT_RESULT: ${{ needs.select.result }}
+        RUN: ${{ needs.select.outputs.run }}
+        SLICE_RESULT: ${{ needs.slice.result }}
+      run: |
+        if [ "$SELECT_RESULT" != success ]; then
+          echo "::error::Owner-surface selection did not succeed: $SELECT_RESULT."
+          exit 1
+        fi
+        if [ "$RUN" = true ]; then
+          expected=success
+        else
+          expected=skipped
+        fi
+        if [ "$SLICE_RESULT" != "$expected" ]; then
+          echo "::error::Owner-surface slice is $SLICE_RESULT (expected $expected, run=$RUN)."
+          exit 1
+        fi
+        echo "Owner Surface Check passed (run=$RUN, slice=$SLICE_RESULT)."
