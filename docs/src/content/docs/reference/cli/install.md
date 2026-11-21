@@ -277,7 +277,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   through a guarded copy, even when the source bytes are unchanged.
   A receipt vouches only for bytes APM wrote under the current lock, or for
   bytes still on disk. A new worktree has no receipts, and a receipt written
-  under another branch's lock does not count. Missing evidence, including
+  under another branch's lock does not count. A receipt also remembers the
+  last few versions APM wrote to each file on this checkout, so after switching
+  branches and back without reinstalling, a source edit installs directly; this
+  history never authorizes deleting a file. Missing evidence, including
   installations predating these receipts, does not authorize overwriting
   existing files. The one exception: a skill directory recorded in the
   lockfile whose files each match either what this install would write
