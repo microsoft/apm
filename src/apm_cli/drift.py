@@ -123,12 +123,19 @@ def marketplace_ref_mismatch(
     dep_ref: DependencyReference,
     locked_dep: LockedDependency,
 ) -> str | None:
-    """Compare a marketplace selection to locked evidence without catalog I/O."""
+    """Compare a marketplace selection to locked evidence without catalog I/O.
+
+    A plugin from a local catalog is locked by its content (``local_path`` and
+    ``content_hash``), never by a commit, and a local catalog selects no
+    version or ref, so a manifest selector cannot be satisfied (#4639).
+    """
     from apm_cli.deps.revision_pins import is_full_revision_pin
     from apm_cli.marketplace.semver import parse_semver, satisfies_range
     from apm_cli.marketplace.version_resolver import is_version_constraint
 
     spec = dep_ref.marketplace_version_spec
+    if locked_dep.is_local_source:
+        return _local_catalog_mismatch(spec, locked_dep)
     if not is_full_revision_pin(locked_dep.resolved_commit):
         return "missing locked commit evidence"
     if not spec:
@@ -151,6 +158,14 @@ def marketplace_ref_mismatch(
             return f"manifest version '{spec}' != lockfile selected version '{locked_dep.version}'"
     elif spec != locked_dep.resolved_ref:
         return f"manifest ref '{spec}' != lockfile ref '{locked_dep.resolved_ref or '(missing)'}'"
+    return None
+
+
+def _local_catalog_mismatch(spec: str | None, locked_dep: LockedDependency) -> str | None:
+    if not locked_dep.local_path or not locked_dep.content_hash:
+        return "missing locked content evidence"
+    if spec:
+        return f"manifest ref '{spec}' cannot select a local catalog plugin"
     return None
 
 
@@ -224,6 +239,7 @@ MARKETPLACE_UNLOCKED = "unlocked"
 MARKETPLACE_UPDATE = "update"
 MARKETPLACE_CATALOG_METADATA = "catalog-metadata"
 MARKETPLACE_ORIGIN_CHANGED = "origin-changed"
+MARKETPLACE_LOCAL_CATALOG = "local-catalog"
 
 
 @dataclass(frozen=True)
@@ -260,12 +276,19 @@ def locked_marketplace_replay(
     whose package owns locked servers replays only while its materialized
     copy under *modules_dir* exists. A cold copy reads the catalog for that
     metadata only; :func:`catalog_metadata_refusal` keeps the lock's pin.
+
+    ``local-catalog`` covers a row locked from a local catalog (#4639): the
+    catalog on disk stays the plugin's live source, so every install reads
+    it again, and ``--frozen`` accepts the row only while the catalog still
+    selects it (:func:`local_catalog_refusal`).
     """
     if update_refs:
         return MarketplaceReplay(MARKETPLACE_UPDATE)
     locked_dep = locked_marketplace_row(dep_ref, lockfile)
     if locked_dep is None:
         return _unlocked_marketplace_replay(dep_ref, lockfile)
+    if locked_dep.is_local_source:
+        return MarketplaceReplay(MARKETPLACE_LOCAL_CATALOG)
     replayed = locked_dep.to_edge_reference(dep_ref)
     if modules_dir is not None and replayed.get_install_path(modules_dir).is_dir():
         return MarketplaceReplay(MARKETPLACE_REPLAYED, replayed)
@@ -341,6 +364,33 @@ def catalog_metadata_refusal(
         f"the catalog now selects {current}, but apm.lock.yaml pins {locked}. "
         "Catalog edits do not change what installs; "
         f"{MARKETPLACE_CATALOG_REPINNED.bind(package=dep_ref.get_display_name()).clause()}"
+    )
+
+
+def local_catalog_refusal(
+    dep_ref: DependencyReference,
+    resolved: DependencyReference,
+    lockfile: LockFile | None,
+) -> ValueError | None:
+    """Refuse a ``--frozen`` install whose local catalog no longer selects the lock row.
+
+    A ``local-catalog`` row replays only while the catalog on disk still
+    resolves the declaration to the locked plugin directory; an edited
+    catalog entry needs a plain ``apm install`` to lock its new selection.
+    """
+    locked_dep = locked_marketplace_row(dep_ref, lockfile)
+    if (
+        locked_dep is not None
+        and resolved.is_local
+        and resolved.get_unique_key() == locked_dep.get_unique_key()
+    ):
+        return None
+    locked = locked_dep.local_path if locked_dep is not None else "another selection"
+    current = resolved.local_path if resolved.is_local else resolved.get_unique_key()
+    return ValueError(
+        "declared source differs from apm.lock.yaml: the local catalog now selects "
+        f"{current}, but apm.lock.yaml pins {locked}. "
+        f"{FROZEN_MARKETPLACE_UNLOCKED.sentence()}"
     )
 
 

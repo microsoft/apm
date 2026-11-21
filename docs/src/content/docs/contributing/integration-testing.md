@@ -63,12 +63,12 @@ APM uses a tiered approach to integration testing:
     -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
   ```
 
-### 3b. **Owner Surface Check** (PR-time, advisory until required)
+### 3b. **Owner Surface Check** (required on every PR)
 - **Location**: `.github/workflows/owner-surface.yml`, selection in `scripts/owner_surface.py`.
 - **Purpose**: run, on every pull request, the slice of the merge-time integration suite that an owner or install-path change can break. Owner-guard and install regressions then show on the PR, not on `main`.
 - **Trigger**: a change to `src/apm_cli/install/*`, `src/apm_cli/deps/lockfile*`, `.apm/architecture/*`, `scripts/architecture_linter/*`, `tests/integration/test_architecture_*.py`, `tests/integration/test_install_*.py`, or any file an owner registry selector names.
 - **Slice**: owner-rule mutation cases and `test_architecture_*.py` files that name a changed file or an affected owner, guard or rule; plus every `test_install_*.py` file for install-path changes. It runs hermetic tests in 3 duration-balanced shards (target under 10 min).
-- **Result**: `Owner Surface Check` always reports. It passes when no owner surface changed (the slice is skipped) and on merge_group, where the full suite runs.
+- **Result**: `Owner Surface Check` always reports and is required by `gate` in every context. It passes when no owner surface changed (the slice steps are skipped) and on merge_group and merge trains (as the `owner` tier), where the full suite runs.
 - **Run it locally**:
   ```bash
   python3 -m scripts.owner_surface plan --base origin/main --out /tmp/changed.txt
@@ -676,7 +676,7 @@ single `train-gate` check at that SHA:
 | Ref | Runs | Time |
 |---|---|---|
 | `queue/t<id>/p<k>-guard` | `scope`, `guard`, `train-gate` | about 5-10 min |
-| `queue/t<id>/p<k>-full` | the guard plus `tier1` (ci.yml), `tier2` (ci-integration.yml) and `spec` (spec-conformance.yml) | about 30-35 min |
+| `queue/t<id>/p<k>-full` | the guard plus `tier1` (ci.yml), `tier2` (ci-integration.yml), `spec` (spec-conformance.yml) and `owner` (owner-surface.yml) | about 30-35 min |
 | `queue/b<sha12>/p0-full` | a full proof of a `main` SHA | about 30-35 min |
 
 `guard` runs the Lint chain (`.github/actions/lint-chain`, shared with the
@@ -704,6 +704,16 @@ gh run list --workflow merge-train.yml --branch queue/t0001/p1-full \
 ```
 
 The run must show `"conclusion": "success"`; cite its `url` as the proof.
+
+`scripts/merge_queue/` composes these trains automatically (shadow mode: it
+builds and proves trains but never merges). It reads PRs labeled `queue:ready`
+with an `apm-queue-ticket` marker comment, builds `queue-build/t<id>` through
+the merges API, publishes the prefix refs, and logs `would-land` events:
+
+```bash
+python -m scripts.merge_queue.runner tick      # one pass; state in ~/.apm-queue
+python -m scripts.merge_queue.runner metrics   # shadow summary from events.jsonl
+```
 
 ### Windows unit hang diagnostics
 
