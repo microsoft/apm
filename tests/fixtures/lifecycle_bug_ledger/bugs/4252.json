@@ -1,0 +1,16 @@
+{
+  "issue": 4252,
+  "fixed_in": "Unreleased",
+  "summary": "registries.<name> entries handled unknown keys differently per manifest contract: a mistyped key was accepted under the OpenAPM v0.1 contract and an x- vendor key was rejected under the default contract. Both contracts now reject a mistyped key, naming it and the registry, and ignore x- keys.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/unit/test_apm_yml_registries.py::TestRegistryEntryKeys::test_mistyped_key_is_rejected_naming_key_and_registry",
+    "tests/unit/test_apm_yml_registries.py::TestRegistryEntryKeys::test_extension_key_is_accepted",
+    "tests/spec_conformance/test_manifest_behavior_reqs.py::test_registry_entry_rejects_typos_but_keeps_vendor_keys"
+  ]
+}

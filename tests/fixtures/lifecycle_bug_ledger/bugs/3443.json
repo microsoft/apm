@@ -1,0 +1,17 @@
+{
+  "issue": 3443,
+  "summary": "Traps apm install DIR classifying source packages versus pack bundles; needs pack output, bundles and lock source fields.",
+  "failure_modes": [
+    "outcome",
+    "reference"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_install_dir_source_package_lifecycle.py::test_apm_pack_output_still_installs_as_local_bundle",
+    "tests/integration/test_install_dir_source_package_lifecycle.py::test_legacy_manifestless_bundle_keeps_bundle_install",
+    "tests/integration/test_install_dir_source_package_lifecycle.py::test_single_argument_dir_install_matches_two_argument_dependency_install"
+  ]
+}

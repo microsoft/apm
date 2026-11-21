@@ -1,0 +1,17 @@
+{
+  "issue": 3764,
+  "summary": "Traps org mcp.transport.allow judging effective transport before writes; needs policy cache and local MCP registry.",
+  "failure_modes": [
+    "outcome",
+    "transaction"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_transport_policy_lifecycle.py::test_registry_sse_remote_blocked_before_any_write",
+    "tests/integration/test_mcp_transport_policy_lifecycle.py::test_registry_streamable_http_remote_passes",
+    "tests/integration/test_mcp_transport_policy_lifecycle.py::test_unreachable_registry_blocks_with_remedy"
+  ]
+}

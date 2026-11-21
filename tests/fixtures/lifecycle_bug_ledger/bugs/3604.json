@@ -1,0 +1,17 @@
+{
+  "issue": 3604,
+  "summary": "Traps audit replaying an apm.yml plus plugin.json source as a legacy plugin (#3604); custom package shape and lock package_type block a row.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "filesystem.open_world_observation",
+    "lockfile.frozen_preserves_bytes",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_install_dir_plugin_audit_lifecycle.py::test_apm_source_with_plugin_json_installs_and_audits_clean",
+    "tests/integration/test_install_dir_plugin_audit_lifecycle.py::test_legacy_local_plugin_still_replays_its_agents"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "issue": 2379,
+  "fixed_in": "Unreleased",
+  "summary": "Frozen install silently repaired an under-recorded lockfile instead of refusing the newly deployed claim.",
+  "failure_modes": [
+    "transaction",
+    "outcome"
+  ],
+  "properties": [
+    "lockfile.frozen_preserves_bytes",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_frozen_no_rewrite_e2e.py::test_frozen_install_fails_on_unrecorded_skill_without_rewriting_lockfile",
+    "tests/lifecycle/machines/test_m_spine.py::test_generated_lifecycle_mandatory_replay"
+  ]
+}

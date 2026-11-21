@@ -1,0 +1,22 @@
+{
+  "issue": 1662,
+  "summary": "Traps user-authored same-name rules, hooks and MCP configs being overwritten or deleted (#1662); needs many targets, global scope and JSONC.",
+  "failure_modes": [
+    "cleanup",
+    "idempotency",
+    "ownership"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_user_authored_name_collision_lifecycle.py::test_identical_user_hook_and_root_context_survive_uninstall_and_compile_clean",
+    "tests/integration/test_user_authored_name_collision_lifecycle.py::test_identity_and_case_only_collisions_survive_full_chain",
+    "tests/integration/test_user_authored_name_collision_lifecycle.py::test_jsonc_mcp_configs_are_never_rewritten_from_scratch",
+    "tests/integration/test_user_authored_name_collision_lifecycle.py::test_project_instruction_edit_still_refreshes_native_rule",
+    "tests/integration/test_user_authored_name_collision_lifecycle.py::test_same_name_user_rule_survives_global_install_and_uninstall",
+    "tests/integration/test_user_authored_name_collision_lifecycle.py::test_same_name_user_rules_survive_install_update_uninstall",
+    "tests/integration/test_user_authored_name_collision_lifecycle.py::test_uninstall_without_lockfile_keeps_user_instruction_files"
+  ]
+}

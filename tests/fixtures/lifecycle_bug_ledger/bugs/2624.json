@@ -1,0 +1,16 @@
+{
+  "issue": 2624,
+  "fixed_in": "Unreleased",
+  "summary": "Manifest rewrites caused repeated Windows line-ending churn.",
+  "failure_modes": [
+    "portability",
+    "idempotency"
+  ],
+  "properties": [
+    "portability.byte_deterministic",
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/unit/test_yaml_io.py::TestLoadYamlRoundtrip::test_dump_roundtrip_writes_deterministic_lf"
+  ]
+}

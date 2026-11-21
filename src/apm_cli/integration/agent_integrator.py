@@ -121,6 +121,13 @@ class CodexAgentFieldError(ValueError):
     """A rendered Codex agent field that Codex's agent-role parser rejects."""
 
 
+def _derived_codex_description(name: object, body: str) -> object:
+    """Return the agent's leading Markdown heading, else *name*, as its description."""
+    first = next((line.strip() for line in body.splitlines() if line.strip()), "")
+    heading = first.lstrip("#").strip() if first.startswith("#") else ""
+    return heading or name
+
+
 class AgentIntegrator(BaseIntegrator):
     """Handles integration of APM package agents into .github/agents/, .claude/agents/, .cursor/agents/, and .kiro/agents/."""
 
@@ -700,6 +707,10 @@ class AgentIntegrator(BaseIntegrator):
         given, *source* is not read again, so the rendered text is exactly
         the verified snapshot.
 
+        With *strict*, an agent that ships no description gets one derived
+        from its leading Markdown heading, else its name, so Codex can load
+        it (a plugin agent need not declare one).
+
         Raises:
             CodexAgentFieldError: with *strict*, a native field Codex requires
                 is blank or not a string, so Codex could not load the agent.
@@ -815,6 +826,11 @@ class AgentIntegrator(BaseIntegrator):
         if resolve_links is not None:
             body, links_resolved = resolve_links(body, source, target)
 
+        # A blank YAML ``description:`` loads as None: treat it as absent.
+        if strict and (
+            description is None or (isinstance(description, str) and not description.strip())
+        ):
+            description = _derived_codex_description(name, body)
         doc = {
             "name": name,
             "description": description,

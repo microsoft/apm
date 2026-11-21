@@ -1,0 +1,15 @@
+{
+  "issue": 3625,
+  "summary": "Receipt-less update behavior asserts local receipt ownership and fresh-clone recovery.",
+  "failure_modes": [
+    "idempotency",
+    "ownership"
+  ],
+  "properties": [
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/integration/test_update_receipt_less_lifecycle.py::test_receipt_less_update_replaces_unchanged_locked_files",
+    "tests/integration/test_update_receipt_less_lifecycle.py::test_receipt_less_update_with_edited_file_fails_closed"
+  ]
+}
