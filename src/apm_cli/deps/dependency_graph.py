@@ -91,6 +91,10 @@ class DependencyTree:
     # --dry-run: subtrees whose metadata could not be loaded. Install treats
     # them as leaves; a preview reports them as incomplete.
     unavailable_subtrees: list[str] = field(default_factory=list)
+    # unique key -> the resolution error of a replacement whose selected
+    # source did not load; install drops it when org policy refused that
+    # source before fetch, so the policy gate reports the refusal.
+    replacement_load_errors: dict[str, str] = field(default_factory=dict)
 
     def add_declaration_error(self, error: str) -> None:
         """Record an apm.yml declaration error install always refuses."""
