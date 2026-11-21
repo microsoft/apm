@@ -362,6 +362,32 @@ The following are deferred to a later milestone and not yet implemented:
 - **Signature verification** -- cryptographic signing of registry-published packages.
 :::
 
+### Enterprise workflow: publish, install, replay in CI
+
+Each machine enables registries and maps the registry name to its URL. Projects declare the same registry in `apm.yml` with `default: corp-main`.
+
+```bash
+# Every machine (producer, developer, CI)
+apm experimental enable registries
+apm config set registry.corp-main.url https://registry.corp.example.com/apm
+export APM_REGISTRY_TOKEN_CORP_MAIN=...
+
+# Producer: publish required dependencies first, from each package root
+apm publish --package acme/base --registry corp-main
+apm publish --package acme/widget --registry corp-main
+
+# Developer: install, then commit apm.yml and apm.lock.yaml
+apm install acme/widget#1.0.0
+
+# CI: clean checkout, empty cache
+apm install --frozen
+apm audit --ci
+```
+
+`--frozen` downloads each package from its lockfile `resolved_url` and checks the bytes against `resolved_hash`. It never contacts the producer's Git host. If the registry is down or returns different bytes, the install fails and deploys nothing. Run with `--verbose` to see which check failed. `apm uninstall` removes only files APM deployed.
+
+APM tests this workflow on every PR with the installed CLI against a local server that implements the [Registry HTTP API](../../reference/registry-http-api/). You can browse a hosted catalog (`apm marketplace add https://.../marketplace.json`) next to a registry. Installing registry packages by catalog name is not supported yet ([#4009](https://github.com/microsoft/apm/issues/4009)).
+
 ## 6. Enterprise policy
 
 Org admins can mandate registry usage and block non-registry sources organization-wide via `apm-policy.yml`:
