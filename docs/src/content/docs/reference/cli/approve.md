@@ -60,6 +60,9 @@ first matching rung decides:
 7. (no match)                -> gated pending approval (denied but approvable)
 ```
 
+The ladder applies once the gate is on (see [The gate opt-in](#the-gate-opt-in)).
+Without an opt-in, rung 7 items deploy.
+
 Deny always wins. The org layer is the ceiling on deny -- personal consent
 cannot widen past an org or project deny. The default (rung 7) is **gated
 pending approval**, not a hard deny: a package with executables and no opinion
@@ -218,7 +221,10 @@ unreachable policy under `policy.fetch_failure_default: block`); run
 prints `Teammates need APM 0.37 or later to read pinned approvals.`
 
 `--pending` marks each item `[approved]`, `[approved, any content]`,
-`[changed since approval]`, `[denied]`, or `[not approved]`. `--list` labels
+`[changed since approval]`, `[denied]`, or `[not approved]`. Before any layer
+turns the gate on, an item that would need approval is marked
+`[deployed: no executables policy]`: it deploys today and is listed so you can
+review it before opting in. `--list` labels
 `hooks` and `mcp` grants `pinned` or `any content`, for example
 `hooks[+:project-allow, pinned]`.
 
