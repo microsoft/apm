@@ -2005,6 +2005,8 @@ def test_gemini_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> No
     assert result.files_adopted == 0
     assert target_path not in result.target_paths
     assert result.target_paths == [gemini_agents / "ok.md"]
+    assert target_path.read_text(encoding="utf-8") == bad_content
+    assert (gemini_agents / "ok.md").read_text(encoding="utf-8").endswith("Ok\n")
     [warning] = diagnostics.by_category()[CATEGORY_WARNING]
     assert "execute_arbitrary_code" in warning.message
     assert "Approved Gemini tool names" in warning.message

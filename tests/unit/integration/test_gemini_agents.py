@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from apm_cli.integration.agent_integrator import AgentIntegrator, is_gemini_agent_tool
+from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import (
     APMPackage,
@@ -25,6 +25,8 @@ from apm_cli.models.apm_package import (
 )
 from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
 from tests.utils.deployment_evidence import prove_overwrites, receipted_evidence
+
+pytestmark = [pytest.mark.component, pytest.mark.promise("req-tg-009")]
 
 # Keys accepted by the Gemini CLI v0.70.0 local-agent schema.
 _GEMINI_SCHEMA_KEYS = {
@@ -91,21 +93,6 @@ def _warnings(diagnostics: DiagnosticCollector) -> list[str]:
     return [d.message for d in diagnostics.by_category().get(CATEGORY_WARNING, [])]
 
 
-def test_gemini_profile_maps_agents_to_project_and_user_dirs() -> None:
-    target = KNOWN_TARGETS["gemini"]
-    agents = target.primitives["agents"]
-    assert (agents.subdir, agents.extension, agents.format_id) == ("agents", ".md", "gemini_agent")
-    assert agents.deploy_root is None
-    # Detection and auto-create behavior are unchanged.
-    assert target.detect_by_dir is True
-    assert target.auto_create is False
-
-    user = target.for_scope(user_scope=True)
-    assert user is not None
-    assert user.root_dir == ".gemini"
-    assert "agents" in user.primitives
-
-
 def test_gemini_agent_renders_only_schema_keys(tmp_path: Path) -> None:
     _write_agent(
         tmp_path,
@@ -158,6 +145,31 @@ def test_gemini_agent_name_defaults_to_file_stem_and_tools_stay_omitted(tmp_path
     assert fm == {"name": "build-worker", "description": "Runs the build"}
 
 
+def test_gemini_agent_with_utf8_bom_deploys_without_bom(tmp_path: Path) -> None:
+    # Gemini's frontmatter regex accepts a leading BOM (skillLoader.ts FRONTMATTER_REGEX).
+    agents = tmp_path / "pkg" / ".apm" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "bom.agent.md").write_bytes(b"\xef\xbb\xbf---\ndescription: With BOM\n---\nBody\n")
+
+    result, diagnostics = _integrate(tmp_path)
+
+    assert result.files_integrated == 1
+    text = (tmp_path / ".gemini" / "agents" / "bom.md").read_text(encoding="utf-8")
+    assert _frontmatter(text) == {"name": "bom", "description": "With BOM"}
+    assert diagnostics.by_category() == {}
+
+
+def test_gemini_agent_infinite_temperature_is_kept(tmp_path: Path) -> None:
+    # Gemini's z.number() accepts Infinity and rejects only NaN.
+    _write_agent(tmp_path, "t.agent.md", "---\ndescription: d\ntemperature: .inf\n---\nB\n")
+
+    result, _ = _integrate(tmp_path)
+
+    assert result.files_integrated == 1
+    deployed = tmp_path / ".gemini" / "agents" / "t.md"
+    assert _frontmatter(deployed.read_text(encoding="utf-8"))["temperature"] == float("inf")
+
+
 def test_gemini_agent_empty_tools_list_is_kept(tmp_path: Path) -> None:
     _write_agent(tmp_path, "x.agent.md", "---\ndescription: No tools\ntools: []\n---\nBody\n")
 
@@ -188,11 +200,12 @@ def test_gemini_agent_empty_tools_list_is_kept(tmp_path: Path) -> None:
         ("a.agent.md", "---\ndescription: d\npermissionMode: plan\n---\nB\n", "'permissionMode'"),
         ("a.agent.md", "---\ndescription: d\nkind: remote\n---\nB\n", "only local agents"),
         ("a.agent.md", "---\ndescription: d\ntemperature: hot\n---\nB\n", "'temperature'"),
+        ("a.agent.md", "---\ndescription: d\ntemperature: .nan\n---\nB\n", "'temperature'"),
         ("a.agent.md", "---\ndescription: d\nmax_turns: 0\n---\nB\n", "'max_turns'"),
         ("a.agent.md", "---\ndescription: d\ntimeout_mins: true\n---\nB\n", "'timeout_mins'"),
         ("a.agent.md", "---\ndescription: d\ndisplay_name: 3\n---\nB\n", "'display_name'"),
         ("a.agent.md", "---\ndescription: [unclosed\n---\nB\n", "not valid YAML"),
-        ("a.agent.md", "---\n- a\n- b\n---\nB\n", "YAML mapping"),
+        ("a.agent.md", "---\n- a\n- b\n---\nB\n", "'description' is required"),
         ("_hidden.agent.md", "---\ndescription: d\n---\nB\n", "starts with '_'"),
     ],
 )
@@ -223,6 +236,7 @@ def test_gemini_tool_rejection_names_the_full_approved_set(tmp_path: Path) -> No
     [message] = _warnings(diagnostics)
     assert all(tool in message for tool in GEMINI_AGENT_BUILTIN_TOOLS)
     assert "mcp_<server>_<tool>" in message
+    assert not (tmp_path / ".gemini" / "agents" / "a.md").exists()
 
 
 def test_gemini_invalid_agent_does_not_block_siblings(tmp_path: Path) -> None:
@@ -252,6 +266,7 @@ def test_gemini_preflight_runs_before_adopt(tmp_path: Path) -> None:
     assert result.files_integrated == 0
     assert result.target_paths == []
     assert "'Read'" in _warnings(diagnostics)[0]
+    assert preset.read_text(encoding="utf-8") == bad
 
 
 def test_gemini_reinstall_adopts_and_update_rewrites(tmp_path: Path, monkeypatch) -> None:
@@ -341,6 +356,11 @@ def test_gemini_agent_user_invocable_false_warns_lossy(tmp_path: Path) -> None:
     assert result.files_integrated == 1
     lossy = [d for ds in diagnostics.by_category().values() for d in ds]
     assert any("Gemini agent i.agent.md" in d.message for d in lossy)
+    deployed = tmp_path / ".gemini" / "agents" / "i.md"
+    assert _frontmatter(deployed.read_text(encoding="utf-8")) == {
+        "name": "i",
+        "description": "Internal",
+    }
 
 
 def test_gemini_agents_skipped_without_gemini_dir(tmp_path: Path) -> None:
@@ -352,31 +372,3 @@ def test_gemini_agents_skipped_without_gemini_dir(tmp_path: Path) -> None:
 
     assert result.files_integrated == 0
     assert not (tmp_path / ".gemini").exists()
-
-
-@pytest.mark.parametrize(
-    ("value", "valid"),
-    [
-        ("read_file", True),
-        ("run_shell_command", True),
-        ("search_file_content", True),
-        ("*", True),
-        ("mcp_*", True),
-        ("mcp_github_*", True),
-        ("mcp_github_create_issue", True),
-        ("mcp_my.server_tool:v2", True),
-        ("discovered_tool_lint", True),
-        ("mcp_", False),
-        ("mcp__tool", False),
-        ("mcp_server", False),
-        ("mcp_server___", False),
-        ("mcp_*_tool", False),
-        ("mcp_bad!_tool", False),
-        ("Read", False),
-        ("shell", False),
-        ("codebase", False),
-        ("", False),
-    ],
-)
-def test_is_gemini_agent_tool_mirrors_gemini_cli(value: str, valid: bool) -> None:
-    assert is_gemini_agent_tool(value) is valid

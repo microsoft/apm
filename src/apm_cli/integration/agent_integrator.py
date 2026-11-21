@@ -7,6 +7,7 @@ See skill-strategy.md for the full architectural rationale (T5).
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -31,7 +32,7 @@ from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
-from apm_cli.utils.yaml_io import load_yaml_str, yaml_to_str
+from apm_cli.utils.yaml_io import load_yaml_str, loads_frontmatter, yaml_to_str
 
 if TYPE_CHECKING:
     from apm_cli.integration.cleanup import DeploymentEvidence
@@ -1182,8 +1183,11 @@ class AgentIntegrator(BaseIntegrator):
         if display_name is not None and not isinstance(display_name, str):
             return "'display_name' must be a string"
         temperature = fm.get("temperature")
+        # z.number() rejects NaN (it accepts Infinity), so NaN fails here too.
         if temperature is not None and (
-            isinstance(temperature, bool) or not isinstance(temperature, int | float)
+            isinstance(temperature, bool)
+            or not isinstance(temperature, int | float)
+            or math.isnan(temperature)
         ):
             return "'temperature' must be a number"
         for field in ("max_turns", "timeout_mins"):
@@ -1217,20 +1221,16 @@ class AgentIntegrator(BaseIntegrator):
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
-        content = source.read_text(encoding="utf-8")
         stem = target.name[: -len(".md")]
-        body = content
-        fm: object = {}
+        fm: dict = {}
+        body = ""
         problem = None
-        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
-        if fm_match:
-            body = content[fm_match.end() :]
-            try:
-                fm = load_yaml_str(fm_match.group(1)) or {}
-            except yaml.YAMLError:
-                problem = "frontmatter is not valid YAML"
-        if problem is None and not isinstance(fm, dict):
-            problem = "frontmatter must be a YAML mapping"
+        try:
+            # The shared parser also strips a leading BOM, which Gemini accepts.
+            post = loads_frontmatter(source.read_text(encoding="utf-8"), preserve_body=True)
+            fm, body = post.metadata, post.content
+        except yaml.YAMLError:
+            problem = "frontmatter is not valid YAML"
         if problem is None and stem.startswith("_"):
             problem = "Gemini CLI ignores agent files whose name starts with '_'"
         if problem is None:

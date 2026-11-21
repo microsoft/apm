@@ -33,6 +33,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_e2e_mode,
     pytest.mark.requires_apm_binary,
+    pytest.mark.promise("P-INV-I1", "P-LAW-idempotency.byte_stable", "req-tg-009"),
 ]
 
 _SCENARIO_TIMEOUT_SECONDS = 300.0
