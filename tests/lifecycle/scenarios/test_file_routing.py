@@ -21,13 +21,14 @@ one exists only under ``apm_modules`` until ``apm compile`` renders it.
 
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 import pytest
 import yaml
 
 from apm_cli.integration.targets import KNOWN_TARGETS
-from tests.lifecycle.scenarios._kit import Known, Scenario, credits, skill_package
+from tests.lifecycle.scenarios._kit import Known, Scenario, credits, known_defect, skill_package
 from tests.lifecycle.world import use_policy
 from tests.lifecycle.world.builder import _pack_bundle
 from tests.utils.local_package import LocalPackageFactory
@@ -81,8 +82,13 @@ def _route_of(targets) -> str:
     return routes.pop()
 
 
-def _assignments(op: str, tgt: str, route: str) -> list[dict[str, str]]:
-    return [{"OP": op, "TGT": tgt, "PRIM": prim, "FILEROUTE": route} for prim in _FILE_PRIMS]
+def _assignments(op: str, tgt: str, route: str, prims=_FILE_PRIMS) -> list[dict[str, str]]:
+    return [{"OP": op, "TGT": tgt, "PRIM": prim, "FILEROUTE": route} for prim in prims]
+
+
+# pack leaves a root skills/ out of a bundle whose package has .apm/ (#4709): a
+# bundle install proves only the instruction's route until that is fixed.
+_BUNDLE_PRIMS = ("other-file",)
 
 
 def _author(world, name: str) -> Path:
@@ -149,9 +155,9 @@ _SINGLE = "single-unchanged"
 def _op_credits(route: str) -> list[dict[str, str]]:
     return [
         item
-        for op in ("install", "compile", "update", "prune", "uninstall", "bundle-install")
+        for op in ("install", "compile", "update", "prune", "uninstall")
         for item in _assignments(op, _SINGLE, route)
-    ]
+    ] + _assignments("bundle-install", _SINGLE, route, _BUNDLE_PRIMS)
 
 
 @pytest.mark.parametrize("route", sorted(HISTORIES))
@@ -178,7 +184,10 @@ def test_operations_keep_the_file_route(lifecycle_world, route) -> None:
     manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
     bundle = _pack_bundle(bundle_root, lifecycle_world.root / "route-bundle", lifecycle_world.env)
     scenario.source_moved()
-    scenario.run(("install", str(bundle)), credit=_assignments("bundle-install", _SINGLE, route))
+    scenario.run(
+        ("install", str(bundle)),
+        credit=_assignments("bundle-install", _SINGLE, route, _BUNDLE_PRIMS),
+    )
     # A staged route already compiled once in this project: AGENTS.md may carry the marker.
     _assert_route(scenario, route, compiled=True)
     scenario.finish()
@@ -215,6 +224,20 @@ def test_uninstall_keeps_a_bundle_owned_instruction(lifecycle_world) -> None:
     scenario.run("install f-doc")
     scenario.run("uninstall f-doc", known={"I1": _BUNDLE_OWNED})
     scenario.finish()
+
+
+def test_bundle_ships_root_skills_with_apm_dir(lifecycle_world) -> None:
+    """Strict known cell bundle-ships-root-skills-with-apm-dir (#4709)."""
+    root = _author(lifecycle_world, "f-bun")
+    manifest = root / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data["dependencies"] = {"apm": []}
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    bundle = _pack_bundle(root, lifecycle_world.root / "skills-bundle", lifecycle_world.env)
+    names = {name.split("/", 1)[1] for name in zipfile.ZipFile(bundle).namelist()}
+    assert "instructions/f-bun.instructions.md" in names, sorted(names)
+    with known_defect("#4709", r"^the bundle drops the root skill"):
+        assert "skills/f-bun/SKILL.md" in names, f"the bundle drops the root skill: {sorted(names)}"
 
 
 CREDITS = credits(
