@@ -2,7 +2,7 @@
 
 PROMISE: P-LAW-auth.credentials_isolated -- credentials remain scoped to
 their intended host and never enter persisted URLs or output (source:
-tests/fixtures/lifecycle_bug_ledger.json); tokens are resolved per host at
+tests/fixtures/lifecycle_bug_ledger/); tokens are resolved per host at
 run time (docs/src/content/docs/getting-started/authentication.md).
 
 FRAMEWORK. One parametrized test runs every row of every

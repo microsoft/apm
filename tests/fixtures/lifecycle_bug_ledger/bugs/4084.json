@@ -1,0 +1,17 @@
+{
+  "issue": 4084,
+  "fixed_in": "0.37.0",
+  "summary": "Policy outcome routing consistency: apm audit --ci and apm approve handled some org policy discovery outcomes differently from apm install; every policy reader now takes one routed decision per outcome from a closed outcome set.",
+  "failure_modes": [
+    "outcome",
+    "routing"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_policy_outcome_routing_lifecycle.py::test_every_policy_reader_routes_the_outcome_like_install",
+    "tests/integration/test_policy_outcome_routing_lifecycle.py::test_approve_under_unreachable_policy_follows_fetch_failure_default"
+  ]
+}

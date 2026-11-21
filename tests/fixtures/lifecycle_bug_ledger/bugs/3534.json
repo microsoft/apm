@@ -1,0 +1,17 @@
+{
+  "issue": 3534,
+  "summary": "Marketplace producer-consumer, pack, and git-ref behavior exceed row vocabulary.",
+  "failure_modes": [
+    "outcome",
+    "reference"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_pack_consumer_chain_lifecycle.py::test_malformed_marketplace_sha_refused_before_any_write",
+    "tests/integration/test_marketplace_pack_consumer_chain_lifecycle.py::test_marketplace_pack_to_consumer_chain",
+    "tests/integration/test_marketplace_pack_consumer_chain_lifecycle.py::test_producer_bump_repack_then_consumer_update"
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "issue": 3902,
+  "summary": "Traps intentional MCP omission persisting while real drift still fails audit; needs mcp_omissions lock fields and global scope.",
+  "failure_modes": [
+    "cleanup",
+    "idempotency",
+    "outcome",
+    "reference",
+    "routing"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "lockfile.frozen_preserves_bytes",
+    "outcome.status_matches_state",
+    "ownership.preserve_unowned",
+    "portability.byte_deterministic",
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_omission_lifecycle.py::test_direct_mcp_admission_supersedes_prior_omission",
+    "tests/integration/test_mcp_omission_lifecycle.py::test_omitted_mcp_stays_omitted_across_install_audit_and_repeat",
+    "tests/integration/test_mcp_omission_lifecycle.py::test_skills_only_preserves_admitted_baseline_and_real_drift",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_approve_refusal_exits_nonzero_and_writes_nothing",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_changed_definition_is_parked_until_reapproved",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_first_project_approval_warns_about_packages_it_parks",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_frozen_applies_the_executables_gate_like_install",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_legacy_type_approval_warns_with_the_pin_remedy",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_lockfile_depth_edit_cannot_make_a_transitive_server_direct",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_lockfile_only_edit_cannot_grant_trust",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_native_plugin_is_approved_by_one_pin_over_its_whole_root",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_native_plugin_legacy_hook_grant_registers_and_warns",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_native_plugin_per_file_hook_pins_never_register_it",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_native_plugin_reaching_apm_owned_paths_cannot_be_approved",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_one_off_flag_warns_and_does_not_persist",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_org_policy_beats_an_approval",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_pending_reports_a_legacy_mcp_grant_that_install_parks",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_pinned_hook_file_is_parked_when_its_script_changes",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_pinned_server_rewritten_as_a_registry_reference_is_parked",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_two_clones_reproduce_an_approved_transitive_server",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_uninstalling_a_sibling_keeps_a_survivors_pinned_hooks",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_user_approval_admits_locally_but_audit_ignores_it",
+    "tests/integration/test_user_scope_exec_trust_lifecycle.py::test_user_manifest_grants_gate_global_install_and_uninstall"
+  ]
+}

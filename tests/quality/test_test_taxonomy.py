@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.lifecycle_ledger import read_ledger
 from scripts.test_static_facts import module_markers
 from tests.quality.taxonomy import (
     candidate_promises,
@@ -49,7 +50,6 @@ PROMISE_CATALOG = REPO_ROOT / "tests" / "quality" / "promise-catalog.json"
 SPEC_REQUIREMENT_ID = re.compile(r"^req-[a-z]{2,3}-[0-9]{3}$")
 SPEC_FAMILY = "req"
 P_FAMILY_ID = re.compile(r"^(P-[A-Z]+)-([A-Za-z0-9][A-Za-z0-9_.-]*)$")
-LIFECYCLE_LEDGER = REPO_ROOT / "tests" / "fixtures" / "lifecycle_bug_ledger.json"
 BASELINE_LISTS = ("misplaced_modules", "promise_exempt_modules", "unclassified_modules")
 AUTHORITY_PROSE = "Module-level `pytestmark` is the sole behavioral classification authority."
 
@@ -396,7 +396,7 @@ def _law_violations(catalog: frozenset[str], ledger: dict[str, object]) -> list[
     ]
     violations += [
         f"{catalog_name}: {promise_id!r} names no lifecycle law. Fix: remove it, or add "
-        "the law to tests/fixtures/lifecycle_bug_ledger.json property_catalog."
+        "the law to tests/fixtures/lifecycle_bug_ledger/property_catalog/."
         for promise_id in sorted(catalog)
         if promise_id.startswith("P-LAW-") and promise_id not in laws
     ]
@@ -513,7 +513,7 @@ def test_tm006_taxonomy_ratchets_do_not_grow(
 
 def test_tm011_every_lifecycle_law_has_a_promise_id() -> None:
     catalog = _load_promise_catalog(PROMISE_CATALOG)
-    ledger = json.loads(LIFECYCLE_LEDGER.read_text(encoding="utf-8"))
+    ledger = read_ledger(REPO_ROOT)
     violations = _law_violations(catalog, ledger)
     assert not violations, "\n".join(f"[x] {violation}" for violation in violations)
 
@@ -552,8 +552,8 @@ def test_tm012_missing_lifecycle_law_promise_fails() -> None:
         "tests/quality/promise-catalog.json: lifecycle law 'new.law' has no promise id. "
         "Fix: add 'P-LAW-new.law' to the catalog.",
         "tests/quality/promise-catalog.json: 'P-LAW-gone.law' names no lifecycle law. "
-        "Fix: remove it, or add the law to tests/fixtures/lifecycle_bug_ledger.json "
-        "property_catalog.",
+        "Fix: remove it, or add the law to tests/fixtures/lifecycle_bug_ledger/"
+        "property_catalog/.",
     ]
 
 

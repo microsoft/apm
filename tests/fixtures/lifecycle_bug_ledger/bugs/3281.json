@@ -1,0 +1,20 @@
+{
+  "issue": 3281,
+  "summary": "Traps retirement of obsolete absent dependency claims within preservation boundaries; needs legacy lock fields, user scope, multiple targets.",
+  "failure_modes": [
+    "cleanup",
+    "idempotency",
+    "ownership"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "lockfile.frozen_preserves_bytes",
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_obsolete_dependency_claim_lifecycle.py::test_dependency_target_narrowing_keeps_cleanup_and_lock_scope_aligned",
+    "tests/integration/test_obsolete_dependency_claim_lifecycle.py::test_historical_absence_respects_live_preservation_boundaries",
+    "tests/integration/test_obsolete_dependency_claim_lifecycle.py::test_ordinary_install_retires_obsolete_absent_dependency_claims",
+    "tests/integration/test_obsolete_dependency_claim_lifecycle.py::test_replacement_table_survives_absent_repair_partial_install_and_narrowing"
+  ]
+}
