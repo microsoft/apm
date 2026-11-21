@@ -67,9 +67,19 @@ on:
   pull_request:
     branches: [ main ]
     types: [ labeled, synchronize, reopened ]
+  # merge-train.yml calls Tier 2 on a speculative queue/* ref (#4574). Only
+  # write-access users can push those refs, the same trust boundary as
+  # merge_group; the caller passes secrets with `secrets: inherit`.
+  workflow_call:
+    inputs:
+      base_sha:
+        description: Base main SHA of the train.
+        required: false
+        type: string
 
 # A newer push or label event on the same PR supersedes the older full run;
-# merge_group and dispatch runs are never cancelled.
+# merge_group, dispatch and workflow_call runs are never cancelled (called
+# from merge-train.yml, the group is ci-integration-<caller run_id>).
 concurrency:
   group: ci-integration-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

@@ -646,6 +646,30 @@ release qualification or change required checks.
 - Allows testing the full build pipeline without creating a release, even when dispatched from a tag ref
 - Useful for validating changes before tagging
 
+### Merge-train proof
+
+`merge-train.yml` proves one exact merge result before it lands. Push the
+merged tree (main plus the queued PRs) to a `queue/*` branch and read the
+single `train-gate` check at that SHA:
+
+| Ref | Runs | Time |
+|---|---|---|
+| `queue/t<id>/p<k>-guard` | `scope`, `guard`, `train-gate` | about 5-10 min |
+| `queue/t<id>/p<k>-full` | the guard plus `tier1` (ci.yml) and `tier2` (ci-integration.yml) | about 30-35 min |
+| `queue/b<sha12>/p0-full` | a full proof of a `main` SHA | about 30-35 min |
+
+`guard` runs the Lint chain (`.github/actions/lint-chain`, shared with the
+`Lint` job), the architecture ratchet contracts, every other `tests/quality`
+module and the NOTICE check. The ratchets compare against the head commit's
+`Queue-Base: <sha>` trailer, else the merge base with `main`. A full train runs
+every check the `merge_group` gate requires. `train-gate` passes only when
+every job is green. Only write-access users can push `queue/*` branches.
+
+```bash
+git push origin HEAD:refs/heads/queue/t0001/p1-full
+gh api "repos/microsoft/apm/commits/$(git rev-parse HEAD)/check-runs?check_name=train-gate"
+```
+
 ### Windows unit hang diagnostics
 
 The Windows unit steps in `.github/workflows/build-release.yml` and the PR
