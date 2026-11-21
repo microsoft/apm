@@ -175,15 +175,9 @@ def _recorded(observation: Observation) -> frozenset[str]:
     return frozenset(keys)
 
 
-KNOWN_CELLS: tuple[KnownCell, ...] = (
-    KnownCell(
-        "gate-cell-c-lock",
-        "I1",
-        "#4043",
-        _frozen_after_tightening,
-        match=r"^recorded file is missing: .*hook-kit-session\.json$",
-    ),
-)
+# gate-cell-c-lock (#4043) is fixed: install --frozen refuses a tightened gate
+# before any write, so no recorded hook goes missing (RA-024).
+KNOWN_CELLS: tuple[KnownCell, ...] = ()
 
 
 @dataclass
