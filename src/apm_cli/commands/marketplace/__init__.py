@@ -1189,7 +1189,10 @@ def _render_check_table(logger, results):
             logger.tree_item(f"  {icon} {r.name}: {detail}")
         return
 
-    if console.width < _check_table_min_width(results):
+    width = getattr(console, "width", None)
+    # A console that reports no integer width keeps the table (RA-032 lists only
+    # when a known terminal width cannot fit it).
+    if isinstance(width, int) and width < _check_table_min_width(results):
         _render_check_list(console, results)
         return
 
