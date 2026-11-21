@@ -11299,8 +11299,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|DEPLOYED=clean|NET=online": {
    "family": "pair",
@@ -11970,8 +11971,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|GATE=allowed|NET=online": {
    "family": "pair",
@@ -12187,8 +12189,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_parked_then_denied_executables_offline"
   },
   "pair|GATE=denied-executable|NET=online": {
    "family": "pair",
@@ -12298,8 +12301,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|GATE=none|NET=online": {
    "family": "pair",
@@ -12409,8 +12413,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|GATE=revoked-after-deploy|NET=online": {
    "family": "pair",
@@ -12516,8 +12521,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_marketplace_sources_work_offline"
   },
   "pair|GATE=unapproved-exec|NET=online": {
    "family": "pair",
@@ -13608,22 +13614,25 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|NET=offline|FORCE=on": {
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|NET=offline|FROZEN=on": {
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|NET=offline|NOPOLICY=on": {
    "family": "pair",
@@ -13636,15 +13645,17 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|NET=offline|UPDATE=on": {
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_local_project_updates_offline"
   },
   "pair|NET=online|DRYRUN=on": {
    "family": "pair",
@@ -13837,8 +13848,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|OP=approve-deny|NET=online": {
    "family": "pair",
@@ -14216,8 +14228,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|OP=audit|NET=online": {
    "family": "pair",
@@ -14621,8 +14634,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_registry_mcp_and_bundle_sources_work_offline"
   },
   "pair|OP=bundle-install|NET=online": {
    "credited_by": [
@@ -14980,8 +14994,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|OP=compile|NET=online": {
    "family": "pair",
@@ -15455,8 +15470,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|OP=install|NET=online": {
    "family": "pair",
@@ -15936,8 +15952,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|OP=lock|NET=online": {
    "family": "pair",
@@ -16345,8 +16362,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_marketplace_sources_work_offline"
   },
   "pair|OP=marketplace|NET=online": {
    "credited_by": [
@@ -16662,8 +16680,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_registry_mcp_and_bundle_sources_work_offline"
   },
   "pair|OP=mcp-install|NET=online": {
    "family": "pair",
@@ -16976,8 +16995,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_registry_mcp_and_bundle_sources_work_offline"
   },
   "pair|OP=pack|NET=online": {
    "family": "pair",
@@ -17285,8 +17305,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|OP=prune|NET=online": {
    "family": "pair",
@@ -17726,8 +17747,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|OP=uninstall|NET=online": {
    "family": "pair",
@@ -18163,8 +18185,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_local_project_updates_offline"
   },
   "pair|OP=update|NET=online": {
    "family": "pair",
@@ -18560,8 +18583,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|PRIM=bin|NET=online": {
    "family": "pair",
@@ -18821,8 +18845,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|PRIM=canvas|NET=online": {
    "family": "pair",
@@ -19077,8 +19102,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|PRIM=hook|NET=online": {
    "family": "pair",
@@ -19347,8 +19373,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|PRIM=lsp|NET=online": {
    "family": "pair",
@@ -19610,8 +19637,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|PRIM=mcp|NET=online": {
    "family": "pair",
@@ -19905,8 +19933,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|PRIM=skill|NET=online": {
    "family": "pair",
@@ -20262,8 +20291,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|SCOPE=project|NET=online": {
    "family": "pair",
@@ -20882,8 +20912,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|SRC=git|NET=online": {
    "family": "pair",
@@ -21151,8 +21182,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_registry_mcp_and_bundle_sources_work_offline"
   },
   "pair|SRC=inline-mcp|NET=online": {
    "credited_by": [
@@ -21425,8 +21457,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_registry_mcp_and_bundle_sources_work_offline"
   },
   "pair|SRC=local-bundle|NET=online": {
    "credited_by": [
@@ -21743,8 +21776,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|SRC=local-path|NET=online": {
    "family": "pair",
@@ -22022,8 +22056,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_marketplace_sources_work_offline"
   },
   "pair|SRC=marketplace-file|NET=online": {
    "family": "pair",
@@ -22134,8 +22169,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_marketplace_sources_work_offline"
   },
   "pair|SRC=marketplace-file|TGT=single-widened": {
    "family": "pair",
@@ -22350,8 +22386,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_marketplace_sources_work_offline"
   },
   "pair|SRC=marketplace-git|NET=online": {
    "credited_by": [
@@ -22681,8 +22718,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_marketplace_sources_work_offline"
   },
   "pair|SRC=marketplace-local|NET=online": {
    "family": "pair",
@@ -22793,8 +22831,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_marketplace_sources_work_offline"
   },
   "pair|SRC=marketplace-local|TGT=single-widened": {
    "family": "pair",
@@ -22937,8 +22976,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_registry_mcp_and_bundle_sources_work_offline"
   },
   "pair|SRC=mcp-registry|NET=online": {
    "family": "pair",
@@ -23199,8 +23239,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|SRC=native-plugin|NET=online": {
    "credited_by": [
@@ -23533,8 +23574,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|SRC=pkg-registry|NET=online": {
    "credited_by": [
@@ -23832,8 +23874,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|TGT=multi-unchanged|NET=online": {
    "family": "pair",
@@ -24045,8 +24088,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[single-unchanged]"
   },
   "pair|TGT=single-unchanged|NET=online": {
    "family": "pair",
