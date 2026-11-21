@@ -201,7 +201,8 @@ class MarketplaceSource:
                 f"Invalid marketplace origin {self.origin!r}; "
                 f"expected one of: {', '.join(MARKETPLACE_ORIGINS)}"
             )
-        if self.credential_bound is not True:
+        if self.credential_bound is not True or self.origin == ORIGIN_PROJECT:
+            # A committed apm.yml map never earns a user's name-bound credential.
             object.__setattr__(self, "credential_bound", False)
         # Reconcile ref / branch: ref is canonical. If only branch was set, copy it onto ref.
         if self.branch and self.branch != "main" and (not self.ref or self.ref == "main"):

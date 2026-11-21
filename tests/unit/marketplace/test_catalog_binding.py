@@ -14,7 +14,7 @@ from apm_cli.marketplace.errors import (
     MarketplaceBindingConflictError,
     MarketplaceCredentialError,
 )
-from apm_cli.marketplace.models import MarketplaceSource
+from apm_cli.marketplace.models import ORIGIN_PROJECT, MarketplaceSource
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-marketplace-catalog-credentials")]
 
@@ -88,6 +88,21 @@ def test_unbound_catalog_never_selects_a_credential(monkeypatch) -> None:
     ((_url, headers, auth),) = session.calls
     assert "Authorization" not in headers
     assert auth is not None
+
+
+def test_project_declared_catalog_never_uses_a_user_credential(monkeypatch) -> None:
+    """A committed apm.yml map cannot claim a user's name-bound credential."""
+    monkeypatch.setenv("APM_MARKETPLACE_TOKEN_CORP", "tok-1")
+    session = _install(monkeypatch, _response(200, body=_CATALOG))
+    source = MarketplaceSource(
+        name="corp", url=_URL, ref="", path="", origin=ORIGIN_PROJECT, credential_bound=True
+    )
+
+    assert source.credential_bound is False
+    client_mod.fetch_marketplace(source, force_refresh=True)
+
+    ((_url, headers, _auth),) = session.calls
+    assert "Authorization" not in headers
 
 
 @pytest.mark.parametrize("status", [401, 403])
