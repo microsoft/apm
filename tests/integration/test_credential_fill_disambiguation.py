@@ -311,8 +311,10 @@ def test_long_enterprise_idp_token_from_credential_fill_is_used(
             stdout=f"protocol=https\nhost=github.com\nusername=u\npassword={_LONG_IDP_TOKEN}\n",
         )
 
-    def fake_requests_get(url, *args, **kwargs):
-        auth = (kwargs.get("headers", {}) or {}).get("Authorization", "")
+    def fake_http_request(session, method, url=None, headers=None, **kwargs):
+        # I/O boundary only: the real _github_api_get and its credential
+        # scoping run; requests never reaches the network.
+        auth = (headers or {}).get("Authorization", "")
         api_auth_headers.append(auth)
         resp = MagicMock()
         resp.headers = {}
@@ -332,7 +334,7 @@ def test_long_enterprise_idp_token_from_credential_fill_is_used(
     caplog.set_level("DEBUG")
     with (
         patch("subprocess.run", side_effect=fake_helper),
-        patch("apm_cli.install.validation._github_api_get", side_effect=fake_requests_get),
+        patch("requests.Session.request", autospec=True, side_effect=fake_http_request),
     ):
         result = _validate_package_exists("acme/widgets", verbose=True)
 
