@@ -58,13 +58,16 @@ def render_and_deploy_codex_agent(
     dry_run: bool,
     diagnostics: DiagnosticCollector | None,
     logger: Any,
+    written_files: list[str],
 ) -> str | None:
     """Render one packed Markdown agent to Codex TOML and deploy it.
 
-    The packed bytes are checked against their ``pack.bundle_files`` digest
-    before rendering. The agent is rendered once, before any adopt or
-    collision decision. A dry run previews the rendered hash and writes
-    nothing.
+    The packed bytes are checked against their ``pack.bundle_files`` digest,
+    normalized as bundle admission normalizes it, and exactly those verified
+    bytes are rendered; the source is never read again. The agent is rendered
+    once, before any adopt or collision decision. A dry run previews the
+    rendered hash and writes nothing. A real write appends *record* to
+    *written_files*, the bundle's receipt evidence; an adopted file does not.
 
     *record* is the lockfile claim (absolute at user scope). The collision
     check takes *dest* relative to the first of *collision_roots* that
@@ -73,10 +76,12 @@ def render_and_deploy_codex_agent(
     Returns:
         The ``sha256:<hex>`` hash of the rendered text when the agent is
         written, adopted unchanged, or previewed; ``None`` when it is skipped
-        (digest mismatch, render failure, unsafe destination or collision).
+        (digest mismatch, render failure, a native field Codex rejects,
+        unsafe destination or collision).
         A skipped agent writes nothing and must not be recorded as deployed.
     """
-    from ..integration.agent_integrator import _SKIPPED, AgentIntegrator
+    from ..bundle.local_bundle import _normalize_hash
+    from ..integration.agent_integrator import _SKIPPED, AgentIntegrator, CodexAgentFieldError
     from ..utils.atomic_io import normalize_crlf_to_lf
     from ..utils.diagnostics import DiagnosticCollector
     from ..utils.path_security import PathTraversalError
@@ -92,7 +97,11 @@ def render_and_deploy_codex_agent(
     except OSError as exc:
         _warn(f"Skipped packed bundle agent {rel_path!r}: it could not be read ({exc}).")
         return None
-    if hashlib.sha256(packed).hexdigest() != expected_hash.removeprefix("sha256:"):
+    try:
+        expected_digest = _normalize_hash(str(expected_hash))
+    except ValueError:
+        expected_digest = None
+    if hashlib.sha256(packed).hexdigest() != expected_digest:
         _warn(
             f"Skipped packed bundle agent {rel_path!r}: its bytes do not match "
             "pack.bundle_files. Repack the bundle, then rerun the install."
@@ -109,7 +118,14 @@ def render_and_deploy_codex_agent(
                 diagnostics=collector,
                 package_name=slug,
                 resolve_links=integrator.resolve_links,
+                content=_verified_text(packed),
             )
+        except CodexAgentFieldError as exc:
+            _warn(
+                f"Skipped packed bundle agent {rel_path!r} for target {target_name}: {exc}. "
+                "Fix the agent source, repack the bundle, then rerun the install."
+            )
+            return None
         except _RENDER_ERRORS as exc:
             _warn(
                 f"Skipped packed bundle agent {rel_path!r} for target {target_name}: "
@@ -138,12 +154,19 @@ def render_and_deploy_codex_agent(
             return None
         if outcome == _SKIPPED:
             return None
+        if integrator.take_rendered_writes():
+            written_files.append(record)
         if logger is not None:
             logger.verbose_detail(f"deployed {record}")
         return f"sha256:{rendered_hash}"
     finally:
         if collector is not diagnostics:
             _relay(collector, record, logger)
+
+
+def _verified_text(packed: bytes) -> str:
+    """Decode verified packed bytes as the renderer's own text read would."""
+    return packed.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _collision_key(dest: Path, roots: tuple[Path, ...]) -> str:

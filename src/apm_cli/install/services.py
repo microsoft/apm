@@ -1109,6 +1109,7 @@ def integrate_local_bundle(
                     logger=logger,
                     deployed_files=deployed_files,
                     deployed_hashes=deployed_hashes,
+                    written_files=written_files,
                 )
                 continue
 

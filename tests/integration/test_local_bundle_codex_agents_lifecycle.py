@@ -222,3 +222,34 @@ def test_codex_bundle_agent_user_scope_lock_and_audit(
     assert lock["local_deployed_file_hashes"][_AGENT] == compute_file_hash(home / _AGENT)
     audit = world.apm(world.isolated.config_root, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
     assert audit.returncode == 0, _output(audit)
+
+
+def test_codex_bundle_agent_external_codex_home_audits_beside_another_target(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A -g claim under an external $CODEX_HOME keeps its Codex target (#3714).
+
+    With another target already recorded and no manifest targets, audit picks
+    the recorded targets; an unattributed claim would resolve against none.
+    """
+    world = _World(tmp_path, apm_binary_path)
+    bundle = world.pack()
+    home = world.isolated.home
+    codex_home = tmp_path / "codex-home"
+    world.env = world.isolated.subprocess_env(overrides={"CODEX_HOME": str(codex_home)})
+    (home / ".claude").mkdir(exist_ok=True)
+    _write(world.isolated.config_root / "apm.yml", "name: user\nversion: 1.0.0\n")
+    world.apm(world.root, "install", "-g", str(bundle), "--target", "claude", _NO_POLICY)
+    world.apm(world.root, "install", "-g", str(bundle), "--target", "codex", _NO_POLICY)
+
+    agent = codex_home / "agents/rev.toml"
+    assert tomllib.loads(agent.read_text(encoding="utf-8")) == _EXPECTED_TOML
+    lock = load_yaml(world.isolated.config_root / "apm.lock.yaml")
+    rows = [row for row in lock["deployments"] if row["value"].endswith("rev.toml")]
+    assert [(row["kind"], row["target"], row["value"]) for row in rows] == [
+        ("target-relative", "codex", "agents/rev.toml")
+    ], rows
+    audit = world.apm(
+        world.isolated.config_root, "audit", "--ci", _NO_POLICY, "--no-fail-fast", expect=None
+    )
+    assert audit.returncode == 0, _output(audit)

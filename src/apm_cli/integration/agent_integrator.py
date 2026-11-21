@@ -112,6 +112,14 @@ _ADOPTED = "adopted"
 _SKIPPED = "skipped"
 _WRITTEN = "written"
 
+# Codex rejects an agent role whose name, description or developer_instructions
+# is blank (codex-rs agent-roles agent_role_config.rs).
+_CODEX_REQUIRED_FIELDS = ("name", "description", "developer_instructions")
+
+
+class CodexAgentFieldError(ValueError):
+    """A rendered Codex agent field that Codex's agent-role parser rejects."""
+
 
 class AgentIntegrator(BaseIntegrator):
     """Handles integration of APM package agents into .github/agents/, .claude/agents/, .cursor/agents/, and .kiro/agents/."""
@@ -293,13 +301,22 @@ class AgentIntegrator(BaseIntegrator):
                     agents_dir.mkdir(parents=True, exist_ok=True)
                     agents_dir_created = True
                 if mapping.format_id == "codex_agent":
-                    rendered, links_resolved = self._render_codex_agent(
-                        source_file,
-                        target_path,
-                        diagnostics=diagnostics,
-                        package_name=package_info.package.name,
-                        resolve_links=self.resolve_links,
-                    )
+                    try:
+                        rendered, links_resolved = self._render_codex_agent(
+                            source_file,
+                            target_path,
+                            diagnostics=diagnostics,
+                            package_name=package_info.package.name,
+                            resolve_links=self.resolve_links,
+                        )
+                    except CodexAgentFieldError as exc:
+                        if diagnostics is not None:
+                            diagnostics.warn(
+                                message=f"Skipped {exc}.",
+                                package=package_info.package.name,
+                            )
+                        files_skipped += 1
+                        continue
                 else:
                     rendered, links_resolved = self._render_copy_agent(source_file, target_path)
 
@@ -676,6 +693,7 @@ class AgentIntegrator(BaseIntegrator):
         diagnostics: DiagnosticCollector | None = None,
         package_name: str = "",
         resolve_links: ResolveLinks | None = None,
+        content: str | None = None,
     ) -> tuple[str, int]:
         """Render an ``.agent.md`` file to Codex ``.toml`` format.
 
@@ -686,6 +704,14 @@ class AgentIntegrator(BaseIntegrator):
         owner; it rewrites source-relative Markdown links in the body from
         *source* for the generated *target* before serialization (#2966).
 
+        *content* is source text the caller already read and verified; when
+        given, *source* is not read again, so the rendered text is exactly
+        the verified snapshot.
+
+        Raises:
+            CodexAgentFieldError: a native field Codex requires is blank or
+                not a string, so Codex could not load the rendered agent.
+
         Returns:
             tuple[str, int]: Rendered TOML string and number of links resolved.
         """
@@ -693,7 +719,8 @@ class AgentIntegrator(BaseIntegrator):
             raise ValueError(f"Refusing to read symlink source: {source}")
         import toml as _toml
 
-        content = source.read_text(encoding="utf-8")
+        if content is None:
+            content = source.read_text(encoding="utf-8")
 
         name = source.stem
         if name.endswith(".agent"):
@@ -802,6 +829,12 @@ class AgentIntegrator(BaseIntegrator):
             **model_settings,
             "developer_instructions": body.strip(),
         }
+        for field in _CODEX_REQUIRED_FIELDS:
+            if not isinstance(doc[field], str) or not doc[field].strip():
+                raise CodexAgentFieldError(
+                    f"Codex agent {printable_ascii_text(source.name)}: '{field}' must be "
+                    "a non-empty string, so Codex cannot load it"
+                )
         return _toml.dumps(doc), links_resolved
 
     @staticmethod

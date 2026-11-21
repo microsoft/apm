@@ -193,7 +193,7 @@ def _expected_deployed_command_path(project: Path, target: TargetProfile) -> Pat
 
 _AGENT_FILES = {
     "agents/rev.agent.md": "---\nname: rev\ndescription: Review agent\n---\nReview the diff.\n",
-    "agents/lint.md": "# Lint\n",
+    "agents/lint.md": "---\ndescription: Lint agent\n---\n# Lint\n",
 }
 
 
@@ -828,13 +828,17 @@ class TestLocalBundlePathRouting:
 
         preview, _diagnostics = _integrate_agents(bundle, project, codex, dry_run=True)
         assert not (project / ".codex").exists()
+        assert preview["written_files"] == []
         installed, _diagnostics = _integrate_agents(bundle, project, codex)
         assert preview["deployed_file_hashes"] == installed["deployed_file_hashes"]
+        # Real writes are receipt evidence; adoptions and dry runs are not.
+        assert sorted(installed["written_files"]) == sorted(installed["deployed_files"])
         rendered = rev.read_bytes()
 
         again, diagnostics = _integrate_agents(bundle, project, codex)
         assert again["deployed_file_hashes"] == installed["deployed_file_hashes"]
         assert again["skipped"] == 0
+        assert again["written_files"] == []
         assert not diagnostics.has_diagnostics
 
         rev.write_bytes(rendered + b"# edited\n")
@@ -919,6 +923,83 @@ class TestLocalBundlePathRouting:
         assert f"{rel!r}" in warning.message
         assert "for target codex" in warning.message
         assert reason in warning.message
+
+    def test_codex_bundle_agent_renders_the_verified_bytes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bytes swapped in after the digest check are never rendered (#3714)."""
+        import tomllib
+
+        from apm_cli.integration.agent_integrator import AgentIntegrator
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        project = _make_project(tmp_path / "dst")
+        render = AgentIntegrator._render_codex_agent
+
+        def _swap_then_render(source: Path, target: Path, **kwargs: Any):
+            source.write_bytes(b"---\nname: rev\ndescription: Evil\n---\nInjected.\n")
+            return render(source, target, **kwargs)
+
+        monkeypatch.setattr(AgentIntegrator, "_render_codex_agent", staticmethod(_swap_then_render))
+        _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
+
+        rev = project / ".codex/agents/rev.toml"
+        assert tomllib.loads(rev.read_text(encoding="utf-8")) == {
+            "name": "rev",
+            "description": "Review agent",
+            "developer_instructions": "Review the diff.",
+        }
+
+    @pytest.mark.parametrize(
+        "digest_form",
+        ["upper", "prefixed-upper-padded"],
+    )
+    def test_codex_bundle_agent_accepts_normalized_manifest_digests(
+        self, tmp_path: Path, digest_form: str
+    ) -> None:
+        """Digests bundle admission normalizes do not drop the agent (#3714)."""
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        digest = lockfile["pack"]["bundle_files"]["agents/rev.agent.md"].upper()
+        if digest_form == "prefixed-upper-padded":
+            digest = f"sha256:{digest}  "
+        lockfile["pack"]["bundle_files"]["agents/rev.agent.md"] = digest
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(
+            bundle, project, KNOWN_TARGETS["codex"], lockfile=lockfile
+        )
+
+        assert result["skipped"] == 0
+        assert ".codex/agents/rev.toml" in result["deployed_file_hashes"]
+        assert not diagnostics.has_diagnostics
+
+    @pytest.mark.parametrize(
+        ("content", "field"),
+        [
+            ("# Lint\n", "description"),
+            ("---\ndescription: Lint agent\n---\n\n", "developer_instructions"),
+        ],
+        ids=["no-description", "blank-body"],
+    )
+    def test_codex_bundle_agent_with_a_field_codex_rejects_is_skipped(
+        self, tmp_path: Path, content: str, field: str
+    ) -> None:
+        """An agent Codex cannot load is warned about, never written or claimed (#3714)."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        files = {**_AGENT_FILES, "agents/lint.md": content}
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=files)
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
+
+        assert result["skipped"] == 1
+        assert result["deployed_files"] == [".codex/agents/rev.toml"]
+        assert not (project / ".codex/agents/lint.toml").exists()
+        [warning] = diagnostics.by_category()[CATEGORY_WARNING]
+        assert "'agents/lint.md' for target codex" in warning.message
+        assert f"'{field}' must be a non-empty string" in warning.message
 
     def test_codex_bundle_agent_rejects_bytes_that_do_not_match_the_manifest(
         self, tmp_path: Path
