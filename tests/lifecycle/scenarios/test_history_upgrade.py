@@ -21,6 +21,15 @@ generator is the refusal neighbor.
 Each row runs through ``driver.run`` with org policy on, applies I1-I9 after
 every step, pins the exact changed set of the upgrade and replays it with
 the I3 pair and a converged rerun (I2).
+
+Target history (T-6a, #4100): a project changes its declared targets between
+two commands. TGT follows ruling #3 (the ``TARGET_CHANGES`` comment in
+``tests/lifecycle/generator/factors.py``): the shape is the declared set
+BEFORE the step; widened adds at least one target and drops none; narrowed
+drops at least one previously declared target and may add others (a switch
+counts as narrowed). Each history row deploys at the old targets, changes
+``targets:`` in apm.yml, runs one command and credits the scenario-lane pairs
+its factor assignment implies (``CREDITS``) through a real-CLI receipt.
 """
 
 from __future__ import annotations
@@ -33,7 +42,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.lifecycle.scenarios._kit import Scenario, assert_changes
+from tests.lifecycle.generator.rules import FROZEN_TARGET_CHANGE, FROZEN_TARGET_CHANGE_MESSAGES
+from tests.lifecycle.oracles import Evidence, check_obligation
+from tests.lifecycle.scenarios._kit import Known, Scenario, assert_changes, credits
 from tests.lifecycle.world import use_policy
 
 pytestmark = [
@@ -139,3 +150,163 @@ def _running_version(scenario: Scenario) -> str:
     match = re.search(r"\d+\.\d+\.\d+\S*", result.stdout)
     assert match, result.stdout
     return match.group(0)
+
+
+# -- target history (T-6a) ----------------------------------------------------------
+
+# TGT value -> (declared targets before the step, after it); ruling #3.
+TARGET_HISTORIES = {
+    "single-narrowed": (("copilot",), ("claude",)),
+    "single-widened": (("copilot",), ("copilot", "claude")),
+    "multi-narrowed": (("copilot", "claude"), ("copilot",)),
+    # Not cursor: Cursor-native hooks next to Claude's are a designed refusal.
+    "multi-widened": (("copilot", "claude"), ("copilot", "claude", "gemini")),
+}
+# The world context every history row holds: project scope, served sources online,
+# files deployed by the previous command and left untouched.
+_CONTEXT = {"SCOPE": "project", "NET": "online", "DEPLOYED": "clean"}
+# Package -> the units it proves: (SRC, PRIM, GATE) once its executables are approved.
+_UNITS = {
+    "p-skill:git": (("git", "skill", "none"),),
+    "p-child": (("local-path", "skill", "none"),),
+    "p-exec": (
+        ("local-path", "hook", "allowed"),
+        ("local-path", "mcp", "allowed"),
+        ("local-path", "bin", "allowed"),
+    ),
+}
+_PACKAGES = tuple(_UNITS)
+
+
+def _assignments(op: str, tgt: str, packages, **modifiers: str) -> list[dict[str, str]]:
+    return [
+        {"OP": op, "TGT": tgt, "SRC": src, "PRIM": prim, "GATE": gate, **_CONTEXT, **modifiers}
+        for name in packages
+        for src, prim, gate in _UNITS[name]
+    ]
+
+
+def _history(world, tgt: str, packages=_PACKAGES) -> Scenario:
+    """Deploy *packages* (executables approved) at the old targets, then declare the new ones."""
+    before, after = TARGET_HISTORIES[tgt]
+    use_policy(world, "allow")
+    scenario = Scenario(world, packages, targets=before, policy="allow")
+    scenario.run(f"install {' '.join(packages)}")
+    if "p-exec" in packages:
+        scenario.run("approve p-exec")
+        scenario.run("install")
+    scenario.assert_deployed()
+    scenario.set_targets(*after)
+    return scenario
+
+
+@pytest.mark.parametrize("tgt", sorted(TARGET_HISTORIES))
+def test_install_after_a_target_change(lifecycle_world, tgt) -> None:
+    scenario = _history(lifecycle_world, tgt)
+    scenario.run("install", credit=_assignments("install", tgt, _PACKAGES))
+    scenario.assert_deployed()
+    scenario.pair()
+    rerun = scenario.run("install")
+    assert_changes(rerun.changed, (), label=f"converged install after {tgt}")
+    scenario.finish()
+
+
+# Row -> (command after the target change, OP, packages whose units it proves,
+# factor overrides). Every row must exit 0: scenario-lane pairs are success pairs.
+HISTORY_ROWS = {
+    "update": ("update --yes", "update", _PACKAGES, {}),
+    "uninstall": ("uninstall p-child", "uninstall", ("p-child",), {}),
+    "prune": ("prune", "prune", _PACKAGES, {}),
+    "compile": ("compile", "compile", _PACKAGES, {}),
+    "lock": ("lock", "lock", _PACKAGES, {}),
+    "audit": ("audit --ci", "audit", _PACKAGES, {}),
+    "pack": ("pack", "pack", _PACKAGES, {}),
+    "deny": ("deny p-exec", "approve-deny", ("p-exec",), {"GATE": "denied-executable"}),
+    "install-dry-run": ("install --dry-run", "install", _PACKAGES, {"DRYRUN": "on"}),
+    "install-force": ("install --force", "install", _PACKAGES, {"FORCE": "on"}),
+    "install-select": ("install p-child", "install", ("p-child",), {"SELECT": "on"}),
+    "install-update": ("install --update", "install", _PACKAGES, {"UPDATE": "on"}),
+}
+
+
+def _row_assignments(row: str, tgt: str) -> list[dict[str, str]]:
+    _, op, packages, overrides = HISTORY_ROWS[row]
+    return [{**item, **overrides} for item in _assignments(op, tgt, packages)]
+
+
+# uninstall deploys the remaining packages to a newly declared target without
+# recording the files in apm.lock.yaml (I1); strict until #4636 is fixed.
+_UNINSTALL_UNRECORDED = Known("#4636", r"^deployed file is not in the lock: ")
+KNOWN_ROWS = {
+    ("uninstall", tgt): {"I1": _UNINSTALL_UNRECORDED}
+    for tgt in ("single-narrowed", "single-widened")
+}
+# On multi-widened the same path shows #4636 as a repeated "Skipped .gemini/commands/"
+# hint (I9), which the strict output cell uninstall-new-target-skipped-hint-repeats
+# owns (tests/utils/lifecycle_evidence.py); the row credits nothing until it is fixed.
+UNCREDITED_ROWS = {*KNOWN_ROWS, ("uninstall", "multi-widened")}
+
+
+@pytest.mark.parametrize("tgt", sorted(TARGET_HISTORIES))
+@pytest.mark.parametrize("row", sorted(HISTORY_ROWS))
+def test_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
+    scenario = _history(lifecycle_world, tgt)
+    line = HISTORY_ROWS[row][0]
+    credit = () if (row, tgt) in UNCREDITED_ROWS else _row_assignments(row, tgt)
+    scenario.run(line, credit=credit, known=KNOWN_ROWS.get((row, tgt)))
+    scenario.finish()
+
+
+# --frozen refuses any declared-target change before it changes anything (U11): a
+# dropped target (#4517) and an added one. This row witnesses the refusal cell U11
+# maps every changed-TGT x FROZEN pair to, and is the detecting gate of that
+# designed refusal (H5): if frozen ever accepts a target change, the cell fails.
+
+
+# A widened refusal leaves merged hook config behind (I7); strict until #4638.
+_FROZEN_LEFT_HOOK_CONFIG = Known(
+    "#4638", r"^failed install-frozen changed durable files: .*apm-hooks\.json"
+)
+
+
+@pytest.mark.parametrize("tgt", sorted(TARGET_HISTORIES))
+def test_frozen_refuses_a_target_change(lifecycle_world, tgt) -> None:
+    scenario = _history(lifecycle_world, tgt)
+    narrowed, widened = FROZEN_TARGET_CHANGE_MESSAGES
+    if tgt.endswith("widened"):
+        step = scenario.run("install --frozen", exit=1, known={"I7": _FROZEN_LEFT_HOOK_CONFIG})
+        assert re.search(widened, " ".join(step.output.split())), step.output
+        scenario.finish()
+        return
+    step = scenario.run("install --frozen", exit=1)
+    assert_changes(step.changed, (), label=f"frozen after {tgt}")
+    check_obligation(
+        FROZEN_TARGET_CHANGE,
+        strength="e2e-evidence",
+        before=step.before,
+        after=step.after,
+        result=step.result,
+        evidence=Evidence(
+            exit=1,
+            output_matches=(narrowed,),
+            unchanged={root: ("*",) for root in scenario.snapshot_roots()},
+        ),
+    )
+    scenario.finish()
+
+
+CREDITS = credits(
+    __file__,
+    {
+        **{
+            f"test_install_after_a_target_change[{tgt}]": _assignments("install", tgt, _PACKAGES)
+            for tgt in TARGET_HISTORIES
+        },
+        **{
+            f"test_command_after_a_target_change[{tgt}-{row}]": _row_assignments(row, tgt)
+            for row in HISTORY_ROWS
+            for tgt in TARGET_HISTORIES
+            if (row, tgt) not in UNCREDITED_ROWS
+        },
+    },
+)
