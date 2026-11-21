@@ -410,11 +410,15 @@ def _run_refused(
     scenario_id: str,
     *,
     environment: dict[str, str],
+    local: bool = False,
 ) -> None:
     """Plain install keeps an edited managed file and names it (#4360, RA-012).
 
-    The receipt proves the edit; with nothing new to deploy the install keeps
-    the file, warns with the true reason and exits 0 (parity with skills).
+    For a dependency file the receipt proves the edit; with nothing new to
+    deploy the install keeps the file, warns with the true reason and exits 0
+    (parity with skills). The project's own local content (*local*, owner ".")
+    has no kept-file partial apply: the install refuses with exit 1 and the
+    move-aside remedy (#4360).
     """
     before = kept.read_bytes()
     result = scenario.runner.run(
@@ -424,6 +428,12 @@ def _run_refused(
     entry = kept.relative_to(project.root).as_posix()
     from apm_cli.integration.base_integrator import kept_edit_message
 
+    if local:
+        both = " ".join((result.stdout + result.stderr).split())
+        assert result.returncode == 1, both
+        assert f"Kept {entry}:" in both and "Move it aside, then run 'apm install'" in both, both
+        assert kept.read_bytes() == before
+        return
     assert result.returncode == 0, text
     assert kept_edit_message(entry, user_scope=False, proven_edit=True) in text, text
     assert "[!] [" in text and "] Kept " in text, text
@@ -734,6 +744,23 @@ def _audit_at(
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
     return result, payload
+
+
+def _assert_replay_reported_once(payload: dict[str, object], remedy: str) -> None:
+    """RA-005: one replay finding, said once.
+
+    The drift check carries the materialization error in full; the other
+    replay-backed checks only point to it.
+    """
+    owner = _check(payload, "drift")
+    assert owner["message"] == "drift replay failed; see details", owner
+    details = " ".join(str(detail) for detail in owner["details"])
+    assert "installed package materialization is missing" in details, details
+    assert remedy in details, details
+    for name in ("config-consistency", "skill-subset-consistency"):
+        assert _check(payload, name)["message"] == (
+            "not verified: the install replay failed (reported under drift)"
+        )
 
 
 def _check(payload: dict[str, object], name: str) -> dict[str, object]:
@@ -3700,10 +3727,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     assert _check(package_removed_audit, "no-orphaned-packages")["passed"] is True
     assert _check(package_removed_audit, "deployed-files-present")["passed"] is True
     assert _check(package_removed_audit, "content-integrity")["passed"] is True
-    for check_name in ("config-consistency", "drift", "skill-subset-consistency"):
-        message = str(_check(package_removed_audit, check_name)["message"])
-        assert "installed package materialization is missing" in message
-        assert "apm install --global" in message
+    _assert_replay_reported_once(package_removed_audit, "apm install --global")
     _assert_same_state(package_removed_before_audit, package_removed_after_audit)
     shutil.move(str(modules_backup), str(modules_dir))
     assert_clean("global-audit-after-package-restore")
