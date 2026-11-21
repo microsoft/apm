@@ -1,0 +1,26 @@
+{
+  "issue": 3279,
+  "summary": "Traps --refresh and update trusting stale TTL marketplace caches (#3279, #3961); needs HTTPS catalogs, cache state and codex target.",
+  "failure_modes": [
+    "cache",
+    "outcome",
+    "reference",
+    "transaction"
+  ],
+  "properties": [
+    "cache.successful_reads_refresh_recency",
+    "outcome.status_matches_state",
+    "source.ref_cache_coherent",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_deprecated_deps_update_follows_a_repinned_catalog",
+    "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_frozen_replay_needs_no_live_catalog",
+    "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_local_catalog_stays_a_local_read_under_refresh",
+    "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_marketplace_update_reports_partial_failure",
+    "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_mixed_batch_fails_whole_and_skips_unrelated_catalogs",
+    "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_refresh_fails_closed_and_preserves_state",
+    "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_refresh_rejects_removed_entry_that_the_cache_still_lists",
+    "tests/integration/test_marketplace_explicit_refresh_lifecycle.py::test_update_follows_changed_pins_and_respects_selection"
+  ]
+}

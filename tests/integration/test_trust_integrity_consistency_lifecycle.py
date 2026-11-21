@@ -1234,6 +1234,113 @@ def test_unpack_into_a_non_project_dir_announces_and_writes_no_lockfile(
     assert load_yaml(output_dir / "apm.lock.yaml")["local_deployed_files"] == [_SKILL]
 
 
+# -- restore-style unpack into a checkout with a tracked lockfile (#4556) ------
+
+
+def _git(checkout: Path, env: dict, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-c", "commit.gpgsign=false", *args],
+        cwd=checkout,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def _committed_checkout(
+    world: PolicyScopeWorld, name: str, files: dict[str, bytes], env: dict
+) -> Path:
+    """A git checkout whose only commit holds *files*, as a CI checkout of a ref."""
+    checkout = world.isolated.work_root / name
+    for rel, data in files.items():
+        (checkout / rel).parent.mkdir(parents=True, exist_ok=True)
+        (checkout / rel).write_bytes(data)
+    _git(checkout, env, "init", "-q", "--initial-branch=main")
+    _git(checkout, env, "add", "-A")
+    _git(
+        checkout,
+        env,
+        "-c",
+        "user.name=ci",
+        "-c",
+        "user.email=ci@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "ref",
+    )
+    return checkout
+
+
+def _restore_world(tmp_path: Path, apm_binary_path: Path):
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    world.publish_package("pkg-a")
+    world.publish_policy(_POLICY)
+    return world, _runner(apm_binary_path)
+
+
+@pytest.mark.parametrize("deployed", ["untracked", "committed"])
+def test_unpack_restore_leaves_a_tracked_lockfile_unchanged(
+    tmp_path: Path, apm_binary_path: Path, deployed: str
+) -> None:
+    world, runner = _restore_world(tmp_path, apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+        producer = world.isolated.work_root / "producer"
+        tracked = ("apm.yml", "apm.lock.yaml") + ((_SKILL,) if deployed == "committed" else ())
+        checkout = _committed_checkout(
+            world, "checkout", {rel: (producer / rel).read_bytes() for rel in tracked}, env
+        )
+        lock_before = (checkout / "apm.lock.yaml").read_bytes()
+
+        run_step(runner, _unpack(bundle, checkout), cwd=checkout, env=env, step="restore")
+
+        assert (checkout / _SKILL).read_bytes() == (bundle / _SKILL).read_bytes()
+        assert (checkout / "apm.lock.yaml").read_bytes() == lock_before
+        status = _git(checkout, env, "status", "--porcelain", "--", "apm.yml", "apm.lock.yaml")
+        assert status == "", status
+        run_step(runner, ("audit", "--ci", "--no-drift"), cwd=checkout, env=env, step="audit")
+
+
+def test_unpack_records_a_file_the_tracked_lockfile_claims_with_another_hash(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world, runner = _restore_world(tmp_path, apm_binary_path)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        bundle = _packed_skill_bundle(world, runner, env, tmp_path / "out")
+        producer = world.isolated.work_root / "producer"
+        lock = load_yaml(producer / "apm.lock.yaml")
+        stale = "sha256:" + "0" * 64
+        claims = [d for d in lock["dependencies"] if _SKILL in d.get("deployed_file_hashes", {})]
+        rows = [row for row in lock.get("deployments", []) if row["value"] == _SKILL]
+        assert claims and rows, lock
+        for dep in claims:
+            dep["deployed_file_hashes"][_SKILL] = stale
+        for row in rows:
+            row["content_hash"] = stale
+        dump_yaml(lock, producer / "apm.lock.yaml")
+        checkout = _committed_checkout(
+            world,
+            "checkout",
+            {rel: (producer / rel).read_bytes() for rel in ("apm.yml", "apm.lock.yaml")},
+            env,
+        )
+
+        run_step(runner, _unpack(bundle, checkout), cwd=checkout, env=env, step="restore")
+
+    recorded = load_yaml(checkout / "apm.lock.yaml")
+    assert recorded["local_deployed_files"] == [_SKILL]
+    digest = recorded["local_deployed_file_hashes"][_SKILL]
+    assert digest.startswith("sha256:") and digest != stale
+
+
 def test_unpack_waits_for_the_lifecycle_lock(tmp_path: Path, apm_binary_path: Path) -> None:
     import subprocess
     import time

@@ -1,0 +1,15 @@
+{
+  "issue": 4262,
+  "fixed_in": "Unreleased",
+  "summary": "apm approve with no package and no selector exited 1 instead of the usage-error exit code 2.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_policy_refusal_stderr_lifecycle.py::test_policy_refusals_and_approve_usage_error_write_stderr",
+    "tests/unit/commands/test_approve_deny.py::TestApproveCmd::test_no_args_is_a_usage_error"
+  ]
+}

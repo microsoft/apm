@@ -1,0 +1,18 @@
+{
+  "issue": 3283,
+  "summary": "Public GitHub request budgeting and marker validation are excluded network behaviors.",
+  "failure_modes": [
+    "cache",
+    "reference"
+  ],
+  "properties": [
+    "cache.successful_reads_refresh_recency"
+  ],
+  "regression_tests": [
+    "tests/integration/test_public_marker_request_budget_lifecycle.py::test_marketplace_add_reuses_discovered_catalog_and_installs_without_contents_api",
+    "tests/integration/test_public_marker_request_budget_lifecycle.py::test_marketplace_add_without_catalog_records_nothing",
+    "tests/integration/test_public_marker_request_budget_lifecycle.py::test_missing_public_marker_keeps_diagnostic_and_bounded_api_fallback",
+    "tests/integration/test_public_marker_request_budget_lifecycle.py::test_private_nested_plugin_recovers_through_authenticated_api",
+    "tests/integration/test_public_marker_request_budget_lifecycle.py::test_public_nested_plugins_validate_without_contents_api"
+  ]
+}

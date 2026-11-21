@@ -30,6 +30,7 @@ from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
+from scripts.lifecycle_ledger import read_ledger
 from tests.integration.test_frozen_no_rewrite_e2e import (
     _add_skill,
     _assert_frozen_refusal_and_recovery,
@@ -104,7 +105,7 @@ _INSTALL_EXACT_PATHS = {
     "user": _USER_WRITE_PATHS,
 }
 _INSTALL_TREE_PREFIXES = {"project": frozenset({"apm_modules"})}
-_LEDGER_PATH = Path(__file__).parents[2] / "fixtures" / "lifecycle_bug_ledger.json"
+_REPO_ROOT = Path(__file__).parents[3]
 _TRANSITION_PROPERTIES = {
     "audit_clean": frozenset({"filesystem.open_world_observation", "outcome.status_matches_state"}),
     "audit_tampered": frozenset(
@@ -152,7 +153,7 @@ USER_EDIT_CELL = "spine-user-edit-preserved"
 
 
 def _phase_one_properties() -> frozenset[str]:
-    ledger = json.loads(_LEDGER_PATH.read_text(encoding="ascii"))
+    ledger = read_ledger(_REPO_ROOT)
     return frozenset(row["id"] for row in ledger["property_catalog"] if row["phase"] == 1)
 
 

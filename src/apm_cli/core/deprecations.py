@@ -214,13 +214,9 @@ _CATALOG: tuple[Deprecation, ...] = (
         surface="List or string form of `marketplace.outputs`",
         replacement="Map form (`outputs: {claude: {}}`)",
         template=(
-            "outputs: [{names}] is deprecated; use the map form:\n\n"
-            "      outputs:\n{map_lines}\n\n"
-            "    The list form will be removed in v0.15."
+            "outputs: [{names}] is deprecated; use the map form:\n\n      outputs:\n{map_lines}"
         ),
-        signal=SIGNAL_COLLECTED,
         since="0.14.0",
-        removal="0.15",
     ),
     Deprecation(
         key="target-agents",

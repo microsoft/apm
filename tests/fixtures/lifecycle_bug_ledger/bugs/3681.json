@@ -1,0 +1,22 @@
+{
+  "issue": 3681,
+  "summary": "Traps same-name user MCP connections reported as already configured on JSON adapters (#3681); needs MCP config bytes, registry and many targets.",
+  "failure_modes": [
+    "idempotency",
+    "outcome",
+    "ownership"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "outcome.status_matches_state",
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_json_mcp_native_conflict_lifecycle.py::test_differing_user_connection_is_preserved_and_reported",
+    "tests/integration/test_json_mcp_native_conflict_lifecycle.py::test_identical_user_connection_is_left_unclaimed",
+    "tests/integration/test_json_mcp_native_conflict_lifecycle.py::test_managed_connection_repeats_updates_and_retires",
+    "tests/integration/test_json_mcp_native_conflict_lifecycle.py::test_registry_connection_receipt_and_user_edit",
+    "tests/integration/test_json_mcp_native_conflict_lifecycle.py::test_resolved_env_value_change_keeps_managed_gemini_connection",
+    "tests/integration/test_json_mcp_native_conflict_lifecycle.py::test_user_scope_only_adapters_report_conflict_and_keep_managed_entry"
+  ]
+}
