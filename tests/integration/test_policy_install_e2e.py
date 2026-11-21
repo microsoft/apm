@@ -696,6 +696,36 @@ class TestI10DryRunDenied:
         assert "test-blocked" not in result.output
         assert manifest_path.read_bytes() == manifest_before
 
+    @patch(_PATCH_UPDATES, return_value=None)
+    @patch(_PATCH_VALIDATE_PKG, return_value=True)
+    @patch(_PATCH_DISCOVER_PREFLIGHT)
+    @patch(_PATCH_DISCOVER_GATE)
+    def test_positional_install_is_not_blocked_by_unrequested_denied_manifest_dependency(
+        self,
+        mock_gate,
+        mock_preflight,
+        _mock_validate,
+        _mock_updates,
+        project,
+    ):
+        """A denied manifest dependency outside the selection does not block it."""
+        project_dir, runner = project
+        manifest_path = project_dir / "apm.yml"
+        _write_apm_yml(manifest_path, deps=["test-blocked/evil-pkg"])
+        requested = project_dir / "requested-package"
+        requested.mkdir()
+        _write_apm_yml(requested / "apm.yml", name="requested-package")
+        fetch = _make_fetch_result("found", policy=_load_fixture_policy("apm-policy-deny.yml"))
+        mock_gate.return_value = fetch
+        mock_preflight.return_value = fetch
+
+        result = _invoke_install(runner, ["./requested-package"])
+
+        assert result.exit_code == 0, result.output
+        assert "blocked by org policy" not in result.output.lower()
+        assert "test-blocked" not in result.output
+        assert "requested-package" in manifest_path.read_text(encoding="utf-8")
+
 
 # =====================================================================
 # I11: dry-run + 6+ denied deps -> 5 lines + tail "and N more"
