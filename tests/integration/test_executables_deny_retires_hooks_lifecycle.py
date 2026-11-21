@@ -351,3 +351,86 @@ def test_frozen_fails_when_a_gated_hook_retires_but_the_lock_still_claims_it(
     assert _exec_status(project) == ("denied" if gate_off == "deny" else "gated_pending_approval")
     apm("install", "--frozen", "--no-policy")
     apm("audit", "--ci", "--no-policy")
+
+
+_LOCAL_EDIT_ADVICE = ("local edit", "export-patch", "Delete the edited files")
+_RESYNC = "Run 'apm install' to re-sync deployed files with the lockfile."
+
+
+def _approved_hook_consumer(
+    tmp_path: Path, apm_binary_path: Path, target: str
+) -> tuple[Path, object]:
+    """A consumer whose approved hook package is deployed; returns (project, apm)."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    _hook_package(isolated.work_root / "hooky")
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    manifest = {
+        "name": "consumer",
+        "version": "0.1.0",
+        "targets": [target],
+        "dependencies": {"apm": ["../hooky"]},
+        "executables": {},
+    }
+    dump_yaml(manifest, project / "apm.yml")
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    def apm(*args: str, expect: int = 0) -> str:
+        result = runner.run(args, cwd=project, env=env)
+        output = " ".join((result.stdout + result.stderr).split())
+        assert result.returncode == expect, f"apm {' '.join(args)}\n{output}"
+        return output
+
+    apm("install", "--no-policy")
+    apm("approve", "../hooky")
+    apm("update", "--yes")
+    assert _exec_status(project) == "deployed"
+    assert _hook_residue(project)
+    return project, apm
+
+
+@pytest.mark.parametrize("target", ["claude", "copilot", "cursor", "codex", "gemini", "kiro"])
+def test_deny_residue_is_not_a_local_edit_and_its_remedy_converges(
+    tmp_path: Path, apm_binary_path: Path, target: str
+) -> None:
+    """What a deny retires audits red without local-edit advice; 'apm install' fixes it."""
+    project, apm = _approved_hook_consumer(tmp_path, apm_binary_path, target)
+
+    apm("deny", "../hooky")
+    lingering = apm("audit", "--ci", "--no-policy", expect=1)
+
+    assert "Drift detected" in lingering, lingering
+    for advice in _LOCAL_EDIT_ADVICE:
+        assert advice not in lingering, lingering
+    assert _RESYNC in lingering, lingering
+
+    apm("install", "--no-policy")
+    assert _hook_residue(project) == []
+    converged = apm("audit", "--ci", "--no-policy")
+    assert "Drift detected" not in converged, converged
+
+    def snapshot() -> dict[str, bytes]:
+        files = [*_project_files(project), project / "apm.yml", project / "apm.lock.yaml"]
+        return {path.relative_to(project).as_posix(): path.read_bytes() for path in files}
+
+    settled = snapshot()
+    apm("install", "--no-policy")
+    assert snapshot() == settled
+
+
+def test_user_edit_to_an_apm_hook_entry_stays_a_local_edit(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """With no gate change, a user-edited APM hook entry is still reported as a local edit."""
+    project, apm = _approved_hook_consumer(tmp_path, apm_binary_path, "claude")
+    settings = project / ".claude" / "settings.json"
+    edited = settings.read_text(encoding="utf-8").replace(_SCRIPT, "user-guard.sh")
+    assert edited != settings.read_text(encoding="utf-8")
+    settings.write_text(edited, encoding="utf-8")
+
+    audit = apm("audit", "--ci", "--no-policy", expect=1)
+
+    assert "Drift detected" in audit, audit
+    assert "1 local edit(s) to managed files" in audit, audit
+    assert settings.read_text(encoding="utf-8") == edited

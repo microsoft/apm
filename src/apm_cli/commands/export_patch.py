@@ -421,7 +421,7 @@ def build_patch_export(
     patches: dict[str, str] = {}
 
     dir_prefixes = _dir_prefix_table(lockfile)
-    modified = [f for f in findings if f.kind == "modified"]
+    modified = [f for f in findings if f.kind == "modified" and not f.owned_entries_only]
     by_package: dict[str, list[DriftFinding]] = {}
     for finding in modified:
         key = _resolve_package_key(finding.path, finding.package, dir_prefixes)

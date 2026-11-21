@@ -191,6 +191,7 @@ def exportable_edit_paths(
         finding.path
         for finding in findings
         if finding.kind == "modified"
+        and not finding.owned_entries_only
         and finding.path not in unedited
         and is_upstream_package(finding.package, lockfile)
     ]

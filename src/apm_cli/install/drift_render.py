@@ -153,7 +153,9 @@ def render_drift_text(
         lines.append(f"  {STATUS_SYMBOLS['info']} {RESYNC_UNRECORDED.sentence()}")
     else:
         edited = [
-            finding for finding in by_kind.get("modified", []) if finding.path not in unedited
+            finding
+            for finding in by_kind.get("modified", [])
+            if finding.path not in unedited and not finding.owned_entries_only
         ]
         # True per primitive kind (RA-009): see install/local_edits.py.
         for bundle in sorted({finding.package == LOCAL_BUNDLE_OWNER for finding in edited}):

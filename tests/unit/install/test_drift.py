@@ -332,6 +332,115 @@ def test_diff_engine_ignores_user_hooks_in_shared_config(tmp_path):
     assert findings == []
 
 
+def test_diff_engine_retired_shared_hook_entries_are_never_local_edits(tmp_path):
+    """RA-028: APM-owned hook entries a gate retired stay in a shared config.
+
+    Replay deploys no hook config, yet the project config still holds an
+    APM-owned entry. The finding is drift (audit fails) but never a local
+    edit: no export-patch or delete-the-edited-files advice, only the resync.
+    """
+    from apm_cli.install.drift_render import render_drift_text
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    scratch = tmp_path / "scratch"
+    project = tmp_path / "project"
+    scratch.mkdir()
+    rel = ".claude/settings.json"
+    managed = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo apm-managed"}],
+    }
+    _write(project / rel, json.dumps({"hooks": {"PreToolUse": [managed]}}).encode())
+    _write(
+        project / ".claude" / "apm-hooks.json",
+        json.dumps({"PreToolUse": [{**managed, "_apm_source": "example/pkg"}]}).encode(),
+    )
+
+    findings = diff_scratch_against_project(
+        scratch, project, _empty_lockfile(), targets=[KNOWN_TARGETS["claude"]]
+    )
+
+    assert [(f.kind, f.path, f.owned_entries_only) for f in findings] == [("modified", rel, True)]
+    text = render_drift_text(findings, lockfile=_empty_lockfile(), project_root=project)
+    assert "local edit" not in text
+    assert "export-patch" not in text
+    assert "Delete the edited files" not in text
+    assert "Run 'apm install' to re-sync deployed files with the lockfile." in text
+
+
+def _hook_entry(command: str, source: str | None = None) -> dict:
+    entry = {"matcher": "Bash", "hooks": [{"type": "command", "command": command}]}
+    return {**entry, "_apm_source": source} if source else entry
+
+
+def _shared_hook_world(tmp_path, *, replayed, on_disk, scratch_sidecar, project_sidecar):
+    scratch, project = tmp_path / "scratch", tmp_path / "project"
+    for root, entries, sidecar in (
+        (scratch, replayed, scratch_sidecar),
+        (project, on_disk, project_sidecar),
+    ):
+        _write(
+            root / ".claude/settings.json", json.dumps({"hooks": {"PreToolUse": entries}}).encode()
+        )
+        _write(root / ".claude/apm-hooks.json", json.dumps({"PreToolUse": sidecar}).encode())
+    return scratch, project
+
+
+def test_diff_engine_flags_owner_the_gate_retired_beside_a_kept_owner(tmp_path):
+    """RA-028: replay drops the retired owner; its config and sidecar drift is no local edit."""
+    from apm_cli.install.drift_render import render_drift_text
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    kept, gone = _hook_entry("echo kept"), _hook_entry("echo gone")
+    scratch, project = _shared_hook_world(
+        tmp_path,
+        replayed=[kept],
+        on_disk=[kept, gone],
+        scratch_sidecar=[_hook_entry("echo kept", "example/kept")],
+        project_sidecar=[
+            _hook_entry("echo kept", "example/kept"),
+            _hook_entry("echo gone", "example/gone"),
+        ],
+    )
+
+    findings = diff_scratch_against_project(
+        scratch, project, _empty_lockfile(), targets=[KNOWN_TARGETS["claude"]]
+    )
+
+    assert sorted((f.kind, f.path, f.owned_entries_only) for f in findings) == [
+        ("modified", ".claude/apm-hooks.json", True),
+        ("modified", ".claude/settings.json", True),
+    ]
+    text = render_drift_text(findings, lockfile=_empty_lockfile(), project_root=project)
+    assert "local edit" not in text
+    assert "Run 'apm install' to re-sync deployed files with the lockfile." in text
+
+
+def test_diff_engine_user_edit_to_apm_hook_entry_stays_a_local_edit(tmp_path):
+    """RA-028: a user edit drops the entry's ownership marker; the owner stays replayed."""
+    from apm_cli.install.drift_render import render_drift_text
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    sidecar = [_hook_entry("echo apm-managed", "example/pkg")]
+    scratch, project = _shared_hook_world(
+        tmp_path,
+        replayed=[_hook_entry("echo apm-managed")],
+        on_disk=[_hook_entry("echo user-edited")],
+        scratch_sidecar=sidecar,
+        project_sidecar=sidecar,
+    )
+
+    findings = diff_scratch_against_project(
+        scratch, project, _empty_lockfile(), targets=[KNOWN_TARGETS["claude"]]
+    )
+
+    assert [(f.kind, f.path, f.owned_entries_only) for f in findings] == [
+        ("modified", ".claude/settings.json", False)
+    ]
+    text = render_drift_text(findings, lockfile=_empty_lockfile(), project_root=project)
+    assert "1 local edit(s) to managed files" in text
+
+
 def test_diff_engine_hook_merge_target_tampering_is_modified(tmp_path):
     """Membership exemption cannot suppress APM-owned hook comparison."""
     from apm_cli.integration.targets import KNOWN_TARGETS
