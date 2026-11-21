@@ -1,60 +1,4 @@
 {
- "counts": {
-  "baseline_by_lane": {
-   "T-1": 133,
-   "T-2": 418,
-   "T-3": 243,
-   "T-6a": 201,
-   "T-6b": 141,
-   "T-6c": 28,
-   "T-6e": 42,
-   "T-7b": 47
-  },
-  "exception_pairs": 94,
-  "mapped": 427,
-  "mapped_by_rule": {
-   "E3": 131,
-   "U1": 84,
-   "U10": 44,
-   "U2": 78,
-   "U5": 5,
-   "U8": 85
-  },
-  "must_cover": 76,
-  "obligations": {
-   "T1": 387,
-   "T2": 12,
-   "T3": 375,
-   "T4": 80,
-   "T5": 57,
-   "pair": 1527,
-   "refusal": 43,
-   "rule": 10
-  },
-  "obligations_total": 2491,
-  "raw_candidates": {
-   "T1": 504,
-   "T2": 12,
-   "T3": 840,
-   "T4": 96,
-   "T5": 120,
-   "pair": 1684
-  },
-  "removed": 391,
-  "removed_by_rule": {
-   "U-BIN": 1,
-   "U3": 5,
-   "U6": 90,
-   "U8": 295
-  },
-  "row_steps": 204,
-  "rows": 17,
-  "status": {
-   "baseline": 1253,
-   "known-failing": 1,
-   "required": 1237
-  }
- },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
  "exception_factors": {
   "FILEROUTE": [
@@ -24885,6 +24829,5 @@
    "text": "approve/deny with no prior decision is reachable; --list and --pending are read-only"
   }
  },
- "schema_version": 1,
- "sha256": "d76ae495a8eac7a800e7333edca1e3baf5448eeb2a24f6a5bf5c4b19229909ae"
+ "schema_version": 1
 }
