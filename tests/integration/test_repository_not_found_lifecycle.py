@@ -229,3 +229,53 @@ def test_inaccessible_repository_names_host_and_credential_source(
         assert "Run '" not in _flat(verbose), "the verbose form repeats its own advice"
         assert project.manifest_path.read_bytes() == manifest_bytes
         assert proxy.hosts_receiving(_GHE_TOKEN) <= {_GHE_HOST, f"api.{_GHE_HOST}"}
+
+
+@pytest.mark.parametrize("token_var", ["GITHUB_APM_PAT", "GH_TOKEN"])
+def test_strict_host_credentials_withhold_env_token_from_unconfigured_ghe_host(
+    tmp_path: Path, apm_binary_path: Path, token_var: str
+) -> None:
+    """#4324: strict mode sends a *.ghe.com host that is not GITHUB_HOST no token."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
+    project = LocalPackageFactory(isolated.work_root).create("consumer", targets=(_TARGET,))
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+    package = f"{_GHE_HOST}/lifecycle/p-missing"
+    hosts = (_GHE_HOST, f"api.{_GHE_HOST}")
+    handlers = {host: _not_found for host in hosts}
+    with local_scripted_https_proxy(isolated.root / "tls", handlers) as proxy:
+        strict = {"APM_STRICT_HOST_CREDENTIALS": "true", token_var: _GHE_TOKEN}
+
+        def authorized_requests() -> list[str]:
+            return [
+                request.host
+                for host in hosts
+                for request in proxy.requests_to(host)
+                if request.header("Authorization")
+            ]
+
+        env = _child_env(isolated, proxy, strict)
+        manifest_bytes = project.manifest_path.read_bytes()
+        before = _snap(project.root)
+
+        withheld = runner.run(("install", package), cwd=project.root, env=env)
+
+        _assert_output_oracles(withheld, secret=_GHE_TOKEN)
+        assert withheld.returncode == 1, _evidence(withheld)
+        output = _flat(withheld)
+        assert _GHE_HOST in output, _evidence(withheld)
+        assert "APM_STRICT_HOST_CREDENTIALS" in output, _evidence(withheld)
+        assert proxy.requests_to(_GHE_HOST) or proxy.requests_to(f"api.{_GHE_HOST}")
+        assert authorized_requests() == [], "strict mode sent a credential to the host"
+        assert project.manifest_path.read_bytes() == manifest_bytes
+        assert _snap(project.root) == before, "I7: a failed install changed durable state"
+
+        proxy.clear()
+        configured = runner.run(
+            ("install", package),
+            cwd=project.root,
+            env=_child_env(isolated, proxy, {**strict, "GITHUB_HOST": _GHE_HOST}),
+        )
+        _assert_output_oracles(configured, secret=_GHE_TOKEN)
+        assert configured.returncode == 1, _evidence(configured)
+        assert authorized_requests(), "the configured host did not receive the env token"
+        assert project.manifest_path.read_bytes() == manifest_bytes

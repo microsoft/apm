@@ -2672,16 +2672,30 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_default_host_class_shares_the_github_token_with_ghe_hosts",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[ghe.com.evil.example-default]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[ghe.com.evil.example-strict]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[github.com.evil.example-default]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[github.com.evil.example-strict]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[gitlab.com-default]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[gitlab.com-strict]",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class"
       ],
       "conformance_class": "consumer",
       "id": "req-sc-005",
       "keyword": "MUST",
       "section": "10.3",
-      "status": "xfail",
-      "test_count": 2,
+      "status": "active",
+      "test_count": 9,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_host_class_collapse_constrained_to_psl_or_aliases",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_default_host_class_shares_the_github_token_with_ghe_hosts",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[ghe.com.evil.example-default]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[ghe.com.evil.example-strict]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[github.com.evil.example-default]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[github.com.evil.example-strict]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[gitlab.com-default]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[gitlab.com-strict]",
         "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class"
       ]
     },
@@ -3303,12 +3317,12 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 109,
+      "active": 110,
       "partial": 1,
       "skipped": 3,
       "text-only": 3,
       "unbound": 0,
-      "xfail": 1
+      "xfail": 0
     },
     "governance": {
       "active": 21,

@@ -1,25 +1,24 @@
 """Strict host credentials keep GitHub-class env tokens off other hosts (#4324).
 
-Real ``gh`` and ``git credential fill`` children run against stubs that
-record every inherited variable name and, like real gh, hand back
-``GH_TOKEN``/``GITHUB_TOKEN`` when present.
+Each case resolves in a fresh Python process (real AuthResolver, real
+``gh`` and ``git credential fill`` children) against stubs that record every
+inherited variable name and, like real gh, hand back ``GH_TOKEN`` or
+``GITHUB_TOKEN`` when present.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from apm_cli.core import auth as auth_mod
-from apm_cli.core.auth import AuthResolver
-from apm_cli.utils import git_env
-
 pytestmark = [
-    pytest.mark.integration,
+    pytest.mark.component,
     pytest.mark.promise("req-sc-005"),
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell stubs"),
 ]
@@ -75,12 +74,35 @@ def stubbed_children(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[st
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(git_config))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-    monkeypatch.setattr(git_env, "_gh_executable", None)
-    monkeypatch.setattr(auth_mod, "_strict_warnings_emitted", set(), raising=False)
     for name in sorted(_SCRUBBED):
         monkeypatch.setenv(name, _ENV_TOKEN)
     monkeypatch.setenv("APM_STRICT_HOST_CREDENTIALS", "true")
     return records
+
+
+_RESOLVE = (
+    "import json, sys\n"
+    "from apm_cli.core.auth import AuthResolver\n"
+    "ctx = AuthResolver().resolve(sys.argv[1], org=sys.argv[2] or None)\n"
+    "print(json.dumps({'token': ctx.token, 'source': ctx.source}))\n"
+)
+
+
+def _resolve(host: str, org: str = "") -> subprocess.CompletedProcess[str]:
+    """Resolve *host* in a fresh process; the last stdout line is the context."""
+    return subprocess.run(
+        [sys.executable, "-c", _RESOLVE, host, org],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+
+
+def _context(stdout: str) -> tuple[str | None, str]:
+    payload = json.loads(stdout.strip().splitlines()[-1])
+    return payload["token"], payload["source"]
 
 
 def _names(record: Path) -> set[str]:
@@ -88,12 +110,15 @@ def _names(record: Path) -> set[str]:
 
 
 def test_strict_mode_scrubs_env_tokens_from_gh_and_credential_fill(
-    stubbed_children: dict[str, Path], capsys: pytest.CaptureFixture[str]
+    stubbed_children: dict[str, Path],
 ) -> None:
-    context = AuthResolver().resolve("acme.ghe.com", org="acme")
+    result = _resolve("acme.ghe.com", "acme")
+    assert result.returncode == 0, result.stderr
+    token, source = _context(result.stdout)
+    warning = result.stdout + result.stderr
 
-    assert context.token == _HELPER_TOKEN
-    assert context.source == "git-credential-fill"
+    assert token == _HELPER_TOKEN
+    assert source == "git-credential-fill"
     gh_names = _names(stubbed_children["gh"])
     helper_names = _names(stubbed_children["helper"])
     assert gh_names, "gh auth token child never ran"
@@ -101,8 +126,6 @@ def test_strict_mode_scrubs_env_tokens_from_gh_and_credential_fill(
     assert not gh_names & _SCRUBBED
     assert not helper_names & _SCRUBBED
 
-    err = capsys.readouterr()
-    warning = err.out + err.err
     assert "acme.ghe.com" in warning
     assert "APM_STRICT_HOST_CREDENTIALS" in warning
     assert _ENV_TOKEN not in warning
@@ -111,12 +134,13 @@ def test_strict_mode_scrubs_env_tokens_from_gh_and_credential_fill(
 def test_strict_mode_keeps_the_env_token_for_the_configured_host(
     stubbed_children: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    resolver = AuthResolver()
-    assert resolver.resolve("github.com").token == _ENV_TOKEN
+    default_host = _resolve("github.com")
+    assert _context(default_host.stdout) == (_ENV_TOKEN, "GITHUB_APM_PAT")
 
     monkeypatch.setenv("GITHUB_HOST", "acme.ghe.com")
-    configured = AuthResolver().resolve("acme.ghe.com", org="acme")
-    assert (configured.token, configured.source) == (_ENV_TOKEN, "GITHUB_APM_PAT_ACME")
+    configured = _resolve("acme.ghe.com", "acme")
+    assert _context(configured.stdout) == (_ENV_TOKEN, "GITHUB_APM_PAT_ACME")
+    assert "withheld" not in configured.stdout + configured.stderr
 
 
 @pytest.mark.parametrize(
@@ -138,7 +162,6 @@ def test_strict_mode_keeps_the_env_token_for_the_configured_host(
 def test_strict_setting_values(
     stubbed_children: dict[str, Path],
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
     value: str | None,
     strict: bool,
     warned: bool,
@@ -148,8 +171,8 @@ def test_strict_setting_values(
     else:
         monkeypatch.setenv("APM_STRICT_HOST_CREDENTIALS", value)
 
-    context = AuthResolver().resolve("acme.ghe.com")
+    result = _resolve("acme.ghe.com")
+    token, _source = _context(result.stdout)
 
-    assert (context.token != _ENV_TOKEN) is strict
-    captured = capsys.readouterr()
-    assert ("is not recognised" in captured.out + captured.err) is warned
+    assert (token != _ENV_TOKEN) is strict
+    assert ("is not recognised" in result.stdout + result.stderr) is warned

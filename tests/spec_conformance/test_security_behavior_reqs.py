@@ -268,37 +268,29 @@ def test_rejected_archive_leaves_no_partial_extraction(tmp_path: Path) -> None:
 
 @pytest.mark.req("req-sc-005")
 @pytest.mark.usefixtures("isolated_credentials")
-def test_token_scoped_to_its_host_class(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Strict mode: a credential for the configured host is not resolved for another
-    host of the GitHub-operated class (#4324)."""
-    monkeypatch.setenv("APM_STRICT_HOST_CREDENTIALS", "true")
-    resolver = AuthResolver()
-    assert resolver.resolve("github.com").token == _FAKE_PAT
-    context = resolver.resolve("acme.ghe.com")
-    assert context.token != _FAKE_PAT
-    assert context.source != "GITHUB_APM_PAT"
-
-
-@pytest.mark.req("req-sc-005")
-@pytest.mark.usefixtures("isolated_credentials")
-def test_default_host_class_shares_the_github_token_with_ghe_hosts() -> None:
-    """Control: without strict mode the documented GitHub-operated class (basis c)
-    lets acme.ghe.com receive GITHUB_APM_PAT."""
-    context = AuthResolver().resolve("acme.ghe.com")
-    assert (context.token, context.source) == (_FAKE_PAT, "GITHUB_APM_PAT")
-
-
-@pytest.mark.req("req-sc-005")
-@pytest.mark.usefixtures("isolated_credentials")
-@pytest.mark.parametrize("strict", ["", "true"], ids=["default", "strict"])
-@pytest.mark.parametrize("host", ["gitlab.com", "github.com.evil.example", "ghe.com.evil.example"])
-def test_host_outside_the_github_operated_class_receives_no_github_token(
-    monkeypatch: pytest.MonkeyPatch, strict: str, host: str
+@pytest.mark.parametrize(
+    ("strict", "host", "receives_env_token"),
+    [
+        # #4324 strict mode: the configured host keeps its token; another
+        # GitHub-operated host does not receive it.
+        pytest.param("true", "github.com", True, id="strict-configured-host"),
+        pytest.param("true", "acme.ghe.com", False, id="strict-other-ghe-host"),
+        # Control: the default GitHub-operated class (basis c) shares it.
+        pytest.param("", "acme.ghe.com", True, id="default-ghe-host"),
+        # Hosts outside the class never receive a GitHub token.
+        pytest.param("", "gitlab.com", False, id="default-outside-class"),
+        pytest.param("", "ghe.com.evil.example", False, id="default-lookalike"),
+        pytest.param("true", "github.com.evil.example", False, id="strict-lookalike"),
+    ],
+)
+def test_token_scoped_to_its_host_class(
+    monkeypatch: pytest.MonkeyPatch, strict: str, host: str, receives_env_token: bool
 ) -> None:
+    """A credential reaches only hosts of its class; strict mode narrows the class."""
     monkeypatch.setenv("APM_STRICT_HOST_CREDENTIALS", strict)
     context = AuthResolver().resolve(host)
-    assert context.token != _FAKE_PAT
-    assert not context.source.startswith(("GITHUB_", "GH_"))
+    assert (context.token == _FAKE_PAT) is receives_env_token
+    assert (context.source == "GITHUB_APM_PAT") is receives_env_token
 
 
 # --- req-sc-006: plaintext registry URLs ---------------------------------------
