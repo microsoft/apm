@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import json
 import sys
@@ -578,6 +579,62 @@ def test_legacy_owners_may_keep_an_unexplained_allowlist(pilot: ModuleType) -> N
     payload = pilot._baseline_payload(_reports(pilot, update_survivors=["a.b__mutmut_1"]))
     assert payload["owners"]["update-plan"]["accepted_survivors"] == ["a.b__mutmut_1"]
     pilot._validate_baseline(payload)
+
+
+def test_a_legacy_baseline_update_keeps_recorded_equivalents(pilot: ModuleType) -> None:
+    explained, unexplained = "a.b__mutmut_1", "a.b__mutmut_2"
+    reports = _reports(pilot, update_survivors=[explained, unexplained])
+    payload = pilot._baseline_payload(
+        reports, {"update-plan": {"equivalent_survivors": {explained: "reviewed reason"}}}
+    )
+    entry = payload["owners"]["update-plan"]
+    assert entry["equivalent_survivors"] == {explained: "reviewed reason"}
+    assert entry["accepted_survivors"] == [unexplained]
+    pilot._validate_baseline(payload)
+
+
+def test_run_owners_refuses_an_unregistered_owner(
+    pilot: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(pilot, "_run_mutmut", Mock(side_effect=AssertionError("ran mutmut")))
+    custom = dataclasses.replace(pilot.OWNERS[0], key="custom-owner")
+    with pytest.raises(pilot.PilotError, match=r"unregistered owner\(s\): \['custom-owner'\]"):
+        pilot.run_owners((custom,), repo_root=tmp_path)
+
+
+def test_a_failed_negative_control_marks_the_report_a_regression(
+    pilot: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reports = _reports(pilot)
+    payload = pilot._baseline_payload(reports)
+    payload["owners"][NEW_OWNER]["kill_rate_floor"] = 0.0
+    baseline_path, report_path = tmp_path / "baseline.json", tmp_path / "report.json"
+    pilot.write_baseline(baseline_path, payload, label="mutation")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_mutation_pilot.py",
+            "--report-only",
+            "--negative-control",
+            "--baseline",
+            str(baseline_path),
+            "--output",
+            str(report_path),
+        ],
+    )
+    monkeypatch.setattr(pilot, "_owner_report", lambda owner, repo_root: reports[owner.key])
+
+    assert pilot.main() == 1
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "regression"
+    assert report["negative_control"] == {"uncontrolled_owners": [NEW_OWNER]}
+    assert all(c["status"] == "accepted" for c in report["comparisons"].values())
+    assert f"would not fail ['{NEW_OWNER}']" in capsys.readouterr().err
 
 
 def test_negative_control_holds_only_when_the_floor_is_tight(pilot: ModuleType) -> None:

@@ -429,10 +429,11 @@ def _baseline_payload(
 ) -> dict[str, Any]:
     """Record each owner's survivors and kill-rate floor from clean outcomes.
 
-    Legacy pilot owners keep an unexplained ``accepted_survivors`` allowlist.
-    Every other owner may only carry survivors already recorded in
-    ``equivalent_survivors`` with a reason; a new survivor needs a test or a
-    reason before the baseline can be written.
+    Recorded ``equivalent_survivors`` reasons are kept for every owner.
+    Legacy pilot owners put their remaining survivors in the unexplained
+    ``accepted_survivors`` allowlist. Every other owner may only carry
+    survivors already recorded with a reason; a new survivor needs a test or
+    a reason before the baseline can be written.
     """
     owners: dict[str, Any] = {}
     for owner in OWNERS:
@@ -446,16 +447,14 @@ def _baseline_payload(
         survivors = report["outcomes"].get("survived", [])
         previous = (previous_owners or {}).get(owner.key, {})
         reasons = previous.get("equivalent_survivors", {})
-        if owner.key in LEGACY_OWNER_KEYS:
-            accepted, equivalent = survivors, {}
-        else:
-            unexplained = sorted(name for name in survivors if name not in reasons)
-            if unexplained:
-                raise PilotError(
-                    f"cannot baseline {owner.key}: {len(unexplained)} survivor(s) have no test "
-                    f"and no equivalent reason: {unexplained}"
-                )
-            accepted, equivalent = [], {name: reasons[name] for name in sorted(survivors)}
+        equivalent = {name: reasons[name] for name in sorted(survivors) if name in reasons}
+        unexplained = sorted(name for name in survivors if name not in reasons)
+        if unexplained and owner.key not in LEGACY_OWNER_KEYS:
+            raise PilotError(
+                f"cannot baseline {owner.key}: {len(unexplained)} survivor(s) have no test "
+                f"and no equivalent reason: {unexplained}"
+            )
+        accepted = unexplained
         owners[owner.key] = {
             "accepted_survivors": accepted,
             "equivalent_survivors": equivalent,
@@ -631,12 +630,21 @@ def run_owners(
     reuse_cache: bool = False,
     repo_root: Path = REPO_ROOT,
 ) -> dict[str, dict[str, Any]]:
-    """Mutate *owners* and return each one's outcome report.
+    """Mutate registered *owners* and return each one's outcome report.
 
     The reusable entry point for other fault-injection harnesses (#4514): an
     ``Owner`` names a source file, the functions to mutate and the test seams
-    expected to kill them; the report lists every mutant by outcome.
+    expected to kill them; the report lists every mutant by outcome. mutmut
+    reads its sources and test selection from ``[tool.mutmut]`` in
+    ``pyproject.toml``, which lists exactly the registered owners, so an
+    unregistered owner is refused rather than measured against other tests.
     """
+    unregistered = sorted(owner.key for owner in owners if owner not in OWNERS)
+    if unregistered:
+        raise PilotError(
+            f"unregistered owner(s): {unregistered}; add them to OWNERS and to "
+            "[tool.mutmut] in pyproject.toml first"
+        )
     _run_mutmut(
         max_children=max_children, reuse_cache=reuse_cache, repo_root=repo_root, owners=owners
     )
@@ -773,21 +781,21 @@ def main() -> int:
 
         baseline_owners = _validate_baseline(load_baseline(args.baseline, label="mutation"))
         comparisons, failed = _compare_with_baseline(owner_reports, baseline_owners)
-        _write_report(
-            args.output,
-            {
-                "comparisons": comparisons,
-                "owners": owner_reports,
-                "schema_version": SCHEMA_VERSION,
-                "status": "regression" if failed else "accepted",
-                "tool": {"name": "mutmut", "version": MUTMUT_VERSION},
-            },
-        )
         uncontrolled = [
             key
             for key, report in owner_reports.items()
             if args.negative_control and not negative_control(report, baseline_owners[key])
         ]
+        payload: dict[str, Any] = {
+            "comparisons": comparisons,
+            "owners": owner_reports,
+            "schema_version": SCHEMA_VERSION,
+            "status": "regression" if failed or uncontrolled else "accepted",
+            "tool": {"name": "mutmut", "version": MUTMUT_VERSION},
+        }
+        if args.negative_control:
+            payload["negative_control"] = {"uncontrolled_owners": uncontrolled}
+        _write_report(args.output, payload)
     except (BaselineError, PilotError) as error:
         print(f"[x] Mutation run failed: {_ascii(str(error))}", file=sys.stderr)
         return 1
