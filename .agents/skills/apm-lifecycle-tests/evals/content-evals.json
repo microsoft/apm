@@ -1,0 +1,49 @@
+{
+  "description": "Content evals for apm-lifecycle-tests. Each scenario is run with_skill and without_skill. If the outputs are indistinguishable, the skill adds no value; redesign or delete it (genesis evals doctrine).",
+  "scenarios": [
+    {
+      "id": "C1-ownership-regression",
+      "label": "Bug fix: uninstall removes an unmanaged sibling file",
+      "prompt": "apm uninstall of a skill package also deletes a user-authored file that sits next to the deployed skill files. Add the test that proves the fix.",
+      "expect_with_skill": [
+        "names promise I5 / ownership.preserve_unowned and the cleanup owner",
+        "drives the installed CLI in a hermetic world, policy ON (no --no-policy)",
+        "asserts the sibling file is byte-identical and the package files are gone via before/after snapshot",
+        "checks I1 lock==deployed after the uninstall",
+        "shows failing-before and passing-after runs",
+        "adds a bug-ledger row"
+      ],
+      "expect_without_skill_risk": [
+        "CliRunner or mocked filesystem",
+        "--no-policy copied from helpers",
+        "asserts only a log string"
+      ]
+    },
+    {
+      "id": "C2-migrate-string-only",
+      "label": "Migrate an old lifecycle file whose assertion is a string compare",
+      "prompt": "Fold tests/integration/test_example_lifecycle.py into the lifecycle family; its only assertion is 'assert \"integrated\" in result.stdout'.",
+      "expect_with_skill": [
+        "flags the string-only assertion as an anti-oracle",
+        "converts it to a replay or scenario row with a state oracle",
+        "keeps or names the regression trap in the ledger",
+        "never drops the assertion silently"
+      ],
+      "expect_without_skill_risk": [
+        "moves the file verbatim",
+        "deletes it as redundant"
+      ]
+    },
+    {
+      "id": "C3-unit-out-of-scope",
+      "label": "Pure parser unit test requested",
+      "prompt": "Add a unit test for the version-constraint parser rejecting '^^1.0'.",
+      "expect_with_skill": [
+        "declines the lifecycle procedure; a unit test at the owner is the right instrument"
+      ],
+      "expect_without_skill_risk": [
+        "n/a: tests that the skill does not over-trigger its procedure"
+      ]
+    }
+  ]
+}

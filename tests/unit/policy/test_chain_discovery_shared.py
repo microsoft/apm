@@ -27,6 +27,8 @@ from apm_cli.policy.discovery import (
 )
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 
+pytestmark = pytest.mark.unit
+
 # Patch targets -- all live in apm_cli.policy.discovery (same module)
 _PATCH_DISCOVER = "apm_cli.policy.discovery.discover_policy"
 _PATCH_WRITE_CACHE = "apm_cli.policy.discovery._write_cache"
@@ -411,6 +413,7 @@ class TestMultiLevelExtendsChain:
         assert "org-mid/.github" in chain_refs[1]
         assert "contoso/.github" in chain_refs[2]
 
+    @pytest.mark.req("req-pl-003")
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
     def test_cycle_in_chain_raises(self, mock_discover, mock_write_cache):
@@ -427,9 +430,12 @@ class TestMultiLevelExtendsChain:
 
         mock_discover.side_effect = [leaf_fetch, b_fetch, a_fetch]
 
-        with pytest.raises(PolicyInheritanceError, match="Cycle"):
+        with pytest.raises(PolicyInheritanceError, match="Cycle") as exc_info:
             discover_policy_with_chain(Path("/fake"))
+        assert "org-a/.github" in str(exc_info.value)
+        assert "org-b/.github" in str(exc_info.value)
 
+    @pytest.mark.req("req-pl-003")
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
     def test_depth_limit_raises(self, mock_discover, mock_write_cache):
@@ -460,6 +466,7 @@ class TestMultiLevelExtendsChain:
             discover_policy_with_chain(Path("/fake"))
         assert str(MAX_CHAIN_DEPTH) in str(exc_info.value)
 
+    @pytest.mark.req("req-pl-010")
     @patch(_PATCH_WRITE_CACHE)
     @patch(_PATCH_DISCOVER)
     def test_partial_chain_fails_closed(self, mock_discover, mock_write_cache):
@@ -505,3 +512,16 @@ class TestMultiLevelExtendsChain:
         kw = mock_write_cache.call_args
         chain_refs = kw.kwargs.get("chain_refs") or kw[1].get("chain_refs")
         assert len(chain_refs) == 2
+
+
+@pytest.mark.parametrize(
+    ("value", "disabled"),
+    [("1", True), (" 1 ", True), ("0", False), ("true", False), ("", False)],
+)
+def test_policy_disabled_by_env_accepts_only_the_documented_value(
+    monkeypatch, value: str, disabled: bool
+) -> None:
+    from apm_cli.policy.discovery import policy_disabled_by_env
+
+    monkeypatch.setenv("APM_POLICY_DISABLE", value)
+    assert policy_disabled_by_env() is disabled

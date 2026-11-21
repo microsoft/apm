@@ -7,9 +7,11 @@ baseline checks (``ci_checks``) and policy checks (``policy_checks``).
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.core.remediation import Remediation
     from apm_cli.security.content_scanner import ScanFinding
     from apm_cli.security.file_scanner import CoverageEntry
 
@@ -20,6 +22,7 @@ _CHECK_ARTIFACT_MAP: dict[str, str] = {
     "deployment-ledger-owners": "apm.lock.yaml",
     "deployed-files-present": "apm.lock.yaml",
     "no-orphaned-packages": "apm.lock.yaml",
+    "lockfile-targets-current": "apm.lock.yaml",
     "config-consistency": "apm.lock.yaml",
     "content-integrity": "apm.lock.yaml",
     "dependency-allowlist": "apm.yml",
@@ -47,6 +50,40 @@ _CHECK_ARTIFACT_MAP: dict[str, str] = {
 # ── Result data classes ───────────────────────────────────────────
 
 
+class PolicyRemedy(StrEnum):
+    """The apm.yml edit a policy violation hint may suggest.
+
+    The single vocabulary for install remediation hints: producers
+    (``policy_checks``) pick a member and the install logger branches on
+    members only. ``None`` (or anything outside this enum) means no apm.yml
+    edit applies.
+    """
+
+    REMOVE = "remove"
+    ADD = "add"
+    PIN = "pin"
+
+
+@dataclass(frozen=True)
+class PolicySubject:
+    """One offending dependency or MCP server named by a policy check.
+
+    ``remedy`` selects the apm.yml edit the install hint suggests:
+    :attr:`PolicyRemedy.REMOVE` (the subject is declared and must go),
+    :attr:`PolicyRemedy.ADD` (a required subject is missing),
+    :attr:`PolicyRemedy.PIN` (the declared ref must be bounded), or ``None``
+    (no apm.yml edit applies; ``reason`` carries the remediation). ``declared_by`` is the lock key of
+    the direct apm.yml dependency that brings in a transitive MCP server
+    (never a package display name), so the hint points at an entry the user
+    can actually remove.
+    """
+
+    ref: str
+    reason: str
+    remedy: PolicyRemedy | None = PolicyRemedy.REMOVE
+    declared_by: str | None = None
+
+
 @dataclass
 class CheckResult:
     """Result of a single CI check."""
@@ -57,6 +94,31 @@ class CheckResult:
     details: list[str] = field(default_factory=list)  # individual violations
     coverage: tuple[CoverageEntry, ...] = ()
     content_findings: tuple[ScanFinding, ...] = ()
+    # Structured per-dependency / per-MCP-server violations. Not serialized:
+    # ``details`` stays the report contract for ``apm audit``.
+    subjects: tuple[PolicySubject, ...] = ()
+    # A violation downgraded to pass by ``enforcement: warn``; text output
+    # still names its subjects (#3994). Not serialized: ``passed`` is the contract.
+    warned: bool = False
+    # Structured advice that clears this failure, first one primary; serialized
+    # by ``apm audit --format json`` as ``remediation`` and ``remediations``.
+    remediations: tuple[Remediation, ...] = ()
+
+    def violation_subjects(self) -> tuple[PolicySubject, ...]:
+        """Return one :class:`PolicySubject` per violation to report.
+
+        The single owner for turning a check into per-subject violation
+        lines (install gate and install preflight). Checks that name
+        dependencies or MCP servers populate ``subjects``; any other check
+        yields one entry keyed by the check name (its category) with no
+        apm.yml edit suggested.
+        """
+        if self.subjects:
+            return self.subjects
+        reason = self.message
+        if self.details:
+            reason = f"{self.message}: {', '.join(self.details[:5])}"
+        return (PolicySubject(ref=self.name, reason=reason, remedy=None),)
 
 
 @dataclass
@@ -95,6 +157,14 @@ class CIAuditResult:
                         if c.coverage
                         else {}
                     ),
+                    **(
+                        {
+                            "remediation": c.remediations[0].to_json(),
+                            "remediations": [item.to_json() for item in c.remediations],
+                        }
+                        if c.remediations
+                        else {}
+                    ),
                 }
                 for c in self.checks
             ],
@@ -121,8 +191,7 @@ class CIAuditResult:
             if not check.passed:
                 artifact = _CHECK_ARTIFACT_MAP.get(check.name, "apm.lock.yaml")
                 content_details = {
-                    f"unicode: {finding.file}{finding.pointer or ''}"
-                    for finding in check.content_findings
+                    f"unicode: {finding.location}" for finding in check.content_findings
                 }
                 results.extend(
                     {**finding_to_sarif(finding), "ruleId": check.name}

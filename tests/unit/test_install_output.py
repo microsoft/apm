@@ -2,13 +2,15 @@
 
 from unittest.mock import MagicMock
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.models.dependency import (
     DependencyReference,
     GitReferenceType,
     ResolvedReference,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestInstallOutputFormatting:

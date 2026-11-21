@@ -21,6 +21,8 @@ from apm_cli.integration.command_integrator import (
     CommandIntegrator,
     _extract_input_names,
 )
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _to_bundle(d: dict) -> IntegratorBundle:
@@ -527,11 +529,13 @@ class TestIntegratePackagePrimitivesTargetGating:
             _integrate_package_primitives(
                 package_info,
                 project_root,
+                skill_subset=None,
                 targets=[KNOWN_TARGETS["copilot"]],
                 managed_files=set(),
                 force=False,
                 diagnostics=diagnostics,
                 integrators=_to_bundle(integrators),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
             integrators["command_integrator"].integrate_commands_for_target.assert_not_called()
@@ -557,11 +561,13 @@ class TestIntegratePackagePrimitivesTargetGating:
             _integrate_package_primitives(
                 package_info,
                 project_root,
+                skill_subset=None,
                 targets=[KNOWN_TARGETS["claude"]],
                 managed_files=set(),
                 force=False,
                 diagnostics=diagnostics,
                 integrators=_to_bundle(integrators),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
             integrators["command_integrator"].integrate_commands_for_target.assert_called_once()
@@ -586,11 +592,13 @@ class TestIntegratePackagePrimitivesTargetGating:
             _integrate_package_primitives(
                 package_info,
                 project_root,
+                skill_subset=None,
                 targets=[KNOWN_TARGETS["cursor"]],
                 managed_files=set(),
                 force=False,
                 diagnostics=diagnostics,
                 integrators=_to_bundle(integrators),
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
             integrators["command_integrator"].integrate_commands_for_target.assert_called_once()
@@ -638,6 +646,7 @@ class TestCursorCommandEndToEnd:
         result = integrate_package_primitives(
             pkg_info,
             temp_project,
+            skill_subset=None,
             targets=[KNOWN_TARGETS["cursor"]],
             integrators=IntegratorBundle(
                 prompt=PromptIntegrator(),
@@ -650,6 +659,7 @@ class TestCursorCommandEndToEnd:
             force=False,
             managed_files=set(),
             diagnostics=DiagnosticCollector(),
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
         assert result["commands"] == 1
@@ -794,6 +804,7 @@ class TestInputToArgumentsEndToEnd:
         result = integrate_package_primitives(
             pkg_info,
             temp_project,
+            skill_subset=None,
             targets=[KNOWN_TARGETS["claude"]],
             integrators=IntegratorBundle(
                 prompt=PromptIntegrator(),
@@ -806,6 +817,7 @@ class TestInputToArgumentsEndToEnd:
             force=False,
             managed_files=set(),
             diagnostics=DiagnosticCollector(),
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
 
         assert result["commands"] == 1
@@ -1438,6 +1450,7 @@ class TestCursorCommandIntegration:
             None,
             temp_project,
             managed_files=managed,
+            evidence=receipted_evidence(temp_project),
         )
 
         assert result["files_removed"] == 1
@@ -1496,7 +1509,7 @@ class TestCursorCommandPanelFindings:
                 ),
             },
         )
-        diag = DiagnosticCollector()
+        diag = DiagnosticCollector(verbose=True)
         CommandIntegrator().integrate_commands_for_target(
             KNOWN_TARGETS["cursor"],
             pkg_info,
@@ -1504,7 +1517,7 @@ class TestCursorCommandPanelFindings:
             diagnostics=diag,
         )
 
-        warnings = diag.by_category().get("warning", [])
+        warnings = diag.by_category().get("info", [])
         assert any(
             "frontmatter keys not supported" in w.message
             and "author" in w.message
@@ -1664,14 +1677,14 @@ class TestCursorCommandPanelFindings:
                 "x.prompt.md": ("---\ndescription: X\nauthor: alice\n---\nbody\n"),
             },
         )
-        diag = DiagnosticCollector()
+        diag = DiagnosticCollector(verbose=True)
         CommandIntegrator().integrate_commands_for_target(
             KNOWN_TARGETS["cursor"],
             pkg_info,
             temp_project,
             diagnostics=diag,
         )
-        warnings = diag.by_category().get("warning", [])
+        warnings = diag.by_category().get("info", [])
         msgs = [w.message for w in warnings]
         assert msgs, "expected at least one dropped-keys warning"
         assert all("shared command transformer" not in m for m in msgs), (

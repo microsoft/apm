@@ -7,15 +7,13 @@ Covers:
 - _check_skill_subset_consistency audit check
 """
 
-import textwrap
-from pathlib import Path
-from unittest.mock import Mock
-
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+
+pytestmark = pytest.mark.unit
 
 
 class TestSkillSubsetFilterTokens:
@@ -233,367 +231,9 @@ class TestLockedDependencySkillSubset:
 # ============================================================================
 
 
-class TestApmYmlWriter:
-    """Test set_skill_subset_for_entry helper."""
-
-    def _write_manifest(self, tmp_path: Path, content: str) -> Path:
-        manifest = tmp_path / "apm.yml"
-        manifest.write_text(textwrap.dedent(content))
-        return manifest
-
-    def test_string_promoted_to_dict_with_skills(self, tmp_path):
-        """String entry is promoted to dict form when skills are set."""
-        from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry
-        from apm_cli.utils.yaml_io import load_yaml
-
-        manifest = self._write_manifest(
-            tmp_path,
-            """\
-            dependencies:
-              apm:
-                - owner/repo#main
-            """,
-        )
-        result = set_skill_subset_for_entry(manifest, "owner/repo", ["alpha", "beta"])
-        assert result is True
-        data = load_yaml(manifest)
-        entry = data["dependencies"]["apm"][0]
-        assert isinstance(entry, dict)
-        assert entry["skills"] == ["alpha", "beta"]
-
-    def test_clear_skills_reverts_to_string(self, tmp_path):
-        """Setting subset=None clears skills and reverts to string form."""
-        from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry
-        from apm_cli.utils.yaml_io import load_yaml
-
-        manifest = self._write_manifest(
-            tmp_path,
-            """\
-            dependencies:
-              apm:
-                - git: owner/repo
-                  ref: main
-                  skills:
-                    - alpha
-                    - beta
-            """,
-        )
-        result = set_skill_subset_for_entry(manifest, "owner/repo", None)
-        assert result is True
-        data = load_yaml(manifest)
-        entry = data["dependencies"]["apm"][0]
-        # Should be string form (no skills, no insecure → string)
-        assert isinstance(entry, str)
-        assert "owner/repo" in entry
-
-    def test_non_matching_repo_not_modified(self, tmp_path):
-        """Non-matching repo_url leaves file unchanged."""
-        from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry
-
-        manifest = self._write_manifest(
-            tmp_path,
-            """\
-            dependencies:
-              apm:
-                - owner/other-repo#main
-            """,
-        )
-        result = set_skill_subset_for_entry(manifest, "owner/repo", ["alpha"])
-        assert result is False
-
-    def test_empty_deps_returns_false(self, tmp_path):
-        """No apm deps returns False."""
-        from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry
-
-        manifest = self._write_manifest(
-            tmp_path,
-            """\
-            dependencies: {}
-            """,
-        )
-        result = set_skill_subset_for_entry(manifest, "owner/repo", ["alpha"])
-        assert result is False
-
-    def test_flat_list_deps_rejected(self, tmp_path):
-        """Flat list dependencies raise ValueError in the writer."""
-        from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry
-
-        manifest = self._write_manifest(
-            tmp_path,
-            """\
-            dependencies:
-              - owner/repo#main
-            """,
-        )
-        with pytest.raises(ValueError, match=r"expected a mapping.*got list"):
-            set_skill_subset_for_entry(manifest, "owner/repo", ["alpha"])
-
-    def test_update_existing_dict_entry(self, tmp_path):
-        """Dict entry with existing skills: gets updated."""
-        from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry
-        from apm_cli.utils.yaml_io import load_yaml
-
-        manifest = self._write_manifest(
-            tmp_path,
-            """\
-            dependencies:
-              apm:
-                - git: owner/repo
-                  ref: main
-                  skills:
-                    - old-skill
-            """,
-        )
-        result = set_skill_subset_for_entry(manifest, "owner/repo", ["new-a", "new-b"])
-        assert result is True
-        data = load_yaml(manifest)
-        entry = data["dependencies"]["apm"][0]
-        assert entry["skills"] == ["new-a", "new-b"]
-
-    def test_subset_is_sorted_and_deduped(self, tmp_path):
-        """Writer sorts and dedupes the subset."""
-        from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry
-        from apm_cli.utils.yaml_io import load_yaml
-
-        manifest = self._write_manifest(
-            tmp_path,
-            """\
-            dependencies:
-              apm:
-                - owner/repo#main
-            """,
-        )
-        set_skill_subset_for_entry(manifest, "owner/repo", ["gamma", "alpha", "gamma"])
-        data = load_yaml(manifest)
-        entry = data["dependencies"]["apm"][0]
-        assert entry["skills"] == ["alpha", "gamma"]
-
-    def test_set_target_subset_promotes_string_entry(self, tmp_path):
-        """Target writer promotes string entries and persists sorted targets."""
-        from apm_cli.commands._apm_yml_writer import set_target_subset_for_entry
-        from apm_cli.utils.yaml_io import load_yaml
-
-        manifest = self._write_manifest(
-            tmp_path,
-            """\
-            dependencies:
-              apm:
-                - owner/repo#main
-            """,
-        )
-
-        assert set_target_subset_for_entry(manifest, "owner/repo", ["codex", "claude"]) is True
-        data = load_yaml(manifest)
-        entry = data["dependencies"]["apm"][0]
-        assert entry["git"] == "owner/repo"
-        assert entry["ref"] == "main"
-        assert entry["targets"] == ["claude", "codex"]
-
-    def test_set_target_subset_clears_field_and_preserves_skills(self, tmp_path):
-        """Clearing targets leaves existing skills untouched."""
-        from apm_cli.commands._apm_yml_writer import set_target_subset_for_entry
-        from apm_cli.utils.yaml_io import load_yaml
-
-        manifest = self._write_manifest(
-            tmp_path,
-            """\
-            dependencies:
-              apm:
-                - git: owner/repo
-                  skills:
-                    - reviewer
-                  targets:
-                    - codex
-            """,
-        )
-
-        assert set_target_subset_for_entry(manifest, "owner/repo", None) is True
-        data = load_yaml(manifest)
-        entry = data["dependencies"]["apm"][0]
-        assert entry["skills"] == ["reviewer"]
-        assert "targets" not in entry
-
-    def test_set_target_subset_preserves_existing_skills(self, tmp_path):
-        """Setting targets does not remove the existing skills field."""
-        from apm_cli.commands._apm_yml_writer import set_target_subset_for_entry
-        from apm_cli.utils.yaml_io import load_yaml
-
-        manifest = self._write_manifest(
-            tmp_path,
-            """\
-            dependencies:
-              apm:
-                - git: owner/repo
-                  skills:
-                    - reviewer
-            """,
-        )
-
-        assert set_target_subset_for_entry(manifest, "owner/repo", ["codex"]) is True
-        data = load_yaml(manifest)
-        entry = data["dependencies"]["apm"][0]
-        assert entry["skills"] == ["reviewer"]
-        assert entry["targets"] == ["codex"]
-
-    def test_no_dependencies_key_returns_false(self, tmp_path):
-        """Manifest with no 'dependencies' key at all returns False (line 30: deps_section={})."""
-        from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry
-
-        manifest = self._write_manifest(tmp_path, "name: test\n")
-        result = set_skill_subset_for_entry(manifest, "owner/repo", ["skill"])
-        assert result is False
-
-    def test_entry_matches_non_str_non_dict_returns_false(self):
-        """Non-str/non-dict entry in _entry_matches returns False (line 70)."""
-        from apm_cli.commands._apm_yml_writer import _entry_matches
-
-        assert _entry_matches(42, "owner/repo") is False
-        assert _entry_matches(None, "owner/repo") is False
-        assert _entry_matches(["owner/repo"], "owner/repo") is False
-
-    def test_entry_matches_parse_error_returns_false(self):
-        """ValueError from DependencyReference.parse returns False (lines 72-73)."""
-        from unittest.mock import patch
-
-        from apm_cli.commands._apm_yml_writer import _entry_matches
-
-        with patch(
-            "apm_cli.commands._apm_yml_writer.DependencyReference.parse",
-            side_effect=ValueError("bad ref"),
-        ):
-            result = _entry_matches("bad-ref-string", "owner/repo")
-        assert result is False
-
-    def test_apply_subset_non_str_non_dict_returns_entry_unchanged(self):
-        """Non-str/non-dict entry is returned unchanged from _apply_subset (line 84)."""
-        from apm_cli.commands._apm_yml_writer import _apply_subset
-
-        entry = 42
-        result = _apply_subset(entry, ["skill"])
-        assert result == entry
-
-        entry_list = ["owner/repo"]
-        result_list = _apply_subset(entry_list, None)
-        assert result_list == entry_list
-
-
 # ============================================================================
 # _check_skill_subset_consistency audit check
 # ============================================================================
-
-
-class TestSkillSubsetConsistencyCheck:
-    """Test _check_skill_subset_consistency audit check."""
-
-    def _make_manifest_mock(self, deps):
-        """Create a manifest mock with given dep_refs."""
-        manifest = Mock()
-        manifest.get_apm_dependencies.return_value = deps
-        manifest.get_dev_apm_dependencies.return_value = []
-        manifest.get_all_apm_dependencies.return_value = deps
-        return manifest
-
-    def _make_lock_mock(self, locked_deps):
-        """Use the real lookup owner so fixtures follow the lockfile contract."""
-        return LockFile(dependencies=locked_deps)
-
-    def _make_dep_ref(self, repo_url, skill_subset=None):
-        ref = Mock()
-        ref.get_unique_key.return_value = repo_url
-        ref.skill_subset = skill_subset
-        return ref
-
-    def _make_locked_dep(self, package_type="skill_bundle", skill_subset=None):
-        return LockedDependency(
-            repo_url="owner/repo",
-            package_type=package_type,
-            skill_subset=skill_subset or [],
-        )
-
-    def _package_with_skills(self, tmp_path: Path, *names: str) -> Path:
-        package = tmp_path / "pkg"
-        for name in names:
-            skill = package / "skills" / name
-            skill.mkdir(parents=True)
-            (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
-        return package
-
-    def test_consistent_passes(self, tmp_path: Path):
-        """Matching skill_subset → check passes."""
-        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
-
-        dep_ref = self._make_dep_ref("owner/repo", skill_subset=["alpha", "beta"])
-        dep_ref.get_install_path.return_value = self._package_with_skills(
-            tmp_path,
-            "alpha",
-            "beta",
-        )
-        locked = self._make_locked_dep(skill_subset=["alpha", "beta"])
-        manifest = self._make_manifest_mock([dep_ref])
-        lock = self._make_lock_mock({"owner/repo": locked})
-
-        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
-        assert result.passed is True
-
-    def test_mismatch_fails(self, tmp_path: Path):
-        """Different skill_subset → check fails."""
-        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
-
-        dep_ref = self._make_dep_ref("owner/repo", skill_subset=["alpha", "beta"])
-        locked = self._make_locked_dep(skill_subset=["alpha"])
-        manifest = self._make_manifest_mock([dep_ref])
-        lock = self._make_lock_mock({"owner/repo": locked})
-
-        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
-        assert result.passed is False
-        assert "mismatch" in result.message
-
-    def test_no_manifest_subset_vs_lock_subset_fails(self, tmp_path: Path):
-        """Manifest has no skills: but lockfile has skill_subset → fails."""
-        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
-
-        dep_ref = self._make_dep_ref("owner/repo", skill_subset=None)
-        locked = self._make_locked_dep(skill_subset=["alpha"])
-        manifest = self._make_manifest_mock([dep_ref])
-        lock = self._make_lock_mock({"owner/repo": locked})
-
-        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
-        assert result.passed is False
-
-    def test_marketplace_plugin_subset_mismatch_fails(self, tmp_path: Path):
-        """Plugin package subsets are checked because CLI --skill supports them."""
-        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
-
-        dep_ref = self._make_dep_ref("owner/repo", skill_subset=["alpha"])
-        locked = self._make_locked_dep(package_type="marketplace_plugin", skill_subset=[])
-        manifest = self._make_manifest_mock([dep_ref])
-        lock = self._make_lock_mock({"owner/repo": locked})
-
-        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
-        assert result.passed is False
-
-    def test_missing_from_lock_skipped(self, tmp_path: Path):
-        """Deps not in lockfile are skipped (other checks catch this)."""
-        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
-
-        dep_ref = self._make_dep_ref("owner/repo", skill_subset=["alpha"])
-        manifest = self._make_manifest_mock([dep_ref])
-        lock = self._make_lock_mock({})
-
-        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
-        assert result.passed is True
-
-    def test_both_empty_passes(self, tmp_path: Path):
-        """Both manifest and lockfile with no skill_subset → passes."""
-        from apm_cli.policy.ci_checks import _check_skill_subset_consistency
-
-        dep_ref = self._make_dep_ref("owner/repo", skill_subset=None)
-        locked = self._make_locked_dep(skill_subset=[])
-        manifest = self._make_manifest_mock([dep_ref])
-        lock = self._make_lock_mock({"owner/repo": locked})
-
-        result = _check_skill_subset_consistency(manifest, lock, tmp_path)
-        assert result.passed is True
 
 
 # ============================================================================
@@ -840,3 +480,75 @@ class TestResolvePackageReferencesPreservesRegistryForm:
         assert any(
             isinstance(dep, dict) and dep.get("id") == "testorg/demo-pkg" for dep in current_deps
         )
+
+
+# ---------------------------------------------------------------------------
+# Unit: --skill overlay on an exact skills x targets pairing (#3763)
+# ---------------------------------------------------------------------------
+
+
+class TestCliOverlayKeepsExactPairing:
+    """The CLI overlay is one more edge over the dependency's targets (req-rs-018)."""
+
+    @staticmethod
+    def _pairing():
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        return merge_edge_pairings([(["alpha"], ["claude"]), (["gamma"], ["copilot"])])
+
+    def _dep(self):
+        from types import SimpleNamespace
+
+        pairing = self._pairing()
+        return SimpleNamespace(
+            skill_subset=list(pairing.skill_subset),
+            target_subset=list(pairing.target_subset),
+            subset_pairings=pairing,
+        )
+
+    def test_deploy_overlay_adds_skill_to_every_selected_target_only(self):
+        from types import SimpleNamespace
+
+        from apm_cli.install.package_resolution import effective_dependency_selection
+
+        ctx = SimpleNamespace(skill_subset=("delta",), skill_subset_from_cli=True)
+        selection = effective_dependency_selection(self._dep(), ctx)
+        assert selection.skill_subset == ("alpha", "delta", "gamma")
+        assert selection.skill_pairing.skills_for_target("claude") == ("alpha", "delta")
+        assert selection.skill_pairing.skills_for_target("copilot") == ("delta", "gamma")
+        assert not selection.skill_pairing.selects_target("cursor")
+
+    def test_star_overlay_drops_pairing_and_deploys_all(self):
+        from types import SimpleNamespace
+
+        from apm_cli.install.package_resolution import effective_dependency_selection
+
+        ctx = SimpleNamespace(skill_subset=(), skill_subset_from_cli=True)
+        selection = effective_dependency_selection(self._dep(), ctx)
+        assert selection.skill_subset is None
+        assert selection.skill_pairing is None
+
+    def test_lockfile_overlay_records_the_same_widened_pairing(self):
+        from types import SimpleNamespace
+
+        from apm_cli.deps.lockfile import LockedDependency
+        from apm_cli.install.phases.lockfile import LockfileBuilder
+
+        pairing = self._pairing()
+        entry = LockedDependency(
+            repo_url="owner/bundle",
+            package_type="skill_bundle",
+            skill_subset=list(pairing.skill_subset),
+            target_subset=list(pairing.target_subset),
+            subset_pairings=pairing.to_lock_records(),
+        )
+        lockfile = LockFile(dependencies={entry.get_unique_key(): entry})
+        ctx = SimpleNamespace(skill_subset=("delta",), skill_subset_from_cli=True)
+        LockfileBuilder(ctx)._attach_skill_subset_override(lockfile)
+
+        assert entry.skill_subset == ["alpha", "delta", "gamma"]
+        assert entry.selection() == pairing.with_edge(["delta"], ["claude", "copilot"])
+        assert entry.subset_pairings == [
+            {"skills": ["alpha", "delta"], "targets": ["claude"]},
+            {"skills": ["delta", "gamma"], "targets": ["copilot"]},
+        ]

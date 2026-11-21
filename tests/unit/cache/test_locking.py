@@ -3,12 +3,16 @@
 import threading
 from pathlib import Path
 
+import pytest
+
 from apm_cli.cache.locking import (
     atomic_land,
     cleanup_incomplete,
     shard_lock,
     stage_path,
 )
+
+pytestmark = pytest.mark.component
 
 
 class TestShardLock:
@@ -18,12 +22,15 @@ class TestShardLock:
         shard = tmp_path / "abc123"
         lock = shard_lock(shard)
         assert lock.lock_file == str(shard.with_suffix(".lock"))
+        with lock:
+            assert shard.with_suffix(".lock").exists()
 
     def test_lock_can_be_acquired(self, tmp_path: Path) -> None:
         shard = tmp_path / "abc123"
         lock = shard_lock(shard, timeout=5)
         with lock:
             assert lock.is_locked
+            assert Path(lock.lock_file).exists()
 
     def test_per_shard_isolation(self, tmp_path: Path) -> None:
         """Lock on shard A does not block shard B."""
@@ -37,6 +44,8 @@ class TestShardLock:
             with lock_b:
                 assert lock_a.is_locked
                 assert lock_b.is_locked
+                assert shard_a.with_suffix(".lock").exists()
+                assert shard_b.with_suffix(".lock").exists()
 
 
 class TestStagePath:
@@ -49,16 +58,19 @@ class TestStagePath:
         staged = stage_path(final)
         assert staged.name != final.name
         assert staged.name.startswith(final.name + ".inc.")
+        assert not staged.exists()
 
     def test_same_parent_as_final(self, tmp_path: Path) -> None:
         final = tmp_path / "final_dir"
         staged = stage_path(final)
         assert staged.parent == final.parent
+        assert not staged.exists()
 
     def test_contains_incomplete_marker(self, tmp_path: Path) -> None:
         final = tmp_path / "final_dir"
         staged = stage_path(final)
         assert ".inc." in staged.name
+        assert not staged.exists()
 
 
 class TestAtomicLand:
@@ -146,7 +158,9 @@ class TestCleanupIncomplete:
         (tmp_path / "valid_shard").mkdir()
         removed = cleanup_incomplete(tmp_path)
         assert removed == 0
+        assert (tmp_path / "valid_shard").is_dir()
 
     def test_nonexistent_parent(self, tmp_path: Path) -> None:
         removed = cleanup_incomplete(tmp_path / "nonexistent")
         assert removed == 0
+        assert not (tmp_path / "nonexistent").exists()

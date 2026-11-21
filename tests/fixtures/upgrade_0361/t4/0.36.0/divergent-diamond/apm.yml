@@ -1,0 +1,10 @@
+name: consumer
+version: 0.1.0
+description: Selection fixture package consumer
+author: APM Test
+dependencies:
+  apm:
+  - fixture-org/pkg-a
+  - fixture-org/pkg-b
+targets:
+- copilot

@@ -4,7 +4,7 @@ description: >-
   Expert on CLI output UX, CommandLogger patterns, and diagnostic rendering in
   APM. Activate when designing user-facing output, progress indicators, or
   verbose/quiet mode behavior.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # CLI Logging Expert

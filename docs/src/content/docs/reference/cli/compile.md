@@ -38,7 +38,7 @@ chatmode to prepend via `--chatmode`). Other primitive types --
 prompts, skills, agents, hooks, commands, MCP -- are deployed by
 `apm install` directly into the harness directories that consume them
 and are not touched by `apm compile`'s own deployment step. See
-[Primitives and targets](../../../concepts/primitives-and-targets/)
+[Primitives and targets](../../targets-matrix/)
 for the full reach map.
 
 After a successful non-dry-run compile, APM also reconciles deployed-file
@@ -46,8 +46,10 @@ ownership with the current `targets:` declaration. If the declared target set
 contracts, artifacts and lockfile entries owned by the removed target are
 cleaned up with the same hash and user-edit safeguards as `apm install` --
 this also includes merge-hook config/sidecar entries (see
-[Hooks and commands](../../../producer/author-primitives/hooks-and-commands/#hooks)
+[Hooks and commands](../../../producer/write-primitives/#hooks-and-commands)
 for what those files are) even though compile does not itself *deploy* hooks.
+Because this step can rewrite `apm.lock.yaml`, a non-dry-run compile refuses a
+lockfile written by a newer APM before it changes any file.
 
 **When you actually need it:** compile is **optional for the
 `copilot` target** -- GitHub Copilot natively reads
@@ -69,14 +71,14 @@ Use [`apm targets`](../targets/) to preview what auto-detection
 resolves to before compiling.
 
 Before it reads sources, `apm compile` fires the `pre-compile`
-[lifecycle event](../../../enterprise/lifecycle-scripts/#generating-sources-before-compile),
+[lifecycle event](../../../enterprise/control-executables/#lifecycle-scripts),
 so a trusted project script can generate instructions under `.apm/` first.
 It does not fire with `--dry-run`, `--validate`, `--watch`, `--root`, or
 `--global`.
 
 The compiled output is scanned for hidden Unicode before any file is
 written. Critical findings cause the command to exit non-zero. See
-[Drift and secure by default](../../../consumer/drift-and-secure-by-default/).
+[Drift and secure by default](../../../enterprise/drift-detection/).
 
 ## Options
 
@@ -87,20 +89,22 @@ written. Critical findings cause the command to exit non-zero. See
 | `-t, --target VALUE` | Target(s) to compile. Comma-separated. The help text derives its values from the same catalog used for validation, including `intellij`. |
 | `--all` | Compile for all canonical targets. Equivalent to `--target all` and mutually exclusive with `--target`. Preferred form. |
 
-`vscode` and `agents` are accepted as deprecated aliases for `copilot`
-and emit a one-line warning. `--target all` also emits a deprecation
-warning -- prefer `--all`.
+`vscode` is a deprecated alias for `copilot` and prints a warning naming
+the replacement; `agents` also selects `copilot`. `--target all` also emits a
+deprecation warning -- prefer `--all`.
 
 Every accepted project target is also accepted by `compile`. `grok-build`
-produces `AGENTS.md`. Targets without root-context output, including
-`agent-skills`, `grok-bot`, and the experimental `grok-cloud` target, are
-successful no-ops.
+produces `AGENTS.md`. Targets without root-context output (`agent-skills`,
+`grok-bot`, and the experimental `grok-cloud`, `openclaw`, `copilot-app`, and
+`copilot-cowork`) are successful no-ops that write nothing. An experimental
+target whose flag is off also prints the `apm experimental enable` hint. See
+[Output layout per target](#output-layout-per-target).
 `antigravity`, `hermes`, and `grok-bot` are explicit-only, while `intellij`
 is MCP-only.
 None is included in `all`.
 For `intellij`, file primitives use the Copilot profile and produce `AGENTS.md`;
 IntelliJ-specific integration remains MCP-only. Use `apm install` or
-`apm deps update` when you want shared `.agents/skills/` output.
+`apm update` when you want shared `.agents/skills/` output.
 
 ### Output control
 
@@ -119,8 +123,9 @@ Keep them on the same filesystem drive.
 For frozen replay, see [install's deploy location](../install/#deploy-location).
 
 Project compilation protects root `AGENTS.md`, `CLAUDE.md`, and
-`.github/copilot-instructions.md` files, including
-destinations selected with `--root`. If an existing root file has no
+`.github/copilot-instructions.md` files, and distributed `AGENTS.md` and
+`CLAUDE.md` outputs in subdirectories, including
+destinations selected with `--root`. If an existing file has no
 exact APM-generated marker line among its first five lines, full-file compilation
 retains it and prints a warning. Live compiles leave the file unchanged; dry
 runs report that it would be retained without writing it. Delete or rename that
@@ -154,8 +159,8 @@ without a valid Build ID, hand-authored files, and symbolic links are retained.
 | `--no-links` | Skip markdown link resolution. |
 | `--with-constitution` / `--no-constitution` | Include or omit the Spec Kit `memory/constitution.md` block at the top. Default: included. When disabled, an existing block is preserved but not regenerated. |
 | `--local-only` | Ignore `apm_modules/`; compile only `.apm/` primitives. |
-| `--force-instructions` (alias: `--no-dedup`) | Include instructions in `CLAUDE.md`, `AGENTS.md`, and `.github/copilot-instructions.md` even when `.claude/rules/`, `.github/instructions/`, or `.agents/rules/` already covers that content (overrides the default deduplication). `--no-dedup` is a hidden backward-compatible alias for `--force-instructions`. |
-| `--legacy-skill-paths` | Accepted for compatibility; skill deployment happens in `apm install` / `apm deps update`, not `apm compile`. |
+| `--force-instructions` / `--no-force-instructions` (alias: `--no-dedup`) | Include instructions in `CLAUDE.md`, `AGENTS.md`, and `.github/copilot-instructions.md` even when `.claude/rules/`, `.github/instructions/`, or `.agents/rules/` already covers that content (overrides the default deduplication). `--no-dedup` is a hidden backward-compatible alias for `--force-instructions`. `--no-force-instructions` (the default) keeps deduplication on. |
+| `--legacy-skill-paths` | Accepted for compatibility; skill deployment happens in `apm install` / `apm update`, not `apm compile`. |
 
 ### Modes
 
@@ -173,7 +178,7 @@ globally installed instruction packages -- one command, no per-tool setup.
 
 | Flag | Description |
 |------|-------------|
-| `-g, --global` | Compile user-scope root context files from `$APM_HOME/apm_modules` (default `~/.apm/apm_modules`). Writes targets declared by `target:` or `targets:` in `$APM_HOME/apm.yml`, or every supported user-scope target when neither field is declared. `APM_HOME` selects the input metadata only; compiled files use each target's home variable or the operating-system home. Not valid with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`. Exits non-zero if the user-scope modules directory does not exist. |
+| `-g, --global` | Compile user-scope root context files from `$APM_HOME/apm_modules` (default `~/.apm/apm_modules`). Writes targets declared by `targets:` (or the deprecated singular `target:`) in `$APM_HOME/apm.yml`, or every supported user-scope target when neither field is declared. `APM_HOME` selects the input metadata only; compiled files use each target's home variable or the operating-system home. Not valid with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`. Exits non-zero if the user-scope modules directory does not exist. |
 
 `apm compile --global` is explicit. `apm install -g` does not run it; instead,
 when global instructions land on a root-context-only target, install prints a
@@ -266,7 +271,7 @@ cloud agents, and contributors who do not run `apm compile` locally
 and rely on the checked-in artifacts.
 
 For the full list of accepted `targets:` values, see
-[manifest schema -- targets](../../../reference/manifest-schema/#36-target).
+[manifest schema -- targets](../../../reference/manifest-schema/#36-target-and-targets).
 
 ## Examples
 
@@ -338,7 +343,8 @@ re-runs compilation automatically.
 
 - Watched directories (when present): `.apm/`, `.github/instructions/`,
   `.github/agents/`.
-- Triggers on changes to `.md` files and `apm.yml`.
+- Triggers on changes to primitive files (such as `*.instructions.md`,
+  `*.agent.md`, `SKILL.md`) and `apm.yml`; other `.md` edits are ignored.
 - Editing `apm.yml`'s `target:` / `targets:` mid-session takes effect on
   the next file event; no need to restart the watcher. The CLI `--target`
   flag, when passed to `apm compile --watch`, still outranks `apm.yml`.
@@ -374,15 +380,15 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `cursor` | `AGENTS.md` |
 | `codex` | `AGENTS.md` |
 | `opencode` | `AGENTS.md` |
-| `gemini` | `AGENTS.md`, `GEMINI.md` |
+| `gemini` | `AGENTS.md`, `GEMINI.md` (a stub that imports `AGENTS.md`; not written, and an APM stub is removed, when there is no `AGENTS.md`) |
 | `antigravity` | `AGENTS.md` |
 | `windsurf` | `AGENTS.md` |
 | `kiro` | `AGENTS.md` |
 | `hermes` | `AGENTS.md` |
 | `intellij` | `AGENTS.md` |
 | `agent-skills` | none |
-| `grok-cloud` | none |
 | `grok-bot` | none |
+| `grok-cloud`, `openclaw`, `copilot-app`, `copilot-cowork` | none |
 | `all` | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` |
 
 `.github/copilot-instructions.md` is only managed by APM when its first
@@ -423,7 +429,7 @@ tests/AGENTS.md      # instructions scoped to tests/**
 Each agent harness then loads only the file nearest the code it is
 working in. If you did not expect new `AGENTS.md` / `CLAUDE.md` files
 in subdirectories, this is the distributed default in effect; see
-[Where compiled context files land](../../../concepts/primitives-and-targets/#where-compiled-context-files-land)
+[Where compiled context files land](../../../consumer/choose-harnesses/#compiled-outputs)
 for the rationale, or pass `--single-agents` for a single-file
 output.
 
@@ -445,6 +451,6 @@ Hand-authored context files without the marker still count.
 
 - [`apm install`](../install/) -- fetches dependencies into `apm_modules/` so `compile` can read them.
 - [`apm targets`](../targets/) -- shows what targets resolve to in the current project.
-- [Concepts: primitives and targets](../../../concepts/primitives-and-targets/)
-- [Concepts: lifecycle](../../../concepts/lifecycle/)
-- [Producer: compile](../../../producer/compile/) -- author workflow that calls `compile` with packaging-specific defaults.
+- [Concepts: primitives and targets](../../targets-matrix/)
+- [Concepts: lifecycle](../../../concepts/how-apm-works/)
+- [Producer: compile](../../../consumer/choose-harnesses/#compiled-outputs) -- author workflow that calls `compile` with packaging-specific defaults.

@@ -14,6 +14,8 @@ from apm_cli.marketplace.git_stderr import (
     translate_git_stderr,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # AUTH classification
 # ---------------------------------------------------------------------------
@@ -234,7 +236,11 @@ class TestUnknownFallback:
 
     def test_unknown_hint(self) -> None:
         result = translate_git_stderr("kaboom", operation="merge")
-        assert result.hint == "Git failed during merge. See raw stderr above."
+        assert result.hint == (
+            "Git failed during merge. Check the remote URL, network access and "
+            "credentials, then retry."
+        )
+        assert "stderr above" not in result.hint
 
     def test_empty_stderr(self) -> None:
         result = translate_git_stderr("")

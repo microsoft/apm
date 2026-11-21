@@ -12,6 +12,7 @@ from apm_cli.install.services import IntegratorBundle, integrate_package_primiti
 from apm_cli.integration.skill_support import SkillIntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 pytestmark = pytest.mark.component
@@ -56,6 +57,7 @@ def test_receipt_requires_both_public_completion_witnesses(
     actual = integrate_package_primitives(
         package,
         tmp_path,
+        skill_subset=None,
         targets=[KNOWN_TARGETS["claude"], KNOWN_TARGETS["codex"]],
         dep_target_subset=["codex"],
         integrators=bundle,
@@ -63,6 +65,7 @@ def test_receipt_requires_both_public_completion_witnesses(
         managed_files=set(),
         diagnostics=diagnostics,
         package_name="example/dependency",
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
     assert create_plan.call_args.args[1] == [KNOWN_TARGETS["codex"]]
     assert skill.integrate_package_skill.call_args.kwargs["source_plan"] is plan
@@ -84,12 +87,14 @@ def test_receipt_requires_both_public_completion_witnesses(
     refused = integrate_package_primitives(
         package,
         tmp_path,
+        skill_subset=None,
         targets=[],
         integrators=bundle,
         force=False,
         managed_files=set(),
         diagnostics=diagnostics,
         package_name="example/dependency",
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
     assert "completed_reintegration" not in refused
     assert skill.integrate_package_skill.call_count == 1

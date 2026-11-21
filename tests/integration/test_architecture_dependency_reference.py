@@ -212,7 +212,7 @@ def test_install_phase_materialization_guard_rejects_alias_path_bypass(
 @pytest.mark.parametrize(
     ("old", "new"),
     [
-        ("is_full_revision_pin(reference)", "False"),
+        ("revision_pin_mismatch(dep.reference, locked_dep)", "None"),
         ("detect_ref_change(dep, locked_dep)", "False"),
         (
             "if detect_ref_change(dep, locked_dep):",
@@ -236,5 +236,83 @@ def test_frozen_manifest_identity_guard_rejects_helper_bypass(old: str, new: str
         violation.rule_id == RULE_ID
         and "Frozen manifest drift checks must route through full-SHA comparison and drift.detect_ref_change"
         in violation.message
+        for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "before", "after"),
+    [
+        (
+            "src/apm_cli/models/dependency/materialization.py",
+            "def nested_materialization_pairs(",
+            "def nested_materialization_pairs_disabled(",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "nested = nested_materialization_pairs(",
+            "nested = list(",
+        ),
+    ],
+)
+def test_nested_root_declarations_route_through_materialization_owner(
+    path: str, before: str, after: str
+) -> None:
+    """#3699: dropping the nested-directory rejection trips the identity guard."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    mutated = source.replace(before, after, 1)
+    assert mutated != source
+
+    report = run_selected_rules(ROOT, (RULE_ID,), source_overrides={path: mutated})
+
+    assert any(
+        violation.rule_id == RULE_ID and "nested_materialization_pairs" in violation.message
+        for violation in report.violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "before", "after"),
+    [
+        (
+            "src/apm_cli/models/dependency/materialization.py",
+            "class MaterializationSlots:",
+            "class MaterializationSlotsDisabled:",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "slots = MaterializationSlots(modules_dir)",
+            "slots = None",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "if self._reject_shared_slots(tree, slots, ((item[1], item[2])",
+            "if self._skip_shared_slots(tree, slots, ((item[1], item[2])",
+        ),
+        (
+            "src/apm_cli/deps/apm_resolver.py",
+            "collision = slots.claim(dep_ref, parent)",
+            "collision = None",
+        ),
+        (
+            "src/apm_cli/models/dependency/replacement.py",
+            "        identity = dep.get_identity()\n",
+            "        identity = dep.get_identity()\n"
+            "        self._slots.setdefault(dep.get_install_path(modules_dir).as_posix(), identity)\n",
+        ),
+    ],
+)
+def test_shared_install_directories_route_through_materialization_owner(
+    path: str, before: str, after: str
+) -> None:
+    """#3696: dropping the shared-directory rejection trips the identity guard."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    mutated = source.replace(before, after, 1)
+    assert mutated != source
+
+    report = run_selected_rules(ROOT, (RULE_ID,), source_overrides={path: mutated})
+
+    assert any(
+        violation.rule_id == RULE_ID and "MaterializationSlots" in violation.message
         for violation in report.violations
     )

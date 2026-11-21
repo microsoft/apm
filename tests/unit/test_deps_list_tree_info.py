@@ -8,11 +8,13 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.commands.deps.cli import _deps_list_source_label
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+pytestmark = pytest.mark.component
 
 
 def _force_rich_fallback():
@@ -80,18 +82,6 @@ class _DepsCmdBase:
                 os.chdir(self.original_dir)
 
 
-def test_deps_list_source_label_mapping():
-    """Source labels follow host class: local, ADO, GitLab, default GitHub bucket."""
-    assert _deps_list_source_label(None, is_local=True) == "local"
-    assert _deps_list_source_label(None, lockfile_source="local") == "local"
-    assert _deps_list_source_label(None, lockfile_source="registry") == "registry"
-    assert _deps_list_source_label("gitlab.com") == "gitlab"
-    assert _deps_list_source_label("dev.azure.com") == "azure-devops"
-    assert _deps_list_source_label("github.com") == "github"
-    # GHES / generic enterprise: not GitLab-class → github bucket for this column
-    assert _deps_list_source_label("ghes.example.org") == "github"
-
-
 class TestDepsListCommand(_DepsCmdBase):
     """Tests for apm deps list."""
 
@@ -119,6 +109,20 @@ class TestDepsListCommand(_DepsCmdBase):
             with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
                 result = self.runner.invoke(cli, ["deps", "list"])
         assert result.exit_code == 0
+        assert "myorg/myrepo" in result.output
+
+    def test_list_with_project_self_entry_in_lock(self):
+        """The lock's virtual self-entry (own .apm/ content) never breaks list (#3994)."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "myorg", "myrepo")
+            (tmp / "apm.lock.yaml").write_text(
+                "lockfile_version: '1'\ndependencies: []\n"
+                "local_deployed_files:\n- .claude/rules/a.md\n",
+                encoding="utf-8",
+            )
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
+                result = self.runner.invoke(cli, ["deps", "list"])
+        assert result.exit_code == 0, result.output
         assert "myorg/myrepo" in result.output
 
     def test_list_global_flag(self):
@@ -239,6 +243,9 @@ class TestDepsListCommand(_DepsCmdBase):
                 "safeorg/saferepo": secure_dep,
                 "insecureorg/insecurerepo": insecure_dep,
             }
+            mock_lockfile.get_package_dependencies.return_value = list(
+                mock_lockfile.dependencies.values()
+            )
 
             mock_lf_path = MagicMock()
             mock_lf_path.exists.return_value = True
@@ -270,6 +277,9 @@ class TestDepsListCommand(_DepsCmdBase):
             mock_lockfile.dependencies = {
                 "childorg/childrepo": insecure_dep,
             }
+            mock_lockfile.get_package_dependencies.return_value = list(
+                mock_lockfile.dependencies.values()
+            )
 
             mock_lf_path = MagicMock()
             mock_lf_path.exists.return_value = True
@@ -300,6 +310,9 @@ class TestDepsListCommand(_DepsCmdBase):
             mock_lockfile.dependencies = {
                 "safeorg/saferepo": secure_dep,
             }
+            mock_lockfile.get_package_dependencies.return_value = list(
+                mock_lockfile.dependencies.values()
+            )
 
             mock_lf_path = MagicMock()
             mock_lf_path.exists.return_value = True
@@ -374,6 +387,26 @@ class TestDepsListCommand(_DepsCmdBase):
         assert "acme/coding-standards" in out
         assert "gitlab" in out
         assert "orphaned" not in out.lower()
+
+    def test_list_labels_unrecognized_host_source_git_not_github(self, monkeypatch):
+        """RA-019: a package from a non-GitHub host shows Source ``git`` on stdout."""
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "acme", "tools", version="1.0.0")
+            (tmp / "apm.yml").write_text(
+                "name: proj\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - git: https://git.example.invalid/acme/tools.git\n",
+                encoding="utf-8",
+            )
+            # Project scope reads the cwd, which _chdir_tmp already points at tmp.
+            with _force_rich_fallback():
+                result = self.runner.invoke(cli, ["deps", "list"])
+        assert result.exit_code == 0, result.output
+        rows = [line for line in result.stdout.splitlines() if "acme/tools" in line]
+        assert len(rows) == 1, result.stdout
+        assert rows[0].split()[2] == "git", rows[0]
+        assert "github" not in rows[0], rows[0]
 
     def test_list_shows_gitlab_source_from_lockfile_host(self):
         """Lockfile-only dep with ``host: gitlab.com`` maps Source to ``gitlab``."""
@@ -503,7 +536,7 @@ class TestDepsTreeCommand(_DepsCmdBase):
             lock = LockFile(
                 lockfile_version="1",
                 generated_at="2025-01-01T00:00:00+00:00",
-                apm_version="0.0.0-test",
+                apm_version="0.0.0",
             )
             lock.add_dependency(
                 LockedDependency(
@@ -538,7 +571,7 @@ class TestDepsTreeCommand(_DepsCmdBase):
             lock = LockFile(
                 lockfile_version="1",
                 generated_at="2025-01-01T00:00:00+00:00",
-                apm_version="0.0.0-test",
+                apm_version="0.0.0",
             )
             for dependency in (
                 LockedDependency(repo_url=repo_url, depth=1, version="1.0.0"),

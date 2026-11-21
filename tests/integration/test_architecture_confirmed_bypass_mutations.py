@@ -12,7 +12,6 @@ from scripts.architecture_linter.runner import run_selected_rules
 
 pytestmark = [
     pytest.mark.component,
-    pytest.mark.xdist_group(name="architecture_confirmed_bypass_mutations"),
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,6 +31,27 @@ class BypassMutation:
 
 BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
     BypassMutation(
+        name="local-bundle-copies-markdown-into-codex-toml",
+        rule_id="install-deployment-bundle-native-layout",
+        path="src/apm_cli/install/local_bundle_paths.py",
+        old='_RENDERED_PLUGIN_FORMAT_IDS = frozenset({"codex_agent"})',
+        new="_RENDERED_PLUGIN_FORMAT_IDS = frozenset()",
+    ),
+    BypassMutation(
+        name="local-bundle-loop-skips-codex-agent-render",
+        rule_id="install-deployment-bundle-native-layout",
+        path="src/apm_cli/install/services.py",
+        old="if _bundle_render_format(",
+        new="if False and _bundle_render_format(",
+    ),
+    BypassMutation(
+        name="local-bundle-codex-agent-writes-outside-integrator",
+        rule_id="install-deployment-bundle-native-layout",
+        path="src/apm_cli/install/local_bundle_agents.py",
+        old="        if dry_run:\n",
+        new="        dest.write_text(rendered)\n        if dry_run:\n",
+    ),
+    BypassMutation(
         name="target-context-exemption",
         rule_id="registry_delegation.install_target_selection",
         path="src/apm_cli/commands/install.py",
@@ -39,6 +59,13 @@ BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
             "\n\ndef _review_rogue_target_context(ctx):\n"
             f"    return dict(target_context=(ctx.target,))  # {EXEMPT}\n"
         ),
+    ),
+    BypassMutation(
+        name="local-bundle-ignores-manifest-targets",
+        rule_id="registry_delegation.install_target_selection",
+        path="src/apm_cli/install/local_bundle_handler.py",
+        old="explicit = resolve_manifest_target_decision(",
+        new="explicit = target or _ignore_manifest_targets(",
     ),
     BypassMutation(
         name="symlink-owner-exemption",
@@ -109,6 +136,13 @@ BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
             'else STATUS_SYMBOLS["error"]'
         ),
         new="        return check.symbol",
+    ),
+    BypassMutation(
+        name="policy-discovery-stdlib-warning",
+        rule_id="registry_delegation.output_diagnostics",
+        path="src/apm_cli/policy/discovery.py",
+        old="masked_private_hint = _masked_private_policy_hint(org, candidate_repo)",
+        new='logger.warning("%s", _masked_private_policy_hint(org, candidate_repo))',
     ),
     BypassMutation(
         name="agent-plugin-duplicate-exemption",

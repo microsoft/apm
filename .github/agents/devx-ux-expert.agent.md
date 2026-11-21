@@ -5,7 +5,7 @@ description: >-
   (npm, pip, cargo, brew). Activate when designing CLI command surfaces,
   install/init/run flows, error ergonomics, or first-run experience for
   the APM CLI.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # Developer Tooling UX Expert

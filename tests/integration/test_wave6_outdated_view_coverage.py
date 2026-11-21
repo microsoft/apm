@@ -27,7 +27,7 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
-from tests.integration.conftest import _reset_console_state
+from tests.conftest import _reset_console_state
 
 # ---------------------------------------------------------------------------
 # Helpers

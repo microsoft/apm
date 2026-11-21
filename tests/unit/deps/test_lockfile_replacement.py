@@ -21,6 +21,8 @@ from apm_cli.models.dependency.replacement import (
     replacement_rules_from_dicts,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestLockfileReplacementSerialization:
     """Lock-file ``replacements:`` section serialization."""

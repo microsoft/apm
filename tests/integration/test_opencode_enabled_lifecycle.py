@@ -35,7 +35,6 @@ def test_opencode_enabled_install_reinstall_and_scope(
     project = isolated.work_root / "project"
     project.mkdir()
     (project / ".opencode").mkdir()
-    (project / ".vscode").mkdir()
     config_path = project / "opencode.json"
     user_server = {"type": "local", "command": ["user-server"], "enabled": False}
     config_path.write_text(
@@ -90,7 +89,7 @@ def test_opencode_enabled_install_reinstall_and_scope(
         manifest = {
             "name": "enabled-lifecycle",
             "version": "1.0.0",
-            "targets": ["opencode", "vscode"],
+            "targets": ["opencode", "copilot"],
             "dependencies": {"apm": [], "mcp": dependencies},
         }
         LockFile().write(project / "apm.lock.yaml")
@@ -135,7 +134,7 @@ def test_opencode_enabled_install_reinstall_and_scope(
             assert rendered["mcp"]["registry-local"]["type"] == "local"
             assert rendered["mcp"]["remote"]["type"] == "remote"
             assert rendered["mcp"]["registry-remote"]["type"] == "remote"
-            other_target = (project / ".vscode" / "mcp.json").read_bytes()
+            other_target = (project / ".mcp.json").read_bytes()
             if previous_other_target is not None:
                 assert other_target == previous_other_target
             previous_other_target = other_target
@@ -143,15 +142,15 @@ def test_opencode_enabled_install_reinstall_and_scope(
         opencode_before = config_path.read_bytes()
         before = LifecycleStateSnapshot.capture(
             project,
-            targets=("opencode", "vscode"),
-            config_paths=(PurePosixPath("opencode.json"), PurePosixPath(".vscode/mcp.json")),
+            targets=("opencode", "copilot"),
+            config_paths=(PurePosixPath("opencode.json"), PurePosixPath(".mcp.json")),
         )
         result = runner.run(("install", "--no-policy"), cwd=project, env=environment)
         assert result.returncode == 0, result.stdout + result.stderr
         after = LifecycleStateSnapshot.capture(
             project,
-            targets=("opencode", "vscode"),
-            config_paths=(PurePosixPath("opencode.json"), PurePosixPath(".vscode/mcp.json")),
+            targets=("opencode", "copilot"),
+            config_paths=(PurePosixPath("opencode.json"), PurePosixPath(".mcp.json")),
         )
         assert after.semantic_bytes == before.semantic_bytes
         assert config_path.read_bytes() == opencode_before
@@ -218,7 +217,7 @@ def test_opencode_enabled_install_reinstall_and_scope(
 
         other_project = isolated.work_root / "without-opencode"
         other_project.mkdir()
-        manifest["targets"] = ["vscode"]
+        manifest["targets"] = ["copilot"]
         manifest["dependencies"]["mcp"] = [dependencies[0]]
         dependencies[0]["enabled"] = False
         dump_yaml(manifest, other_project / "apm.yml")
@@ -230,6 +229,6 @@ def test_opencode_enabled_install_reinstall_and_scope(
             scenario_id="opencode-no-opt-in",
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert (other_project / ".vscode" / "mcp.json").exists()
+        assert (other_project / ".mcp.json").exists()
         assert not (other_project / "opencode.json").exists()
         assert not (other_project / ".opencode").exists()

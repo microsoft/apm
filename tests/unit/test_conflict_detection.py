@@ -3,8 +3,12 @@
 import unittest
 from unittest.mock import Mock, patch  # noqa: F401
 
+import pytest
+
 from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.core.conflict_detector import MCPConflictDetector
+
+pytestmark = pytest.mark.unit
 
 
 class TestMCPConflictDetection(unittest.TestCase):

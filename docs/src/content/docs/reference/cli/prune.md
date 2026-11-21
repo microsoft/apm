@@ -7,7 +7,8 @@ sidebar:
 
 Remove installed packages from `apm_modules/` that are neither declared in
 `apm.yml` nor retained as transitive nodes in `apm.lock.yaml`. The command also
-removes their deployed integration files and updates the lockfile.
+removes their deployed integration files, listing each removed path, and
+updates the lockfile.
 
 ## Synopsis
 
@@ -36,6 +37,11 @@ dependency list nor needed by a retained package. This preserves transitive
 dependencies, bundled skills, and whole roots containing a needed nested
 package. An unrelated sibling root can still be pruned.
 
+A package removed from `apm.yml` by hand that another installed package still
+declares is kept; the next `apm install` records it as transitive. If a
+retained package's manifest cannot be read, prune keeps such packages rather
+than guess.
+
 Switching a whole-repository dependency such as `owner/repo` to `path:`
 dependencies on the same repository needs no prune: the next `apm install` or
 `apm update` trims the old checkout to the requested subdirectories.
@@ -58,7 +64,10 @@ Neither a surviving lock entry nor an `.apm-pin` cache marker is required.
 
 `apm prune` removes the orphan's directory under `apm_modules/`, cleans up its
 owned harness deployments using the protections below, removes its entry from
-`apm.lock.yaml`, and cleans up empty parent directories.
+`apm.lock.yaml`, and cleans up empty parent directories. A deployed file is
+deleted only with evidence that APM wrote its current bytes: a local deployment
+receipt, or byte equality with the locked version's render, taken before the
+package directory is removed. Files without evidence are kept with a warning.
 
 `apm prune` also parses and reconciles the lockfile's canonical deployment
 ownership metadata on every run, even when `apm_modules/` does not exist or
@@ -166,7 +175,7 @@ Notes:
 | Code | Meaning                                                                       |
 |------|--------------------------------------------------------------------------------|
 | 0    | Prune completed with no orphan deletion failures (including "nothing to prune"). |
-| 1    | An orphan deletion failed, `apm.yml` is missing, parsing or lockfile writing failed, or an unhandled error occurred. |
+| 1    | An orphan deletion failed, `apm.yml` is missing, `apm.lock.yaml` was written by a newer APM (refused before any change), parsing or lockfile writing failed, or an unhandled error occurred. |
 
 Orphan deletion failures are logged without stopping the remaining packages.
 The final error reports how many packages were removed and how many failed.
@@ -183,6 +192,6 @@ confirm the resulting state.
 
 - [`apm install`](../install/) -- install declared dependencies
 - [`apm uninstall`](../uninstall/) -- remove a declared dependency (shares this command's hook-reconciliation owner)
-- [`apm list`](../list/) -- inspect what is installed
+- [`apm deps list`](../deps/#apm-deps-list) -- inspect what is installed
 - [Lockfile spec](../../lockfile-spec/) -- `deployed_files` schema
-- [Package anatomy](../../../concepts/package-anatomy/) -- what gets deployed where
+- [Package anatomy](../../../producer/create-a-package/) -- what gets deployed where

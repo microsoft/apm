@@ -62,12 +62,12 @@ def _resilient_get_stub(captured: list[dict]):
     """Build a ``_resilient_get`` replacement that captures and dispatches.
 
     Returns a callable that mimics the real signature
-    ``(url, headers=..., timeout=...)`` used by both the GitLab raw-file
-    download path and the commit SHA resolver.
+    ``(url, headers=..., timeout=..., *, allow_netrc=...)`` used by both the
+    GitLab raw-file download path and the commit SHA resolver.
     """
 
-    def _stub(url, headers=None, timeout=None):
-        captured.append({"url": url, "headers": dict(headers or {})})
+    def _stub(url, headers=None, timeout=None, *, allow_netrc=True):
+        captured.append({"url": url, "headers": dict(headers or {}), "allow_netrc": allow_netrc})
 
         if "/repository/files/" in url and "/raw" in url:
             return _make_response(status=200, content=_GITLAB_FILE_BYTES)
@@ -158,6 +158,8 @@ class TestInstallFromGitLabIntegration:
         assert "Authorization" not in raw_call["headers"], (
             f"Authorization header must not leak onto GitLab raw-file call: {raw_call['headers']}"
         )
+        # A token-bearing request must not also pick up ambient netrc credentials
+        assert raw_call["allow_netrc"] is False
 
         # No GitHub Contents API URL leakage
         for call in captured_calls:

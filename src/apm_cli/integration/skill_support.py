@@ -5,8 +5,12 @@ import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from apm_cli.core.deployment_state import MaterializationResult
+
+if TYPE_CHECKING:
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
@@ -80,6 +84,38 @@ def build_copy_ignore(
     return combined
 
 
+def _build_deployable_copy_ignore(
+    *,
+    skip_bin: bool = False,
+    source_plan: "DeployableSourcePlan | None" = None,
+    exclude_apm: bool = False,
+    exclude_apm_yml: bool = False,
+) -> Callable[[str, list[str]], list[str]]:
+    """Build a copy filter constrained to the authorized source plan."""
+    base_ignore = build_copy_ignore(skip_bin=skip_bin)
+    internal_names = (
+        *((".apm",) if exclude_apm else ()),
+        *(("apm.yml",) if exclude_apm_yml else ()),
+    )
+    internal_filter = shutil.ignore_patterns(*internal_names) if internal_names else None
+
+    def _combined(directory: str, contents: list[str]) -> list[str]:
+        ignored = set(base_ignore(directory, contents))
+        if internal_filter is not None:
+            ignored.update(internal_filter(directory, contents))
+        if source_plan is not None:
+            ignored.update(source_plan.copy_ignore(directory, contents))
+        return list(ignored)
+
+    _combined.rebased = lambda plan: _build_deployable_copy_ignore(  # type: ignore[attr-defined]
+        skip_bin=skip_bin,
+        source_plan=plan,
+        exclude_apm=exclude_apm,
+        exclude_apm_yml=exclude_apm_yml,
+    )
+    return _combined
+
+
 @dataclass
 class SkillIntegrationResult:
     """Skill outputs and completion of the admitted skill-processing domain.
@@ -97,6 +133,10 @@ class SkillIntegrationResult:
     references_copied: int
     links_resolved: int = 0
     sub_skills_promoted: int = 0
+    # Skills whose deployed bytes changed this run; None when not measured.
+    skills_changed: int | None = None
+    # Of the promoted skills, those whose identical pre-existing copy was adopted.
+    sub_skills_adopted: int = 0
     bin_deployed: int = 0
     bin_skipped_reason: str | None = None
     target_paths: list[Path] = None
@@ -109,58 +149,50 @@ class SkillIntegrationResult:
             self.target_paths = []
 
 
-def clean_orphaned_skills(
-    skills_dir: Path,
-    installed_skill_names: set,
-    *,
-    project_root: Path | None,
-    get_lockfile_owned_agent_skills: Callable[[Path], set[str]],
-    removed_paths: list[Path] | None = None,
-) -> dict[str, int]:
-    """Remove legacy-orphan skill directories without touching foreign agents."""
-    protected_names = set(installed_skill_names)
-    if project_root is not None:
-        from apm_cli.integration.lsp_integrator import LSPIntegrator
+def skills_integrated(result: SkillIntegrationResult) -> int:
+    """Skills one package integrated: changed skills plus adopted ones.
 
-        protected_names.update(LSPIntegrator.reserved_project_skill_names(skills_dir, project_root))
-    files_removed = 0
-    errors = 0
-    lockfile_owned_skills: set[str] | None = None
-    if skills_dir.parent.name == ".agents" and project_root is not None:
-        lockfile_owned_skills = get_lockfile_owned_agent_skills(project_root)
-
-    for skill_subdir in skills_dir.iterdir():
-        if not skill_subdir.is_dir() or skill_subdir.name in protected_names:
-            continue
-        if lockfile_owned_skills is not None and skill_subdir.name not in lockfile_owned_skills:
-            continue
-        try:
-            shutil.rmtree(skill_subdir)
-            files_removed += 1
-            if removed_paths is not None:
-                removed_paths.append(skill_subdir)
-        except Exception:
-            errors += 1
-
-    return {"files_removed": files_removed, "errors": errors}
+    ``SkillIntegrator`` measures ``skills_changed`` -- skills whose deployed
+    bytes changed (new or rewritten) -- so a converged skill directory counts
+    zero (#4184); an identical unowned copy it adopts counts once, reported as
+    adopted. Results that do not measure it count a new root skill plus
+    promoted skills; a ``skills/`` bundle has no root skill (#4089).
+    """
+    if isinstance(result.skills_changed, int):
+        raw_adopted = getattr(result, "sub_skills_adopted", 0)
+        return result.skills_changed + (raw_adopted if isinstance(raw_adopted, int) else 0)
+    root_skill = 1 if result.skill_created and result.skill_path is not None else 0
+    return root_skill + result.sub_skills_promoted
 
 
-def get_lockfile_owned_agent_skills(project_root: Path) -> set[str]:
-    """Return APM-owned ``.agents/skills`` names from the lockfile."""
-    owned: set[str] = set()
-    try:
-        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+def tree_file_hashes(root: Path, key: Callable[[Path], str]) -> dict[str, str]:
+    """Hash the regular files already under *root*, keyed like deployment receipts.
 
-        lockfile = LockFile.read(get_lockfile_path(project_root))
-        if lockfile and lockfile.dependencies:
-            for dep in lockfile.dependencies.values():
-                for deployed_file in dep.deployed_files:
-                    if deployed_file.startswith(".agents/skills/"):
-                        name = deployed_file[len(".agents/skills/") :].split("/", 1)[0]
-                        if name:
-                            owned.add(name)
-    except (FileNotFoundError, OSError, KeyError, ValueError, TypeError, AttributeError) as exc:
-        import logging
+    Taken before a skill copy so the integrator can tell a rewrite that changed
+    bytes from one that left the destination identical. Links are never read.
+    """
+    from apm_cli.utils.content_hash import compute_file_hash
 
-        logging.getLogger(__name__).debug("Could not read lockfile for ownership check: %s", exc)
-    return owned
+    hashes: dict[str, str] = {}
+    if not root.is_dir() or _is_link_like(root):
+        return hashes
+    for directory, _dirs, files in os.walk(root):
+        for name in files:
+            path = Path(directory) / name
+            if not _is_link_like(path) and path.is_file():
+                hashes[key(path)] = compute_file_hash(path)
+    return hashes
+
+
+def skill_line_label(result: SkillIntegrationResult, skill_count: int) -> str:
+    """Label one package's skill line, reporting identical pre-existing copies as adopted."""
+    promoted = result.sub_skills_promoted
+    raw_adopted = getattr(result, "sub_skills_adopted", 0)
+    adopted = min(raw_adopted if isinstance(raw_adopted, int) else 0, skill_count)
+    if adopted == skill_count:
+        return f"{adopted} skill(s) adopted"
+    integrated = skill_count - adopted
+    if integrated == 1 and not promoted:
+        return "Skill integrated"
+    phrase = f"{integrated} skill(s) integrated"
+    return f"{phrase} ({adopted} adopted)" if adopted else phrase

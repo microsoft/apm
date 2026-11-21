@@ -892,7 +892,7 @@ def _create_bundle_tarball(
             "    resolved_ref: main\n"
             "    resolved_commit: abc1234\n"
             "    deployed_files:\n"
-            "      - test-file.md\n"
+            "      - .github/prompts/test-file.prompt.md\n"
         )
     (inner_dir / "apm.lock.yaml").write_text(lockfile_content, encoding="utf-8")
 
@@ -928,7 +928,7 @@ class TestUnpackBundle:
     """Test unpack_bundle function."""
 
     def test_unpack_from_directory(self, tmp_path: Path) -> None:
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         bundle_dir = tmp_path / "my-bundle"
         bundle_dir.mkdir()
@@ -940,34 +940,40 @@ class TestUnpackBundle:
             "    resolved_ref: main\n"
             "    resolved_commit: abc1234\n"
             "    deployed_files:\n"
-            "      - hello.md\n"
+            "      - .github/prompts/hello.prompt.md\n"
         )
         (bundle_dir / "apm.lock.yaml").write_text(lockfile, encoding="utf-8")
-        (bundle_dir / "hello.md").write_text("# Hello\n", encoding="utf-8")
+        hello = bundle_dir / ".github" / "prompts" / "hello.prompt.md"
+        hello.parent.mkdir(parents=True)
+        hello.write_text("# Hello\n", encoding="utf-8")
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = unpack_bundle(bundle_dir, output_dir=output_dir, skip_verify=True)
         assert result.extracted_dir == bundle_dir
+        deployed = output_dir / ".github" / "prompts" / "hello.prompt.md"
+        assert deployed.read_text(encoding="utf-8") == "# Hello\n"
 
     def test_unpack_from_tarball(self, tmp_path: Path) -> None:
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         tar_path = _create_bundle_tarball(
             tmp_path,
-            files={"test-file.md": "# Test\n"},
+            files={".github/prompts/test-file.prompt.md": "# Test\n"},
         )
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = unpack_bundle(tar_path, output_dir=output_dir, skip_verify=True)
         assert result.extracted_dir.exists()
+        deployed = output_dir / ".github" / "prompts" / "test-file.prompt.md"
+        assert deployed.read_text(encoding="utf-8") == "# Test\n"
 
     def test_unpack_dry_run(self, tmp_path: Path) -> None:
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         tar_path = _create_bundle_tarball(
             tmp_path,
-            files={"test-file.md": "# Test\n"},
+            files={".github/prompts/test-file.prompt.md": "# Test\n"},
         )
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -975,14 +981,14 @@ class TestUnpackBundle:
         assert result.extracted_dir.exists()
 
     def test_unpack_missing_bundle_raises(self, tmp_path: Path) -> None:
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         with pytest.raises(FileNotFoundError):
             unpack_bundle(tmp_path / "nonexistent.tar.gz")
 
     def test_unpack_with_path_traversal_tarball(self, tmp_path: Path) -> None:
         """Tar entries with absolute paths are rejected."""
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         tar_path = tmp_path / "evil.tar.gz"
         inner_dir = tmp_path / "evil-source"
@@ -999,7 +1005,7 @@ class TestUnpackBundle:
 
     def test_unpack_with_symlink_tarball(self, tmp_path: Path) -> None:
         """Tar entries with symlinks are rejected."""
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         tar_path = tmp_path / "symlink.tar.gz"
         with tarfile.open(tar_path, "w:gz") as tar:
@@ -1015,7 +1021,7 @@ class TestUnpackBundle:
 
     def test_unpack_legacy_lockfile_name(self, tmp_path: Path) -> None:
         """Bundle with legacy apm.lock is supported."""
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         bundle_dir = tmp_path / "legacy-bundle"
         bundle_dir.mkdir()
@@ -1027,12 +1033,16 @@ class TestUnpackBundle:
             "    resolved_ref: main\n"
             "    resolved_commit: abc1234\n"
             "    deployed_files:\n"
-            "      - hello.md\n"
+            "      - .github/prompts/hello.prompt.md\n"
         )
         (bundle_dir / "apm.lock").write_text(lockfile, encoding="utf-8")
-        (bundle_dir / "hello.md").write_text("# Hello\n", encoding="utf-8")
+        hello = bundle_dir / ".github" / "prompts" / "hello.prompt.md"
+        hello.parent.mkdir(parents=True)
+        hello.write_text("# Hello\n", encoding="utf-8")
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         result = unpack_bundle(bundle_dir, output_dir=output_dir, skip_verify=True)
         assert result.extracted_dir == bundle_dir
+        deployed = output_dir / ".github" / "prompts" / "hello.prompt.md"
+        assert deployed.read_text(encoding="utf-8") == "# Hello\n"

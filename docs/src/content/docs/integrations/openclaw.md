@@ -62,4 +62,4 @@ apm install --target openclaw,claude
 - Skills not picked up at project scope: ensure OpenClaw's skill search paths include `.agents/skills/`.
 - Skills not picked up at user scope: verify that `~/.openclaw/skills/` exists and that OpenClaw is configured to scan its managed skill directory.
 
-See also [IDE and Tool Integration](../ide-tool-integration/) and [apm experimental](../../reference/experimental/).
+See also [IDE and Tool Integration](../../consumer/choose-harnesses/) and [apm experimental](../../reference/experimental/).

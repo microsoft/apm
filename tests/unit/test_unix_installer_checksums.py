@@ -19,6 +19,7 @@ import pytest
 pytestmark = [
     pytest.mark.component,
     pytest.mark.skipif(sys.platform == "win32", reason="Unix bootstrap uses POSIX shell tools"),
+    pytest.mark.promise("P-OWN-self-update-release-resolution"),
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -392,6 +393,15 @@ def test_supported_hash_tools_and_sidecar_formats(
     )
     _assert_verified(result, trace, marker)
     assert [e["tool"] for e in trace if e["tool"] in ("shasum", "sha256sum")] == list(hash_tools)
+
+
+@pytest.mark.parametrize("selection", ["argument", "self-update"])
+@pytest.mark.parametrize("shell", ["bash", "sh"])
+def test_piped_output_has_no_color_codes(tmp_path: Path, selection: str, shell: str) -> None:
+    """#4308: with stdout not a terminal, the installer prints plain text (I6)."""
+    result, trace, marker = _run_installer(tmp_path, shell=shell, selection=selection)
+    _assert_verified(result, trace, marker)
+    assert "\x1b" not in result.stdout + result.stderr, repr(result.stdout + result.stderr)
 
 
 @pytest.mark.parametrize(

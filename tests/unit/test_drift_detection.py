@@ -1,6 +1,6 @@
 """Unit tests for apm_cli.drift -- pure drift-detection helpers.
 
-These tests cover detect_ref_change, detect_orphans, detect_config_drift,
+These tests cover detect_ref_change, the install orphan decision, detect_config_drift,
 and build_download_ref.  All four functions are stateless and side-effect-free
 so no I/O or network access is required.
 """
@@ -13,14 +13,39 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional  # noqa: F401, UP035
 from unittest.mock import MagicMock, call, patch  # noqa: F401
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.drift import (
     build_download_ref,
     detect_config_drift,
-    detect_orphans,
     detect_ref_change,
+    revision_pin_mismatch,
 )
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
+
+
+def _orphan_preview(lockfile, intended, *, only_packages):
+    """Return the deployed files the install orphan decision would remove."""
+    from apm_cli.install.orphans import DeploymentClaims, OrphanOperation, decide_orphan_removal
+
+    if only_packages or not lockfile:
+        return set()
+    decision = decide_orphan_removal(
+        operation=OrphanOperation.INSTALL,
+        roots=(),
+        candidate_universe=lockfile,
+        installed_paths=None,
+        resolved_keys=None,
+        intended=intended,
+        materialized=None,
+        reachability=None,
+        deployment_claims=DeploymentClaims(live_files=None, retained={}),
+    )
+    return {path for files in decision.removed_files.values() for path in files}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -194,31 +219,68 @@ class TestDetectRefChange(unittest.TestCase):
         dep = DependencyReference.parse("./packages/foo")
         self.assertFalse(detect_ref_change(dep, locked))
 
+    # --- full-SHA manifest pins ---
+
+    def test_sha_pin_with_divergent_locked_commit_is_ref_change(self):
+        pin = "a" * 40
+        locked = _LockedDep(resolved_ref=pin, resolved_commit="b" * 40)
+        self.assertTrue(detect_ref_change(_dep(reference=pin), locked))
+
+    def test_sha_pin_with_matching_locked_commit_is_unchanged(self):
+        pin = "A" * 40
+        locked = _LockedDep(resolved_ref=pin, resolved_commit="a" * 40)
+        self.assertFalse(detect_ref_change(_dep(reference=pin), locked))
+
+
+class TestRevisionPinMismatch(unittest.TestCase):
+    """Tests for revision_pin_mismatch()."""
+
+    def test_non_sha_reference_is_never_a_pin_mismatch(self):
+        locked = _LockedDep(resolved_ref="v1.0.0", resolved_commit="b" * 40)
+        self.assertIsNone(revision_pin_mismatch("v1.0.0", locked))
+        self.assertIsNone(revision_pin_mismatch("abc1234", locked))
+        self.assertIsNone(revision_pin_mismatch(None, locked))
+
+    def test_matching_commit_ignores_case_and_whitespace(self):
+        locked = _LockedDep(resolved_commit="ab" * 20)
+        self.assertIsNone(revision_pin_mismatch(" " + "AB" * 20 + " ", locked))
+
+    def test_divergent_or_missing_commit_reports_both_values(self):
+        pin = "a" * 40
+        reason = revision_pin_mismatch(pin, _LockedDep(resolved_commit="b" * 40))
+        self.assertEqual(
+            reason, f"manifest commit '{pin}' != lockfile resolved_commit '{'b' * 40}'"
+        )
+        missing = revision_pin_mismatch(pin, _LockedDep(resolved_commit=None))
+        self.assertEqual(
+            missing, f"manifest commit '{pin}' != lockfile resolved_commit '(missing)'"
+        )
+
 
 # ---------------------------------------------------------------------------
-# detect_orphans
+# the install orphan decision
 # ---------------------------------------------------------------------------
 
 
 class TestDetectOrphans(unittest.TestCase):
-    """Tests for detect_orphans()."""
+    """Tests for the install orphan decision."""
 
     def test_partial_install_returns_empty(self):
         """Partial install must not clean up anything."""
         locked_dep = _LockedDep(repo_url="owner/orphan", deployed_files=["a.md"])
         lf = _LockFile(dependencies={"owner/orphan": locked_dep})
-        result = detect_orphans(lf, {"owner/kept"}, only_packages=["owner/kept"])
+        result = _orphan_preview(lf, {"owner/kept"}, only_packages=["owner/kept"])
         self.assertEqual(result, set())
 
     def test_no_lockfile_returns_empty(self):
         """First install has no previous lockfile."""
-        result = detect_orphans(None, {"owner/pkg"}, only_packages=[])
+        result = _orphan_preview(None, {"owner/pkg"}, only_packages=[])
         self.assertEqual(result, set())
 
     def test_all_packages_present_returns_empty(self):
         locked_dep = _LockedDep(repo_url="owner/pkg", deployed_files=["file.md"])
         lf = _LockFile(dependencies={"owner/pkg": locked_dep})
-        result = detect_orphans(lf, {"owner/pkg"}, only_packages=[])
+        result = _orphan_preview(lf, {"owner/pkg"}, only_packages=[])
         self.assertEqual(result, set())
 
     def test_orphan_files_returned(self):
@@ -226,28 +288,28 @@ class TestDetectOrphans(unittest.TestCase):
         orphan = _LockedDep(repo_url="owner/gone", deployed_files=["x.md", "y.md"])
         kept = _LockedDep(repo_url="owner/kept", deployed_files=["z.md"])
         lf = _LockFile(dependencies={"owner/gone": orphan, "owner/kept": kept})
-        result = detect_orphans(lf, {"owner/kept"}, only_packages=[])
+        result = _orphan_preview(lf, {"owner/kept"}, only_packages=[])
         self.assertEqual(result, {"x.md", "y.md"})
 
     def test_multiple_orphans_combined(self):
         a = _LockedDep(repo_url="a/a", deployed_files=["a.md"])
         b = _LockedDep(repo_url="b/b", deployed_files=["b.md"])
         lf = _LockFile(dependencies={"a/a": a, "b/b": b})
-        result = detect_orphans(lf, set(), only_packages=[])
+        result = _orphan_preview(lf, set(), only_packages=[])
         self.assertEqual(result, {"a.md", "b.md"})
 
     def test_empty_intended_deps(self):
         """Empty manifest means all current packages are orphans."""
         dep = _LockedDep(repo_url="owner/removed", deployed_files=["f.md"])
         lf = _LockFile(dependencies={"owner/removed": dep})
-        result = detect_orphans(lf, set(), only_packages=[])
+        result = _orphan_preview(lf, set(), only_packages=[])
         self.assertEqual(result, {"f.md"})
 
     def test_none_only_packages_treated_as_empty(self):
         """only_packages=None is treated the same as [] -- full install."""
         locked_dep = _LockedDep(repo_url="owner/orphan", deployed_files=["a.md"])
         lf = _LockFile(dependencies={"owner/orphan": locked_dep})
-        result = detect_orphans(lf, set(), only_packages=None)
+        result = _orphan_preview(lf, set(), only_packages=None)
         self.assertEqual(result, {"a.md"})
 
     def test_self_entry_never_orphaned(self):
@@ -269,7 +331,7 @@ class TestDetectOrphans(unittest.TestCase):
         )
         orphan = _LockedDep(repo_url="owner/gone", deployed_files=["gone.md"])
         lf = _LockFile(dependencies={_SELF_KEY: self_dep, "owner/gone": orphan})
-        result = detect_orphans(lf, set(), only_packages=[])
+        result = _orphan_preview(lf, set(), only_packages=[])
         # Only the genuinely dropped package is an orphan; self-includes are not.
         self.assertEqual(result, {"gone.md"})
 
@@ -296,7 +358,7 @@ class TestDetectOrphans(unittest.TestCase):
         )
         # Manifest now empty -> only the real dropped package is an orphan;
         # the synthesized self-entry's includes are never reported.
-        result = detect_orphans(lock, set(), only_packages=[])
+        result = _orphan_preview(lock, set(), only_packages=[])
         self.assertEqual(result, {".apm/x.md"})
 
 
@@ -476,3 +538,8 @@ class TestBuildDownloadRef(unittest.TestCase):
         lf = _LockFile(dependencies={})
         result = build_download_ref(dep, lf, update_refs=False, ref_changed=False)
         self.assertIs(result, dep)
+
+
+# ---------------------------------------------------------------------------
+# locked_copy_proof / locked_copy_is_stale (#3884)
+# ---------------------------------------------------------------------------

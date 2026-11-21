@@ -173,13 +173,12 @@ class TestClaudeClientAdapterProject(unittest.TestCase):
         self.assertIn("keep", data["mcpServers"])
         self.assertIn("new", data["mcpServers"])
 
-    def test_update_config_tolerates_malformed_project_mcp_json(self):
-        """Corrupted .mcp.json must not abort install; treat as empty + rewrite."""
+    def test_update_config_keeps_malformed_project_mcp_json(self):
+        """An unparsable .mcp.json is kept byte-identical and the write is refused."""
         self.mcp_path.write_text("{not valid json", encoding="utf-8")
         ok = self.adapter.update_config({"srv": {"command": "x"}})
-        self.assertTrue(ok)
-        data = json.loads(self.mcp_path.read_text(encoding="utf-8"))
-        self.assertIn("srv", data["mcpServers"])
+        self.assertFalse(ok)
+        self.assertEqual(self.mcp_path.read_text(encoding="utf-8"), "{not valid json")
 
     def test_self_defined_skill_command_rewritten_to_claude_skills(self):
         """Skill-shipped MCP launchers declare their command using the
@@ -188,6 +187,7 @@ class TestClaudeClientAdapterProject(unittest.TestCase):
         so the prefix must be rewritten to ``.claude/skills/`` -- otherwise
         ``.mcp.json`` points at a path that does not exist on disk.
         """
+        (self.root / ".claude/skills/nix-chrome-devtools-mcp").mkdir(parents=True)
         with patch.object(self.adapter, "registry_client") as mock_registry:
             mock_registry.find_server_by_reference.return_value = {
                 "name": "chrome-devtools",
@@ -351,7 +351,7 @@ class TestClaudeProjectEnvPlaceholders(unittest.TestCase):
             text = self._configure_project(
                 self._stdio_info("atlassian", {"JIRA_TOKEN": "${JIRA_TOKEN}"})
             )
-            with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
                 ClaudeClientAdapter.emit_install_run_summary()
 
         self.assertNotIn("baked-sentinel", text)
@@ -436,7 +436,7 @@ class TestClaudeProjectEnvPlaceholders(unittest.TestCase):
             for name in ("MISSING_CMD", "MISSING_ARG", "DEFAULTED_ARG", "MISSING_ENV"):
                 os.environ.pop(name, None)
             self._configure_project(info)
-            with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
                 ClaudeClientAdapter.emit_install_run_summary()
 
         joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
@@ -470,7 +470,7 @@ class TestClaudeProjectEnvPlaceholders(unittest.TestCase):
         }
         with patch.dict(os.environ, {"REMOTE_TOKEN": "baked-sentinel"}):
             text = self._configure_project(remote)
-            with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+            with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
                 ClaudeClientAdapter.emit_install_run_summary()
 
         self.assertNotIn("baked-sentinel", text)
@@ -588,6 +588,72 @@ class TestClaudeLegacyEntries(unittest.TestCase):
 
         self.assertEqual(snapshot, native)
 
+    def test_conflict_guidance_restores_plugin_root_path_without_rotation(self):
+        # #3927: the adapter's own ${CLAUDE_PROJECT_DIR:-.} render is a path.
+        written = "${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local/p/scripts/server.js"
+        flag = "--config=${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local/p/c.json"
+        expected = {"type": "stdio", "command": "node", "args": [written, flag]}
+        native = dict(expected, args=["/elsewhere/apm_modules/_local/p/scripts/server.js", "-v"])
+        self.adapter.update_config({"synthdb": native})
+        guidance = self.adapter.native_conflict_guidance("synthdb", expected)
+
+        self.assertIn("Fields args[0], args[1] hold values where APM writes a package", guidance)
+        self.assertIn(f"(args[0]: {written}; args[1]: {flag})", guidance)
+        self.assertNotIn("environment references", guidance)
+        self.assertNotIn("${CLAUDE_PROJECT_DIR}", guidance)
+        self.assertNotIn("rotate", guidance)
+        self.assertNotIn("/elsewhere", guidance)
+
+    def test_conflict_guidance_keeps_env_hint_beside_plugin_root_path(self):
+        root = "${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local/p"
+        expected = {
+            "type": "stdio",
+            "command": "node",
+            "args": [f"{root}/server.js", f"--db={root}/data/${{DB_NAME}}"],
+            "env": {"TOKEN": "${TOKEN}"},
+        }
+        native = dict(
+            expected, args=["/x/server.js", "--db=/x/data/prod"], env={"TOKEN": "leaked-sentinel"}
+        )
+        self.adapter.update_config({"synthdb": native})
+        guidance = self.adapter.native_conflict_guidance("synthdb", expected)
+
+        self.assertIn("Fields args[1], env.TOKEN hold values", guidance)
+        self.assertIn("(args[1]: ${DB_NAME}; env.TOKEN: ${TOKEN})", guidance)
+        self.assertIn(
+            f"(args[0]: {root}/server.js; args[1]: a package path under ${{CLAUDE_PROJECT_DIR:-.}})",
+            guidance,
+        )
+        self.assertIn("rotate those credentials", guidance)
+        self.assertNotIn("${CLAUDE_PROJECT_DIR}", guidance)
+        self.assertNotIn("leaked-sentinel", guidance)
+
+    def test_conflict_guidance_names_unprintable_plugin_root_paths_only(self):
+        root = "${CLAUDE_PROJECT_DIR:-.}/apm_modules/_local"
+        expected = {
+            "type": "stdio",
+            "command": "node",
+            "args": [
+                f"{root}/p/server.js?token=literal-sentinel",
+                f"{root}/m\u00fcnchen/server.js",
+                f"--url=https://u:prefix-sentinel@h/{root}/p/c.json",
+            ],
+        }
+        native = dict(expected, args=["/x/server.js", "/y/server.js", "--url=/z"])
+        self.adapter.update_config({"synthdb": native})
+        guidance = self.adapter.native_conflict_guidance("synthdb", expected)
+
+        self.assertIn(
+            "(args[0]: a package path under ${CLAUDE_PROJECT_DIR:-.}; "
+            "args[1]: a package path under ${CLAUDE_PROJECT_DIR:-.}; "
+            "args[2]: a package path under ${CLAUDE_PROJECT_DIR:-.})",
+            guidance,
+        )
+        self.assertNotIn("literal-sentinel", guidance)
+        self.assertNotIn("prefix-sentinel", guidance)
+        self.assertNotIn("rotate", guidance)
+        self.assertTrue(guidance.isascii())
+
     def test_conflict_guidance_is_silent_without_expanded_fields(self):
         self.adapter.update_config({"legacy": dict(_LEGACY_EXPECTED, command="other")})
         self.assertIsNone(self.adapter.native_conflict_guidance("legacy", _LEGACY_EXPECTED))
@@ -670,13 +736,12 @@ class TestClaudeClientAdapterUser(unittest.TestCase):
         leftovers = list(self.home.glob(".claude.json.*")) + list(self.home.glob("apm-atomic-*"))
         self.assertEqual(leftovers, [])
 
-    def test_update_config_tolerates_malformed_user_claude_json(self):
-        """Corrupted ~/.claude.json must not abort install; treat as empty + rewrite."""
+    def test_update_config_keeps_malformed_user_claude_json(self):
+        """An unparsable ~/.claude.json is kept byte-identical and the write is refused."""
         self.claude_json.write_text("{not valid json", encoding="utf-8")
         ok = self.adapter.update_config({"srv": {"command": "x"}})
-        self.assertTrue(ok)
-        data = json.loads(self.claude_json.read_text(encoding="utf-8"))
-        self.assertIn("srv", data["mcpServers"])
+        self.assertFalse(ok)
+        self.assertEqual(self.claude_json.read_text(encoding="utf-8"), "{not valid json")
 
     def test_configure_mcp_server_returns_false_when_update_fails(self):
         """If update_config returns False, configure_mcp_server must surface the failure."""
@@ -941,7 +1006,12 @@ class TestMCPIntegratorClaudeStaleCleanup(unittest.TestCase):
         self.assertIn("keep", data["mcpServers"])
         self.assertNotIn("stale", data["mcpServers"])
 
-    def test_remove_stale_claude_project_skips_without_claude_dir(self):
+    def test_broadcast_remove_stale_skips_claude_project_without_claude_dir(self):
+        """Broadcast cleanup (no runtime) never writes a project that never opted in.
+
+        Runtime-scoped cleanup from the ownership ledger stays reachable after
+        ``.claude/`` is pruned (#3664); see tests/unit/install/test_mcp_ownership.py.
+        """
         from apm_cli.integration.mcp_integrator import MCPIntegrator
 
         mcp = self.root / ".mcp.json"
@@ -949,7 +1019,7 @@ class TestMCPIntegratorClaudeStaleCleanup(unittest.TestCase):
         mcp.write_text(raw, encoding="utf-8")
         MCPIntegrator.remove_stale(
             {"stale"},
-            runtime="claude",
+            runtime=None,
             project_root=self.root,
             scope=InstallScope.PROJECT,
         )
@@ -1149,7 +1219,7 @@ class TestClaudeAutoDetection(unittest.TestCase):
         scripts = {"start": "claude --interactive"}
         detected = MCPIntegrator._detect_runtimes(scripts)
         self.assertIn("claude", detected)
-        with patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None):
+        with patch("shutil.which", return_value=None):
             filtered = MCPIntegrator._filter_runtimes(detected)
             self.assertNotIn("claude", filtered)
 

@@ -27,6 +27,7 @@ EXCLUDED_ROOTS: tuple[str, ...] = (
     ".mypy_cache",
     ".pytest_cache",
     ".ruff_cache",
+    ".hypothesis",
     ".tox",
     "build",
     "dist",
@@ -34,6 +35,8 @@ EXCLUDED_ROOTS: tuple[str, ...] = (
     "mutants",
     ".idea",
     ".vscode",
+    # Gitignored install output a test may create and remove mid-walk.
+    "apm_modules",
 )
 
 # These names are generated wherever they occur.  The remaining names in
@@ -47,6 +50,8 @@ _EXCLUDED_ANYWHERE: frozenset[str] = frozenset(
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
+        # Hypothesis creates and removes .hypothesis/tmp while tests run.
+        ".hypothesis",
         ".tox",
     }
 )

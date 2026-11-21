@@ -31,11 +31,16 @@ from urllib.parse import urlsplit
 
 from git.exc import GitCommandError
 
+from ..core.auth_chain import AdoAuthChainExhaustedError
+from ..core.auth_outcome import (
+    RepositoryNotFoundError,
+    classify_auth_outcome,
+    is_repository_not_found,
+)
 from ..models.apm_package import DependencyReference
 from ..models.dependency.host_virtual import repository_owner
 from ..utils.github_host import (
     default_host,
-    is_ado_auth_failure_signal,
     is_github_hostname,
 )
 from .bare_cache import build_clone_failure_message
@@ -48,6 +53,15 @@ from .transport_selection import (
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
+
+
+def _retry_sleep(seconds: float) -> None:
+    """Wait before retrying a failed Git connection.
+
+    The single retry-wait seam: tests patch this instead of the process-wide
+    ``time.sleep``, which would also record sleeps from unrelated threads.
+    """
+    time.sleep(seconds)
 
 
 def _is_connect_failure(error: GitCommandError | subprocess.CalledProcessError, url: str) -> bool:
@@ -118,9 +132,7 @@ class _DownloaderContext(Protocol):
         repo_url_base: str,
         *,
         use_ssh: bool = ...,
-        dep_ref: DependencyReference | None = ...,
-        token: str | None = ...,
-        auth_scheme: str = ...,
+        dep_ref: DependencyReference,
     ) -> str: ...
     def _sanitize_git_error(self, error_message: str) -> str: ...
 
@@ -192,7 +204,7 @@ class CloneEngine:
                 _debug("HTTPS connection failed; retrying the same Git action once in 1s")
                 # Clone callbacks own partial-target cleanup; fetch callbacks
                 # retain the existing bare repository. Never delete here.
-                time.sleep(1)
+                _retry_sleep(1)
                 clone_action(url, env, target)
 
         dep_host = dep_ref.host if dep_ref else None
@@ -204,7 +216,6 @@ class CloneEngine:
                 repo_url_base,
                 use_ssh=candidate_uses_ssh,
                 dep_ref=dep_ref,
-                token="",
             )
             if dep_ref is not None
             else None
@@ -351,8 +362,6 @@ class CloneEngine:
                     repo_url_base,
                     use_ssh=False,
                     dep_ref=dep_ref,
-                    token="",
-                    auth_scheme="basic",
                 )
                 _clone(winning_url, git_env, target_path)
 
@@ -373,6 +382,7 @@ class CloneEngine:
         prev_label: str | None = None
         prev_scheme: str | None = None
         authenticated_fallback_used = False
+        ado_chain_ran = False
         for attempt in plan.attempts:
             if attempt.use_token and not has_token:
                 continue
@@ -393,8 +403,6 @@ class CloneEngine:
                         repo_url_base,
                         use_ssh=use_ssh,
                         dep_ref=dep_ref,
-                        token="",
-                        auth_scheme=dep_auth_scheme if attempt.use_token else "basic",
                     )
                 except Exception as e:
                     last_error = e
@@ -411,69 +419,33 @@ class CloneEngine:
                 _debug(f"Attempting clone with {attempt.label} (URL sanitized)")
                 if lazy_public_attempt:
                     url, authenticated_fallback_used = _run_public_github_attempt()
-                elif (
-                    is_ado
-                    and attempt.use_token
-                    and dep_auth_scheme == "basic"
-                    and has_token
-                    and dep_auth_ctx is not None
-                ):
-                    from ..utils.git_env import git_subprocess_error_text
+                elif is_ado and attempt.scheme == "https" and dep_ref is not None:
+                    if ado_chain_ran:
+                        continue
+                    ado_chain_ran = True
+                    ado_url = url
 
-                    def _clone_outcome(
-                        attempt_url: str,
+                    def _clone_ado(
+                        _token: str | None,
                         attempt_env: dict[str, str],
-                    ) -> tuple[str, str | Exception]:
-                        try:
-                            _clone(attempt_url, attempt_env, target_path)
-                            return "ok", attempt_url
-                        except (
-                            GitCommandError,
-                            subprocess.CalledProcessError,
-                            subprocess.TimeoutExpired,
-                        ) as clone_exc:
-                            return "err", clone_exc
+                        attempt_url: str = ado_url,
+                    ) -> None:
+                        # auth-delegated: try_with_fallback walks PAT -> az bearer
+                        # -> path-scoped helper and classifies each failure.
+                        _clone(attempt_url, attempt_env, target_path)
 
-                    primary_env = _env_for(attempt, url)
-
-                    def _primary_clone(
-                        attempt_url: str = url,
-                        attempt_env: dict[str, str] = primary_env,
-                    ) -> tuple[str, str | Exception]:
-                        return _clone_outcome(attempt_url, attempt_env)
-
-                    def _bearer_clone(bearer: str) -> tuple[str, str | Exception]:
-                        bearer_url = host._build_repo_url(
-                            repo_url_base,
-                            use_ssh=False,
-                            dep_ref=dep_ref,
-                            token=None,
-                            auth_scheme="bearer",
-                        )
-                        bearer_env = host.auth_resolver.build_ado_bearer_git_env(
-                            dep_auth_ctx,
-                            bearer,
-                            bearer_url,
-                            base_env=host.git_env,
-                        )
-                        return _clone_outcome(bearer_url, bearer_env)
-
-                    def _is_auth_failure(outcome: tuple[str, str | Exception]) -> bool:
-                        return outcome[0] == "err" and is_ado_auth_failure_signal(
-                            git_subprocess_error_text(outcome[1])
-                        )
-
-                    fallback = host.auth_resolver.execute_with_bearer_fallback(
-                        dep_ref,
-                        _primary_clone,
-                        _bearer_clone,
-                        _is_auth_failure,
+                    host.auth_resolver.try_with_fallback(
+                        dep_host or "dev.azure.com",
+                        _clone_ado,
+                        org=dep_ref.ado_organization,
+                        port=dep_ref.port,
+                        path=dep_ref.repo_url,
+                        host_type=dep_ref.host_type,
+                        remote_url=attempt.effective_url or ado_url,
+                        base_env=host.git_env,
+                        verbose_callback=verbose_callback,
                     )
-                    outcome = fallback.outcome
-                    if outcome[0] == "err":
-                        raise outcome[1]
-                    url = str(outcome[1])
-                    authenticated_fallback_used = fallback.bearer_attempted
+                    authenticated_fallback_used = True
                 else:
                     _clone(url, _env_for(attempt, url), target_path)
                 if verbose_callback:
@@ -488,6 +460,7 @@ class CloneEngine:
                 GitCommandError,
                 subprocess.CalledProcessError,
                 subprocess.TimeoutExpired,
+                AdoAuthChainExhaustedError,
             ) as e:
                 last_error = e
                 prev_label = attempt.label
@@ -495,6 +468,7 @@ class CloneEngine:
                 if plan.strict:
                     break
 
+        repository_not_found = last_error is not None and is_repository_not_found(last_error)
         error_msg = build_clone_failure_message(
             repo_url_base=repo_url_base,
             plan=plan,
@@ -512,8 +486,15 @@ class CloneEngine:
             public_github_non_auth_failure=bool(
                 public_github_https_first
                 and last_error is not None
-                and not host.auth_resolver.is_public_github_auth_failure(last_error)
+                and not classify_auth_outcome(
+                    host_kind="github",
+                    error=last_error,
+                    public_github_anonymous=True,
+                ).is_auth_failure
             ),
+            repository_not_found=repository_not_found,
         )
 
+        if repository_not_found:
+            raise RepositoryNotFoundError(error_msg) from last_error
         raise RuntimeError(error_msg)

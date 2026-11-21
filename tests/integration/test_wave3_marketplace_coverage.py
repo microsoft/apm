@@ -140,27 +140,27 @@ class TestInitCommand:
             project_dir = isolated_path / "multi-target"
             assert project_dir.exists()
 
-    def test_init_deprecated_plugin_flag(self, runner: CliRunner, tmp_path: Path) -> None:
-        """Test deprecated --plugin flag still works with warning."""
+    def test_init_removed_plugin_flag(self, runner: CliRunner, tmp_path: Path) -> None:
+        """--plugin was removed in 0.37 (#4073): exit 2 naming the replacement."""
         with runner.isolated_filesystem(temp_dir=str(tmp_path)):
             result = runner.invoke(
                 cli,
                 ["init", "legacy-plugin", "-y", "--plugin"],
                 catch_exceptions=False,
             )
-            assert result.exit_code == 0, result.output
-            assert "deprecated" in result.output.lower()
+            assert result.exit_code == 2, result.output
+            assert "Run: apm plugin init" in result.output
 
-    def test_init_deprecated_marketplace_flag(self, runner: CliRunner, tmp_path: Path) -> None:
-        """Test deprecated --marketplace flag still works with warning."""
+    def test_init_removed_marketplace_flag(self, runner: CliRunner, tmp_path: Path) -> None:
+        """--marketplace was removed in 0.37 (#4073): exit 2 naming the replacement."""
         with runner.isolated_filesystem(temp_dir=str(tmp_path)):
             result = runner.invoke(
                 cli,
                 ["init", "legacy-marketplace", "-y", "--marketplace"],
                 catch_exceptions=False,
             )
-            assert result.exit_code == 0, result.output
-            assert "deprecated" in result.output.lower()
+            assert result.exit_code == 2, result.output
+            assert "Run: apm marketplace init" in result.output
 
     def test_init_verbose_output(self, runner: CliRunner, tmp_path: Path) -> None:
         """Test init with --verbose flag shows detailed output."""
@@ -549,11 +549,9 @@ class TestIntegrationScenarios:
             # Get the project directory
             proj_dir = Path(isolated_cwd) / "e2e-test"
 
-            # Add dependencies
+            # init already declares an empty dependencies block
             apm_yml = proj_dir / "apm.yml"
-            content = apm_yml.read_text(encoding="utf-8")
-            content += "\ndependencies:\n  apm: []\n"
-            apm_yml.write_text(content, encoding="utf-8")
+            assert "dependencies:" in apm_yml.read_text(encoding="utf-8")
 
             # Create lock file
             lock_file = proj_dir / "apm.lock.yaml"

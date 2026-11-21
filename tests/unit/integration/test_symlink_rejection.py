@@ -14,6 +14,8 @@ import pytest
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.prompt_integrator import PromptIntegrator
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def package_with_symlinks(tmp_path: Path) -> Path:

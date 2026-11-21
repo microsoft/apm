@@ -5,7 +5,7 @@ description: >-
   is the same hand that drafts the OpenAPM specification artifact in
   new-version mode and that arbitrates panel returns in editorial-patch
   mode. Activate ONLY from the apm-spec-guardian skill.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # Spec Editor Synthesizer (Spec Review + Drafting)

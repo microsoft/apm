@@ -95,6 +95,7 @@ def lockfile_has_persisted_state(lockfile) -> bool:
         or lockfile.mcp_servers
         or lockfile.lsp_servers
         or lockfile.local_deployed_files
+        or lockfile.local_staged_files
         or lockfile.deployment_ledger.records
         or lockfile.replacements is not None
     )

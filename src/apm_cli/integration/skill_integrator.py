@@ -13,14 +13,17 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from apm_cli.core import remediation as _remediation
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.install.services import enforce_agent_plugin_deployment_boundary
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.skill_adoption import (
     dircmp_equal,
+    installing_commit,
     is_skill_dir_identical_to_source,
     render_skill_markdown,
     skill_tree_baselines,
+    tree_equals_install_output,
 )
 from apm_cli.integration.skill_package_routing import (
     get_effective_type,
@@ -35,10 +38,8 @@ from apm_cli.integration.skill_preflight import find_unmanaged_conflicts, select
 from apm_cli.integration.skill_preflight import preflight_skill_selection as _preflight_selection
 from apm_cli.integration.skill_support import (
     SkillIntegrationResult,
-    build_copy_ignore,
+    _build_deployable_copy_ignore,
     build_skill_ownership_maps,
-    clean_orphaned_skills,
-    get_lockfile_owned_agent_skills,
     skill_dir_has_content,
 )
 from apm_cli.integration.targets import TargetProfile
@@ -58,8 +59,12 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from collections.abc import Set
+
     from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.integration.cleanup import DeploymentEvidence
+    from apm_cli.models.dependency.subsets import SkillTargetSelection
     from apm_cli.models.validation import PackageType
 
 
@@ -77,38 +82,6 @@ def should_compile_instructions(package_info) -> bool:
         package_info,
         resolve_effective_type=get_effective_type,
     )
-
-
-def _build_deployable_copy_ignore(
-    *,
-    skip_bin: bool = False,
-    source_plan: "DeployableSourcePlan | None" = None,
-    exclude_apm: bool = False,
-    exclude_apm_yml: bool = False,
-) -> Callable[[str, list[str]], list[str]]:
-    """Build a copy filter constrained to the authorized source plan."""
-    base_ignore = build_copy_ignore(skip_bin=skip_bin)
-    internal_names = (
-        *((".apm",) if exclude_apm else ()),
-        *(("apm.yml",) if exclude_apm_yml else ()),
-    )
-    internal_filter = shutil.ignore_patterns(*internal_names) if internal_names else None
-
-    def _combined(directory: str, contents: list[str]) -> list[str]:
-        ignored = set(base_ignore(directory, contents))
-        if internal_filter is not None:
-            ignored.update(internal_filter(directory, contents))
-        if source_plan is not None:
-            ignored.update(source_plan.copy_ignore(directory, contents))
-        return list(ignored)
-
-    _combined.rebased = lambda plan: _build_deployable_copy_ignore(  # type: ignore[attr-defined]
-        skip_bin=skip_bin,
-        source_plan=plan,
-        exclude_apm=exclude_apm,
-        exclude_apm_yml=exclude_apm_yml,
-    )
-    return _combined
 
 
 def to_hyphen_case(name: str) -> str:
@@ -391,12 +364,17 @@ class SkillIntegrator(BaseIntegrator):
             dict[Path, tuple[Mapping[str, str], Mapping[str, str]]] | None
         ) = None
         self._skill_files: list[Path] = []
+        self._skill_changed_dirs: set[Path] = set()  # destinations whose bytes changed
+        # Promoted skills whose pre-existing unowned copy already matched, per skills root.
+        self._skill_adopted: dict[Path, set[str]] = {}
+        self._skill_primary_root: Path | None = None
         self._skill_recorded_hashes: dict[str, str] = {}
         self._skill_session_hashes: dict[str, str] = {}
         self._hash_snapshots: dict[Path, dict[str, str]] | None = None
         self._skill_targets: list[TargetProfile] | None = None
         self._replay_owners: Mapping[str, str] | None = None
         self._skill_current_owner: str | None = None
+        self._skill_current_commit: str | None = None
         self._skill_source_plan: DeployableSourcePlan | None = None
         # Any skipped member or unverified rewrite invalidates this call's completion proof.
         self._skill_can_complete = False
@@ -434,8 +412,21 @@ class SkillIntegrator(BaseIntegrator):
             self._replay_owners = None
             self._materialization_session = None
 
-    def _skill_member_skipped(self, _path: Path) -> None:
+    def install_user_scope(self) -> bool:
+        """Return whether the active materialization session deploys at user scope."""
+        scope = getattr(self._materialization_session, "scope", None)
+        return getattr(scope, "value", None) == "user"
+
+    def kept_values(self) -> frozenset[str]:
+        """Return lock values of declared skill members this batch left unwritten."""
+        session = self._materialization_session
+        return session.kept_values() if session is not None else frozenset()
+
+    def _skill_member_skipped(self, path: Path) -> None:
         self._skill_can_complete = False
+        # A declared member left on disk is kept, never cleaned as stale.
+        if self._materialization_session is not None and self._skill_targets:
+            self._materialization_session.keep(path, self._skill_targets)
 
     def _skill_materialization_complete(self, project_root: Path) -> bool:
         """Require positive discovery and every admitted source at every physical target."""
@@ -479,6 +470,7 @@ class SkillIntegrator(BaseIntegrator):
         """Record copied source members, never surviving siblings; adopt identical trees (#3391)."""
         from collections import ChainMap
 
+        from apm_cli.integration.skill_support import tree_file_hashes
         from apm_cli.utils.content_hash import compute_file_hash
 
         def entry(path: Path) -> str:
@@ -511,6 +503,7 @@ class SkillIntegrator(BaseIntegrator):
             self, source, destination, ignore=ignore, owned=lambda p: claimed(entry(p)), force=force
         )
         unchanged = unchanged and not adopted
+        before = tree_file_hashes(destination, entry)
         copied = self.copy_directory_files(
             source,
             destination,
@@ -519,7 +512,7 @@ class SkillIntegrator(BaseIntegrator):
             is_managed=managed,
             recorded_hashes=hashes,
             baseline_hash=(
-                (lambda path: session.baseline(path, targets) or adopted.get(path))
+                (lambda path: adopted.get(path) or session.baseline(path, targets))
                 if session is not None
                 else None
             ),
@@ -543,6 +536,8 @@ class SkillIntegrator(BaseIntegrator):
                 self._skill_can_complete = False
             self._resolve_markdown_links_in_skill_bundle(source, destination, copied)
         written_hashes = {entry(path): compute_file_hash(path) for path in copied}
+        if any(before.get(key) != digest for key, digest in written_hashes.items()):
+            self._skill_changed_dirs.add(destination)
         if session is not None and written:
             if self.link_resolver is None:
                 raise RuntimeError("Cannot record skill writes without final link rendering.")
@@ -810,16 +805,29 @@ class SkillIntegrator(BaseIntegrator):
         parent_name: str,
         diagnostics=None,
         logger=None,
+        declared_by: str | None = None,
     ) -> None:
-        """Fail an unsatisfied persisted required selection through the output cascade."""
+        """Fail an unsatisfied persisted required selection through the output cascade.
+
+        *declared_by* names the dependency chain whose manifest declared the
+        selection when it is not the project's own apm.yml.
+        """
         available_display = ", ".join(sorted(available_names)) if available_names else "(none)"
         requested_display = ", ".join(sorted(set(requested_names)))
-        details = (
-            "Skill selection matched no available skills. "
-            f"Requested: {requested_display}. Available: {available_display}. "
-            "Edit 'skills:' in apm.yml to use an available name or remove the filter, "
-            "then run 'apm install'."
-        )
+        if declared_by:
+            details = (
+                f"Skill selection declared by '{declared_by}' matched no available skills. "
+                f"Requested: {requested_display}. Available: {available_display}. "
+                + _remediation.SKILL_SELECTION_DECLARED_UNMATCHED.bind(
+                    package=declared_by.split(" > ")[-1]
+                ).sentence()
+            )
+        else:
+            details = (
+                "Skill selection matched no available skills. "
+                f"Requested: {requested_display}. Available: {available_display}. "
+                + _remediation.SKILL_SELECTION_UNMATCHED.sentence()
+            )
         if diagnostics is not None:
             diagnostics.error(details, package=parent_name)
         elif logger:
@@ -936,6 +944,7 @@ class SkillIntegrator(BaseIntegrator):
                 sub_skill_path, target
             )
             is_self_overwrite = False
+            is_managed = False
             if target_existed:
                 # Check if this is a user-authored skill (not managed by APM)
                 is_managed = (
@@ -961,7 +970,7 @@ class SkillIntegrator(BaseIntegrator):
                         elif logger:
                             logger.warning(
                                 f"Skipping skill '{sub_name}' -- local skill exists (not managed by APM). "
-                                f"Use 'apm install --force' to overwrite."
+                                f"{_remediation.LOCAL_FILE_UNMANAGED.sentence()}"
                             )
                         else:
                             try:
@@ -969,7 +978,7 @@ class SkillIntegrator(BaseIntegrator):
 
                                 _rich_warning(
                                     f"Skipping skill '{sub_name}' -- local skill exists (not managed by APM). "
-                                    f"Use 'apm install --force' to overwrite."
+                                    f"{_remediation.LOCAL_FILE_UNMANAGED.sentence()}"
                                 )
                             except ImportError:
                                 pass
@@ -991,7 +1000,11 @@ class SkillIntegrator(BaseIntegrator):
             if not copied:
                 continue
             rewriter._native_skill_session_owners[target.resolve()] = parent_name
-            promoted += 1
+            promoted += target in rewriter._skill_changed_dirs
+            if unchanged and not is_managed and not is_self_overwrite:
+                rewriter._skill_adopted.setdefault(target_skills_root.resolve(), set()).add(
+                    sub_name
+                )
             if target / "SKILL.md" in copied:
                 deployed.append(target)
                 if warn and target_existed and not is_self_overwrite and not unchanged:
@@ -1011,6 +1024,10 @@ class SkillIntegrator(BaseIntegrator):
                         _rich_warning(detail)
         return promoted, deployed
 
+    def _primary_adopted_count(self) -> int:
+        """Count promoted skills adopted, not written, in the primary skills root."""
+        return len(self._skill_adopted.get(self._skill_primary_root, ()))
+
     _build_ownership_maps = staticmethod(build_skill_ownership_maps)
 
     @staticmethod
@@ -1025,6 +1042,42 @@ class SkillIntegrator(BaseIntegrator):
         _, native_owners = SkillIntegrator._build_ownership_maps(lockfile_root)
         return {path.rsplit("/", 1)[-1]: owner for path, owner in native_owners.items()}
 
+    @staticmethod
+    def _skill_root_target_names(targets, skills_root) -> dict[Path, tuple[str, ...]]:
+        """Group skill-capable target names by the resolved skills root they share."""
+        grouped: dict[Path, list[str]] = {}
+        for target in targets:
+            if target.supports("skills"):
+                grouped.setdefault(skills_root(target).resolve(), []).append(target.name)
+        return {root: tuple(names) for root, names in grouped.items()}
+
+    @staticmethod
+    def _paired_name_filter(
+        name_filter: "Set[str] | None",
+        skill_pairing: "SkillTargetSelection | None",
+        target_names: tuple[str, ...],
+    ) -> "Set[str] | None":
+        """Narrow *name_filter* to the skills paired with one skills root's targets.
+
+        Without a pairing every target receives the whole filter. A root shared
+        by several targets receives the union of their paired skills, so a
+        shared directory never loses a skill one of its targets selected.
+        """
+        if skill_pairing is None:
+            return name_filter
+        selected = [
+            skill_pairing.skills_for_target(name)
+            for name in target_names
+            if skill_pairing.selects_target(name)
+        ]
+        if not selected:
+            return frozenset()
+        if any(skills is None for skills in selected):
+            return name_filter
+        paired = skill_subset_filter_tokens({name for skills in selected for name in skills})
+        paired = frozenset(paired or ())
+        return paired if name_filter is None else frozenset(name_filter) & paired
+
     def _promote_sub_skills_standalone(
         self,
         package_info,
@@ -1037,6 +1090,7 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         targets=None,
         skill_subset=None,
+        skill_pairing: "SkillTargetSelection | None" = None,
         skip_bin: bool = False,
         source_plan: "DeployableSourcePlan | None" = None,
         source_paths: dict[str, Path] | None = None,
@@ -1077,6 +1131,9 @@ class SkillIntegrator(BaseIntegrator):
             if source_paths is not None
             else self._skill_names_in_directory(sub_skills_dir)
         )
+        root_targets = self._skill_root_target_names(
+            targets, lambda target: self._target_skills_root(target, project_root)
+        )
 
         for target in targets:
             if not target.supports("skills"):
@@ -1096,6 +1153,8 @@ class SkillIntegrator(BaseIntegrator):
             seen_skill_dirs.add(resolved_root)
             is_primary = not primary_selected
             primary_selected = True
+            if is_primary:
+                self._skill_primary_root = resolved_root
 
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
@@ -1110,7 +1169,9 @@ class SkillIntegrator(BaseIntegrator):
                 force=force,
                 project_root=project_root,
                 logger=logger if is_primary else None,
-                name_filter=name_filter,
+                name_filter=self._paired_name_filter(
+                    name_filter, skill_pairing, root_targets[resolved_root]
+                ),
                 link_rewriter=self,
                 skip_bin=skip_bin,
                 source_plan=source_plan,
@@ -1242,34 +1303,39 @@ class SkillIntegrator(BaseIntegrator):
                 continue
             seen_skill_dirs.add(resolved)
 
+            from apm_cli.models.apm_package import PackageType as _PackageType
+
+            native_ignore = _build_deployable_copy_ignore(
+                skip_bin=skip_bin,
+                source_plan=source_plan,
+                exclude_apm=True,
+                exclude_apm_yml=package_info.package_type is _PackageType.MARKETPLACE_PLUGIN,
+            )
             rel_path = deployed_path_entry(target_skill_dir, project_root, [target])
             session_owned = resolved in self._native_skill_session_owners
             target_existed = skill_dir_has_content(target_skill_dir)
-            if target_existed and self.check_collision(
-                target_skill_dir,
-                rel_path,
-                {rel_path} if session_owned else collision_managed,
-                force,
-                diagnostics=diagnostics,
+            owned = {rel_path} if session_owned else collision_managed
+            # A would-be collision equal to this install's output is adopted (#3994).
+            may_adopt = target_existed and not force and rel_path not in owned
+            unchanged = may_adopt and tree_equals_install_output(
+                self, package_path, target_skill_dir, native_ignore
+            )
+            collides = target_existed and not unchanged
+            if collides and self.check_collision(
+                target_skill_dir, rel_path, owned, force, diagnostics=diagnostics
             ):
                 self._skill_can_complete = False
                 continue
-
-            from apm_cli.models.apm_package import PackageType as _PackageType
 
             copied = self._copy_skill_bundle(
                 package_path,
                 target_skill_dir,
                 project_root,
-                ignore=_build_deployable_copy_ignore(
-                    skip_bin=skip_bin,
-                    source_plan=source_plan,
-                    exclude_apm=True,
-                    exclude_apm_yml=package_info.package_type is _PackageType.MARKETPLACE_PLUGIN,
-                ),
+                ignore=native_ignore,
                 managed_files=collision_managed,
                 force=force,
                 diagnostics=diagnostics,
+                unchanged=unchanged,
             )
             if target_skill_dir / "SKILL.md" in copied:
                 all_target_paths.append(target_skill_dir)
@@ -1342,10 +1408,11 @@ class SkillIntegrator(BaseIntegrator):
             )
             all_target_paths.extend(sub_deployed)
 
-        # Count unique sub-skills from primary target only
+        # Count changed unique sub-skills from primary target only
         primary_root = project_root / ".github" / "skills"
         sub_skills_count = sum(
-            1 for p in all_target_paths if p.parent == primary_root and p.name != skill_name
+            p.parent == primary_root and p.name != skill_name and p in self._skill_changed_dirs
+            for p in all_target_paths
         )
 
         return SkillIntegrationResult(
@@ -1356,6 +1423,10 @@ class SkillIntegrator(BaseIntegrator):
             references_copied=files_copied,
             links_resolved=0,
             sub_skills_promoted=sub_skills_count,
+            skills_changed=sub_skills_count
+            + (
+                primary_skill_md is not None and primary_skill_md.parent in self._skill_changed_dirs
+            ),
             target_paths=all_target_paths,
             deployed_files=tuple(self._skill_files),
             complete=self._skill_materialization_complete(project_root),
@@ -1374,6 +1445,7 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         targets=None,
         skill_subset=None,
+        skill_pairing: "SkillTargetSelection | None" = None,
         skip_bin: bool = False,
         source_plan: "DeployableSourcePlan | None" = None,
         source_paths: dict[str, Path] | None = None,
@@ -1412,6 +1484,9 @@ class SkillIntegrator(BaseIntegrator):
             if source_plan is not None
             else skill_subset_filter_tokens(skill_subset)
         )
+        root_targets = self._skill_root_target_names(
+            targets, lambda target: project_root / target.skills_rel_root
+        )
 
         for target in targets:
             if not target.supports("skills"):
@@ -1431,6 +1506,8 @@ class SkillIntegrator(BaseIntegrator):
             seen_skill_dirs.add(resolved_root)
             is_primary = not primary_selected
             primary_selected = True
+            if is_primary:
+                self._skill_primary_root = resolved_root
 
             target_skills_root.mkdir(parents=True, exist_ok=True)
 
@@ -1445,7 +1522,9 @@ class SkillIntegrator(BaseIntegrator):
                 force=force,
                 project_root=project_root,
                 logger=logger if is_primary else None,
-                name_filter=_name_filter,
+                name_filter=self._paired_name_filter(
+                    _name_filter, skill_pairing, root_targets[resolved_root]
+                ),
                 link_rewriter=self,
                 skip_bin=skip_bin,
                 source_plan=source_plan,
@@ -1475,6 +1554,8 @@ class SkillIntegrator(BaseIntegrator):
             references_copied=0,
             links_resolved=0,
             sub_skills_promoted=total_promoted,
+            skills_changed=total_promoted,
+            sub_skills_adopted=self._primary_adopted_count(),
             target_paths=all_deployed,
             deployed_files=tuple(self._skill_files),
             complete=self._skill_materialization_complete(project_root),
@@ -1496,6 +1577,7 @@ class SkillIntegrator(BaseIntegrator):
         bin_skip_reason_override: str | None = None,
         trust_bin: bool | None = None,
         source_plan=None,
+        skill_pairing: "SkillTargetSelection | None" = None,
     ) -> SkillIntegrationResult:
         """Deploy admitted native skills, bundles and promoted sub-skills.
 
@@ -1511,20 +1593,22 @@ class SkillIntegrator(BaseIntegrator):
         lockfile_root = (
             get_apm_dir(InstallScope.USER) if scope is InstallScope.USER else project_root
         )
-        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+        from apm_cli.core.deployment_ledger import (
+            DeploymentLedgerCodec,
+            DeploymentMaterializationSession,
+        )
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
-        self._skill_files = []
+        self._skill_files, self._skill_changed_dirs = [], set()
+        self._skill_adopted = {}
+        self._skill_primary_root = None
         self._skill_targets = targets
         self._skill_source_plan = source_plan
         self._skill_can_complete = True
         self._skill_completed_roots = {}
         self._skill_completed_files = {}
-        self._skill_current_owner = (
-            package_info.dependency_ref.get_unique_key()
-            if package_info.dependency_ref is not None
-            else "."
-        )
+        self._skill_current_owner = DeploymentMaterializationSession.receipt_owner(package_info)
+        self._skill_current_commit = installing_commit(package_info)
         snapshots = self._hash_snapshots if self._hash_snapshots is not None else {}
         if lockfile_root not in snapshots:
             lockfile = LockFile.read(get_lockfile_path(lockfile_root))
@@ -1550,6 +1634,7 @@ class SkillIntegrator(BaseIntegrator):
                 logger=logger,
                 targets=targets,
                 skill_subset=skill_subset,
+                skill_pairing=skill_pairing,
                 skip_bin=skip_bin,
                 source_plan=source_plan,
                 source_paths=selection.children,
@@ -1562,6 +1647,8 @@ class SkillIntegrator(BaseIntegrator):
                 references_copied=0,
                 links_resolved=0,
                 sub_skills_promoted=sub_skills_count,
+                skills_changed=sub_skills_count,
+                sub_skills_adopted=self._primary_adopted_count(),
                 target_paths=sub_deployed,
                 deployed_files=tuple(self._skill_files),
                 complete=self._skill_materialization_complete(project_root),
@@ -1588,7 +1675,8 @@ class SkillIntegrator(BaseIntegrator):
         from apm_cli.models.apm_package import PackageType as _PackageType
 
         if package_info.package_type is _PackageType.MARKETPLACE_PLUGIN:
-            if skip_bin:
+            if skip_bin and (package_path / "bin").is_dir():
+                # A refusal is reportable only for a plugin that ships bin/.
                 bin_skip_reason = bin_skip_reason_override or "not_approved"
             else:
                 bin_paths, bin_skip_reason = self._deploy_plugin_bin(
@@ -1670,6 +1758,7 @@ class SkillIntegrator(BaseIntegrator):
                 logger=logger,
                 targets=targets,
                 skill_subset=skill_subset,
+                skill_pairing=skill_pairing,
                 skip_bin=skip_bin,
                 source_plan=source_plan,
             ),
@@ -1863,8 +1952,8 @@ class SkillIntegrator(BaseIntegrator):
         )
         return dest_manifest
 
-    @staticmethod
     def _copy_plugin_file(
+        self,
         src_file: Path,
         dest_file: Path,
         *,
@@ -1893,6 +1982,7 @@ class SkillIntegrator(BaseIntegrator):
 
         if not skip_copy:
             shutil.copy2(src_file, dest_file)
+            self.note_rendered_write(dest_file)
 
         if make_executable and os.name == "posix":
             # User-only (0o700-style): set the exact deploy mode so group,
@@ -1911,18 +2001,19 @@ class SkillIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         targets=None,
         removed_paths: list[Path] | None = None,
+        evidence: "DeploymentEvidence | None" = None,
     ) -> dict[str, int]:
-        """Sync recorded skill paths, or use legacy package-name orphan detection.
+        """Remove recorded skill paths; without a managed set remove nothing.
 
         Scope-resolved ``targets`` supply skill prefixes; absent targets use the
-        catalog. An explicit managed set limits cleanup to those recorded paths.
+        catalog. Only paths in the managed set (lockfile ownership) whose bytes
+        *evidence* proves APM deployed are removed (#3701); ``None`` keeps them.
         Return removed-file and error counts.
         """
+        from apm_cli.integration.cleanup import remove_synced_files
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         source = targets if targets is not None else list(KNOWN_TARGETS.values())
-
-        stats = {"files_removed": 0, "errors": 0}
 
         # Build the set of valid skill prefixes from targets
         skill_prefixes: list[str] = []
@@ -1937,158 +2028,25 @@ class SkillIntegrator(BaseIntegrator):
                     skill_prefixes.append(COWORK_LOCKFILE_PREFIX)
                 continue
             skill_prefixes.append(f"{t.skills_rel_root}/")
-        skill_prefix_tuple = tuple(skill_prefixes)
 
         if managed_files is not None:
-            # Manifest-based removal -- only remove tracked skill directories
-            project_root_resolved = project_root.resolve()
+            cleanup = remove_synced_files(
+                managed_files,
+                project_root,
+                prefixes=tuple(skill_prefixes),
+                dep_key="<sync skills>",
+                targets=targets,
+                evidence=evidence,
+                receipt_retirements=removed_paths,
+            )
+            return {"files_removed": len(cleanup.deleted), "errors": len(cleanup.failed)}
 
-            # Lazy-resolve cowork root at most once per invocation
-            # (mirrors the pattern in cleanup.py and sync_remove_files).
-            _cowork_root_resolved: bool = False
-            _cowork_root_cached: Path | None = None
-            _cowork_skipped: int = 0
+        # Without lockfile ownership nothing proves which skill directories
+        # APM deployed, so legacy cleanup removes nothing.
+        from apm_cli.utils.console import _rich_info
 
-            for rel_path in managed_files:
-                if not rel_path.startswith(skill_prefix_tuple):
-                    continue
-                if ".." in rel_path:
-                    continue
-
-                # Cowork:// paths
-                from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
-
-                if rel_path.startswith(COWORK_URI_SCHEME):
-                    try:
-                        if not _cowork_root_resolved:
-                            from apm_cli.integration.copilot_cowork_paths import (
-                                resolve_copilot_cowork_skills_dir,
-                            )
-
-                            _cowork_root_cached = resolve_copilot_cowork_skills_dir()
-                            _cowork_root_resolved = True
-                        if _cowork_root_cached is None:
-                            _cowork_skipped += 1
-                            continue
-                        from apm_cli.integration.copilot_cowork_paths import from_lockfile_path
-
-                        target = from_lockfile_path(rel_path, _cowork_root_cached)
-                    except Exception:
-                        stats["errors"] += 1
-                        continue
-                else:
-                    target = project_root / rel_path
-                    if not str(target.resolve()).startswith(str(project_root_resolved)):
-                        continue
-
-                if not target.exists():
-                    continue
-
-                try:
-                    if target.is_dir():
-                        shutil.rmtree(target)
-                    else:
-                        target.unlink()
-                    stats["files_removed"] += 1
-                    if removed_paths is not None:
-                        removed_paths.append(target)
-                except Exception:
-                    stats["errors"] += 1
-
-            # One-time warning when cowork entries were skipped
-            # because the OneDrive path is unavailable.
-            if _cowork_skipped > 0:
-                from apm_cli.utils.console import _rich_warning
-
-                _rich_warning(
-                    f"Cowork: skipping {_cowork_skipped} skill "
-                    f"{'entry' if _cowork_skipped == 1 else 'entries'}"
-                    " -- OneDrive path not detected.\n"
-                    "Run: apm config set copilot-cowork-skills-dir <path>  "
-                    "(or set APM_COPILOT_COWORK_SKILLS_DIR)\n"
-                    "to clean up these entries on the next install/uninstall.",
-                    symbol="warning",
-                )
-
-            return stats
-
-        installed_skill_names = set()
-        for dep in apm_package.get_apm_dependencies():
-            raw_name = dep.repo_url.split("/")[-1]
-            if dep.is_virtual and dep.virtual_path:
-                raw_name = dep.virtual_path.split("/")[-1]
-            is_valid, _ = validate_skill_name(raw_name)
-            skill_name = raw_name if is_valid else normalize_skill_name(raw_name)
-            installed_skill_names.add(skill_name)
-
-            # Also include promoted sub-skills from installed packages
-            install_path = dep.get_install_path(project_root / "apm_modules")
-            sub_skills_dir = install_path / ".apm" / "skills"
-            if sub_skills_dir.is_dir():
-                for sub_skill_path in sub_skills_dir.iterdir():
-                    if sub_skill_path.is_dir() and (sub_skill_path / "SKILL.md").exists():
-                        raw_sub = sub_skill_path.name
-                        is_valid, _ = validate_skill_name(raw_sub)
-                        installed_skill_names.add(
-                            raw_sub if is_valid else normalize_skill_name(raw_sub)
-                        )
-
-        # Clean all target skill directories dynamically
-        seen_cleanup_dirs: set[Path] = set()
-        for t in source:
-            if not t.supports("skills"):
-                continue
-            sm = t.primitives["skills"]
-
-            # Special guard for cross-tool deploy_root (.agents/)
-            # Only clean if the owning target dir exists
-            if sm.deploy_root:
-                if not (project_root / t.root_dir).is_dir():
-                    continue
-
-            skills_dir = project_root / t.skills_rel_root
-
-            # Dedup: skip if same resolved skills dir already cleaned.
-            resolved_skills = skills_dir.resolve()
-            if resolved_skills in seen_cleanup_dirs:
-                import logging
-
-                logging.getLogger(__name__).debug(
-                    "%s -- already processed, skipping cleanup for %s", skills_dir, t.name
-                )
-                continue
-            seen_cleanup_dirs.add(resolved_skills)
-
-            if skills_dir.exists():
-                result = self._clean_orphaned_skills(
-                    skills_dir,
-                    installed_skill_names,
-                    project_root=project_root,
-                    removed_paths=removed_paths,
-                )
-                stats["files_removed"] += result["files_removed"]
-                stats["errors"] += result["errors"]
-
-        return stats
-
-    def _clean_orphaned_skills(
-        self,
-        skills_dir: Path,
-        installed_skill_names: set,
-        *,
-        project_root: Path | None = None,
-        removed_paths: list[Path] | None = None,
-    ) -> dict[str, int]:
-        """Clean legacy-orphan skill directories without touching foreign agents."""
-        return clean_orphaned_skills(
-            skills_dir,
-            installed_skill_names,
-            project_root=project_root,
-            get_lockfile_owned_agent_skills=self._get_lockfile_owned_agent_skills,
-            removed_paths=removed_paths,
+        _rich_info(
+            "Skipped skill directory cleanup: no lockfile records which skills APM deployed.",
+            symbol="info",
         )
-
-    @staticmethod
-    def _get_lockfile_owned_agent_skills(project_root: Path) -> set[str]:
-        """Return the lockfile-owned ``.agents/skills`` names."""
-        return get_lockfile_owned_agent_skills(project_root)
+        return {"files_removed": 0, "errors": 0}

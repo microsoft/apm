@@ -283,28 +283,26 @@ class TestInitDeprecatedFlags:
         monkeypatch.chdir(tmp_path)
         clear_apm_yml_cache()
         # Provide a valid kebab-case project name for --plugin (uses the tmp dir name otherwise)
-        result = runner.invoke(cli, ["init", "my-plugin", "--yes", "--plugin"])
+        result = runner.invoke(cli, ["plugin", "init", "my-plugin", "--yes"])
         assert result.exit_code == 0, result.output
         assert (tmp_path / "my-plugin" / "apm.yml").exists()
         assert (tmp_path / "my-plugin" / "plugin.json").exists()
 
-    def test_init_marketplace_flag_shows_deprecation(self, runner, tmp_path, monkeypatch):
-        """--marketplace flag shows a deprecation warning and appends block."""
+    def test_init_marketplace_flag_was_removed(self, runner, tmp_path, monkeypatch):
+        """--marketplace was removed in 0.37 (#4073): exit 2, nothing written."""
         monkeypatch.chdir(tmp_path)
         clear_apm_yml_cache()
         result = runner.invoke(cli, ["init", "--yes", "--marketplace"])
-        assert result.exit_code == 0, result.output
-        content = (tmp_path / "apm.yml").read_text()
-        # marketplace block appended
-        assert "marketplace" in content
+        assert result.exit_code == 2, result.output
+        assert not (tmp_path / "apm.yml").exists()
 
-    def test_init_plugin_and_marketplace_flags(self, runner, tmp_path, monkeypatch):
-        """--plugin and --marketplace together work."""
+    def test_init_plugin_and_marketplace_flags_were_removed(self, runner, tmp_path, monkeypatch):
+        """Both removed flags together refuse before writing (#4073)."""
         monkeypatch.chdir(tmp_path)
         clear_apm_yml_cache()
         result = runner.invoke(cli, ["init", "my-plugin", "--yes", "--plugin", "--marketplace"])
-        assert result.exit_code == 0, result.output
-        assert (tmp_path / "my-plugin" / "plugin.json").exists()
+        assert result.exit_code == 2, result.output
+        assert not (tmp_path / "my-plugin").exists()
 
 
 class TestInitInteractive:
@@ -390,7 +388,7 @@ class TestInitPluginNameValidation:
         """A valid kebab-case plugin name succeeds."""
         monkeypatch.chdir(tmp_path)
         clear_apm_yml_cache()
-        result = runner.invoke(cli, ["init", "valid-plugin", "--yes", "--plugin"])
+        result = runner.invoke(cli, ["plugin", "init", "valid-plugin", "--yes"])
         assert result.exit_code == 0, result.output
         subdir = tmp_path / "valid-plugin"
         assert (subdir / "plugin.json").exists()
@@ -400,7 +398,7 @@ class TestInitPluginNameValidation:
         monkeypatch.chdir(tmp_path)
         clear_apm_yml_cache()
         # Use a name with uppercase which fails kebab-case validation
-        result = runner.invoke(cli, ["init", "Invalid_Plugin", "--yes", "--plugin"])
+        result = runner.invoke(cli, ["plugin", "init", "Invalid_Plugin", "--yes"])
         assert result.exit_code != 0
 
 

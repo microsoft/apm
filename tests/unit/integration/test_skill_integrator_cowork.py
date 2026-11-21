@@ -15,6 +15,8 @@ import pytest  # noqa: F401
 
 from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.integration.skill_integrator import SkillIntegrator
+from apm_cli.utils.diagnostics import DiagnosticCollector
+from tests.utils.deployment_evidence import no_evidence, receipted_evidence
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,7 +69,7 @@ class TestSyncIntegrationCoworkDeletion:
     """sync_integration must resolve cowork:// entries and delete them."""
 
     def test_cowork_skill_directory_deleted(self, tmp_path: Path) -> None:
-        """A cowork://skills/foo entry pointing to a directory is rmtree'd."""
+        """A cowork://skills/foo entry and its receipted members are removed (#3701)."""
         cowork_root = tmp_path / "cowork-skills"
         skill_dir = cowork_root / "foo"
         skill_dir.mkdir(parents=True)
@@ -87,12 +89,17 @@ class TestSyncIntegrationCoworkDeletion:
             result = integrator.sync_integration(
                 _stub_apm_package(),
                 project_root,
-                managed_files={"cowork://skills/foo"},
+                managed_files={
+                    "cowork://skills/foo",
+                    "cowork://skills/foo/SKILL.md",
+                    "cowork://skills/foo/extra.md",
+                },
                 targets=targets,
+                evidence=receipted_evidence(cowork_root, deploy_root=project_root),
             )
 
         assert not skill_dir.exists(), "Cowork skill directory still exists after sync_integration."
-        assert result["files_removed"] == 1
+        assert result["files_removed"] == 3
         assert result["errors"] == 0
 
     def test_cowork_skill_file_deleted(self, tmp_path: Path) -> None:
@@ -118,11 +125,36 @@ class TestSyncIntegrationCoworkDeletion:
                 project_root,
                 managed_files={"cowork://skills/bar/SKILL.md"},
                 targets=targets,
+                evidence=receipted_evidence(cowork_root, deploy_root=project_root),
             )
 
         assert not skill_md.exists(), "Cowork SKILL.md still exists after sync_integration."
         assert result["files_removed"] == 1
         assert result["errors"] == 0
+
+    def test_cowork_skill_file_without_evidence_is_kept(self, tmp_path: Path) -> None:
+        """cowork:// rows are not exempt from deployment evidence (#3701)."""
+        cowork_root = tmp_path / "cowork-skills"
+        skill_md = cowork_root / "bar" / "SKILL.md"
+        skill_md.parent.mkdir(parents=True)
+        skill_md.write_text("# Bar\n", encoding="ascii")
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=cowork_root,
+        ):
+            result = SkillIntegrator().sync_integration(
+                _stub_apm_package(),
+                project_root,
+                managed_files={"cowork://skills/bar/SKILL.md"},
+                targets=[_make_cowork_target_profile()],
+                evidence=no_evidence(project_root),
+            )
+
+        assert skill_md.exists()
+        assert result["files_removed"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -133,37 +165,38 @@ class TestSyncIntegrationCoworkDeletion:
 class TestSyncIntegrationCoworkResolverNone:
     """When cowork root resolver returns None, entries are skipped with a warning."""
 
-    def test_resolver_none_skips_entry_and_warns(self, tmp_path: Path) -> None:
+    def test_resolver_none_skips_entry_and_warns(self, tmp_path: Path, monkeypatch) -> None:
         project_root = tmp_path / "project"
         project_root.mkdir()
 
         integrator = SkillIntegrator()
         targets = [_make_cowork_target_profile()]
+        messages: list[str] = []
+        monkeypatch.setattr(
+            DiagnosticCollector,
+            "render_summary",
+            lambda self, *_a, **_kw: messages.extend(d.message for d in self._diagnostics),
+        )
 
-        with (
-            patch(
-                "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
-                return_value=None,
-            ),
-            patch(
-                "apm_cli.utils.console._rich_warning",
-            ) as mock_warn,
+        with patch(
+            "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
+            return_value=None,
         ):
             result = integrator.sync_integration(
                 _stub_apm_package(),
                 project_root,
                 managed_files={"cowork://skills/baz"},
                 targets=targets,
+                evidence=no_evidence(project_root),
             )
 
-        # Entry is skipped, not an error.
+        # Nothing is deleted; the entry is retained for a later run (#3701).
         assert result["files_removed"] == 0
-        assert result["errors"] == 0
+        assert result["errors"] == 1
 
         # A one-time warning must have been emitted.
-        mock_warn.assert_called_once()
-        warn_msg = mock_warn.call_args[0][0]
-        assert "OneDrive" in warn_msg or "cowork" in warn_msg.lower()
+        cowork_msgs = [m for m in messages if "OneDrive" in m]
+        assert len(cowork_msgs) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +232,7 @@ class TestSyncIntegrationCoworkTranslationError:
                 project_root,
                 managed_files={"cowork://skills/malformed-entry"},
                 targets=targets,
+                evidence=no_evidence(project_root),
             )
 
         assert result["files_removed"] == 0
@@ -233,6 +267,7 @@ class TestSyncIntegrationCoworkIdempotent:
                 project_root,
                 managed_files={"cowork://skills/already-gone"},
                 targets=targets,
+                evidence=no_evidence(project_root),
             )
 
         assert result["files_removed"] == 0
@@ -266,8 +301,11 @@ class TestSyncIntegrationMixed:
 
         managed = {
             ".github/skills/local-skill",
+            ".github/skills/local-skill/SKILL.md",
             "cowork://skills/remote-skill",
+            "cowork://skills/remote-skill/SKILL.md",
         }
+        evidence = receipted_evidence(project_root, cowork_root, deploy_root=project_root)
 
         with patch(
             "apm_cli.integration.copilot_cowork_paths.resolve_copilot_cowork_skills_dir",
@@ -278,9 +316,11 @@ class TestSyncIntegrationMixed:
                 project_root,
                 managed_files=managed,
                 targets=targets,
+                evidence=evidence,
             )
 
         assert not local_skill.exists(), "Local skill dir should be removed."
         assert not cowork_skill.exists(), "Cowork skill dir should be removed."
-        assert result["files_removed"] == 2
+        # Each directory plus its member file (#3701).
+        assert result["files_removed"] == 4
         assert result["errors"] == 0

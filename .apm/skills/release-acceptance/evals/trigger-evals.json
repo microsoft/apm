@@ -1,0 +1,35 @@
+{
+  "description": "Trigger evals for the release-acceptance dispatch description. 10 should-trigger + 10 should-NOT-trigger. 60/40 train/val split. Validation split is the ship gate (>=0.5 on should-trigger AND <0.5 on should-not-trigger).",
+  "should_trigger": {
+    "train": [
+      "Red team 0.38 before we tag it",
+      "Run acceptance on the release train tip and tell me if it is ready",
+      "Is the release candidate good to ship?",
+      "Do a UX acceptance pass on the RC: walk the journeys and run every hint",
+      "Re-check the open findings on the release PR, its head moved",
+      "Break the train before we cut the release"
+    ],
+    "val": [
+      "Pre-release QA sweep on 0.37.0 please",
+      "Hardcore test the consumer, producer and enterprise journeys before release",
+      "We are about to run cut-release, do the acceptance pass first",
+      "Give me a go or no-go for the release candidate with evidence"
+    ]
+  },
+  "should_not_trigger": {
+    "train": [
+      "Review PR #4004 and post the panel recommendation",
+      "Cut the release and open the release PR",
+      "Audit the docs corpus for drift",
+      "Write a lifecycle test proving apm deny removes the MCP server",
+      "Triage the open issues labelled bug",
+      "Fix the failing Windows unit test"
+    ],
+    "val": [
+      "Verify the claims on the install-packages docs page",
+      "What changed since 0.36.1?",
+      "Threat-model the lockfile v4 design",
+      "Run the unit tests for the install pipeline"
+    ]
+  }
+}

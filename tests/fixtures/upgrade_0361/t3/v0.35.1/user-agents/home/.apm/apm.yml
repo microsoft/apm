@@ -1,0 +1,4 @@
+name: user-profile
+version: 1.0.0
+dependencies:
+  apm: []

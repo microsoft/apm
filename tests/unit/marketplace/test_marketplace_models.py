@@ -9,6 +9,8 @@ from apm_cli.marketplace.models import (
     parse_marketplace_json,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestMarketplaceSource:
     """Frozen dataclass for registered marketplace sources."""

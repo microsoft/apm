@@ -1,0 +1,33 @@
+---
+title: Publish packages
+description: Ship skills, instructions, agents, hooks and plugins that other teams install, pin to a version and update when they choose.
+---
+
+import { LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+This journey is for a package author or a central platform team. Your job: ship
+agent capabilities that other teams depend on, pin and update on their own
+schedule, without copies drifting apart in every repository.
+
+A package is a git repository APM can install. Tag a release and consumers write
+`your-org/your-package#v1.2.0` in their `apm.yml`. Their lockfile records the
+exact commit, and each fix you ship reaches them as a Dependabot or Renovate pull
+request they review and merge.
+
+**You need:** APM ([install it](../getting-started/installation/)) and a git
+repository you can push tags to.
+
+<LinkCard title="Create a package" description="Write one skill, tag v1.0.0 and install it from another repository." href="./create-a-package/" />
+
+## Tasks
+
+<CardGrid>
+  <LinkCard title="Write skills, instructions and hooks" description="Author each primitive once; APM writes it for every harness." href="./write-primitives/" />
+  <LinkCard title="Test a package locally" description="Install your working copy into a consumer before you tag." href="./test-packages/" />
+  <LinkCard title="Release a version" description="Tag semver releases and tell consumers how to pin them." href="./release-a-version/" />
+  <LinkCard title="Build a plugin" description="Ship native plugins for Claude Code, GitHub Copilot and Codex." href="./build-a-plugin/" />
+  <LinkCard title="Publish to a marketplace" description="List your packages so people install them by name." href="./publish-to-a-marketplace/" />
+</CardGrid>
+
+Curating packages for a whole organization? See
+[Build your organization's marketplace](../enterprise/org-marketplace/).

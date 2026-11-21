@@ -16,7 +16,9 @@ from typing import TYPE_CHECKING
 
 import click
 
-from ..errors import InstallFailureAlreadyRendered, MCPNativeConflictError
+from apm_cli.core.scope import manifest_file
+
+from ..errors import InstallFailureAlreadyRendered
 
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
@@ -24,6 +26,7 @@ if TYPE_CHECKING:
 
 from .args import parse_env_pairs, parse_header_pairs
 from .entry import build_mcp_entry
+from .entry_integration import McpEntryCommand, McpEntryRequest
 from .registry import registry_env_override
 from .warnings import warn_shell_metachars, warn_ssrf_url
 from .writer import add_mcp_to_apm_yml
@@ -37,7 +40,7 @@ try:
     from ...deps.lockfile import (
         LockFile,
         LockfileConflictError,
-        LockfileSymlinkError,
+        LockfileRefusal,
         get_lockfile_path,
         migrate_lockfile_if_needed,
     )
@@ -48,8 +51,73 @@ except ImportError:
     pass
 
 
+def manifest_label(manifest_path: Path) -> str:
+    """Name *manifest_path* for CLI output: cwd-relative, else ``~``-relative (#4089)."""
+    resolved = manifest_path.resolve()
+    for base, prefix in ((Path.cwd(), ""), (Path.home(), "~/")):
+        try:
+            return prefix + resolved.relative_to(base.resolve()).as_posix()
+        except ValueError:
+            continue
+    return manifest_path.as_posix()
+
+
+def user_manifest_bootstrap_config(
+    manifest_path: Path,
+    supported_runtimes: list[str],
+    target: str | Sequence[str] | None,
+    runtime: str | Sequence[str] | None,
+) -> dict | None:
+    """Config for the user manifest ``apm install -g --mcp`` creates, if any.
+
+    ``None`` when the user manifest already exists.
+
+    An explicit ``--target`` / ``--runtime`` is recorded under ``targets:``
+    through the manifest target declaration owner, so the new manifest never
+    holds a token the reader rejects (#3870); a target with no ``targets:``
+    spelling is refused here, before anything is written.
+    """
+    from ...core.project_name import resolve_bootstrap_project_name
+    from ...models.manifest_bootstrap import bootstrap_config
+    from ...models.manifest_targets import (
+        IdeTargetError,
+        TargetRewriteError,
+        bootstrap_target_names,
+    )
+
+    if manifest_path.exists():
+        return None
+    config = bootstrap_config(resolve_bootstrap_project_name(Path.home().name))
+    flag, requested = ("--target", target) if target is not None else ("--runtime", runtime)
+    if requested is None:
+        return config
+    try:
+        config["targets"] = list(bootstrap_target_names(supported_runtimes))
+    except TargetRewriteError as exc:
+        if exc.token is None:
+            raise
+        rendered = requested if isinstance(requested, str) else ",".join(requested)
+        label = manifest_label(manifest_path)
+        reason = (
+            f"{exc}"
+            if isinstance(exc, IdeTargetError)
+            else f"target '{exc.token}' has no 'targets:' equivalent, so later "
+            "'apm install -g' runs could not read the new manifest."
+        )
+        # An IDE is a refused value, not a usage mistake: exit 1 like every
+        # other apm.yml writer (#3878).
+        error = click.ClickException if isinstance(exc, IdeTargetError) else click.UsageError
+        raise error(
+            f"Cannot create {label} for {flag} {rendered}: {reason} Nothing was written. "
+            f"Create {label} with just 'name:' and 'version:', then rerun; {flag} "
+            f"{rendered} will apply to that install only."
+        ) from None
+    return config
+
+
 def run_mcp_policy_preflight(
     *,
+    policy_root: Path,
     mcp_name: str,
     transport: str | None,
     url: str | None,
@@ -57,11 +125,20 @@ def run_mcp_policy_preflight(
     no_policy: bool,
     logger,
     target_decision: EffectiveTargetDecision,
+    registry: tuple[str | None, str | None] = (None, None),
 ) -> None:
-    """Run policy checks for a direct MCP install before any persistent write."""
-    from ...core.target_detection import normalize_policy_targets
+    """Judge a direct MCP install through the commit gate before any persistent write.
+
+    *registry* is the ``(url, source)`` pair from ``_resolve_registry_url``;
+    the registry override is active so the transport check resolves a
+    registry server against the same registry the install will query. A
+    blocked server is refused exactly as ``apm install`` refuses it.
+    *policy_root* is the scope manifest root (``$APM_HOME`` under ``-g``).
+    """
+    registry_url, registry_source = registry
     from ...models.dependency.mcp import MCPDependency
-    from ...policy.install_preflight import PolicyBlockError, run_policy_preflight
+    from ...policy.install_preflight import PolicyBlockError
+    from ..commit_gate import enforce_mcp_policy, refuse_blocked_mcp
 
     resolved_transport = transport
     if resolved_transport is None:
@@ -76,17 +153,69 @@ def run_mcp_policy_preflight(
         url=url,
     )
     try:
-        run_policy_preflight(
-            project_root=Path.cwd(),
-            mcp_deps=[dependency],
-            no_policy=no_policy,
-            logger=logger,
-            dry_run=logger.dry_run,
-            effective_target=normalize_policy_targets(target_decision.value),
-        )
-    except PolicyBlockError:
-        logger.render_summary()
-        raise click.exceptions.Exit(1) from None
+        with registry_env_override(
+            registry_url,
+            allow_http=registry_source == "flag",
+            source=registry_source,
+        ):
+            # APM writes this server on every selected runtime, so it is always
+            # a policy subject; target policy judges the selection itself.
+            enforce_mcp_policy(
+                [dependency],
+                brought_in_by=None,
+                runtime=None,
+                target_decision=None,
+                user_scope=False,
+                project_root=policy_root,
+                no_policy=no_policy,
+                logger=logger,
+                dry_run=logger.dry_run,
+                effective_target=target_decision.canonical_targets,
+                effective_target_source=target_decision.source,
+            )
+    except PolicyBlockError as exc:
+        refuse_blocked_mcp(logger, exc)
+
+
+def _reconcile_mcp_entry(
+    *,
+    manifest_path: Path,
+    command: McpEntryCommand,
+    explicit_target: str | list[str] | None,
+    target_decision: EffectiveTargetDecision | None,
+) -> None:
+    """Hand the added server to the install's MCP service stage (#4085).
+
+    ``apm install`` reconciles every declared server through
+    ``run_service_integrations``; the direct entry goes through the same stage,
+    which installs only ``command.mcp_entry`` and records it in the lockfile.
+    """
+    from ...models.apm_package import APMPackage
+    from ..service import InstallService
+    from ..service_integration import run_service_integrations
+
+    # Migrate before creating apm.lock.yaml so legacy state is not shadowed.
+    migrate_lockfile_if_needed(command.project_root)
+    lock_path = get_lockfile_path(command.project_root)
+    existing_lock = LockFile.read(lock_path)
+    run_service_integrations(
+        command,
+        apm_package=APMPackage.from_apm_yml(manifest_path),
+        mcp_deps=[command.mcp_entry.dependency],
+        lock_path=lock_path,
+        existing_lock=existing_lock,
+        old_mcp_servers=set(existing_lock.mcp_servers) if existing_lock else set(),
+        old_mcp_configs=dict(existing_lock.mcp_configs) if existing_lock else {},
+        old_mcp_provenance=dict(existing_lock.mcp_config_provenance) if existing_lock else {},
+        old_mcp_target_servers=dict(existing_lock.mcp_target_servers) if existing_lock else {},
+        old_mcp_target_servers_present=(
+            existing_lock._mcp_target_servers_present if existing_lock else True
+        ),
+        diagnostics=None,
+        explicit_target=explicit_target,
+        target_decision=target_decision,
+        frozen_disposition=InstallService.frozen_disposition(command),
+    )
 
 
 def run_mcp_install(  # noqa: PLR0913
@@ -112,13 +241,13 @@ def run_mcp_install(  # noqa: PLR0913
     registry_source: str | None = None,
     initial_manifest_config: dict | None = None,
     retry_args: tuple[str, ...] = (),
+    no_policy: bool = False,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
     --registry value; the caller resolved precedence vs MCP_REGISTRY_URL.
     ``manifest_path`` is derived from ``apm_dir`` (``apm_dir / 'apm.yml'``)."""
-    from ...constants import APM_YML_FILENAME
 
-    manifest_path = apm_dir / APM_YML_FILENAME
+    manifest_path = manifest_file(apm_dir)
     verbose = logger.verbose
     from ...models.dependency.mcp import MCPDependency
 
@@ -177,8 +306,12 @@ def run_mcp_install(  # noqa: PLR0913
                     retry_args=retry_args,
                 )
             except Exception as exc:
+                from ...registry.client import RegistryEgressRefusedError
+
                 detail = str(exc)
-                if detail.startswith("Could not reach MCP registry"):
+                if isinstance(exc, RegistryEgressRefusedError) or detail.startswith(
+                    "Could not reach MCP registry"
+                ):
                     logger.error(f"{detail} No state was changed.")
                     raise InstallFailureAlreadyRendered(detail) from None
                 if detail.startswith("Cannot install ") and "missing server" in detail:
@@ -191,15 +324,17 @@ def run_mcp_install(  # noqa: PLR0913
                 ) from None
 
     if getattr(logger, "dry_run", False) is True:
-        logger.dry_run_notice(f"would add MCP server '{mcp_name}' to {manifest_path}")
+        logger.dry_run_notice(
+            f"would add MCP server '{mcp_name}' to {manifest_label(manifest_path)}"
+        )
         return
 
     if initial_manifest_config is not None:
-        from ...commands._helpers import _create_minimal_apm_yml
+        from ...models.manifest_bootstrap import write_minimal_manifest
 
         apm_dir.mkdir(parents=True, exist_ok=True)
-        _create_minimal_apm_yml(initial_manifest_config, target_path=manifest_path)
-        logger.success(f"Created {manifest_path}")
+        write_minimal_manifest(initial_manifest_config, target_path=manifest_path)
+        logger.success(f"Created {manifest_label(manifest_path)}")
 
     status, _diff = add_mcp_to_apm_yml(
         mcp_name,
@@ -212,10 +347,10 @@ def run_mcp_install(  # noqa: PLR0913
     if status == "skipped":
         logger.progress(f"MCP server '{mcp_name}' already declared; checking integrations")
 
-    # Install just this MCP via the integrator and update lockfile.
-    # ``registry_env_override`` exports MCP_REGISTRY_URL for THIS call so
-    # MCPServerOperations() (constructed deep inside MCPIntegrator.install)
-    # picks up the override; prior env restored on exit.
+    # Reconcile just this server through the install's MCP service stage, which
+    # records it in the lockfile. ``registry_env_override`` exports
+    # MCP_REGISTRY_URL for THIS call so MCPServerOperations() (constructed deep
+    # inside MCPIntegrator.install) picks up the override; prior env restored.
     if APM_DEPS_AVAILABLE:
         if target is not None and logger:
             rendered_target = target if isinstance(target, str) else ", ".join(target)
@@ -226,144 +361,22 @@ def run_mcp_install(  # noqa: PLR0913
             source=registry_source,
         ):
             try:
-                # Migrate before creating apm.lock.yaml so legacy state is not shadowed.
-                migrate_lockfile_if_needed(apm_dir)
-                _mcp_lock_path = get_lockfile_path(apm_dir)
-                _existing_lock = LockFile.read(_mcp_lock_path)
-                from ...core.deployment_ledger import DeploymentLedgerCodec
-
-                native_hashes = (
-                    DeploymentLedgerCodec.mcp_native_hashes(_existing_lock)
-                    if _existing_lock
-                    else {}
-                )
-                old_native_hashes = {
-                    target_name: dict(hashes) for target_name, hashes in native_hashes.items()
-                }
-                old_servers = set(_existing_lock.mcp_servers) if _existing_lock else set()
-                old_configs = dict(_existing_lock.mcp_configs) if _existing_lock else {}
-                old_provenance = (
-                    dict(_existing_lock.mcp_config_provenance) if _existing_lock else {}
-                )
-                old_target_servers = (
-                    {
-                        target_name: set(server_names)
-                        for target_name, server_names in _existing_lock.mcp_target_servers.items()
-                    }
-                    if _existing_lock
-                    else {}
-                )
-                target_servers_present = (
-                    _existing_lock._mcp_target_servers_present if _existing_lock else True
-                )
-                from ...core.scope import InstallScope
-
-                user_scope = scope is InstallScope.USER
-                if _existing_lock:
-                    from .ownership import resolve_mcp_target_servers
-
-                    old_target_servers = resolve_mcp_target_servers(
-                        recorded_target_servers=old_target_servers,
-                        ownership_present=target_servers_present,
-                        server_names=old_servers,
-                        stored_configs=old_configs,
+                _reconcile_mcp_entry(
+                    manifest_path=manifest_path,
+                    command=McpEntryCommand(
                         project_root=apm_dir,
-                        user_scope=user_scope,
-                    )
-                requested_target_servers = {
-                    target_name: server_names & {mcp_name}
-                    for target_name, server_names in old_target_servers.items()
-                    if server_names & {mcp_name}
-                }
-                from ...integration.mcp_integrator_install import _validate_target_configs
-
-                _validate_target_configs(
-                    list(requested_target_servers),
-                    project_root=apm_dir,
-                    user_scope=user_scope,
-                    console=None,
-                    logger=logger,
-                )
-                # Legacy --runtime remains a direct override. Target values
-                # are projected through the shared decision below.
-                conflict = None
-                try:
-                    MCPIntegrator.install(
-                        [dep],
-                        runtime,
-                        exclude,
-                        verbose,
-                        stored_mcp_configs=old_configs,
-                        explicit_target=target,
-                        target_decision=target_decision,
-                        fail_on_write_error=True,
                         scope=scope,
-                        project_root=apm_dir,
-                        user_scope=user_scope,
-                        managed_target_servers=requested_target_servers,
-                        prevalidated_registry_servers=prevalidated_registry_servers,
-                        native_hashes=native_hashes,
-                    )
-                except MCPNativeConflictError as exc:
-                    if not exc.wrote_connections:
-                        raise
-                    conflict = exc
-                new_names = MCPIntegrator.get_server_names([dep])
-                new_configs = MCPIntegrator.get_server_configs([dep])
-                merged_names = old_servers | new_names
-                merged_configs = dict(old_configs)
-                merged_configs.update(new_configs)
-                merged_provenance = dict(old_provenance)
-                merged_provenance.pop(mcp_name, None)
-                merged_target_servers = {
-                    target_name: set(server_names)
-                    for target_name, server_names in old_target_servers.items()
-                }
-                for target_name, server_names in requested_target_servers.items():
-                    merged_target_servers.setdefault(target_name, set()).discard(mcp_name)
-                    merged_target_servers.setdefault(target_name, set()).update(server_names)
-                retired_targets = {
-                    previous_target: {mcp_name}
-                    for previous_target, server_names in old_target_servers.items()
-                    if mcp_name in server_names and previous_target not in requested_target_servers
-                }
-                if retired_targets and conflict is None:
-                    # Cleanup can fail after a destination write. Keep both deployments
-                    # durably owned until removal succeeds, so retry cannot orphan either.
-                    MCPIntegrator.update_lockfile(
-                        merged_names,
-                        _mcp_lock_path,
-                        mcp_configs=merged_configs,
-                        mcp_target_servers=merged_target_servers,
-                        mcp_config_provenance=merged_provenance,
-                        native_hashes=native_hashes,
                         logger=logger,
-                        fail_on_write_error=True,
-                    )
-                    for previous_target, retired in retired_targets.items():
-                        MCPIntegrator.remove_stale(
-                            retired,
-                            runtime=previous_target,
-                            project_root=apm_dir,
-                            user_scope=user_scope,
-                            scope=scope,
-                            fail_on_write_error=True,
-                            stored_configs=old_configs,
-                            native_hashes=old_native_hashes,
-                        )
-                        merged_target_servers[previous_target].difference_update(retired)
-                MCPIntegrator.update_lockfile(
-                    merged_names,
-                    _mcp_lock_path,
-                    mcp_configs=merged_configs,
-                    mcp_target_servers=merged_target_servers,
-                    mcp_config_provenance=merged_provenance,
-                    native_hashes=native_hashes,
-                    logger=logger,
-                    fail_on_write_error=True,
+                        runtime=runtime,
+                        exclude=exclude,
+                        no_policy=no_policy,
+                        verbose=verbose,
+                        force=force,
+                        mcp_entry=McpEntryRequest(dep, prevalidated_registry_servers),
+                    ),
+                    explicit_target=target,
+                    target_decision=target_decision,
                 )
-                if conflict is not None:
-                    raise conflict
             except InstallFailureAlreadyRendered:
                 raise
             except LockfileConflictError as exc:
@@ -373,9 +386,9 @@ def run_mcp_install(  # noqa: PLR0913
                 logger.error("MCP server written to apm.yml but tool integration failed.")
                 raise click.ClickException(f"MCP integration failed for '{mcp_name}'") from exc
             except Exception as exc:
-                symlink_error = exc if isinstance(exc, LockfileSymlinkError) else exc.__cause__
-                if isinstance(symlink_error, LockfileSymlinkError):
-                    logger.error(str(symlink_error))
+                refusal = exc if isinstance(exc, LockfileRefusal) else exc.__cause__
+                if isinstance(refusal, LockfileRefusal):
+                    logger.error(str(refusal))
                     logger.error("MCP server written to apm.yml but tool integration failed.")
                     raise click.ClickException(f"MCP integration failed for '{mcp_name}'") from exc
                 # Keep the raw exception (which may contain internal paths,
@@ -402,4 +415,4 @@ def run_mcp_install(  # noqa: PLR0913
     else:
         chosen_transport = "registry"
     logger.tree_item(f"  transport: {chosen_transport}")
-    logger.tree_item(f"  apm.yml: {manifest_path}")
+    logger.tree_item(f"  manifest: {manifest_label(manifest_path)}")

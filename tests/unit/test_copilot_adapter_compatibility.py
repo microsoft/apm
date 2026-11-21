@@ -27,6 +27,7 @@ import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from apm_cli.adapters.client.copilot import (
@@ -106,6 +107,27 @@ class TestGetConfigPath(unittest.TestCase):
         self.assertIn(".copilot", config_path)
         self.assertTrue(config_path.endswith("mcp-config.json"))
 
+    def test_project_scope_returns_github_mcp_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = _make_adapter(project_root=tmpdir)
+            config_path = adapter.get_config_path()
+            self.assertTrue(
+                config_path.endswith(".github/mcp.json")
+                or config_path.endswith(".github\\mcp.json")
+            )
+
+    def test_project_scope_lookup_does_not_create_github_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = _make_adapter(project_root=tmpdir)
+            adapter.get_config_path()
+            self.assertFalse((Path(tmpdir) / ".github").exists())
+
+    def test_user_scope_honors_copilot_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"COPILOT_HOME": tmpdir}):
+                adapter = _make_adapter(user_scope=True)
+                self.assertEqual(adapter.get_config_path(), str(Path(tmpdir) / "mcp-config.json"))
+
 
 # ---------------------------------------------------------------------------
 # get_current_config
@@ -174,7 +196,7 @@ class TestUpdateConfig(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp_dir = tempfile.mkdtemp()
         self.config_path = os.path.join(self.tmp_dir, "mcp-config.json")
-        self.adapter = _make_adapter()
+        self.adapter = _make_adapter(project_root=self.tmp_dir)
         self.patcher = patch(
             "apm_cli.adapters.client.copilot.CopilotClientAdapter.get_config_path",
             return_value=self.config_path,
@@ -219,7 +241,7 @@ class TestConfigureMcpServer(unittest.TestCase):
         self.config_path = os.path.join(self.tmp_dir, "mcp-config.json")
         with open(self.config_path, "w") as f:
             json.dump({"mcpServers": {}}, f)
-        self.adapter = _make_adapter()
+        self.adapter = _make_adapter(project_root=self.tmp_dir)
         self.path_patcher = patch(
             "apm_cli.adapters.client.copilot.CopilotClientAdapter.get_config_path",
             return_value=self.config_path,
@@ -524,7 +546,7 @@ class TestEmitInstallRunSummaryLegacyAngle(unittest.TestCase):
     def test_legacy_angle_offenders_warning_emitted(self) -> None:
         """Lines 463-473: legacy angle offenders trigger deprecation warning."""
         CopilotClientAdapter._legacy_angle_offenders_by_server["legacy-srv"] = {"OLD_VAR"}
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
         self.assertIn("Deprecated", joined)
@@ -532,7 +554,7 @@ class TestEmitInstallRunSummaryLegacyAngle(unittest.TestCase):
 
     def test_no_warnings_when_all_state_empty(self) -> None:
         """emit_install_run_summary emits nothing when all buckets are empty."""
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         mock_warn.assert_not_called()
         self.assertTrue(CopilotClientAdapter._install_run_summary_emitted)
@@ -554,7 +576,7 @@ class TestEmitInstallRunSummaryLegacyAngle(unittest.TestCase):
     def test_singular_noun_for_single_unset_var(self) -> None:
         """The unset-env warning uses 'variable' (singular) for one var."""
         CopilotClientAdapter._unset_env_keys_by_server["s"] = ["SOLO"]
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
         self.assertIn("variable", joined)
@@ -563,7 +585,7 @@ class TestEmitInstallRunSummaryLegacyAngle(unittest.TestCase):
     def test_plural_noun_for_multiple_unset_vars(self) -> None:
         """The unset-env warning uses 'variables' (plural) for multiple vars."""
         CopilotClientAdapter._unset_env_keys_by_server["s"] = ["A", "B"]
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         joined = "\n".join(call.args[0] for call in mock_warn.call_args_list)
         self.assertIn("variables", joined)

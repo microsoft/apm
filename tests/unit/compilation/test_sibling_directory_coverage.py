@@ -19,6 +19,8 @@ import pytest
 from apm_cli.compilation.context_optimizer import ContextOptimizer
 from apm_cli.primitives.models import Instruction
 
+pytestmark = pytest.mark.component
+
 
 class TestSiblingDirectoryCoverage:
     """Test coverage for files in sibling directories."""
@@ -145,9 +147,3 @@ class TestSiblingDirectoryCoverage:
                 f"Inheritance chain: {[str(p) for p in inheritance_chain]}\n"
                 f"Placement map: {[(str(k), [i.name for i in v]) for k, v in placement_map.items()]}"
             )
-
-    def test_corporate_website_exact_reproduction(self):
-        """Test that reproduces the exact corporate-website scenario."""
-        # This would be run against the actual corporate-website structure
-        # when we have the fix in place
-        pass

@@ -11,9 +11,12 @@ from apm_cli.models.apm_package import DependencyReference
 from apm_cli.policy._constraint_pinning import (
     UnboundedReason,
     classify_unbounded_reason,
+    collect_declared_refs,
     humanize_reason,
     is_pinned_constraint,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _dep(
@@ -109,24 +112,41 @@ def test_classify_open_upper_in_multi_component():
 
 
 @pytest.mark.parametrize(
-    "spec",
+    "ref",
     [
-        "^1.2.3",
-        "^0.0.1",
-        "~1.2.3",
-        "1.2.3",
-        "0.0.1",
-        ">=1.0.0 <2.0.0",
-        ">=1.0.0 <=1.9.9",
-        "1.2.x",
-        "1.2.X",
-        "v1.2.3",
-        "v1.0.0-rc.1",
-        "v1.2.3+build.42",
+        "acme/lib#^1.2.3",
+        "acme/lib#^0.0.1",
+        "acme/lib#~1.2.3",
+        "acme/lib#1.2.3",
+        "acme/lib#0.0.1",
+        "acme/lib#>=1.0.0 <2.0.0",
+        "acme/lib#>=1.0.0 <=1.9.9",
+        "acme/lib#1.2.x",
+        "acme/lib#1.2.X",
+        "acme/lib#v1.2.3",
+        "acme/lib#v1.0.0-rc.1",
+        "acme/lib#v1.2.3+build.42",
+        # Package-qualified literal tags for the dependency's own name (#3224)
+        "acme/mono/packages/pkg-a#pkg-a-v1.1.0",
+        "acme/mono/packages/pkg-a#pkg-a--v1.1.0",
+        "acme/mono/packages/pkg-a#pkg-a-v1.1.0-rc.1",
+        "acme/mono/packages/pkg-a#pkg-a-v1.1.0+build.5",
+        "acme/widget#widget-v1.2.0",
+        "acme/widget#widget--v1.2.0",
+        "https://github.com/acme/widget.git#widget-v1.2.0",
+        # Ruling change (#3731): pkg-a@1.1.0 used to be a bare branch.
+        # An exact name@X.Y.Z tag declares one release, like v1.2.3, and
+        # the name is not bound to the dependency's own name.
+        "acme/mono/packages/pkg-a#pkg-a@1.1.0",
+        "acme/mono/packages/pkg-a#pkg-a@v1.1.0",
+        "shadcn/ui#shadcn@4.12.0",
+        "upstash/context7/skills/context7-mcp#@upstash/context7-mcp@4.4.4",
+        "acme/mono/packages/pkg-a#@scope/pkg-a@1.1.0-rc.1",
+        "acme/mono#pkg-a@1.1.0+build.5",
     ],
 )
-def test_classify_pinned_specs_return_none(spec):
-    assert classify_unbounded_reason(_dep(spec)) is None
+def test_classify_pinned_refs_return_none(ref):
+    assert classify_unbounded_reason(DependencyReference.parse(ref)) is None
 
 
 # Regression trap for the ``=1.2.3`` alternate exact-version form
@@ -181,6 +201,35 @@ def test_classify_literal_tag_v_prefixed_returns_pinned_none():
     assert classify_unbounded_reason(_dep("v1.5.3")) is None
 
 
+@pytest.mark.parametrize(
+    "ref",
+    [
+        # Leading zeros and non-ASCII digits are not exact SemVer releases (#3795).
+        "acme/lib#v01.2.3",
+        "acme/lib#v1.02.3",
+        "acme/lib#v1.2.3-01",
+        "acme/lib#v1.2.3-rc..1",
+        "acme/lib#v\u0661.2.3",
+        "acme/lib#pkg@01.2.3",
+        # another package's tag on a subdirectory dep
+        "acme/mono/packages/pkg-a#pkg-b-v1.1.0",
+        # the repository's tag layout on a subdirectory dep
+        "acme/mono/packages/pkg-a#mono-v1.1.0",
+        # a subdirectory package's tag on the repository dep
+        "acme/mono#pkg-a-v1.1.0",
+        # version-looking suffix that is not a full semver
+        "acme/mono/packages/pkg-a#pkg-a-v1.1",
+        "acme/mono/packages/pkg-a#pkg-a-v1",
+        # arbitrary prefix
+        "acme/mono/packages/pkg-a#release-pkg-a-v1.1.0",
+        # layouts the resolver does not select from
+        "acme/mono/packages/pkg-a#pkg-a_v1.1.0",
+    ],
+)
+def test_classify_non_release_tag_refs_return_bare_branch(ref):
+    assert classify_unbounded_reason(DependencyReference.parse(ref)) is UnboundedReason.BARE_BRANCH
+
+
 def test_classify_sha_returns_pinned_none():
     sha = "a" * 40
     assert classify_unbounded_reason(_dep(sha)) is None
@@ -215,30 +264,42 @@ def test_classify_registry_dep_missing_ref_returns_no_ref():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "awaits #1488 (git-source semver routing). The shape-based "
-        "classifier already accepts ``^1.2.0`` regardless of source, so "
-        "this test xpasses today on every supported semver shape. The "
-        "marker stays in place so that once #1488 lands and introduces "
-        "a normalised ``source='git-semver'`` value, a CI failure here "
-        "alerts us to revisit the classification path end-to-end."
-    ),
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        ("^1.2.0", None),
+        ("~1.2.0", None),
+        (">=1.0.0 <2.0.0", None),
+        ("1.2.0", None),
+        ("v1.2.0", None),
+        (">=1.0.0", UnboundedReason.OPEN_UPPER),
+        ("*", UnboundedReason.WILDCARD),
+        ("main", UnboundedReason.BARE_BRANCH),
+    ],
 )
-def test_classify_git_semver_dep_returns_pinned_none():
-    # Pseudo: when #1488 lands, ``acme/lib#^1.2.0`` will be tagged
-    # source="git-semver" or the resolver will normalize the ref. Either
-    # way, the classifier needs to see "^1.2.0" as a pinned constraint.
-    dep = DependencyReference.parse("acme/lib#^1.2.0")
-    dep.source = "git-semver"  # hypothetical post-#1488 marker
+def test_classify_git_semver_dep_judges_the_declared_constraint(spec, expected):
+    """#1488 resolves git-source semver ranges against repo tags with no
+    ``source`` discriminator: a parsed git dependency keeps ``source=None`` and
+    the classifier judges the declared constraint by shape, as for registry deps.
+    """
+    dep = DependencyReference.parse(f"acme/lib#{spec}")
+    assert dep.source is None
+    assert dep.reference == spec
+    assert classify_unbounded_reason(dep) is expected
+
+
+def test_classify_git_semver_dep_judges_the_declaration_not_the_selected_tag():
+    """Resolution rewrites ``reference`` to the selected tag (#1488); policy
+    judges the declared snapshot, so an open range stays unbounded (#3224).
+    """
+    dep = DependencyReference.parse("acme/lib#>=1.0.0")
+    declared = collect_declared_refs([dep])
+    dep.reference = "v1.4.2"
+
     assert classify_unbounded_reason(dep) is None
-    # Sentinel that will start failing once the source-discriminator
-    # actually exists post-#1488, signalling time to remove the xfail.
-    raise AssertionError(
-        "remove xfail decorator once #1488 lands and 'git-semver' source "
-        "discriminator is wired in the resolver"
-    )
+    (snapshot,) = declared[dep.get_unique_key()]
+    assert snapshot.reference == ">=1.0.0"
+    assert classify_unbounded_reason(snapshot) is UnboundedReason.OPEN_UPPER
 
 
 def test_classify_marketplace_dep_with_caret_returns_pinned_none():

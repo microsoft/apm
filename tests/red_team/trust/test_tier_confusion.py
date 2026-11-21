@@ -14,6 +14,8 @@ import pytest
 
 from apm_cli.core.lifecycle_scripts import build_runner_from_context, discover_scripts
 
+pytestmark = pytest.mark.component
+
 
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)

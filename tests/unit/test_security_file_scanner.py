@@ -19,6 +19,8 @@ from apm_cli.security.file_scanner import (
 )
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # _is_safe_lockfile_path
 # ---------------------------------------------------------------------------

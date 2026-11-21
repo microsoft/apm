@@ -206,7 +206,7 @@ def test_frozen_cold_cache_git_apm_package_with_mcp_passes(
     project = tmp_path / "with-mcp"
     _write_project(project, monkeypatch, with_mcp=True)
     locked = (project / "apm.lock.yaml").read_bytes()
-    native = (project / ".github/mcp.json").read_bytes()
+    native = (project / ".mcp.json").read_bytes()
 
     # Confirm cold cache: apm_modules/ does not exist
     assert not (project / "apm_modules").exists()
@@ -225,7 +225,7 @@ def test_frozen_cold_cache_git_apm_package_with_mcp_passes(
     assert "out of sync" not in result.output
     assert "McpSourceProblem" not in result.output
     assert (project / "apm.lock.yaml").read_bytes() == locked
-    assert (project / ".github/mcp.json").read_bytes() == native
+    assert (project / ".mcp.json").read_bytes() == native
 
 
 def test_frozen_cold_cache_git_apm_package_without_mcp_passes(
@@ -284,7 +284,7 @@ def test_frozen_hydrated_declaration_mismatch_preserves_baseline(
     project = tmp_path / "changed-source"
     lock = _write_project(project, monkeypatch, with_mcp=True)
     lock_path = project / "apm.lock.yaml"
-    native_path = project / ".github/mcp.json"
+    native_path = project / ".mcp.json"
     lock.mcp_configs[_MCP_SERVER]["command"] = "changed-command"
     lock.save(lock_path)
     locked, native = lock_path.read_bytes(), native_path.read_bytes()

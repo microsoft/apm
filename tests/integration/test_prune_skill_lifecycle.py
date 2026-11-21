@@ -180,7 +180,9 @@ def test_install_trims_released_root_to_nested_dependency_it_hosts(
     """A released root is trimmed to the nested dependency it still hosts (#2926).
 
     Prune then has nothing left to remove or retain, and content written
-    afterwards inside the hosting directory is never touched.
+    afterwards inside the hosting directory is never touched. A root may not
+    be declared together with its own subdirectory package (#3699), so the
+    direct and dev cases switch the root declaration to the subdirectory.
     """
     isolated = IsolatedApmEnvironment.create(
         tmp_path_factory.mktemp("pc") / "i", base_env=os.environ
@@ -204,16 +206,9 @@ def test_install_trims_released_root_to_nested_dependency_it_hosts(
     child_dep = {**root_dep, "path": child_path}
     factory = LocalPackageFactory(isolated.work_root)
     consumer = factory.create("consumer", dependencies=(root_dep,), targets=("copilot",))
-    manifest = load_yaml(consumer.manifest_path)
-    if retention == "direct":
-        manifest["dependencies"]["apm"].append(child_dep)
-    elif retention == "dev":
-        manifest["devDependencies"] = {"apm": [child_dep]}
-    else:
+    if retention == "transitive":
         keeper = factory.create("keeper", dependencies=(child_dep,), targets=("copilot",))
         factory.add_relative_dependency(consumer, keeper)
-        manifest = load_yaml(consumer.manifest_path)
-    dump_yaml(manifest, consumer.manifest_path)
     runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=30)
 
     def run(*args: str) -> str:
@@ -237,6 +232,10 @@ def test_install_trims_released_root_to_nested_dependency_it_hosts(
     assert (root / child_path / "SKILL.md").is_file()
     manifest = load_yaml(consumer.manifest_path)
     manifest["dependencies"]["apm"] = manifest["dependencies"]["apm"][1:]
+    if retention == "direct":
+        manifest["dependencies"]["apm"].append(child_dep)
+    elif retention == "dev":
+        manifest["devDependencies"] = {"apm": [child_dep]}
     dump_yaml(manifest, consumer.manifest_path)
     run(*install_args)
     lock = LockFile.read(lock_path)

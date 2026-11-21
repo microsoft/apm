@@ -44,7 +44,8 @@ class TestConfigValidKeysE2E:
 
         assert result.exit_code != 0, f"Expected non-zero exit code, got {result.exit_code}"
         assert "copilot-cowork-skills-dir" not in result.output
-        assert "auto-integrate" in result.output
+        assert "temp-dir" in result.output
+        assert "auto-integrate" not in result.output
 
     def test_config_set_unknown_key_includes_cowork_when_flag_on(self, isolated_config):
         """When copilot_cowork is enabled, cowork key must appear."""
@@ -58,4 +59,5 @@ class TestConfigValidKeysE2E:
 
         assert result.exit_code != 0, f"Expected non-zero exit code, got {result.exit_code}"
         assert "copilot-cowork-skills-dir" in result.output
-        assert "auto-integrate" in result.output
+        assert "temp-dir" in result.output
+        assert "auto-integrate" not in result.output

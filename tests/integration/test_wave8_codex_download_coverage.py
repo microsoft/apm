@@ -345,7 +345,7 @@ class TestResilientGet:
                 "apm_cli.deps.download_strategies.requests.get",
                 side_effect=[rate_resp, ok_resp],
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 200
@@ -363,7 +363,7 @@ class TestResilientGet:
                 "apm_cli.deps.download_strategies.requests.get",
                 side_effect=[rate_resp, ok_resp],
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 200
@@ -381,7 +381,7 @@ class TestResilientGet:
                 "apm_cli.deps.download_strategies.requests.get",
                 side_effect=[rate_resp, ok_resp],
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 200
@@ -396,7 +396,7 @@ class TestResilientGet:
                 "apm_cli.deps.download_strategies.requests.get",
                 return_value=rate_resp,
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 503
@@ -414,7 +414,7 @@ class TestResilientGet:
                     ok_resp,
                 ],
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 200
@@ -426,7 +426,7 @@ class TestResilientGet:
                 "apm_cli.deps.download_strategies.requests.get",
                 side_effect=requests.exceptions.ConnectionError("fail"),
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
             pytest.raises(requests.exceptions.ConnectionError),
         ):
             delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
@@ -465,7 +465,7 @@ class TestResilientGet:
                 "apm_cli.deps.download_strategies.requests.get",
                 side_effect=[rate_resp, ok_resp],
             ),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 200
@@ -546,17 +546,17 @@ class TestGetArtifactoryHeaders:
 
     def test_with_registry_config(self) -> None:
         cfg = MagicMock()
-        cfg.get_headers.return_value = {"Authorization": "Bearer token"}
+        cfg.headers_for.return_value = {"Authorization": "Bearer token"}
         delegate = self._make_delegate(registry_config=cfg)
-        headers = delegate.get_artifactory_headers()
+        headers = delegate.get_artifactory_headers(scheme="https", host="art.example.com")
         assert "Authorization" in headers
 
-    def test_with_legacy_token(self) -> None:
+    def test_legacy_token_without_registry_url_is_not_attached(self) -> None:
         delegate = self._make_delegate(artifactory_token="tok123")
-        headers = delegate.get_artifactory_headers()
-        assert headers["Authorization"] == "Bearer tok123"
+        headers = delegate.get_artifactory_headers(scheme="https", host="art.example.com")
+        assert headers == {}
 
     def test_no_auth(self) -> None:
         delegate = self._make_delegate(artifactory_token=None)
-        headers = delegate.get_artifactory_headers()
+        headers = delegate.get_artifactory_headers(scheme="https", host="art.example.com")
         assert headers == {}

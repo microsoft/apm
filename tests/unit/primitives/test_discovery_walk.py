@@ -1,54 +1,28 @@
-"""Tests for os.walk-based discovery (replacing glob.glob) and related helpers.
+"""Pure-logic tests for discovery and parser path helpers.
 
-Covers _glob_match, find_primitive_files with exclude_patterns, and
-_exclude_matches_dir -- the new code introduced to fix compile hangs
-on large repositories.
+Covers _glob_match, _exclude_matches_dir, directory skip/containment
+predicates and primitive name/context/validation helpers. Filesystem
+walks live in test_discovery_parser.py.
 """
 
-import tempfile
 import unittest
 from pathlib import Path
 
-from apm_cli.constants import DEFAULT_SKIP_DIRS
+import pytest
+
 from apm_cli.primitives.discovery import (
     _exclude_matches_dir,
     _glob_match,
-    find_primitive_files,
-    scan_directory_with_source,
+    _is_under_directory,
+    _should_skip_directory,
 )
-from apm_cli.primitives.models import PrimitiveCollection
+from apm_cli.primitives.parser import (
+    _extract_primitive_name,
+    _is_context_file,
+    validate_primitive,
+)
 
-
-def _write(path: Path, content: str = "---\ndescription: stub\n---\n\n# Stub\n") -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-def test_dependency_skill_respects_parent_nested_repository_boundary(tmp_path: Path) -> None:
-    """Direct SKILL.md discovery consumes the parent inventory boundary."""
-    from apm_cli.compilation.inventory import CompileInventory
-
-    dep_dir = tmp_path / "nested-dependency"
-    dep_dir.mkdir()
-    (dep_dir / ".git").write_text(
-        "gitdir: ../.git/worktrees/nested-dependency\n",
-        encoding="utf-8",
-    )
-    (dep_dir / "SKILL.md").write_text(
-        "---\nname: foreign\ndescription: Foreign skill.\n---\n# Foreign\n",
-        encoding="utf-8",
-    )
-    inventory = CompileInventory.collect(tmp_path)
-    collection = PrimitiveCollection()
-
-    scan_directory_with_source(
-        dep_dir,
-        collection,
-        "dependency:nested",
-        inventory=inventory,
-    )
-
-    assert collection.count() == 0
+pytestmark = pytest.mark.unit
 
 
 # -------------------------------------------------------------------
@@ -102,14 +76,6 @@ class TestGlobMatch(unittest.TestCase):
             )
         )
 
-    def test_doublestar_middle_zero(self):
-        """Leading **/ should also match zero segments when pattern has a middle path."""
-        self.assertTrue(
-            _glob_match(
-                ".apm/instructions/style.instructions.md", "**/.apm/instructions/*.instructions.md"
-            )
-        )
-
     # -- no match --
     def test_no_match_extension(self):
         self.assertFalse(_glob_match("src/app.js", "**/*.py"))
@@ -149,118 +115,6 @@ class TestExcludeMatchesDir(unittest.TestCase):
 
 
 # -------------------------------------------------------------------
-# find_primitive_files -- early directory pruning
-# -------------------------------------------------------------------
-class TestFindPrimitiveFilesExclude(unittest.TestCase):
-    """Tests that find_primitive_files prunes directories via exclude_patterns."""
-
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.base = Path(self.tmp)
-
-    def tearDown(self):
-        import shutil
-
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def test_finds_instruction_in_apm_dir(self):
-        _write(self.base / ".apm" / "instructions" / "style.instructions.md")
-        result = find_primitive_files(str(self.base), ["**/.apm/instructions/*.instructions.md"])
-        self.assertEqual(len(result), 1)
-        self.assertTrue(result[0].name == "style.instructions.md")
-
-    def test_finds_file_at_root(self):
-        _write(self.base / "root.instructions.md")
-        result = find_primitive_files(str(self.base), ["**/*.instructions.md"])
-        self.assertEqual(len(result), 1)
-
-    def test_skips_default_dirs(self):
-        """Files inside DEFAULT_SKIP_DIRS should never be returned."""
-        _write(self.base / "node_modules" / "pkg" / "bad.instructions.md")
-        _write(self.base / "__pycache__" / "bad.instructions.md")
-        _write(self.base / ".git" / "hooks" / "bad.instructions.md")
-        _write(self.base / "src" / "good.instructions.md")
-
-        result = find_primitive_files(str(self.base), ["**/*.instructions.md"])
-        names = [f.name for f in result]
-        self.assertIn("good.instructions.md", names)
-        self.assertNotIn("bad.instructions.md", names)
-
-    def test_exclude_patterns_prune_custom_dirs(self):
-        """User-supplied exclude_patterns prevent traversal into named dirs."""
-        _write(self.base / "Binaries" / "Win64" / "deep.instructions.md")
-        _write(self.base / "Content" / "Textures" / "deep.instructions.md")
-        _write(self.base / "Source" / "style.instructions.md")
-
-        result = find_primitive_files(
-            str(self.base),
-            ["**/*.instructions.md"],
-            exclude_patterns=["Binaries", "Content"],
-        )
-        names = [f.name for f in result]
-        self.assertIn("style.instructions.md", names)
-        self.assertNotIn("deep.instructions.md", names)
-
-    def test_exclude_patterns_glob_style(self):
-        """Glob-style exclude patterns work for nested matches."""
-        _write(self.base / "a" / "test-fixtures" / "f.instructions.md")
-        _write(self.base / "b" / "real.instructions.md")
-
-        result = find_primitive_files(
-            str(self.base),
-            ["**/*.instructions.md"],
-            exclude_patterns=["**/test-fixtures"],
-        )
-        names = [f.name for f in result]
-        self.assertIn("real.instructions.md", names)
-        self.assertNotIn("f.instructions.md", names)
-
-    def test_exclude_patterns_none_finds_everything(self):
-        """When exclude_patterns is None, only default skips apply."""
-        _write(self.base / "a" / "one.instructions.md")
-        _write(self.base / "b" / "two.instructions.md")
-
-        result = find_primitive_files(
-            str(self.base), ["**/*.instructions.md"], exclude_patterns=None
-        )
-        self.assertEqual(len(result), 2)
-
-    def test_deduplicates_across_patterns(self):
-        """Overlapping patterns should not produce duplicate results."""
-        _write(self.base / ".apm" / "instructions" / "style.instructions.md")
-        result = find_primitive_files(
-            str(self.base),
-            [
-                "**/.apm/instructions/*.instructions.md",
-                "**/*.instructions.md",
-            ],
-        )
-        self.assertEqual(len(result), 1)
-
-    def test_symlink_rejected(self):
-        """Symlinked files should be filtered out."""
-        real = self.base / "real.instructions.md"
-        _write(real)
-        link = self.base / "link.instructions.md"
-        try:
-            link.symlink_to(real)
-        except OSError:
-            self.skipTest("Cannot create symlinks on this platform")
-        result = find_primitive_files(str(self.base), ["**/*.instructions.md"])
-        names = [f.name for f in result]
-        self.assertIn("real.instructions.md", names)
-        self.assertNotIn("link.instructions.md", names)
-
-    def test_nonexistent_dir_returns_empty(self):
-        result = find_primitive_files("/nonexistent/path/1234", ["**/*.md"])
-        self.assertEqual(result, [])
-
-    def test_apm_dir_not_skipped(self):
-        """.apm must NOT be in the default skip set -- primitives live there."""
-        self.assertNotIn(".apm", DEFAULT_SKIP_DIRS)
-
-
-# -------------------------------------------------------------------
 # _glob_match segment-aware semantics (PR #870 review C2)
 # -------------------------------------------------------------------
 class TestGlobMatchSegmentAware(unittest.TestCase):
@@ -295,57 +149,142 @@ class TestGlobMatchSegmentAware(unittest.TestCase):
         self.assertFalse(_glob_match("a/b", "a?b"))
 
 
-# -------------------------------------------------------------------
-# File-level exclude patterns (PR #870 review C1)
-# -------------------------------------------------------------------
-class TestFindPrimitiveFilesFileExclude(unittest.TestCase):
-    """File-level exclude patterns must filter individual files,
-    not just whole directories."""
-
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.base = Path(self.tmp)
-
-    def tearDown(self):
-        import shutil
-
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def test_file_pattern_excludes_individual_files(self):
-        from apm_cli.primitives.discovery import find_primitive_files
-
-        skills_dir = self.base / ".apm" / "skills"
-        skills_dir.mkdir(parents=True)
-        (skills_dir / "good.md").touch()
-        (skills_dir / "bad.draft.md").touch()
-
-        results = find_primitive_files(
-            str(self.base),
-            ["**/.apm/skills/*.md"],
-            exclude_patterns=["**/*.draft.md"],
-        )
-
-        names = sorted(p.name for p in results)
-        self.assertIn("good.md", names)
-        self.assertNotIn("bad.draft.md", names)
-
-    def test_files_sorted_deterministically(self):
-        """os.walk does not sort files -- find_primitive_files must."""
-        from apm_cli.primitives.discovery import find_primitive_files
-
-        skills_dir = self.base / ".apm" / "skills"
-        skills_dir.mkdir(parents=True)
-        # Create files in non-alphabetical order
-        for name in ["zeta.md", "alpha.md", "mike.md"]:
-            (skills_dir / name).touch()
-
-        results = find_primitive_files(
-            str(self.base),
-            ["**/.apm/skills/*.md"],
-        )
-        names = [p.name for p in results]
-        self.assertEqual(names, sorted(names))
-
-
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestExtractPrimitiveName(unittest.TestCase):
+    """Tests for _extract_primitive_name with various path structures."""
+
+    def test_agent_md_in_apm_agents_dir(self):
+        """Files in .apm/agents/ are treated as structured agent primitives.
+        The '.agent.md' suffix is stripped, yielding just the agent name."""
+        path = Path("/project/.apm/agents/myagent.agent.md")
+        name = _extract_primitive_name(path)
+        self.assertEqual(name, "myagent")
+
+    def test_agent_md_in_github_agents_dir(self):
+        """.github/agents/ is also treated as a structured agent primitive directory."""
+        path = Path("/project/.github/agents/reviewer.agent.md")
+        name = _extract_primitive_name(path)
+        self.assertEqual(name, "reviewer")
+
+    def test_instruction_in_structured_dir(self):
+        path = Path("/project/.apm/instructions/coding-style.instructions.md")
+        name = _extract_primitive_name(path)
+        self.assertEqual(name, "coding-style")
+
+    def test_context_in_structured_dir(self):
+        path = Path("/project/.apm/context/project-info.context.md")
+        name = _extract_primitive_name(path)
+        self.assertEqual(name, "project-info")
+
+    def test_memory_in_structured_dir(self):
+        path = Path("/project/.github/memory/state.memory.md")
+        name = _extract_primitive_name(path)
+        self.assertEqual(name, "state")
+
+    def test_plain_md_fallback(self):
+        path = Path("/project/notes.md")
+        name = _extract_primitive_name(path)
+        self.assertEqual(name, "notes")
+
+    def test_stem_fallback_no_known_extension(self):
+        path = Path("/project/something.xyz.md")
+        name = _extract_primitive_name(path)
+        self.assertEqual(name, "something.xyz")
+
+
+class TestIsContextFile(unittest.TestCase):
+    """Tests for _is_context_file."""
+
+    def test_apm_memory_dir_is_context(self):
+        path = Path("/project/.apm/memory/notes.md")
+        self.assertTrue(_is_context_file(path))
+
+    def test_github_memory_dir_is_context(self):
+        path = Path("/project/.github/memory/state.md")
+        self.assertTrue(_is_context_file(path))
+
+    def test_random_dir_is_not_context(self):
+        path = Path("/project/docs/notes.md")
+        self.assertFalse(_is_context_file(path))
+
+    def test_apm_context_dir_is_not_matched_here(self):
+        """_is_context_file only matches memory/ dirs, not context/."""
+        path = Path("/project/.apm/context/info.context.md")
+        self.assertFalse(_is_context_file(path))
+
+
+class TestValidatePrimitive(unittest.TestCase):
+    """Tests for the validate_primitive wrapper."""
+
+    def test_valid_chatmode_returns_no_errors(self):
+        from apm_cli.primitives.models import Chatmode
+
+        cm = Chatmode(
+            name="test",
+            file_path=Path("test.agent.md"),
+            description="desc",
+            apply_to=None,
+            content="# body",
+        )
+        self.assertEqual(validate_primitive(cm), [])
+
+    def test_invalid_chatmode_returns_errors(self):
+        from apm_cli.primitives.models import Chatmode
+
+        cm = Chatmode(
+            name="test",
+            file_path=Path("test.agent.md"),
+            description="",
+            apply_to=None,
+            content="",
+        )
+        errors = validate_primitive(cm)
+        self.assertTrue(len(errors) > 0)
+
+
+class TestShouldSkipDirectory(unittest.TestCase):
+    """Tests for _should_skip_directory."""
+
+    def test_git_dir_skipped(self):
+        self.assertTrue(_should_skip_directory("/project/.git"))
+
+    def test_node_modules_skipped(self):
+        self.assertTrue(_should_skip_directory("/project/node_modules"))
+
+    def test_pycache_skipped(self):
+        self.assertTrue(_should_skip_directory("/project/__pycache__"))
+
+    def test_pytest_cache_skipped(self):
+        self.assertTrue(_should_skip_directory("/project/.pytest_cache"))
+
+    def test_venv_skipped(self):
+        self.assertTrue(_should_skip_directory("/project/.venv"))
+        self.assertTrue(_should_skip_directory("/project/venv"))
+
+    def test_build_skipped(self):
+        self.assertTrue(_should_skip_directory("/project/build"))
+
+    def test_normal_dir_not_skipped(self):
+        self.assertFalse(_should_skip_directory("/project/src"))
+        self.assertFalse(_should_skip_directory("/project/.apm"))
+        self.assertFalse(_should_skip_directory("/project/tests"))
+
+
+class TestIsUnderDirectory(unittest.TestCase):
+    """Tests for _is_under_directory."""
+
+    def test_file_under_directory_returns_true(self):
+        self.assertTrue(
+            _is_under_directory(
+                Path("/project/apm_modules/owner/repo/file.md"),
+                Path("/project/apm_modules"),
+            )
+        )
+
+    def test_file_not_under_directory_returns_false(self):
+        self.assertFalse(
+            _is_under_directory(Path("/project/.apm/file.md"), Path("/project/apm_modules"))
+        )

@@ -7,8 +7,6 @@ import pytest
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.skill_preflight import (
-    SkillConflict,
-    format_skill_conflicts,
     preflight_skill_selection,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
@@ -16,20 +14,6 @@ from apm_cli.models.apm_package import APMPackage, PackageInfo, PackageType
 from apm_cli.models.dependency import DependencyReference
 
 pytestmark = pytest.mark.component
-
-
-def test_multiple_conflicts_keep_each_source_and_one_nondestructive_remedy() -> None:
-    conflicts = [
-        SkillConflict("review", "first", Path("first/SKILL.md"), ".claude/review", ("claude",)),
-        SkillConflict("lint", "second", Path("second/SKILL.md"), ".agents/lint", ("codex",)),
-    ]
-    message = format_skill_conflicts(conflicts)
-    for conflict in conflicts:
-        assert conflict.message() in message
-    assert message.count("Rename the local skill") == 1
-    assert "skills: or targets: selection in apm.yml" in message
-    assert "--force" not in message
-    assert message.isascii()
 
 
 def _package(tmp_path: Path, layout: str = "subskills") -> PackageInfo:
@@ -273,8 +257,8 @@ def _session_conflicts(
 
     integrator = SkillIntegrator()
     integrator._materialization_session = SimpleNamespace(
-        has_receipt=lambda _path: False,
         baseline=lambda _path, _targets: baseline,
+        receipt_held=lambda _path: False,
         locked_sources=LockedSkillSources(lambda _owner, _scratch: locked),
     )
     targets = [KNOWN_TARGETS["copilot"]]
@@ -299,7 +283,8 @@ def test_managed_file_without_trusted_baseline_is_refused_before_writes(
     target = KNOWN_TARGETS["copilot"].skills_deploy_path(root) / "review/SKILL.md"
     target.parent.mkdir(parents=True)
     entry = target.relative_to(root).as_posix()
-    managed = {entry}
+    # Real lockfiles claim the skill directory too; materialization skips unclaimed ones.
+    managed = {entry, target.parent.relative_to(root).as_posix()}
     older = b"---\nname: review\ndescription: Review\n---\nOlder review.\n"
     target.write_bytes(older)
     locked = None
@@ -322,7 +307,10 @@ def test_managed_file_without_trusted_baseline_is_refused_before_writes(
         if case != "unmanaged":
             assert conflicts[0].message() == (
                 f"Skipped {entry}: no trustworthy local deployment baseline. Move the "
-                "conflicting file aside and retry; use --force only to intentionally overwrite it."
+                "conflicting file aside and retry. To redeploy only this skill, move "
+                ".agents/skills/review/ aside (or delete it if it holds no edits), then run "
+                "'apm install'; that rewrites .agents/skills/review/ alone and keeps edited "
+                "files elsewhere."
             )
     else:
         assert conflicts == ()
@@ -351,7 +339,56 @@ def test_identical_member_needs_a_baseline_unless_copy_keeps_it(
     entry = (skill / "SKILL.md").relative_to(root).as_posix()
     if extra:
         (skill / "guide.md").write_bytes(b"Locally edited guide removed upstream.\n")
-    conflicts = _session_conflicts(info, root, {entry}, baseline=None)
+    claims = {entry, skill.relative_to(root).as_posix()}
+    conflicts = _session_conflicts(info, root, claims, baseline=None)
     assert [conflict.path for conflict in conflicts if conflict.untrusted] == (
         [entry] if refused else []
     )
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize("layout", ["native", "subskills"])
+def test_claimed_member_of_an_unclaimed_skill_directory_is_not_refused(
+    tmp_path: Path, layout: str
+) -> None:
+    """Bundle output in an unclaimed skill dir is skipped by materialization, not refused."""
+    info = _package(tmp_path, layout)
+    root = tmp_path / "consumer"
+    skill = KNOWN_TARGETS["copilot"].skills_deploy_path(root) / "review"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_bytes(b"bundled")
+    entry = (skill / "SKILL.md").relative_to(root).as_posix()
+
+    assert _session_conflicts(info, root, {entry}, baseline=None) == ()
+    refused = _session_conflicts(
+        info, root, {entry, skill.relative_to(root).as_posix()}, baseline=None
+    )
+    assert [conflict.path for conflict in refused if conflict.untrusted] == [entry]
+    assert (skill / "SKILL.md").read_bytes() == b"bundled"
+
+
+@pytest.mark.parametrize(
+    ("entry", "user_scope", "directory", "command"),
+    [
+        (".agents/skills/x", False, ".agents/skills/x", "'apm install'"),
+        (".copilot/skills/x", True, "ABS", "'apm install -g'"),
+        ("cowork://skills/x", False, "ABS", "'apm install'"),
+    ],
+)
+def test_untrusted_refusal_names_a_movable_directory_and_its_scope(
+    tmp_path: Path, entry: str, user_scope: bool, directory: str, command: str
+) -> None:
+    from apm_cli.integration.base_integrator import (
+        recovery_directory,
+        untrusted_baseline_message,
+    )
+
+    destination = tmp_path / "skills" / "x"
+    shown = recovery_directory(entry, destination, user_scope=user_scope)
+    expected = destination.resolve().as_posix() if directory == "ABS" else directory
+    assert shown == expected
+    message = untrusted_baseline_message(f"{entry}/SKILL.md", shown, user_scope=user_scope)
+    assert f"move {expected}/ aside" in message
+    assert f"then run {command};" in message
+    assert "--force" not in message
+    assert not destination.exists()

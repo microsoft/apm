@@ -89,6 +89,25 @@ def iter_relative_script_paths(command: str) -> Iterator[re.Match[str]]:
     return iter(_RELATIVE_SCRIPT_PATH.finditer(command))
 
 
+def plugin_root_script_reference(relative_path: str, quote: str) -> str:
+    """Anchor a packed script path on ``${CLAUDE_PLUGIN_ROOT}`` within *quote*.
+
+    *quote* is the quote wrapping the original reference (``wrapping_quote``).
+    A single-quoted reference is reopened so the variable still expands.
+    """
+    if any(character in relative_path for character in "$`\"'\\\n\r\t"):
+        raise ValueError(
+            f"Hook resource path cannot be anchored safely: {relative_path}. "
+            "Rename it without quotes, '$', backticks, backslashes or control characters and pack again."
+        )
+    root = f"${{{PLUGIN_ROOT_NAMES[0]}}}"
+    if quote == '"':
+        return f"{root}/{relative_path}"
+    if quote == "'":
+        return f"'\"{root}\"'/{relative_path}"
+    return f'"{root}/{relative_path}"'
+
+
 def wrapping_quote(command: str, match: re.Match[str]) -> str:
     """Return the quote character wrapping a reference, or "" when it has none."""
     if match.start() > 0 and match.end() < len(command):

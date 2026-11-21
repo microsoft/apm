@@ -14,9 +14,17 @@ import sys
 import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import click
+
+from apm_cli.core.remediation import (
+    MARKETPLACE_ADD_FAILED,
+    MARKETPLACE_BUILD_REMOVED,
+    MARKETPLACE_CONFIG_MISSING,
+    MARKETPLACE_SEARCH_FORMAT,
+    MARKETPLACES_NONE_REGISTERED,
+)
 
 from ...core.command_logger import CommandLogger
 from ...install.locking import serialized_lifecycle
@@ -25,6 +33,8 @@ from ...marketplace.errors import (
     BuildError,
     GitLsRemoteError,
     HeadNotAllowedError,
+    MarketplaceEgressRefusedError,
+    MarketplaceFetchError,
     MarketplaceNotFoundError,
     MarketplaceYmlError,
     NoMatchingVersionError,
@@ -39,6 +49,12 @@ from ...marketplace.migration import (
     migrate_marketplace_yml,
 )
 from ...marketplace.ref_resolver import RefResolver, RemoteRef
+from ...marketplace.registration import (
+    ALIAS_PATTERN,
+    is_valid_alias,
+    local_source_points_to_file,
+    split_source_fragment_ref,
+)
 from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
 from ...utils.console import STATUS_SYMBOLS
@@ -57,14 +73,11 @@ logger = logging.getLogger(__name__)
 list = builtins.list
 
 
-# Marketplace alias must satisfy this pattern so it can appear on the right of
-# ``@`` in ``apm install <plugin>@<marketplace>`` syntax.
-_ALIAS_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+$")
-
-
-def _is_valid_alias(value: str) -> bool:
-    """Return True when ``value`` is a legal marketplace alias."""
-    return bool(value) and _ALIAS_PATTERN.match(value) is not None
+# Compatibility exports: the canonical owner is ``marketplace.registration``.
+_ALIAS_PATTERN = ALIAS_PATTERN
+_is_valid_alias = is_valid_alias
+_split_source_fragment_ref = split_source_fragment_ref
+_local_source_points_to_file = local_source_points_to_file
 
 
 # ---------------------------------------------------------------------------
@@ -98,9 +111,7 @@ class MarketplaceGroup(click.Group):
         # hint rather than silently aliasing.
         if cmd_name == "build":
             raise click.UsageError(
-                "'apm marketplace build' was removed. Use 'apm pack' instead.\n"
-                "marketplace.json is now produced by 'apm pack' when "
-                "apm.yml has a 'marketplace:' block."
+                f"'apm marketplace build' was removed. {MARKETPLACE_BUILD_REMOVED.sentence()}"
             )
         return super().get_command(ctx, cmd_name)
 
@@ -135,7 +146,7 @@ def _load_yml_or_exit(logger):
     yml_path = Path.cwd() / "marketplace.yml"
     if not yml_path.exists():
         logger.error(
-            "No marketplace.yml found. Run 'apm marketplace init' to scaffold one.",
+            f"No marketplace.yml found. {MARKETPLACE_CONFIG_MISSING.sentence()}",
             symbol="error",
         )
         sys.exit(1)
@@ -311,6 +322,21 @@ Examples:
 """
 
 
+def _require_credential_binding(name: str | None, url: str, *, is_direct_url: bool) -> bool:
+    """Return whether this registration binds *name* to a hosted catalog URL.
+
+    A hosted catalog registered with --name binds that name to the URL for its
+    APM_MARKETPLACE_* credential. Checked before any network access.
+    """
+    credential_bound = is_direct_url and name is not None
+    if credential_bound:
+        from ...marketplace.catalog_binding import require_binding_available
+        from ...marketplace.registry import get_registered_marketplaces
+
+        require_binding_available(name, url, get_registered_marketplaces())
+    return credential_bound
+
+
 @marketplace.command(help="Register a marketplace", epilog=_ADD_EPILOG)
 @click.argument("source", metavar="SOURCE", required=True)
 @click.option("--name", "-n", default=None, help="Display name (defaults to repo name)")
@@ -333,7 +359,7 @@ Examples:
     metavar="PATH",
     help=(
         "Repository-relative path to the marketplace JSON file, for "
-        "catalogs outside the default locations. Skips auto-discovery."
+        "files outside the default locations. Skips auto-discovery."
     ),
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
@@ -360,41 +386,34 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
     """
     logger = CommandLogger("marketplace-add", verbose=verbose)
     try:
-        from ...marketplace.client import (
-            _auto_detect_path_with_payload,
-            _fetch_file,
-            fetch_marketplace,
-            is_local_authoring_source,
-        )
+        from ...marketplace.client import is_local_authoring_source
         from ...marketplace.models import MarketplaceSource
+        from ...marketplace.registration import (
+            MarketplaceCatalogPathError,
+            MarketplaceManifestNotFoundError,
+            parse_registration_source,
+            probe_registration,
+        )
         from ...marketplace.registry import add_marketplace
         from ...marketplace.source_identity import (
             admit_marketplace_catalog_path,
             parse_marketplace_source,
         )
 
-        source_arg, fragment_ref = _split_source_fragment_ref(source)
-
-        # --ref / --branch reconciliation. --branch stays as a hidden alias
-        # for one release so legacy invocations keep working; passing multiple
-        # ref sources is a hard error so we never silently pick one.
-        explicit_ref = ref is not None or branch is not None
+        # --branch stays as a hidden CLI-only alias for --ref for one release.
+        # Normalize it here; the shared parser owns the rest of the SOURCE
+        # grammar (#ref fragments, ref precedence, direct-URL classification),
+        # exactly as the user-manifest ``marketplaces:`` reconcile does.
         if ref is not None and branch is not None:
             logger.error(
                 "--ref and --branch are mutually exclusive. Use --ref (--branch is a deprecated alias).",
                 symbol="error",
             )
             sys.exit(1)
-        if fragment_ref and explicit_ref:
-            logger.error(
-                "Do not combine a git URL #ref with --ref or --branch. Use one ref source.",
-                symbol="error",
-            )
-            sys.exit(1)
-        effective_ref = fragment_ref or ref or branch or "main"
+        explicit_ref = ref if ref is not None else branch
 
         try:
-            url, kind, resolved_host = _parse_marketplace_source(source_arg, host)
+            parsed = parse_registration_source(source, ref=explicit_ref, host=host)
         except PathTraversalError:
             logger.error(
                 f"Invalid source '{source}': contains a path-traversal sequence. "
@@ -402,13 +421,18 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
             )
             sys.exit(1)
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(str(exc), symbol="error")
             sys.exit(1)
+        url, kind, resolved_host = parsed.url, parsed.kind, parsed.host
+        fragment_ref = parsed.fragment_ref
+        effective_ref = parsed.ref
+        is_direct_url = parsed.is_direct_url
+        # Without a #ref fragment the source is the argument itself.
+        source_arg = source.strip()
 
         # --host is meaningful only for shorthand OWNER/REPO inputs. For URL
         # / SSH / local-path inputs the host is already embedded; warn that
         # --host is being ignored rather than silently overriding.
-        is_direct_url = _is_remote_marketplace_json_url(url)
 
         if host is not None and is_direct_url:
             logger.warning(
@@ -467,7 +491,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
         )
         logger.start(f"Registering marketplace '{provisional_label}'...", symbol="gear")
         if _should_warn_unpinned_git_url(
-            source_arg, kind, is_direct_url, fragment_ref, explicit_ref
+            source_arg, kind, is_direct_url, fragment_ref, explicit_ref is not None
         ):
             from ...marketplace.source_identity import parse_marketplace_source
 
@@ -483,74 +507,42 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
             logger.warning(warning, symbol="warning")
 
         # Probe for marketplace.json location. The probe source's name is a
-        # placeholder -- _auto_detect_path_with_payload only consults url/ref/path/kind.
+        # placeholder -- the probe only consults url/ref/path/kind.
         probe_name = provisional_label
-        probe_source = MarketplaceSource(
-            name=probe_name,
-            url=url,
-            ref="" if is_direct_url else effective_ref,
-            path="" if is_direct_url else "marketplace.json",
-        )
-        if offline and not is_local_authoring_source(probe_source):
+        if offline and not is_local_authoring_source(
+            MarketplaceSource(name=probe_name, url=url, ref=effective_ref)
+        ):
             logger.error(
                 "--offline requires an explicitly selected local apm.yml. "
                 "Omit --offline to register a JSON or repository source."
             )
             sys.exit(1)
-        if is_direct_url or _local_source_points_to_file(probe_source):
-            if explicit_path is not None:
-                logger.error(
-                    "--path is not supported when SOURCE is a marketplace.json file. "
-                    "Pass the repository directory as SOURCE instead.",
-                    symbol="error",
-                )
-                sys.exit(1)
-            detected_path = ""
-            discovered_manifest = None
-        elif explicit_path is not None:
-            discovered_manifest = _fetch_file(probe_source, explicit_path)
-            if discovered_manifest is None:
-                at_ref = "" if kind == "local" else f" at ref '{effective_ref}'"
-                logger.error(
-                    f"No marketplace catalog found at '{explicit_path}' in "
-                    f"'{probe_source.display_source}'{at_ref}. Check that --path is "
-                    "relative to the repository root and that the file exists.",
-                    symbol="error",
-                )
-                sys.exit(1)
-            detected_path = explicit_path
-        else:
-            detected_path, discovered_manifest = _auto_detect_path_with_payload(probe_source)
-
-        if detected_path is None:
-            hint = (
-                " To register a local authoring catalog, pass the apm.yml file "
-                "itself (for example ./my-catalog/apm.yml)."
-                if probe_source.kind == "local"
-                else ""
+        credential_bound = _require_credential_binding(name, url, is_direct_url=is_direct_url)
+        try:
+            fetch_source, manifest = probe_registration(
+                probe_name,
+                url,
+                effective_ref,
+                is_direct_url=is_direct_url,
+                offline=offline,
+                explicit_path=explicit_path,
+                credential_bound=credential_bound,
             )
+        except (MarketplaceManifestNotFoundError, MarketplaceCatalogPathError) as exc:
+            logger.error(str(exc), symbol="error")
+            sys.exit(1)
+        except MarketplaceFetchError as exc:
+            if isinstance(exc, MarketplaceEgressRefusedError):
+                raise
+            # Nothing is registered yet, so 'apm marketplace update' cannot retry (#3994).
+            detail = f": {exc.reason}" if exc.reason else ""
             logger.error(
-                f"No marketplace.json found in '{probe_source.display_source}'. "
-                f"Checked: marketplace.json, .github/plugin/marketplace.json, "
-                f".claude-plugin/marketplace.json.{hint}",
+                f"Failed to fetch marketplace '{probe_name}'{detail}. It was not "
+                f"registered. {MARKETPLACE_ADD_FAILED.sentence()}",
                 symbol="error",
             )
             sys.exit(1)
-
-        fetch_source = MarketplaceSource(
-            name=probe_name,
-            url=url,
-            ref="" if is_direct_url else effective_ref,
-            path=detected_path,
-        )
-        manifest = fetch_marketplace(
-            fetch_source,
-            force_refresh=True,
-            # Reuse the catalog response the probe above just fetched from
-            # the same url/ref/path instead of re-fetching it (apm#3283).
-            discovery_payload=discovered_manifest,
-            offline=offline,
-        )
+        detected_path = fetch_source.path
         plugin_count = len(manifest.plugins)
 
         manifest_name = (manifest.name or "").strip()
@@ -596,12 +588,14 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
             url=url,
             ref="" if is_direct_url else effective_ref,
             path=detected_path,
+            credential_bound=credential_bound,
         )
         _warn_if_replacing_catalog(logger, final_source, explicit_path is not None)
+        _warn_if_duplicate_origin(logger, final_source)
         add_marketplace(final_source)
 
         logger.success(
-            f"Marketplace '{display_name}' registered ({plugin_count} plugins)",
+            f"Marketplace '{display_name}' registered ({plugin_count} plugin{'' if plugin_count == 1 else 's'})",
             symbol="check",
         )
         if manifest.structural_errors:
@@ -629,31 +623,6 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
         sys.exit(1)
 
 
-def _split_source_fragment_ref(source: str) -> tuple[str, str]:
-    """Split an HTTPS git URL #ref fragment from the URL stored in the registry."""
-    raw = (source or "").strip()
-    if raw.lower().startswith("ssh://") and "#" in raw:
-        raise ValueError("SSH URL fragments are not supported; use --ref REF instead.")
-    if not raw.lower().startswith("https://"):
-        return raw, ""
-    parsed = urlsplit(raw)
-    if not parsed.fragment:
-        return raw, ""
-    clean_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
-    return clean_url, parsed.fragment
-
-
-def _is_remote_marketplace_json_url(url: str) -> bool:
-    """Return True when *url* names a hosted marketplace.json document.
-
-    Delegates to the single shared classifier in ``marketplace.models`` so
-    the CLI and ``MarketplaceSource`` cannot drift on the url-kind decision.
-    """
-    from ...marketplace.models import url_names_remote_manifest
-
-    return url_names_remote_manifest(url)
-
-
 def _should_warn_unpinned_git_url(
     source: str,
     kind: str,
@@ -669,19 +638,6 @@ def _should_warn_unpinned_git_url(
     from ...marketplace.source_identity import parse_marketplace_source
 
     return parse_marketplace_source(source).transport in {"https", "ssh", "scp"}
-
-
-def _local_source_points_to_file(source: MarketplaceSource) -> bool:
-    """Return True when a local marketplace source points directly to a file."""
-    if source.kind != "local":
-        return False
-    from ...marketplace.client import is_local_authoring_source
-
-    try:
-        path = Path(source.local_path).expanduser()
-        return path.is_file() or is_local_authoring_source(source)
-    except OSError:
-        return False
 
 
 def _warn_if_replacing_catalog(
@@ -710,6 +666,18 @@ def _warn_if_replacing_catalog(
                 symbol="warning",
             )
         return
+
+
+def _warn_if_duplicate_origin(logger: CommandLogger, source: MarketplaceSource) -> None:
+    """Warn when another alias already registers the same catalog (#3912)."""
+    from ...marketplace.catalog_origin import (
+        duplicate_origin_warning,
+        registrations_sharing_origin,
+    )
+    from ...marketplace.registry import get_registered_marketplaces
+
+    for existing in registrations_sharing_origin(source, get_registered_marketplaces()):
+        logger.warning(duplicate_origin_warning(source, existing), symbol="warning")
 
 
 def _display_source_kind(kind: str, is_direct_url: bool) -> str:
@@ -776,8 +744,7 @@ def list_cmd(verbose):
 
         if not sources:
             logger.progress(
-                "No marketplaces registered. Use 'apm marketplace add SOURCE' to register one "
-                "(OWNER/REPO, HTTPS URL, SSH URL, or local path).",
+                f"No marketplaces registered. {MARKETPLACES_NONE_REGISTERED.sentence()}",
                 symbol="info",
             )
             return
@@ -790,9 +757,9 @@ def list_cmd(verbose):
                 logger.tree_item(f"  {s.name}  ({s.display_source})")
             return
 
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(
+        table = new_table(
             title="Registered Marketplaces",
             show_header=True,
             header_style="bold cyan",
@@ -844,36 +811,19 @@ def browse(name, verbose, offline=False):
             logger.warning(f"Marketplace '{name}' has no plugins")
             return
 
-        console = _get_console()
-        if not console:
-            # Colorama fallback
-            logger.success(f"{len(manifest.plugins)} plugin(s) in '{name}':", symbol="check")
-            for p in manifest.plugins:
-                desc = f" -- {p.description}" if p.description else ""
-                logger.tree_item(f"  {p.name}{desc}")
-            logger.progress(f"Install: apm install <plugin-name>@{name}", symbol="info")
-            return
+        # A list, not a table: install names run long, and a table squeezed
+        # to the terminal width truncates exactly the text users copy.
+        import shutil
+        import textwrap
 
-        from rich.table import Table
-
-        table = Table(
-            title=f"Plugins in '{name}'",
-            show_header=True,
-            header_style="bold cyan",
-            border_style="cyan",
-        )
-        table.add_column("Plugin", style="bold white", no_wrap=True)
-        table.add_column("Description", style="white", ratio=1)
-        table.add_column("Version", style="cyan", justify="center")
-        table.add_column("Install", style="green")
-
+        width = max(40, shutil.get_terminal_size((80, 24)).columns)
+        logger.success(f"{len(manifest.plugins)} plugin(s) in '{name}':", symbol="check")
         for p in manifest.plugins:
-            desc = p.description or "--"
-            ver = p.version or "--"
-            table.add_row(p.name, desc, ver, f"{p.name}@{name}")
-
-        console.print()
-        console.print(table)
+            version = f"  ({p.version})" if p.version else ""
+            click.echo(f"  {p.name}@{name}{version}")
+            if p.description:
+                for line in textwrap.wrap(p.description, width=width - 6):
+                    click.echo(f"      {line}")
         logger.progress(
             f"Install a plugin: apm install <plugin-name>@{name}",
             symbol="info",
@@ -886,15 +836,26 @@ def browse(name, verbose, offline=False):
         sys.exit(1)
 
 
-@marketplace.command(help="Refresh marketplace cache")
+@marketplace.command(
+    short_help="Refresh marketplace cache (all, or NAME)",
+    help=(
+        "Revalidate cached marketplace data for NAME, or for every registered "
+        "marketplace if NAME is omitted. Exits 1 if any marketplace fails to "
+        "revalidate; its last valid cached copy is kept."
+    ),
+)
 @click.argument("name", required=False, default=None)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @serialized_lifecycle
 def update(name, verbose):
-    """Refresh cached marketplace data (one or all)."""
+    """Refresh cached marketplace data (one or all).
+
+    Each catalog must revalidate; a failed refresh keeps the last valid
+    cached copy and makes the command exit nonzero (#3279).
+    """
     logger = CommandLogger("marketplace-update", verbose=verbose)
     try:
-        from ...marketplace.client import clear_marketplace_cache, fetch_marketplace
+        from ...marketplace.client import fetch_marketplace
         from ...marketplace.registry import (
             get_marketplace_by_name,
             get_registered_marketplaces,
@@ -903,28 +864,38 @@ def update(name, verbose):
         if name:
             source = get_marketplace_by_name(name)
             logger.start(f"Refreshing marketplace '{name}'...", symbol="gear")
-            clear_marketplace_cache(source=source)
-            manifest = fetch_marketplace(source, force_refresh=True)
+            manifest = fetch_marketplace(source, require_fresh=True)
             logger.success(
-                f"Marketplace '{name}' updated ({len(manifest.plugins)} plugins)",
+                f"Marketplace '{name}' updated ({len(manifest.plugins)} plugin{'' if len(manifest.plugins) == 1 else 's'})",
                 symbol="check",
             )
-        else:
-            sources = get_registered_marketplaces()
-            if not sources:
-                logger.progress("No marketplaces registered.", symbol="info")
-                return
-            logger.start(f"Refreshing {len(sources)} marketplace(s)...", symbol="gear")
-            for s in sources:
-                try:
-                    clear_marketplace_cache(source=s)
-                    manifest = fetch_marketplace(s, force_refresh=True)
-                    logger.tree_item(f"  {s.name} ({len(manifest.plugins)} plugins)")
-                except Exception as exc:
-                    logger.warning(f"  {s.name}: {exc}")
-                    if verbose:
-                        logger.progress(traceback.format_exc(), symbol="info")
-            logger.success("Marketplace cache refreshed", symbol="check")
+            return
+
+        sources = get_registered_marketplaces()
+        if not sources:
+            logger.progress("No marketplaces registered.", symbol="info")
+            return
+        logger.start(f"Refreshing {len(sources)} marketplace(s)...", symbol="gear")
+        failed = []
+        for s in sources:
+            try:
+                manifest = fetch_marketplace(s, require_fresh=True)
+                logger.tree_item(
+                    f"  {s.name} ({len(manifest.plugins)} plugin{'' if len(manifest.plugins) == 1 else 's'})"
+                )
+            except Exception as exc:
+                failed.append(s.name)
+                logger.error(f"  {s.name}: {exc}", symbol="error")
+                if verbose:
+                    logger.progress(traceback.format_exc(), symbol="info")
+        if failed:
+            logger.error(
+                f"Refreshed {len(sources) - len(failed)} of {len(sources)} marketplace(s); "
+                f"failed: {', '.join(failed)}",
+                symbol="error",
+            )
+            sys.exit(1)
+        logger.success("Marketplace cache refreshed", symbol="check")
 
     except Exception as e:
         logger.error(f"Failed to update marketplace: {e}")
@@ -1015,10 +986,11 @@ def _render_build_table(logger, report):
             logger.tree_item(f"  [+] {pkg.name}  {pkg.ref}  {sha_short}  ({ref_kind})")
         return
 
-    from rich.table import Table
     from rich.text import Text
 
-    table = Table(
+    from apm_cli.utils.console import new_table
+
+    table = new_table(
         title="Resolved Packages",
         show_header=True,
         header_style="bold cyan",
@@ -1132,10 +1104,11 @@ def _render_outdated_table(logger, rows):
             )
         return
 
-    from rich.table import Table
     from rich.text import Text
 
-    table = Table(
+    from apm_cli.utils.console import new_table
+
+    table = new_table(
         title="Package Version Status",
         show_header=True,
         header_style="bold cyan",
@@ -1178,6 +1151,52 @@ class _CheckResult:
         self.error = error
 
 
+_CHECK_FLAG_HEADERS = ("Reachable", "Version Found", "Ref OK")
+
+
+def _check_table_min_width(results) -> int:
+    """Width the check table needs before Rich crushes a column to ``..``.
+
+    Six columns cost 7 borders plus 2 padding cells each; Status is fixed at
+    6, the Package column never wraps, and every other header must fit whole.
+    """
+    longest_name = max((len(r.name) for r in results), default=0)
+    package = max(len("Package"), longest_name)
+    flags = sum(len(header) for header in _CHECK_FLAG_HEADERS)
+    return 7 + 6 * 2 + 6 + package + flags + len("Detail")
+
+
+def _render_check_list(console, results):
+    """Render check results as a list when the table cannot fit the terminal.
+
+    Same narrow-terminal approach as ``apm marketplace browse``: a squeezed
+    table truncates exactly the text users read, so each entry gets its own
+    lines and the detail wraps instead.
+    """
+    import textwrap
+
+    width = max(40, console.width)
+
+    def emit(line: str) -> None:
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
+
+    console.print()
+    emit("Entry Health Check:")
+    for r in results:
+        flags = (r.reachable, r.version_found, r.ref_ok)
+        emit(f"  {'[+]' if r.ref_ok else '[x]'} {r.name}")
+        emit(
+            "      "
+            + "  ".join(
+                f"{header}: {'[+]' if ok else '[x]'}"
+                for header, ok in zip(_CHECK_FLAG_HEADERS, flags, strict=True)
+            )
+        )
+        detail = f"Detail: {r.error if r.error else 'OK'}"
+        for line in textwrap.wrap(detail, width=width - 6) or [detail]:
+            emit(f"      {line}")
+
+
 def _render_check_table(logger, results):
     """Render the check-results table."""
     console = _get_console()
@@ -1188,10 +1207,18 @@ def _render_check_table(logger, results):
             logger.tree_item(f"  {icon} {r.name}: {detail}")
         return
 
-    from rich.table import Table
+    width = getattr(console, "width", None)
+    # A console that reports no integer width keeps the table (RA-032 lists only
+    # when a known terminal width cannot fit it).
+    if isinstance(width, int) and width < _check_table_min_width(results):
+        _render_check_list(console, results)
+        return
+
     from rich.text import Text
 
-    table = Table(
+    from apm_cli.utils.console import new_table
+
+    table = new_table(
         title="Entry Health Check",
         show_header=True,
         header_style="bold cyan",
@@ -1250,10 +1277,11 @@ def _render_doctor_table(logger, checks):
             logger.tree_item(f"  {icon} {c.name}: {c.detail}")
         return
 
-    from rich.table import Table
     from rich.text import Text
 
-    table = Table(
+    from apm_cli.utils.console import new_table
+
+    table = new_table(
         title="Environment Diagnostics",
         show_header=True,
         header_style="bold cyan",
@@ -1281,7 +1309,7 @@ def _render_doctor_table(logger, checks):
 def search(expression, limit, verbose):
     """Search for plugins in a specific marketplace.
 
-    Use QUERY@MARKETPLACE format, e.g.:  apm marketplace search security@skills
+    Use QUERY@MARKETPLACE format, e.g.:  apm search security@skills
     """
     logger = CommandLogger("marketplace-search", verbose=verbose)
     try:
@@ -1290,16 +1318,16 @@ def search(expression, limit, verbose):
 
         if "@" not in expression:
             logger.error(
-                f"Invalid format: '{expression}'. "
-                "Use QUERY@MARKETPLACE, e.g.: apm marketplace search security@skills"
+                f"Invalid format: '{expression}'. {MARKETPLACE_SEARCH_FORMAT.sentence()} "
+                "For example: apm search security@skills"
             )
             sys.exit(1)
 
         query, marketplace_name = expression.rsplit("@", 1)
         if not query or not marketplace_name:
             logger.error(
-                "Both QUERY and MARKETPLACE are required. "
-                "Use QUERY@MARKETPLACE, e.g.: apm marketplace search security@skills"
+                f"Both QUERY and MARKETPLACE are required. {MARKETPLACE_SEARCH_FORMAT.sentence()} "
+                "For example: apm search security@skills"
             )
             sys.exit(1)
 
@@ -1335,9 +1363,9 @@ def search(expression, limit, verbose):
             )
             return
 
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(
+        table = new_table(
             title=f"Search Results: '{query}' in {marketplace_name}",
             show_header=True,
             header_style="bold cyan",

@@ -32,6 +32,7 @@ from apm_cli.install.services import (
     integrate_package_primitives,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
 
 def _to_bundle(d: dict) -> IntegratorBundle:
@@ -172,11 +173,13 @@ class TestIntegratePackagePrimitivesNoTargets:
             result = integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=[],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert result["prompts"] == 0
@@ -209,12 +212,14 @@ class TestIntegratePackagePrimitivesScratchRoot:
             result = integrate_package_primitives(
                 pkg_info,
                 project_in_scratch,
+                skill_subset=None,
                 targets=[copilot],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
                 scratch_root=scratch,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert isinstance(result, dict)
@@ -240,12 +245,14 @@ class TestIntegratePackagePrimitivesScratchRoot:
             integrate_package_primitives(
                 pkg_info,
                 project_root,
+                skill_subset=None,
                 targets=[copilot],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
                 scratch_root=scratch,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
 
@@ -286,6 +293,7 @@ class TestIntegratePackagePrimitivesFormatTargetCollapse:
             return integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=[copilot],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
@@ -293,6 +301,7 @@ class TestIntegratePackagePrimitivesFormatTargetCollapse:
                 managed_files=None,
                 logger=logger,
                 ctx=ctx,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
     def test_zero_skill_paths_collapsed_to_empty(self, tmp_path: Path) -> None:
@@ -357,12 +366,14 @@ class TestIntegratePackagePrimitivesSubSkills:
             result = integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=[copilot],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
                 logger=logger,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert result["sub_skills"] == 2
@@ -386,12 +397,14 @@ class TestIntegratePackagePrimitivesSubSkills:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=[copilot],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
                 logger=logger,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         all_log_calls = "".join(str(c) for c in logger.tree_item.call_args_list)
@@ -434,11 +447,13 @@ class TestSkillPathOutsideProject:
             result = integrate_package_primitives(
                 pkg_info,
                 project_root,
+                skill_subset=None,
                 targets=[cowork_target],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert result["skills"] == 1
@@ -779,12 +794,14 @@ class TestCopilotAppWorkflowHint:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=[mock_target],
                 diagnostics=MagicMock(),
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
                 logger=logger,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         all_log = " ".join(str(c) for c in logger.tree_item.call_args_list)

@@ -1,0 +1,11 @@
+name: user-profile
+version: 1.0.0
+dependencies:
+  apm: []
+  mcp:
+  - name: local-tool
+    registry: false
+    transport: stdio
+    command: node
+    args:
+    - server.js

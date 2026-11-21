@@ -1,4 +1,4 @@
-"""Tests for apm init --plugin flag.
+"""Tests for apm plugin init (formerly apm init --plugin, removed in 0.37).
 
 Focused test suite for the plugin author initialization workflow.
 Complements the broader ``TestInitCommand`` tests in ``test_init_command.py``.
@@ -9,12 +9,14 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest  # noqa: F401
+import pytest
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.commands._helpers import _validate_plugin_name
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # CLI integration tests
@@ -46,7 +48,7 @@ class TestInitPlugin:
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                result = self.runner.invoke(cli, ["plugin", "init", "--yes"])
 
                 assert result.exit_code == 0, result.output
                 created = {e.name for e in project_dir.iterdir()}
@@ -58,13 +60,13 @@ class TestInitPlugin:
                 os.chdir(self.original_dir)
 
     def test_plugin_json_structure(self):
-        """plugin.json has required fields: name, version, description, author, license."""
+        """plugin.json has name, version, description, author, and no default license."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             project_dir = Path(tmp_dir) / "my-plugin"
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                result = self.runner.invoke(cli, ["plugin", "init", "--yes"])
                 assert result.exit_code == 0, result.output
 
                 with open("plugin.json", encoding="utf-8") as f:
@@ -75,7 +77,7 @@ class TestInitPlugin:
                 assert isinstance(data["description"], str)
                 assert isinstance(data["author"], dict)
                 assert "name" in data["author"]
-                assert data["license"] == "MIT"
+                assert "license" not in data
             finally:
                 os.chdir(self.original_dir)
 
@@ -86,7 +88,7 @@ class TestInitPlugin:
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                result = self.runner.invoke(cli, ["plugin", "init", "--yes"])
                 assert result.exit_code == 0, result.output
 
                 with open("apm.yml", encoding="utf-8") as f:
@@ -104,7 +106,7 @@ class TestInitPlugin:
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                self.runner.invoke(cli, ["plugin", "init", "--yes"])
                 assert not Path("SKILL.md").exists()
             finally:
                 os.chdir(self.original_dir)
@@ -116,7 +118,7 @@ class TestInitPlugin:
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                self.runner.invoke(cli, ["plugin", "init", "--yes"])
 
                 entries = list(project_dir.iterdir())
                 dirs = [e for e in entries if e.is_dir()]
@@ -131,7 +133,7 @@ class TestInitPlugin:
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                result = self.runner.invoke(cli, ["plugin", "init", "--yes"])
                 assert result.exit_code != 0
                 assert "Invalid plugin name" in result.output
             finally:
@@ -172,7 +174,7 @@ class TestInitPlugin:
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                result = self.runner.invoke(cli, ["plugin", "init", "--yes"])
 
                 assert result.exit_code == 0, result.output
                 assert Path("apm.yml").exists()
@@ -209,7 +211,7 @@ class TestInitPlugin:
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                self.runner.invoke(cli, ["plugin", "init", "--yes"])
 
                 with open("plugin.json", encoding="utf-8") as f:
                     data = json.load(f)
@@ -228,7 +230,7 @@ class TestInitPlugin:
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                self.runner.invoke(cli, ["plugin", "init", "--yes"])
 
                 with open("plugin.json", encoding="utf-8") as f:
                     data = json.load(f)
@@ -244,7 +246,7 @@ class TestInitPlugin:
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                result = self.runner.invoke(cli, ["plugin", "init", "--yes"])
                 assert result.exit_code == 0, result.output
                 assert "apm pack --format agent-plugin" in result.output
                 assert "apm pack --format claude-plugin" in result.output
@@ -257,7 +259,7 @@ class TestInitPlugin:
         with tempfile.TemporaryDirectory() as tmp_dir:
             os.chdir(tmp_dir)
             try:
-                result = self.runner.invoke(cli, ["init", "cool-plugin", "--plugin", "--yes"])
+                result = self.runner.invoke(cli, ["plugin", "init", "cool-plugin", "--yes"])
                 assert result.exit_code == 0, result.output
 
                 project_path = Path(tmp_dir) / "cool-plugin"
@@ -277,7 +279,7 @@ class TestInitPlugin:
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                self.runner.invoke(cli, ["plugin", "init", "--yes"])
                 raw = Path("plugin.json").read_text()
                 assert raw.endswith("\n")
             finally:
@@ -290,7 +292,7 @@ class TestInitPlugin:
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                result = self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                result = self.runner.invoke(cli, ["plugin", "init", "--yes"])
                 assert result.exit_code == 0, result.output
                 assert not Path("start.prompt.md").exists()
             finally:
@@ -303,7 +305,7 @@ class TestInitPlugin:
             project_dir.mkdir()
             os.chdir(project_dir)
             try:
-                self.runner.invoke(cli, ["init", "--plugin", "--yes"])
+                self.runner.invoke(cli, ["plugin", "init", "--yes"])
 
                 with open("apm.yml", encoding="utf-8") as f:
                     config = yaml.safe_load(f)

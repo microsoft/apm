@@ -890,6 +890,7 @@ class TestRunMcpInstall:
     def test_mcp_integrator_failure_raises_click_exception(self, tmp_path: Path) -> None:
         import click
 
+        from apm_cli.core.target_detection import EffectiveTargetDecision
         from apm_cli.install.mcp.command import run_mcp_install
 
         apm_yml = tmp_path / "apm.yml"
@@ -915,7 +916,9 @@ class TestRunMcpInstall:
             patch("apm_cli.install.mcp.command.warn_shell_metachars"),
             patch("apm_cli.install.mcp.command.APM_DEPS_AVAILABLE", True),
             patch("apm_cli.install.mcp.command.MCPIntegrator", mock_integrator),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator", mock_integrator),
             patch("apm_cli.install.mcp.command.LockFile", mock_lockfile_cls),
+            patch("apm_cli.install.mcp.entry_integration.LockFile", mock_lockfile_cls),
             patch(
                 "apm_cli.install.mcp.command.get_lockfile_path",
                 return_value=tmp_path / "apm.lock.yaml",
@@ -940,9 +943,11 @@ class TestRunMcpInstall:
                     logger=logger,
                     apm_dir=tmp_path,
                     scope=None,
+                    target_decision=EffectiveTargetDecision(["claude"], "test"),
                 )
 
     def test_mcp_integrator_success_updates_lockfile(self, tmp_path: Path) -> None:
+        from apm_cli.core.target_detection import EffectiveTargetDecision
         from apm_cli.install.mcp.command import run_mcp_install
 
         apm_yml = tmp_path / "apm.yml"
@@ -972,7 +977,9 @@ class TestRunMcpInstall:
             patch("apm_cli.install.mcp.command.warn_shell_metachars"),
             patch("apm_cli.install.mcp.command.APM_DEPS_AVAILABLE", True),
             patch("apm_cli.install.mcp.command.MCPIntegrator", mock_integrator),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator", mock_integrator),
             patch("apm_cli.install.mcp.command.LockFile", mock_lockfile_cls),
+            patch("apm_cli.install.mcp.entry_integration.LockFile", mock_lockfile_cls),
             patch(
                 "apm_cli.install.mcp.command.get_lockfile_path",
                 return_value=tmp_path / "apm.lock.yaml",
@@ -996,6 +1003,7 @@ class TestRunMcpInstall:
                 logger=logger,
                 apm_dir=tmp_path,
                 scope=None,
+                target_decision=EffectiveTargetDecision(["claude"], "test"),
             )
 
         mock_integrator.update_lockfile.assert_called_once()
@@ -1450,6 +1458,7 @@ class TestMarketplacePluginSetCmd:
     def test_mutable_ref_resolution_finds_package(self) -> None:
         """Cover the ref resolution path when --ref is a mutable ref (e.g. 'main')."""
         from apm_cli.commands.marketplace.plugin import package
+        from apm_cli.marketplace.ref_resolver import RemoteRef
 
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -1458,13 +1467,15 @@ class TestMarketplacePluginSetCmd:
             with (
                 patch("apm_cli.marketplace.yml_editor.update_plugin_entry") as mock_update,
                 patch(
-                    "apm_cli.commands.marketplace.plugin._resolve_ref",
-                    return_value=resolved_sha,
-                ),
+                    "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
+                    return_value=[RemoteRef(name="refs/heads/main", sha=resolved_sha)],
+                ) as mock_ls_remote,
             ):
                 result = runner.invoke(package, ["set", "tool-a", "--ref", "main"])
         assert result.exit_code == 0, result.output
+        mock_ls_remote.assert_called_once_with("org/tool-a")
         mock_update.assert_called_once()
+        assert mock_update.call_args.kwargs["ref"] == resolved_sha
 
     def test_mutable_ref_resolution_package_not_found_exits_2(self) -> None:
         """Cover the 'source is None -> sys.exit(2)' path in ref resolution."""

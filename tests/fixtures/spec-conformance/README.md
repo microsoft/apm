@@ -15,6 +15,7 @@ they exercise in a header comment.
 | `policy/`                                | `apm-policy.yml` fixtures (valid + invalid).                |
 | `resolution/semver-dialect.json`         | Canonical semver-range -> tag-set table per req-rs-007.     |
 | `source-plan/req-sc-015.json`            | Authorized-source-plan fixture and symlink-exclusion oracle.|
+| `native-activation/req-na-004.json`      | Native activation settings-reconciliation oracle.          |
 
 ## Binding to the spec
 

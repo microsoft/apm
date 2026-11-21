@@ -31,9 +31,13 @@ __all__ = [
 # Regex
 # ---------------------------------------------------------------------------
 
+# SemVer 2.0.0 grammar: ASCII digits only, and numeric identifiers
+# (core parts and numeric prerelease ids) carry no leading zeros.
+_NUMERIC_ID = r"(?:0|[1-9][0-9]*)"
+_PRERELEASE_ID = rf"(?:{_NUMERIC_ID}|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
 _SEMVER_RE = re.compile(
-    r"^(\d+)\.(\d+)\.(\d+)"
-    r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    rf"^({_NUMERIC_ID})\.({_NUMERIC_ID})\.({_NUMERIC_ID})"
+    rf"(?:-({_PRERELEASE_ID}(?:\.{_PRERELEASE_ID})*))?"
     r"(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
 )
 
@@ -116,7 +120,9 @@ class SemVer:
 def parse_semver(text: str) -> SemVer | None:
     """Parse a semver string into a ``SemVer`` instance.
 
-    Returns ``None`` when *text* does not match the semver grammar.
+    Returns ``None`` when *text* does not match the SemVer 2.0.0 grammar
+    (for example ``01.2.3``, ``1.2.3-01`` or non-ASCII digits). This is the
+    one exact-version parser; callers needing an exact release reuse it.
 
     Examples
     --------

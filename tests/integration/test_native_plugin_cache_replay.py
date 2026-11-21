@@ -7,7 +7,10 @@ import pytest
 from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
-from apm_cli.install.phases.local_content import _copy_tree_dereferencing_validated
+from apm_cli.install.phases.local_content import (
+    _copy_tree_dereferencing_validated,
+    materialize_local_package_for_replay,
+)
 from apm_cli.utils.content_hash import compute_package_hash
 from tests.unit.copilot_plugins._builders import write_agent_plugin
 
@@ -31,7 +34,10 @@ def test_local_native_replay_uses_install_symlink_materialization(tmp_path: Path
     _copy_tree_dereferencing_validated(source, candidate, source)
     assert not (candidate / "alias.txt").is_symlink()
     assert (candidate / "alias.txt").read_bytes() == resource.read_bytes()
-    replay = lock.to_dependency_ref().get_install_path(scratch / "apm_modules")
+    replay = materialize_local_package_for_replay(
+        lock.to_dependency_ref(), tmp_path, scratch / "apm_modules"
+    )
+    assert replay == lock.to_dependency_ref().get_install_path(scratch / "apm_modules")
     verify_native_plugin_cache(lock, source, replay, modules, scratch)
     assert compute_package_hash(replay) == compute_package_hash(candidate)
     assert compute_package_hash(source) != compute_package_hash(candidate)

@@ -7,7 +7,7 @@ description: >-
   (consumer / producer / enterprise). Activate to synthesize doc-writer
   + python-architect + editorial-owner + growth-hacker outputs into a
   ship recommendation, or to evaluate TOC-level proposals.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # Chief Documentation Officer (CDO)

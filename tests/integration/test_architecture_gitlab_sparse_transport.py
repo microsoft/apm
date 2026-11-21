@@ -164,10 +164,18 @@ def test_both_guards_reject_credentials_in_prepared_url(builder: str) -> None:
     start = source.index("    def download_gitlab_file(")
     end = source.index("    def _download_gitlab_file_via_rest(")
     bounded = source[start:end]
-    old = 'token="",'
+    old = "self.build_repo_url("
     assert bounded.count(old) == 2
-    before, after = bounded.split(old, 1) if builder == "candidate" else bounded.rsplit(old, 1)
-    mutated = source[:start] + before + "token=managed_token," + after + source[end:]
+    call = bounded.index(old) if builder == "candidate" else bounded.rindex(old)
+    seam = "dep_ref=dep_ref,"
+    at = bounded.index(seam, call)
+    mutated = (
+        source[:start]
+        + bounded[:at]
+        + "dep_ref=dep_ref, token=managed_token,"
+        + bounded[at + len(seam) :]
+        + source[end:]
+    )
     ast.parse(mutated)
     report = run_selected_rules(ROOT, (RULE_ID, AUTH_RULE_ID), source_overrides={CONSUMER: mutated})
     assert not report.failures

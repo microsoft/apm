@@ -229,6 +229,24 @@ class TestConfigSet:
         assert result.exit_code == 0
         mock_set.assert_called_once_with(True)
 
+    def test_set_auto_integrate_warns_deprecated(self):
+        """auto-integrate is still accepted but warns that it has no effect (#3839)."""
+        with patch("apm_cli.config.set_auto_integrate"):
+            result = self.runner.invoke(config, ["set", "auto-integrate", "false"])
+        output = " ".join(result.output.split())
+        assert result.exit_code == 0
+        assert "[!] 'auto-integrate' is deprecated and has no effect" in output
+
+    def test_set_auto_integrate_warns_first_and_claims_no_success(self):
+        """A deprecated key never prints a success line implying it took effect."""
+        with patch("apm_cli.config.set_auto_integrate"):
+            result = self.runner.invoke(config, ["set", "auto-integrate", "false"])
+        output = " ".join(result.output.split())
+        assert result.exit_code == 0
+        assert "Auto-integration set to" not in output
+        assert "[i] Stored auto-integrate=false (no effect)" in output
+        assert output.index("deprecated") < output.index("Stored auto-integrate")
+
     def test_set_target(self):
         """Set install default target."""
         with patch("apm_cli.config.set_install_target", return_value="claude") as mock_set:
@@ -326,6 +344,14 @@ class TestConfigGet:
         assert result.exit_code == 0
         assert "auto-integrate: false" in result.output
 
+    def test_get_auto_integrate_warns_deprecated(self):
+        """Reading the deprecated key still works but warns (#3839)."""
+        with patch("apm_cli.config.get_auto_integrate", return_value=True):
+            result = self.runner.invoke(config, ["get", "auto-integrate"])
+        output = " ".join(result.output.split())
+        assert result.exit_code == 0
+        assert "[!] 'auto-integrate' is deprecated and has no effect" in output
+
     def test_get_unknown_key(self):
         """Reject an unknown key."""
         result = self.runner.invoke(config, ["get", "nonexistent"])
@@ -336,7 +362,8 @@ class TestConfigGet:
         with patch("apm_cli.config.get_auto_integrate", return_value=True):
             result = self.runner.invoke(config, ["get"])
         assert result.exit_code == 0
-        assert "auto-integrate: true" in result.output
+        # Deprecated keys are not listed in the summary (#3839).
+        assert "auto-integrate" not in result.output
         # Internal keys must not appear - users cannot set them via apm config set
         assert "default_client" not in result.output
 
@@ -365,11 +392,11 @@ class TestConfigGet:
         )
 
     def test_get_all_config_fresh_install(self):
-        """auto-integrate is shown even on a fresh install with no key in the file."""
-        with patch("apm_cli.config.get_auto_integrate", return_value=True):
+        """temp-dir is shown even on a fresh install with no key in the file."""
+        with patch("apm_cli.config.get_temp_dir", return_value=None):
             result = self.runner.invoke(config, ["get"])
         assert result.exit_code == 0
-        assert "auto-integrate: true" in result.output
+        assert "temp-dir: Not set" in result.output
 
     def test_get_all_config_suppresses_default_self_update_channel(self):
         """apm config get (no key) omits the default stable self-update channel."""
@@ -1154,7 +1181,7 @@ class TestValidConfigKeys:
         with patch("apm_cli.core.experimental.is_enabled", return_value=False):
             result = _valid_config_keys()
 
-        assert "auto-integrate" in result
+        assert "auto-integrate" not in result
         assert "temp-dir" in result
         assert "copilot-cowork-skills-dir" not in result
 
@@ -1165,7 +1192,7 @@ class TestValidConfigKeys:
         with patch("apm_cli.core.experimental.is_enabled", return_value=True):
             result = _valid_config_keys()
 
-        assert "auto-integrate" in result
+        assert "auto-integrate" not in result
         assert "temp-dir" in result
         assert "copilot-cowork-skills-dir" in result
 
@@ -1178,6 +1205,58 @@ class TestValidConfigKeys:
 
         assert "allow-protocol-fallback" in result
         assert "ssh" in result
+
+
+class TestConfigKeyRegistry:
+    """The valid-key registry and the get/set/unset dispatch must agree."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_config(self, tmp_path, monkeypatch):
+        import apm_cli.config as conf
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(conf, "CONFIG_DIR", str(tmp_path / ".apm"))
+        monkeypatch.setattr(conf, "CONFIG_FILE", str(tmp_path / ".apm" / "config.json"))
+        conf._invalidate_config_cache()
+        yield
+        conf._invalidate_config_cache()
+
+    @staticmethod
+    def _concrete(name: str) -> str:
+        from apm_cli.security.external.registry import SUPPORTED_SCANNERS
+
+        placeholder = sorted(SUPPORTED_SCANNERS)[0] if name.startswith("external.") else "corp"
+        return name.replace("<name>", placeholder)
+
+    @pytest.mark.parametrize("operation", ["get", "set", "unset"])
+    def test_unknown_key_is_a_plain_user_error(self, operation):
+        args = [operation, "no-such-key"] + (["x"] if operation == "set" else [])
+        result = CliRunner().invoke(config, args)
+
+        assert result.exit_code == 1
+        assert "Unknown configuration key: 'no-such-key'" in result.output
+        assert "command routing" not in result.output
+        assert "github-auth-first" in result.output
+
+    def test_every_registered_key_is_dispatched(self):
+        from apm_cli.commands.config import _CONFIG_KEYS
+
+        runner = CliRunner()
+        with patch("apm_cli.core.experimental.is_enabled", return_value=True):
+            for name, _flag, unsettable in _CONFIG_KEYS:
+                key = self._concrete(name)
+                operations = [["get", key], ["set", key, "true"]]
+                if unsettable:
+                    operations.append(["unset", key])
+                for args in operations:
+                    result = runner.invoke(config, args)
+                    assert "Unknown configuration key" not in result.output, (args, result.output)
+            rejected = runner.invoke(config, ["unset", "auto-integrate"])
+
+        assert "Unknown configuration key: 'auto-integrate'" in rejected.output
+        valid = rejected.output.split("Valid keys:", 1)[1]
+        assert "auto-integrate" not in valid
+        assert "registry.<name>.default" in valid
 
 
 # ---------------------------------------------------------------------------
@@ -2009,7 +2088,10 @@ class TestMcpRegistryUrlCommand:
             )
         assert result.exit_code == 0
         mock_set.assert_called_once_with("http://internal.corp/mcp")
-        assert "MCP_REGISTRY_ALLOW_HTTP=1" in result.output
+        # Config-sourced URLs are exempt from the env-var gate; do not point at it.
+        assert "MCP_REGISTRY_ALLOW_HTTP" not in result.output
+        assert "[!]" in result.output
+        assert "plaintext HTTP" in " ".join(result.output.split())
 
     def test_set_invalid_scheme_rejected(self):
         with patch(

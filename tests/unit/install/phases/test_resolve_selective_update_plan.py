@@ -2,8 +2,12 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from apm_cli.install.phases import resolve
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 def test_run_records_complete_keys_before_only_filter(monkeypatch):

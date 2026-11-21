@@ -7,7 +7,10 @@ sidebar:
 
 Start with [CONTRIBUTING.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md)
 for issue-first scope approval, PR eligibility, small corrections, private
-security reporting, and the transition for existing contributions.
+security reporting, and the transition for existing contributions. To list your
+organization, follow
+[Adding your organization to ADOPTERS.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#adding-your-organization-to-adoptersmd):
+no issue or scope record needed.
 [GOVERNANCE.md](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md) names
 the responsible human maintainers and explains decisions and responsibilities.
 The [public maintainer roster](https://github.com/microsoft/apm/blob/main/MAINTAINERS.md)
@@ -189,7 +192,7 @@ apm install --target claude
 
 The local exclusion avoids changing repository-wide ignore rules. This install
 also adds deploy paths to `apm.lock.yaml`; leave that local override uncommitted.
-Check the [target catalogue](../../concepts/primitives-and-targets/#target-catalogue)
+Check the [target catalogue](../../reference/targets-matrix/)
 for other targets; some write to more than one root.
 
 ## Testing
@@ -216,7 +219,7 @@ to force serial execution. The default selection in `pyproject.toml` excludes
 
 For performance changes, prefer deterministic operation-count regressions over
 wall-clock thresholds. Run the consolidated scan regressions with
-`uv run --extra dev pytest -q tests/unit/test_performance_scan_regressions.py`.
+`uv run --extra dev pytest -q tests/unit/test_performance_scan_regressions.py tests/integration/test_performance_scan_regressions.py`.
 They check deferred error-only imports, at most two indexed ZIP member lookups,
 and uninstall deduplication without comparing previously selected entries.
 Archive parsing and canonical dependency matching retain their existing costs.
@@ -332,10 +335,41 @@ defines the complete enforced step list; mirror it before pushing or claiming
 green CI.
 
 Ruff lint and format are only part of that job. It also checks YAML I/O,
-file length, portable relative paths, duplication, auth-protocol boundaries,
-and architecture boundaries. Its Python scope includes the architecture-linter
+file length, portable relative paths, duplication, complexity, auth-protocol
+boundaries, and architecture boundaries. Its Python scope includes the architecture-linter
 scripts as well as `src/` and `tests/`. CI checks the PR merge result, so changes
 on `main` can introduce failures even when the branch alone passes.
+
+### Complexity ratchet
+
+New and changed functions must meet the Stage 2 limits: at most 120
+statements, 40 branches, McCabe complexity 35, 12 arguments and 8 returns.
+Functions that already exceeded them are listed in
+[`tests/quality/complexity_baseline.json`](https://github.com/microsoft/apm/blob/main/tests/quality/complexity_baseline.json),
+keyed by file and function qualname. The list can only shrink.
+
+```bash
+git fetch origin main
+uv run --frozen --extra dev python scripts/check_complexity_ratchet.py --base-ref origin/main
+```
+
+The check fails when:
+
+- a function outside the baseline exceeds a limit (`# noqa` does not exempt it);
+- the baseline gains an entry compared with the base branch (needs `--base-ref`,
+  which CI always passes);
+- a listed function is now within limits but still in the baseline.
+
+Fix a new violation by splitting the function, not by editing the baseline.
+Renaming a grandfathered function, or moving it to another file or class,
+counts as new code. After you bring a grandfathered function within limits,
+prune its entry:
+
+```bash
+uv run --frozen --extra dev python scripts/check_complexity_ratchet.py --update-baseline
+```
+
+`--update-baseline` only removes entries; it refuses to add new ones.
 
 ### Architecture guardrails
 
@@ -365,6 +399,18 @@ bash scripts/lint-architecture-boundaries.sh
 The check fails closed when metadata is malformed, missing, or not listed in the
 index.
 
+Every module under `src/apm_cli/` must match one owner's `selectors` or appear in
+`.apm/architecture/unowned-modules.json`. That list only shrinks: a new module
+needs an owner, and when you give a listed module an owner, remove its entry and
+lower `UNOWNED_MODULE_CEILING` in
+`scripts/architecture_linter/checks/registry_module_ownership.py` to match.
+
+Every CLI command must be classified in
+`scripts/architecture_linter/checks/install_lifecycle_serialization.py`. A command
+that writes lifecycle state uses `@serialized_lifecycle` (or its `_unless` /
+`_when` variants) and is listed in `SERIALIZED_LIFECYCLE_ROUTES`. A command that
+writes no lifecycle state is listed as exempt, with the reason.
+
 `InstallTransaction` owns one acquisition of the shared lifecycle `FileLock`.
 Commit, rollback, and context exit are the normal release paths; explicit release
 invokes the same `weakref.finalize` callback used for abandoned transactions.
@@ -380,7 +426,7 @@ cannot mask a missed release.
 For instant feedback before pushing, install the pre-commit hooks:
 
 ```bash
-uv run pre-commit install
+uvx pre-commit install
 ```
 
 This is optional -- CI is the authoritative gate. The pre-commit hook rev may lag behind the CI version; check `.pre-commit-config.yaml` against `uv.lock` if you see discrepancies.
@@ -422,6 +468,7 @@ consistency with the repository pin, and action-pin consistency.
 
 The CodeQL workflow runs Python and GitHub Actions analysis on pull requests,
 pushes to `main`, merge-queue `checks_requested` events, and the weekly schedule.
+Python uses a standard Ubuntu ARM64 runner; Actions analysis stays on x86_64.
 Keep the workflow path, `analyze` job ID, and language matrix stable: they
 identify the analysis configurations GitHub compares against the base branch.
 PR results do not replace results for the merge queue's separate commit.
@@ -488,8 +535,9 @@ other user-facing strings. The CLI accepts both forms on input. Persist flag
 state only in `~/.apm/config.json` through `update_config`.
 
 When a flag graduates to the default, remove its gate and `FLAGS` entry in the
-same PR. Add a `CHANGELOG.md` entry under `Changed`, with a migration note if
-the previous default differed.
+same PR. Add one changelog fragment: `changelog.d/<pr>.changed.md`, or, if users
+must act because the previous default differed, only
+`changelog.d/<pr>.breaking-changes-and-upgrade-notes.md` with the migration.
 
 ## Adding or changing a normative requirement (OpenAPM v0.1)
 
@@ -500,16 +548,26 @@ coupled edits in the same PR:
 1. **Spec:** add or change a `<a id="req-XXX"></a>` anchor and its prose in
    `docs/src/content/docs/specs/openapm-v0.1.md`, plus the matching Appendix C row.
 2. **Manifest:** update
-   `docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`
+   `docs/public/specs/manifests/openapm-v0.1.requirements.yml`
    to remain a byte-equivalent projection of the canonical anchors.
-3. **Test:** add or extend a `@pytest.mark.req("req-XXX")` test under
-   `tests/spec_conformance/`. If a real assertion is not yet possible, call
+3. **Test:** add or extend a `@pytest.mark.req("req-XXX")` test. The marker
+   binds from any test under `tests/` (an installed-CLI test in
+   `tests/integration/` counts); `tests/spec_conformance/` holds the
+   requirement-specific ones. If a real assertion is not yet possible, call
    `waive("...")` from `_helpers.py` with a one-line rationale. The waiver
    appears in `CONFORMANCE.md` as visible debt, not test coverage.
+   Only a behavioral test counts as coverage: one that reaches `apm_cli`
+   (not its constants or YAML helpers), `tests.integration`, `tests.unit` or
+   the CLI runner `tests.utils.apm_lifecycle_runner`, or takes the
+   `apm_binary_path` fixture. A requirement whose tests only assert spec text or
+   fixture shape is reported `text-only` (rule:
+   `tests/spec_conformance/_test_kind.py`).
 
-Regenerate the conformance statement after these edits:
+Regenerate the conformance statement after these edits (the full collect-only
+run over `tests/` writes the coverage map):
 
 ```bash
+uv run --extra dev pytest tests --collect-only -q -p no:xdist
 uv run --extra dev python -m tests.spec_conformance.gen_statement
 ```
 

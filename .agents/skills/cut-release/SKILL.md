@@ -4,9 +4,11 @@ description: >-
   Use this skill to cut an APM release from the current worktree:
   assess whether the cycle since the last tag warrants a patch or
   minor bump (semver discipline against the merged-since-last-tag
-  diff), sanitize the [Unreleased] CHANGELOG block into a dated
-  version block with one concise "so what" entry per merged PR
-  (drop internal-only churn, consolidate duplicates), bump
+  diff), assemble the changelog.d/ fragments and any legacy
+  [Unreleased] CHANGELOG bullets into a dated version block and
+  sanitize it so each change has one line in one section
+  (dedupe across sections, condense, add Highlights, drop
+  internal-only churn), bump
   pyproject.toml + uv.lock, run the CI-mirror lint chain, and open
   the release PR. Activate on "ship a release", "cut v0.x",
   "release prep", "bump and PR", "open release PR", "what kind of
@@ -106,6 +108,8 @@ script's stdout.
 
 ### Phase 2 -- pick the bump (B10 CHECKPOINT 1)
 
+Before picking the bump, read the latest `release-acceptance` report for this candidate (its release-gate row must be GO; see `../release-acceptance/SKILL.md`).
+
 Load `assets/semver-rubric.md`. Walk every PR from Phase 1
 against the rubric. The rubric outputs PATCH, MINOR, or
 ESCALATE-TO-MAJOR.
@@ -123,30 +127,62 @@ confirmation.
 
 Wait for the operator's confirm before continuing.
 
-### Phase 3 -- sanitize the changelog (B10 CHECKPOINT 2)
+### Phase 3 -- assemble and sanitize the changelog (B10 CHECKPOINT 2)
 
-Load `assets/entry-sanitizer.md`. For each PR classified as
-user-facing in Phase 1:
+PRs add one-line fragments, `changelog.d/<pr>.<section>.md`,
+instead of editing `[Unreleased]` (format: `changelog.d/README.md`).
+`[Unreleased]` may still hold legacy bullets from before the
+migration. `scripts/changelog_fragments.py` assembles both:
 
-1. Choose its section: Added (new feature, new command, new spec),
-   Changed (behavior change in existing surface), Fixed (bug fix),
-   Deprecated, Removed, Security, Performance.
-2. Write ONE entry per PR. Two-sentence cap. "So what" framing.
-   PR number in parentheses at the end. Preserve `by @author` for
-   external contributors.
-3. Consolidate any pre-existing Unreleased entries that point at
-   the same PR.
-4. Drop INTERNAL PRs entirely (the script flagged most of them;
+1. `python scripts/changelog_fragments.py --root <repo> check`
+   validates every fragment. Fix or ask about any `[x]` line.
+2. `python scripts/changelog_fragments.py --root <repo> render
+   --version X.Y.Z --date YYYY-MM-DD` prints the version block
+   (dry run): legacy `[Unreleased]` bullets first, then
+   fragments by PR number, in section order.
+3. `python scripts/changelog_fragments.py --root <repo> assemble
+   --version X.Y.Z --date YYYY-MM-DD` writes that block under an
+   empty `## [Unreleased]` and deletes the fragments (it keeps
+   `changelog.d/README.md`).
+
+Then load `assets/entry-sanitizer.md` and the format contract it
+points at (`.github/instructions/changelog.instructions.md`).
+Re-sanitize the WHOLE new version block, not just new PRs --
+entries added PR by PR drift into duplicates and paragraphs:
+
+1. ONE CHANGE, ONE LINE, ONE SECTION. Breaking and must-act
+   changes (including deprecations that need action) go ONLY under
+   `### Breaking changes and upgrade notes`, with the migration in
+   the line and `**BREAKING:**` for true breakings. Everything else
+   goes in exactly one of Added, Changed, Deprecated, Removed,
+   Fixed, Security.
+2. Each line: user-visible effect first, 25 words or fewer, ending
+   with `(#PR)`. Keep `-- by @author` credits and caveats that
+   matter.
+3. DEDUPE ACROSS SECTIONS: if a change appears in more than one
+   section (or twice in one), keep one line in the right section
+   and fold any caveat or migration from the others into it.
+4. GROUP: a PR with several user-visible fixes gets as few
+   themed lines as stay clear; related PRs share one line.
+5. Drop INTERNAL PRs entirely (the script flagged most of them;
    the rubric in entry-sanitizer.md confirms).
-5. Mark BREAKING entries with `**BREAKING:**` prefix.
+6. Remove any `### Highlights` a PR added, then write 2-4 short
+   Highlights pointers last. Highlights are the only allowed
+   repeat of a change and exist only in released versions.
+7. Check that every user-facing `#NNNN` ref and `@user` credit in
+   the old block survives in the new one.
 
-Rewrite the CHANGELOG.md `[Unreleased]` block in place:
+Rewrite the new version block in place; the result is:
 
 ```
 ## [Unreleased]
 
 ## [X.Y.Z] - YYYY-MM-DD
 
+### Highlights
+...
+### Breaking changes and upgrade notes
+...
 ### Added
 ...
 ### Changed
@@ -194,7 +230,8 @@ will claim CI is green; that claim must hold.
 
 ### Phase 6 -- commit, push, open PR
 
-1. `git add CHANGELOG.md pyproject.toml uv.lock`.
+1. `git add CHANGELOG.md changelog.d pyproject.toml uv.lock`
+   (`changelog.d` stages the deleted fragments).
 2. `git commit -m "chore: release vX.Y.Z" -m "<short body>"`.
    The body mirrors prior release commits (#1410, #1454, #1526):
    one paragraph naming what was bumped and the lint-mirror

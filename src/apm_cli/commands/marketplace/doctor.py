@@ -5,6 +5,11 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from apm_cli.core.remediation import (
+    MARKETPLACE_CONFIG_LEGACY,
+)
+from apm_cli.core.scope import manifest_file
+
 from ...core.command_logger import CommandLogger
 from ...marketplace.errors import MarketplaceYmlError
 from ...marketplace.git_stderr import translate_git_stderr
@@ -35,7 +40,7 @@ def _executable_trust_drift_check(
     is reported so the operator can repair ``apm.yml``. Points the operator at
     ``apm policy explain <pkg>`` for per-package detail.
     """
-    apm_path = project_root / "apm.yml"
+    apm_path = manifest_file(project_root)
     if not apm_path.is_file():
         return None
     try:
@@ -46,8 +51,8 @@ def _executable_trust_drift_check(
             LAYER_USER_ALLOW,
             build_exec_trust_context,
             parse_project_executables,
-            resolve_exec_decision,
         )
+        from ...security.trust import package_type_verdicts
         from ...utils.yaml_io import load_yaml
         from ..approve import load_org_policy, scan_installed_executable_packages
 
@@ -94,13 +99,18 @@ def _executable_trust_drift_check(
         for decl in scan_installed_executable_packages(apm_path):
             if not getattr(decl, "has_executables", False):
                 continue
-            for exec_type in decl.exec_types:
-                decision = resolve_exec_decision(ctx, decl.package_key, exec_type)
-                if decision.deciding_layer in org_deny_layers and any(
-                    layer in decision.shadowed_layers for layer in allow_layers
-                ):
-                    conflicts.append(decl.package_name)
-                    break
+            verdicts = package_type_verdicts(
+                ctx,
+                (decl.package_key, decl.package_key.split("#", 1)[0]),
+                Path(decl.install_path) if decl.install_path else None,
+                decl.exec_types,
+            )
+            if any(
+                verdict.layer in org_deny_layers
+                and any(layer in verdict.shadowed for layer in allow_layers)
+                for verdict in verdicts.values()
+            ):
+                conflicts.append(decl.package_name)
     except Exception:
         return None
 
@@ -225,7 +235,7 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
 
     # Check 4: marketplace config presence + parsability
     project_root = Path.cwd()
-    apm_path = project_root / "apm.yml"
+    apm_path = manifest_file(project_root)
     legacy_path = project_root / "marketplace.yml"
     yml_obj = None
     config_passed = True
@@ -244,8 +254,7 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
             try:
                 yml_obj = load_marketplace_yml(legacy_path)
                 config_detail = (
-                    "marketplace.yml found (legacy). Run 'apm marketplace "
-                    "migrate' to fold it into apm.yml."
+                    f"marketplace.yml found (legacy). {MARKETPLACE_CONFIG_LEGACY.sentence()}"
                 )
             except MarketplaceYmlError as exc:
                 config_passed = False

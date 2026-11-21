@@ -28,6 +28,7 @@ from apm_cli.deps.download_strategies import DownloadDelegate
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.policy.discovery import (
+    PolicyFetchResult,
     _compute_hash_normalized,
     _split_hash_pin,
     _verify_hash_pin,
@@ -140,42 +141,6 @@ class TestDownloadStrategySelection:
                     max_retries=2,
                 )
 
-    def test_build_repo_url_github_https(self) -> None:
-        """build_repo_url generates correct GitHub HTTPS URL."""
-        mock_host = MagicMock()
-        mock_host.github_host = "github.com"
-        mock_host.github_token = "test-token"
-        mock_host.auth_resolver = MagicMock()
-
-        delegate = DownloadDelegate(mock_host)
-
-        with patch("apm_cli.deps.download_strategies.backend_for") as mock_backend_for:
-            mock_backend = MagicMock()
-            mock_backend.kind = "github"
-            mock_backend.is_github_family = True
-            mock_backend_for.return_value = mock_backend
-
-            url = delegate.build_repo_url("owner/repo", use_ssh=False)
-            assert url is not None
-
-    def test_build_repo_url_ssh(self) -> None:
-        """build_repo_url generates SSH URL when requested."""
-        mock_host = MagicMock()
-        mock_host.github_host = "github.com"
-        mock_host.github_token = None
-        mock_host.auth_resolver = MagicMock()
-
-        delegate = DownloadDelegate(mock_host)
-
-        with patch("apm_cli.deps.download_strategies.backend_for") as mock_backend_for:
-            mock_backend = MagicMock()
-            mock_backend.kind = "github"
-            mock_backend.is_github_family = True
-            mock_backend_for.return_value = mock_backend
-
-            url = delegate.build_repo_url("owner/repo", use_ssh=True)
-            assert url is not None
-
 
 class TestPolicyDiscovery:
     """Tests for policy discovery pipeline."""
@@ -254,10 +219,15 @@ class TestPolicyDiscovery:
     def test_discover_policy_with_chain_no_git(self, tmp_path: Path) -> None:
         """discover_policy_with_chain fails gracefully when not a git repo."""
         project_root = tmp_path
+        # A real PolicyFetchResult: a bare MagicMock auto-creates truthy
+        # ``policy`` / ``ancestry_parents`` attributes and would wrongly drive
+        # the chain walker.
         with patch("apm_cli.policy.discovery.discover_policy") as mock_discover:
-            mock_discover.return_value = MagicMock(outcome="absent")
+            mock_discover.return_value = PolicyFetchResult(outcome="absent")
             result = discover_policy_with_chain(project_root)
-            assert result is not None
+            assert result.outcome == "absent"
+            assert result.policy is None
+            assert result.chain_sources == []
 
 
 class TestPolicyChecks:
@@ -470,16 +440,6 @@ scripts:
 
 class TestGithubDownloader:
     """Tests for GitHub download operations."""
-
-    def test_github_downloader_initializes(self) -> None:
-        """GitHubPackageDownloader initializes."""
-        from apm_cli.core.auth import AuthResolver
-
-        auth_resolver = AuthResolver()
-        downloader = GitHubPackageDownloader(
-            auth_resolver=auth_resolver,
-        )
-        assert downloader is not None
 
     def test_github_downloader_has_delegate(self) -> None:
         """GitHubPackageDownloader works with delegates."""

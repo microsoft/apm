@@ -23,6 +23,7 @@ from apm_cli.commands.approve import (
 )
 from apm_cli.commands.policy import policy as policy_group
 from apm_cli.core.command_logger import CommandLogger
+from apm_cli.install.errors import PolicyViolationError
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
 
@@ -39,6 +40,39 @@ def _write_manifest(tmpdir: str, extra: dict | None = None) -> Path:
     manifest = Path(tmpdir) / "apm.yml"
     manifest.write_text(yaml.dump(data))
     return manifest
+
+
+def _write_local_replacement() -> None:
+    """Install acme/hooky replaced by ./local-hooky (one hook) in the cwd."""
+    from apm_cli.deps.lockfile import LockFile
+
+    local_pkg = Path("local-hooky")
+    (local_pkg / ".apm" / "hooks").mkdir(parents=True)
+    (local_pkg / "apm.yml").write_text(yaml.dump({"name": "hooky", "version": "1.0.0"}))
+    (local_pkg / ".apm" / "hooks" / "hook.json").write_text("{}")
+    Path("apm_modules").mkdir()
+    LockFile.from_yaml(
+        """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      path: ./local-hooky
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        path: ./local-hooky
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+    ).write(Path("apm.lock.yaml"))
 
 
 def _create_pkg_with_hooks(apm_modules: Path, name: str) -> None:
@@ -149,81 +183,83 @@ def test_approval_policy_benign_miss_does_not_warn(tmp_path: Path, outcome: str)
     logger.warning.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    "outcome",
-    [
-        "incomplete_chain",
-        "malformed",
-        "cache_miss_fetch_fail",
-        "garbage_response",
-    ],
-)
-def test_approval_policy_resolution_failure_warns(
+@pytest.mark.parametrize("outcome", ["malformed", "cache_miss_fetch_fail", "garbage_response"])
+def test_approval_policy_resolution_failure_is_reported_through_the_owner(
     tmp_path: Path,
     outcome: str,
 ) -> None:
     logger = MagicMock(spec=CommandLogger)
-    result = PolicyFetchResult(policy=None, outcome=outcome)
+    result = PolicyFetchResult(policy=None, outcome=outcome, source="org:contoso/.github")
 
-    with patch(
-        "apm_cli.policy.discovery.discover_policy_with_chain",
-        return_value=result,
+    with (
+        patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=result),
+        patch("apm_cli.utils.console._rich_warning") as warning,
     ):
         loaded = load_org_policy(tmp_path, logger=logger)
 
     assert loaded == ApmPolicy()
-    logger.warning.assert_called_once_with(
-        "Org policy could not be resolved; approval is proceeding without org "
-        "restrictions. Run 'apm policy status --no-cache' to diagnose."
-    )
+    warning.assert_called_once()
+    assert f"outcome={outcome}" in warning.call_args.args[0]
 
 
-def test_approval_policy_hash_mismatch_gets_distinct_sanitized_warning(
-    tmp_path: Path,
+@pytest.mark.parametrize("outcome", ["hash_mismatch", "incomplete_chain"])
+def test_approval_policy_blocking_outcome_raises_without_error_detail(
+    tmp_path: Path, outcome: str
 ) -> None:
     logger = MagicMock(spec=CommandLogger)
     result = PolicyFetchResult(
         policy=None,
-        outcome="hash_mismatch",
+        outcome=outcome,
         error="SENSITIVE_URL_TOKEN_HASH_EXCEPTION",
     )
 
-    with patch(
-        "apm_cli.policy.discovery.discover_policy_with_chain",
-        return_value=result,
+    with (
+        patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=result),
+        patch("apm_cli.utils.console._rich_warning") as warning,
+        pytest.raises(PolicyViolationError) as excinfo,
     ):
-        loaded = load_org_policy(tmp_path, logger=logger)
+        load_org_policy(tmp_path, logger=logger)
 
-    assert loaded == ApmPolicy()
-    logger.warning.assert_called_once_with(
-        "Policy hash verification failed; this may indicate policy tampering. "
-        "Approval is proceeding without org restrictions. "
-        "Run 'apm policy status --no-cache' to verify the policy source."
-    )
-    assert "SENSITIVE_URL_TOKEN_HASH_EXCEPTION" not in logger.warning.call_args.args[0]
+    assert "SENSITIVE_URL_TOKEN_HASH_EXCEPTION" not in str(excinfo.value)
+    warning.assert_not_called()
 
 
-def test_approve_recommended_warns_when_org_policy_chain_fails() -> None:
+def test_approve_recommended_warns_when_org_policy_discovery_fails() -> None:
     runner = CliRunner()
-    warning = (
-        "Org policy could not be resolved; approval is proceeding without org "
-        "restrictions. Run 'apm policy status --no-cache' to diagnose."
-    )
     with runner.isolated_filesystem():
         _write_manifest(".")
         _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
-        with (
-            patch(
-                "apm_cli.policy.discovery.discover_policy_with_chain",
-                side_effect=RuntimeError("SENSITIVE_TRANSPORT_DETAIL"),
-            ),
-            patch("apm_cli.core.command_logger.CommandLogger.warning") as mock_warning,
+        with patch(
+            "apm_cli.policy.discovery.discover_policy_with_chain",
+            side_effect=RuntimeError("SENSITIVE_TRANSPORT_DETAIL"),
         ):
             result = runner.invoke(approve_cmd, ["--recommended"])
 
     assert result.exit_code == 0
-    mock_warning.assert_called_once_with(warning)
+    assert "Org policy not applied (outcome=cache_miss_fetch_fail" in " ".join(
+        result.output.split()
+    )
     assert "SENSITIVE_TRANSPORT_DETAIL" not in result.output
+
+
+def test_approve_exits_on_blocking_policy_outcome_without_writing() -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_manifest(".")
+        _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
+        before = Path("apm.yml").read_bytes()
+        with patch(
+            "apm_cli.policy.discovery.discover_policy_with_chain",
+            return_value=PolicyFetchResult(outcome="incomplete_chain"),
+        ):
+            result = runner.invoke(approve_cmd, ["--recommended"])
+        after = Path("apm.yml").read_bytes()
+
+    assert result.exit_code == 1
+    flat = " ".join(result.output.split())
+    assert "Blocked by org policy" in flat
+    assert "apm policy status --no-cache" in flat
+    assert after == before
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +282,21 @@ class TestFindMatchingKey:
 
     def test_empty_dict(self) -> None:
         assert _find_matching_key({}, "anything") is None
+
+
+def test_port_less_name_points_at_the_ported_package() -> None:
+    """A port-less name never grants a ported package but names its key (#3967)."""
+    from apm_cli.commands.approve import _not_found_message
+    from apm_cli.security.executables import ExecutableDeclaration
+
+    ported = ExecutableDeclaration(package_key="github.com:8443/acme/hooky", package_name="hooky")
+    other = ExecutableDeclaration(package_key="acme/other", package_name="other")
+    message = _not_found_message([ported, other], "acme/hooky")
+    assert "not found in installed packages" in message
+    assert "'apm approve github.com:8443/acme/hooky'" in message
+    assert _not_found_message([other], "acme/hooky") == (
+        "acme/hooky: not found in installed packages"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -284,18 +335,18 @@ class TestApproveCmd:
         logger = MagicMock(spec=CommandLogger)
         with runner.isolated_filesystem():
             with patch("apm_cli.commands.approve.CommandLogger", return_value=logger):
-                result = runner.invoke(approve_cmd, [])
+                result = runner.invoke(approve_cmd, ["owner/repo"])
 
         assert result.exit_code == 1
         assert isinstance(result.exception, SystemExit)
         logger.render_summary.assert_called_once_with()
 
-    def test_no_args_shows_error(self) -> None:
+    def test_no_args_is_a_usage_error(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_manifest(".")
             result = runner.invoke(approve_cmd, [])
-            assert result.exit_code != 0
+            assert result.exit_code == 2
             assert "Specify at least one package" in result.output
 
     def test_pending_no_packages(self) -> None:
@@ -375,8 +426,54 @@ class TestApproveCmd:
             _write_manifest(".")
             Path("apm_modules").mkdir()
             result = runner.invoke(approve_cmd, ["nonexistent"])
-            assert result.exit_code == 0
+            # Approving nothing is an error, never a silent success (#4154).
+            assert result.exit_code == 1
             assert "not found" in result.output
+
+    @pytest.mark.parametrize("command", [approve_cmd, deny_cmd])
+    def test_partial_name_never_matches_an_installed_package(self, command) -> None:
+        """A prefix of a package name must not grant or deny that package."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
+
+            result = runner.invoke(command, ["hook"])
+
+            from apm_cli.utils.yaml_io import load_yaml
+
+            store = load_yaml(Path("apm.yml")).get("executables", {})
+            assert "hook-pkg" not in str(store.get("allow", {}))
+            assert not any("hook-pkg" in key for key in store.get("deny", {}))
+            # approve and deny of a name matching nothing exit 1 (#4154, #4189).
+            assert result.exit_code == 1, result.output
+
+    @pytest.mark.parametrize("command", [approve_cmd, deny_cmd])
+    def test_name_matching_two_installed_packages_is_refused(self, command) -> None:
+        """An ambiguous name refuses instead of picking one package."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            from apm_cli.deps.lockfile import LockFile
+
+            _write_manifest(".")
+            for owner in ("acme", "other"):
+                pkg = Path("apm_modules") / owner / "hooky"
+                (pkg / ".apm" / "hooks").mkdir(parents=True)
+                (pkg / ".apm" / "hooks" / "pre-tool-use.json").write_text("{}")
+                (pkg / "apm.yml").write_text(yaml.dump({"name": "hooky", "version": "1.0"}))
+            LockFile.from_yaml(
+                "lockfile_version: '3'\n"
+                "dependencies:\n"
+                "  - repo_url: acme/hooky\n    version: 1.0.0\n"
+                "  - repo_url: other/hooky\n    version: 1.0.0\n"
+            ).write(Path("apm.lock.yaml"))
+            before = Path("apm.yml").read_text()
+
+            result = runner.invoke(command, ["hooky"])
+
+            assert result.exit_code == 1, result.output
+            assert "matches more than one installed package" in result.output
+            assert Path("apm.yml").read_text() == before
 
     @pytest.mark.parametrize("command", [approve_cmd, deny_cmd])
     def test_trust_command_reports_corrupt_local_dependency_ancestry(self, command) -> None:
@@ -418,7 +515,268 @@ class TestApproveCmd:
             from apm_cli.utils.yaml_io import load_yaml
 
             stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
-            assert set(stored) == {"evil/repo#1.0"}
+            assert set(stored) == {"evil/repo"}
+
+    def test_approve_replaced_dependency_local_path_grants_source_key(self) -> None:
+        """apm approve for a replaced dependency grants the selected source key."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            local_pkg = Path("local-hooky")
+            local_pkg.mkdir()
+            (local_pkg / "apm.yml").write_text(yaml.dump({"name": "hooky", "version": "1.0.0"}))
+            hooks_dir = local_pkg / ".apm" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            (hooks_dir / "hook.json").write_text("{}")
+            Path("apm_modules").mkdir()
+
+            from apm_cli.deps.lockfile import LockFile
+            from apm_cli.utils.yaml_io import load_yaml
+
+            lock_text = """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      path: ./local-hooky
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        path: ./local-hooky
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+            LockFile.from_yaml(lock_text).write(Path("apm.lock.yaml"))
+
+            result = runner.invoke(approve_cmd, ["acme/hooky"])
+            assert result.exit_code == 0, result.output
+            stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
+            assert set(stored) == {"./local-hooky"}
+
+    def test_approve_replaced_dependency_by_source_key(self) -> None:
+        """apm approve <selected-source-key> also works for replaced dependencies."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            local_pkg = Path("local-hooky")
+            local_pkg.mkdir()
+            (local_pkg / "apm.yml").write_text(yaml.dump({"name": "hooky", "version": "1.0.0"}))
+            hooks_dir = local_pkg / ".apm" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            (hooks_dir / "hook.json").write_text("{}")
+            Path("apm_modules").mkdir()
+
+            from apm_cli.deps.lockfile import LockFile
+            from apm_cli.utils.yaml_io import load_yaml
+
+            lock_text = """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      path: ./local-hooky
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        path: ./local-hooky
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+            LockFile.from_yaml(lock_text).write(Path("apm.lock.yaml"))
+
+            result = runner.invoke(approve_cmd, ["./local-hooky"])
+            assert result.exit_code == 0, result.output
+            stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
+            assert set(stored) == {"./local-hooky"}
+
+    def test_deny_replaced_dependency_by_original_identity(self) -> None:
+        """apm deny <original-identity> denies the selected source key."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            local_pkg = Path("local-hooky")
+            local_pkg.mkdir()
+            (local_pkg / "apm.yml").write_text(yaml.dump({"name": "hooky", "version": "1.0.0"}))
+            hooks_dir = local_pkg / ".apm" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            (hooks_dir / "hook.json").write_text("{}")
+            Path("apm_modules").mkdir()
+
+            from apm_cli.deps.lockfile import LockFile
+            from apm_cli.utils.yaml_io import load_yaml
+
+            lock_text = """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      path: ./local-hooky
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        path: ./local-hooky
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+            LockFile.from_yaml(lock_text).write(Path("apm.lock.yaml"))
+
+            result = runner.invoke(deny_cmd, ["acme/hooky"])
+            assert result.exit_code == 0, result.output
+            stored = load_yaml(Path("apm.yml"))["executables"]["deny"]
+            assert set(stored) == {"./local-hooky", "acme/hooky"}
+
+    def test_approve_original_identity_beats_lookalike_package_name(self) -> None:
+        """A package naming itself acme/hooky cannot capture apm approve acme/hooky."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            lookalike = Path("apm_modules/aaa/lookalike")
+            lookalike.mkdir(parents=True)
+            (lookalike / "apm.yml").write_text(
+                yaml.dump({"name": "acme/hooky", "version": "9.9.9"})
+            )
+            (lookalike / ".apm" / "hooks").mkdir(parents=True)
+            (lookalike / ".apm" / "hooks" / "hook.json").write_text("{}")
+            local_pkg = Path("local-hooky")
+            local_pkg.mkdir()
+            (local_pkg / "apm.yml").write_text(yaml.dump({"name": "hooky", "version": "1.0.0"}))
+            (local_pkg / ".apm" / "hooks").mkdir(parents=True)
+            (local_pkg / ".apm" / "hooks" / "hook.json").write_text("{}")
+
+            from apm_cli.deps.lockfile import LockFile
+            from apm_cli.utils.yaml_io import load_yaml
+
+            lock_text = """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      path: ./local-hooky
+dependencies:
+  - repo_url: aaa/lookalike
+    version: 9.9.9
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        path: ./local-hooky
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+            LockFile.from_yaml(lock_text).write(Path("apm.lock.yaml"))
+
+            result = runner.invoke(approve_cmd, ["acme/hooky"])
+            assert result.exit_code == 0, result.output
+            stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
+            assert set(stored) == {"./local-hooky"}
+
+    def test_approve_replaced_dependency_by_versioned_original_name(self) -> None:
+        """apm approve acme/hooky#1.0.0 still grants the replaced row's source key."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            _write_local_replacement()
+            from apm_cli.utils.yaml_io import load_yaml
+
+            result = runner.invoke(approve_cmd, ["acme/hooky#1.0.0"])
+            assert result.exit_code == 0, result.output
+            stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
+            assert set(stored) == {"./local-hooky"}
+
+    def test_deny_replaced_dependency_drops_upstream_allow(self) -> None:
+        """apm deny <original> removes an old upstream grant as well."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(
+                ".",
+                {
+                    "executables": {
+                        "allow": {
+                            "acme/hooky": {"hooks": True},
+                            "./local-hooky": {"hooks": True},
+                        }
+                    }
+                },
+            )
+            _write_local_replacement()
+            from apm_cli.utils.yaml_io import load_yaml
+
+            result = runner.invoke(deny_cmd, ["acme/hooky"])
+            assert result.exit_code == 0, result.output
+            executables = load_yaml(Path("apm.yml"))["executables"]
+            assert set(executables["deny"]) == {"./local-hooky", "acme/hooky"}
+            assert not executables.get("allow")
+
+    def test_approve_replaced_dependency_git_fork_grants_fork_key(self) -> None:
+        """apm approve for a fork-replaced dependency grants the fork approval key."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            pkg = Path("apm_modules/acme/hooky")
+            pkg.mkdir(parents=True)
+            (pkg / "apm.yml").write_text(yaml.dump({"name": "hooky", "version": "1.2.0"}))
+            hooks_dir = pkg / ".apm" / "hooks"
+            hooks_dir.mkdir(parents=True)
+            (hooks_dir / "hook.json").write_text("{}")
+
+            from apm_cli.deps.lockfile import LockFile
+            from apm_cli.utils.yaml_io import load_yaml
+
+            lock_text = """lockfile_version: '3'
+replacements:
+  - for:
+      git: https://github.com/acme/hooky.git
+    with:
+      git: https://github.com/myfork/hooky.git
+      ref: v1.2.0
+dependencies:
+  - repo_url: acme/hooky
+    version: 1.0.0
+    replacement:
+      source:
+        git: https://github.com/myfork/hooky.git
+        ref: v1.2.0
+      requests:
+        - parent: null
+          ref: null
+          skills: null
+          targets: null
+          dev: false
+          alias: null
+"""
+            LockFile.from_yaml(lock_text).write(Path("apm.lock.yaml"))
+
+            result = runner.invoke(approve_cmd, ["acme/hooky"])
+            assert result.exit_code == 0, result.output
+            stored = load_yaml(Path("apm.yml"))["executables"]["allow"]
+            # Pins bind content, so the key is the version-blind selected source.
+            assert set(stored) == {"myfork/hooky"}
 
     def test_approve_recommended_bulk_accepts_org_set(self) -> None:
         runner = CliRunner()
@@ -484,28 +842,81 @@ class TestDenyCmd:
         with runner.isolated_filesystem():
             _write_manifest(".")
             Path("apm_modules").mkdir()
+            before = Path("apm.yml").read_bytes()
             result = runner.invoke(deny_cmd, ["owner/repo"])
-            assert result.exit_code == 0
-            assert "Denied" in result.output
-            from apm_cli.security.executables import ALL_EXEC_TYPES
-            from apm_cli.utils.yaml_io import load_yaml
-
-            stored = load_yaml(Path("apm.yml"))["executables"]["deny"]["owner/repo"]
-            assert set(stored) == set(ALL_EXEC_TYPES)
-            assert all(stored.values())
+            # A deny that matches no installed package is refused (#4189).
+            assert result.exit_code == 1
+            assert "not found" in result.output
+            assert Path("apm.yml").read_bytes() == before
 
     def test_deny_user_scope_writes_config(self, tmp_path: Path) -> None:
         p_cfg, p_legacy, cfg = _isolated_config(tmp_path)
         runner = CliRunner()
         with runner.isolated_filesystem(), p_cfg, p_legacy:
             _write_manifest(".")
-            Path("apm_modules").mkdir()
-            result = runner.invoke(deny_cmd, ["--user", "owner/repo"])
-            assert result.exit_code == 0
+            _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
+            result = runner.invoke(deny_cmd, ["--user", "hook-pkg"])
+            assert result.exit_code == 0, result.output
             import json
 
             stored = json.loads(cfg.read_text())
             assert stored["executables"]["deny"]
+
+
+_BUNDLE_KEY = "bun#1.0.0@sha256:abc123"
+
+
+def _write_approved_local_bundle() -> None:
+    """Record an installed local bundle 'bun' whose exact-content key is approved."""
+    from apm_cli.install.local_bundle_pending import record_bundle_executables
+
+    _write_manifest(".", {"executables": {"allow": {_BUNDLE_KEY: {"hooks": True}}}})
+    record_bundle_executables(Path("."), "bun", _BUNDLE_KEY, ["hooks"])
+
+
+@pytest.mark.parametrize(
+    ("command", "verb"),
+    [(deny_cmd, "deny"), (approve_cmd, "approve")],
+)
+@pytest.mark.parametrize("name", ["bun", "_local/bun"])
+def test_local_bundle_name_names_its_exact_content_key(command, verb, name) -> None:
+    """RA-026: a local bundle's name points at its runnable content-bound key."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_approved_local_bundle()
+        before = Path("apm.yml").read_bytes()
+        result = runner.invoke(command, [name])
+        after = Path("apm.yml").read_bytes()
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert result.stderr == (
+        f"[x] {name}: not found in installed packages; it is a local bundle whose key "
+        f"binds its exact content. Run: apm {verb} '{_BUNDLE_KEY}'\n"
+    )
+    assert after == before
+
+
+@pytest.mark.parametrize(
+    ("command", "verb"),
+    [(deny_cmd, "deny"), (approve_cmd, "approve")],
+)
+def test_quoted_package_argument_is_refused_without_writing(command, verb) -> None:
+    """RA-027: a key wrapped in literal quotes is refused; the store is unchanged."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        _write_approved_local_bundle()
+        before = Path("apm.yml").read_bytes()
+        result = runner.invoke(command, [f'"{_BUNDLE_KEY}"'])
+        after = Path("apm.yml").read_bytes()
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert result.stderr == (
+        f'[x] "{_BUNDLE_KEY}": the package argument contains literal quote characters. '
+        f"Nothing written. Run: apm {verb} '{_BUNDLE_KEY}'\n"
+    )
+    assert after == before
 
 
 # ---------------------------------------------------------------------------
@@ -521,7 +932,8 @@ class TestExplainCmd:
             Path("apm_modules").mkdir()
             with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
                 result = runner.invoke(policy_group, ["explain", "nonexistent"])
-            assert result.exit_code == 0
+            # Explaining a package that is not installed exits 1 (#4189).
+            assert result.exit_code == 1
             assert "not found" in result.output
 
     def test_explain_blocked_package_shows_layer_and_remedy(self) -> None:
@@ -537,6 +949,19 @@ class TestExplainCmd:
             assert "default-deny" in result.output
             assert "apm approve" in result.output
 
+    def test_explain_with_gate_disabled_does_not_promise_deployment(self) -> None:
+        """A disabled executables gate is not an org-policy verdict (#3994)."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_manifest(".")
+            _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
+            with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
+                result = runner.invoke(policy_group, ["explain", "hook-pkg"])
+            assert result.exit_code == 0
+            output = " ".join(result.output.split())
+            assert "all executables deploy" not in output
+            assert "Org policy can still block the package" in output
+
     def test_explain_allowed_via_project(self) -> None:
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -550,3 +975,54 @@ class TestExplainCmd:
             assert result.exit_code == 0
             assert "allowed" in result.output
             assert "project-allow" in result.output
+
+
+def test_approve_clears_a_deny_stored_under_another_spelling() -> None:
+    """A URL-form deny blocks ``acme/hooky``, so approving it must clear that deny."""
+    from apm_cli.commands.approve import _same_store_denies
+    from apm_cli.security.executables import ExecutableDeclaration
+
+    decl = ExecutableDeclaration(package_key="acme/hooky#1.0.0", package_name="hooky")
+    deny = {
+        "https://github.com/acme/hooky.git": {"hooks": True},
+        "Acme/Hooky": {"bin": True},
+        "acme/other": {"hooks": True},
+    }
+
+    assert sorted(_same_store_denies(deny, decl)) == [
+        "Acme/Hooky",
+        "https://github.com/acme/hooky.git",
+    ]
+
+
+def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``apm approve --all`` writes no allow for a package another layer denies (#3957)."""
+    project = tmp_path / "project"
+    apm_home = tmp_path / "home" / ".apm"
+    apm_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(apm_home.parent))
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(apm_home / "config.json"))
+    for name in ("org-denied", "fine"):
+        hooks = project / "apm_modules" / name / ".apm" / "hooks"
+        hooks.mkdir(parents=True)
+        (hooks / "guard.json").write_text("{}", encoding="utf-8")
+        (project / "apm_modules" / name / "apm.yml").write_text(
+            f"name: {name}\nversion: '1.0'\n", encoding="utf-8"
+        )
+    manifest = project / "apm.yml"
+    manifest.write_text("name: consumer\nversion: '1.0'\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+    policy = ApmPolicy(executables=ExecutablesPolicy(deny=["org-denied"]))
+
+    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+        result = CliRunner().invoke(approve_cmd, ["--all"])
+
+    allow = (yaml.safe_load(manifest.read_text(encoding="utf-8")).get("executables") or {}).get(
+        "allow"
+    ) or {}
+    assert not any("org-denied" in key for key in allow), result.output
+    assert any("fine" in key for key in allow), result.output
+    assert "Skipped org-denied" in " ".join(result.output.split())

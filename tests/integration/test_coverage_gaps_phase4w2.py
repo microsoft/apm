@@ -28,6 +28,14 @@ from click.testing import CliRunner
 # ---------------------------------------------------------------------------
 
 
+def _orphan_decision(files):
+    from apm_cli.install.orphans import OrphanOperation, OrphanRemovalDecision
+
+    return OrphanRemovalDecision(
+        operation=OrphanOperation.INSTALL, removed_files={"owner/gone": tuple(files)}
+    )
+
+
 class TestConstitutionBlock:
     """Tests for render_block, find_existing_block, inject_or_update."""
 
@@ -1128,7 +1136,10 @@ class TestDryRunPresentation:
             patch(
                 "apm_cli.deps.lockfile.get_lockfile_path", return_value=tmp_path / "apm.lock.yaml"
             ),
-            patch("apm_cli.drift.detect_orphans", return_value=set()),
+            patch(
+                "apm_cli.install.orphans.decide_orphan_removal",
+                return_value=_orphan_decision(set()),
+            ),
         ):
             mock_lf.read.return_value = MagicMock()
             render_and_exit(
@@ -1185,7 +1196,10 @@ class TestDryRunPresentation:
             patch(
                 "apm_cli.deps.lockfile.get_lockfile_path", return_value=tmp_path / "apm.lock.yaml"
             ),
-            patch("apm_cli.drift.detect_orphans", return_value=orphans),
+            patch(
+                "apm_cli.install.orphans.decide_orphan_removal",
+                return_value=_orphan_decision(orphans),
+            ),
         ):
             mock_lf.read.return_value = MagicMock()
             render_and_exit(
@@ -1216,7 +1230,10 @@ class TestDryRunPresentation:
             patch(
                 "apm_cli.deps.lockfile.get_lockfile_path", return_value=tmp_path / "apm.lock.yaml"
             ),
-            patch("apm_cli.drift.detect_orphans", return_value=orphans),
+            patch(
+                "apm_cli.install.orphans.decide_orphan_removal",
+                return_value=_orphan_decision(orphans),
+            ),
         ):
             mock_lf.read.return_value = MagicMock()
             render_and_exit(
@@ -1272,7 +1289,10 @@ class TestDryRunPresentation:
             patch(
                 "apm_cli.deps.lockfile.get_lockfile_path", return_value=tmp_path / "apm.lock.yaml"
             ),
-            patch("apm_cli.drift.detect_orphans", return_value=set()),
+            patch(
+                "apm_cli.install.orphans.decide_orphan_removal",
+                return_value=_orphan_decision(set()),
+            ),
         ):
             mock_lf.read.return_value = MagicMock()
             render_and_exit(

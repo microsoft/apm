@@ -197,23 +197,29 @@ def test_kiro_prompt_installed_lifecycle(
         ).stdout
     )
     assert {check["name"] for check in drift["checks"] if not check["passed"]} == {"drift"}
+    # The skipped user-authored collision is never a managed local edit (#3682).
     assert [(item["path"], item["kind"]) for item in drift["drift"]["drift"]] == [
-        (".kiro/prompts/collision.md", "modified")
+        (".kiro/prompts/collision.md", "unmanaged-conflict")
     ]
     assert snapshot() == audit_before
 
     edited = prompts / "edited.md"
     edited.write_text("USER_EDITED_MANAGED_PROMPT\n")
     manifest_before = (state_root / "apm.yml").read_bytes()
-    lock_before = (state_root / "apm.lock.yaml").read_bytes()
+    claims_before = {record["value"] for record in lock()["deployments"]}
     owner = records[".kiro/prompts/review.md"]["owners"][0]
+    before = snapshot()
     removal = run("uninstall", *scope, owner, expected_returncode=1)
-    assert "Retained user-edited file" in removal.stdout
+    # The refusal is an error: it goes to stderr, never stdout (RA-004).
+    text = " ".join(removal.stderr.split())
+    assert "Uninstall refused" in text, text
+    assert "Uninstall refused" not in removal.stdout, removal.stdout
+    assert ".kiro/prompts/edited.md: edited since APM deployed it" in text, text
+    # Without deletion evidence nothing changes (#3701).
     assert (state_root / "apm.yml").read_bytes() == manifest_before
-    assert (state_root / "apm.lock.yaml").read_bytes() == lock_before
-    assert not deployed.exists()
-    assert not (target_root / "agents/reviewer.md").exists()
-    assert not (target_root / "steering/style.md").exists()
+    assert {record["value"] for record in lock()["deployments"]} == claims_before
+    assert snapshot() == before
+    assert deployed.exists()
     assert user_file.read_text() == "USER_PROMPT\n"
     assert collision.read_text() == "USER_COLLISION\n"
     assert edited.read_text() == "USER_EDITED_MANAGED_PROMPT\n"

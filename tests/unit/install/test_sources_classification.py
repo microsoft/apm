@@ -8,8 +8,12 @@ Regression suite for microsoft/apm#780.
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.install.sources import _format_package_type_label
 from apm_cli.models.apm_package import PackageType
+
+pytestmark = pytest.mark.unit
 
 
 class TestFormatPackageTypeLabel:

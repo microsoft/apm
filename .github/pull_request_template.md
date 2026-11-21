@@ -34,6 +34,15 @@ Does this PR complete the issue, or what remains?
 - [ ] All existing tests pass
 - [ ] Added tests for new functionality (if applicable)
 
+## Changelog
+
+- [ ] One fragment per section, `changelog.d/<pr>.<section>.md`, holding
+      one line: user-visible effect first, 25 words or fewer, ending with
+      `(#PR)`; breaking changes only under upgrade notes; no Highlights; no
+      new lines under `## [Unreleased]`. See `changelog.d/README.md` and
+      `.github/instructions/changelog.instructions.md`.
+- [ ] N/A -- internal-only change (CI, tests, refactor).
+
 ## Spec conformance (OpenAPM v0.1)
 
 If this PR changes behaviour that an OpenAPM v0.1 `req-XXX` covers,

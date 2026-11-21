@@ -39,6 +39,7 @@ import pytest
 from apm_cli.deps.artifactory_entry import fetch_entry_from_archive
 from apm_cli.deps.artifactory_orchestrator import ArtifactoryOrchestrator
 from apm_cli.deps.download_strategies import DownloadDelegate
+from apm_cli.deps.registry_proxy import RegistryConfig
 from apm_cli.models.apm_package import DependencyReference, PackageInfo, PackageType
 from apm_cli.utils.archive import ArchiveError, safe_extract_zip
 
@@ -274,11 +275,24 @@ class _LocalArchiveDownloader:
             safe_extract_zip(zf, target_path, error_type=ArchiveError)
 
 
-def _real_archive_downloader(authorization: str | None = None) -> DownloadDelegate:
-    """Build the production downloader with enough host surface for local HTTP."""
+def _real_archive_downloader(
+    registry_host: str | None = None, token: str | None = None
+) -> DownloadDelegate:
+    """Build the production downloader with enough host surface for local HTTP.
+
+    When ``registry_host`` is given, a real ``RegistryConfig`` scopes ``token``
+    to that ``http://`` origin, exactly as ``PROXY_REGISTRY_URL`` does.
+    """
     registry_config = (
-        SimpleNamespace(get_headers=lambda: {"Authorization": authorization})
-        if authorization is not None
+        RegistryConfig(
+            url=f"http://{registry_host}/{_PROXY_PREFIX}",
+            host=registry_host,
+            prefix=_PROXY_PREFIX,
+            scheme="http",
+            token=token,
+            enforce_only=False,
+        )
+        if registry_host is not None
         else None
     )
     host = SimpleNamespace(registry_config=registry_config, artifactory_token=None)
@@ -449,7 +463,7 @@ class TestArtifactoryInstallE2E:
         )
         redirect_server.start()
         try:
-            downloader = _real_archive_downloader("Bearer test-token")
+            downloader = _real_archive_downloader(redirect_server.host, "test-token")
             orchestrator = ArtifactoryOrchestrator(archive_downloader=downloader)
             dep_ref = DependencyReference(
                 repo_url=f"{_OWNER}/{_REPO}",

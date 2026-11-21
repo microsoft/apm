@@ -12,7 +12,6 @@ from scripts.architecture_linter.runner import run_selected_rules
 
 pytestmark = [
     pytest.mark.component,
-    pytest.mark.xdist_group(name="architecture_contract_compound_mutations"),
 ]
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -5,7 +5,7 @@ description: >-
   resolution, lockfile integrity, package downloads, signature/integrity
   checks, token scoping, or any surface that could enable dependency
   confusion, typosquatting, or malicious-package execution in APM.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # Supply Chain Security Expert

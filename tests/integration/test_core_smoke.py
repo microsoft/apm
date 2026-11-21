@@ -138,7 +138,7 @@ class TestBinaryStartup:
         assert "Usage:" in result.stdout
 
     def test_apm_rich_table_runs(self, apm_binary_path: Path, tmp_path: Path) -> None:
-        """``deps list`` must render non-ASCII cell widths from the frozen binary."""
+        """``deps list`` from the frozen binary renders a non-ASCII name escaped in an ASCII table."""
         repo_name = "wide-\u4e2d"
         package_dir = tmp_path / "apm_modules" / "test-org" / repo_name
         package_dir.mkdir(parents=True)
@@ -163,9 +163,12 @@ class TestBinaryStartup:
             f"apm deps list failed (rc={result.returncode})\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
-        assert f"test-org/{repo_name}" in result.stdout
-        # Rich borders are structural Unicode, not ANSI, so piped output keeps them.
-        assert "\u2502" in result.stdout, "deps list did not render a Rich table"
+        # Output stays ASCII (encoding rule): the wide name is escaped, never raw (#4330).
+        shown = "test-org/wide-\\u4e2d"
+        assert result.stdout.isascii(), result.stdout
+        assert any(
+            line.lstrip().startswith("|") and shown in line for line in result.stdout.splitlines()
+        ), "deps list did not render the escaped package row inside an ASCII table"
 
 
 class TestPortableByManifest:

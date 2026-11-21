@@ -22,6 +22,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def isolated_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

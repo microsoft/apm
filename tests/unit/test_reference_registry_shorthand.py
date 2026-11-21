@@ -19,6 +19,8 @@ import pytest
 
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _enable_package_registry(monkeypatch):
@@ -38,7 +40,7 @@ def _disable_package_registry(monkeypatch):
     monkeypatch.setattr(_conf, "_config_cache", {"experimental": {}})
 
 
-@pytest.mark.xfail(reason="@registry shorthand deferred to v2", strict=True)
+@pytest.mark.xfail(reason="#4543 @registry shorthand deferred to v2", strict=True)
 class TestRegistryScopeRouting:
     """Strings of the form ``owner/repo@<name>#<semver>`` route to a registry."""
 
@@ -84,7 +86,7 @@ class TestRegistryScopeRouting:
 
 
 class TestPackageRegistryExperimentalGate:
-    @pytest.mark.xfail(reason="@registry shorthand deferred to v2", strict=True)
+    @pytest.mark.xfail(reason="#4543 @registry shorthand deferred to v2", strict=True)
     def test_registry_scope_requires_flag(self, monkeypatch):
         _disable_package_registry(monkeypatch)
         with pytest.raises(ValueError, match="apm experimental enable registries"):
@@ -110,7 +112,7 @@ class TestPackageRegistryExperimentalGate:
         assert local_dep.is_local
 
 
-@pytest.mark.xfail(reason="@registry shorthand deferred to v2", strict=True)
+@pytest.mark.xfail(reason="#4543 @registry shorthand deferred to v2", strict=True)
 class TestSemverEnforcement:
     """Parse-time semver validation per design §3.3."""
 
@@ -465,7 +467,7 @@ class TestObjectFormRegistry:
             )
 
 
-@pytest.mark.xfail(reason="@registry shorthand deferred to v2", strict=True)
+@pytest.mark.xfail(reason="#4543 @registry shorthand deferred to v2", strict=True)
 class TestRegistryFieldsRoundTrip:
     """The parser sets ``source`` + ``registry_name`` consistently with the
     object-form path (Phase 4 will add a parallel parser for object form)."""
@@ -473,9 +475,3 @@ class TestRegistryFieldsRoundTrip:
     def test_unique_key_includes_repo_url(self):
         d = DependencyReference.parse("acme/foo@corp-main#1.0.0")
         assert d.get_unique_key() == "acme/foo"
-
-    def test_identity_unchanged_by_registry_scope(self):
-        # The registry routing is metadata, not part of the package identity.
-        d_git = DependencyReference.parse("acme/foo#1.0.0")
-        d_reg = DependencyReference.parse("acme/foo@corp-main#1.0.0")
-        assert d_git.get_identity() == d_reg.get_identity() == "acme/foo"

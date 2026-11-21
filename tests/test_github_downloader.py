@@ -24,6 +24,8 @@ from apm_cli.models.apm_package import (
     ValidationResult,
 )
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture(autouse=True)
 def _mock_git_object_links():
@@ -368,10 +370,25 @@ class TestGitHubPackageDownloaderIntegration:
         pytest.skip("Integration test requiring network access")
 
     @pytest.mark.integration
+    @pytest.mark.skipif(
+        os.environ.get("APM_RUN_INTEGRATION_TESTS") != "1",
+        reason="Integration test requiring network access",
+    )
     def test_download_real_package(self):
         """Test downloading a real APM package (requires network)."""
-        # This test would require a real APM package repository - skip in CI
-        pytest.skip("Integration test requiring network access")
+        target_path = self.temp_dir / "apm-sample-package"
+
+        result = self.downloader.download_package(
+            "microsoft/apm-sample-package#v1.0.0", target_path
+        )
+
+        assert result.install_path == target_path
+        assert result.package.name == "apm-sample-package"
+        assert (target_path / "apm.yml").is_file()
+        assert not (target_path / ".git").exists()
+        assert result.resolved_reference.ref_name == "v1.0.0"
+        commit = result.resolved_reference.resolved_commit
+        assert commit is not None and len(commit) == 40
 
 
 class TestEnterpriseHostHandling:
@@ -410,7 +427,11 @@ class TestEnterpriseHostHandling:
         target_path = tmp_path / "test-enterprise"
 
         with patch("pathlib.Path.exists", return_value=False):
-            downloader._clone_with_fallback("team/internal-repo", target_path)
+            downloader._clone_with_fallback(
+                "team/internal-repo",
+                target_path,
+                dep_ref=DependencyReference(repo_url="team/internal-repo"),
+            )
 
         # Verify Method 3 used enterprise host, NOT github.com
         calls = mock_repo_class.clone_from.call_args_list
@@ -430,9 +451,10 @@ class TestEnterpriseHostHandling:
         downloader = GitHubPackageDownloader()
         downloader.github_host = "custom.ghe.com"
 
-        # Build URLs for both SSH and HTTPS methods
-        url_ssh = downloader._build_repo_url("owner/repo", use_ssh=True)
-        url_https = downloader._build_repo_url("owner/repo", use_ssh=False)
+        # Build URLs for both SSH and HTTPS methods from a host-less dep_ref
+        dep_ref = DependencyReference(repo_url="owner/repo")
+        url_ssh = downloader._build_repo_url("owner/repo", use_ssh=True, dep_ref=dep_ref)
+        url_https = downloader._build_repo_url("owner/repo", use_ssh=False, dep_ref=dep_ref)
 
         assert "custom.ghe.com" in url_ssh
         assert "custom.ghe.com" in url_https
@@ -468,10 +490,46 @@ class TestErrorHandling:
         # Would require mocking network timeouts
         pass
 
-    def test_authentication_failure_handling(self):
-        """Test handling of authentication failures."""
-        # Would require mocking authentication failures
-        pass
+    def test_authentication_failure_handling(self, tmp_path):
+        """A clone rejected for bad credentials surfaces the auth guidance, not raw git output."""
+        from git.exc import GitCommandError
+
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+        resolved = ResolvedReference(
+            original_ref="owner/private-repo#main",
+            ref_type=GitReferenceType.BRANCH,
+            resolved_commit="abc123",
+            ref_name="main",
+        )
+        git_error = GitCommandError(
+            ["git", "clone"], 128, stderr="fatal: Authentication failed for repository"
+        )
+
+        with (
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", side_effect=git_error),
+            patch.object(
+                downloader.auth_resolver,
+                "build_error_context",
+                return_value="Set GITHUB_APM_PAT to a token with repo access.",
+            ) as build_context,
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            downloader.download_package("owner/private-repo#main", tmp_path / "pkg")
+
+        assert str(exc_info.value) == (
+            "Failed to clone repository owner/private-repo. "
+            "Set GITHUB_APM_PAT to a token with repo access."
+        )
+        assert exc_info.value.__cause__ is git_error
+        build_context.assert_called_once_with(
+            "github.com",
+            "clone",
+            org="owner",
+            port=None,
+            dep_url="owner/private-repo",
+        )
 
     def test_download_raw_file_retries_anonymous_failure_with_token(self):
         """Public GitHub retries an anonymous 401 with the resolved token."""
@@ -593,10 +651,37 @@ class TestErrorHandling:
                 )
                 assert "Authorization" in mock_get.call_args_list[3].kwargs["headers"]
 
-    def test_repository_not_found_handling(self):
-        """Test handling of repository not found errors."""
-        # Would require mocking 404 errors
-        pass
+    def test_repository_not_found_handling(self, tmp_path):
+        """'remote: Repository not found' is routed to the access-guidance error path."""
+        from git.exc import GitCommandError
+
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+        resolved = ResolvedReference(
+            original_ref="acme/missing-repo#v1.0.0",
+            ref_type=GitReferenceType.TAG,
+            resolved_commit="def456",
+            ref_name="v1.0.0",
+        )
+        not_found = GitCommandError(
+            ["git", "clone"], 128, stderr="remote: Repository not found.\nfatal: not found"
+        )
+
+        with (
+            patch.object(downloader, "resolve_git_reference", return_value=resolved),
+            patch.object(downloader, "_clone_with_fallback", side_effect=not_found),
+            patch.object(
+                downloader.auth_resolver, "build_error_context", return_value="<access hint>"
+            ) as build_context,
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            downloader.download_package("acme/missing-repo#v1.0.0", tmp_path / "missing")
+
+        message = str(exc_info.value)
+        assert message == "Failed to clone repository acme/missing-repo. <access hint>"
+        assert "Repository not found" not in message
+        assert build_context.call_args.args == ("github.com", "clone")
+        assert build_context.call_args.kwargs["org"] == "acme"
 
     def test_download_github_file_403_rate_limit_no_token(self):
         """Test that 403 with X-RateLimit-Remaining: 0 and no token gives a rate-limit error."""
@@ -615,7 +700,7 @@ class TestErrorHandling:
 
             with (
                 patch("apm_cli.deps.github_downloader.requests.get") as mock_get,
-                patch("apm_cli.deps.github_downloader.time.sleep"),
+                patch("apm_cli.deps.download_strategies._backoff_sleep"),
             ):
                 mock_get.return_value = mock_response_403
 
@@ -641,7 +726,7 @@ class TestErrorHandling:
 
             with (
                 patch("apm_cli.deps.github_downloader.requests.get") as mock_get,
-                patch("apm_cli.deps.github_downloader.time.sleep"),
+                patch("apm_cli.deps.download_strategies._backoff_sleep"),
             ):
                 mock_get.return_value = mock_response_403
 
@@ -686,7 +771,7 @@ class TestErrorHandling:
 
             with (
                 patch("apm_cli.deps.github_downloader.requests.get") as mock_get,
-                patch("apm_cli.deps.github_downloader.time.sleep"),
+                patch("apm_cli.deps.download_strategies._backoff_sleep"),
             ):
                 mock_get.side_effect = [mock_response_403, mock_response_200]
 
@@ -835,14 +920,10 @@ class TestAzureDevOpsSupport:
             build_ado_ssh_url,
         )
 
-        # HTTPS clone URL with token
-        url = build_ado_https_clone_url("myorg", "My Project", "myrepo", token="tok")
+        # HTTPS clone URL
+        url = build_ado_https_clone_url("myorg", "My Project", "myrepo")
         assert "My%20Project" in url
         assert "My Project" not in url
-        assert url == "https://tok@dev.azure.com/myorg/My%20Project/_git/myrepo"
-
-        # HTTPS clone URL without token
-        url = build_ado_https_clone_url("myorg", "My Project", "myrepo")
         assert url == "https://dev.azure.com/myorg/My%20Project/_git/myrepo"
 
         # SSH cloud URL
@@ -2310,8 +2391,8 @@ class TestGitLabInstallFileDownload:
             dep_ref = DependencyReference(repo_url="a/b", host="gitlab.com")
             assert downloader._resolve_dep_token(dep_ref) == "gitlab-pat"
 
-    def test_gitlab_pat_primary_https_uses_oauth2_not_x_access_token(self):
-        """GitLab-class remotes embed PAT via oauth2 basic form (not GitHub x-access-token)."""
+    def test_gitlab_pat_never_embedded_in_https_url(self):
+        """GitLab PATs travel via git env; the clone URL stays credential-free."""
         with (
             patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-resolved-value"}, clear=True),
             _CRED_FILL_PATCH,
@@ -2324,17 +2405,16 @@ class TestGitLabInstallFileDownload:
                 "group/nested/repo",
                 use_ssh=False,
                 dep_ref=gitlab_dep,
-                token=resolved,
             )
         assert "x-access-token" not in url.lower()
-        assert "oauth2" in url
-        assert "glpat-resolved-value" in url
+        assert "oauth2" not in url
+        assert "glpat-resolved-value" not in url
         from urllib.parse import urlsplit
 
         sp = urlsplit(url)
         assert sp.scheme == "https"
         assert sp.hostname == "gitlab.com"
-        assert sp.username == "oauth2"
+        assert sp.username is None
         assert sp.path == "/group/nested/repo.git"
 
     def test_gitlab_git_error_redacts_oauth2_url(self):
@@ -2406,24 +2486,6 @@ def _gitea_json_envelope(file_bytes: bytes) -> bytes:
             "content": _b64.b64encode(file_bytes).decode("ascii"),
         }
     ).encode("utf-8")
-
-
-def _error_url_components(text: str) -> list[tuple[str, str, str]]:
-    """Extract (scheme, hostname, path) tuples for any URLs embedded in *text*.
-
-    Download-error messages embed the failed endpoint as a URL. Asserting on
-    parsed components (per tests.instructions.md: never substring-match URLs)
-    rather than scraping with ``startswith``/``rstrip`` keeps the assertion
-    robust to wording or punctuation tweaks in the error string.
-    """
-    out: list[tuple[str, str, str]] = []
-    for token in text.split():
-        cleaned = token.strip("(),.;'\"")
-        if "://" not in cleaned:
-            continue
-        parsed = urlparse(cleaned)
-        out.append((parsed.scheme, parsed.hostname or "", parsed.path))
-    return out
 
 
 class TestGiteaRawUrlDownload:

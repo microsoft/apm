@@ -43,6 +43,7 @@ from apm_cli.utils.github_host import (
     iter_artifactory_boundary_candidates,
     sanitize_token_url_in_message,
 )
+from apm_cli.utils.http_credentials import unfollowed_redirect_request
 
 _ARTIFACTORY_BOUNDARY_UNRESOLVED = (
     "Artifactory host/path did not resolve to a reachable repository archive. "
@@ -98,12 +99,7 @@ def _candidate_archive_status(
     last_exc: BaseException | None = None
     for url in urls:
         try:
-            # ``allow_redirects=False`` keeps the Bearer token from leaking to
-            # any host the proxy might redirect us to.  3xx is still existence
-            # proof -- the server confirmed the resource by issuing a redirect.
-            r = requests.head(
-                url, headers=headers, timeout=timeout, verify=verify, allow_redirects=False
-            )
+            r = _head_probe(url, headers=headers, timeout=timeout, verify=verify)
         except requests.RequestException as exc:
             last_exc = exc
             continue
@@ -124,6 +120,18 @@ def _candidate_archive_status(
     return _CandidateStatus.MISSING, None
 
 
+def _head_probe(
+    url: str, *, headers: dict[str, str], timeout: int, verify: bool | str
+) -> requests.Response:
+    """HEAD one archive URL; a redirect is never followed, only reported.
+
+    The origin-bounded owner refuses any hop away from *url*, so credentials
+    stay on the probed resource. 3xx is still existence proof -- the server
+    confirmed the resource by issuing a redirect.
+    """
+    return unfollowed_redirect_request("HEAD", url, headers=headers, timeout=timeout, verify=verify)
+
+
 def _proxy_probe_headers(
     dep_ref: DependencyReference,
     auth_resolver,
@@ -142,7 +150,7 @@ def _proxy_probe_headers(
     if is_mode_1:
         ctx = auth_resolver.resolve_for_dep(dep_ref)
         if ctx and getattr(ctx, "token", None):
-            headers["Authorization"] = f"Bearer {ctx.token}"
+            headers.update(AuthResolver.bearer_headers(ctx.token))
         return headers
     # Mode 2: proxy-scoped token only.
     from ..deps.registry_proxy import RegistryConfig
@@ -151,41 +159,6 @@ def _proxy_probe_headers(
     if cfg is not None:
         headers.update(cfg.get_headers())
     return headers
-
-
-def _proxy_routing_target(
-    dep_ref: DependencyReference,
-) -> tuple[str, str, str, bool] | None:
-    """Return ``(host, prefix, scheme, is_mode_1)`` if *dep_ref* routes through the proxy.
-
-    * Mode 1 (explicit FQDN): host and prefix come from the dependency ref;
-      scheme is always ``https`` (Mode 1 deps reject ``http://`` upstream).
-    * Mode 2 (bare shorthand under ``PROXY_REGISTRY_ONLY``): host, prefix,
-      and scheme come from the registry-proxy config, so installs that
-      intentionally route through an ``http://`` proxy (isolated networks
-      using ``PROXY_REGISTRY_ALLOW_HTTP=1``) probe over the same transport.
-
-    Returns ``None`` when no proxy routing applies (regular GitHub/ADO deps)
-    or when host/prefix are not real strings (e.g. mocked dependency refs
-    in unit tests).
-    """
-    if dep_ref.is_artifactory():
-        host = dep_ref.host
-        prefix = dep_ref.artifactory_prefix
-        if isinstance(host, str) and isinstance(prefix, str) and host and prefix:
-            return (host, prefix, "https", True)
-        return None
-    from ..deps.artifactory_orchestrator import ArtifactoryRouter
-
-    if not ArtifactoryRouter.should_use_proxy(dep_ref):
-        return None
-    cfg = ArtifactoryRouter.parse_proxy_config()
-    if cfg is None:
-        return None
-    host, prefix, scheme = cfg
-    if isinstance(host, str) and isinstance(prefix, str) and host and prefix:
-        return (host, prefix, scheme or "https", False)
-    return None
 
 
 def _resolve_artifactory_boundary(
@@ -209,7 +182,9 @@ def _resolve_artifactory_boundary(
     if dep_ref is None:
         dep_ref = DependencyReference.parse(package)
 
-    target = _proxy_routing_target(dep_ref)
+    from ..deps.artifactory_orchestrator import ArtifactoryRouter
+
+    target = ArtifactoryRouter.routing_target(dep_ref)
     if target is None:
         # Not routed through the proxy -- nothing for this resolver to do.
         return dep_ref

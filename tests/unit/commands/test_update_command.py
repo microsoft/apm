@@ -30,6 +30,8 @@ from apm_cli.deps.revision_pins import RevisionPinResolutionResult
 from apm_cli.install.errors import RequiredIntegrationError
 from apm_cli.install.plan import PlanEntry, UpdatePlan
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def runner() -> CliRunner:
@@ -500,6 +502,7 @@ class TestRevisionPinLockfileAnnotation:
         updated = LockFile.read(get_lockfile_path(tmp_path))
         assert updated is not None
         assert updated.get_dependency("org/pkg").resolved_tag == "v2.0.0"
+        assert "resolved_tag: v2.0.0" in get_lockfile_path(tmp_path).read_text(encoding="utf-8")
 
     def test_lockfile_annotation_refuses_sha_mismatch(self, tmp_path) -> None:
         from apm_cli.commands.update import _annotate_lockfile_revision_tags
@@ -1500,6 +1503,30 @@ class TestUpdateForceAndParallel:
                 result = runner.invoke(cli, ["update", "--parallel-downloads", "0"])
             assert result.exit_code == 0, result.output
             assert captured["parallel_downloads"] == 0
+
+
+class TestUpdateLegacySkillPaths:
+    """``apm update`` keeps a per-client skill layout like ``apm deps update`` (#3841)."""
+
+    @pytest.mark.parametrize(
+        ("args", "env", "expected"),
+        [
+            (["update", "--legacy-skill-paths"], {}, True),
+            (["update"], {"APM_LEGACY_SKILL_PATHS": "1"}, True),
+            (["update"], {"APM_LEGACY_SKILL_PATHS": ""}, False),
+        ],
+    )
+    def test_legacy_skill_paths_forwarded(self, runner, tmp_path, args, env, expected):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured: dict = {}
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=_capturing_install(captured),
+            ):
+                result = runner.invoke(cli, args, env=env)
+            assert result.exit_code == 0, result.output
+            assert captured["legacy_skill_paths"] is expected
 
 
 class TestUpdateGlobalScope:

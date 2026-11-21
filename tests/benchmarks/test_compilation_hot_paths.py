@@ -32,6 +32,8 @@ from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.primitives.models import Context, Instruction  # noqa: F401
 from apm_cli.utils.content_hash import compute_file_hash  # noqa: F401
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers to build synthetic data
 # ---------------------------------------------------------------------------

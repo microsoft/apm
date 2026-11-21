@@ -12,7 +12,10 @@ import pytest
 
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.unit
 
+
+@pytest.mark.req("req-rs-003", "req-rs-008")
 class TestStringShorthandRouting:
     """Routing from the ``owner/repo#<ref>`` shorthand."""
 
@@ -75,6 +78,7 @@ class TestLiteralTagRegressionTrap:
     the semver resolver would be a behaviour break.
     """
 
+    @pytest.mark.req("req-rs-003")
     def test_literal_tag_v1_2_3_does_not_route_to_semver(self) -> None:
         dep = DependencyReference.parse("acme/some-skills#v1.2.3")
         assert dep.reference == "v1.2.3"

@@ -23,6 +23,8 @@ from apm_cli.utils.path_security import PathTraversalError
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
+pytestmark = pytest.mark.component
+
 
 def _write_manifest(project: Path, dependencies: Sequence[object]) -> None:
     dump_yaml(
@@ -75,6 +77,7 @@ def test_global_lsp_cleanup_failure_uses_global_recovery_command(tmp_path: Path)
     ):
         updated, error = _cleanup_stale_lsp(
             apm_package=MagicMock(),
+            manifest_path=tmp_path / "apm.yml",
             lockfile=MagicMock(),
             lockfile_path=tmp_path / "apm.lock.yaml",
             modules_dir=tmp_path / "apm_modules",
@@ -87,6 +90,7 @@ def test_global_lsp_cleanup_failure_uses_global_recovery_command(tmp_path: Path)
     assert isinstance(error, OSError)
     message = logger.error.call_args.args[0]
     assert "'apm install --global'" in message
+    assert not (tmp_path / "apm.lock.yaml").exists()
 
 
 def test_uninstall_help_points_to_actionable_dependency_keys() -> None:
@@ -199,11 +203,12 @@ def test_ambiguous_alias_exits_nonzero_without_leaking_paths_or_writes(
     fire_scripts.assert_not_called()
 
 
-def test_windows_exact_ambiguity_reports_only_portable_alias(
+def test_windows_duplicate_declaration_reports_only_portable_alias(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A duplicate exact Windows declaration is named without host path leakage."""
+    """A duplicate exact Windows declaration is removed whole (#3693) and named
+    without host path leakage."""
     project = tmp_path / "project"
     project.mkdir()
     declared_path = r"C:\Users\runner\Shared Package"
@@ -212,9 +217,10 @@ def test_windows_exact_ambiguity_reports_only_portable_alias(
 
     result = CliRunner().invoke(uninstall, [declared_path])
 
-    assert result.exit_code != 0
+    assert result.exit_code == 0, result.output
     assert "_local/Shared Package" in result.output
     assert declared_path not in result.output
+    assert declared_path not in (project / "apm.yml").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -317,7 +323,7 @@ def test_mcp_cleanup_failure_preserves_lock_and_live_config(
     output = " ".join(result.output.split())
     assert "MCP cleanup failed" in result.output
     assert "apm install" in output
-    assert "lock ownership was retained" in output
+    assert "Lock ownership was retained" in output
     assert lock_path.read_bytes() == lock_before
     assert config_path.read_bytes() == config_before
 

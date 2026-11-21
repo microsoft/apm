@@ -127,6 +127,7 @@ def validate_path_segments(
     context: str = "path",
     reject_empty: bool = False,
     allow_current_dir: bool = False,
+    reject_all_dots: bool = False,
 ) -> None:
     """Reject path strings containing traversal sequences.
 
@@ -147,6 +148,10 @@ def validate_path_segments(
         strings like ``./bin/my-server`` where "here" is meaningful).
         ``..`` is still rejected.  Defaults to *False* so the strict
         rule applies to the dependency / virtual-path call sites.
+    reject_all_dots : bool
+        If *True*, also reject segments made only of dots (``...``).
+        Windows drops trailing dots from names, so such a segment would
+        alias its parent directory on disk.
 
     Raises
     ------
@@ -167,6 +172,10 @@ def validate_path_segments(
         if segment in reject or decoded in reject:
             raise PathTraversalError(
                 f"Invalid {context} '{path_str}': segment '{segment}' is a traversal sequence"
+            )
+        if reject_all_dots and decoded and not decoded.strip("."):
+            raise PathTraversalError(
+                f"Invalid {context} '{path_str}': segment '{segment}' consists only of dots"
             )
         if reject_empty and not segment:
             raise PathTraversalError(

@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile  # noqa: F401
+from apm_cli.install.phases.lockfile import compute_deployed_hashes
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.base_integrator import BaseIntegrator, _managed_absolute_target_root
 from apm_cli.integration.command_integrator import CommandIntegrator
@@ -33,6 +34,21 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
 )
 from apm_cli.utils.diagnostics import CATEGORY_COLLISION, DiagnosticCollector
+from tests.utils.deployment_evidence import prove_overwrites, receipted_evidence
+
+
+def _sync(integrator, target: str, root: Path, managed: set[str] | None) -> dict:
+    """Sync *integrator* for *target* as on the machine that deployed every file.
+
+    Lockfile-listed files are removed only with deployment evidence (#3701).
+    """
+    return integrator.sync_for_target(
+        KNOWN_TARGETS[target],
+        None,
+        root,
+        managed_files=managed,
+        evidence=receipted_evidence(root),
+    )
 
 
 def _make_package_info(
@@ -181,8 +197,9 @@ class TestPromptCollisionDetection:
         assert result.files_skipped == 1
         assert (prompts_dir / "review.prompt.md").read_text() == "# user version"
 
-    def test_managed_file_not_collision(self, tmp_path: Path):
+    def test_managed_file_not_collision(self, tmp_path: Path, monkeypatch):
         """File listed in managed_files is overwritten (not a collision)."""
+        prove_overwrites(monkeypatch)
         prompts_dir = tmp_path / ".github" / "prompts"
         prompts_dir.mkdir(parents=True)
         (prompts_dir / "review.prompt.md").write_text("# old")
@@ -262,7 +279,7 @@ class TestPromptSync:
         (prompts_dir / "b.prompt.md").write_text("user")
 
         managed = {".github/prompts/a.prompt.md"}
-        stats = PromptIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        stats = _sync(PromptIntegrator(), "copilot", tmp_path, managed)
 
         assert stats["files_removed"] == 1
         assert not (prompts_dir / "a.prompt.md").exists()
@@ -290,7 +307,7 @@ class TestPromptSync:
         (agents_dir / "sec.agent.md").write_text("agent")
 
         managed = {".github/agents/sec.agent.md"}
-        stats = PromptIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        stats = _sync(PromptIntegrator(), "copilot", tmp_path, managed)
         assert stats["files_removed"] == 0
         assert (agents_dir / "sec.agent.md").exists()
 
@@ -410,7 +427,7 @@ class TestAgentSync:
         (agents_dir / "b.agent.md").write_text("user")
 
         managed = {".github/agents/a.agent.md"}
-        stats = AgentIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        stats = _sync(AgentIntegrator(), "copilot", tmp_path, managed)
 
         assert stats["files_removed"] == 1
         assert not (agents_dir / "a.agent.md").exists()
@@ -437,7 +454,7 @@ class TestAgentSync:
         (claude_dir / "b.md").write_text("user")
 
         managed = {".claude/agents/a.md"}
-        stats = AgentIntegrator().sync_integration_claude(None, tmp_path, managed_files=managed)
+        stats = _sync(AgentIntegrator(), "claude", tmp_path, managed)
 
         assert stats["files_removed"] == 1
         assert not (claude_dir / "a.md").exists()
@@ -497,8 +514,9 @@ class TestCommandCollisionDetection:
         # Verify user content is preserved
         assert (cmds_dir / "review.md").read_text() == "# user version"
 
-    def test_managed_file_not_collision(self, tmp_path: Path):
+    def test_managed_file_not_collision(self, tmp_path: Path, monkeypatch):
         """File listed in managed_files is overwritten (not a collision)."""
+        prove_overwrites(monkeypatch)
         cmds_dir = tmp_path / ".claude" / "commands"
         cmds_dir.mkdir(parents=True)
         (cmds_dir / "review.md").write_text("# old")
@@ -578,7 +596,7 @@ class TestCommandSync:
         (cmds_dir / "b.md").write_text("user")
 
         managed = {".claude/commands/a.md"}
-        stats = CommandIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        stats = _sync(CommandIntegrator(), "claude", tmp_path, managed)
 
         assert stats["files_removed"] == 1
         assert not (cmds_dir / "a.md").exists()
@@ -606,7 +624,7 @@ class TestCommandSync:
         (agents_dir / "sec.agent.md").write_text("agent")
 
         managed = {".github/agents/sec.agent.md"}
-        stats = CommandIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        stats = _sync(CommandIntegrator(), "claude", tmp_path, managed)
         assert stats["files_removed"] == 0
         assert (agents_dir / "sec.agent.md").exists()
 
@@ -661,8 +679,9 @@ class TestHookCollisionDetection:
         # Verify user content is preserved
         assert json.loads((hooks_dir / "test-pkg-hooks.json").read_text()) == {"user": True}
 
-    def test_managed_file_not_collision(self, tmp_path: Path):
+    def test_managed_file_not_collision(self, tmp_path: Path, monkeypatch):
         """Hook file in managed_files is overwritten (not a collision)."""
+        prove_overwrites(monkeypatch)
         hooks_dir = tmp_path / ".github" / "hooks"
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "test-pkg-hooks.json").write_text('{"old": true}')
@@ -705,7 +724,13 @@ class TestHookSync:
         (hooks_dir / "user-hooks.json").write_text('{"user": true}')
 
         managed = {".github/hooks/pkg-hooks.json"}
-        stats = HookIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        stats = HookIntegrator().sync_integration(
+            None,
+            tmp_path,
+            managed_files=managed,
+            managed_file_hashes=compute_deployed_hashes(managed, tmp_path),
+            evidence=receipted_evidence(tmp_path),
+        )
 
         assert stats["files_removed"] == 1
         assert not (hooks_dir / "pkg-hooks.json").exists()
@@ -749,7 +774,9 @@ class TestHookSync:
         (prompts_dir / "a.prompt.md").write_text("prompt")
 
         managed = {".github/prompts/a.prompt.md"}
-        stats = HookIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        stats = HookIntegrator().sync_integration(
+            None, tmp_path, managed_files=managed, evidence=receipted_evidence(tmp_path)
+        )
         assert stats["files_removed"] == 0
         assert (prompts_dir / "a.prompt.md").exists()
 
@@ -977,10 +1004,13 @@ class TestSkillSync:
         user_skill.mkdir()
         (user_skill / "SKILL.md").write_text("user authored")
 
-        managed = {".agents/skills/code-review/"}
-        stats = SkillIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        managed = {".agents/skills/code-review", ".agents/skills/code-review/SKILL.md"}
+        stats = SkillIntegrator().sync_integration(
+            None, tmp_path, managed_files=managed, evidence=receipted_evidence(tmp_path)
+        )
 
-        assert stats["files_removed"] == 1
+        # The member file and its directory entry (#3701).
+        assert stats["files_removed"] == 2
         assert not managed_skill.exists()
         assert user_skill.exists()
         assert (user_skill / "SKILL.md").read_text() == "user authored"
@@ -996,10 +1026,12 @@ class TestSkillSync:
         user_skill.mkdir()
         (user_skill / "SKILL.md").write_text("user")
 
-        managed = {".claude/skills/code-review/"}
-        stats = SkillIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        managed = {".claude/skills/code-review", ".claude/skills/code-review/SKILL.md"}
+        stats = SkillIntegrator().sync_integration(
+            None, tmp_path, managed_files=managed, evidence=receipted_evidence(tmp_path)
+        )
 
-        assert stats["files_removed"] == 1
+        assert stats["files_removed"] == 2
         assert not managed_skill.exists()
         assert user_skill.exists()
 
@@ -1012,7 +1044,9 @@ class TestSkillSync:
         (prompts_dir / "a.prompt.md").write_text("prompt")
 
         managed = {".github/prompts/a.prompt.md"}
-        stats = SkillIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        stats = SkillIntegrator().sync_integration(
+            None, tmp_path, managed_files=managed, evidence=receipted_evidence(tmp_path)
+        )
         assert stats["files_removed"] == 0
         assert (prompts_dir / "a.prompt.md").exists()
 
@@ -1038,7 +1072,7 @@ class TestCollisionWarningOutput:
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "Skipping" in output
-        assert "--force" in output or "apm install --force" in output
+        assert "Move the local file aside, then run 'apm install'" in " ".join(output.split())
 
     def test_agent_collision_warns_on_stderr(self, tmp_path: Path, capsys):
         """Agent collision should print warning via _rich_warning."""
@@ -1051,7 +1085,7 @@ class TestCollisionWarningOutput:
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "Skipping" in output
-        assert "--force" in output or "apm install --force" in output
+        assert "Move the local file aside, then run 'apm install'" in " ".join(output.split())
 
     def test_command_collision_warns_on_stderr(self, tmp_path: Path, capsys):
         """Command collision should print warning via _rich_warning."""
@@ -1066,7 +1100,7 @@ class TestCollisionWarningOutput:
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "Skipping" in output
-        assert "--force" in output or "apm install --force" in output
+        assert "Move the local file aside, then run 'apm install'" in " ".join(output.split())
 
     def test_hook_collision_warns_on_stderr(self, tmp_path: Path, capsys):
         """Hook collision should print warning via _rich_warning."""
@@ -1079,7 +1113,7 @@ class TestCollisionWarningOutput:
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "Skipping" in output
-        assert "--force" in output or "apm install --force" in output
+        assert "Move the local file aside, then run 'apm install'" in " ".join(output.split())
 
 
 # ---------------------------------------------------------------------------
@@ -1143,7 +1177,7 @@ class TestCheckCollisionDiagnostics:
         captured = capsys.readouterr()
         output = captured.out + captured.err
         assert "Skipping" in output
-        assert "--force" in output or "apm install --force" in output
+        assert "Move the local file aside, then run 'apm install'" in " ".join(output.split())
 
     def test_no_collision_no_diagnostic_recorded(self, tmp_path: Path):
         """When there is no collision, diagnostics remains empty."""
@@ -1302,7 +1336,7 @@ class TestSyncPreservesUserFiles:
         (prompts_dir / "user-custom.prompt.md").write_text("my custom prompt")
 
         managed = {".github/prompts/managed.prompt.md"}
-        PromptIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        _sync(PromptIntegrator(), "copilot", tmp_path, managed)
 
         assert not (prompts_dir / "managed.prompt.md").exists()
         assert (prompts_dir / "user-custom.prompt.md").exists()
@@ -1316,7 +1350,7 @@ class TestSyncPreservesUserFiles:
         (agents_dir / "my-agent.agent.md").write_text("user authored agent")
 
         managed = {".github/agents/managed.agent.md"}
-        AgentIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        _sync(AgentIntegrator(), "copilot", tmp_path, managed)
 
         assert not (agents_dir / "managed.agent.md").exists()
         assert (agents_dir / "my-agent.agent.md").exists()
@@ -1330,7 +1364,7 @@ class TestSyncPreservesUserFiles:
         (claude_dir / "my-agent.md").write_text("user authored")
 
         managed = {".claude/agents/managed.md"}
-        AgentIntegrator().sync_integration_claude(None, tmp_path, managed_files=managed)
+        _sync(AgentIntegrator(), "claude", tmp_path, managed)
 
         assert not (claude_dir / "managed.md").exists()
         assert (claude_dir / "my-agent.md").exists()
@@ -1344,7 +1378,7 @@ class TestSyncPreservesUserFiles:
         (cmds_dir / "my-command.md").write_text("user command")
 
         managed = {".claude/commands/managed.md"}
-        CommandIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        _sync(CommandIntegrator(), "claude", tmp_path, managed)
 
         assert not (cmds_dir / "managed.md").exists()
         assert (cmds_dir / "my-command.md").exists()
@@ -1361,8 +1395,10 @@ class TestSyncPreservesUserFiles:
         user_skill.mkdir()
         (user_skill / "SKILL.md").write_text("user skill")
 
-        managed = {".agents/skills/pkg-skill/"}
-        SkillIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        managed = {".agents/skills/pkg-skill", ".agents/skills/pkg-skill/SKILL.md"}
+        SkillIntegrator().sync_integration(
+            None, tmp_path, managed_files=managed, evidence=receipted_evidence(tmp_path)
+        )
 
         assert not managed_skill.exists()
         assert user_skill.exists()
@@ -1376,8 +1412,29 @@ class TestSyncPreservesUserFiles:
         (hooks_dir / "user-hooks.json").write_text('{"user": true}')
 
         managed = {".github/hooks/managed.json"}
-        HookIntegrator().sync_integration(None, tmp_path, managed_files=managed)
+        HookIntegrator().sync_integration(
+            None,
+            tmp_path,
+            managed_files=managed,
+            managed_file_hashes=compute_deployed_hashes(managed, tmp_path),
+            evidence=receipted_evidence(tmp_path),
+        )
 
         assert not (hooks_dir / "managed.json").exists()
         assert (hooks_dir / "user-hooks.json").exists()
         assert json.loads((hooks_dir / "user-hooks.json").read_text()) == {"user": True}
+
+
+def test_compute_deployed_hashes_hashes_cowork_rows(tmp_path, monkeypatch):
+    """cowork:// rows carry provenance hashes like project rows (#3701)."""
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    cowork = tmp_path / "cowork"
+    skill = cowork / "demo" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("demo\n", encoding="utf-8")
+    monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(cowork))
+    hashes = compute_deployed_hashes(
+        ["cowork://skills/demo/SKILL.md", "cowork://skills/../escape.md"], tmp_path / "project"
+    )
+    assert hashes == {"cowork://skills/demo/SKILL.md": compute_file_hash(skill)}

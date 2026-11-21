@@ -160,6 +160,10 @@ def sync_markers_for_lockfile(
 ) -> int:
     """Write a marker for every remote dep in ``lockfile`` that has a cached install.
 
+    A dep that is no longer markable (registry, local, unpinned) loses any
+    marker its copy kept from a previous source (#4572), so a git -> registry
+    switch converges on the first install.
+
     Self-healing: this is called unconditionally by ``LockfileBuilder``
     after ``_write_if_changed`` so that caches which pre-date the
     marker contract get marked on the next ``apm install`` even when
@@ -180,29 +184,67 @@ def sync_markers_for_lockfile(
     if warn_unpinned:
         unpinned = find_unpinned_remote_deps(lockfile)
         if unpinned:
+            from apm_cli.core.remediation import REMOTE_DEPENDENCY_UNPINNED
             from apm_cli.utils.console import _rich_warning
 
             for repo in unpinned:
                 _rich_warning(
                     f"cache-pin: remote dep {repo!r} has no resolved_commit; "
-                    "drift cannot verify its cache freshness. Re-run 'apm install' "
-                    "with a pinned ref (commit, tag, or specific branch HEAD)."
+                    "drift cannot verify its cache freshness. "
+                    f"{REMOTE_DEPENDENCY_UNPINNED.sentence()}"
                 )
 
     written = 0
+    marked: set[Path] = set()
+    unmarkable: list[Path] = []
     for dep_key, dep in lockfile.dependencies.items():  # noqa: B007
-        if not _is_markable(dep):
-            continue
         try:
             install_path = _resolve_install_path(dep, project_root, apm_modules_dir)
         except Exception:  # noqa: S112 -- best-effort marker sync, see module docstring
             continue
         if install_path is None or not install_path.exists():
             continue
+        if not _is_markable(dep):
+            unmarkable.append(install_path)
+            continue
+        marked.add(install_path)
+        if not _copy_holds_locked_commit(dep, install_path):
+            continue
         # dep.resolved_commit is non-None per _is_markable.
         write_marker(install_path, dep.resolved_commit)  # type: ignore[arg-type]
         written += 1
+    for install_path in unmarkable:
+        if install_path not in marked:
+            _remove_marker(install_path, apm_modules_dir)
     return written
+
+
+def _remove_marker(install_path: Path, apm_modules_dir: Path) -> None:
+    """Drop a marker left by a previous source of an unmarkable dep (#4572).
+
+    A registry or local dep records no resolved commit, so a marker in its
+    copy names a commit the lockfile no longer vouches for. Only copies under
+    ``apm_modules`` are touched. Best-effort, like ``write_marker``: a removal
+    failure never blocks install.
+    """
+    try:
+        if not install_path.resolve().is_relative_to(apm_modules_dir.resolve()):
+            return
+        (install_path / MARKER_FILENAME).unlink(missing_ok=True)
+    except OSError:
+        return
+
+
+def _copy_holds_locked_commit(dep: LockedDependency, install_path: Path) -> bool:
+    """Whether the copy may carry a marker naming *dep*'s locked commit (#3884).
+
+    The resolver trusts the marker, so the copy-validity owner decides: a
+    proven copy, or a legacy copy with no evidence against it. A copy left by
+    an older lock, or a checkout at another commit, stays unmarked.
+    """
+    from apm_cli.drift import locked_copy_is_stale
+
+    return not locked_copy_is_stale(dep, install_path)
 
 
 def _is_markable(dep: LockedDependency) -> bool:

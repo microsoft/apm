@@ -25,6 +25,8 @@ from apm_cli.install.local_edits import (
     count_local_edits,
     is_upstream_package,
     local_edit_hint,
+    rendering_change_hint,
+    unedited_modified_paths,
 )
 from apm_cli.utils.content_hash import compute_file_hash
 
@@ -58,23 +60,6 @@ def _lockfile(project: Path, **files: tuple[bytes, bytes | None]) -> LockFile:
         )
     )
     return lock
-
-
-class TestLocalEditHint:
-    def test_audit_wording_points_at_export_patch(self) -> None:
-        text = local_edit_hint(2)
-        assert text.startswith("2 local edit(s) to managed files;")
-        assert "run 'apm export-patch'" in text
-        assert "before the next install overwrites them" in text
-        assert text.isascii()
-
-    def test_install_wording_names_this_install(self) -> None:
-        text = local_edit_hint(1, installing=True)
-        assert text.startswith("1 local edit(s) to managed files may be overwritten")
-        assert "this install" in text
-        assert "next time" in text
-        assert "run 'apm export-patch'" in text
-        assert text.isascii()
 
 
 class TestCountLocalEdits:
@@ -160,32 +145,12 @@ class TestUpstreamOwnership:
 
 
 class TestDriftTextHint:
-    def test_modified_findings_add_export_hint(self) -> None:
-        out = render_drift_text(
-            [
-                DriftFinding(path=".github/a.md", kind="modified", package="org/pkg"),
-                DriftFinding(path=".github/b.md", kind="modified", package="org/pkg"),
-            ]
-        )
-        assert local_edit_hint(2) in out
-        # The hint must precede the re-sync advice that would overwrite edits.
-        assert out.index("apm export-patch") < out.index("Run 'apm install'")
-
     def test_local_path_package_findings_get_no_hint(self, tmp_path: Path) -> None:
         lock = _lockfile(tmp_path, **{".github/a.md": (_ORIGINAL, _EDITED)})
         key = next(iter(lock.dependencies))
         lock.dependencies[key].local_path = "../pkg"
         out = render_drift_text(
             [DriftFinding(path=".github/a.md", kind="modified", package=key)], lockfile=lock
-        )
-        assert "apm export-patch" not in out
-
-    def test_project_local_and_unintegrated_findings_get_no_hint(self) -> None:
-        out = render_drift_text(
-            [
-                DriftFinding(path="AGENTS.md", kind="modified", package="."),
-                DriftFinding(path=".github/c.md", kind="unintegrated", package="org/pkg"),
-            ]
         )
         assert "apm export-patch" not in out
 
@@ -208,7 +173,7 @@ def _pipeline_patches(deploy_root: Path, lockfile: object) -> list[AbstractConte
             "apm_cli.integration.base_integrator.BaseIntegrator.normalize_managed_files",
             return_value=set(),
         ),
-        patch("apm_cli.commands._helpers._update_gitignore_for_apm_modules"),
+        patch("apm_cli.install.helpers.gitignore.update_gitignore_for_apm_modules"),
     ]
 
 
@@ -232,10 +197,10 @@ def _run_pipeline(tmp_path: Path, edited: int, **kwargs) -> tuple[MagicMock, Mag
         elif name == "targets":
             ctx.integrators["skill"] = MagicMock()
 
-    counter = MagicMock(return_value=edited)
+    counter = MagicMock(return_value=[f".github/agents/a{i}.agent.md" for i in range(edited)])
     with (
         patch("apm_cli.install.pipeline._run_phase", side_effect=_phase),
-        patch("apm_cli.install.local_edits.count_local_edits", counter),
+        patch("apm_cli.install.local_edits.local_edit_paths", counter),
     ):
         stack = _pipeline_patches(tmp_path, lockfile)
         for cm in stack:
@@ -251,7 +216,7 @@ def _run_pipeline(tmp_path: Path, edited: int, **kwargs) -> tuple[MagicMock, Mag
 def _hint_calls(logger: MagicMock) -> list[str]:
     return [
         str(call.args[0])
-        for call in logger.info.call_args_list
+        for call in logger.warning.call_args_list
         if call.args and "apm export-patch" in str(call.args[0])
     ]
 
@@ -259,7 +224,13 @@ def _hint_calls(logger: MagicMock) -> list[str]:
 class TestInstallPipelineHint:
     def test_project_install_shows_hint_once(self, tmp_path: Path) -> None:
         logger, counter = _run_pipeline(tmp_path, 3, scope=InstallScope.PROJECT)
-        assert _hint_calls(logger) == [local_edit_hint(3, installing=True)]
+        # Install keeps every edit (#4360): no overwrite warning, one export hint.
+        assert _hint_calls(logger) == []
+        assert [
+            str(call.args[0])
+            for call in logger.info.call_args_list
+            if call.args and "apm export-patch" in str(call.args[0])
+        ] == [local_edit_hint(3, overwritten=0)]
         _, _, keys = counter.call_args.args
         assert set(keys) == {"org/pkg"}
 
@@ -276,3 +247,45 @@ class TestInstallPipelineHint:
         logger, counter = _run_pipeline(tmp_path, 3, scope=InstallScope.PROJECT, lockfile_only=True)
         assert _hint_calls(logger) == []
         counter.assert_not_called()
+
+
+class TestRenderingChangeIsNotALocalEdit:
+    """Drift whose bytes still match the lock is a rendering change (#3654)."""
+
+    def _findings(self, tmp_path: Path) -> tuple[LockFile, list[DriftFinding]]:
+        lock = _lockfile(
+            tmp_path,
+            **{".github/a.md": (_ORIGINAL, _ORIGINAL), ".github/b.md": (_ORIGINAL, _EDITED)},
+        )
+        key = next(iter(lock.dependencies))
+        return lock, [
+            DriftFinding(path=".github/a.md", kind="modified", package=key),
+            DriftFinding(path=".github/b.md", kind="modified", package=key),
+        ]
+
+    def test_unedited_paths_match_the_locked_hash(self, tmp_path: Path) -> None:
+        lock, findings = self._findings(tmp_path)
+        assert unedited_modified_paths(findings, lock, tmp_path) == {".github/a.md"}
+        assert unedited_modified_paths(findings, lock, None) == frozenset()
+        assert unedited_modified_paths(findings, None, tmp_path) == frozenset()
+
+    def test_drift_text_separates_edits_from_rendering_changes(self, tmp_path: Path) -> None:
+        lock, findings = self._findings(tmp_path)
+        out = render_drift_text(findings, lockfile=lock, project_root=tmp_path)
+        assert local_edit_hint(1, overwritten=0) in out
+        assert rendering_change_hint(1) in out
+        assert rendering_change_hint(1).isascii()
+
+    def test_rendering_change_alone_gets_no_export_hint(self, tmp_path: Path) -> None:
+        lock, findings = self._findings(tmp_path)
+        out = render_drift_text(findings[:1], lockfile=lock, project_root=tmp_path)
+        assert "apm export-patch" not in out
+        assert rendering_change_hint(1) in out
+
+    def test_without_project_root_every_modified_finding_is_exportable(
+        self, tmp_path: Path
+    ) -> None:
+        lock, findings = self._findings(tmp_path)
+        out = render_drift_text(findings, lockfile=lock)
+        assert local_edit_hint(2, overwritten=0) in out
+        assert "renders them differently" not in out

@@ -5,11 +5,10 @@ from dataclasses import FrozenInstanceError, astuple
 from types import MappingProxyType
 
 import pytest
-from click.testing import CliRunner
 
-from apm_cli.cli import cli
 from apm_cli.core.apm_yml import CANONICAL_TARGETS
 from apm_cli.core.target_catalog import (
+    DEPRECATED_TARGET_ALIASES,
     TARGET_CAPABILITIES,
     TargetCapability,
     _build_target_catalog,
@@ -31,6 +30,8 @@ from apm_cli.core.target_detection import (
 )
 from apm_cli.integration.targets import KNOWN_TARGETS, RUNTIME_TO_CANONICAL_TARGET
 
+pytestmark = pytest.mark.unit
+
 COMMANDS = ("compile", "install", "update")
 
 
@@ -41,12 +42,12 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
             {
                 "claude",
                 "codex",
+                "copilot",
                 "cursor",
                 "gemini",
                 "grok-build",
                 "kiro",
                 "opencode",
-                "vscode",
                 "windsurf",
             }
         )
@@ -63,9 +64,7 @@ def test_current_target_sets_and_aliases_are_characterized() -> None:
     assert frozenset({"intellij"}) == MCP_ONLY_TARGETS
     assert TARGET_ALIASES == {
         "agy": "antigravity",
-        "agents": "vscode",
-        "copilot": "vscode",
-        "vscode": "vscode",
+        "agents": "copilot",
     }
     assert (
         frozenset(
@@ -104,7 +103,6 @@ def test_current_runtime_mapping_is_characterized() -> None:
         "agents": "copilot",
         "copilot": "copilot",
         "intellij": "copilot",
-        "vscode": "copilot",
     }
 
 
@@ -319,28 +317,8 @@ def test_every_accepted_value_is_advertised_and_parses() -> None:
             assert value in help_fragment
             with pytest.warns(Warning) if value == "agents" else nullcontext():
                 assert parse_target_field(value) is not None
-
-
-@pytest.mark.parametrize("command", COMMANDS)
-def test_command_help_and_errors_advertise_every_accepted_value(command: str) -> None:
-    """Real Click surfaces advertise the same values accepted by parsing."""
-    runner = CliRunner()
-    help_result = runner.invoke(cli, [command, "--help"], terminal_width=1000)
-    error_result = runner.invoke(
-        cli,
-        [command, "--target", "definitely-bogus"],
-        terminal_width=1000,
-    )
-
-    assert help_result.exit_code == 0
-    assert error_result.exit_code == 2
-    valid_line = next(
-        line for line in error_result.output.splitlines() if line.startswith("Valid targets:")
-    )
-    error_values = {target.strip() for target in valid_line.partition(":")[2].split(",")}
-    assert error_values == set(accepted_target_values(command))
-    for value in accepted_target_values(command):
-        assert value in help_result.output
+        for alias, target in DEPRECATED_TARGET_ALIASES.items():
+            assert f"'{alias}' is a deprecated alias of '{target}'." in help_fragment
 
 
 def test_alias_runtime_profile_and_compile_projections_match_catalog() -> None:

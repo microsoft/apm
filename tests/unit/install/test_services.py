@@ -17,6 +17,7 @@ from apm_cli.install.services import (
     _plugin_bin_deployable,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.paths import portable_relpath
 
 # ---------------------------------------------------------------------------
@@ -366,6 +367,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="test-pkg",
@@ -374,6 +376,7 @@ class TestAmendment6Warning:
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         # Warning should have fired
@@ -390,6 +393,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info2,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="test-pkg2",
@@ -398,6 +402,7 @@ class TestAmendment6Warning:
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
         warning_calls_after = [
             c for c in logger.warning.call_args_list if "cowork" in str(c).lower()
@@ -443,6 +448,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 logger=logger,
@@ -450,6 +456,7 @@ class TestAmendment6Warning:
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
         warning_calls = [c for c in logger.warning.call_args_list if "cowork" in str(c).lower()]
         assert len(warning_calls) == 0
@@ -492,6 +499,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 logger=logger,
@@ -499,6 +507,7 @@ class TestAmendment6Warning:
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
         warning_calls = [c for c in logger.warning.call_args_list if "cowork" in str(c).lower()]
         assert len(warning_calls) == 0
@@ -541,6 +550,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 logger=logger,
@@ -548,6 +558,7 @@ class TestAmendment6Warning:
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
         # No exception is the assertion
 
@@ -589,6 +600,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="my-awesome-pkg",
@@ -597,6 +609,7 @@ class TestAmendment6Warning:
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
         warning_calls = [c for c in logger.warning.call_args_list if "cowork" in str(c).lower()]
         assert len(warning_calls) == 1
@@ -643,6 +656,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=diagnostics,
                 package_name="diag-pkg",
@@ -651,6 +665,7 @@ class TestAmendment6Warning:
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         # logger.warning should have been called once
@@ -703,6 +718,7 @@ class TestAmendment6Warning:
             integrate_package_primitives(
                 pkg_info,
                 tmp_path,
+                skill_subset=None,
                 targets=targets,
                 diagnostics=MagicMock(),
                 package_name="prompts-only-pkg",
@@ -711,6 +727,7 @@ class TestAmendment6Warning:
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         warning_calls = [c for c in logger.warning.call_args_list if "cowork" in str(c).lower()]

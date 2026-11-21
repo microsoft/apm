@@ -11,6 +11,8 @@ import pytest
 from apm_cli.integration.skill_adoption import adoptable_skill_members, adoption_baselines
 from apm_cli.utils.content_hash import compute_file_hash
 
+pytestmark = pytest.mark.component
+
 
 def _walk(source: Path):
     yield from os.walk(source, followlinks=False)
@@ -92,6 +94,35 @@ def test_destination_symlink_blocks_adoption(tmp_path: Path) -> None:
     assert _members(source, destination) == frozenset()
 
 
+@pytest.mark.parametrize(
+    ("anchor_on_disk", "adoptable"),
+    [("receipted", True), ("render", True), ("neither", False)],
+)
+def test_member_matches_its_own_trusted_receipt_or_the_render(
+    tmp_path: Path, anchor_on_disk: str, adoptable: bool
+) -> None:
+    """#4230 R5: a receipted edit plus a git-restored sibling still form one APM tree."""
+    source, destination = _tree(tmp_path)
+    anchor = destination / "SKILL.md"
+    (source / "SKILL.md").write_text("---\nname: s\n---\nEdited source.\n", encoding="ascii")
+    receipted = anchor.read_bytes() if anchor_on_disk == "receipted" else b"Earlier write.\n"
+    if anchor_on_disk == "render":
+        anchor.write_bytes((source / "SKILL.md").read_bytes())
+    elif anchor_on_disk == "neither":
+        anchor.write_bytes(b"User edit.\n")
+    witness = tmp_path / "receipted.md"
+    witness.write_bytes(receipted)
+    receipt = compute_file_hash(witness)
+
+    def trusted(path: Path) -> str | None:
+        return receipt if path == anchor else None
+
+    on_disk = anchor.read_bytes()
+    members = _members(source, destination, trusted=trusted)
+    assert bool(members) is adoptable
+    assert anchor.read_bytes() == on_disk
+
+
 def test_missing_destination_is_not_adoptable(tmp_path: Path) -> None:
     source, destination = _tree(tmp_path)
     shutil.rmtree(destination)
@@ -150,7 +181,9 @@ def _locked_update(tmp_path: Path, old_body: bytes = b"v1\n", new_body: bytes = 
 
     integrator = SkillIntegrator()
     integrator._materialization_session = SimpleNamespace(
-        has_receipt=lambda _path: False, locked_sources=LockedSkillSources(fetch)
+        baseline=lambda _path, _targets: None,
+        receipt_held=lambda _path: False,
+        locked_sources=LockedSkillSources(fetch),
     )
     return SimpleNamespace(
         new=new,
@@ -203,7 +236,8 @@ def test_update_never_adopts_a_differing_or_owned_elsewhere_tree(
     elif change == "unclaimed":
         overrides["owned"] = lambda _path: False
     elif change == "receipt":
-        update.integrator._materialization_session.has_receipt = lambda _path: True
+        # Files that all still hold their receipted bytes need no adoption.
+        update.integrator._materialization_session.receipt_held = lambda _path: True
     else:
         overrides["force"] = True
     assert _locked_baselines(update, **overrides) == {}
@@ -258,3 +292,37 @@ def test_locked_links_render_into_the_current_deployment_frame(tmp_path: Path) -
     assert count == 1
     anchor.write_bytes(rendered.encode("utf-8"))
     assert _locked_baselines(update) == {anchor: compute_file_hash(anchor)}
+
+
+def test_locked_sources_skip_the_download_when_installing_the_locked_commit(
+    tmp_path: Path,
+) -> None:
+    from apm_cli.integration.skill_adoption import LockedSkillSources
+
+    update = _locked_update(tmp_path)
+    fetched: list[str] = []
+    locked = "a" * 40
+
+    def fetch(owner: str, _scratch: Path):
+        fetched.append(owner)
+
+    sources = LockedSkillSources(fetch, lambda _owner: locked)
+    assert sources.plan("org/pkg", update.plan, update.targets, locked) is None
+    assert fetched == []
+    sources = LockedSkillSources(fetch, lambda _owner: locked)
+    sources.plan("org/pkg", update.plan, update.targets, "b" * 40)
+    assert fetched == ["org/pkg"]
+    sources.close()
+
+
+@pytest.mark.windows_compat
+def test_receipt_from_another_checkout_falls_through_to_the_render(tmp_path: Path) -> None:
+    """#4229: a receipt the file no longer holds never blocks a render match."""
+    update = _locked_update(tmp_path)
+    anchor = update.destination / "SKILL.md"
+    update.integrator._materialization_session.baseline = lambda _path, _targets: (
+        "sha256:" + "b" * 64
+    )
+    on_disk = anchor.read_bytes()
+    assert _locked_baselines(update) == {anchor: compute_file_hash(anchor)}
+    assert anchor.read_bytes() == on_disk

@@ -9,6 +9,7 @@ Covers:
 - read_constitution is cached (second call doesn't re-read the file)
 - clear_constitution_cache clears the cache (second call re-reads)
 - Cache isolation between different base directories
+- ConstitutionInjector reading and injecting the constitution on disk
 """
 
 from __future__ import annotations
@@ -16,13 +17,26 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from apm_cli.compilation.constants import CONSTITUTION_RELATIVE_PATH
+import pytest
+
+from apm_cli.compilation.constants import (
+    CONSTITUTION_MARKER_BEGIN,
+    CONSTITUTION_MARKER_END,
+    CONSTITUTION_RELATIVE_PATH,
+)
 from apm_cli.compilation.constitution import (
     _constitution_cache,
     clear_constitution_cache,
     find_constitution,
     read_constitution,
 )
+from apm_cli.compilation.constitution_block import compute_constitution_hash, render_block
+from apm_cli.compilation.injector import ConstitutionInjector
+
+pytestmark = pytest.mark.component
+
+_BEGIN = CONSTITUTION_MARKER_BEGIN
+_END = CONSTITUTION_MARKER_END
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -216,3 +230,219 @@ class TestReadConstitution:
 
         clear_constitution_cache()
         assert len(_constitution_cache) == 0
+
+
+class TestConstitutionInjector:
+    def setup_method(self):
+        clear_constitution_cache()
+
+    def _make_injector(self, base_dir: Path) -> ConstitutionInjector:
+        return ConstitutionInjector(str(base_dir))
+
+    def test_skipped_no_existing_block(self, tmp_path):
+        injector = self._make_injector(tmp_path)
+        output_path = tmp_path / "AGENTS.md"
+        compiled = "# Title\n\nBody text.\n"
+        final, status, hash_val = injector.inject(compiled, False, output_path)
+        assert status == "SKIPPED"
+        assert hash_val is None
+        assert final == compiled
+        assert not output_path.exists()
+
+    def test_skipped_preserves_existing_block(self, tmp_path):
+        constitution = "Constitution rule\n"
+        spec_path = tmp_path / ".specify" / "memory"
+        spec_path.mkdir(parents=True)
+        (spec_path / "constitution.md").write_text(constitution)
+
+        injector = self._make_injector(tmp_path)
+        block = render_block(constitution)
+        existing = f"# Title\n\n{block.rstrip()}\n\nBody.\n"
+        output_path = tmp_path / "AGENTS.md"
+        output_path.write_text(existing)
+
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", False, output_path)  # noqa: RUF059
+        assert status == "SKIPPED"
+        assert _BEGIN in final
+        assert output_path.read_text() == existing
+
+    def test_missing_when_no_constitution_file(self, tmp_path):
+        injector = self._make_injector(tmp_path)
+        output_path = tmp_path / "AGENTS.md"
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
+        assert status == "MISSING"
+        assert hash_val is None
+        assert not output_path.exists()
+
+    def test_missing_preserves_existing_block(self, tmp_path):
+        # AGENTS.md already has a block, but no constitution file present
+        existing_block = f"{_BEGIN}\nhash: old123\nOld rule\n{_END}\n"
+        output_path = tmp_path / "AGENTS.md"
+        output_path.write_text(f"# Title\n\n{existing_block}\nBody.\n")
+
+        injector = self._make_injector(tmp_path)
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
+        assert status == "MISSING"
+        assert _BEGIN in final
+        assert output_path.read_text() == f"# Title\n\n{existing_block}\nBody.\n"
+
+    def test_created_with_constitution_file(self, tmp_path):
+        spec_path = tmp_path / ".specify" / "memory"
+        spec_path.mkdir(parents=True)
+        (spec_path / "constitution.md").write_text("New rule.\n")
+
+        injector = self._make_injector(tmp_path)
+        output_path = tmp_path / "AGENTS.md"
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)
+        assert status == "CREATED"
+        assert hash_val is not None
+        assert _BEGIN in final
+        assert "New rule." in final
+        assert not output_path.exists()
+
+    def test_unchanged_when_same_constitution(self, tmp_path):
+        constitution = "Same rule.\n"
+        spec_path = tmp_path / ".specify" / "memory"
+        spec_path.mkdir(parents=True)
+        (spec_path / "constitution.md").write_text(constitution)
+
+        injector = self._make_injector(tmp_path)
+        # Pre-render exact block
+        block = render_block(constitution)
+        existing = f"# Title\n\n{block.rstrip()}\n\nBody.\n"
+        output_path = tmp_path / "AGENTS.md"
+        output_path.write_text(existing)
+
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
+        assert status == "UNCHANGED"
+        assert output_path.read_text() == existing
+
+    def test_updated_when_constitution_changes(self, tmp_path):
+        old_constitution = "Old rule.\n"
+        new_constitution = "New rule.\n"
+        spec_path = tmp_path / ".specify" / "memory"
+        spec_path.mkdir(parents=True)
+        (spec_path / "constitution.md").write_text(new_constitution)
+
+        injector = self._make_injector(tmp_path)
+        old_block = render_block(old_constitution)
+        existing = f"# Title\n\n{old_block.rstrip()}\n\nBody.\n"
+        output_path = tmp_path / "AGENTS.md"
+        output_path.write_text(existing)
+
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
+        assert status == "UPDATED"
+        assert "New rule." in final
+        assert "Old rule." not in final
+        assert output_path.read_text() == existing
+
+    def test_output_path_not_exists(self, tmp_path):
+        spec_path = tmp_path / ".specify" / "memory"
+        spec_path.mkdir(parents=True)
+        (spec_path / "constitution.md").write_text("Rule.\n")
+
+        injector = self._make_injector(tmp_path)
+        output_path = tmp_path / "nonexistent.md"
+        final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)  # noqa: RUF059
+        assert status == "CREATED"
+        assert not output_path.exists()
+
+    def test_trailing_newline_in_output(self, tmp_path):
+        spec_path = tmp_path / ".specify" / "memory"
+        spec_path.mkdir(parents=True)
+        (spec_path / "constitution.md").write_text("Rule.\n")
+
+        injector = self._make_injector(tmp_path)
+        output_path = tmp_path / "AGENTS.md"
+        final, status, hash_val = injector.inject("# Title\n\nBody.", True, output_path)  # noqa: RUF059
+        assert final.endswith("\n")
+        assert not output_path.exists()
+
+    def test_hash_value_extracted_correctly(self, tmp_path):
+        constitution = "My rules.\n"
+        spec_path = tmp_path / ".specify" / "memory"
+        spec_path.mkdir(parents=True)
+        (spec_path / "constitution.md").write_text(constitution)
+
+        injector = self._make_injector(tmp_path)
+        output_path = tmp_path / "AGENTS.md"
+        _, _, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)
+        expected = compute_constitution_hash(constitution)
+        assert hash_val == expected
+        assert not output_path.exists()
+
+    def test_oserror_reading_existing_file_treated_as_empty(self, tmp_path):
+        """OSError when reading AGENTS.md is caught; existing_content defaults to '' (lines 37-38)."""
+        spec_path = tmp_path / ".specify" / "memory"
+        spec_path.mkdir(parents=True)
+        (spec_path / "constitution.md").write_text("Rule.\n")
+
+        injector = self._make_injector(tmp_path)
+        output_path = tmp_path / "AGENTS.md"
+        output_path.write_text("existing content")
+
+        # Patch only this specific file's read_text to raise OSError,
+        # while leaving the constitution file readable.
+        _orig = Path.read_text
+
+        def _raise_for_output(self, *args, **kwargs):
+            if self == output_path:
+                raise OSError("permission denied")
+            return _orig(self, *args, **kwargs)
+
+        with patch.object(Path, "read_text", _raise_for_output):
+            _final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)
+
+        # OSError causes existing_content = "" → no existing block → block CREATED
+        assert status == "CREATED"
+        assert hash_val is not None
+        assert output_path.read_text() == "existing content"
+
+    def test_compiled_content_without_double_newline_uses_full_as_header(self, tmp_path):
+        """Compiled content lacking \\n\\n causes _split_header to return full content as header (line 48)."""
+        spec_path = tmp_path / ".specify" / "memory"
+        spec_path.mkdir(parents=True)
+        (spec_path / "constitution.md").write_text("Rule.\n")
+
+        injector = self._make_injector(tmp_path)
+        output_path = tmp_path / "AGENTS.md"
+        # No double-newline: the entire string is treated as the "header"
+        compiled = "# Title with no blank line\n"
+        final, status, hash_val = injector.inject(compiled, True, output_path)
+
+        assert status == "CREATED"
+        assert hash_val is not None
+        assert _BEGIN in final
+        assert not output_path.exists()
+
+    def test_hash_value_none_when_block_has_single_line(self, tmp_path):
+        """When render_block returns a single-line block, hash_value is None (branch 85->90)."""
+        spec_path = tmp_path / ".specify" / "memory"
+        spec_path.mkdir(parents=True)
+        (spec_path / "constitution.md").write_text("Rule.\n")
+
+        injector = self._make_injector(tmp_path)
+        output_path = tmp_path / "AGENTS.md"
+
+        with patch("apm_cli.compilation.injector.render_block", return_value="SINGLE_LINE\n"):
+            _final, status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)
+
+        assert hash_val is None
+        assert status == "CREATED"
+        assert not output_path.exists()
+
+    def test_hash_value_none_when_hash_line_has_no_value(self, tmp_path):
+        """When hash line has no value after 'hash:', hash_value is None (branch 87->90)."""
+        spec_path = tmp_path / ".specify" / "memory"
+        spec_path.mkdir(parents=True)
+        (spec_path / "constitution.md").write_text("Rule.\n")
+
+        injector = self._make_injector(tmp_path)
+        output_path = tmp_path / "AGENTS.md"
+
+        block = f"{_BEGIN}\nhash:\nRule.\n{_END}\n"
+        with patch("apm_cli.compilation.injector.render_block", return_value=block):
+            _final, _status, hash_val = injector.inject("# Title\n\nBody.\n", True, output_path)
+
+        assert hash_val is None
+        assert not output_path.exists()

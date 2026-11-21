@@ -6,7 +6,7 @@ description: >-
   pass before publishing -- catches bloat, abstract jargon, marketing
   voice, redundant explanations, and any prose that fails the
   "stranger reading at 11pm on Friday" test.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # Editorial Owner

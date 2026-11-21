@@ -1,0 +1,12 @@
+# Conformance fixture for req-mf-028 (Section 4.2.5): a root project
+# manifest declaring a marketplace map that a marketplace reference
+# resolves through.
+name: root-marketplaces
+version: 1.0.0
+marketplaces:
+  - name: contoso
+    source: https://github.com/contoso/agent-marketplace
+    ref: main
+dependencies:
+  apm:
+    - { name: security-review, marketplace: contoso }

@@ -17,6 +17,7 @@ from .plugin_exporter import (
     _scan_bundle_sources,
     _warn_no_local_primitives,
     _warn_skipped_root_components,
+    _warn_skipped_source_links,
     _write_bundle_sources,
 )
 
@@ -37,5 +38,6 @@ __all__ = [
     "_scan_bundle_sources",
     "_warn_no_local_primitives",
     "_warn_skipped_root_components",
+    "_warn_skipped_source_links",
     "_write_bundle_sources",
 ]

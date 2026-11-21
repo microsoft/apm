@@ -13,8 +13,8 @@ Coverage gate: FAILING ACCEPTANCE TEST FIRST.
 Docs are part of the deliverable: fold the brief's `docs_required`
 (Starlight pages under docs/, and the apm-usage resource files when
 the change touches CLI commands, flags, dependency formats, auth flow,
-policy schema, or primitive formats) and a CHANGELOG entry into the
-same PR.
+policy schema, or primitive formats) and a CHANGELOG line into the
+same PR, written per `.github/instructions/changelog.instructions.md`.
 
 Scope fence: implement ONLY the accepted feature surface in the brief.
 Adjacent enhancements are `non_goals`. If the feature requires a

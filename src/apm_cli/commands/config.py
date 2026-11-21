@@ -8,9 +8,15 @@ from pathlib import Path
 
 import click
 
-from ..constants import APM_YML_FILENAME
+from apm_cli.core.remediation import (
+    EXPERIMENTAL_FLAG_DISABLED,
+)
+from apm_cli.core.scope import manifest_file
+
 from ..core.command_logger import CommandLogger
+from ..core.deprecations import deprecation_message
 from ..install.locking import serialized_lifecycle
+from ..utils.credential_rendering import redact_secrets, render_config_value
 from ..version import get_version
 from . import self_update as self_update_command
 from ._helpers import HIGHLIGHT, RESET, _get_console, _load_apm_config
@@ -46,7 +52,9 @@ def _parse_bool_value(value: str) -> bool:
         return True
     if normalized in _BOOLEAN_FALSE_VALUES:
         return False
-    raise ValueError(f"Invalid value '{value}'. Use 'true' or 'false'.")
+    raise ValueError(
+        f"Invalid value '{render_config_value('value', value)}'. Use 'true' or 'false'."
+    )
 
 
 def _get_config_setters():
@@ -83,39 +91,66 @@ def _get_config_getters():
     }
 
 
-def _valid_config_keys() -> str:
-    """Return valid config keys for messages."""
+# Keys still accepted by get/set so existing scripts keep working, but no
+# longer advertised. Each maps to the warning shown when it is used.
+_DEPRECATED_CONFIG_KEYS = {
+    "auto-integrate": deprecation_message("config-auto-integrate"),
+}
+
+
+# Single registry of user-facing config keys: (name, experimental flag, unsettable).
+# Messages derive the valid-key list from it; tests pin it to the dispatch below.
+_CONFIG_KEYS: tuple[tuple[str, str | None, bool], ...] = (
+    ("target", None, True),
+    ("self-update.channel", None, True),
+    ("self-update.install-dir", None, True),
+    ("mcp-registry-url", None, True),
+    ("temp-dir", None, True),
+    ("allow-protocol-fallback", None, True),
+    ("prefer-ssh", None, True),
+    ("github-auth-first", None, True),
+    ("audit-on-install", "external_scanners", True),
+    ("external.<name>.llm", "external_scanners", True),
+    ("external.<name>.args", "external_scanners", True),
+    ("copilot-cowork-skills-dir", "copilot_cowork", True),
+    ("registry.<name>.url", "registries", True),
+    ("registry.<name>.token", "registries", True),
+    ("registry.<name>.default", "registries", True),
+)
+
+
+def _valid_config_keys(*, unset: bool = False) -> str:
+    """Return the keys the current flags expose, for messages."""
     from ..core.experimental import is_enabled
 
-    keys = [
-        "auto-integrate",
-        "target",
-        "self-update.channel",
-        "self-update.install-dir",
-        "mcp-registry-url",
-        "temp-dir",
-        "allow-protocol-fallback",
-        "prefer-ssh",
-        "github-auth-first",
-    ]
-    if is_enabled("external_scanners"):
-        keys.append("audit-on-install")
-        keys.append("external.<name>.llm")
-        keys.append("external.<name>.args")
-    if is_enabled("copilot_cowork"):
-        keys.append("copilot-cowork-skills-dir")
-    if is_enabled("registries"):
-        keys.append("registry.<name>.url")
-        keys.append("registry.<name>.token")
-        keys.append("registry.<name>.default")
-    return ", ".join(keys)
+    return ", ".join(
+        name
+        for name, flag, unsettable in _CONFIG_KEYS
+        if (flag is None or is_enabled(flag)) and (unsettable or not unset)
+    )
+
+
+def _reject_unknown_key(logger: CommandLogger, key: str, *, unset: bool = False) -> None:
+    """Report an unknown key with the valid-key list and exit 1."""
+    logger.error(f"Unknown configuration key: '{key}'")
+    logger.progress(f"Valid keys: {_valid_config_keys(unset=unset)}")
+    sys.exit(1)
+
+
+def _echo_setting(key: str, value: object, *, indent: str = "") -> None:
+    """Print one ``key: value`` line; the value renders through the owner."""
+    click.echo(f"{indent}{key}: {render_config_value(key, value)}")
+
+
+def _add_table_row(table, category: str, setting: str, value: object) -> None:
+    """Add one ``apm config`` table row; the value renders through the owner."""
+    table.add_row(category, setting, render_config_value(setting, value))
 
 
 def _show_all_user_config(logger: CommandLogger) -> None:
     """Print all user-settable configuration keys with effective values."""
     from ..config import (
         get_allow_protocol_fallback,
-        get_auto_integrate,
         get_github_auth_first,
         get_install_target,
         get_mcp_registry_url,
@@ -126,20 +161,21 @@ def _show_all_user_config(logger: CommandLogger) -> None:
     )
 
     logger.progress("APM Configuration:")
-    click.echo(f"  auto-integrate: {str(get_auto_integrate()).lower()}")
     temp_dir = get_temp_dir()
-    click.echo(
-        f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}"
+    _echo_setting(
+        "temp-dir",
+        temp_dir if temp_dir is not None else "Not set (using system default)",
+        indent="  ",
     )
     install_target = get_install_target()
     if install_target is not None:
-        click.echo(f"  target: {_render_target_value(install_target)}")
+        _echo_setting("target", _render_target_value(install_target), indent="  ")
     self_update_channel = get_self_update_channel()
     if self_update_channel != "stable":
-        click.echo(f"  self-update.channel: {self_update_channel}")
+        _echo_setting("self-update.channel", self_update_channel, indent="  ")
     self_update_install_dir = get_self_update_install_dir()
     if self_update_install_dir is not None:
-        click.echo(f"  self-update.install-dir: {self_update_install_dir}")
+        _echo_setting("self-update.install-dir", self_update_install_dir, indent="  ")
     # Only show transport keys when non-default to reduce noise.
     if get_allow_protocol_fallback():
         click.echo("  allow-protocol-fallback: true")
@@ -154,27 +190,68 @@ def _show_all_user_config(logger: CommandLogger) -> None:
         from ..config import get_audit_on_install, get_scanner_options
         from ..security.external.registry import SUPPORTED_SCANNERS
 
-        click.echo(f"  audit-on-install: {get_audit_on_install()}")
+        _echo_setting("audit-on-install", get_audit_on_install(), indent="  ")
         for scanner in SUPPORTED_SCANNERS:
             llm, args = get_scanner_options(scanner)
             if llm is not None:
-                click.echo(f"  external.{scanner}.llm: {str(llm).lower()}")
+                _echo_setting(f"external.{scanner}.llm", str(llm).lower(), indent="  ")
             if args is not None:
-                click.echo(f"  external.{scanner}.args: {' '.join(args)}")
+                _echo_setting(f"external.{scanner}.args", " ".join(args), indent="  ")
 
     if is_enabled("copilot_cowork"):
         from ..config import get_copilot_cowork_skills_dir
 
         csd = get_copilot_cowork_skills_dir()
-        click.echo(
-            f"  copilot-cowork-skills-dir: "
-            f"{csd if csd is not None else 'Not set (using auto-detection)'}"
+        _echo_setting(
+            "copilot-cowork-skills-dir",
+            csd if csd is not None else "Not set (using auto-detection)",
+            indent="  ",
         )
 
     mcp_url = get_mcp_registry_url()
-    click.echo(
-        f"  mcp-registry-url: {mcp_url if mcp_url is not None else 'Not set (using default https://api.mcp.github.com)'}"
+    _echo_setting(
+        "mcp-registry-url",
+        mcp_url if mcp_url is not None else "Not set (using default https://api.mcp.github.com)",
+        indent="  ",
     )
+
+    if is_enabled("registries"):
+        from ..config import list_registry_configs
+
+        for reg_name, body in sorted(list_registry_configs().items()):
+            if "url" in body:
+                _echo_setting(f"registry.{reg_name}.url", body["url"], indent="  ")
+            if "token" in body:
+                _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")
+            if body.get("default") is True:
+                _echo_setting(f"registry.{reg_name}.default", True, indent="  ")
+
+
+def _set_registry_key(logger: CommandLogger, reg_name: str, field: str, value: str) -> None:
+    """Apply ``apm config set registry.<name>.<field> <value>``."""
+    from ..config import set_registry_default, set_registry_token, set_registry_url
+
+    if field == "url":
+        try:
+            set_registry_url(reg_name, value)
+        except ValueError as exc:
+            logger.error(redact_secrets(str(exc)))
+            sys.exit(1)
+        logger.success(f"registry.{reg_name}.url set")
+    elif field == "token":
+        set_registry_token(reg_name, value)
+        logger.success(f"registry.{reg_name}.token set")
+    else:
+        try:
+            is_default = _parse_bool_value(value)
+        except ValueError as exc:
+            logger.error(redact_secrets(str(exc)))
+            sys.exit(1)
+        set_registry_default(reg_name, is_default)
+        if is_default:
+            logger.success(f"registry.{reg_name}.default set")
+        else:
+            logger.success(f"registry.{reg_name}.default cleared")
 
 
 def _require_external_scanners(logger, key: str) -> None:
@@ -184,7 +261,7 @@ def _require_external_scanners(logger, key: str) -> None:
     if not is_enabled("external_scanners"):
         logger.error(
             f"'{key}' requires the external-scanners experimental flag. "
-            "Run: apm experimental enable external-scanners"
+            f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='external-scanners').sentence()}"
         )
         sys.exit(1)
 
@@ -215,11 +292,11 @@ def config(ctx):
         logger = CommandLogger("config")
         try:
             # Lazy import rich table
-            from rich.table import Table  # type: ignore
+            from apm_cli.utils.console import new_table
 
             console = _get_console()
             # Create configuration display
-            config_table = Table(
+            config_table = new_table(
                 title="Current APM Configuration",
                 show_header=True,
                 header_style="bold cyan",
@@ -229,12 +306,13 @@ def config(ctx):
             config_table.add_column("Value", style="cyan")
 
             # Show apm.yml if in project
-            if Path(APM_YML_FILENAME).exists():
+            if manifest_file(Path(".")).exists():
                 apm_config = _load_apm_config()
-                config_table.add_row("Project", "Name", apm_config.get("name", "Unknown"))
-                config_table.add_row("", "Version", apm_config.get("version", "Unknown"))
-                config_table.add_row("", "Entrypoint", apm_config.get("entrypoint", "None"))
-                config_table.add_row(
+                _add_table_row(config_table, "Project", "Name", apm_config.get("name", "Unknown"))
+                _add_table_row(config_table, "", "Version", apm_config.get("version", "Unknown"))
+                _add_table_row(config_table, "", "Entrypoint", apm_config.get("entrypoint", "None"))
+                _add_table_row(
+                    config_table,
                     "",
                     "MCP Dependencies",
                     str(len(apm_config.get("dependencies", {}).get("mcp", []))),
@@ -243,27 +321,32 @@ def config(ctx):
                 # Show compilation configuration
                 compilation_config = apm_config.get("compilation", {})
                 if compilation_config:
-                    config_table.add_row(
+                    _add_table_row(
+                        config_table,
                         "Compilation",
                         "Output",
                         compilation_config.get("output", "AGENTS.md"),
                     )
-                    config_table.add_row(
+                    _add_table_row(
+                        config_table,
                         "",
                         "Chatmode",
                         compilation_config.get("chatmode", "auto-detect"),
                     )
-                    config_table.add_row(
+                    _add_table_row(
+                        config_table,
                         "",
                         "Resolve Links",
                         str(compilation_config.get("resolve_links", True)),
                     )
                 else:
-                    config_table.add_row("Compilation", "Status", "Using defaults (no config)")
+                    _add_table_row(
+                        config_table, "Compilation", "Status", "Using defaults (no config)"
+                    )
             else:
-                config_table.add_row("Project", "Status", "Not in an APM project directory")
+                _add_table_row(config_table, "Project", "Status", "Not in an APM project directory")
 
-            config_table.add_row("Global", "APM CLI Version", get_version())
+            _add_table_row(config_table, "Global", "APM CLI Version", get_version())
 
             from ..config import get_allow_protocol_fallback as _get_apf
             from ..config import get_github_auth_first as _get_gaf
@@ -274,13 +357,14 @@ def config(ctx):
 
             _temp_dir_val = _get_temp_dir()
             if _temp_dir_val:
-                config_table.add_row("", "Temp Directory", _temp_dir_val)
+                _add_table_row(config_table, "", "Temp Directory", _temp_dir_val)
             _self_update_channel_val = _get_self_update_channel_cfg()
             if _self_update_channel_val != "stable":
-                config_table.add_row("", "Self-update Channel", _self_update_channel_val)
+                _add_table_row(config_table, "", "Self-update Channel", _self_update_channel_val)
             _self_update_install_dir_val = _get_self_update_install_dir_cfg()
             if _self_update_install_dir_val:
-                config_table.add_row(
+                _add_table_row(
+                    config_table,
                     "",
                     "Self-update Install Dir",
                     _self_update_install_dir_val,
@@ -292,11 +376,11 @@ def config(ctx):
             _prefer_ssh = _get_prefer_ssh_cfg()
             _gaf = _get_gaf()
             if _apf:
-                config_table.add_row("", "Allow Protocol Fallback", "true")
+                _add_table_row(config_table, "", "Allow Protocol Fallback", "true")
             if _prefer_ssh:
-                config_table.add_row("", "Prefer SSH Transport", "true")
+                _add_table_row(config_table, "", "Prefer SSH Transport", "true")
             if _gaf:
-                config_table.add_row("", "GitHub Auth-first", "true")
+                _add_table_row(config_table, "", "GitHub Auth-first", "true")
 
             from ..core.experimental import is_enabled as _is_enabled
 
@@ -304,7 +388,8 @@ def config(ctx):
                 from ..config import get_copilot_cowork_skills_dir as _get_csd
 
                 _csd_val = _get_csd()
-                config_table.add_row(
+                _add_table_row(
+                    config_table,
                     "",
                     "Cowork Skills Dir",
                     _csd_val if _csd_val else "Not set (using auto-detection)",
@@ -316,20 +401,22 @@ def config(ctx):
             # Fallback display
             logger.progress("Current APM Configuration:")
 
-            if Path(APM_YML_FILENAME).exists():
+            if manifest_file(Path(".")).exists():
                 apm_config = _load_apm_config()
                 click.echo(f"\n{HIGHLIGHT}Project (apm.yml):{RESET}")
-                click.echo(f"  Name: {apm_config.get('name', 'Unknown')}")
-                click.echo(f"  Version: {apm_config.get('version', 'Unknown')}")
-                click.echo(f"  Entrypoint: {apm_config.get('entrypoint', 'None')}")
-                click.echo(
-                    f"  MCP Dependencies: {len(apm_config.get('dependencies', {}).get('mcp', []))}"
+                _echo_setting("Name", apm_config.get("name", "Unknown"), indent="  ")
+                _echo_setting("Version", apm_config.get("version", "Unknown"), indent="  ")
+                _echo_setting("Entrypoint", apm_config.get("entrypoint", "None"), indent="  ")
+                _echo_setting(
+                    "MCP Dependencies",
+                    len(apm_config.get("dependencies", {}).get("mcp", [])),
+                    indent="  ",
                 )
             else:
                 logger.progress("Not in an APM project directory")
 
             click.echo(f"\n{HIGHLIGHT}Global:{RESET}")
-            click.echo(f"  APM CLI Version: {get_version()}")
+            _echo_setting("APM CLI Version", get_version(), indent="  ")
 
             from ..config import get_allow_protocol_fallback as _get_apf_fb
             from ..config import get_github_auth_first as _get_gaf_fb
@@ -340,17 +427,17 @@ def config(ctx):
 
             _temp_dir_fb = _get_temp_dir_fb()
             if _temp_dir_fb:
-                click.echo(f"  Temp Directory: {_temp_dir_fb}")
+                _echo_setting("Temp Directory", _temp_dir_fb, indent="  ")
             _self_update_channel_fb = _get_self_update_channel_fb()
             if _self_update_channel_fb != "stable":
-                click.echo(f"  self-update.channel: {_self_update_channel_fb}")
+                _echo_setting("self-update.channel", _self_update_channel_fb, indent="  ")
             _self_update_install_dir_fb = _get_self_update_install_dir_fb()
             if _self_update_install_dir_fb:
-                click.echo(f"  self-update.install-dir: {_self_update_install_dir_fb}")
+                _echo_setting("self-update.install-dir", _self_update_install_dir_fb, indent="  ")
 
-            click.echo(f"  allow-protocol-fallback: {str(_get_apf_fb()).lower()}")
-            click.echo(f"  prefer-ssh: {str(_get_prefer_ssh_fb()).lower()}")
-            click.echo(f"  github-auth-first: {str(_get_gaf_fb()).lower()}")
+            _echo_setting("allow-protocol-fallback", str(_get_apf_fb()).lower(), indent="  ")
+            _echo_setting("prefer-ssh", str(_get_prefer_ssh_fb()).lower(), indent="  ")
+            _echo_setting("github-auth-first", str(_get_gaf_fb()).lower(), indent="  ")
 
             from ..core.experimental import is_enabled as _is_enabled_fb
 
@@ -358,9 +445,10 @@ def config(ctx):
                 from ..config import get_copilot_cowork_skills_dir as _get_csd_fb
 
                 _csd_fb = _get_csd_fb()
-                click.echo(
-                    f"  Cowork Skills Dir: "
-                    f"{_csd_fb if _csd_fb else 'Not set (using auto-detection)'}"
+                _echo_setting(
+                    "Cowork Skills Dir",
+                    _csd_fb if _csd_fb else "Not set (using auto-detection)",
+                    indent="  ",
                 )
 
 
@@ -372,8 +460,8 @@ def set(key, value):  # noqa: F811
     """Set a configuration value.
 
     Examples:
-        apm config set auto-integrate false
-        apm config set auto-integrate true
+        apm config set target copilot
+        apm config set prefer-ssh true
     """
     from ..config import get_temp_dir, set_temp_dir
 
@@ -386,29 +474,10 @@ def set(key, value):  # noqa: F811
         if not is_enabled("registries"):
             logger.error(
                 f"'{key}' requires the registries experimental flag. "
-                "Run: apm experimental enable registries"
+                f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='registries').sentence()}"
             )
             sys.exit(1)
-        reg_name, field = registry_match.group(1), registry_match.group(2)
-        from ..config import set_registry_default, set_registry_token, set_registry_url
-
-        if field == "url":
-            set_registry_url(reg_name, value)
-            logger.success(f"registry.{reg_name}.url set")
-        elif field == "token":
-            set_registry_token(reg_name, value)
-            logger.success(f"registry.{reg_name}.token set")
-        else:
-            try:
-                is_default = _parse_bool_value(value)
-            except ValueError as exc:
-                logger.error(str(exc))
-                sys.exit(1)
-            set_registry_default(reg_name, is_default)
-            if is_default:
-                logger.success(f"registry.{reg_name}.default set")
-            else:
-                logger.success(f"registry.{reg_name}.default cleared")
+        _set_registry_key(logger, registry_match.group(1), registry_match.group(2), value)
         return
 
     external_match = _EXTERNAL_SCANNER_KEY_RE.match(key)
@@ -422,7 +491,7 @@ def set(key, value):  # noqa: F811
             try:
                 llm = _parse_bool_value(value)
             except ValueError as exc:
-                logger.error(str(exc))
+                logger.error(redact_secrets(str(exc)))
                 sys.exit(1)
             set_scanner_llm(scanner_name, llm)
             logger.success(f"external.{scanner_name}.llm set to {'true' if llm else 'false'}")
@@ -432,7 +501,7 @@ def set(key, value):  # noqa: F811
             try:
                 tokens = shlex.split(value, posix=(os.name != "nt"))
             except ValueError as exc:
-                logger.error(f"Could not parse args value: {exc}")
+                logger.error(f"Could not parse args value: {redact_secrets(str(exc))}")
                 sys.exit(1)
             if not tokens:
                 logger.error("external.<name>.args requires at least one token.")
@@ -447,25 +516,30 @@ def set(key, value):  # noqa: F811
         if not is_enabled("copilot_cowork"):
             logger.error(
                 "copilot-cowork-skills-dir requires the copilot-cowork experimental flag. "
-                "Run: apm experimental enable copilot-cowork"
+                f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='copilot-cowork').sentence()}"
             )
             sys.exit(1)
         from ..config import get_copilot_cowork_skills_dir, set_copilot_cowork_skills_dir
 
         try:
             set_copilot_cowork_skills_dir(value)
-            logger.success(f"Cowork skills directory set to: {get_copilot_cowork_skills_dir()}")
+            logger.success(
+                "Cowork skills directory set to: "
+                f"{render_config_value(key, get_copilot_cowork_skills_dir())}"
+            )
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
     if key == "temp-dir":
         try:
             set_temp_dir(value)
-            logger.success(f"Temporary directory set to: {get_temp_dir()}")
+            logger.success(
+                f"Temporary directory set to: {render_config_value(key, get_temp_dir())}"
+            )
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
@@ -475,9 +549,9 @@ def set(key, value):  # noqa: F811
         try:
             parsed = set_install_target(value)
             rendered = _render_target_value(parsed)
-            logger.success(f"Default install target set to: {rendered}")
+            logger.success(f"Default install target set to: {render_config_value(key, rendered)}")
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
@@ -486,9 +560,9 @@ def set(key, value):  # noqa: F811
 
         try:
             channel = set_self_update_channel(value)
-            logger.success(f"Self-update channel saved: {channel}")
+            logger.success(f"Self-update channel saved: {render_config_value(key, channel)}")
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
@@ -498,14 +572,16 @@ def set(key, value):  # noqa: F811
         try:
             install_dir = set_self_update_install_dir(value)
             if self_update_command._is_windows_platform():
-                logger.success(f"Self-update install directory saved: {install_dir}")
+                logger.success(
+                    f"Self-update install directory saved: {render_config_value(key, install_dir)}"
+                )
             else:
                 logger.success(
-                    f"Self-update launcher directory preference saved: {install_dir} "
+                    f"Self-update launcher directory preference saved: {render_config_value(key, install_dir)} "
                     "(must match the existing Unix installation)"
                 )
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
@@ -525,13 +601,14 @@ def set(key, value):  # noqa: F811
         try:
             set_mcp_registry_url(value)
             configured_url = get_mcp_registry_url()
-            logger.success(f"MCP registry URL set to: {configured_url}")
+            logger.success(f"MCP registry URL set to: {render_config_value(key, configured_url)}")
             if configured_url and configured_url.startswith("http://"):
-                logger.info(
-                    "Set MCP_REGISTRY_ALLOW_HTTP=1 when using this trusted plaintext endpoint."
+                logger.warning(
+                    "This endpoint uses plaintext HTTP; registry traffic is not encrypted. "
+                    "Use only a trusted network or switch to https://."
                 )
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
@@ -541,38 +618,40 @@ def set(key, value):  # noqa: F811
         if not is_enabled("external_scanners"):
             logger.error(
                 "audit-on-install requires the external-scanners experimental flag. "
-                "Run: apm experimental enable external-scanners"
+                f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='external-scanners').sentence()}"
             )
             sys.exit(1)
         from ..config import get_audit_on_install, set_audit_on_install
 
         try:
             set_audit_on_install(value)
-            logger.success(f"Install-time audit set to: {get_audit_on_install()}")
+            logger.success(
+                f"Install-time audit set to: {render_config_value(key, get_audit_on_install())}"
+            )
         except ValueError as exc:
-            logger.error(str(exc))
+            logger.error(redact_secrets(str(exc)))
             sys.exit(1)
         return
 
     setters = _get_config_setters()
     config_entry = setters.get(key)
     if config_entry is None:
-        logger.error(f"Unknown configuration key: '{key}'")
-        logger.progress(f"Valid keys: {_valid_config_keys()}")
-        logger.progress(
-            "This error may indicate a bug in command routing. Please report this issue."
-        )
-        sys.exit(1)
+        _reject_unknown_key(logger, key)
 
     try:
         enabled = _parse_bool_value(value)
     except ValueError as exc:
-        logger.error(str(exc))
+        logger.error(redact_secrets(str(exc)))
         sys.exit(1)
 
     setter, label = config_entry
     setter(enabled)
-    logger.success(f"{label} set to {'true' if enabled else 'false'}")
+    if key in _DEPRECATED_CONFIG_KEYS:
+        # A success line would imply the setting does something.
+        logger.warning(_DEPRECATED_CONFIG_KEYS[key])
+        logger.info(f"Stored {key}={'true' if enabled else 'false'} (no effect)")
+    else:
+        logger.success(f"{label} set to {'true' if enabled else 'false'}")
 
     # Warn when persisting allow-protocol-fallback=true in a CI environment where
     # $HOME is often shared across jobs -- the persisted value will affect all
@@ -596,7 +675,7 @@ def get(key):
     """Get a configuration value or show all configuration.
 
     Examples:
-        apm config get auto-integrate
+        apm config get target
         apm config get
     """
     from ..config import get_temp_dir
@@ -611,22 +690,16 @@ def get(key):
             if not is_enabled("registries"):
                 logger.error(
                     f"'{key}' requires the registries experimental flag. "
-                    "Run: apm experimental enable registries"
+                    f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='registries').sentence()}"
                 )
                 sys.exit(1)
             reg_name, field = registry_match.group(1), registry_match.group(2)
             from ..config import get_registry_config, is_registry_default
 
-            cfg = get_registry_config(reg_name)
             if field == "default":
-                val = is_registry_default(reg_name)
-                click.echo(f"{key}: {'true' if val else 'false'}")
+                _echo_setting(key, is_registry_default(reg_name))
                 return
-            val = (cfg or {}).get(field)
-            if val is None:
-                click.echo(f"{key}: Not set")
-            else:
-                click.echo(f"{key}: {val}")
+            _echo_setting(key, (get_registry_config(reg_name) or {}).get(field))
             return
 
         if key == "copilot-cowork-skills-dir":
@@ -636,7 +709,7 @@ def get(key):
             if value is None:
                 click.echo("copilot-cowork-skills-dir: Not set (using auto-detection)")
             else:
-                click.echo(f"copilot-cowork-skills-dir: {value}")
+                _echo_setting("copilot-cowork-skills-dir", value)
             return
 
         if key == "temp-dir":
@@ -644,7 +717,7 @@ def get(key):
             if value is None:
                 click.echo("temp-dir: Not set (using system default)")
             else:
-                click.echo(f"temp-dir: {value}")
+                _echo_setting("temp-dir", value)
             return
 
         if key == "target":
@@ -654,13 +727,13 @@ def get(key):
             if value is None:
                 click.echo("target: Not set (using auto-detection)")
             else:
-                click.echo(f"target: {_render_target_value(value)}")
+                _echo_setting("target", _render_target_value(value))
             return
 
         if key == "self-update.channel":
             from ..config import get_self_update_channel
 
-            click.echo(f"self-update.channel: {get_self_update_channel()}")
+            _echo_setting("self-update.channel", get_self_update_channel())
             return
 
         if key == "self-update.install-dir":
@@ -676,7 +749,7 @@ def get(key):
                         "(preserving the detected Unix installation)"
                     )
             else:
-                click.echo(f"self-update.install-dir: {value}")
+                _echo_setting("self-update.install-dir", value)
             return
 
         if key == "mcp-registry-url":
@@ -686,13 +759,13 @@ def get(key):
             if value is None:
                 click.echo("mcp-registry-url: Not set (using default https://api.mcp.github.com)")
             else:
-                click.echo(f"mcp-registry-url: {value}")
+                _echo_setting("mcp-registry-url", value)
             return
 
         if key == "audit-on-install":
             from ..config import get_audit_on_install
 
-            click.echo(f"audit-on-install: {get_audit_on_install()}")
+            _echo_setting("audit-on-install", get_audit_on_install())
             return
 
         external_match = _EXTERNAL_SCANNER_KEY_RE.match(key)
@@ -707,31 +780,28 @@ def get(key):
                 if llm is None:
                     click.echo(f"{key}: Not set")
                 else:
-                    click.echo(f"{key}: {str(llm).lower()}")
+                    _echo_setting(key, str(llm).lower())
             elif args is None:
                 click.echo(f"{key}: Not set")
             else:
-                click.echo(f"{key}: {' '.join(args)}")
+                _echo_setting(key, " ".join(args))
             return
 
         getter = getters.get(key)
         if getter is None:
-            logger.error(f"Unknown configuration key: '{key}'")
-            logger.progress(f"Valid keys: {_valid_config_keys()}")
-            logger.progress(
-                "This error may indicate a bug in command routing. Please report this issue."
-            )
-            sys.exit(1)
+            _reject_unknown_key(logger, key)
         value = getter()
         # Render booleans as lowercase true/false (npm convention).
         if isinstance(value, bool):
-            click.echo(f"{key}: {str(value).lower()}")
+            _echo_setting(key, str(value).lower())
         else:
-            click.echo(f"{key}: {value}")
+            _echo_setting(key, value)
+        if key in _DEPRECATED_CONFIG_KEYS:
+            logger.warning(_DEPRECATED_CONFIG_KEYS[key])
     else:
         # Show all user-settable keys with their effective values (including
         # defaults).  Iterating raw config keys would hide settings that
-        # have not been written yet (e.g. auto_integrate on a fresh install).
+        # have not been written yet (e.g. temp-dir on a fresh install).
         _show_all_user_config(logger)
 
 
@@ -762,7 +832,7 @@ def unset(key):
         if not is_enabled("registries"):
             logger.error(
                 f"'{key}' requires the registries experimental flag. "
-                "Run: apm experimental enable registries"
+                f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='registries').sentence()}"
             )
             sys.exit(1)
         reg_name, field = registry_match.group(1), registry_match.group(2)
@@ -870,6 +940,4 @@ def unset(key):
         logger.success("Cowork skills directory configuration removed")
         return
 
-    logger.error(f"Unknown configuration key: '{key}'")
-    logger.progress(f"Valid keys: {_valid_config_keys()}")
-    sys.exit(1)
+    _reject_unknown_key(logger, key, unset=True)

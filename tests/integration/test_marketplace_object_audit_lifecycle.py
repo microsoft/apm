@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -173,6 +174,17 @@ def test_marketplace_object_install_audit_repeat_offline(
     dump_yaml(manifest, manifest_path)
     scenario.run(_INSTALL)
     scenario.run(("marketplace", "remove", _CATALOG, "--yes"))
+    scenario.audit()
+
+    # Locked selections replay without the marketplace registration (#3911).
+    lock_path = scenario.root / "apm.lock.yaml"
+    lock_bytes = lock_path.read_bytes()
+    scenario.run(_INSTALL)
+    assert lock_path.read_bytes() == lock_bytes
+    for materialized in ("apm_modules", ".agents", ".github"):
+        shutil.rmtree(scenario.root / materialized, ignore_errors=True)
+    scenario.run((*_INSTALL, "--frozen"))
+    assert lock_path.read_bytes() == lock_bytes
     scenario.audit()
 
 

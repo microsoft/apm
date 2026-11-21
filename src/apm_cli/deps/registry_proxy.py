@@ -11,10 +11,10 @@ Environment variables (canonical)::
     PROXY_REGISTRY_TOKEN    -- Bearer token for the proxy.
     PROXY_REGISTRY_ONLY     -- Set to ``1``/``true``/``yes`` to block all
                             direct VCS downloads.
-    PROXY_REGISTRY_ALLOW_HTTP -- Set to ``1`` to silence the plaintext-token
-                            warning when ``PROXY_REGISTRY_URL`` uses ``http://``
-                            and ``PROXY_REGISTRY_TOKEN`` is set (intended for
-                            trusted internal proxies; not recommended).
+    PROXY_REGISTRY_ALLOW_HTTP -- Set to ``1`` to authorize sending
+                            ``PROXY_REGISTRY_TOKEN`` over ``http://`` to a host
+                            that is not loopback or a private network address
+                            (intended for trusted internal proxies).
 
 Deprecated aliases (still functional, emit ``DeprecationWarning``)::
 
@@ -40,6 +40,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from urllib.parse import urlparse
+
+from apm_cli.core.deprecations import deprecation_message
+
+from ..utils.credential_rendering import redact_url_userinfo
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency
@@ -128,13 +132,14 @@ class RegistryConfig:
             art_url = os.environ.get("ARTIFACTORY_BASE_URL", "").strip().rstrip("/")
             if art_url:
                 warnings.warn(
-                    "ARTIFACTORY_BASE_URL is deprecated; use PROXY_REGISTRY_URL instead.",
+                    deprecation_message("artifactory-base-url"),
                     DeprecationWarning,
                     stacklevel=2,
                 )
                 url = art_url
 
         if not url:
+            _warn_token_without_registry_url()
             return None
 
         parsed = urlparse(url)
@@ -147,15 +152,9 @@ class RegistryConfig:
 
         token = os.environ.get("PROXY_REGISTRY_TOKEN") or _read_deprecated_token()
 
-        if token and parsed.scheme == "http" and not os.environ.get("PROXY_REGISTRY_ALLOW_HTTP"):
-            warnings.warn(
-                f"PROXY_REGISTRY_TOKEN is set but PROXY_REGISTRY_URL uses http:// "
-                f"({url!r}); the bearer token will be transmitted in plaintext. "
-                f"Use https:// in production, or set PROXY_REGISTRY_ALLOW_HTTP=1 "
-                f"to silence this warning when targeting a trusted internal proxy.",
-                UserWarning,
-                stacklevel=2,
-            )
+        if token and not http_token_allowed(parsed.scheme, host):
+            _warn_http_token_withheld(url)
+            token = None
 
         enforce_str = os.environ.get("PROXY_REGISTRY_ONLY", "")
         if not enforce_str:
@@ -178,6 +177,24 @@ class RegistryConfig:
         if self.token:
             return {"Authorization": f"Bearer {self.token}"}
         return {}
+
+    def serves(self, scheme: str, host: str) -> bool:
+        """Return whether ``scheme://host`` is this registry's own origin."""
+        return (scheme or "").lower() == self.scheme.lower() and (
+            host or ""
+        ).lower() == self.host.lower()
+
+    def headers_for(self, scheme: str, host: str) -> dict:
+        """Return registry auth headers only for this registry's own origin.
+
+        A dependency may name any Artifactory-style host (explicit FQDN form
+        or a lockfile ``host`` field); the registry token is scoped to the
+        configured ``PROXY_REGISTRY_URL`` origin and is never attached to a
+        request for a different scheme or host.
+        """
+        if not self.serves(scheme, host):
+            return {}
+        return self.get_headers()
 
     def get_client(self) -> RegistryClient:
         """Return a :class:`RegistryClient` for this configuration.
@@ -266,11 +283,58 @@ def is_enforce_only() -> bool:
 # ---------------------------------------------------------------------------
 
 
+_REGISTRY_URL_MISSING_WARNING = (
+    "ARTIFACTORY_APM_TOKEN is ignored without PROXY_REGISTRY_URL; "
+    "set PROXY_REGISTRY_URL and PROXY_REGISTRY_TOKEN"
+)
+_emitted_warnings: set[str] = set()
+
+
+def http_token_allowed(scheme: str, host: str | None) -> bool:
+    """Whether ``PROXY_REGISTRY_TOKEN`` may be sent to ``scheme://host``.
+
+    Always over https. Over http only to a loopback or RFC 1918 private host,
+    or when ``PROXY_REGISTRY_ALLOW_HTTP=1`` explicitly authorizes it.
+    """
+    from apm_cli.utils.net import is_local_network_host
+
+    if (scheme or "").lower() != "http":
+        return True
+    return is_local_network_host(host) or os.environ.get("PROXY_REGISTRY_ALLOW_HTTP") == "1"
+
+
+def _warn_http_token_withheld(url: str) -> None:
+    """Say once per process that the proxy token is not sent over http."""
+    message = (
+        f"PROXY_REGISTRY_TOKEN is not sent to {redact_url_userinfo(url)!r}: the URL uses "
+        "http:// and the host is not loopback or a private network address. Use "
+        "https://, or set PROXY_REGISTRY_ALLOW_HTTP=1 to authorize sending it over http."
+    )
+    if message in _emitted_warnings:
+        return
+    _emitted_warnings.add(message)
+    from apm_cli.utils.console import _rich_warning
+
+    _rich_warning(message, symbol="warning", err=True)
+
+
+def _warn_token_without_registry_url() -> None:
+    """Warn once per process that a registry token has no registry origin."""
+    if not os.environ.get("ARTIFACTORY_APM_TOKEN"):
+        return
+    if _REGISTRY_URL_MISSING_WARNING in _emitted_warnings:
+        return
+    _emitted_warnings.add(_REGISTRY_URL_MISSING_WARNING)
+    from apm_cli.utils.console import _rich_warning
+
+    _rich_warning(_REGISTRY_URL_MISSING_WARNING)
+
+
 def _read_deprecated_token() -> str | None:
     token = os.environ.get("ARTIFACTORY_APM_TOKEN")
     if token:
         warnings.warn(
-            "ARTIFACTORY_APM_TOKEN is deprecated; use PROXY_REGISTRY_TOKEN instead.",
+            deprecation_message("artifactory-apm-token"),
             DeprecationWarning,
             stacklevel=3,
         )
@@ -281,7 +345,7 @@ def _read_deprecated_enforce_only() -> str:
     val = os.environ.get("ARTIFACTORY_ONLY", "")
     if val:
         warnings.warn(
-            "ARTIFACTORY_ONLY is deprecated; use PROXY_REGISTRY_ONLY instead.",
+            deprecation_message("artifactory-only"),
             DeprecationWarning,
             stacklevel=3,
         )

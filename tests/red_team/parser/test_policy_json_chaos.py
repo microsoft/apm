@@ -15,7 +15,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from .conftest import run_guarded
+
+pytestmark = pytest.mark.component
 
 
 def _write_json(path, obj):

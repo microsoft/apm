@@ -1,6 +1,6 @@
 """Unit tests for CommandLogger, InstallLogger, and _ValidationOutcome."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -10,6 +10,8 @@ from apm_cli.core.command_logger import (
     InstallLogger,
     _ValidationOutcome,
 )
+from apm_cli.core.remediation import DRY_RUN_INCOMPLETE
+from apm_cli.integration.cleanup import CleanupResult
 
 
 class TestValidationOutcome:
@@ -56,6 +58,15 @@ class TestCommandLogger:
         logger = CommandLogger("test")
         logger.start("Starting operation...")
         mock_info.assert_called_once_with("Starting operation...", symbol="running")
+
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_targets_are_announced_once_per_command(self, mock_info):
+        logger = CommandLogger("install")
+        logger.announce_targets("Targets: claude, copilot  (source: apm.yml)")
+        logger.announce_targets("Targets: copilot  (source: apm.yml)")
+        mock_info.assert_called_once_with(
+            "Targets: claude, copilot  (source: apm.yml)", symbol="info"
+        )
 
     @patch("apm_cli.core.command_logger._rich_success")
     def test_success(self, mock_success):
@@ -186,23 +197,62 @@ class TestCommandLogger:
         mock_info.assert_called_once_with("Processing 3 files...", symbol="info")
 
     @pytest.mark.parametrize("verbose", [False, True])
-    @pytest.mark.parametrize(("count", "noun"), [(1, "file"), (6, "files")])
+    @pytest.mark.parametrize(
+        ("deleted", "directories", "user_scope", "header", "listed"),
+        [
+            (["a.md"], [], False, "Cleaned 1 stale deployed file", ["a.md"]),
+            (["a.md", "b.md"], [], False, "Cleaned 2 stale deployed files", ["a.md", "b.md"]),
+            (
+                [".claude/skills/s/SKILL.md", ".claude/skills/s", ".claude/rules/r.md"],
+                [".claude/skills/s"],
+                False,
+                "Cleaned 2 stale deployed paths",
+                [".claude/rules/r.md", ".claude/skills/s/"],
+            ),
+            (
+                [".agents/skills/s"],
+                [".agents/skills/s"],
+                True,
+                "Cleaned 1 stale deployed path",
+                ["~/.agents/skills/s/"],
+            ),
+        ],
+        ids=["one-file", "two-files", "directory-folds-members", "user-scope"],
+    )
     @patch("apm_cli.core.command_logger._rich_info")
-    def test_stale_cleanup_describes_dependency_not_deletion_location(
-        self, mock_info, count, noun, verbose
+    def test_stale_cleanup_names_each_removed_path(
+        self, mock_info, deleted, directories, user_scope, header, listed, verbose
     ):
         logger = CommandLogger("test", verbose=verbose)
-        logger.stale_cleanup("/home/user/local-agent", count)
-        mock_info.assert_called_once_with(
-            f"Cleaned {count} stale deployed {noun} for /home/user/local-agent",
-            symbol="info",
+        cleanup = CleanupResult(
+            deleted=deleted, deleted_directories=directories, user_scope=user_scope
+        )
+        assert logger.stale_cleanup("/home/user/local-agent", cleanup) == len(listed)
+        assert mock_info.call_args_list == [
+            call(f"{header} for _local/local-agent:", symbol="info"),
+            *(call(f"  - {path}", soft_wrap=True) for path in listed),
+        ]
+
+    @pytest.mark.parametrize(
+        ("dep_key", "label"),
+        [
+            ("C:\\Users\\me\\local-agent", "_local/local-agent"),
+            ("~/pkgs/local-agent", "_local/local-agent"),
+            ("owner/repo", "owner/repo"),
+            ("<local .apm/>", "<local .apm/>"),
+        ],
+    )
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_stale_cleanup_never_prints_machine_paths(self, mock_info, dep_key, label):
+        CommandLogger("test").stale_cleanup(dep_key, CleanupResult(deleted=["a.md", "b.md"]))
+        assert mock_info.call_args_list[0] == call(
+            f"Cleaned 2 stale deployed files for {label}:", symbol="info"
         )
 
-    @pytest.mark.parametrize("count", [0, -1])
     @patch("apm_cli.core.command_logger._rich_info")
-    def test_stale_cleanup_nonpositive_count_silent(self, mock_info, count):
+    def test_stale_cleanup_without_deletions_is_silent(self, mock_info):
         logger = CommandLogger("test")
-        logger.stale_cleanup("/home/user/local-agent", count)
+        assert logger.stale_cleanup("/home/user/local-agent", CleanupResult()) == 0
         mock_info.assert_not_called()
 
     @patch("apm_cli.core.command_logger._rich_info")
@@ -390,8 +440,7 @@ class TestInstallLogger:
         logger.install_summary(apm_count=count, mcp_count=0, disposition=InstallDisposition.DRY_RUN)
         mock_warning.assert_called_once()
         assert mock_warning.call_args.args[0] == (
-            f"Dry run incomplete: {count} locally known APM {noun}. "
-            "Run 'apm install' without --dry-run to resolve the full plan."
+            f"Dry run incomplete: {count} locally known APM {noun}. {DRY_RUN_INCOMPLETE.sentence()}"
         )
 
     @patch("apm_cli.core.command_logger._rich_warning")
@@ -410,41 +459,36 @@ class TestInstallLogger:
     @patch("apm_cli.core.command_logger._rich_info")
     def test_stale_cleanup_visible_at_default_verbosity(self, mock_info, verbose):
         logger = InstallLogger(verbose=verbose)
-        logger.stale_cleanup("/home/user/local-agent", 3)
-        mock_info.assert_called_once_with(
-            "Cleaned 3 stale deployed files for /home/user/local-agent",
-            symbol="info",
+        logger.stale_cleanup("pkg", CleanupResult(deleted=["a.md", "b.md", "c.md"]))
+        assert mock_info.call_args_list[0] == call(
+            "Cleaned 3 stale deployed files for pkg:", symbol="info"
         )
         assert logger.stale_cleaned_total == 3
 
     @patch("apm_cli.core.command_logger._rich_info")
-    def test_stale_cleanup_singular_noun(self, mock_info):
+    def test_stale_cleanup_without_deletions_adds_nothing(self, mock_info):
         logger = InstallLogger()
-        logger.stale_cleanup("pkg", 1)
-        assert "1 stale deployed file " in mock_info.call_args[0][0]
-
-    @pytest.mark.parametrize("count", [0, -1])
-    @patch("apm_cli.core.command_logger._rich_info")
-    def test_stale_cleanup_zero_count_silent(self, mock_info, count):
-        logger = InstallLogger()
-        logger.stale_cleanup("pkg", count)
+        logger.stale_cleanup("pkg", CleanupResult())
         assert not mock_info.called
         assert logger.stale_cleaned_total == 0
 
     @patch("apm_cli.core.command_logger._rich_info")
-    def test_orphan_cleanup_visible_at_default_verbosity(self, mock_info):
+    def test_orphan_cleanup_names_paths_of_every_orphan(self, mock_info):
         logger = InstallLogger(verbose=False)
-        logger.orphan_cleanup(2)
-        assert mock_info.called
-        assert "no longer in apm.yml" in mock_info.call_args[0][0]
+        logger.orphan_cleanup([CleanupResult(deleted=["a.md"]), CleanupResult(deleted=["b.md"])])
+        assert mock_info.call_args_list == [
+            call("Cleaned 2 files from packages no longer in apm.yml:", symbol="info"),
+            call("  - a.md", soft_wrap=True),
+            call("  - b.md", soft_wrap=True),
+        ]
         assert logger.stale_cleaned_total == 2
 
     @patch("apm_cli.core.command_logger._rich_info")
     def test_stale_and_orphan_totals_accumulate(self, _info):
         logger = InstallLogger()
-        logger.stale_cleanup("pkg-a", 2)
-        logger.orphan_cleanup(3)
-        logger.stale_cleanup("pkg-b", 1)
+        logger.stale_cleanup("pkg-a", CleanupResult(deleted=["a", "b"]))
+        logger.orphan_cleanup([CleanupResult(deleted=["c", "d", "e"])])
+        logger.stale_cleanup("pkg-b", CleanupResult(deleted=["f"]))
         assert logger.stale_cleaned_total == 6
 
     @patch("apm_cli.core.command_logger._rich_success")
@@ -563,6 +607,62 @@ class TestInstallLogger:
         msg = mock_echo.call_args[0][0]
         assert "#v1.0" in msg
         assert "(cached)" in msg
+
+    @patch("apm_cli.core.command_logger._rich_echo")
+    def test_download_complete_prints_ref_once(self, mock_echo):
+        """A name that already spells the ref does not repeat it (#3994)."""
+        logger = InstallLogger()
+        logger.download_complete("host/o/r/plugins/x#main", ref="main", sha="30c0ac7f")
+        msg = mock_echo.call_args[0][0]
+        assert msg == "  [+] host/o/r/plugins/x #main @30c0ac7f"
+
+    @patch("apm_cli.core.command_logger._rich_echo")
+    def test_held_package_header_prints_on_release(self, mock_echo):
+        """Held header lines print only when released, in order (#3994)."""
+        logger = InstallLogger(verbose=True)
+        with logger.held_package_header() as held:
+            logger.download_complete("owner/repo", ref="v1", sha="abc12345")
+            logger.package_auth("GITHUB_TOKEN", "pat")
+        mock_echo.assert_not_called()
+        for emit in held:
+            emit()
+        assert [call.args[0] for call in mock_echo.call_args_list] == [
+            "  [+] owner/repo #v1 @abc12345",
+            "    Auth: GITHUB_TOKEN (pat)",
+        ]
+
+    @patch("apm_cli.core.command_logger._rich_echo")
+    def test_acquire_all_then_announce_keeps_each_header_above_its_tree(self, mock_echo):
+        """Acquiring every package first still prints each header block in order (#3994)."""
+        from types import SimpleNamespace
+
+        from apm_cli.install.template import announce_package, prepare_integration_materialization
+
+        logger = InstallLogger(verbose=True)
+
+        def source(name):
+            def acquire():
+                logger.download_complete(name, ref="v1", sha="abc12345")
+                logger.package_type_info("APM package")
+                return object()
+
+            return SimpleNamespace(ctx=SimpleNamespace(logger=logger), acquire=acquire)
+
+        sources = [source("a/one"), source("b/two")]
+        for src in sources:
+            prepare_integration_materialization(src)
+        assert mock_echo.call_count == 0
+        for src, name in zip(sources, ("one", "two"), strict=True):
+            announce_package(src)
+            mock_echo(f"  |-- {name} integrated")
+        assert [call.args[0] for call in mock_echo.call_args_list] == [
+            "  [+] a/one #v1 @abc12345",
+            "    Package type: APM package",
+            "  |-- one integrated",
+            "  [+] b/two #v1 @abc12345",
+            "    Package type: APM package",
+            "  |-- two integrated",
+        ]
 
     @patch("apm_cli.core.command_logger._rich_echo")
     def test_download_complete_legacy_ref_suffix(self, mock_echo):

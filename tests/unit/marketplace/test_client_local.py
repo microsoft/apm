@@ -21,11 +21,12 @@ import pytest
 from apm_cli.marketplace.client import (
     _fetch_local,
     _fetch_local_direct_read,
-    _validate_ref,
 )
 from apm_cli.marketplace.errors import MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
 from apm_cli.utils.git_env import get_git_executable
+
+pytestmark = pytest.mark.component
 
 
 def _local_source(name: str, path: Path, ref: str = "main") -> MarketplaceSource:
@@ -44,7 +45,7 @@ def test_fetch_local_bare_repo_via_git_show(tmp_path: Path) -> None:
     completed = subprocess.CompletedProcess(
         args=[], returncode=0, stdout=json.dumps(manifest).encode(), stderr=b""
     )
-    with patch("apm_cli.marketplace.client.subprocess.run", return_value=completed) as run_mock:
+    with patch("subprocess.run", return_value=completed) as run_mock:
         result = _fetch_local(_local_source("acme", bare), "marketplace.json")
 
     assert result == manifest
@@ -95,36 +96,6 @@ def test_fetch_local_symlink_escape_blocked(tmp_path: Path) -> None:
         _fetch_local_direct_read(_local_source("acme", repo), "marketplace.json", repo.resolve())
 
 
-@pytest.mark.parametrize(
-    "bad_ref",
-    [
-        "",
-        "-rf",
-        "main; rm -rf /",
-        "main:other",
-        "main with space",
-        "..",
-    ],
-)
-def test_validate_ref_rejects_unsafe_inputs(bad_ref: str) -> None:
-    with pytest.raises(MarketplaceFetchError, match="Invalid git ref"):
-        _validate_ref(bad_ref, "acme")
-
-
-@pytest.mark.parametrize(
-    "good_ref",
-    [
-        "main",
-        "v1.2.3",
-        "feature/local-mkt",
-        "release-2024.01",
-        "abc123",
-    ],
-)
-def test_validate_ref_accepts_safe_inputs(good_ref: str) -> None:
-    assert _validate_ref(good_ref, "acme") == good_ref
-
-
 def test_fetch_local_git_show_returns_none_when_path_missing(tmp_path: Path) -> None:
     """``git show`` reports 'does not exist' -> fetcher returns ``None`` so caller can probe next path."""
     bare = tmp_path / "mkt.git"
@@ -138,7 +109,7 @@ def test_fetch_local_git_show_returns_none_when_path_missing(tmp_path: Path) -> 
         stdout=b"",
         stderr=b"fatal: path 'marketplace.json' does not exist in 'main'",
     )
-    with patch("apm_cli.marketplace.client.subprocess.run", return_value=completed):
+    with patch("subprocess.run", return_value=completed):
         result = _fetch_local(_local_source("acme", bare), "marketplace.json")
 
     assert result is None

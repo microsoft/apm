@@ -1,0 +1,74 @@
+lockfile_version: '1'
+apm_version: 0.36.0
+dependencies:
+- repo_url: fixture-org/pkg-a
+  name: pkg-a
+  host: github.com
+  resolved_commit: 4c721fa9078bb80f22f3e8800b6b17434fc4717b
+  version: 0.1.0
+  package_type: apm_package
+  content_hash: sha256:6e971dde75e7b49584f094b7a693f2a060b0288d9342e4e35f1708d393450298
+- repo_url: fixture-org/pkg-b
+  name: pkg-b
+  host: github.com
+  resolved_commit: 8fc575cec633689da7bb88044c2ad2287d071ed3
+  version: 0.1.0
+  package_type: apm_package
+  content_hash: sha256:1df13340e3372bd09a6c815178690f009118c94fbc8e9e123a03e0d713599082
+- repo_url: fixture-org/bundle
+  name: bundle
+  host: github.com
+  resolved_commit: 4efda884acd77620fb5060b4235015e3dc133d43
+  version: 0.1.0
+  depth: 2
+  resolved_by: fixture-org/pkg-a
+  package_type: skill_bundle
+  deployed_files:
+  - .agents/skills/alpha
+  - .agents/skills/alpha/SKILL.md
+  - .agents/skills/beta
+  - .agents/skills/beta/SKILL.md
+  deployed_file_hashes:
+    .agents/skills/alpha/SKILL.md: sha256:90fba848e8f3c60cf011dc7eb6e2d17a6309be3b7b304c007eed3f52217cfa4e
+    .agents/skills/beta/SKILL.md: sha256:1d4847c85b72f6bf903ef965ba6f5160fc03f13c83595e451933213ce25902cc
+  content_hash: sha256:1fe9458d8019649e7b743601ba2a18c5216ba6d2874e226cf0e68963dfe2ac35
+  skill_subset:
+  - alpha
+  - beta
+deployments:
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/alpha
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/alpha/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: sha256:90fba848e8f3c60cf011dc7eb6e2d17a6309be3b7b304c007eed3f52217cfa4e
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/beta
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: null
+- kind: project-relative
+  target: copilot
+  value: .agents/skills/beta/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - fixture-org/bundle
+  active_owner: fixture-org/bundle
+  content_hash: sha256:1d4847c85b72f6bf903ef965ba6f5160fc03f13c83595e451933213ce25902cc

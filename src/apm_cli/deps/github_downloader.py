@@ -79,7 +79,7 @@ _log = logging.getLogger(__name__)
 # `--allow-protocol-fallback` section (Starlight site defined in
 # docs/astro.config.mjs).
 _PROTOCOL_FALLBACK_DOCS_URL = (
-    "https://microsoft.github.io/apm/guides/dependencies/#restoring-the-legacy-permissive-chain"
+    "https://microsoft.github.io/apm/consumer/install-packages/#transport-selection"
 )
 
 
@@ -315,7 +315,7 @@ class GitHubPackageDownloader:
         backend = backend_for(dep_ref, self.auth_resolver)
         if backend.is_github_family or backend.kind == "ado":
             return repository_url
-        return self._build_repo_url(dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref, token="")
+        return self._build_repo_url(dep_ref.repo_url, use_ssh=True, dep_ref=dep_ref)
 
     def _cache_git_env(
         self, dep_ref: DependencyReference, remote_url: str | None = None
@@ -348,8 +348,6 @@ class GitHubPackageDownloader:
                 dep_ref.repo_url,
                 use_ssh=False,
                 dep_ref=dep_ref,
-                token="",
-                auth_scheme=auth_ctx.auth_scheme if auth_ctx is not None else "basic",
             )
         if auth_ctx is None:
             auth_ctx = self.auth_resolver.resolve_for_remote(
@@ -496,9 +494,9 @@ class GitHubPackageDownloader:
 
     # --- Artifactory VCS archive download support ---
 
-    def _get_artifactory_headers(self) -> dict[str, str]:
+    def _get_artifactory_headers(self, *, scheme: str, host: str) -> dict[str, str]:
         """Backward-compat stub -- delegates to download strategies."""
-        return self._strategies.get_artifactory_headers()
+        return self._strategies.get_artifactory_headers(scheme=scheme, host=host)
 
     def _download_artifactory_archive(
         self,
@@ -649,8 +647,10 @@ class GitHubPackageDownloader:
         stream: bool = False,
         retry_throttles: bool = True,
         allow_netrc: bool = True,
+        redirect_base: str | None = None,
     ) -> requests.Response:
         """Backward-compat stub -- delegates to download strategies."""
+        extra = {} if redirect_base is None else {"redirect_base": redirect_base}
         return self._strategies.resilient_get(
             url,
             headers,
@@ -659,6 +659,7 @@ class GitHubPackageDownloader:
             stream=stream,
             retry_throttles=retry_throttles,
             allow_netrc=allow_netrc,
+            **extra,
         )
 
     def _sanitize_git_error(self, error_message: str) -> str:
@@ -669,18 +670,11 @@ class GitHubPackageDownloader:
         self,
         repo_ref: str,
         use_ssh: bool = False,
-        dep_ref: DependencyReference = None,
-        token: str | None = None,
-        auth_scheme: str = "basic",
+        *,
+        dep_ref: DependencyReference,
     ) -> str:
         """Backward-compat stub -- delegates to download strategies."""
-        return self._strategies.build_repo_url(
-            repo_ref,
-            use_ssh=use_ssh,
-            dep_ref=dep_ref,
-            token=token,
-            auth_scheme=auth_scheme,
-        )
+        return self._strategies.build_repo_url(repo_ref, use_ssh=use_ssh, dep_ref=dep_ref)
 
     def _clone_with_fallback(
         self,
@@ -1166,7 +1160,6 @@ class GitHubPackageDownloader:
                     dep_ref.repo_url,
                     use_ssh=False,
                     dep_ref=dep_ref,
-                    token="",
                 )
                 setup_env = self.auth_resolver.build_public_github_anonymous_git_env(
                     base_env=self.git_env,
@@ -1196,7 +1189,6 @@ class GitHubPackageDownloader:
                             dep_ref.repo_url,
                             use_ssh=False,
                             dep_ref=dep_ref,
-                            token="",
                         )
                         winning_url = authenticated_url
                     git_env = git_network_env(
@@ -1264,13 +1256,10 @@ class GitHubPackageDownloader:
 
             # Resolve per-dependency auth via AuthResolver.
             dep_auth_ctx = self._resolve_dep_auth_ctx(dep_ref)
-            dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
             auth_url = self._build_repo_url(
                 dep_ref.repo_url,
                 use_ssh=False,
                 dep_ref=dep_ref,
-                token="",
-                auth_scheme=dep_auth_scheme,
             )
             if dep_auth_ctx is not None:
                 env = self.auth_resolver.git_env_for_remote(
@@ -1445,6 +1434,7 @@ class GitHubPackageDownloader:
                         sparse_paths=[subdir_path],
                     )
                     _perf_logger.materialize_result(
+                        _dep_display,
                         sparse_applied=sparse_checkout_active(
                             "git",
                             _persistent_checkout,
@@ -1541,6 +1531,7 @@ class GitHubPackageDownloader:
                     ) from e
                 if _perf_logger is not None and getattr(_perf_logger, "verbose", False):
                     _perf_logger.materialize_result(
+                        _dep_display,
                         sparse_applied=sparse_checkout_active(
                             "git",
                             temp_clone_path,

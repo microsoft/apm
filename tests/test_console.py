@@ -5,10 +5,12 @@ import shutil
 import tempfile
 from unittest import TestCase  # noqa: F401
 
-import pytest  # noqa: F401
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli as app
+
+pytestmark = pytest.mark.component
 
 runner = CliRunner()
 

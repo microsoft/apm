@@ -101,69 +101,6 @@ class TestDownloadStrategiesDelegate:
             result = delegate.resilient_get("https://example.com/file", {}, max_retries=1)
             assert result.status_code == 429
 
-    def test_build_repo_url_github_https(self) -> None:
-        """build_repo_url constructs GitHub HTTPS URL correctly."""
-        mock_host = MagicMock()
-        mock_host.github_host = "github.com"
-        mock_host.github_token = "token123"
-        mock_host.auth_resolver = MagicMock()
-
-        delegate = DownloadDelegate(mock_host)
-
-        with patch("apm_cli.deps.download_strategies.backend_for") as mock_backend:
-            mock_backend_inst = MagicMock()
-            mock_backend_inst.kind = "github"
-            mock_backend_inst.is_github_family = True
-            mock_backend.return_value = mock_backend_inst
-
-            with patch("apm_cli.deps.download_strategies.build_https_clone_url") as mock_url:
-                mock_url.return_value = "https://token123@github.com/owner/repo.git"
-
-                result = delegate.build_repo_url("owner/repo", use_ssh=False)
-                assert "github.com/owner/repo" in result
-
-    def test_build_repo_url_github_ssh(self) -> None:
-        """build_repo_url constructs GitHub SSH URL correctly."""
-        mock_host = MagicMock()
-        mock_host.github_host = "github.com"
-        mock_host.auth_resolver = MagicMock()
-
-        delegate = DownloadDelegate(mock_host)
-
-        with patch("apm_cli.deps.download_strategies.backend_for") as mock_backend:
-            mock_backend_inst = MagicMock()
-            mock_backend_inst.kind = "github"
-            mock_backend_inst.is_github_family = True
-            mock_backend.return_value = mock_backend_inst
-
-            with patch("apm_cli.deps.download_strategies.build_ssh_url") as mock_url:
-                mock_url.return_value = "git@github.com:owner/repo.git"
-
-                result = delegate.build_repo_url("owner/repo", use_ssh=True)
-                assert "git@github.com" in result
-
-    def test_build_repo_url_suppresses_token_with_empty_string(self) -> None:
-        """build_repo_url respects empty string token suppression."""
-        mock_host = MagicMock()
-        mock_host.github_host = "github.com"
-        mock_host.github_token = "token123"
-        mock_host.auth_resolver = MagicMock()
-
-        delegate = DownloadDelegate(mock_host)
-
-        with patch("apm_cli.deps.download_strategies.backend_for") as mock_backend:
-            mock_backend_inst = MagicMock()
-            mock_backend_inst.kind = "github"
-            mock_backend_inst.is_github_family = True
-            mock_backend.return_value = mock_backend_inst
-
-            with patch("apm_cli.deps.download_strategies.build_https_clone_url") as mock_url:
-                mock_url.return_value = "https://github.com/owner/repo.git"
-
-                result = delegate.build_repo_url("owner/repo", token="")
-                # Should not contain token
-                assert "token123" not in result
-
 
 class TestGitHubDownloaderValidation:
     """Test github_downloader_validation helpers."""
@@ -240,7 +177,7 @@ class TestGitHubDownloaderValidation:
 
 
 class TestBareCache:
-    """Test bare_cache functions with mocked git."""
+    """Test bare_cache transport planning and bare-repo materialization."""
 
     def test_bare_clone_with_fallback_executes_transport(self, tmp_path: Path) -> None:
         """bare_clone_with_fallback calls transport executor."""
@@ -262,27 +199,28 @@ class TestBareCache:
         mock_executor.assert_called_once()
 
     def test_materialize_from_bare_creates_checkout(self, tmp_path: Path) -> None:
-        """materialize_from_bare creates working tree from bare repo."""
-        # Create a minimal bare repo structure
-        bare_dir = tmp_path / "bare.git"
-        bare_dir.mkdir()
-        (bare_dir / "config").write_text("[core]\n\tbare = true\n")
+        """materialize_from_bare creates a link-materialized tree from a real bare repo."""
+        from tests.utils.git_link_fixture import (
+            EXPECTED_PKG,
+            bare_clone,
+            build_link_origin,
+            tree_bytes,
+        )
 
+        origin, sha = build_link_origin(tmp_path)
+        bare_dir = bare_clone(origin, tmp_path / "bare.git")
         target = tmp_path / "working"
 
-        with patch("apm_cli.deps.bare_cache.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="abcd1234\n")
+        result = materialize_from_bare(
+            bare_dir,
+            target,
+            ref="main",
+            env={},
+            known_sha=sha,
+        )
 
-            result = materialize_from_bare(
-                bare_dir,
-                target,
-                ref="main",
-                env={},
-                known_sha="abcd1234",
-            )
-
-            # Should return the known SHA
-            assert result == "abcd1234"
+        assert result == sha
+        assert tree_bytes(target / "pkg") == EXPECTED_PKG
 
 
 class TestPackageValidator:

@@ -35,7 +35,7 @@ marketplace:
     monkeypatch.setattr(
         AuthResolver,
         "resolve",
-        lambda _self, host, org=None: AuthContext(
+        lambda _self, host, org=None, **_kwargs: AuthContext(
             token=bearer,
             source="AAD_BEARER_AZ_CLI",
             token_type="unknown",
@@ -72,7 +72,7 @@ marketplace:
             stderr="",
         )
 
-    monkeypatch.setattr("apm_cli.marketplace.ref_resolver.subprocess.run", fake_git)
+    monkeypatch.setattr("subprocess.run", fake_git)
 
     result = CliRunner().invoke(marketplace, ["check", "--verbose"])
 

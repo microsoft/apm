@@ -44,6 +44,8 @@ Flags
   for multiple targets. The generated command help lists every accepted
   value. Overrides ``apm.yml targets:``, the saved config target, and
   auto-detection.
+* ``--legacy-skill-paths`` -- keep per-client skill paths instead of
+  ``.agents/skills/`` (env fallback: ``APM_LEGACY_SKILL_PATHS``).
 
 These flags make ``apm update`` a strict superset of the deprecated
 ``apm deps update`` (issue #1525). ``apm install --update`` remains the
@@ -53,6 +55,7 @@ swiss-army-knife escape hatch for the rest of the install surface.
 from __future__ import annotations
 
 import copy
+import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,11 +63,20 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from apm_cli.core.remediation import (
+    CLI_BINARY_OUTDATED,
+    UPDATE_UNDECLARED_PACKAGE,
+    USER_MANIFEST_MISSING,
+)
+from apm_cli.core.scope import manifest_file
+
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger
+from ..core.deprecations import UPDATE_REFRESHES_DEPENDENCIES, deprecation_message
 from ..core.target_catalog import target_help_fragment
 from ..core.target_detection import TargetParamType
 from ..deps.github_downloader import GitHubPackageDownloader
+from ..deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from ..deps.revision_pins import (
     RemoteRefDownloader,
     RevisionPinResolutionError,
@@ -82,9 +94,15 @@ from ..install.errors import (
     RequiredIntegrationError,
 )
 from ..install.locking import serialized_lifecycle
+from ..install.lsp.integration import LspPreflight
 from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
-from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_packages
+from ._helpers import (
+    UnknownPackageError,
+    _find_apm_yml,
+    resolve_requested_packages,
+    trust_transitive_mcp_option,
+)
 
 if TYPE_CHECKING:
     from ..core.command_logger import CommandLogger
@@ -102,6 +120,7 @@ class _UpdateRunState:
     proceeded: bool = False
     revision_pins_applied: bool = False
     cache_rehydration_requested: bool = False
+    gate_retirement: bool = False
 
 
 def _stdin_is_tty() -> bool:
@@ -133,6 +152,133 @@ def _module_cache_needs_rehydration(
         if install_path.exists():
             return False
     return has_locked_dependency
+
+
+def _locked_copy_contradicts_lock(lockfile: LockFile | None, modules_dir: Path) -> bool:
+    """Whether a materialized locked package no longer matches its ``content_hash``.
+
+    An update with no ref change still runs install when a copy contradicts
+    the lock, so install's locked-source verdict
+    (:func:`~apm_cli.install.source_helpers.locked_content_mismatch`) re-fetches
+    it or refuses, as ``apm install``, ``--frozen`` and ``audit --ci`` do (#4385).
+    """
+    if lockfile is None:
+        return False
+    from apm_cli.install.source_helpers import locked_content_mismatch
+
+    for key, dependency in lockfile.dependencies.items():
+        # Local packages re-copy from their source on every install, so their
+        # copy carries no locked-source verdict (as audit's replay skips them).
+        if key == "." or not dependency.content_hash or dependency.source == "local":
+            continue
+        install_path = dependency.to_dependency_ref().get_install_path(modules_dir)
+        if install_path.is_dir() and locked_content_mismatch(
+            key, dependency, install_path, lockfile=lockfile
+        ):
+            return True
+    return False
+
+
+def _executables_need_reconcile(
+    lockfile: LockFile | None,
+    modules_dir: Path,
+    scope: InstallScope,
+    apm_package: Any,
+) -> bool:
+    """Return whether a recorded executables decision no longer holds (#3958).
+
+    Lets the no-change short-circuit still run the install gate after an
+    ``apm approve`` / ``apm deny`` so it deploys or retires executables.
+    """
+    if lockfile is None:
+        return False
+    from apm_cli.core.scope import InstallScope as _Scope
+    from apm_cli.core.scope import get_deploy_root, get_manifest_path, manifest_root
+    from apm_cli.install.exec_gate import lock_exec_decisions_stale
+    from apm_cli.integration.targets import resolve_audit_targets
+
+    def _policy() -> Any:
+        from apm_cli.install.exec_gate import ExecPolicyUnavailable
+        from apm_cli.policy.outcome_routing import classify_project_policy
+
+        route = classify_project_policy(
+            manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER)
+        )
+        # A blocking or unresolved outcome fails toward running the install
+        # gate, which routes the same outcome and reports it.
+        if route.blocks or route.unresolved:
+            raise ExecPolicyUnavailable(route.outcome)
+        return route.policy
+
+    return lock_exec_decisions_stale(
+        lockfile,
+        modules_dir,
+        get_manifest_path(scope),
+        policy_provider=_policy,
+        targets=resolve_audit_targets(
+            get_deploy_root(scope), user_scope=scope is _Scope.USER, lockfile=lockfile
+        ),
+        fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+    )
+
+
+def _gate_retirements_pending(
+    lockfile: LockFile | None, modules_dir: Path, scope: InstallScope, apm_package: Any
+) -> bool:
+    """Whether the current gates no longer allow something deployed (#4444, #4445).
+
+    Asked once the resolver restaged local packages, so a changed local
+    definition is judged as install judges it: a policy-denied dependency or
+    a server install's MCP admission now parks also runs the install gate,
+    which refuses or retires it.
+    """
+    from apm_cli.core.scope import InstallScope as _Scope
+    from apm_cli.core.scope import get_deploy_root
+    from apm_cli.install.exec_gate import gate_retirements
+
+    try:
+        retirements = gate_retirements(
+            lockfile,
+            modules_dir,
+            apm_package,
+            get_deploy_root(scope),
+            user_scope=scope is _Scope.USER,
+        )
+    except (OSError, ValueError):
+        return False
+    # An unresolved or blocking org policy is the policy preflight's outcome.
+    return retirements is not None and any(retirements)
+
+
+def _reconcile_note(exec_reconcile_required: bool, gate_retirement: bool) -> str | None:
+    """The info line for an update that reconciles deployed state without moving refs."""
+    if gate_retirement:
+        return "Re-checking deployed items against the current gates, as install does."
+    if exec_reconcile_required:
+        return (
+            "Executables approvals changed since the last install; "
+            "reconciling deployed executables."
+        )
+    return None
+
+
+def _enforce_policy_without_changes(
+    apm_package: Any, scope: InstallScope, logger: InstallLogger, dry_run: bool
+) -> None:
+    """Apply org policy to the declared dependencies when an update changes nothing."""
+    from apm_cli.core.scope import InstallScope as _Scope
+    from apm_cli.core.scope import get_deploy_root, manifest_root
+    from apm_cli.install.pipeline_entry import enforce_declared_policy
+
+    from ..models.dependency.replacement import project_manifest_dependencies
+
+    enforce_declared_policy(
+        manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER),
+        list(project_manifest_dependencies(apm_package)),
+        list(apm_package.get_all_mcp_dependencies()) or None,
+        logger,
+        dry_run=dry_run,
+    )
 
 
 def _build_revision_pin_downloader() -> RemoteRefDownloader:
@@ -235,6 +381,7 @@ def _run_mcp_lsp_integration(
     effective_allow_executables: dict[str, dict[str, bool]] | None = None,
     effective_allow_resolved: bool = False,
     force: bool = False,
+    trust_transitive_mcp: bool = False,
 ) -> None:
     """Reconcile MCP and LSP servers against the current apm.yml.
 
@@ -247,12 +394,13 @@ def _run_mcp_lsp_integration(
     """
     from apm_cli.core.scope import InstallScope, get_modules_dir
     from apm_cli.install.lsp import run_lsp_integration
+    from apm_cli.install.lsp.integration import lsp_target_config, prepare_lsp_integration
     from apm_cli.install.mcp import run_mcp_integration
     from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
     from apm_cli.policy.install_preflight import PolicyBlockError
 
     clear_apm_yml_cache()
-    apm_package = APMPackage.from_apm_yml(Path("apm.yml"))
+    apm_package = APMPackage.from_apm_yml(manifest_file(Path(".")))
     effective_target = target_decision.value if target_decision is not None else None
 
     old_mcp_servers: set = set()
@@ -264,17 +412,29 @@ def _run_mcp_lsp_integration(
         old_mcp_configs = dict(existing_lock.mcp_configs)
         old_mcp_provenance = dict(existing_lock.mcp_config_provenance)
         old_mcp_target_servers = dict(existing_lock.mcp_target_servers)
-    trusted_transitive_configs = {
-        name: (old_mcp_provenance[name], config)
-        for name, config in old_mcp_configs.items()
-        if name in old_mcp_provenance and config.get("registry") is False
-    }
 
     apm_modules_path = get_modules_dir(scope)
     user_scope = scope is InstallScope.USER
+    # Declared LSP without a capable target fails before any MCP write (#3727).
+    apm_config = lsp_target_config(apm_package)
+    prepared_lsp = prepare_lsp_integration(
+        apm_package=apm_package,
+        apm_modules_path=apm_modules_path,
+        lock_path=lock_path,
+        project_root=project_root,
+        should_install=True,
+        logger=logger,
+        existing_lock=existing_lock,
+        user_scope=user_scope,
+        target_context=(apm_config, effective_target, scope),
+        target_decision=target_decision,
+        diagnostics=diagnostics,
+        executable_context=(effective_allow_executables, effective_allow_resolved),
+    )
+    prepared_lsp.require_capable_target()
 
     try:
-        _mcp_count, mcp_apm_config = run_mcp_integration(
+        _mcp_count, _mcp_apm_config = run_mcp_integration(
             apm_package=apm_package,
             mcp_deps=apm_package.get_all_mcp_dependencies(),
             apm_modules_path=apm_modules_path,
@@ -283,7 +443,7 @@ def _run_mcp_lsp_integration(
             old_mcp_configs=old_mcp_configs,
             old_mcp_provenance=old_mcp_provenance,
             old_mcp_target_servers=old_mcp_target_servers,
-            trusted_transitive_configs=trusted_transitive_configs,
+            trust_transitive_mcp=trust_transitive_mcp,
             project_root=project_root,
             user_scope=user_scope,
             should_install=True,
@@ -293,12 +453,11 @@ def _run_mcp_lsp_integration(
             explicit_target=effective_target,
             target_decision=target_decision,
             scope=scope,
+            executable_context=(effective_allow_executables, effective_allow_resolved),
+            pre_install_lock=existing_lock,
         )
     except PolicyBlockError:
-        logger.error(
-            "MCP server(s) blocked by org policy. "
-            "APM packages remain installed; MCP configs were NOT written."
-        )
+        logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
         logger.render_summary()
         sys.exit(1)
 
@@ -312,13 +471,31 @@ def _run_mcp_lsp_integration(
         should_install=True,
         logger=logger,
         diagnostics=diagnostics,
-        target_context=(mcp_apm_config, effective_target, scope),
+        target_context=(apm_config, effective_target, scope),
         target_decision=target_decision,
         fail_on_write_error=True,
         effective_allow_executables=effective_allow_executables,
         effective_allow_resolved=effective_allow_resolved,
         force=force,
+        prepared=prepared_lsp,
     )
+
+
+def _resolve_only_packages(packages: tuple[str, ...], declared: list) -> list[str] | None:
+    """Resolve named packages to declared keys, or refuse with exit 1."""
+    try:
+        return resolve_requested_packages(packages, declared)
+    except UnknownPackageError as e:
+        _rich_error(f"Package '{e.token}' not found in apm.yml")
+        if e.available:
+            _rich_info(f"Available: {', '.join(e.available)}", symbol="info")
+        else:
+            _rich_info(
+                "No APM dependencies are declared. "
+                + UPDATE_UNDECLARED_PACKAGE.bind(package=shlex.quote(e.token)).sentence(),
+                symbol="info",
+            )
+        sys.exit(1)
 
 
 def _handle_service_only_update(
@@ -330,6 +507,7 @@ def _handle_service_only_update(
     logger: InstallLogger,
     verbose: bool,
     force: bool,
+    trust_transitive_mcp: bool = False,
 ) -> bool:
     """Reconcile service-only manifests and return whether update is complete."""
     if apm_package.has_any_apm_dependencies():
@@ -349,6 +527,7 @@ def _handle_service_only_update(
     )
     if not has_services:
         logger.info("No APM dependencies declared in apm.yml -- nothing to update.")
+        _explain_local_bundles(scope, apm_package, logger)
         return True
     if dry_run:
         logger.dry_run_notice("would reconcile MCP/LSP configuration; no files written")
@@ -372,13 +551,98 @@ def _handle_service_only_update(
             logger=logger,
             verbose=verbose,
             force=force,
+            trust_transitive_mcp=trust_transitive_mcp,
         )
     except RequiredIntegrationError as exc:
         logger.error(str(exc))
         logger.render_summary()
         sys.exit(1)
     logger.success("MCP/LSP configuration reconciled. No APM dependencies to update.")
+    _explain_local_bundles(scope, apm_package, logger)
     return True
+
+
+def _explain_local_bundles(scope: Any, apm_package: Any, logger: InstallLogger) -> None:
+    """Name the installed local bundles 'apm update' leaves untouched (#4318)."""
+    from apm_cli.install.local_bundle_hook_trust import installed_local_bundles
+    from apm_cli.install.outcome import (
+        local_bundle_parked_next_step,
+        local_bundle_update_next_step,
+    )
+
+    names, file_count = installed_local_bundles(scope, apm_package)
+    if names or file_count:
+        logger.info(local_bundle_update_next_step(names, file_count, scope))
+    for slug, exec_types in _parked_local_bundles(scope, apm_package):
+        logger.info(local_bundle_parked_next_step(slug, exec_types, scope))
+
+
+def _parked_local_bundles(scope: Any, apm_package: Any) -> list[tuple[str, tuple[str, ...]]]:
+    """Installed local bundles whose executables the current trust still parks (#4441)."""
+    from apm_cli.core.scope import get_apm_dir, get_deploy_root, is_user_scope
+    from apm_cli.install.local_bundle_pending import pending_bundles
+    from apm_cli.security.executables import (
+        package_type_approved,
+        resolve_project_exec_allow_map,
+    )
+
+    allow = resolve_project_exec_allow_map(
+        get_deploy_root(scope), apm_package, user_scope=is_user_scope(scope), no_policy=True
+    )
+    return [
+        (bundle.slug, bundle.exec_types)
+        for bundle in pending_bundles(
+            get_apm_dir(scope), lambda key, kind: package_type_approved(allow, (key,), kind)
+        )
+    ]
+
+
+def _no_ref_change_summary(exec_reconciled: bool, provenance_restored: bool) -> str:
+    """The success line of an update that reconciled state without moving a ref."""
+    if exec_reconciled:
+        return "Reconciled executables without changing refs."
+    if provenance_restored:
+        return "Recorded restored marketplace provenance without changing refs."
+    return "Restored dependency cache without changing refs."
+
+
+def _reverified_lock(lockfile, lock_path: Path, logger, *, dry_run: bool, marketplaces=None):
+    """Re-verify locked marketplace provenance before planning; fail closed (#4228).
+
+    *marketplaces* is the root project's ``marketplaces:`` map (``None`` at user
+    scope): its names resolve through apm.yml, not a registration (#2903).
+
+    Returns ``(lockfile, restored)``: the lockfile with restored rows applied
+    in memory, and their provenance for the lockfile phase. The update's one
+    lockfile write records it (``LockfileBuilder`` via
+    ``marketplace_provenance``, #4430); a failed update writes nothing.
+    """
+    from apm_cli.marketplace.catalog_origin import locked_provenance, reverify_locked_provenance
+    from apm_cli.marketplace.client import catalog_cache_writes_on_success
+    from apm_cli.marketplace.errors import MarketplaceError
+    from apm_cli.marketplace.project_marketplaces import bind_project_marketplaces
+
+    rows = lockfile.dependencies if lockfile is not None else {}
+    before = {key: locked_provenance(dep) for key, dep in rows.items()}
+    try:
+        # A refused re-verification leaves the catalog cache unchanged; a
+        # completed one persists what it fetched, validators included, and a
+        # dry run persists nothing (#4484).
+        with (
+            bind_project_marketplaces(marketplaces),
+            catalog_cache_writes_on_success(commit=not dry_run),
+        ):
+            restored = reverify_locked_provenance(lockfile, manifest_file(lock_path.parent))
+    except MarketplaceError as exc:
+        _rich_error(str(exc), symbol="error")
+        sys.exit(1)
+    for row in restored:
+        logger.info(f"Restored marketplace provenance for {row} from its catalog.")
+    return lockfile, {
+        key: current
+        for key, dep in rows.items()
+        if (current := locked_provenance(dep)) != before.get(key)
+    }
 
 
 @click.command(
@@ -436,7 +700,10 @@ def _handle_service_only_update(
     "check_only",
     is_flag=True,
     default=False,
-    help="(Deprecated) Forwarded to 'apm self-update --check' when run outside an apm.yml project; rejected inside a project.",
+    help=(
+        "(Deprecated) Forwarded to 'apm self-update --check' (ignored with --global). "
+        "Use 'apm update --dry-run' to preview dependency changes."
+    ),
     hidden=True,
 )
 @click.option(
@@ -451,6 +718,17 @@ def _handle_service_only_update(
         "(--target > apm.yml targets: > apm config set target ... > auto-detect)."
     ),
 )
+@click.option(
+    "--legacy-skill-paths",
+    "legacy_skill_paths",
+    is_flag=True,
+    default=False,
+    help=(
+        "Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of "
+        "the shared .agents/skills/ directory. Env: APM_LEGACY_SKILL_PATHS=1."
+    ),
+)
+@trust_transitive_mcp_option
 @click.pass_context
 @serialized_lifecycle
 def update(
@@ -464,6 +742,8 @@ def update(
     parallel_downloads: int,
     check_only: bool,
     target: str | list[str] | None,
+    legacy_skill_paths: bool,
+    trust_transitive_mcp: bool,
 ) -> None:
     """Refresh APM dependencies to the latest matching refs.
 
@@ -474,17 +754,17 @@ def update(
         apm update org/pkg-a org/pkg-b  # Refresh only the named packages
         apm update -g                   # Refresh user-scope deps (~/.apm/)
     """
-    from apm_cli.core.scope import InstallScope, get_apm_dir
+    from apm_cli.core.scope import InstallScope, get_manifest_path
+    from apm_cli.integration.targets import should_use_legacy_skill_paths
 
     if global_:
         # User scope: operate on $APM_HOME/apm.yml. The cwd manifest walk and
         # the self-update back-compat shim apply only to project scope.
         scope = InstallScope.USER
-        manifest_path = get_apm_dir(scope) / "apm.yml"
+        manifest_path = get_manifest_path(scope)
         if not manifest_path.is_file():
             _rich_error(
-                f"No apm.yml found in {manifest_path.parent}. "
-                "Run 'apm install -g <org/repo>' to create one."
+                f"No apm.yml found in {manifest_path.parent}. {USER_MANIFEST_MISSING.sentence()}"
             )
             sys.exit(1)
         if check_only:
@@ -506,14 +786,10 @@ def update(
             if target is not None:
                 _rich_warning(
                     "--target is ignored when forwarding to 'apm self-update' "
-                    "(no apm.yml found). Use 'apm self-update' directly.",
+                    f"(no apm.yml found). {CLI_BINARY_OUTDATED.sentence()}",
                     symbol="warning",
                 )
-            _rich_warning(
-                "'apm update' refreshes APM dependencies. To update the CLI binary, "
-                "use 'apm self-update'. Forwarding for back-compat (deprecated).",
-                symbol="warning",
-            )
+            _rich_warning(deprecation_message("update-self-updater"), symbol="warning")
             ctx.invoke(_self_update_cmd, check=check_only)
             return
 
@@ -526,13 +802,7 @@ def update(
                     "Use 'apm update --dry-run' to preview dependency changes.",
                     symbol="warning",
                 )
-            _rich_warning(
-                "'apm update --check' is the deprecated self-updater shim. "
-                "Use 'apm update --dry-run' to preview dependency changes, "
-                "or 'apm self-update --check' to check for a new CLI binary. "
-                "Forwarding for back-compat (deprecated).",
-                symbol="warning",
-            )
+            _rich_warning(deprecation_message("update-check"), symbol="warning")
             ctx.invoke(_self_update_cmd, check=True)
             return
 
@@ -553,9 +823,12 @@ def update(
         packages=packages,
         force=force,
         parallel_downloads=parallel_downloads,
+        legacy_skill_paths=legacy_skill_paths or should_use_legacy_skill_paths(),
+        trust_transitive_mcp=trust_transitive_mcp,
     )
 
 
+@lockfile_writer(LockfileWriter.UPDATE)
 def _run_dep_update(
     *,
     assume_yes: bool,
@@ -567,22 +840,30 @@ def _run_dep_update(
     packages: tuple[str, ...] = (),
     force: bool = False,
     parallel_downloads: int = 4,
+    legacy_skill_paths: bool = False,
+    trust_transitive_mcp: bool = False,
 ) -> None:
     """Serialize update with every other mutation of the same workspace."""
     from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.lockfile_generator import require_current_cli
+    from apm_cli.install.service import InstallService
 
     effective_scope = scope or InstallScope.PROJECT
-    _run_dep_update_locked(
-        assume_yes=assume_yes,
-        dry_run=dry_run,
-        verbose=verbose,
-        project_root=project_root,
-        target=target,
-        scope=effective_scope,
-        packages=packages,
-        force=force,
-        parallel_downloads=parallel_downloads,
-    )
+    require_current_cli(project_root or Path.cwd(), command="apm update")
+    with InstallService.catalog_freshness(update_refs=True, refresh=False):
+        _run_dep_update_locked(
+            assume_yes=assume_yes,
+            dry_run=dry_run,
+            verbose=verbose,
+            project_root=project_root,
+            target=target,
+            scope=effective_scope,
+            packages=packages,
+            force=force,
+            parallel_downloads=parallel_downloads,
+            legacy_skill_paths=legacy_skill_paths,
+            trust_transitive_mcp=trust_transitive_mcp,
+        )
 
 
 def _run_dep_update_locked(
@@ -596,6 +877,8 @@ def _run_dep_update_locked(
     packages: tuple[str, ...] = (),
     force: bool = False,
     parallel_downloads: int = 4,
+    legacy_skill_paths: bool = False,
+    trust_transitive_mcp: bool = False,
 ) -> None:
     """Core ``apm update`` flow: resolve, plan, prompt, install.
 
@@ -605,8 +888,9 @@ def _run_dep_update_locked(
     against the discovered project root, not the caller's cwd.
 
     ``scope`` selects project vs user deployment (defaults to project).
-    ``packages`` narrows the refresh to the named dependencies; ``force``
-    and ``parallel_downloads`` mirror the install-pipeline flags.
+    ``packages`` narrows the refresh to the named dependencies; ``force``,
+    ``parallel_downloads`` and ``legacy_skill_paths`` mirror the
+    install-pipeline flags.
     """
     import os
 
@@ -620,8 +904,7 @@ def _run_dep_update_locked(
     # the CLI binary.
     if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
         _rich_info(
-            "'apm update' refreshes APM dependencies. "
-            "Use 'apm self-update' to update the CLI binary.",
+            f"{UPDATE_REFRESHES_DEPENDENCIES} {CLI_BINARY_OUTDATED.sentence()}",
             symbol="info",
         )
 
@@ -637,12 +920,24 @@ def _run_dep_update_locked(
         scope = InstallScope.PROJECT
 
     try:
-        apm_package = APMPackage.from_apm_yml(Path("apm.yml"))
+        apm_package = APMPackage.from_apm_yml(manifest_file(Path(".")))
     except (FileNotFoundError, ValueError) as e:
         _rich_error(f"Failed to parse apm.yml: {e}")
         sys.exit(1)
 
-    logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=bool(packages))
+    logger = InstallLogger(
+        verbose=verbose, dry_run=dry_run, partial=bool(packages), command="update"
+    )
+    from ..models.dependency.replacement import project_manifest_dependencies
+
+    # Map any positional [PACKAGES] to canonical dependency keys for the
+    # engine's only_packages filter; None means "refresh everything". A named
+    # package must be declared even when apm.yml declares no APM dependencies
+    # (#4263), so this runs before any reconcile or service-only path.
+    only_packages = _resolve_only_packages(packages, project_manifest_dependencies(apm_package))
+    from apm_cli.install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
+
+    reconcile_scope_bundle_hooks(scope, apm_package, logger=logger, dry_run=dry_run)
     if _handle_service_only_update(
         apm_package=apm_package,
         scope=scope,
@@ -651,6 +946,7 @@ def _run_dep_update_locked(
         logger=logger,
         verbose=verbose,
         force=force,
+        trust_transitive_mcp=trust_transitive_mcp,
     ):
         return
 
@@ -658,21 +954,7 @@ def _run_dep_update_locked(
     # pipeline must resolve against the new SHAs, but declined/dry-run paths
     # should not mutate the APMPackage instance parsed from the on-disk manifest.
     staged_apm_package = copy.deepcopy(apm_package)
-    from ..models.dependency.replacement import project_manifest_dependencies
-
     all_declared_deps = project_manifest_dependencies(staged_apm_package)
-
-    # Map any positional [PACKAGES] to canonical dependency keys for the
-    # engine's only_packages filter; None means "refresh everything".
-    try:
-        only_packages = resolve_requested_packages(
-            packages,
-            all_declared_deps,
-        )
-    except UnknownPackageError as e:
-        _rich_error(f"Package '{e.token}' not found in apm.yml")
-        _rich_info(f"Available: {', '.join(e.available)}", symbol="info")
-        sys.exit(1)
 
     revision_pin_resolution = _resolve_and_stage_revision_pin_updates(
         all_declared_deps=all_declared_deps,
@@ -689,7 +971,7 @@ def _run_dep_update_locked(
         if not revision_pin_updates or plan_state.revision_pins_applied:
             return
         try:
-            apply_revision_pin_updates(Path("apm.yml"), revision_pin_updates)
+            apply_revision_pin_updates(manifest_file(Path(".")), revision_pin_updates)
         except Exception as e:
             _rich_error(f"Failed to update apm.yml revision pins: {e}")
             sys.exit(1)
@@ -729,13 +1011,21 @@ def _run_dep_update_locked(
             _rich_echo(revision_plan)
             _rich_echo("")
 
-        if plan.has_changes:
-            rendered = render_plan_text(plan, verbose=verbose)
+        # A moved revision pin is already listed above; list each package once (#4208).
+        unpinned_plan = plan.excluding(update.dep_key for update in revision_pin_updates)
+        if unpinned_plan.has_changes:
+            rendered = render_plan_text(unpinned_plan, verbose=verbose)
             if rendered:
                 _rich_echo(rendered)
                 _rich_echo("")
         elif not revision_pin_updates:
-            if not _cache_rehydration_required:
+            plan_state.gate_retirement = not _exec_reconcile_required and (
+                _gate_retirements_pending(_existing_lock, _modules_dir, scope, staged_apm_package)
+            )
+            reconcile_note = _reconcile_note(_exec_reconcile_required, plan_state.gate_retirement)
+            if reconcile_note:
+                logger.info(reconcile_note)
+            elif not _cache_rehydration_required and not _restored_provenance:
                 retained_count = len(revision_pin_resolution.skips)
                 if retained_count:
                     noun = "pin" if retained_count == 1 else "pins"
@@ -748,12 +1038,15 @@ def _run_dep_update_locked(
                         "All dependencies already at their latest matching refs.",
                         symbol="check",
                     )
+                # Nothing to change still judges the installed set against org
+                # policy, as install does (#4458).
+                _enforce_policy_without_changes(apm_package, scope, logger, dry_run)
                 return False
             plan_state.cache_rehydration_requested = True
 
-        if revision_pin_updates and plan.has_changes:
+        if revision_pin_updates and unpinned_plan.has_changes:
             pin_count = len(revision_pin_updates)
-            dep_count = len(plan.entries)
+            dep_count = len(unpinned_plan.changed_entries)
             pin_noun = "pin rewrite" if pin_count == 1 else "pin rewrites"
             dep_noun = "dependency change" if dep_count == 1 else "dependency changes"
             logger.info(f"Total: {pin_count} revision {pin_noun} + {dep_count} {dep_noun}.")
@@ -785,10 +1078,21 @@ def _run_dep_update_locked(
     _modules_dir = get_modules_dir(scope)
     _mcp_lsp_project_root = get_deploy_root(scope)
     _lock_path = get_lockfile_path(_apm_dir)
-    _existing_lock = LockFile.read(_lock_path)
+    _existing_lock, _restored_provenance = _reverified_lock(
+        LockFile.read(_lock_path),
+        _lock_path,
+        logger,
+        dry_run=dry_run,
+        marketplaces=None
+        if scope is InstallScope.USER
+        else getattr(apm_package, "marketplaces", None),
+    )
     _cache_rehydration_required = _module_cache_needs_rehydration(
         _existing_lock,
         _modules_dir,
+    ) or _locked_copy_contradicts_lock(_existing_lock, _modules_dir)
+    _exec_reconcile_required = not _cache_rehydration_required and _executables_need_reconcile(
+        _existing_lock, _modules_dir, scope, apm_package
     )
 
     try:
@@ -811,7 +1115,12 @@ def _run_dep_update_locked(
             parallel_downloads=parallel_downloads,
             logger=logger,
             plan_callback=_plan_callback,
+            marketplace_provenance=_restored_provenance or None,
             target=target,
+            legacy_skill_paths=legacy_skill_paths,
+            lsp_preflight=LspPreflight(),
+            trust_transitive_mcp=trust_transitive_mcp,
+            post_install_after_services=True,
         )
     except FrozenInstallError as e:
         _rich_error(str(e))
@@ -828,8 +1137,12 @@ def _run_dep_update_locked(
             _rich_echo(e.diagnostic_context)
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
-    except (DirectDependencyError, PolicyViolationError) as e:
-        _rich_error(str(e))
+    except PolicyViolationError as e:
+        logger.render_summary()
+        _rich_error(f"{e} Nothing was written.", symbol="error", err=True)
+        sys.exit(1)
+    except (DirectDependencyError, RequiredIntegrationError) as e:
+        logger.error(str(e))
         sys.exit(1)
     except click.UsageError:
         raise
@@ -887,6 +1200,7 @@ def _run_dep_update_locked(
                 effective_allow_executables=getattr(result, "exec_allow_map", None),
                 effective_allow_resolved=getattr(result, "exec_allow_resolved", False),
                 force=force,
+                trust_transitive_mcp=trust_transitive_mcp,
             )
         except RequiredIntegrationError as e:
             logger.error(str(e))
@@ -899,7 +1213,15 @@ def _run_dep_update_locked(
                 logger.info("Run with --verbose for detailed diagnostics.")
             sys.exit(1)
 
+    post_install = getattr(result, "post_install", None)
+    if post_install is not None:
+        post_install()
+
     if plan_state.proceeded:
+        # Name files cleanup kept (#3701) and other install warnings once.
+        update_diagnostics = getattr(result, "diagnostics", None)
+        if update_diagnostics is not None and update_diagnostics.has_diagnostics:
+            update_diagnostics.render_summary()
         # Report the number of dependencies that actually changed (per the
         # plan), not the total tree re-materialized (result.installed_count).
         # The latter counts unchanged deps that were re-integrated, which
@@ -921,7 +1243,10 @@ def _run_dep_update_locked(
             _rich_success(f"Updated {changed} APM {dep_noun}.")
         elif plan_state.cache_rehydration_requested and installed:
             logger.success(
-                "Restored dependency cache without changing refs.",
+                _no_ref_change_summary(
+                    _exec_reconcile_required or plan_state.gate_retirement,
+                    bool(_restored_provenance),
+                ),
                 symbol="check",
             )
         elif revision_pin_updates:

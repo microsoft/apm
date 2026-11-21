@@ -5,16 +5,22 @@ Extracted from the trailing block of ``_install_apm_dependencies`` in
 ``if X > 0:`` stat blocks, the ``if not logger:`` bare-success fallback,
 and the unpinned-dependency warning.
 
-``_rich_success`` is resolved through the ``_install_mod`` indirection so
-that test patches at ``apm_cli.commands.install._rich_success`` remain
-effective.
+``_rich_success`` comes from the console owner directly; the install layer
+does not import the commands layer (#3879).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from apm_cli.core.remediation import ROOT_CONTEXT_COMPILE, USER_ROOT_CONTEXT_COMPILE
+from apm_cli.utils.console import _rich_success
 
 if TYPE_CHECKING:
+    from apm_cli.core.command_logger import CommandLogger
     from apm_cli.install.context import InstallContext
     from apm_cli.models.results import InstallResult
 
@@ -28,14 +34,88 @@ _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS = frozenset(
 )
 
 
+# apm.lock.yaml already pins the resolved commit; the ref in apm.yml decides
+# what 'apm update' moves to. A literal tag pins it; only a semver range
+# tracks releases (#3994).
+UNPINNED_HINT = (
+    "apm.lock.yaml pins the resolved commit; to pin it in apm.yml, declare the "
+    "dependency at that commit as shown, or, when it publishes release tags, use a "
+    "semver range such as #^1.0.0 to track releases on update "
+    "(a tag like #v1.0.0 stays put)"
+)
+
+
+def _unpinned_entries(ctx: Any) -> tuple[list[str], list[str]]:
+    """Return (direct, transitive) unpinned remote dependencies, de-duplicated.
+
+    Each entry is the exact apm.yml entry that pins the locked commit. A
+    transitive entry also names the package that declares it.
+    """
+    direct: list[str] = []
+    transitive: list[str] = []
+    for installed in ctx.installed_packages:
+        ref = getattr(installed, "dep_ref", None)
+        if ref is None or ref.reference or getattr(ref, "is_local", False) is True:
+            continue
+        name = getattr(ref, "repo_url", None) or ""
+        commit = getattr(installed, "resolved_commit", None)
+        if name and isinstance(commit, str) and commit:
+            name = f"{ref.to_display_reference()}#{commit}"
+        if not name:
+            continue
+        depth = getattr(installed, "depth", 1)
+        parent = getattr(installed, "resolved_by", None)
+        if isinstance(depth, int) and depth > 1:
+            entry = f"{name} (declared by {parent})" if isinstance(parent, str) else str(name)
+            if entry not in transitive:
+                transitive.append(entry)
+        elif str(name) not in direct:
+            direct.append(str(name))
+    return direct, transitive
+
+
+def _name_list(names: list[str]) -> str:
+    shown = ", ".join(names[:5])
+    extra = len(names) - 5
+    return f"{shown}, and {extra} more" if extra > 0 else shown
+
+
+def _warn_unpinned(ctx: Any) -> None:
+    """Warn about unpinned direct dependencies; transitive ones are verbose (#4183).
+
+    The user can pin only what their apm.yml declares. A transitive
+    dependency is chosen by the package that declares it, so it is reported
+    only in verbose output, naming that package.
+    """
+    direct, transitive = _unpinned_entries(ctx)
+    if direct:
+        noun = "dependency" if len(direct) == 1 else "dependencies"
+        ctx.diagnostics.warn(
+            f"{len(direct)} {noun} unpinned: {_name_list(direct)} -- {UNPINNED_HINT}"
+        )
+    elif not transitive:
+        noun = "dependency" if ctx.unpinned_count == 1 else "dependencies"
+        ctx.diagnostics.warn(f"{ctx.unpinned_count} {noun} unpinned -- {UNPINNED_HINT}")
+    verbose = bool(getattr(ctx.diagnostics, "verbose", False)) or bool(
+        getattr(getattr(ctx, "logger", None), "verbose", False) is True
+    )
+    if transitive and verbose:
+        noun = "dependency" if len(transitive) == 1 else "dependencies"
+        ctx.diagnostics.info(
+            f"{len(transitive)} transitive {noun} unpinned: {_name_list(transitive)} -- "
+            "apm.lock.yaml pins the resolved commit; the declaring package chooses "
+            "its version, or declare it in apm.yml at that commit to override"
+        )
+
+
 def _compile_hint_targets(
-    ctx: InstallContext, *, user_scope: bool, scoped_instructions_only: bool = False
+    targets: Iterable[object], *, user_scope: bool, scoped_instructions_only: bool = False
 ) -> tuple[list[str], frozenset[str]]:
     """Return display names and compiler families that need root-context hints."""
     target_names: list[str] = []
     families: set[str] = set()
     seen: set[str] = set()
-    for target in ctx.targets:
+    for target in targets:
         scoped = target.for_scope(user_scope=user_scope)
         if scoped is None:
             continue
@@ -72,46 +152,63 @@ def _root_context_outputs(families: frozenset[str]) -> list[str]:
     return outputs
 
 
-def _has_dep_instruction_files(ctx: InstallContext) -> bool:
-    """Return True if any installed dep directory contains ``.instructions.md`` files.
+def _iter_dep_instruction_files(apm_modules: Path, diagnostics=None) -> Iterator[str]:
+    """Yield ``apm_modules``-relative compile-input instruction files.
 
     Scans ``apm_modules/`` for ``*.instructions.md`` files under any
-    ``.apm/instructions/`` subdirectory, including dependencies installed by
-    earlier runs.  The all-modules scan is intentionally conservative: after
-    any successful install, every dependency instruction must be represented
-    in the next compile.  Imports stay lazy to keep the common no-hint path
-    lightweight.
+    ``.apm/instructions/`` subdirectory, which is where ``_copy_local_package``
+    and the bundle staging logic place compile-only instruction files.  Links
+    that resolve outside ``apm_modules`` are skipped (and reported when
+    *diagnostics* is given).  Imports stay lazy to keep the common no-hint
+    path lightweight.
     """
     from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
-    apm_modules = (ctx.apm_modules_dir or (ctx.project_root / "apm_modules")).resolve()
+    apm_modules = apm_modules.resolve()
     if not apm_modules.is_dir():
-        return False
+        return
 
-    for candidate in apm_modules.rglob("*.instructions.md"):
+    for found in apm_modules.rglob("*.instructions.md"):
+        relative_found = found.relative_to(apm_modules).as_posix()
         try:
-            candidate = ensure_path_within(candidate, apm_modules)
+            candidate = ensure_path_within(found, apm_modules)
         except PathTraversalError:
-            relative_candidate = candidate.relative_to(apm_modules).as_posix()
-            ctx.diagnostics.warn(
-                "Ignored unsafe instruction link that resolves outside "
-                f"apm_modules: {relative_candidate}"
-            )
+            if diagnostics is not None:
+                diagnostics.warn(
+                    "Ignored unsafe instruction link that resolves outside "
+                    f"apm_modules: {relative_found}"
+                )
             continue
         if not candidate.is_file():
             continue
-        # Only count files that live inside a ``.apm/instructions/`` subtree,
-        # which is where ``_copy_local_package`` and the bundle staging logic
-        # place compile-only instruction files.
         parts = candidate.parts
         try:
             idx = parts.index(".apm")
         except ValueError:
             continue
         if idx + 1 < len(parts) and parts[idx + 1] == "instructions":
-            return True
+            yield relative_found
 
-    return False
+
+def _has_dep_instruction_files(ctx: InstallContext) -> bool:
+    """Return True if any installed dep directory contains ``.instructions.md`` files.
+
+    The all-modules scan is intentionally conservative: after any successful
+    install, every dependency instruction must be represented in the next
+    compile.  Diagnostics are optional at this boundary: the hint must work
+    for a context that carries none (unsafe links are then skipped silently).
+    """
+    apm_modules = ctx.apm_modules_dir or (ctx.project_root / "apm_modules")
+    diagnostics = getattr(ctx, "diagnostics", None)
+    return any(True for _ in _iter_dep_instruction_files(apm_modules, diagnostics))
+
+
+def _project_compile_hint(target_names: list[str], families: frozenset[str], verb: str) -> str:
+    """Render the single project-scope ``apm compile`` hint line."""
+    targets = ", ".join(target_names)
+    outputs = " / ".join(_root_context_outputs(families))
+    advice = ROOT_CONTEXT_COMPILE.bind(outputs=outputs).sentence()
+    return f"Instructions {verb} for {targets}. {advice}"
 
 
 def _hint_project_compile_needed(ctx: InstallContext) -> None:
@@ -134,7 +231,7 @@ def _hint_project_compile_needed(ctx: InstallContext) -> None:
     if ctx.installed_count == 0:
         return
 
-    target_names, families = _compile_hint_targets(ctx, user_scope=False)
+    target_names, families = _compile_hint_targets(ctx.targets, user_scope=False)
     if not target_names:
         return
 
@@ -142,10 +239,59 @@ def _hint_project_compile_needed(ctx: InstallContext) -> None:
         return
 
     if ctx.logger:
-        targets = ", ".join(target_names)
-        outputs = " / ".join(_root_context_outputs(families))
-        message = f"Instructions installed for {targets}. Run 'apm compile' to update {outputs}."
-        ctx.logger.info(message, symbol="info")
+        ctx.logger.info(_project_compile_hint(target_names, families, "installed"), symbol="info")
+
+
+@dataclass(frozen=True)
+class CompileInputSnapshot:
+    """Compile-input instructions present before a project-scope removal."""
+
+    target_names: tuple[str, ...] = ()
+    families: frozenset[str] = frozenset()
+    instruction_files: frozenset[str] = frozenset()
+
+
+def snapshot_compile_inputs(
+    project_root: Path, explicit_target: str | list[str] | None, apm_modules: Path
+) -> CompileInputSnapshot:
+    """Record compile-input instructions before ``apm uninstall`` / ``apm prune``.
+
+    Targets come from the same declaration ``apm install`` resolves.  The scan
+    is skipped when no active target compiles root context files, so the
+    common native-rules path stays cheap.  Never raises: a hint must not break
+    the removal it follows.
+    """
+    from apm_cli.integration.targets import resolve_targets
+
+    try:
+        targets = resolve_targets(
+            project_root, explicit_target=explicit_target, create_config=False
+        )
+    except Exception:
+        return CompileInputSnapshot()
+    target_names, families = _compile_hint_targets(targets, user_scope=False)
+    if not target_names:
+        return CompileInputSnapshot()
+    return CompileInputSnapshot(
+        tuple(target_names), families, frozenset(_iter_dep_instruction_files(apm_modules))
+    )
+
+
+def hint_compile_after_removal(
+    snapshot: CompileInputSnapshot, apm_modules: Path, logger: CommandLogger
+) -> None:
+    """Hint to run ``apm compile`` when a removal dropped compile-input instructions.
+
+    The compiled root context files (AGENTS.md / GEMINI.md) still carry the
+    removed instructions until the next compile.  Compilation stays explicit:
+    no file is written or recompiled here.
+    """
+    if not snapshot.instruction_files:
+        return
+    if snapshot.instruction_files <= frozenset(_iter_dep_instruction_files(apm_modules)):
+        return
+    message = _project_compile_hint(list(snapshot.target_names), snapshot.families, "removed")
+    logger.info(message, symbol="info")
 
 
 def _hint_global_root_context(ctx: InstallContext) -> None:
@@ -180,7 +326,7 @@ def _hint_global_root_context(ctx: InstallContext) -> None:
         return
 
     target_names, _ = _compile_hint_targets(
-        ctx,
+        ctx.targets,
         user_scope=True,
         scoped_instructions_only=not any(not instruction.apply_to for instruction in instructions),
     )
@@ -189,17 +335,13 @@ def _hint_global_root_context(ctx: InstallContext) -> None:
 
     if ctx.logger:
         targets = ", ".join(target_names)
-        message = (
-            "Applicable instructions are available. Run 'apm compile -g' "
-            f"to update root context files for: {targets}."
-        )
+        advice = USER_ROOT_CONTEXT_COMPILE.bind(targets=targets).sentence()
+        message = f"Applicable instructions are available. {advice}"
         ctx.logger.info(message, symbol="info")
 
 
 def run(ctx: InstallContext) -> InstallResult:
     """Emit verbose stats, fallback success, unpinned warning, and return final result."""
-    from apm_cli.commands import install as _install_mod
-
     # Show integration stats (verbose-only when logger is available)
     if ctx.total_links_resolved > 0:
         if ctx.logger:
@@ -221,43 +363,11 @@ def run(ctx: InstallContext) -> InstallResult:
 
     # Summary is now emitted by the caller via logger.install_summary()
     if not ctx.logger:
-        _install_mod._rich_success(f"Installed {ctx.installed_count} APM dependencies")
+        _rich_success(f"Installed {ctx.installed_count} APM dependencies")
 
-    if ctx.unpinned_count:
-        # Enumerate names of unpinned deps so the user knows which to pin.
-        # Cap at 5 names then "and M more"; fall back to count-only if names
-        # cannot be derived.
-        _unpinned_names: list[str] = []
-        for _ip in ctx.installed_packages:
-            _ref = getattr(_ip, "dep_ref", None)
-            if _ref is None or _ref.reference:
-                continue
-            _name = getattr(_ref, "repo_url", None) or getattr(_ref, "local_path", None) or ""
-            if _name:
-                _unpinned_names.append(str(_name))
-        # De-dupe while preserving order.
-        _seen: set[str] = set()
-        _unique_names: list[str] = []
-        for _n in _unpinned_names:
-            if _n not in _seen:
-                _seen.add(_n)
-                _unique_names.append(_n)
-
-        noun = "dependency" if ctx.unpinned_count == 1 else "dependencies"
-        if _unique_names:
-            _shown = _unique_names[:5]
-            _suffix = ", ".join(_shown)
-            _extra = len(_unique_names) - len(_shown)
-            if _extra > 0:
-                _suffix += f", and {_extra} more"
-            ctx.diagnostics.warn(
-                f"{ctx.unpinned_count} {noun} unpinned: {_suffix} "
-                "-- add #tag or #sha to prevent drift"
-            )
-        else:
-            ctx.diagnostics.warn(
-                f"{ctx.unpinned_count} {noun} unpinned -- add #tag or #sha to prevent drift"
-            )
+    # A converged run changed nothing, so it repeats no unpinned notice (#4184).
+    if ctx.unpinned_count and ctx.installed_count:
+        _warn_unpinned(ctx)
 
     # Post-install hints: remind the user to run ``apm compile`` when
     # instructions land in deps but are not written to a per-file rules
@@ -269,6 +379,35 @@ def run(ctx: InstallContext) -> InstallResult:
     elif ctx.scope is InstallScope.PROJECT:
         _hint_project_compile_needed(ctx)
 
+    _report_kept_overwrites(ctx)
+
     from apm_cli.install.outcome import result_from_install_context
 
     return result_from_install_context(ctx)
+
+
+def _report_kept_overwrites(ctx: InstallContext) -> None:
+    """Fail on managed files install kept without deployment evidence (#4360).
+
+    The lockfile already keeps their prior entries; the files written this
+    run are recorded, so the lockfile matches the project.
+    """
+    if not ctx.kept_overwrites:
+        return
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.integration.base_integrator import kept_edit_message
+
+    user_scope = ctx.scope is InstallScope.USER
+    kinds = getattr(ctx, "kept_overwrite_kinds", {})
+    blocking = 0
+    for owner, entry in ctx.kept_overwrites:
+        kind = kinds.get(entry)
+        message = kept_edit_message(entry, user_scope=user_scope, proven_edit=kind is not None)
+        if kind == "drift":
+            # A user edit with nothing new to deploy: kept and reported, not a failure.
+            ctx.diagnostics.warn(message, package=owner)
+            continue
+        blocking += 1
+        ctx.diagnostics.error(message, package=owner)
+    if blocking and ctx.logger is not None:
+        ctx.logger.kept_overwrites(blocking, ctx.kept_overwrite_written)

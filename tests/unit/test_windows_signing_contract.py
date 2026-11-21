@@ -22,6 +22,8 @@ from tests.workflow_contracts import (
     workflow_step_index,
 )
 
+pytestmark = pytest.mark.component
+
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build-release.yml"
 
@@ -36,7 +38,7 @@ def _workflow() -> WorkflowNode:
 
 def _assert_signing_step(workflow: WorkflowNode) -> None:
     """Assert the Authenticode signing step is correctly configured."""
-    job = workflow_job(workflow, "build-and-test")
+    job = workflow_job(workflow, "build-windows")
     step = workflow_step(job, SIGNING_STEP)
 
     # Must only run on the Windows matrix entry.
@@ -77,7 +79,7 @@ def test_signing_step_exists() -> None:
 def test_signing_step_gated_on_windows() -> None:
     """Removing the Windows platform gate must fail the contract."""
     workflow = deepcopy(_workflow())
-    step = workflow_step(workflow_job(workflow, "build-and-test"), SIGNING_STEP)
+    step = workflow_step(workflow_job(workflow, "build-windows"), SIGNING_STEP)
     step["if"] = "env.WINDOWS_CERT_PFX != ''"  # no platform gate
 
     with pytest.raises(AssertionError, match="Windows platform"):
@@ -87,7 +89,7 @@ def test_signing_step_gated_on_windows() -> None:
 def test_signing_step_gated_on_secret() -> None:
     """Removing the secret gate must fail -- signing must skip gracefully."""
     workflow = deepcopy(_workflow())
-    step = workflow_step(workflow_job(workflow, "build-and-test"), SIGNING_STEP)
+    step = workflow_step(workflow_job(workflow, "build-windows"), SIGNING_STEP)
     step["if"] = "matrix.platform == 'windows'"  # no secret gate
 
     with pytest.raises(AssertionError, match="WINDOWS_CERT_PFX"):
@@ -97,7 +99,7 @@ def test_signing_step_gated_on_secret() -> None:
 def test_signing_step_references_script() -> None:
     """Replacing the script reference must fail the contract."""
     workflow = deepcopy(_workflow())
-    step = workflow_step(workflow_job(workflow, "build-and-test"), SIGNING_STEP)
+    step = workflow_step(workflow_job(workflow, "build-windows"), SIGNING_STEP)
     step["run"] = "echo skipping signing\n"
 
     with pytest.raises(AssertionError, match=r"sign-binary\.ps1"):
@@ -107,7 +109,7 @@ def test_signing_step_references_script() -> None:
 def test_signing_step_order() -> None:
     """Moving the signing step after upload must fail the contract."""
     workflow = deepcopy(_workflow())
-    job = workflow_job(workflow, "build-and-test")
+    job = workflow_job(workflow, "build-windows")
     steps: list = job["steps"]
 
     # Find and remove the signing step, then insert it after the upload step.
@@ -129,7 +131,7 @@ def test_signing_step_order() -> None:
 def test_signing_step_requires_password_env() -> None:
     """Removing WINDOWS_CERT_PASSWORD from env must fail the contract."""
     workflow = deepcopy(_workflow())
-    step = workflow_step(workflow_job(workflow, "build-and-test"), SIGNING_STEP)
+    step = workflow_step(workflow_job(workflow, "build-windows"), SIGNING_STEP)
     env = step.get("env", {})
     assert isinstance(env, dict), "env must be a mapping for this mutation test"
     env.pop("WINDOWS_CERT_PASSWORD", None)

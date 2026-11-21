@@ -12,12 +12,11 @@ import yaml
 from apm_cli.deps.plugin_parser import (
     PluginIntegrityError,
     _extract_mcp_servers,
-    _generate_apm_yml,
     _holds_skill_dirs,
     _map_plugin_artifacts,
     _mcp_servers_to_apm_deps,
-    _union_dep_list,
     has_normalized_plugin_skill_sources_receipt,
+    install_generated_mirror_source,
     normalize_plugin_directory,
     normalized_plugin_skill_sources,
     parse_plugin_manifest,
@@ -26,30 +25,7 @@ from apm_cli.deps.plugin_parser import (
 )
 from apm_cli.utils.helpers import find_plugin_json
 
-
-def test_union_dep_list_indexes_existing_entries_once() -> None:
-    """Large dependency merges must not scan the growing result per append."""
-
-    class NoContainsList(list):
-        def __contains__(self, _item: object) -> bool:
-            raise AssertionError("linear membership scan used")
-
-    existing = NoContainsList(
-        {"name": f"server-{index}", "command": "echo"} for index in range(100)
-    )
-    merged = {"mcp": existing}
-    new_entries = [{"name": f"server-{index}", "command": "echo"} for index in range(100, 1000)]
-    new_entries.extend(
-        [
-            {"name": "server-0", "command": "echo"},
-            {"name": "server-0", "command": "different"},
-        ]
-    )
-
-    _union_dep_list(merged, "mcp", new_entries)
-
-    assert len(existing) == 1001
-    assert existing[-1] == {"name": "server-0", "command": "different"}
+pytestmark = pytest.mark.component
 
 
 class TestFindPluginJson:
@@ -319,6 +295,48 @@ class TestMapPluginArtifacts:
         assert declared is True
         assert sources == {"tdd": skill}
         assert (plugin_dir / ".apm" / "skills" / "tdd" / "SKILL.md").is_file()
+
+    def test_mirror_source_needs_path_specific_receipt_evidence(self, tmp_path):
+        plugin_dir = tmp_path / "plugin"
+        nested = plugin_dir / "skills" / "engineering" / "tdd"
+        (nested / "ref").mkdir(parents=True)
+        (nested / "SKILL.md").write_text("# tdd", encoding="utf-8")
+        (nested / "ref" / "notes.md").write_text("notes", encoding="utf-8")
+        authored = plugin_dir / ".apm" / "skills" / "own"
+        authored.mkdir(parents=True)
+        (authored / "SKILL.md").write_text("# own", encoding="utf-8")
+        agents = plugin_dir / "agents"
+        agents.mkdir()
+        (agents / "a.md").write_text("# a", encoding="utf-8")
+
+        _map_plugin_artifacts(
+            plugin_dir,
+            plugin_dir / ".apm",
+            {
+                "skills": ["./skills/engineering/tdd", "./.apm/skills/own"],
+                "agents": ["./agents/"],
+            },
+        )
+
+        assert install_generated_mirror_source(".apm/skills/tdd/SKILL.md", plugin_dir) == (
+            "skills/engineering/tdd/SKILL.md"
+        )
+        assert install_generated_mirror_source(".apm/skills/tdd/ref/notes.md", plugin_dir) == (
+            "skills/engineering/tdd/ref/notes.md"
+        )
+        # An authored source the plugin declares is not a generated mirror.
+        assert install_generated_mirror_source(".apm/skills/own/SKILL.md", plugin_dir) is None
+        # No path-specific evidence for other copies: callers keep ambiguity.
+        assert install_generated_mirror_source(".apm/agents/a.md", plugin_dir) is None
+        assert (
+            install_generated_mirror_source("skills/engineering/tdd/SKILL.md", plugin_dir) is None
+        )
+
+    def test_mirror_source_is_none_without_a_receipt(self, tmp_path):
+        skill = tmp_path / ".apm" / "skills" / "x"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# x", encoding="utf-8")
+        assert install_generated_mirror_source(".apm/skills/x/SKILL.md", tmp_path) is None
 
     def test_duplicate_declared_skill_leaf_names_fail_closed(self, tmp_path):
         plugin_dir = tmp_path / "plugin"
@@ -869,64 +887,6 @@ class TestMapPluginArtifacts:
         )
 
 
-class TestGenerateApmYml:
-    def test_generate_full_metadata(self):
-        manifest = {
-            "name": "full-plugin",
-            "version": "2.0.0",
-            "description": "Full featured",
-            "author": "Bob",
-            "license": "Apache-2.0",
-            "repository": "https://github.com/org/repo",
-            "homepage": "https://example.com",
-            "tags": ["ai", "copilot"],
-        }
-
-        yml_str = _generate_apm_yml(manifest)
-        parsed = yaml.safe_load(yml_str)
-
-        assert parsed["name"] == "full-plugin"
-        assert parsed["version"] == "2.0.0"
-        assert parsed["description"] == "Full featured"
-        assert parsed["author"] == "Bob"
-        assert parsed["license"] == "Apache-2.0"
-        assert parsed["tags"] == ["ai", "copilot"]
-        assert parsed["type"] == "hybrid"
-
-    def test_generate_minimal_metadata(self):
-        manifest = {"name": "minimal"}
-
-        yml_str = _generate_apm_yml(manifest)
-        parsed = yaml.safe_load(yml_str)
-
-        assert parsed["name"] == "minimal"
-        assert parsed["version"] == "0.0.0"
-        assert parsed["description"] == ""
-        assert parsed["type"] == "hybrid"
-
-    def test_generate_author_as_dict(self):
-        manifest = {
-            "name": "dict-author",
-            "author": {"name": "Foo Bar", "email": "foo@bar.com"},
-        }
-
-        yml_str = _generate_apm_yml(manifest)
-        parsed = yaml.safe_load(yml_str)
-
-        assert parsed["author"] == "Foo Bar"
-
-    def test_generate_with_dependencies(self):
-        manifest = {
-            "name": "with-deps",
-            "dependencies": {"dep-a": "^1.0", "dep-b": "~2.0"},
-        }
-
-        yml_str = _generate_apm_yml(manifest)
-        parsed = yaml.safe_load(yml_str)
-
-        assert parsed["dependencies"] == {"apm": {"dep-a": "^1.0", "dep-b": "~2.0"}}
-
-
 class TestNormalizePluginDirectory:
     def test_normalize_with_manifest(self, tmp_path):
         plugin_dir = tmp_path / "my-plugin"
@@ -959,32 +919,26 @@ class TestNormalizePluginDirectory:
 
 
 class TestValidatePluginPackage:
-    def test_validate_with_plugin_json(self, tmp_path):
-        plugin_dir = tmp_path / "valid"
+    @pytest.mark.parametrize(
+        ("entries", "expected"),
+        [
+            ({"plugin.json": '{"name": "valid-plugin"}'}, True),
+            ({"agents": None}, True),
+            ({}, False),
+            ({"README.md": "# Hello"}, False),
+        ],
+        ids=["plugin-json", "component-dirs-only", "empty-directory", "readme-only"],
+    )
+    def test_validate_plugin_package(self, tmp_path, entries, expected):
+        plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()
-        (plugin_dir / "plugin.json").write_text('{"name": "valid-plugin"}')
+        for name, content in entries.items():
+            if content is None:
+                (plugin_dir / name).mkdir()
+            else:
+                (plugin_dir / name).write_text(content)
 
-        assert validate_plugin_package(plugin_dir) is True
-
-    def test_validate_with_component_dirs_only(self, tmp_path):
-        plugin_dir = tmp_path / "components"
-        plugin_dir.mkdir()
-        (plugin_dir / "agents").mkdir()
-
-        assert validate_plugin_package(plugin_dir) is True
-
-    def test_validate_empty_directory(self, tmp_path):
-        plugin_dir = tmp_path / "empty"
-        plugin_dir.mkdir()
-
-        assert validate_plugin_package(plugin_dir) is False
-
-    def test_validate_readme_only(self, tmp_path):
-        plugin_dir = tmp_path / "readme-only"
-        plugin_dir.mkdir()
-        (plugin_dir / "README.md").write_text("# Hello")
-
-        assert validate_plugin_package(plugin_dir) is False
+        assert validate_plugin_package(plugin_dir) is expected
 
 
 class TestExtractMCPServers:
@@ -1105,8 +1059,8 @@ class TestExtractMCPServers:
         result = _extract_mcp_servers(plugin_dir, manifest)
         assert result == {}
 
-    def test_plugin_root_substitution(self, tmp_path):
-        """${CLAUDE_PLUGIN_ROOT} replaced with absolute plugin path."""
+    def test_plugin_root_kept_authored(self, tmp_path):
+        """${CLAUDE_PLUGIN_ROOT} stays authored; target renders expand it (#3825)."""
         plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()
         manifest = {
@@ -1120,8 +1074,7 @@ class TestExtractMCPServers:
         }
 
         result = _extract_mcp_servers(plugin_dir, manifest)
-        abs_root = str(plugin_dir.resolve())
-        assert result["local-srv"]["args"] == [f"{abs_root}/server.js"]
+        assert result["local-srv"]["args"] == ["${CLAUDE_PLUGIN_ROOT}/server.js"]
 
 
 _FLAT_MCP_SERVERS = {
@@ -1159,10 +1112,9 @@ class TestMCPJsonShapes:
 
         result, warnings = self._extract(plugin_dir, {"name": "flat"})
 
-        abs_root = str(plugin_dir.resolve())
         assert set(result) == {"linear", "local"}
         assert result["linear"] == self._FLAT["linear"]
-        assert result["local"]["args"] == [f"{abs_root}/server.js"]
+        assert result["local"]["args"] == ["${CLAUDE_PLUGIN_ROOT}/server.js"]
         assert warnings == []
 
     def test_flat_file_named_by_plugin_json(self, tmp_path):
@@ -1311,7 +1263,7 @@ class TestMCPJsonShapes:
         assert mcp["linear"]["transport"] == "http"
         assert mcp["linear"]["url"] == "https://mcp.linear.app/mcp"
         assert mcp["local"]["transport"] == "stdio"
-        assert mcp["local"]["args"] == [f"{plugin_dir.resolve()}/server.js"]
+        assert mcp["local"]["args"] == ["${CLAUDE_PLUGIN_ROOT}/server.js"]
 
 
 class TestMCPServersToDeps:
@@ -1390,45 +1342,6 @@ class TestMCPServersToDeps:
         }
         deps = _mcp_servers_to_apm_deps(servers, tmp_path)
         assert deps[0]["headers"] == {"Authorization": "Bearer token"}
-
-
-class TestGenerateApmYmlMCPDeps:
-    """Test _mcp_deps injection in generated apm.yml."""
-
-    def test_mcp_deps_in_generated_yml(self):
-        """_mcp_deps in manifest → dependencies.mcp in output."""
-        manifest = {
-            "name": "mcp-plugin",
-            "_mcp_deps": [
-                {"name": "my-srv", "registry": False, "transport": "stdio", "command": "echo"},
-            ],
-        }
-        yml_str = _generate_apm_yml(manifest)
-        parsed = yaml.safe_load(yml_str)
-        assert "mcp" in parsed["dependencies"]
-        assert len(parsed["dependencies"]["mcp"]) == 1
-        assert parsed["dependencies"]["mcp"][0]["name"] == "my-srv"
-
-    def test_mcp_deps_with_apm_deps(self):
-        """Both apm and mcp deps coexist."""
-        manifest = {
-            "name": "both-plugin",
-            "dependencies": {"dep-a": "^1.0"},
-            "_mcp_deps": [
-                {"name": "srv", "registry": False, "transport": "http", "url": "https://x"},
-            ],
-        }
-        yml_str = _generate_apm_yml(manifest)
-        parsed = yaml.safe_load(yml_str)
-        assert "apm" in parsed["dependencies"]
-        assert "mcp" in parsed["dependencies"]
-
-    def test_no_mcp_deps_no_section(self):
-        """No _mcp_deps → no mcp key in dependencies."""
-        manifest = {"name": "no-mcp"}
-        yml_str = _generate_apm_yml(manifest)
-        parsed = yaml.safe_load(yml_str)
-        assert "dependencies" not in parsed
 
 
 class TestSynthesizeMCPIntegration:
@@ -2167,3 +2080,50 @@ class TestSyntheticManifestLineEndings:
         raw = (apm_dir / "hooks" / "hooks.json").read_bytes()
         assert b"\r" not in raw
         assert json.loads(raw.decode("utf-8")) == hooks
+
+
+def test_claude_native_mcp_servers_model_claude_loader(tmp_path: Path) -> None:
+    """The native route's MCP owner unions every source Claude merges."""
+    from apm_cli.deps.plugin_parser import claude_native_mcp_servers
+
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"a": {"command": "x"}}}))
+    (tmp_path / "more.json").write_text(json.dumps({"b": {"url": "https://b.example"}}))
+    manifest = {
+        "mcpServers": [
+            "./more.json",
+            {"c": {"type": "sse", "url": "https://c.example", "command": "y"}, "d": {}},
+            "../outside.json",
+            "https://evil.example/x.mcpb",
+        ]
+    }
+    servers, unmodeled = claude_native_mcp_servers(tmp_path, manifest)
+    assert [(s["name"], s["transport"]) for s in servers] == [
+        ("a", "stdio"),
+        ("b", "http"),
+        ("c", "sse"),
+    ]
+    assert len(unmodeled) == 3
+    assert any("'d'" in entry for entry in unmodeled)
+    assert any("outside" in entry for entry in unmodeled)
+    assert any(".mcpb" in entry for entry in unmodeled)
+
+
+def test_missing_declared_component_names_the_manifest_folder_cause(tmp_path):
+    """A staged marketplace plugin rooted at its manifest folder gets an upstream hint (#3994)."""
+    from apm_cli.deps.plugin_parser import (
+        DeclaredPluginComponentError,
+        _validate_declared_component_paths,
+    )
+
+    plugin_root = tmp_path / "apm_modules" / ".apm-resolution-staging" / "abc"
+    plugin_root.mkdir(parents=True)
+    with pytest.raises(DeclaredPluginComponentError) as excinfo:
+        _validate_declared_component_paths(
+            plugin_root, {"name": "ai-ready", "skills": ["./skills/ai-ready"]}
+        )
+    message = str(excinfo.value)
+    assert "Plugin 'ai-ready'" in message
+    assert "'./skills/ai-ready'" in message
+    assert "'.github/plugin'" in message
+    assert "Report it to the plugin publisher" in message
+    assert ".apm-resolution-staging" not in message

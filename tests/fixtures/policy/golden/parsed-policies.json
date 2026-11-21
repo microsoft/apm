@@ -44,6 +44,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -117,6 +120,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -194,6 +200,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -268,6 +277,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -341,6 +353,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -418,6 +433,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -494,6 +512,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -567,6 +588,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -642,6 +666,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -715,6 +742,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -790,6 +820,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": [
         "io.github.github/*",
@@ -802,7 +835,7 @@
       "transport": {
         "allow": [
           "stdio",
-          "http"
+          "streamable-http"
         ]
       },
       "trust_transitive": false
@@ -871,6 +904,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -946,6 +982,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1019,6 +1058,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -1096,6 +1138,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1172,6 +1217,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1219,7 +1267,7 @@
       },
       "target": {
         "allow": [
-          "vscode"
+          "copilot"
         ],
         "enforce": null
       }
@@ -1247,6 +1295,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -1321,6 +1372,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -1405,6 +1459,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1479,6 +1536,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1525,11 +1585,7 @@
         "enforce": "distributed"
       },
       "target": {
-        "allow": [
-          "vscode",
-          "claude",
-          "all"
-        ],
+        "allow": null,
         "enforce": null
       }
     },
@@ -1575,6 +1631,9 @@
       ],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": [
         "io.github.github/*",
@@ -1585,7 +1644,7 @@
       "transport": {
         "allow": [
           "stdio",
-          "http"
+          "streamable-http"
         ]
       },
       "trust_transitive": false
@@ -1656,6 +1715,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,

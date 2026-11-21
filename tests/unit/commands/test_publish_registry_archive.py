@@ -11,7 +11,10 @@ import pytest
 from click.exceptions import ClickException, UsageError
 
 from apm_cli.commands.publish import _pack_archive, _resolve_package_id
+from apm_cli.core.command_logger import CommandLogger
 from apm_cli.models.apm_package import APMPackage
+
+pytestmark = pytest.mark.component
 
 
 def _list_zip_members(data: bytes) -> list[str]:
@@ -129,7 +132,9 @@ class TestPackRegistryArchive:
         tarball = _pack_archive(tmp_path, tmp_path / "apm.yml", pkg, MagicMock(), verbose=False)
         assert "LICENCE" in _list_zip_members(tarball.read_bytes())
 
-    def test_verbose_logs_each_bundled_doc_file(self, tmp_path: Path) -> None:
+    def test_verbose_logs_each_bundled_doc_file(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """--verbose emits a logger.info line for every doc file added to the archive."""
         (tmp_path / "apm.yml").write_text(
             "name: demo\nversion: 1.0.0\ndescription: x\nauthor: a\n",
@@ -140,13 +145,13 @@ class TestPackRegistryArchive:
         (tmp_path / ".apm" / "skills" / "demo").mkdir(parents=True)
         (tmp_path / ".apm" / "skills" / "demo" / "SKILL.md").write_text("# s\n")
 
-        logger = MagicMock()
+        logger = CommandLogger("publish", verbose=True)
         pkg = APMPackage(name="demo", version="1.0.0")
         _pack_archive(tmp_path, tmp_path / "apm.yml", pkg, logger, verbose=True)
 
-        info_calls = [call.args[0] for call in logger.info.call_args_list]
-        assert any("README.md" in msg for msg in info_calls)
-        assert any("LICENSE" in msg for msg in info_calls)
+        out = "".join(capsys.readouterr())
+        assert "[i]   bundling README.md" in out
+        assert "[i]   bundling LICENSE" in out
 
     def test_symlinked_doc_files_excluded(self, tmp_path: Path) -> None:
         """Symlinks to doc files are not packed (path-traversal guard)."""
@@ -187,8 +192,25 @@ class TestResolvePackageId:
     def test_package_identity_is_lowercase(self) -> None:
         assert _resolve_package_id("Acme/My-Skill") == ("acme", "my-skill")
 
-    def test_github_https_url_stripped(self) -> None:
-        assert _resolve_package_id("https://github.com/acme/my-skill") == ("acme", "my-skill")
+    @pytest.mark.parametrize(
+        ("package_id", "expected"),
+        [
+            ("gitlab.com/acme/my-skill", ("gitlab.com/acme", "my-skill")),
+            ("https://gitlab.com/acme/my-skill", ("gitlab.com/acme", "my-skill")),
+            ("https://github.com/acme/my-skill", ("github.com/acme", "my-skill")),
+            ("dev.azure.com/org/proj/repo", ("dev.azure.com/org/proj", "repo")),
+        ],
+    )
+    def test_host_is_kept_in_owner(self, package_id: str, expected: tuple[str, str]) -> None:
+        """#3844: the host is part of the identity, so hosts never collide."""
+        assert _resolve_package_id(package_id) == expected
+
+    def test_identity_matches_consumer_split(self) -> None:
+        """Publish addresses the same registry path install requests."""
+        from apm_cli.deps.registry.resolver import split_registry_identity
+
+        for identity in ("acme/my-skill", "gitlab.com/acme/my-skill"):
+            assert _resolve_package_id(identity) == split_registry_identity(identity)
 
     def test_malformed_value_raises(self) -> None:
         with pytest.raises(UsageError, match="owner/repo"):

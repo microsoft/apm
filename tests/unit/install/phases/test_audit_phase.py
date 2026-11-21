@@ -22,6 +22,8 @@ from apm_cli.install.phases import audit as audit_phase
 from apm_cli.security.content_scanner import ScanFinding
 from apm_cli.security.external.base import ExternalScanError
 
+pytestmark = pytest.mark.unit
+
 
 class _Diag:
     def __init__(self):

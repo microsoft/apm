@@ -5,7 +5,7 @@ description: >-
   positioning, competitive strategy, release-cadence calls, breaking-
   change communication, and as the final arbiter when specialist
   reviewers disagree.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # APM CEO

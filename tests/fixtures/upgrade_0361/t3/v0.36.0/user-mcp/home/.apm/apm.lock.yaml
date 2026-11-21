@@ -1,0 +1,293 @@
+lockfile_version: '1'
+apm_version: 0.36.0
+dependencies: []
+deployments:
+- kind: uri
+  target: mcp
+  value: heal-http
+  runtime: antigravity
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:556e098b2ed67d1ad2607a25fd465e168c5eae343b1a2c5130a840be2cb3c991
+- kind: uri
+  target: mcp
+  value: heal-sse
+  runtime: antigravity
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:f3d0650b245ba5a3ab8695e4297b43bc54fbad8701791276d96b01f4b9519713
+- kind: uri
+  target: mcp
+  value: heal-stdio
+  runtime: antigravity
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:7e1cb5e2c3c7eb4cb1cc1b1276bcfe9d13ec3e40609117ee5dd0edaa5fd5484d
+- kind: uri
+  target: mcp
+  value: heal-streamable
+  runtime: antigravity
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:2a34812e572797169021549b240142f5b2201c153663710a58f2c20ca9a41288
+- kind: uri
+  target: mcp
+  value: io.github.apm-fixture/heal-registry
+  runtime: antigravity
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a55d5b3a1257d1b51e28938297e09334f5be67389164ae0fd4e96c552e185bfb
+- kind: uri
+  target: mcp
+  value: heal-http
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:ac33c373c548a9414e5146c3e3ff0372b4eb031088aa459c63e06de165dde094
+- kind: uri
+  target: mcp
+  value: heal-sse
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:ac20364380e4d40f73848ae86353a67a48656be5485ce766ee84a888b093a625
+- kind: uri
+  target: mcp
+  value: heal-stdio
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:3840daf3cffadbfd11dc7266a75981de130c6fd777779fa6e4aa026115d7b1df
+- kind: uri
+  target: mcp
+  value: heal-streamable
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:8c4430e126ccc9af428d39cfe576d5ca6787abb878f4ce98dc4941659ed6f505
+- kind: uri
+  target: mcp
+  value: io.github.apm-fixture/heal-registry
+  runtime: claude
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:92fead0e8bf8d6c5185ece9398ec390083e8bec4189858c653286b9e4417deea
+- kind: uri
+  target: mcp
+  value: heal-http
+  runtime: copilot
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:ce94cbe4f22f29c182f37403f82f71ab246fccc2db849b31b756fe89fb92939d
+- kind: uri
+  target: mcp
+  value: heal-sse
+  runtime: copilot
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:64b1ade4dc079234be5e046781ede77493247656abbec0e1609b73ad2dd469ba
+- kind: uri
+  target: mcp
+  value: heal-stdio
+  runtime: copilot
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:983ea93d9d90b3b47b0df17eb132935d2868c8fce34c80db1126edd606f62857
+- kind: uri
+  target: mcp
+  value: heal-streamable
+  runtime: copilot
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:670c69471fe868aca8d34046811b523e1ac2bc330fea3e290d576bb805333f40
+- kind: uri
+  target: mcp
+  value: io.github.apm-fixture/heal-registry
+  runtime: copilot
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:60acb58c80f5f1a0736201758c57871a5879bd80357b5b3bcacc7a5b0e9deca0
+- kind: uri
+  target: mcp
+  value: heal-http
+  runtime: gemini
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:556e098b2ed67d1ad2607a25fd465e168c5eae343b1a2c5130a840be2cb3c991
+- kind: uri
+  target: mcp
+  value: heal-sse
+  runtime: gemini
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:f3d0650b245ba5a3ab8695e4297b43bc54fbad8701791276d96b01f4b9519713
+- kind: uri
+  target: mcp
+  value: heal-stdio
+  runtime: gemini
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:7e1cb5e2c3c7eb4cb1cc1b1276bcfe9d13ec3e40609117ee5dd0edaa5fd5484d
+- kind: uri
+  target: mcp
+  value: heal-streamable
+  runtime: gemini
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:2a34812e572797169021549b240142f5b2201c153663710a58f2c20ca9a41288
+- kind: uri
+  target: mcp
+  value: io.github.apm-fixture/heal-registry
+  runtime: gemini
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a55d5b3a1257d1b51e28938297e09334f5be67389164ae0fd4e96c552e185bfb
+- kind: uri
+  target: mcp
+  value: heal-http
+  runtime: hermes
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:2ac2b1aab2be65c45a623b65a24c48e5b485bbcdaf4f3d436df81b504000d28e
+- kind: uri
+  target: mcp
+  value: heal-sse
+  runtime: hermes
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:07ded34cea01cc87bb1da8f8c4733b2a3c0905e30e73844eb4e90e3efa78057f
+- kind: uri
+  target: mcp
+  value: heal-stdio
+  runtime: hermes
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a7a06348b2626117f7be2b41d95dd38467b6d56398d9b6b9001d7c2c2370f4a0
+- kind: uri
+  target: mcp
+  value: heal-streamable
+  runtime: hermes
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a0b5d62f6661354c683e70da7f1ca99f89c27c37d9a8fca064209dc7ae40b9eb
+- kind: uri
+  target: mcp
+  value: io.github.apm-fixture/heal-registry
+  runtime: hermes
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a7eb87b9dabf1c350666798db1b939e796a0a98bf231043f98084d32db00fa87
+mcp_servers:
+- heal-http
+- heal-sse
+- heal-stdio
+- heal-streamable
+- io.github.apm-fixture/heal-registry
+mcp_configs:
+  heal-http:
+    name: heal-http
+    transport: http
+    registry: false
+    url: https://http.example.invalid/mcp
+  heal-sse:
+    name: heal-sse
+    transport: sse
+    registry: false
+    url: https://sse.example.invalid/sse
+  heal-stdio:
+    name: heal-stdio
+    transport: stdio
+    args:
+    - server.js
+    registry: false
+    command: node
+    cwd: /srv/heal-fixture
+  heal-streamable:
+    name: heal-streamable
+    transport: streamable-http
+    registry: false
+    url: https://streamable.example.invalid/mcp
+  io.github.apm-fixture/heal-registry:
+    name: io.github.apm-fixture/heal-registry
+    registry: __REGISTRY_URL__
+mcp_target_servers:
+  antigravity:
+  - heal-http
+  - heal-sse
+  - heal-stdio
+  - heal-streamable
+  - io.github.apm-fixture/heal-registry
+  claude:
+  - heal-http
+  - heal-sse
+  - heal-stdio
+  - heal-streamable
+  - io.github.apm-fixture/heal-registry
+  copilot:
+  - heal-http
+  - heal-sse
+  - heal-stdio
+  - heal-streamable
+  - io.github.apm-fixture/heal-registry
+  gemini:
+  - heal-http
+  - heal-sse
+  - heal-stdio
+  - heal-streamable
+  - io.github.apm-fixture/heal-registry
+  hermes:
+  - heal-http
+  - heal-sse
+  - heal-stdio
+  - heal-streamable
+  - io.github.apm-fixture/heal-registry

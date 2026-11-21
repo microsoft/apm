@@ -8,6 +8,12 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    MARKETPLACE_CONFIG_DUPLICATE,
+    MARKETPLACE_CONFIG_MISSING,
+)
+from apm_cli.core.scope import manifest_file
+
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import (
     GitLsRemoteError,
@@ -20,7 +26,7 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 def _yml_path() -> Path:
     """Return the active marketplace authoring config path in CWD."""
     cwd = Path.cwd()
-    apm_path = cwd / "apm.yml"
+    apm_path = manifest_file(cwd)
     legacy_path = cwd / "marketplace.yml"
 
     if _has_marketplace_block(apm_path):
@@ -33,14 +39,14 @@ def _yml_path() -> Path:
 def _ensure_yml_exists(logger: CommandLogger) -> Path:
     """Return the yml path or exit with guidance if it does not exist."""
     cwd = Path.cwd()
-    apm_path = cwd / "apm.yml"
+    apm_path = manifest_file(cwd)
     legacy_path = cwd / "marketplace.yml"
 
     if _has_marketplace_block(apm_path) and legacy_path.exists():
         logger.error(
             "Both apm.yml (with a 'marketplace:' block) and "
-            "marketplace.yml exist. Remove marketplace.yml or run "
-            "'apm marketplace migrate --force' to consolidate.",
+            "marketplace.yml exist. Remove marketplace.yml, or "
+            f"{MARKETPLACE_CONFIG_DUPLICATE.clause()}.",
             symbol="error",
         )
         sys.exit(1)
@@ -48,7 +54,7 @@ def _ensure_yml_exists(logger: CommandLogger) -> Path:
     path = _yml_path()
     if not path.exists() or (path == apm_path and not _has_marketplace_block(path)):
         logger.error(
-            "No marketplace authoring config found. Run 'apm marketplace init' to scaffold one.",
+            f"No marketplace authoring config found. {MARKETPLACE_CONFIG_MISSING.sentence()}",
             symbol="error",
         )
         sys.exit(1)
@@ -114,7 +120,7 @@ def _resolve_ref(
     Returns the (possibly resolved) ref string, or ``None`` when
     *version* is set (version-based pinning, no ref needed).
     """
-    from ....marketplace.ref_resolver import RefResolver
+    from ....marketplace.ref_resolver import RefResolver, explicit_ref_error
 
     # Version-based - no ref resolution needed.
     if version is not None:
@@ -153,15 +159,17 @@ def _resolve_ref(
         )
         return sha
 
-    # Non-HEAD, non-SHA ref - check whether it is a branch name.
-    resolver = RefResolver()
+    # Non-HEAD, non-SHA ref - verify it exists the same way ``check`` does.
+    resolver = RefResolver(host=host)
     try:
         remote_refs = resolver.list_remote_refs(source)
-    except (GitLsRemoteError, OfflineMissError):
-        # Cannot verify - store as-is but warn the user.
+    except (GitLsRemoteError, OfflineMissError) as exc:
+        detail = exc.summary_text if isinstance(exc, GitLsRemoteError) else str(exc)
+        if not no_verify:
+            logger.error(f"Cannot verify ref '{ref}' for '{source}': {detail}", symbol="error")
+            sys.exit(2)
         logger.warning(
-            f"Could not verify ref '{ref}' for '{source}' (network unavailable). "
-            "Storing unresolved -- run with network access to pin a concrete SHA.",
+            f"Could not verify ref '{ref}' for '{source}' ({detail}). Storing unresolved.",
             symbol="warning",
         )
         return ref
@@ -185,7 +193,14 @@ def _resolve_ref(
             )
             return remote_ref.sha
 
-    # Not a branch - tag or unknown ref; store as-is.
+    # Not a branch - a tag must exist on the remote, as ``marketplace check``
+    # requires; --no-verify keeps the explicit opt-out.
+    error = explicit_ref_error(
+        ref, remote_refs, resolver=resolver, owner_repo=source, offline=False
+    )
+    if error and not no_verify:
+        logger.error(f"{error} for '{source}'", symbol="error")
+        sys.exit(2)
     return ref
 
 

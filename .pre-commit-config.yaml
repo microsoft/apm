@@ -1,4 +1,4 @@
-# Optional: install with `uv run pre-commit install` for local lint feedback.
+# Optional: install with `uvx pre-commit install` for local lint feedback.
 # CI (ci.yml lint job) is the authoritative gate -- pre-commit is a convenience.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit

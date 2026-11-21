@@ -24,6 +24,8 @@ import pytest
 from apm_cli.install import validation
 from apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 
 def _make_gitlab_resolver():
     """Resolver mock returning a GitLab classification with no token."""

@@ -14,6 +14,8 @@ from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.marketplace.yml_editor import add_plugin_entry
 from apm_cli.marketplace.yml_schema import MarketplaceConfig
 
+pytestmark = pytest.mark.component
+
 _SHA = "a" * 40
 
 
@@ -45,7 +47,7 @@ class _RecordingAuthResolver:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str | None]] = []
 
-    def resolve(self, host: str, org: str | None = None):
+    def resolve(self, host: str, org: str | None = None, **_kwargs: object):
         self.calls.append((host, org))
         return SimpleNamespace(token="token", source="test-auth", auth_scheme="basic")
 

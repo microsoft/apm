@@ -8,6 +8,8 @@ import pytest
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases.lockfile import LockfileBuilder
 
+pytestmark = pytest.mark.unit
+
 
 class TestLockedDependencyProvenance:
     """Verify marketplace provenance fields round-trip correctly."""

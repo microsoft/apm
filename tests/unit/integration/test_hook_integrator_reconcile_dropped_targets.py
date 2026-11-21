@@ -28,7 +28,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from apm_cli.integration.hook_integrator import HookIntegrator
+
+pytestmark = pytest.mark.component
 
 
 def _write_json(path: Path, data: dict) -> None:

@@ -12,6 +12,7 @@ from collections.abc import MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..core.remediation import ORPHANED_AGENTS_MD
 from ..output.formatters import CompilationFormatter
 from ..output.models import CompilationResults
 from ..primitives.models import Instruction, PrimitiveCollection
@@ -345,14 +346,17 @@ class DistributedAgentsCompiler:
             )
 
             if orphaned_files and not defer_orphan_warnings:
-                # Always show warnings about orphaned files
-                warning_messages = self._generate_orphan_warnings(orphaned_files)
-                if warning_messages:
-                    self.warnings.extend(warning_messages)
+                # Without --clean, tell the user how to remove orphans.  With
+                # --clean, the cleanup step reports what was (or would be)
+                # removed, so a "run --clean" instruction would be stale.
+                if not clean_orphaned:
+                    self.warnings.extend(self._generate_orphan_warnings(orphaned_files))
+                elif dry_run:
+                    self.warnings.extend(self._cleanup_orphaned_files(orphaned_files, dry_run=True))
                 # Standalone callers retain the established cleanup behavior.
                 # AgentsCompiler defers cleanup until its full write preflight has
                 # succeeded, preserving all-or-nothing distributed writes.
-                if clean_orphaned and not dry_run and not defer_orphan_cleanup:
+                elif not defer_orphan_cleanup:
                     self.warnings.extend(self._cleanup_orphaned_files(orphaned_files))
 
             # Phase 5: Validate coverage
@@ -362,6 +366,8 @@ class DistributedAgentsCompiler:
 
             # Compile statistics
             stats = self._compile_distributed_stats(placements, primitives, content_map=content_map)
+            # Every placement was suppressed by dedup: an explained skip, not zero output (#4209).
+            stats["agents_md_suppressed_by_dedup"] = 0 if content_map else len(suppressed_paths)
 
             # Optional: Get referenced contexts for reporting (doesn't copy)
             try:
@@ -961,7 +967,7 @@ class DistributedAgentsCompiler:
         if len(orphaned_files) == 1:
             rel_path = portable_relpath(orphaned_files[0], self.base_dir)
             warning_messages.append(
-                f"Orphaned AGENTS.md found: {rel_path} - run 'apm compile --clean' to remove"
+                f"Orphaned AGENTS.md found: {rel_path} - {ORPHANED_AGENTS_MD.clause()}"
             )
         else:
             # For multiple files, create a single multi-line warning message
@@ -975,7 +981,8 @@ class DistributedAgentsCompiler:
             # Create one cohesive warning message
             files_text = "\n".join(file_list)
             warning_messages.append(
-                f"Found {len(orphaned_files)} orphaned AGENTS.md files:\n{files_text}\n  Run 'apm compile --clean' to remove orphaned files"
+                f"Found {len(orphaned_files)} orphaned AGENTS.md files:\n{files_text}\n"
+                f"  {ORPHANED_AGENTS_MD.sentence()}"
             )
 
         return warning_messages

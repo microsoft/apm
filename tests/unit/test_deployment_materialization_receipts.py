@@ -47,9 +47,25 @@ def _session(root: Path, lock: LockFile) -> DeploymentMaterializationSession:
     return DeploymentMaterializationSession(root, InstallScope.PROJECT, lock)
 
 
-def test_receipt_outlives_checked_out_hash_without_adopting_disk(
+def _receipt_evidence(root: Path):
+    """Deletion evidence from this installation's persisted receipts only (#3701)."""
+    from apm_cli.integration.cleanup import DeploymentEvidence
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    return DeploymentEvidence.collect(
+        root,
+        user_scope=False,
+        lockfile=None,
+        lockfile_root=root,
+        diagnostics=DiagnosticCollector(),
+        kept=(),
+    )
+
+
+def test_receipt_outlives_checked_out_hash_only_while_disk_holds_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A receipt for another lock's hash vouches only for its own bytes, never the disk's."""
     root, path, lock = _fixture(tmp_path, monkeypatch)
     old_hash = compute_file_hash(path)
     session = _session(root, lock)
@@ -70,8 +86,29 @@ def test_receipt_outlives_checked_out_hash_without_adopting_disk(
     )
     assert _session(root, lock).baseline(path, [TARGET]) == old_hash
     path.write_text("user edit\n", encoding="utf-8")
-    assert _session(root, lock).baseline(path, [TARGET]) == old_hash
+    assert _session(root, lock).baseline(path, [TARGET]) is None
     assert compute_file_hash(path) != old_hash
+
+
+def test_hashless_claim_trusts_a_receipt_only_while_disk_holds_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A legacy claim without a hash never lets a receipt vouch for different bytes."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    old_hash = compute_file_hash(path)
+    session = _session(root, lock)
+    session.record({path: old_hash}, [TARGET], "pkg")
+    session.flush()
+    row = next(iter(lock.deployment_ledger.records.values()))
+    DeploymentLedgerCodec.apply_to_lockfile(
+        DeploymentLedger({row.locator.key: DeploymentRecord(row.locator, row.owners, "pkg", None)}),
+        lock,
+        write_legacy_views=False,
+    )
+    assert _session(root, lock).baseline(path, [TARGET]) == old_hash
+    path.write_text("user edit\n", encoding="utf-8")
+    assert _session(root, lock).baseline(path, [TARGET]) is None
+    assert path.read_text(encoding="utf-8") == "user edit\n"
 
 
 @pytest.mark.parametrize("target_name", ["claude", "hermes", "copilot-cowork"])
@@ -327,6 +364,7 @@ def test_cleanup_retires_only_successfully_removed_members(
         dep_key="pkg",
         targets=[TARGET],
         diagnostics=DiagnosticCollector(),
+        evidence=_receipt_evidence(root),
         recorded_hashes={entry: original_hash},
     )
     assert result.skipped_user_edit == [entry]
@@ -338,6 +376,7 @@ def test_cleanup_retires_only_successfully_removed_members(
         dep_key="pkg",
         targets=[TARGET],
         diagnostics=DiagnosticCollector(),
+        evidence=_receipt_evidence(root),
         recorded_hashes={entry: original_hash},
     )
     assert result.deleted == [entry]
@@ -346,9 +385,8 @@ def test_cleanup_retires_only_successfully_removed_members(
     assert _session(root, lock).baseline(path, [TARGET]) is None
 
 
-@pytest.mark.parametrize("managed", [True, False], ids=["recorded", "legacy"])
 def test_sync_reports_only_successful_removals_for_receipt_retirement(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, managed: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import shutil
     from types import SimpleNamespace
@@ -379,21 +417,33 @@ def test_sync_reports_only_successful_removals_for_receipt_retirement(
             raise PermissionError("injected failed skill removal")
         rmtree(directory, *args, **kwargs)
 
+    unlink = Path.unlink
+
+    def unlink_or_refuse(member: Path, *args, **kwargs) -> None:
+        if member == blocked:
+            raise PermissionError("injected failed member removal")
+        unlink(member, *args, **kwargs)
+
     monkeypatch.setattr(shutil, "rmtree", remove)
+    monkeypatch.setattr(Path, "unlink", unlink_or_refuse)
     removed: list[Path] = []
+    # Lockfiles list each skill directory and its members; members are
+    # removed first, under receipt evidence (#3701).
+    managed = set()
+    for member in (path, blocked):
+        managed.add(member.parent.relative_to(root).as_posix())
+        managed.add(member.relative_to(root).as_posix())
     result = SkillIntegrator().sync_integration(
         SimpleNamespace(get_apm_dependencies=lambda: []),
         root,
-        managed_files=(
-            {member.parent.relative_to(root).as_posix() for member in (path, blocked)}
-            if managed
-            else None
-        ),
+        managed_files=managed,
         targets=[TARGET],
         removed_paths=removed,
+        evidence=_receipt_evidence(root),
     )
-    assert result == {"files_removed": 1, "errors": 1}
-    assert removed == [path.parent]
+    assert result == {"files_removed": 2, "errors": 2}
+    assert removed == [path, path.parent]
+    monkeypatch.setattr(Path, "unlink", unlink)
     DeploymentMaterializationSession.retire_removed(root, removed, user_scope=False)
     path.parent.mkdir()
     path.write_bytes(blocked.read_bytes())
@@ -465,6 +515,7 @@ def test_uninstall_retires_before_recreating_and_binding_survivor_receipt(
         lockfile=lock,
         modules_dir=root / "apm_modules",
         survivor_plan=[(dep, info)],
+        evidence=_receipt_evidence(root),
     )
     assert observed == ["retired"]
     assert outcome.counts["skills"] == 1
@@ -479,6 +530,104 @@ def test_uninstall_retires_before_recreating_and_binding_survivor_receipt(
     _persist_uninstall_lockfile(lock, lock_path, MagicMock(), outcome)
     final = _session(root, LockFile.read(lock_path))
     assert final.baseline(path, [TARGET]) == compute_file_hash(source)
+
+
+def _empty_cleanup_outcome():
+    from apm_cli.commands.uninstall.engine import IntegrationCleanupOutcome
+
+    return IntegrationCleanupOutcome(counts={}, deployed_files={}, failed_paths=[], error_count=0)
+
+
+@pytest.mark.parametrize("defer", [True, False])
+def test_empty_uninstall_lock_is_kept_only_when_removal_is_deferred(
+    tmp_path: Path, defer: bool
+) -> None:
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.cli import _persist_uninstall_lockfile
+
+    lock_path = tmp_path / "apm.lock.yaml"
+    lock_path.write_text("stale\n", encoding="utf-8")
+    outcome = _persist_uninstall_lockfile(
+        LockFile(), lock_path, MagicMock(), _empty_cleanup_outcome(), defer_empty_removal=defer
+    )
+    assert outcome.saved is True
+    assert outcome.removal_pending is defer
+    assert lock_path.exists() is defer
+    if defer:
+        assert not LockFile.read(lock_path).dependencies
+
+
+@pytest.mark.parametrize("native_fails", [False, True])
+def test_empty_uninstall_lock_is_removed_only_after_native_resync_converges(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_fails: bool
+) -> None:
+    import contextlib
+    from unittest.mock import MagicMock
+
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+    from apm_cli.commands.uninstall import cli
+
+    def resync(**_kwargs) -> None:
+        assert lock_path.exists()
+        if native_fails:
+            raise ClaudeNativePluginError("native cleanup interrupted")
+
+    monkeypatch.setattr(cli, "_resync_native_registration_after_uninstall", resync)
+    lock_path = tmp_path / "apm.lock.yaml"
+    lock_path.write_text("stale\n", encoding="utf-8")
+    expectation = (
+        pytest.raises(ClaudeNativePluginError) if native_fails else contextlib.nullcontext()
+    )
+    with expectation:
+        cli._persist_lock_then_resync_native(
+            lock_changed=True,
+            persist_allowed=True,
+            lockfile=LockFile(),
+            lockfile_path=lock_path,
+            logger=MagicMock(),
+            integration_cleanup=_empty_cleanup_outcome(),
+            deploy_root=tmp_path,
+            modules_dir=tmp_path / "apm_modules",
+            scope=InstallScope.USER,
+            native_before=cli._NativeBefore({}, None),
+        )
+    assert lock_path.exists() is native_fails
+
+
+@pytest.mark.parametrize("case", ["withheld", "write_failed", "unchanged"])
+def test_native_resync_never_runs_ahead_of_the_survivor_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """A withheld or failed required save leaves Claude registrations unchanged."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall import cli
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        cli, "_resync_native_registration_after_uninstall", lambda **kw: calls.append(kw)
+    )
+    modules = tmp_path / "apm_modules"
+    lock = LockFile()
+    if case == "write_failed":
+        monkeypatch.setattr(lock, "write", MagicMock(side_effect=OSError("disk full")))
+    logger = MagicMock()
+    cli._persist_lock_then_resync_native(
+        lock_changed=case != "unchanged",
+        persist_allowed=case != "withheld",
+        lockfile=lock,
+        lockfile_path=tmp_path / "apm.lock.yaml",
+        logger=logger,
+        integration_cleanup=_empty_cleanup_outcome(),
+        deploy_root=tmp_path,
+        modules_dir=modules,
+        scope=InstallScope.USER,
+        native_before=cli._NativeBefore({"owner/plugin": object()}, b"lock"),
+    )
+    assert bool(calls) is (case == "unchanged")
+    held = [c for c in logger.warning.call_args_list if "left unchanged" in str(c)]
+    assert bool(held) is (case != "unchanged")
 
 
 @pytest.mark.windows_compat
@@ -882,3 +1031,64 @@ def test_native_receipt_with_drifted_device_number_is_rebound(
     assert rebound.baseline(path, [TARGET]) == compute_file_hash(path)
     rebound.flush()
     assert json.loads(rebound.state_path.read_text(encoding="utf-8"))["root_identity"] == actual
+
+
+def test_non_skill_write_records_receipt_under_target_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every file primitive's final write is receipted, not only skills (#3701)."""
+    root, _path, lock = _fixture(tmp_path, monkeypatch)
+    rule = root / ".claude/rules/style.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("rendered rule\n", encoding="utf-8")
+    session = _session(root, lock)
+    session.record({rule: compute_file_hash(rule)}, [TARGET], "pkg")
+    session.flush()
+    state = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert rule.resolve().as_posix() in state["destinations"].values()
+    assert rule.resolve().as_posix() in _session(root, lock).receipt_hashes()
+
+
+def test_write_outside_every_target_root_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _path, lock = _fixture(tmp_path, monkeypatch)
+    stray = root / "notes/stray.md"
+    stray.parent.mkdir(parents=True)
+    stray.write_text("user\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Cannot record unverified materialization"):
+        _session(root, lock).record({stray: compute_file_hash(stray)}, [TARGET], "pkg")
+
+
+def test_orphaned_receipt_collection_keeps_every_doubtful_receipt(tmp_path, monkeypatch) -> None:
+    """Only a receipt naming its own key for a root gone from a live parent goes (#4176)."""
+    import json as _json
+
+    from apm_cli.core import deployment_ledger
+
+    home = tmp_path / "apm-home"
+    receipts = home / "deployment-receipts"
+    receipts.mkdir(parents=True)
+    monkeypatch.setenv("APM_HOME", str(home))
+    live = tmp_path / "live"
+    live.mkdir()
+
+    def receipt(root: Path, *, name: str | None = None) -> Path:
+        stem = name or deployment_ledger._receipt_key(root.as_posix(), "project")
+        path = receipts / f"{stem}.json"
+        path.write_text(_json.dumps({"root": root.as_posix(), "scope": "project"}))
+        return path
+
+    gone = receipt(tmp_path / "gone")
+    kept = {
+        "live": receipt(live),
+        "renamed": receipt(tmp_path / "other-gone", name="0" * 64),
+        "unmounted": receipt(tmp_path / "missing-volume" / "project"),
+    }
+    corrupt = receipts / f"{'1' * 64}.json"
+    corrupt.write_text("{not json")
+
+    assert deployment_ledger.retire_receipts_of_missing_projects() == 1
+    assert not gone.exists()
+    assert all(path.exists() for path in kept.values()), kept
+    assert corrupt.exists()

@@ -1,0 +1,15 @@
+{
+  "issue": 4363,
+  "fixed_in": "Unreleased",
+  "summary": "A refused apm update names the content hash mismatch with an error line.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_locked_source_cache_parity_lifecycle.py::test_update_refusal_names_the_mismatch_as_an_error",
+    "tests/lifecycle/security/test_integrity.py::test_integrity_row"
+  ]
+}

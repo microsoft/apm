@@ -82,7 +82,10 @@ class TestUpdateConfig:
         (tmp_path / ".vscode").mkdir()
         adapter = _make_adapter(tmp_path)
         logger = MagicMock()
-        with patch("builtins.open", side_effect=PermissionError("denied")):
+        with patch(
+            "apm_cli.utils.json_config.atomic_write_text",
+            side_effect=PermissionError("denied"),
+        ):
             result = adapter.update_config({"servers": {}}, logger=logger)
         assert result is False
         logger.error.assert_called_once()
@@ -90,11 +93,15 @@ class TestUpdateConfig:
     def test_write_error_no_logger_prints(self, tmp_path, capsys):
         (tmp_path / ".vscode").mkdir()
         adapter = _make_adapter(tmp_path)
-        with patch("builtins.open", side_effect=PermissionError("denied")):
+        with patch(
+            "apm_cli.utils.json_config.atomic_write_text",
+            side_effect=PermissionError("denied"),
+        ):
             result = adapter.update_config({"servers": {}})
         assert result is False
         captured = capsys.readouterr()
-        assert "Error" in captured.out
+        # Adapter errors render through the library logger on stderr (RA-004).
+        assert "Error" in captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +150,8 @@ class TestGetCurrentConfig:
             result = adapter.get_current_config()
         assert result == {}
         captured = capsys.readouterr()
-        assert "Error" in captured.out
+        # Adapter errors render through the library logger on stderr (RA-004).
+        assert "Error" in captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +172,7 @@ class TestConfigureMcpServer:
         result = adapter.configure_mcp_server("")
         assert result is False
         captured = capsys.readouterr()
-        assert "Error" in captured.out
+        assert "server_url cannot be empty" in captured.err
 
     def test_server_not_in_registry_raises_value_error(self, tmp_path):
         adapter = _make_adapter(tmp_path)
@@ -608,7 +616,7 @@ class TestWarnOnLegacyAngleVars:
         # No warning expected
 
     def test_angle_var_emits_warning(self, capsys, tmp_path):
-        with patch("apm_cli.adapters.client.vscode._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             VSCodeClientAdapter._warn_on_legacy_angle_vars({"K": "<MY_TOKEN>"}, "my-server", "env")
         mock_warn.assert_called_once()
         call_text = mock_warn.call_args[0][0]

@@ -25,6 +25,8 @@ from apm_cli.marketplace.builder import (
 )
 from apm_cli.marketplace.migration import load_marketplace_config
 
+pytestmark = pytest.mark.component
+
 _SCHEMA_PATH = (
     Path(__file__).parent.parent.parent
     / "fixtures"

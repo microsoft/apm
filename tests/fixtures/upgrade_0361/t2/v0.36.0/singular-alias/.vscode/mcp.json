@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "srv": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {}
+    }
+  },
+  "inputs": []
+}

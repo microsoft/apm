@@ -28,11 +28,12 @@ Ref: https://geminicli.com/docs/reference/configuration/
 
 import json
 import logging
-import os
 from pathlib import Path
 
-from ...utils.atomic_io import atomic_write_text
-from ...utils.console import _rich_error, _rich_success
+from ...core.command_logger import library_logger
+from ...mcp_transport import canonical_remote_transport
+from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
+from .base import warn_unreadable_config_once
 from .copilot import CopilotClientAdapter
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,8 @@ class GeminiClientAdapter(CopilotClientAdapter):
     ``<project_root>/.gemini/settings.json`` (opt-in -- the directory must
     already exist), and user scope reads/writes ``~/.gemini/settings.json``.
     """
+
+    remote_shape = remote_shape_row("gemini")
 
     supports_user_scope: bool = True
     target_name: str = "gemini"
@@ -91,7 +94,9 @@ class GeminiClientAdapter(CopilotClientAdapter):
             return
 
         config_path = Path(self.get_config_path())
-        current_config = self.get_current_config()
+        current_config = self._parse_json_config_for_update(config_path)
+        if current_config is None:
+            return False
         if "mcpServers" not in current_config:
             current_config["mcpServers"] = {}
 
@@ -102,13 +107,8 @@ class GeminiClientAdapter(CopilotClientAdapter):
             logger.debug(
                 "Creating %s for %s user configuration", config_path.parent, self.target_name
             )
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(
-            config_path,
-            json.dumps(current_config, indent=2),
-            new_file_mode=0o600,
-        )
-        os.chmod(config_path, 0o600)
+        self._write_json_config(config_path, current_config)
+        return True
 
     def get_current_config(self):
         """Read the current ``settings.json`` contents for the active scope."""
@@ -119,7 +119,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
             with open(config_path, encoding="utf-8") as f:
                 return json.load(f)
         except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Could not read %s: %s", config_path, exc)
+            warn_unreadable_config_once(logger, config_path, exc)
             return {}
 
     def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
@@ -149,7 +149,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
         # three placeholder syntaxes (``<VAR>``, ``${VAR}``, ``${env:VAR}``)
         # are resolved at install time before being written to
         # ``.gemini/settings.json``. See issue #1266.
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             config["command"] = raw["command"]
             if raw.get("cwd") is not None:
@@ -177,21 +177,14 @@ class GeminiClientAdapter(CopilotClientAdapter):
         if remotes:
             remote = self._select_remote_with_url(remotes) or remotes[0]
 
-            transport = (remote.get("transport_type") or "").strip()
-            if not transport:
-                transport = "http"
-            elif transport not in ("sse", "http", "streamable-http"):
-                raise ValueError(
-                    f"Unsupported remote transport '{transport}' for {self.target_name}. "
-                    f"Server: {server_info.get('name', 'unknown')}. "
-                    f"Supported transports: http, sse, streamable-http."
-                )
-
-            url = (remote.get("url") or "").strip()
-            if transport == "sse":
-                config["url"] = url
-            else:
-                config["httpUrl"] = url
+            server_name = server_info.get("name", "unknown")
+            transport = canonical_remote_transport(
+                remote, runtime_label=self.target_name, server_name=server_name
+            )
+            shape = active_remote_shape(self)
+            if not shape.supports(transport):
+                return skip_unsupported_remote(self, server_name, transport)
+            config.update(shape.render(transport, (remote.get("url") or "").strip()))
 
             # Registry-supplied headers
             for header in remote.get("headers", []):
@@ -276,7 +269,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
         the target CLI settings file.
         """
         if not server_url:
-            _rich_error("server_url cannot be empty", symbol="error")
+            library_logger().error("server_url cannot be empty", symbol="error")
             return False
 
         if not self.user_scope and not self._get_config_dir().is_dir():
@@ -294,23 +287,22 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 server_info = self.registry_client.find_server_by_reference(server_url)
 
             if not server_info:
-                _rich_error(f"MCP server '{server_url}' not found in registry", symbol="error")
+                library_logger().error(
+                    f"MCP server '{server_url}' not found in registry", symbol="error"
+                )
                 return False
 
-            config_key = self._determine_config_key(server_url, server_name, server_info)
+            config_key = self.determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
-            self.update_config({config_key: server_config})
-
-            _rich_success(
-                f"Configured MCP server '{config_key}' for {self.target_name}",
-                symbol="success",
-            )
-            return True
+            if server_config is None:
+                return False
+            # Integrator's install tree reports success once (#3994, #4089).
+            return self.update_config({config_key: server_config}) is not False
 
         except Exception as e:
             logger.debug("%s MCP configuration failed: %s", self.target_name, e)
-            _rich_error(
+            library_logger().error(
                 f"Failed to configure MCP server for {self.target_name}",
                 symbol="error",
             )

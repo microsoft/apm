@@ -24,6 +24,8 @@ from apm_cli.compilation.constitution import clear_constitution_cache
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Module-level cache isolation
 # ---------------------------------------------------------------------------
@@ -170,6 +172,7 @@ class TestCleanRemovesApmGeneratedStaleCLAUDEMD:
         assert any("Removed stale" in m and "CLAUDE.md" in m for m in success_messages), (
             f"Expected a 'Removed stale CLAUDE.md' log line at 'success' level, got: {logger.logged}"
         )
+        assert not (tmp_path / "CLAUDE.md").exists()
 
     def test_clean_checks_containment_before_unlink(self, tmp_path, monkeypatch):
         """Stale CLAUDE.md deletion must pass through the path containment guard."""
@@ -275,6 +278,7 @@ class TestHandAuthoredCLAUDEMDIsNeverRemoved:
         assert any("hand-authored" in w for w in result.warnings), (
             f"Expected a 'hand-authored' warning, got: {result.warnings}"
         )
+        assert (tmp_path / "CLAUDE.md").exists()
 
     def test_clean_hand_authored_warning_emitted_via_logger(self, tmp_path):
         """Live --clean hand-authored skips must reach the terminal logger."""
@@ -297,6 +301,7 @@ class TestHandAuthoredCLAUDEMDIsNeverRemoved:
             "Live --clean with a hand-authored CLAUDE.md must emit the skip warning "
             f"through the logger; got: {logger.logged}"
         )
+        assert (tmp_path / "CLAUDE.md").exists()
 
     def test_clean_unlink_error_warning_emitted_via_logger(self, tmp_path, monkeypatch):
         """Live --clean unlink failures must be visible through the logger."""
@@ -390,6 +395,7 @@ class TestPlainCompileIsNonDestructive:
             "Plain compile (no --clean) must not emit 'Skipped removal' warnings; "
             f"got: {result.warnings}"
         )
+        assert (tmp_path / "CLAUDE.md").exists()
 
     def test_plain_compile_apm_generated_emits_no_stale_warnings(self, tmp_path):
         """Plain apm compile (no --clean) with an APM-generated CLAUDE.md must
@@ -411,6 +417,7 @@ class TestPlainCompileIsNonDestructive:
             any(kw in w for kw in ("stale", "Skipped removal", "Could not read", "hand-authored"))
             for w in result.warnings
         ), f"Plain compile (no --clean) must emit no stale-file warnings; got: {result.warnings}"
+        assert (tmp_path / "CLAUDE.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -559,6 +566,7 @@ class TestDryRunCleanBehavior:
             "Dry-run --clean preview must mention 'would remove stale CLAUDE.md'; "
             f"got content:\n{result.content}"
         )
+        assert (tmp_path / "CLAUDE.md").exists()
 
     def test_dry_run_no_clean_does_not_preview_removal(self, tmp_path):
         """Dry-run WITHOUT --clean must NOT preview a stale-removal line
@@ -579,6 +587,7 @@ class TestDryRunCleanBehavior:
             "Dry-run without --clean must not mention stale-removal; "
             f"got content:\n{result.content}"
         )
+        assert (tmp_path / "CLAUDE.md").exists()
 
     def test_dry_run_clean_preview_emitted_via_logger(self, tmp_path):
         """The stale-removal preview must be emitted through self._log (progress)
@@ -610,6 +619,7 @@ class TestDryRunCleanBehavior:
             "cli.py dry-run path. "
             f"Logger calls captured: {logger.logged}"
         )
+        assert (tmp_path / "CLAUDE.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -654,6 +664,7 @@ class TestConstitutionCaseNoRemovalPreview:
             "must NOT show a stale-removal preview. "
             f"Got content:\n{result.content}"
         )
+        assert (tmp_path / "CLAUDE.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -708,6 +719,7 @@ class TestDryRunHandAuthoredPreview:
             "Dry-run --clean with a hand-authored CLAUDE.md must emit a 'hand-authored'"
             f" warning; got: {result.warnings}"
         )
+        assert (tmp_path / "CLAUDE.md").exists()
 
     def test_dry_run_clean_hand_authored_preview_in_content(self, tmp_path):
         """The dry-run content must include the skip-preview line mentioning
@@ -728,6 +740,7 @@ class TestDryRunHandAuthoredPreview:
             "Dry-run --clean preview content must mention 'hand-authored' for a"
             f" hand-authored CLAUDE.md; got content:\n{result.content}"
         )
+        assert (tmp_path / "CLAUDE.md").exists()
 
     def test_dry_run_clean_hand_authored_preview_emitted_via_logger(self, tmp_path):
         """The hand-authored skip preview must also be emitted through self._log
@@ -754,6 +767,7 @@ class TestDryRunHandAuthoredPreview:
             "via the distributed cli.py dry-run path. "
             f"Logger calls captured: {logger.logged}"
         )
+        assert (tmp_path / "CLAUDE.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -803,3 +817,4 @@ class TestDryRunReadErrorLoggedViaLogger:
         assert any("Could not read" in w for w in result.warnings), (
             f"result.warnings must also contain the read-error; got: {result.warnings}"
         )
+        assert claude_md.exists()

@@ -115,7 +115,11 @@ done
 case "$url" in
     https://api.github.com/repos/*/releases/*)
         printf 'api auth=%s url=%s\\n' "$auth" "$url" >> "$FAKE_CURL_LOG"
-        cat "$FAKE_RELEASE_JSON"
+        if [ -n "$output" ]; then
+            cp "$FAKE_RELEASE_JSON" "$output"
+        else
+            cat "$FAKE_RELEASE_JSON"
+        fi
         ;;
     https://github.com/*/releases/download/*)
         printf 'download auth=%s url=%s\\n' "$auth" "$url" >> "$FAKE_CURL_LOG"
@@ -143,6 +147,8 @@ def run_setup(
     tarball: Path,
     env_updates: dict[str, str] | None = None,
     curl_script: Path | None = None,
+    vanilla: bool = True,
+    version: str = TEST_VERSION,
 ) -> subprocess.CompletedProcess[str]:
     home_dir = tmp_path / "home"
     bin_dir = tmp_path / "bin"
@@ -169,7 +175,7 @@ def run_setup(
         env.update(env_updates)
 
     return subprocess.run(
-        ["bash", str(SETUP_SCRIPT), "--vanilla", TEST_VERSION],
+        ["bash", str(SETUP_SCRIPT), *(["--vanilla"] if vanilla else []), version],
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,

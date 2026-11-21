@@ -34,8 +34,7 @@ _HOOK_FILE_TARGET_TOKENS: dict[str, set[str]] = {
 }
 
 _MIGRATION_DOCS = (
-    "https://microsoft.github.io/apm/producer/author-primitives/hooks-and-commands/"
-    "#migrating-from-filename-routing"
+    "https://microsoft.github.io/apm/producer/write-primitives/#migrating-from-filename-routing"
 )
 
 

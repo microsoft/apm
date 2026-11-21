@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "local-tool": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "server.js"
+      ]
+    }
+  }
+}

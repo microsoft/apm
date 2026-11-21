@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.context import InstallContext
+from apm_cli.install.phases import lockfile as lockfile_phase
 from apm_cli.install.phases.lockfile import LockfileBuilder
 
 
@@ -107,20 +108,14 @@ class TestHasOrphanLockfileEntries:
         )
         observed: list[LockFile | None] = []
         monkeypatch.setattr(
-            LockfileBuilder,
-            "_sync_cache_pin_markers_from_existing",
-            lambda self: None,
+            lockfile_phase, "sync_cache_pin_markers_from_existing", lambda ctx: None
         )
         monkeypatch.setattr(
             LockfileBuilder,
             "_reconcile_dropped_merge_hook_targets",
             lambda self: None,
         )
-        monkeypatch.setattr(
-            LockfileBuilder,
-            "_sync_cache_pin_markers_from_disk",
-            lambda self: None,
-        )
+        monkeypatch.setattr(lockfile_phase, "sync_cache_pin_markers_from_disk", lambda ctx: None)
         monkeypatch.setattr(
             LockfileBuilder,
             "_reconcile_target_deployed_files",
@@ -168,3 +163,44 @@ class TestHasOrphanLockfileEntries:
         assert len(_build(lockfile_only=False)) == 1
         # Guarded path: `apm lock` skips the deployed-file contraction.
         assert _build(lockfile_only=True) == []
+
+
+def test_retained_orphan_keeps_its_concrete_target_rows() -> None:
+    """A kept orphan carries its source rows instead of rebuilding them as legacy (#3662)."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.core.deployment_state import (
+        DeploymentLedger,
+        DeploymentLocator,
+        DeploymentRecord,
+        LocatorKind,
+    )
+
+    owner = "acme/pkg"
+    path = ".agents/skills/alpha/SKILL.md"
+    hashes = {path: "sha256:" + "a" * 64}
+    locator = DeploymentLocator(
+        LocatorKind.PROJECT_RELATIVE, "codex", path, runtime=None, scope="project"
+    )
+    source = LockFile(
+        dependencies={
+            owner: LockedDependency(
+                repo_url=owner,
+                resolved_ref="1.0.0",
+                deployed_files=[path],
+                deployed_file_hashes=hashes,
+            )
+        },
+        deployment_ledger=DeploymentLedger(
+            {locator.key: DeploymentRecord(locator, (owner,), owner, hashes[path])}
+        ),
+        _deployments_present=True,
+    )
+
+    built = LockFile()
+    LockfileBuilder._keep_retained_orphan(
+        built, owner, source.dependencies[owner], dict(hashes), source
+    )
+
+    rows = DeploymentLedgerCodec.from_lockfile(built).records.values()
+    assert {record.locator.target for record in rows} == {"codex"}
+    assert built.is_semantically_equivalent(source)

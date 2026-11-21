@@ -21,8 +21,8 @@ from typing import Any, List, Optional  # noqa: F401, UP035
 from unittest.mock import MagicMock, patch
 
 import pytest
-import yaml
 
+from apm_cli.core.target_detection import EffectiveTargetDecision
 from apm_cli.install.phases.policy_gate import PolicyViolationError
 from apm_cli.install.phases.policy_target_check import TARGET_CHECK_IDS, run
 from apm_cli.policy.models import CheckResult, CIAuditResult
@@ -32,10 +32,9 @@ from apm_cli.policy.schema import (
     CompilationTargetPolicy,
 )
 
+pytestmark = pytest.mark.unit
+
 # Path to fixtures
-FIXTURES_DIR = Path(__file__).resolve().parent.parent.parent / "fixtures" / "policy"
-TARGET_POLICY_FIXTURE = FIXTURES_DIR / "apm-policy-target-allow.yml"
-TARGET_MISMATCH_DIR = FIXTURES_DIR / "projects" / "target-mismatch"
 
 
 # -- Minimal synthetic context ----------------------------------------
@@ -74,6 +73,7 @@ class _FakeContext:
     # From caller / CLI
     apm_package: Any = None
     target_override: str | list[str] | None = None
+    target_decision: EffectiveTargetDecision | None = None
 
     # From policy_gate
     policy_fetch: Any = None
@@ -89,32 +89,21 @@ def _make_ctx(
     manifest_target=None,
     deps=None,
 ):
-    """Build a _FakeContext with defaults."""
+    """Build a _FakeContext whose target decision mirrors the pipeline."""
     pkg = _FakePackage(target=manifest_target)
+    decision = (
+        EffectiveTargetDecision(target_override, "--target flag")
+        if target_override is not None
+        else EffectiveTargetDecision(manifest_target, "apm.yml")
+    )
     return _FakeContext(
         logger=logger or MagicMock(),
         deps_to_install=deps or [],
         apm_package=pkg,
-        target_override=target_override,
+        target_override=decision.value,
+        target_decision=decision,
         policy_fetch=policy_fetch,
         policy_enforcement_active=enforcement_active,
-    )
-
-
-def _load_target_policy_from_fixture() -> ApmPolicy:
-    """Load the apm-policy-target-allow.yml fixture into an ApmPolicy."""
-    raw = yaml.safe_load(TARGET_POLICY_FIXTURE.read_text())
-    # Build the policy with compilation.target.allow from fixture
-    allow = raw.get("compilation", {}).get("target", {}).get("allow")
-    enforcement = raw.get("enforcement", "warn")
-    allow_tuple = tuple(allow) if allow else None
-    return ApmPolicy(
-        name=raw.get("name", ""),
-        version=raw.get("version", ""),
-        enforcement=enforcement,
-        compilation=CompilationPolicy(
-            target=CompilationTargetPolicy(allow=allow_tuple),
-        ),
     )
 
 
@@ -216,6 +205,16 @@ class TestSkipConditions:
 
         run(ctx)  # should not raise
 
+    def test_raw_manifest_target_is_not_a_second_source(self):
+        """Only the shared decision is judged, never ``apm_package.target``."""
+        ctx = _make_ctx(
+            enforcement_active=True,
+            policy_fetch=_make_policy_fetch(enforcement="block", allow=("copilot",)),
+        )
+        ctx.apm_package = _FakePackage(target="claude")
+
+        run(ctx)  # decision is unrestricted -> nothing to judge
+
 
 # =====================================================================
 # Test: block mode
@@ -311,7 +310,8 @@ class TestTargetOverride:
         # Verify effective_target passed to checks is the CLI override
         mock_checks.assert_called_once()
         call_kwargs = mock_checks.call_args
-        assert call_kwargs[1]["effective_target"] == "claude"
+        assert call_kwargs[1]["effective_target"] == ("claude",)
+        assert call_kwargs[1]["effective_target_source"] == "--target flag"
 
     @patch(_PATCH_CHECKS)
     def test_cli_override_fixes_disallowed_manifest_target(self, mock_checks):
@@ -333,7 +333,7 @@ class TestTargetOverride:
         # Verify effective_target passed to checks is the CLI override
         mock_checks.assert_called_once()
         call_kwargs = mock_checks.call_args
-        assert call_kwargs[1]["effective_target"] == "vscode"
+        assert call_kwargs[1]["effective_target"] == ("copilot",)
 
         ctx.logger.policy_violation.assert_not_called()
 
@@ -350,7 +350,7 @@ class TestTargetOverride:
         run(ctx)
 
         mock_checks.assert_called_once()
-        assert mock_checks.call_args.kwargs["effective_target"] == "copilot"
+        assert mock_checks.call_args.kwargs["effective_target"] == ("copilot",)
         ctx.logger.policy_violation.assert_not_called()
 
     @patch(_PATCH_CHECKS)
@@ -369,7 +369,7 @@ class TestTargetOverride:
         run(ctx)
 
         mock_checks.assert_called_once()
-        assert mock_checks.call_args.kwargs["effective_target"] == ["copilot", "claude"]
+        assert mock_checks.call_args.kwargs["effective_target"] == ("copilot", "claude")
 
     def test_plural_override_blocks_when_any_target_is_disallowed(self):
         """A plural target set cannot bypass compilation.target.allow."""
@@ -441,67 +441,6 @@ class TestNoDoubleEmit:
 # =====================================================================
 # Test: fixture-based integration
 # =====================================================================
-
-
-class TestWithFixtures:
-    """Tests using the real policy fixture files."""
-
-    def test_fixture_loads_correctly(self):
-        """Verify apm-policy-target-allow.yml fixture parses to allow=[vscode]."""
-        assert TARGET_POLICY_FIXTURE.exists(), f"Fixture not found: {TARGET_POLICY_FIXTURE}"
-        policy = _load_target_policy_from_fixture()
-        assert policy.enforcement == "block"
-        assert policy.compilation.target.allow == ("vscode",)
-
-    def test_target_mismatch_fixture_exists(self):
-        """Verify the target-mismatch project fixture exists with target=claude."""
-        apm_yml = TARGET_MISMATCH_DIR / "apm.yml"
-        assert apm_yml.exists(), f"Fixture not found: {apm_yml}"
-        raw = yaml.safe_load(apm_yml.read_text())
-        assert raw["target"] == "claude"
-
-    @patch(_PATCH_CHECKS)
-    def test_fixture_block_mode_target_mismatch(self, mock_checks):
-        """Real fixture: policy allow=[vscode], project target=claude, block -> raises."""
-        policy = _load_target_policy_from_fixture()
-        fetch = _FakePolicyFetch(policy=policy, outcome="found")
-
-        mock_checks.return_value = _target_failing_audit(target_value="claude", allowed=("vscode",))
-
-        # Read manifest target from fixture
-        apm_yml = TARGET_MISMATCH_DIR / "apm.yml"
-        raw = yaml.safe_load(apm_yml.read_text())
-        manifest_target = raw["target"]
-
-        ctx = _make_ctx(
-            enforcement_active=True,
-            policy_fetch=fetch,
-            manifest_target=manifest_target,
-        )
-
-        with pytest.raises(PolicyViolationError, match="compilation target"):
-            run(ctx)
-
-    @patch(_PATCH_CHECKS)
-    def test_fixture_cli_override_fixes_mismatch(self, mock_checks):
-        """Real fixture: --target vscode overrides manifest claude -> passes."""
-        policy = _load_target_policy_from_fixture()
-        fetch = _FakePolicyFetch(policy=policy, outcome="found")
-
-        mock_checks.return_value = _target_passing_audit()
-
-        ctx = _make_ctx(
-            enforcement_active=True,
-            policy_fetch=fetch,
-            target_override="vscode",  # override fixes the mismatch
-            manifest_target="claude",  # from fixture
-        )
-
-        run(ctx)  # should NOT raise
-
-        # Verify the override was passed through
-        call_kwargs = mock_checks.call_args
-        assert call_kwargs[1]["effective_target"] == "vscode"
 
 
 # =====================================================================

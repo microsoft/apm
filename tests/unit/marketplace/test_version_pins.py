@@ -206,11 +206,13 @@ class TestPinsPath:
         result = _pins_path(pins_dir=str(tmp_path))
         assert result == os.path.join(str(tmp_path), "version-pins.json")
 
-    def test_default_dir(self):
-        """Default path (no pins_dir) includes version-pins.json under CONFIG_DIR."""
-        with patch("apm_cli.config.CONFIG_DIR", "/fake/.apm"):
-            result = _pins_path(pins_dir=None)
-        assert result == os.path.join("/fake/.apm", "cache", "marketplace", "version-pins.json")
+    def test_default_dir_follows_apm_home_at_call_time(self, tmp_path, monkeypatch):
+        """Default path (no pins_dir) is under the APM_HOME in effect for the call."""
+        monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+        result = _pins_path(pins_dir=None)
+        assert result == os.path.join(
+            str(tmp_path / "home"), "cache", "marketplace", "version-pins.json"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +227,7 @@ class TestAtomicWrite:
         """os.replace is called to atomically move the temp file."""
         pins = {"mkt/plug": "ref1"}
 
-        with patch("apm_cli.marketplace.version_pins.os.replace", wraps=os.replace) as mock_replace:
+        with patch("os.replace", wraps=os.replace) as mock_replace:
             save_ref_pins(pins, pins_dir=str(tmp_path))
             mock_replace.assert_called_once()
             args = mock_replace.call_args[0]

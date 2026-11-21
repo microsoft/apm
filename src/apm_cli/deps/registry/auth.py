@@ -27,7 +27,9 @@ import urllib.parse
 from dataclasses import dataclass, replace
 from typing import Any
 
+from ...core.catalog_credentials import credential_env_suffix
 from ...models.dependency.reference import DependencyReference
+from ...utils.credential_rendering import redact_url_userinfo
 
 
 @dataclass(frozen=True)
@@ -58,9 +60,14 @@ class RegistryAuthContext:
             return f"Basic {base64.b64encode(credentials).decode('ascii')}"
         return None
 
+    def headers(self) -> dict[str, str]:
+        """Return the credential headers for one registry call (empty when anonymous)."""
+        value = self.auth_header()
+        return {"Authorization": value} if value else {}
+
 
 def _sanitized(registry_name: str) -> str:
-    return registry_name.upper().replace("-", "_").replace(".", "_")
+    return credential_env_suffix(registry_name)
 
 
 def registry_token_env_var(registry_name: str) -> str:
@@ -124,10 +131,12 @@ def resolve_registry_basic(
 def _credential_origin_matches(registry_name: str, target_url: str) -> bool:
     """Return whether trusted user config binds *registry_name* to *target_url*."""
     from ...config import get_registry_config
+    from .url_scheme import registry_url_error
 
     cfg = get_registry_config(registry_name)
     configured_url = cfg.get("url") if isinstance(cfg, dict) else None
-    if not isinstance(configured_url, str) or not configured_url:
+    insecure = cfg.get("insecure") if isinstance(cfg, dict) else None
+    if registry_url_error(registry_name, configured_url, insecure=insecure) is not None:
         return False
     target = _normalize_url_prefix(target_url)
     configured = _normalize_url_prefix(configured_url)
@@ -256,7 +265,7 @@ def remediation_message(target_url: str) -> str:
 
     return (
         f"error: this project depends on a package from\n"
-        f"  {target_url}\n"
+        f"  {redact_url_userinfo(target_url)}\n"
         f"but no credentials for that registry are configured on this machine.\n"
         f"Add a registry entry whose URL matches (in apm.yml or "
         f"{get_apm_home() / 'config.json'})\n"

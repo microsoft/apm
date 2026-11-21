@@ -17,6 +17,7 @@ import tomlkit
 import yaml
 
 from apm_cli.codex_plugins.registrar import marketplace_name
+from apm_cli.core.cache_drift import PACKAGE_CACHE_DRIFT
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.content_hash import compute_native_bundle_hash, compute_package_hash
 from apm_cli.utils.path_security import safe_rmtree
@@ -153,13 +154,27 @@ def _source(root: Path, marker: str) -> None:
     asset.chmod(0o644)
 
 
+# One drift message whichever owner detects the changed copy (#4480).
+_DRIFT = PACKAGE_CACHE_DRIFT
+_OLD_REPLAY_DRIFT = "do not match apm.lock.yaml"
+
+
+def _assert_one_drift_message(text: str) -> None:
+    flat = " ".join(text.split())
+    assert _DRIFT in flat and _OLD_REPLAY_DRIFT not in flat, flat
+
+
 def _audit_cache(
     runner: ApmLifecycleRunner,
     root: Path,
     env: dict[str, str],
     materialized: Path,
 ) -> None:
-    """Native source cache drift must fail the canonical audit without native writes."""
+    """Native source cache drift must fail the canonical audit without native writes.
+
+    Every changed copy (a hashed file, an unhashed cache file or a mode change)
+    names the drift with the same message.
+    """
     home = Path(env["HOME"])
 
     def state() -> dict[Path, tuple[bytes, int]]:
@@ -192,18 +207,21 @@ def _audit_cache(
             cached.write_bytes(original + b"\nChanged only in the APM cache.\n")
             changed = audit(f"codex-native-cache-audit-tampered-{cached.name}")
             assert changed.returncode != 0, changed.stdout + changed.stderr
-            assert "cache differs" in " ".join((changed.stdout + changed.stderr).split())
+            _assert_one_drift_message(changed.stdout + changed.stderr)
             assert "Traceback" not in changed.stderr
             structured = audit(f"codex-native-cache-json-{cached.name}", json_output=True)
             assert structured.returncode != 0, structured.stdout + structured.stderr
             report = json.loads(structured.stdout)
             assert report["passed"] is False
-            assert any(
-                check["name"] == "drift"
-                and check["passed"] is False
-                and "cache differs" in check["message"]
-                for check in report["checks"]
-            )
+            (drift,) = [check for check in report["checks"] if check["name"] == "drift"]
+            assert drift["passed"] is False, drift
+            # A blocked replay names the drift in its message; a failed replay
+            # says it once, in details, and the message points there (RA-005).
+            if drift["message"].startswith("drift replay failed"):
+                assert drift["message"] == "drift replay failed; see details", drift
+                assert _DRIFT in " ".join(" ".join(drift["details"]).split()), drift
+            else:
+                assert _DRIFT in drift["message"], drift
         finally:
             cached.write_bytes(original)
     if os.name != "nt":
@@ -213,7 +231,7 @@ def _audit_cache(
             cached.chmod(original_mode ^ stat.S_IXUSR)
             changed = audit("codex-native-cache-audit-mode")
             assert changed.returncode != 0, changed.stdout + changed.stderr
-            assert "cache differs" in " ".join((changed.stdout + changed.stderr).split())
+            _assert_one_drift_message(changed.stdout + changed.stderr)
             assert "Traceback" not in changed.stderr
         finally:
             cached.chmod(original_mode)
@@ -228,6 +246,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
     """The real install cannot claim native delivery after a skills-only projection."""
     codex = shutil.which("codex")
     assert codex is not None
+    targets = "codex,claude" if mcp_shape == "inline" else "codex"
     env = _environment(tmp_path)
     source = tmp_path / "source"
     _source(source, "FIRST")
@@ -243,7 +262,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
         {
             "name": "consumer",
             "version": "1.0.0",
-            "targets": ["codex"],
+            "targets": targets.split(","),
             "dependencies": {"apm": [str(source)]},
             "allowExecutables": {str(reference): {"mcp": True}},
         },
@@ -252,7 +271,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
     runner = ApmLifecycleRunner((str(apm_binary_path),))
     result = _apm(
         runner,
-        ("install", "-g", "--target", "codex", "--no-policy"),
+        ("install", "-g", "--target", targets, "--no-policy"),
         tmp_path,
         env,
         "codex-native-first",
@@ -315,7 +334,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
     managed_config = config_path.read_bytes()
     result = _apm(
         runner,
-        ("install", "-g", "--frozen", "--target", "codex", "--no-policy"),
+        ("install", "-g", "--frozen", "--target", targets, "--no-policy"),
         tmp_path,
         env,
         "codex-native-frozen-noop",
@@ -327,7 +346,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
     (source / "resources/__pycache__/asset.bin").chmod(0o755)
     result = _apm(
         runner,
-        ("install", "-g", "--target", "codex", "--no-policy"),
+        ("install", "-g", "--target", targets, "--no-policy"),
         tmp_path,
         env,
         "codex-native-executable-mode-update",
@@ -369,7 +388,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
         before = next(iter(json.loads(ledger.read_bytes())["plugins"].values()))
         result = _apm(
             runner,
-            ("install", "-g", "--frozen", "--target", "codex", "--no-policy"),
+            ("install", "-g", "--frozen", "--target", targets, "--no-policy"),
             tmp_path,
             env,
             f"codex-native-{label}-restore",
@@ -395,7 +414,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
     safe_rmtree(Path(before["snapshot"]["path"]), ledger.parent / "snapshots")
     result = _apm(
         runner,
-        ("install", "-g", "--frozen", "--target", "codex", "--no-policy"),
+        ("install", "-g", "--frozen", "--target", targets, "--no-policy"),
         tmp_path,
         env,
         "codex-native-missing-transport-restore",
@@ -414,7 +433,7 @@ def test_installed_cli_registers_complete_codex_bundle_disabled(
         publisher_manifest = (source / ".codex-plugin/plugin.json").read_bytes()
     result = _apm(
         runner,
-        ("install", "-g", "--update", "--target", "codex", "--no-policy"),
+        ("install", "-g", "--update", "--target", targets, "--no-policy"),
         tmp_path,
         env,
         "codex-native-same-version-update",
@@ -570,7 +589,7 @@ def test_git_pinned_install_and_missing_apm_cache_restore(
                 f"codex-native-same-pin-{fault}",
             )
             assert refused.returncode != 0, refused.stdout + refused.stderr
-            assert "cache differs" in " ".join((refused.stdout + refused.stderr).split())
+            assert _DRIFT in " ".join((refused.stdout + refused.stderr).split())
             assert "Error installing dependencies:" not in refused.stdout + refused.stderr
             assert ledger.read_bytes() == ownership_before
             assert config_path.read_bytes() == config_before
@@ -694,7 +713,7 @@ def test_git_pinned_install_and_missing_apm_cache_restore(
             "codex-native-repaired-pin-cache-refusal",
         )
         assert refused.returncode != 0, refused.stdout + refused.stderr
-        assert "cache differs" in " ".join((refused.stdout + refused.stderr).split())
+        assert _DRIFT in " ".join((refused.stdout + refused.stderr).split())
         assert ledger.read_bytes() == ownership_before
         assert config_path.read_bytes() == config_before
     finally:
@@ -779,7 +798,7 @@ def test_project_refusal_and_foreign_collision_do_not_cross_write(
         runner, ("install", "--target", "codex", "--no-policy"), tmp_path, env, "project-refusal"
     )
     assert result.returncode != 0
-    assert "user scope" in result.stdout + result.stderr
+    assert "user scope" in " ".join((result.stdout + result.stderr).split())
     assert native_config.read_bytes() == before
     assert not list((tmp_path / ".agents").rglob("SKILL.md"))
     assert not any(path.is_file() for path in (tmp_path / ".codex").rglob("*"))

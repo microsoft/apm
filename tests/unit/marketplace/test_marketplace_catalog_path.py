@@ -19,6 +19,8 @@ from apm_cli.marketplace import client as mp_client
 from apm_cli.marketplace.models import MarketplaceSource
 from apm_cli.marketplace.source_identity import admit_marketplace_catalog_path
 
+pytestmark = pytest.mark.component
+
 CATALOG = {"name": "frontend", "plugins": [{"name": "fe-skill", "source": "./plugins/fe"}]}
 
 
@@ -193,7 +195,7 @@ class TestMarketplaceAddPath:
                 f"acme-{audience}",
             )
             assert result.exit_code == 0, result.output
-            assert f"Marketplace 'acme-{audience}' registered (1 plugins)" in result.output
+            assert f"Marketplace 'acme-{audience}' registered (1 plugin)" in result.output
 
         registered = {entry["name"]: entry for entry in _registered()}
         assert registered["acme-frontend"]["path"] == "catalogs/frontend/marketplace.json"
@@ -305,7 +307,7 @@ class TestMarketplaceAddPath:
         )
         result = CliRunner().invoke(marketplace, ["update", "acme-backend"])
         assert result.exit_code == 0, result.output
-        assert "Marketplace 'acme-backend' updated (1 plugins)" in result.output
+        assert "Marketplace 'acme-backend' updated (1 plugin)" in result.output
 
         browse = CliRunner().invoke(marketplace, ["browse", "acme-backend"])
         assert browse.exit_code == 0, browse.output

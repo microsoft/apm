@@ -122,12 +122,23 @@ def _assert_state(
         for p in materialized.rglob("*")
         if p.is_file() and p.name != ".apm-pin"
     ) == [f".apm/{directory}/{source.name}", "apm.yml"]
-    package_digest = sha256()
-    for relative_path in (f".apm/{directory}/{source.name}", "apm.yml"):
-        package_digest.update(relative_path.encode("utf-8"))
-        package_digest.update((materialized / relative_path).read_bytes())
-    assert dependency["content_hash"] == f"sha256:{package_digest.hexdigest()}"
+    assert dependency["content_hash"] == _framed_package_digest(
+        materialized, (f".apm/{directory}/{source.name}", "apm.yml")
+    )
     return lock
+
+
+def _framed_package_digest(root: Path, relative_paths: tuple[str, ...]) -> str:
+    """Independent oracle for the lockfile version 4 package stream (req-lk-016).
+
+    Per file in byte-wise path order: the UTF-8 path, one NUL, then the raw
+    SHA-256 digest of the file bytes. Deliberately not the code under test.
+    """
+    digest = sha256()
+    for relative_path in sorted(relative_paths):
+        digest.update(relative_path.encode("utf-8") + b"\0")
+        digest.update(sha256((root / relative_path).read_bytes()).digest())
+    return f"sha256:{digest.hexdigest()}"
 
 
 def _assert_audit_read_only(scenario: _Scenario, *, user: bool = False) -> None:
@@ -340,10 +351,7 @@ def test_project_absolute_and_home_file_claude_lifecycle(
             "version": "1.0.0",
             "description": description,
         }
-        package_digest = sha256()
-        for relative_path in sorted((primitive_relative, "apm.yml")):
-            package_digest.update(relative_path.encode("utf-8"))
-            package_digest.update((materialized / relative_path).read_bytes())
+        package_digest = _framed_package_digest(materialized, (primitive_relative, "apm.yml"))
         native_digest = f"sha256:{sha256(expected_native).hexdigest()}"
         lock = load_yaml(root / "apm.lock.yaml")
         assert len(lock["dependencies"]) == 1
@@ -354,7 +362,7 @@ def test_project_absolute_and_home_file_claude_lifecycle(
         assert dependency["package_type"] == "apm_package"
         assert dependency["deployed_files"] == [native_relative]
         assert dependency["deployed_file_hashes"] == {native_relative: native_digest}
-        assert dependency["content_hash"] == f"sha256:{package_digest.hexdigest()}"
+        assert dependency["content_hash"] == package_digest
         assert dependency["content_hash"] != native_digest
         assert lock["deployments"] == [
             {
@@ -803,9 +811,7 @@ def test_declaration_rename_and_same_name_conflict_preserve_identity(
     }
     for row in lock["dependencies"]:
         materialized = scenario.project.root / "apm_modules" / row["alias"]
-        package_digest = sha256()
-        for relative_path in (f".apm/instructions/{renamed.name}", "apm.yml"):
-            package_digest.update(relative_path.encode())
-            package_digest.update((materialized / relative_path).read_bytes())
-        assert row["content_hash"] == f"sha256:{package_digest.hexdigest()}"
+        assert row["content_hash"] == _framed_package_digest(
+            materialized, (f".apm/instructions/{renamed.name}", "apm.yml")
+        )
     _assert_audit_read_only(scenario)

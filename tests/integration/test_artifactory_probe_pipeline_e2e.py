@@ -73,7 +73,7 @@ class TestArtifactoryProbePipelineMode1:
 
         scripted = _scripted_head(boundary_owner="sub", boundary_repo="repo")
 
-        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=scripted):
+        with patch("apm_cli.install.artifactory_resolver._head_probe", side_effect=scripted):
             dep_ref, direct_virtual_resolved = resolve_parsed_dependency_reference(
                 package,
                 marketplace_dep_ref=None,
@@ -131,7 +131,7 @@ class TestArtifactoryProbePipelineMode1:
             resp.status_code = 200
             return resp
 
-        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_head):
+        with patch("apm_cli.install.artifactory_resolver._head_probe", side_effect=_head):
             dep_ref, direct_virtual_resolved = resolve_parsed_dependency_reference(
                 package,
                 marketplace_dep_ref=None,
@@ -163,7 +163,7 @@ class TestArtifactoryProbePipelineMode2:
 
         scripted = _scripted_head(boundary_owner="sub", boundary_repo="repo")
 
-        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=scripted):
+        with patch("apm_cli.install.artifactory_resolver._head_probe", side_effect=scripted):
             dep_ref, direct_virtual_resolved = resolve_parsed_dependency_reference(
                 package,
                 marketplace_dep_ref=None,
@@ -206,7 +206,7 @@ class TestArtifactoryProbePipelineErrorSurfacing:
             resp.status_code = 404
             return resp
 
-        with patch("apm_cli.install.artifactory_resolver.requests.head", side_effect=_all_404):
+        with patch("apm_cli.install.artifactory_resolver._head_probe", side_effect=_all_404):
             with pytest.raises(ValueError, match=r"//"):
                 resolve_parsed_dependency_reference(
                     package,
@@ -233,7 +233,7 @@ class TestArtifactoryProbePipelineErrorSurfacing:
             raise _requests.ConnectionError("simulated DNS failure")
 
         with patch(
-            "apm_cli.install.artifactory_resolver.requests.head",
+            "apm_cli.install.artifactory_resolver._head_probe",
             side_effect=_all_transport_err,
         ):
             with pytest.raises(ValueError, match=r"//") as excinfo:

@@ -115,6 +115,35 @@ def _get_target_prefixes(target: str) -> list[str]:
     return list(profile.effective_pack_prefixes)
 
 
+def pack_target_prefixes(targets: list[str]) -> tuple[str, ...]:
+    """Every path prefix a bundle packed for *targets* may ship.
+
+    The targets' own pack prefixes plus their cross-target mapping
+    destinations: exactly the paths :func:`_filter_files_by_target` keeps.
+    """
+    prefixes: dict[str, None] = {}
+    for target in targets:
+        prefixes.update(dict.fromkeys(_get_target_prefixes(target)))
+        prefixes.update(dict.fromkeys(_CROSS_TARGET_MAPS.get(target, {}).values()))
+    return tuple(prefixes)
+
+
+def _project_hashes(hashes: dict[str, str], mappings: dict[str, str]) -> dict[str, str]:
+    """Add each remapped bundle path's hash under its bundle path.
+
+    *mappings* maps ``bundle_path -> disk_path``; a directory entry maps
+    every hashed file beneath it.
+    """
+    projected = dict(hashes)
+    for bundle_path, disk_path in mappings.items():
+        src = disk_path.rstrip("/")
+        dst = bundle_path.rstrip("/")
+        for key, digest in hashes.items():
+            if key == src or key.startswith(src + "/"):
+                projected.setdefault(dst + key[len(src) :], digest)
+    return projected
+
+
 def _filter_files_by_target(
     deployed_files: list[str], target: str | list[str]
 ) -> tuple[list[str], dict[str, str]]:
@@ -183,6 +212,30 @@ def _filter_files_by_target(
     return direct, path_mappings
 
 
+# Top-level lockfile keys that record the packager's OWN install state
+# (deployment receipts, MCP/LSP wiring, staged local content, the manifest
+# targets seen at install time). Bundle consumers never read them -- bundle
+# MCP/LSP servers ship as files -- and keeping them would make the packed lock
+# differ before vs after the author runs ``apm install`` (RA-031).
+_AUTHOR_INSTALL_STATE_KEYS = (
+    "manifest_targets",
+    "deployments",
+    "mcp_servers",
+    "mcp_configs",
+    "mcp_omissions",
+    "mcp_target_servers",
+    "mcp_config_provenance",
+    "lsp_servers",
+    "lsp_configs",
+    "lsp_target_servers",
+    "lsp_config_provenance",
+    "local_deployed_files",
+    "local_deployed_file_hashes",
+    "local_staged_files",
+    "local_staged_file_hashes",
+)
+
+
 def enrich_lockfile_for_pack(
     lockfile: LockFile,
     fmt: str | BundleFormat,
@@ -224,13 +277,17 @@ def enrich_lockfile_for_pack(
     # Build a filtered lockfile YAML: each dep's deployed_files is narrowed
     # to only the paths matching the pack target (with cross-target mapping).
     all_mappings: dict[str, str] = {}
-    data = yaml.safe_load(lockfile.to_yaml())
+    data = yaml.safe_load(lockfile.without_author_local_state().to_yaml())
     if data and "dependencies" in data:
         for dep in data["dependencies"]:
             if "deployed_files" in dep:
                 filtered, mappings = _filter_files_by_target(dep["deployed_files"], target)
                 dep["deployed_files"] = filtered
                 all_mappings.update(mappings)
+                if mappings and isinstance(dep.get("deployed_file_hashes"), dict):
+                    dep["deployed_file_hashes"] = _project_hashes(
+                        dep["deployed_file_hashes"], mappings
+                    )
 
     # Issue #887: strip packaging-time local-content fields from the bundle
     # lockfile. ``local_deployed_files`` / ``local_deployed_file_hashes``
@@ -239,9 +296,15 @@ def enrich_lockfile_for_pack(
     # in the bundle lockfile would cause ``LockFile.from_yaml()`` on the
     # consumer side to synthesize a self-entry whose ``deployed_files`` do
     # not exist under the bundle source dir, breaking unpacker verification.
+    # The rest of the packager's install receipts go too (RA-031).
     if isinstance(data, dict):
-        data.pop("local_deployed_files", None)
-        data.pop("local_deployed_file_hashes", None)
+        for key in _AUTHOR_INSTALL_STATE_KEYS:
+            data.pop(key, None)
+        # The bundle lock is a new artifact: its generator is the packer, so a
+        # consumer older than this APM is warned (#3962).
+        from apm_cli.deps.lockfile import installed_apm_version
+
+        data["apm_version"] = installed_apm_version()
 
     # Build the pack: metadata section (after filtering so we know if mapping
     # occurred).

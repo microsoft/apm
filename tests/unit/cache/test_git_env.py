@@ -38,7 +38,7 @@ from apm_cli.utils.git_env import (
 # ["git", ...] argv WinError 2 class). Selected by the PR-time Windows
 # Compatibility Gate via `pytest -m windows_compat`; also runs on
 # every other OS.
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 _REAL_SUBPROCESS_RUN = subprocess.run
 
 
@@ -328,11 +328,6 @@ class TestGitSubprocessEnv:
             env = git_subprocess_env()
             assert env["GIT_CONFIG_GLOBAL"] == "/etc/gitconfig"
 
-    def test_preserves_https_proxy(self) -> None:
-        with patch.dict(os.environ, {"HTTPS_PROXY": "http://proxy.corp:8080"}):
-            env = git_subprocess_env()
-            assert env["HTTPS_PROXY"] == "http://proxy.corp:8080"
-
     def test_preserves_ssh_askpass(self) -> None:
         with patch.dict(os.environ, {"SSH_ASKPASS": "/usr/lib/ssh/ssh-askpass"}):
             env = git_subprocess_env()
@@ -453,12 +448,16 @@ class TestGitSubprocessEnv:
         assert "/Users/alice/.ssh/id_private" not in message
         assert "Host key verification failed." in message
 
-    def test_rewrite_probe_failure_has_safe_recovery(self) -> None:
+    def test_rewrite_probe_failure_shows_first_redacted_stderr_line(self) -> None:
+        token = "ghp_" + "Q7xR2mK9pL4vN8wT3yZ6bC1dF5gH0jS2aE4u"
         result = subprocess.CompletedProcess(
             ["git", "config"],
-            2,
+            128,
             stdout=b"",
-            stderr=b"private config detail",
+            stderr=(
+                f"error: invalid key: https://x-access-token:{token}@github.com/\n"
+                "fatal: unable to parse command-line config\n"
+            ).encode(),
         )
         with (
             patch("apm_cli.utils.git_env._git_config_run", return_value=result),
@@ -467,11 +466,14 @@ class TestGitSubprocessEnv:
             git_network_env("https://git.example.com/acme/repo")
 
         message = str(raised.value)
-        assert "Git config probe failed" in message
-        assert "check Git configuration and retry" in message
-        assert "--show-origin" in message
-        assert "remove the unsafe rule" not in message
-        assert "private config detail" not in message
+        assert message == (
+            "Unable to verify Git URL rewrite safety (Git config probe failed: "
+            "invalid key: https://***@github.com/); check Git configuration with "
+            "'git config --show-origin --list' and retry"
+        )
+        assert token not in message
+        assert "x-access-token" not in message
+        assert "unable to parse" not in message
 
     def test_rewrite_probe_retries_once_after_timeout(self) -> None:
         calls: list[int] = []
@@ -504,6 +506,7 @@ class TestGitSubprocessEnv:
         message = str(raised.value)
         assert "Git config probe timed out" in message
         assert "check Git configuration and retry" in message
+        assert "'git config --show-origin --list'" in message
         assert calls == [10, 30]
 
     def test_clone_retains_url_rewrite_without_restoring_parent_auth(self, tmp_path) -> None:
@@ -530,7 +533,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, parent, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
         ):
@@ -577,7 +580,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, parent, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
             pytest.raises(ValueError, match=message),
@@ -615,7 +618,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, parent, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
             pytest.raises(ValueError, match=message),
@@ -652,7 +655,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
             pytest.raises(GitUrlRewriteError, match=message),
@@ -677,7 +680,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ),
             pytest.raises(GitUrlRewriteError, match="different HTTPS origin"),
@@ -709,7 +712,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ),
             pytest.raises(GitUrlRewriteError, match="different HTTPS origin"),
@@ -741,7 +744,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
         ):
@@ -778,7 +781,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
         ):
@@ -812,7 +815,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ),
             pytest.raises(GitUrlRewriteError, match="different HTTPS origin"),
@@ -885,7 +888,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ),
             pytest.raises(GitUrlRewriteError, match="different HTTPS origin"),
@@ -907,7 +910,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ),
             pytest.raises(GitUrlRewriteError) as raised,
@@ -930,7 +933,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
         ):
@@ -953,7 +956,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ),
             pytest.raises(GitUrlRewriteError) as raised,
@@ -989,7 +992,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
             pytest.raises(GitUrlRewriteError, match="different network host"),
@@ -1014,7 +1017,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ),
             pytest.raises(GitUrlRewriteError, match="different HTTPS origin"),
@@ -1037,7 +1040,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ),
             pytest.raises(GitUrlRewriteError, match="insecure HTTP"),
@@ -1060,7 +1063,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
         ):
@@ -1119,7 +1122,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ),
             pytest.raises(ValueError, match="Unable to verify Git URL rewrite safety"),
@@ -1157,7 +1160,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ),
             pytest.raises(GitUrlRewriteError, match=message),
@@ -1180,7 +1183,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
         ):
@@ -1233,7 +1236,7 @@ class TestGitSubprocessEnv:
                 clear=True,
             ),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
         ):
@@ -1269,7 +1272,7 @@ class TestGitSubprocessEnv:
 
         with (
             patch.dict(os.environ, env, clear=True),
-            patch("apm_cli.utils.git_env.subprocess.run") as run,
+            patch("subprocess.run") as run,
             pytest.raises(GitUrlRewriteError, match="insecure HTTP"),
         ):
             clone_git_worktree(
@@ -1301,7 +1304,7 @@ class TestGitSubprocessEnv:
 
         with (
             patch.dict(os.environ, env, clear=True),
-            patch("apm_cli.utils.git_env.subprocess.run") as run,
+            patch("subprocess.run") as run,
             pytest.raises(GitUrlRewriteError, match="insecure HTTP"),
         ):
             clone_git_worktree(
@@ -1378,7 +1381,7 @@ class TestGitSubprocessEnv:
                 clear=True,
             ),
             patch("apm_cli.utils.git_env._git_config_run", return_value=config_result),
-            patch("apm_cli.utils.git_env.subprocess.run", return_value=network_result) as run,
+            patch("subprocess.run", return_value=network_result) as run,
         ):
             git_remote_refs("https://git.example.com/acme/repo")
 
@@ -1398,7 +1401,7 @@ class TestGitSubprocessEnv:
         with (
             patch("apm_cli.utils.git_env._git_config_run", return_value=config_result),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=subprocess.TimeoutExpired(
                     ["git", "ls-remote", f"https://{token}@git.example.com/repo"],
                     30,
@@ -1426,7 +1429,7 @@ class TestGitSubprocessEnv:
         )
         with (
             patch("apm_cli.utils.git_env._git_config_run", return_value=config_result),
-            patch("apm_cli.utils.git_env.subprocess.run", return_value=network_result),
+            patch("subprocess.run", return_value=network_result),
         ):
             result = git_remote_refs("https://git.example.com/acme/repo")
 
@@ -1443,7 +1446,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
         ):
@@ -1482,7 +1485,7 @@ class TestGitSubprocessEnv:
         with (
             patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=_run_real_git_config_and_fake_clone,
             ) as run,
         ):
@@ -1572,7 +1575,7 @@ class TestGitSubprocessEnv:
                 "apm_cli.utils.git_env._git_init_run",
                 return_value=subprocess.CompletedProcess(["git", "init"], 0),
             ),
-            patch("apm_cli.utils.git_env.subprocess.Popen", return_value=process) as popen,
+            patch("subprocess.Popen", return_value=process) as popen,
             patch("git.cmd.handle_process_output", side_effect=stream),
         ):
             clone_git_worktree(
@@ -1593,7 +1596,7 @@ class TestGitSubprocessEnv:
                 return_value=(None, _GitConfigSnapshot((), (), ())),
             ),
             patch(
-                "apm_cli.utils.git_env.subprocess.run",
+                "subprocess.run",
                 side_effect=subprocess.TimeoutExpired(
                     ["git", "clone", f"https://{token}@git.example.com/repo"],
                     300,
@@ -1628,7 +1631,7 @@ class TestUncachedFallbackLineEndings:
         )
 
         with patch(
-            "apm_cli.utils.git_env.subprocess.run",
+            "subprocess.run",
             side_effect=_run_real_git_config_and_fake_clone,
         ) as run:
             clone_git_worktree(
@@ -1643,7 +1646,7 @@ class TestUncachedFallbackLineEndings:
             assert clone_argv[clone_pin - 1] == "-c"
             assert clone_pin < clone_argv.index("clone")
 
-        with patch("apm_cli.utils.git_env.subprocess.run") as checkout_run:
+        with patch("subprocess.run") as checkout_run:
             checkout_git_worktree(
                 tmp_path / "clone",
                 "0123456789abcdef0123456789abcdef01234567",

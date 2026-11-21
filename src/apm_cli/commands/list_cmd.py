@@ -51,10 +51,10 @@ def list(ctx):  # noqa: F811
         console = _get_console()
         if console:
             try:
-                from rich.table import Table
+                from apm_cli.utils.console import new_table
 
                 # Create a nice table for scripts
-                table = Table(
+                table = new_table(
                     title=" Available Scripts",
                     show_header=True,
                     header_style="bold cyan",

@@ -7,10 +7,12 @@ import subprocess
 import sys
 import time
 from copy import deepcopy
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
 
+from scripts.ci_selections import SELECTIONS
 from tests.workflow_contracts import load_workflow, shell_commands, workflow_job, workflow_step
 
 pytestmark = pytest.mark.component
@@ -19,18 +21,35 @@ WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/build-releas
 TEST_COMMAND = ["uv", "run", "pytest", "tests/unit", "tests/test_console.py"]
 PARALLEL_ARGS = ["-n", "auto", "--dist", "worksteal"]
 DIAGNOSTIC_ARGS = ["-vv", "--tb=short", "--show-capture=no", "--no-showlocals"]
+RUN_UNIT = "needs.release-plan.outputs.run_unit == 'true'"
+# scripts/ci_selections.py owns the Windows unit run (#4115); the PR gate runs it too.
+OWNER_COMMAND = ["uv", "run", "--frozen", "python", "-m", "scripts.ci_selections", "windows-unit"]
+
+
+def _assert_owner_selection(owner: list[str]) -> None:
+    """Same tests as Linux, worksteal xdist on the runner's 4 CPUs, diagnostics on."""
+    assert owner[:2] == TEST_COMMAND[3:]
+    pairs = list(pairwise(owner))
+    assert ("-n", "4") in pairs and ("--dist", "worksteal") in pairs
+    start = owner.index(DIAGNOSTIC_ARGS[0])
+    assert owner[start : start + len(DIAGNOSTIC_ARGS)] == DIAGNOSTIC_ARGS
+    assert "-m" not in owner and "-k" not in owner
 
 
 def _assert_windows_diagnostics(workflow: dict) -> None:
     """Windows stays exhaustive, parallel, bounded, and fail-closed."""
-    job = workflow_job(workflow, "build-and-test")
+    job = workflow_job(workflow, "build-windows")
+    assert [entry["platform"] for entry in job["strategy"]["matrix"]["include"]] == ["windows"]
     linux = workflow_step(job, "Run unit tests")
     windows = workflow_step(job, "Run unit tests (Windows diagnostics)")
-    assert linux["if"] == "matrix.platform != 'windows'"
+    assert linux["if"] == f"matrix.platform != 'windows' && {RUN_UNIT}"
     assert shell_commands(linux) == [TEST_COMMAND + PARALLEL_ARGS]
-    assert windows["if"] == "matrix.platform == 'windows'"
+    assert (
+        windows["if"] == "matrix.platform == 'windows' && needs.release-plan.outputs.full == 'true'"
+    )
     assert windows["timeout-minutes"] == 60
-    assert shell_commands(windows) == [[*TEST_COMMAND, *PARALLEL_ARGS, *DIAGNOSTIC_ARGS]]
+    assert shell_commands(windows) == [OWNER_COMMAND]
+    _assert_owner_selection(list(SELECTIONS["windows-unit"]))
     assert windows["env"] == {**linux["env"], "PYTHONUNBUFFERED": "1"}
     for node in (job, windows):
         assert not node.get("continue-on-error", False)
@@ -39,6 +58,20 @@ def _assert_windows_diagnostics(workflow: dict) -> None:
 def test_windows_release_unit_diagnostics_contract() -> None:
     """Diagnostics must not change test selection or turn failures green."""
     _assert_windows_diagnostics(load_workflow(WORKFLOW))
+
+
+@pytest.mark.parametrize(
+    "owner",
+    [
+        [*TEST_COMMAND[3:], "-n", "4", "--dist", "worksteal", "-m", "windows_compat"],
+        [*TEST_COMMAND[3:], "-n", "4", "--dist", "worksteal"],
+        ["tests/unit", "-n", "4", "--dist", "worksteal", *DIAGNOSTIC_ARGS],
+    ],
+)
+def test_windows_owner_selection_contract_rejects_mutations(owner: list[str]) -> None:
+    """A filtered, undiagnosed or narrowed owner selection is rejected."""
+    with pytest.raises((AssertionError, ValueError)):
+        _assert_owner_selection(owner)
 
 
 @pytest.mark.parametrize(
@@ -54,7 +87,7 @@ def test_windows_diagnostics_contract_rejects_mutations(key: str, value: object)
     """A success-shaped replacement or changed safety bound is rejected."""
     workflow = deepcopy(load_workflow(WORKFLOW))
     step = workflow_step(
-        workflow_job(workflow, "build-and-test"), "Run unit tests (Windows diagnostics)"
+        workflow_job(workflow, "build-windows"), "Run unit tests (Windows diagnostics)"
     )
     step[key] = value
     with pytest.raises(AssertionError):

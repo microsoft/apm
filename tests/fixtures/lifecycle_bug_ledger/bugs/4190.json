@@ -1,0 +1,16 @@
+{
+  "issue": 4190,
+  "fixed_in": "0.37.0",
+  "summary": "apm install --mcp and apm uninstall printed the absolute apm.yml path while every other command printed project-relative paths.",
+  "failure_modes": [
+    "observation",
+    "portability"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "portability.byte_deterministic"
+  ],
+  "regression_tests": [
+    "tests/integration/test_manifest_rewrite_preservation_lifecycle.py::test_manifest_rewrites_name_the_manifest_by_relative_path"
+  ]
+}

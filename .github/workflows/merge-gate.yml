@@ -18,7 +18,17 @@
 #   "Expected -- Waiting for status to be reported" indefinitely
 #   (observed on PR #899). The merge_group trigger fires the same gate
 #   logic against the temp branch SHA and aggregates the merge-queue-time
-#   checks (ci.yml + ci-integration.yml).
+#   checks (ci.yml + ci-integration.yml). This merge_group run is the
+#   merge-time gate: full integration, binary build, release validation
+#   and the global coverage floor block only here.
+#
+# Keeping the merge-time gate honest:
+#   - tests/quality/test_ci_topology.py fails unless every merge_group
+#     EXPECTED_CHECKS name is produced by exactly one merge_group job, and
+#     every PR-time check is also required at merge time.
+#   - merge-queue-freshness.yml fails when main received commits but no
+#     merge_group run of ci-integration.yml completed in the last 3 days,
+#     i.e. when merges reach main without passing through this gate.
 #
 # Why no pull_request_target dual trigger:
 #   We tried dual-trigger redundancy in PR #865 to harden against rare
@@ -66,7 +76,7 @@ jobs:
     runs-on: ubuntu-24.04
     # Job timeout sized above the poll budget (TIMEOUT_MIN below) to leave
     # headroom for setup/teardown without false-failing the gate.
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Resolve target and trusted SHAs
         id: sha
@@ -107,9 +117,27 @@ jobs:
           SHA: ${{ steps.sha.outputs.target_sha }}
           EVENT_NAME: ${{ github.event_name }}
           # All required checks the gate aggregates, branched by event:
-          #   pull_request -> only ci.yml runs at PR time
-          #   merge_group                      -> ci.yml AND ci-integration.yml run
-          # Keep this in sync with the underlying workflows.
+          #   pull_request -> ci.yml (+ notice-drift.yml, spec-conformance.yml)
+          #                   at PR time, plus
+          #                   the four ci-integration.yml checks when the PR
+          #                   is labeled `full-integration`
+          #   merge_group  -> the PR-time checks, Coverage Combine and the
+          #                   four ci-integration.yml checks
+          # tests/quality/test_ci_topology.py keeps this in sync with the
+          # jobs that actually run on merge_group.
+          # "Test Architecture Ratchets" is required in every context: it gates
+          # the deterministic tests/quality contracts (including the
+          # merge-time topology guards in test_ci_topology.py). It does not
+          # depend on "Architecture Scaling (Linux)", a wall-clock ratio that
+          # stays non-required because timing asserts flake.
+          # "Spec conformance gate" and its three "Spec tests (N/3)" shards
+          # (spec-conformance.yml) are required in every context too; that
+          # workflow has no paths: filter, so the gate never waits for a
+          # check that was filtered out. "Check conformance statement" is
+          # aggregated by the spec gate and is not listed on its own.
+          # A PR labeled `full-integration` also runs ci-integration.yml at
+          # PR time, so its four checks are required then too; unlabeled
+          # PRs never wait for them.
           # NOTE: 'gate' (this job) MUST NOT appear here -- it would
           # deadlock waiting for itself.
           # PR context: only the shard jobs gate. Coverage Combine runs
@@ -133,16 +161,19 @@ jobs:
           # gate the class of Windows-only regressions fixed in
           # microsoft/apm#2233 rather than surfacing only after landing
           # on main.
-          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Coverage Combine (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux)' }}
+          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Coverage Combine (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Test Architecture Ratchets,Spec conformance gate,Spec tests (1/3),Spec tests (2/3),Spec tests (3/3),Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || contains(github.event.pull_request.labels.*.name, 'full-integration') && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Test Architecture Ratchets,Spec conformance gate,Spec tests (1/3),Spec tests (2/3),Spec tests (3/3),Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Windows Compatibility Gate,APM Self-Check,NOTICE Drift Check,Lifecycle Smoke (Linux),Test Architecture Ratchets,Spec conformance gate,Spec tests (1/3),Spec tests (2/3),Spec tests (3/3)' }}
           # Poll budget: ci-integration.yml chains Build -> Smoke ->
-          # Integration (timeout 20m) -> Release Validation (timeout 20m).
-          # Theoretical worst case ~50m; observed today ~5m end-to-end.
-          # Sized at 55m to absorb growth without false-failing the gate.
-          TIMEOUT_MIN: '55'
-          # 5s poll keeps perceived gate latency low. With ~3 expected checks
-          # per poll = ~36 gh API calls/min, well under the 5000/hr quota.
+          # planned Integration shards (timeout 25m) -> fan-in, with
+          # Release Validation (timeout 20m) in parallel. Expected
+          # 16-18m end-to-end; sized at 80m to absorb runner queueing
+          # without false-failing the gate.
+          TIMEOUT_MIN: '80'
+          # The Checks API calls of every open gate run share the repository's
+          # Actions installation quota with CodeQL and other repository
+          # automation. A 5s poll across dozens of concurrent gate runs exhausted
+          # it; 30s adds at most ~25s of gate latency.
           # cancel-in-progress concurrency bounds parallel polling per PR.
-          POLL_SEC: '5'
+          POLL_SEC: '30'
         run: |
           chmod +x .github/scripts/ci/merge_gate_wait.sh
           .github/scripts/ci/merge_gate_wait.sh

@@ -5,10 +5,12 @@ Two renderers ship in this module:
 * :func:`render_marketplace_yml_template` -- legacy ``marketplace.yml``
   scaffold, retained for one release while the deprecation runs out.
 * :func:`render_marketplace_block` -- the apm.yml ``marketplace:`` block
-  used by ``apm marketplace init`` and ``apm init --marketplace``.
+  used by ``apm marketplace init``.
 """
 
 from __future__ import annotations
+
+from ..core.remediation import MARKETPLACE_BLOCK_COMPILE, MARKETPLACE_YML_COMPILE
 
 # The template uses Python str.format() with named placeholders for
 # {name} and {owner}.  Literal braces (e.g. in tagPattern) are doubled.
@@ -17,11 +19,11 @@ _TEMPLATE = """\
 # APM marketplace descriptor
 #
 # This file (marketplace.yml) is the SOURCE for your marketplace.
-# Run 'apm pack' to compile it to marketplace.json.
+# {compile_hint}
 # Both files must be committed to the repository.
 #
 # For the full schema, see:
-#   https://microsoft.github.io/apm/guides/marketplace-authoring/
+#   https://microsoft.github.io/apm/producer/publish-to-a-marketplace/
 
 name: {name}
 description: A short description of what your marketplace offers
@@ -83,12 +85,13 @@ def render_marketplace_yml_template(
     return _TEMPLATE.format(
         name=name or "my-marketplace",
         owner=owner or "acme-org",
+        compile_hint=MARKETPLACE_YML_COMPILE.sentence(),
     )
 
 
 _MARKETPLACE_BLOCK_TEMPLATE = """\
 # Marketplace authoring config (APM-only).
-# Run 'apm pack' to compile this block to .claude-plugin/marketplace.json.
+# {compile_hint}
 # Optionally enable Codex output below to also write .agents/plugins/marketplace.json.
 #
 # Top-level 'name', 'description', and 'version' are inherited from
@@ -97,7 +100,7 @@ _MARKETPLACE_BLOCK_TEMPLATE = """\
 # cadence.
 #
 # For the full schema, see:
-#   https://microsoft.github.io/apm/guides/marketplace-authoring/
+#   https://microsoft.github.io/apm/producer/publish-to-a-marketplace/
 marketplace:
   owner:
     name: {owner}
@@ -149,11 +152,12 @@ marketplace:
 def render_marketplace_block(owner: str | None = None) -> str:
     """Return a YAML snippet for the ``marketplace:`` block of apm.yml.
 
-    Used by ``apm init --marketplace`` to seed a new project that ships
-    its own marketplace.  ``name``/``description``/``version`` are
+    Used by ``apm marketplace init`` to seed a project that ships its own
+    marketplace.  ``name``/``description``/``version`` are
     inherited from the surrounding apm.yml top level by default, so they
     are intentionally omitted here.
     """
     return _MARKETPLACE_BLOCK_TEMPLATE.format(
         owner=owner or "acme-org",
+        compile_hint=MARKETPLACE_BLOCK_COMPILE.sentence(),
     )

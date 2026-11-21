@@ -6,6 +6,8 @@ import pytest
 
 from apm_cli.runtime.copilot_runtime import CopilotRuntime
 
+pytestmark = pytest.mark.component
+
 
 class TestCopilotRuntime:
     """Test Copilot Runtime."""

@@ -38,7 +38,7 @@ def _proc(*, returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMo
 def cache(tmp_path: Path) -> GitCache:
     with (
         patch("apm_cli.cache.git_cache.cleanup_incomplete"),
-        patch("apm_cli.cache.git_cache.os.chmod"),
+        patch("os.chmod"),
     ):
         return GitCache(tmp_path)
 
@@ -47,7 +47,7 @@ class TestGitCacheInit:
     def test_init_creates_directories_and_calls_cleanup(self, tmp_path: Path) -> None:
         with (
             patch("apm_cli.cache.git_cache.cleanup_incomplete") as mock_cleanup,
-            patch("apm_cli.cache.git_cache.os.chmod") as mock_chmod,
+            patch("os.chmod") as mock_chmod,
         ):
             cache = GitCache(tmp_path)
 
@@ -70,7 +70,7 @@ class TestGitCacheInit:
 
         with (
             patch("apm_cli.cache.git_cache.cleanup_incomplete"),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
         ):
             cache = GitCache(tmp_path)
 
@@ -129,7 +129,7 @@ class TestGetCheckout:
     def test_refresh_ignores_existing_checkout(self, tmp_path: Path) -> None:
         with (
             patch("apm_cli.cache.git_cache.cleanup_incomplete"),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
         ):
             cache = GitCache(tmp_path, refresh=True)
         url = "https://github.com/owner/repo.git"
@@ -413,7 +413,7 @@ class TestEnsureBareRepo:
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
             patch("apm_cli.cache.git_cache.atomic_land", side_effect=_land) as mock_land,
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
         ):
             result = cache._ensure_bare_repo("https://example.com/repo.git", shard_key, "c" * 40)
 
@@ -433,7 +433,7 @@ class TestEnsureBareRepo:
             ),
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
             patch("apm_cli.utils.file_ops.robust_rmtree") as mock_rmtree,
             pytest.raises(RuntimeError, match="Failed to clone"),
         ):
@@ -454,7 +454,7 @@ class TestEnsureBareRepo:
             patch("apm_cli.cache.git_cache.atomic_land", return_value=False),
             patch.object(cache, "_bare_has_sha", return_value=False) as mock_has_sha,
             patch.object(cache, "_fetch_into_bare_locked") as mock_fetch,
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
         ):
             result = cache._ensure_bare_repo("https://example.com/repo.git", shard_key, "e" * 40)
 
@@ -477,7 +477,7 @@ class TestEnsureBareRepo:
             patch("apm_cli.cache.git_cache.atomic_land", return_value=False),
             patch.object(cache, "_bare_has_sha", return_value=True),
             patch.object(cache, "_fetch_into_bare_locked") as mock_fetch,
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
         ):
             result = cache._ensure_bare_repo("https://example.com/repo.git", shard_key, "f" * 40)
 
@@ -547,7 +547,7 @@ class TestCreateCheckout:
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
             patch("apm_cli.cache.git_cache.atomic_land", side_effect=_land),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
         ):
             result = cache._create_checkout(url, shard_key, "b" * 40)
 
@@ -568,7 +568,7 @@ class TestCreateCheckout:
             ),
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
             patch("apm_cli.utils.file_ops.robust_rmtree") as mock_rmtree,
             pytest.raises(RuntimeError, match="Failed to create checkout"),
         ):
@@ -588,7 +588,7 @@ class TestCreateCheckout:
             patch("subprocess.run", side_effect=[clone_result, checkout_error]),
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
             patch("apm_cli.utils.file_ops.robust_rmtree") as mock_rmtree,
             pytest.raises(RuntimeError, match="Failed to create checkout"),
         ):
@@ -617,7 +617,7 @@ class TestCreateCheckout:
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
             patch("apm_cli.cache.git_cache.atomic_land", return_value=False),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
         ):
             result = cache._create_checkout(url, shard_key, "e" * 40)
 
@@ -641,7 +641,7 @@ class TestCreateCheckout:
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
             patch("apm_cli.cache.git_cache.atomic_land", return_value=False),
             patch.object(cache, "_evict_checkout") as mock_evict,
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
             pytest.raises(RuntimeError, match="Race condition"),
         ):
             cache._create_checkout(url, shard_key, "f" * 40)

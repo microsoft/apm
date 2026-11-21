@@ -64,6 +64,7 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.github_rate_limit import GitHubThrottleError
 from apm_cli.models.dependency.reference import DependencyReference
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.simulated_ado_chain import install_simulated_ado_chain
 
 # ---------------------------------------------------------------------------
 # Helpers / factories
@@ -94,6 +95,7 @@ def _make_host(
         api_base="https://api.github.com",
     )
     host.auth_resolver.build_error_context.return_value = "Use GITHUB_APM_PAT."
+    install_simulated_ado_chain(host.auth_resolver)
     host._resolve_dep_auth_ctx = MagicMock(
         side_effect=lambda *a, **k: host.auth_resolver.resolve.return_value
     )
@@ -208,7 +210,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep") as mock_sleep,
+            patch("apm_cli.deps.download_strategies._backoff_sleep") as mock_sleep,
         ):
             mock_get.side_effect = [rate_limited, success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -224,7 +226,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             mock_get.side_effect = [unavailable, success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -240,7 +242,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             mock_get.side_effect = [forbidden, success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -253,7 +255,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             mock_get.side_effect = [requests.exceptions.ConnectionError("down"), success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -266,7 +268,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             mock_get.side_effect = [requests.exceptions.Timeout("timed out"), success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -278,7 +280,7 @@ class TestResilientGet:
         delegate = DownloadDelegate(host)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             mock_get.side_effect = requests.exceptions.ConnectionError("always fails")
             with pytest.raises(requests.exceptions.ConnectionError):
@@ -291,7 +293,7 @@ class TestResilientGet:
         rate_limited = _make_mock_response(429, headers={"Retry-After": "0.01"})
         with (
             patch("apm_cli.deps.download_strategies.requests.get", return_value=rate_limited),
-            patch("apm_cli.deps.download_strategies.time.sleep"),
+            patch("apm_cli.deps.download_strategies._backoff_sleep"),
         ):
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=2)
         assert result.status_code == 429
@@ -306,7 +308,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep") as mock_sleep,
+            patch("apm_cli.deps.download_strategies._backoff_sleep") as mock_sleep,
         ):
             mock_get.side_effect = [rate_limited, success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -339,7 +341,7 @@ class TestResilientGet:
         success = _make_mock_response(200)
         with (
             patch("apm_cli.deps.download_strategies.requests.get") as mock_get,
-            patch("apm_cli.deps.download_strategies.time.sleep") as mock_sleep,
+            patch("apm_cli.deps.download_strategies._backoff_sleep") as mock_sleep,
         ):
             mock_get.side_effect = [rate_limited, success]
             result = delegate.resilient_get("https://api.github.com/test", {}, max_retries=3)
@@ -356,23 +358,23 @@ class TestBuildRepoUrl:
     """URL construction for different backends and configurations."""
 
     def test_github_https_with_token(self) -> None:
-        """Builds authenticated GitHub HTTPS clone URL."""
+        """Builds a credential-free GitHub HTTPS clone URL even when a token exists."""
         from urllib.parse import urlparse
 
         host = _make_host(github_host="github.com", github_token="mytoken")
         backend_mock = MagicMock()
         backend_mock.kind = "github"
         backend_mock.is_github_family = True
-        backend_mock.build_clone_https_url.return_value = (
-            "https://mytoken@github.com/owner/repo.git"
-        )
+        backend_mock.build_clone_https_url.return_value = "https://github.com/owner/repo.git"
         with patch("apm_cli.deps.download_strategies.backend_for", return_value=backend_mock):
             delegate = DownloadDelegate(host)
             dep = _make_dep_ref("owner/repo", host="github.com")
             url = delegate.build_repo_url("owner/repo", dep_ref=dep)
+        backend_mock.build_clone_https_url.assert_called_once_with(dep)
         parsed = urlparse(url)
         assert parsed.scheme == "https"
-        assert "github.com" in parsed.netloc
+        assert parsed.hostname == "github.com"
+        assert parsed.username is None
 
     def test_github_ssh_url(self) -> None:
         """Builds SSH URL when use_ssh=True."""
@@ -403,35 +405,8 @@ class TestBuildRepoUrl:
         parsed = urlparse(url)
         assert parsed.scheme == "http"
 
-    def test_no_dep_ref_uses_ssh_url(self) -> None:
-        """Legacy no-dep_ref path: SSH URL when use_ssh=True."""
-
-        host = _make_host(github_host="github.com", github_token=None)
-        backend_mock = MagicMock()
-        backend_mock.kind = "github"
-        backend_mock.is_github_family = True
-        with patch("apm_cli.deps.download_strategies.backend_for", return_value=backend_mock):
-            delegate = DownloadDelegate(host)
-            url = delegate.build_repo_url("owner/repo", use_ssh=True, dep_ref=None)
-        assert "owner/repo" in url or "git@" in url
-
-    def test_no_dep_ref_https_without_token(self) -> None:
-        """Legacy no-dep_ref: HTTPS without embedding a token when no token."""
-        from urllib.parse import urlparse
-
-        host = _make_host(github_host="github.com", github_token=None)
-        backend_mock = MagicMock()
-        backend_mock.kind = "github"
-        backend_mock.is_github_family = True
-        with patch("apm_cli.deps.download_strategies.backend_for", return_value=backend_mock):
-            delegate = DownloadDelegate(host)
-            url = delegate.build_repo_url("owner/repo", dep_ref=None)
-        assert url  # Should produce some URL
-        parsed = urlparse(url)
-        assert parsed.scheme in ("https", "http")
-
-    def test_empty_token_suppresses_credential(self) -> None:
-        """token='' means 'suppress token' — HTTPS URL has no credential."""
+    def test_host_token_never_reaches_url(self) -> None:
+        """The downloader token is never forwarded to the URL builder."""
         host = _make_host(github_token="should_not_appear")
         backend_mock = MagicMock()
         backend_mock.kind = "github"
@@ -440,7 +415,8 @@ class TestBuildRepoUrl:
         with patch("apm_cli.deps.download_strategies.backend_for", return_value=backend_mock):
             delegate = DownloadDelegate(host)
             dep = _make_dep_ref("owner/repo", host="github.com")
-            url = delegate.build_repo_url("owner/repo", dep_ref=dep, token="")
+            url = delegate.build_repo_url("owner/repo", dep_ref=dep)
+        backend_mock.build_clone_https_url.assert_called_once_with(dep)
         assert "should_not_appear" not in url
 
 
@@ -453,27 +429,27 @@ class TestGetArtifactoryHeaders:
     """Artifactory header construction delegates to registry_config or fallback."""
 
     def test_uses_registry_config_headers(self) -> None:
-        """Delegates to registry_config.get_headers() when available."""
+        """Delegates to registry_config.headers_for() for the target origin."""
         cfg = MagicMock()
-        cfg.get_headers.return_value = {"Authorization": "Bearer reg-token"}
+        cfg.headers_for.return_value = {"Authorization": "Bearer reg-token"}
         host = _make_host(registry_config=cfg)
         delegate = DownloadDelegate(host)
-        hdrs = delegate.get_artifactory_headers()
+        hdrs = delegate.get_artifactory_headers(scheme="https", host="art.example.com")
         assert hdrs == {"Authorization": "Bearer reg-token"}
-        cfg.get_headers.assert_called_once()
+        cfg.headers_for.assert_called_once_with("https", "art.example.com")
 
-    def test_falls_back_to_artifactory_token(self) -> None:
-        """Falls back to direct artifactory_token when no registry_config."""
+    def test_artifactory_token_without_registry_config_is_not_attached(self) -> None:
+        """A token without a configured registry origin is never attached."""
         host = _make_host(artifactory_token="direct-token", registry_config=None)
         delegate = DownloadDelegate(host)
-        hdrs = delegate.get_artifactory_headers()
-        assert hdrs == {"Authorization": "Bearer direct-token"}
+        hdrs = delegate.get_artifactory_headers(scheme="https", host="art.example.com")
+        assert hdrs == {}
 
     def test_empty_headers_when_no_token_or_config(self) -> None:
         """Returns empty dict when no token and no registry_config."""
         host = _make_host(artifactory_token=None, registry_config=None)
         delegate = DownloadDelegate(host)
-        hdrs = delegate.get_artifactory_headers()
+        hdrs = delegate.get_artifactory_headers(scheme="https", host="art.example.com")
         assert hdrs == {}
 
 
@@ -885,7 +861,11 @@ class TestDownloadGitlabFile:
             "/api/v4/projects/group%2Fproject/repository/files/apm.yml/raw",
         )
         assert parse_qs(url.query) == {"ref": ["main"]}
-        assert call.kwargs == {"headers": {"PRIVATE-TOKEN": "gl-token"}, "timeout": 30}
+        assert call.kwargs == {
+            "headers": {"PRIVATE-TOKEN": "gl-token"},
+            "timeout": 30,
+            "allow_netrc": False,
+        }
 
     def test_404_tries_master_fallback(self, gitlab_downloader: GitHubPackageDownloader) -> None:
         """On 404 with ref=main, retries with master."""
@@ -1941,7 +1921,7 @@ class TestFormatServerConfig:
             "remotes": [{"url": "https://example.com/sse", "transport_type": "sse", "headers": []}],
         }
         config = adapter._format_server_config(server_info)
-        assert config["type"] == "http"
+        assert config["type"] == "sse"
 
     def test_missing_transport_defaults_to_http(self) -> None:
         """Missing transport_type defaults to http."""
@@ -2153,7 +2133,7 @@ class TestEmitInstallRunSummary:
     ) -> None:
         """Warning emitted when env vars referenced by config are not set."""
         CopilotClientAdapter._unset_env_keys_by_server = {"my-server": ["UNSET_VAR_XYZ_9999"]}
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         mock_warn.assert_called()
         call_args = mock_warn.call_args_list
@@ -2163,7 +2143,7 @@ class TestEmitInstallRunSummary:
     def test_legacy_angle_deprecation_emitted(self, capsys: pytest.CaptureFixture) -> None:
         """Deprecation warning emitted for legacy <VAR> usage."""
         CopilotClientAdapter._legacy_angle_offenders_by_server = {"legacy-server": {"OLD_TOKEN"}}
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         mock_warn.assert_called()
         call_args_str = " ".join(str(c) for c in mock_warn.call_args_list)
@@ -2172,7 +2152,7 @@ class TestEmitInstallRunSummary:
     def test_security_upgrade_warning_emitted(self) -> None:
         """Security upgrade warning emitted when keys were previously baked."""
         CopilotClientAdapter._security_upgraded_keys = {"BAKED_SECRET"}
-        with patch("apm_cli.adapters.client.copilot._rich_warning") as mock_warn:
+        with patch("apm_cli.core.null_logger._rich_warning") as mock_warn:
             CopilotClientAdapter.emit_install_run_summary()
         mock_warn.assert_called()
         call_args_str = " ".join(str(c) for c in mock_warn.call_args_list)

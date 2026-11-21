@@ -17,6 +17,8 @@ from apm_cli.install.context import InstallContext
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
+pytestmark = pytest.mark.component
+
 
 def _make_ctx(tmp_path: Path, dep_keys: list[str]) -> InstallContext:
     """Build a minimal InstallContext with fake deps whose keys match *dep_keys*."""

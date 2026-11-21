@@ -10,10 +10,14 @@ config/policy precedence resolved in
 :mod:`apm_cli.core.install_audit`.  When the effective mode is ``off`` (the
 default), this phase is a hard no-op -- zero added cost.
 
-Runs AFTER the lockfile is written (so deployed files are enumerable via
+Runs AFTER the lockfile is staged (so deployed files are enumerable via
 ``scan_lockfile_packages``) and BEFORE ``finalize``.  A ``block`` decision
 raises :class:`~apm_cli.install.errors.PolicyViolationError`, reusing the
 pipeline's existing clean-halt path; ``--force`` downgrades a block to a warn.
+Because this phase scans bytes integrators already wrote, the install
+transaction snapshots every deploy path before integration whenever the mode
+is not ``off`` and restores it when the install fails before this phase
+passes (``install/deploy_snapshot.py``).
 """
 
 from __future__ import annotations
@@ -38,9 +42,7 @@ def run(ctx: InstallContext) -> None:
     cli_override = getattr(ctx, "audit_override", None)
     if cli_override == "off" and decision.mode != "off" and logger is not None:
         logger.warning(
-            f"Policy overrides --no-audit to '{decision.mode}' "
-            f"(set by {decision.source}). "
-            f"Use '--no-policy' to skip the policy floor."
+            f"Policy overrides --no-audit to '{decision.mode}' (set by {decision.source})."
         )
     project_root = ctx.project_root
 
@@ -103,18 +105,18 @@ def run(ctx: InstallContext) -> None:
     blocking = decision.mode == "block" and has_critical and not ctx.force
 
     if blocking:
+        from apm_cli.core.remediation import (
+            HIDDEN_CHARACTERS_FLAGGED,
+            SECURITY_FINDINGS_REVIEW,
+            either,
+        )
         from apm_cli.install.errors import PolicyViolationError
 
+        # Review, never bypass: no --force or --no-policy hint (RA-008, RA-015).
+        advice = either(HIDDEN_CHARACTERS_FLAGGED, SECURITY_FINDINGS_REVIEW)
         raise PolicyViolationError(
-            f"Install-time audit blocked: {summary}. "
-            f"Run 'apm audit --strip' to clean hidden characters, or "
-            f"'apm install --force' to override"
-            + (
-                ", or '--no-policy' to skip the policy floor"
-                if "policy" in decision.source.lower()
-                else ""
-            )
-            + f" (mode set by {decision.source})."
+            f"Install-time audit blocked: {summary}. {advice[:1].upper()}{advice[1:]}"
+            f" (mode set by {decision.source})."
         )
 
     # warn mode, or block downgraded by --force: record without halting.

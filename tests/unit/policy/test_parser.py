@@ -1,9 +1,9 @@
 """Tests for apm_cli.policy.parser (load_policy, validate_policy)."""
 
-import os
-import tempfile
 import textwrap
 import unittest
+
+import pytest
 
 from apm_cli.policy.parser import (
     PolicyValidationError,
@@ -12,6 +12,8 @@ from apm_cli.policy.parser import (
     validate_policy,
 )
 from apm_cli.policy.schema import ApmPolicy
+
+pytestmark = pytest.mark.unit
 
 
 class TestValidatePolicy(unittest.TestCase):
@@ -133,7 +135,7 @@ class TestValidatePolicy(unittest.TestCase):
             errors,
             [
                 "cache must be a YAML mapping",
-                "dependencies.allow must be a YAML list of package patterns",
+                "dependencies.allow must be a YAML list of package patterns (got str)",
             ],
         )
 
@@ -151,7 +153,7 @@ class TestValidatePolicy(unittest.TestCase):
             [
                 "mcp must be a YAML mapping",
                 "manifest must be a YAML mapping",
-                "dependencies.allow must be a YAML list of package patterns",
+                "dependencies.allow must be a YAML list of package patterns (got list)",
             ],
         )
 
@@ -306,8 +308,8 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertEqual(policy.mcp.transport.allow, ("stdio", "sse"))
         self.assertEqual(policy.mcp.self_defined, "deny")
         self.assertTrue(policy.mcp.trust_transitive)
-        self.assertEqual(policy.compilation.target.allow, ("vscode", "claude"))
-        self.assertEqual(policy.compilation.target.enforce, "vscode")
+        self.assertEqual(policy.compilation.target.allow, ("copilot", "claude"))
+        self.assertEqual(policy.compilation.target.enforce, "copilot")
         self.assertEqual(policy.compilation.strategy.enforce, "distributed")
         self.assertTrue(policy.compilation.source_attribution)
         self.assertEqual(policy.manifest.required_fields, ("description", "version"))
@@ -505,43 +507,6 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertEqual(policy.dependencies.require, (), "require: [] must yield ()")
 
 
-class TestLoadPolicyFromFile(unittest.TestCase):
-    """Test load_policy from a file path."""
-
-    def test_load_from_file(self):
-        yaml_content = textwrap.dedent("""\
-            name: file-policy
-            version: "1.0"
-            enforcement: off
-        """)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            path = f.name
-
-        try:
-            policy, warnings = load_policy(path)  # noqa: RUF059
-            self.assertEqual(policy.name, "file-policy")
-            self.assertEqual(policy.enforcement, "off")
-        finally:
-            os.unlink(path)
-
-    def test_load_from_pathlib_path(self):
-        from pathlib import Path
-
-        yaml_content = "name: pathlib-test\nversion: '0.1'"
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            path = Path(f.name)
-
-        try:
-            policy, warnings = load_policy(path)  # noqa: RUF059
-            self.assertEqual(policy.name, "pathlib-test")
-        finally:
-            os.unlink(str(path))
-
-
 class TestSecurityAuditParsing(unittest.TestCase):
     """Validation + build for the security.audit policy section."""
 
@@ -571,3 +536,28 @@ class TestSecurityAuditParsing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMcpTransportAllowCanonicalization(unittest.TestCase):
+    """mcp.transport.allow is canonicalized once, at parse time."""
+
+    def test_http_alias_folds_into_streamable_http(self):
+        policy, warnings = load_policy(
+            "mcp:\n  transport:\n    allow: [HTTP, stdio, streamable-http]\n"
+        )
+        self.assertEqual(warnings, [])
+        self.assertEqual(policy.mcp.transport.allow, ("streamable-http", "stdio"))
+
+    def test_unknown_transport_warns(self):
+        policy, warnings = load_policy("mcp:\n  transport:\n    allow: [stdio, websocket]\n")
+        self.assertEqual(policy.mcp.transport.allow, ("stdio", "websocket"))
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("unknown transport 'websocket'", warnings[0])
+
+    def test_inheritance_intersects_canonical_names(self):
+        from apm_cli.policy.inheritance import merge_policies
+
+        parent, _ = load_policy("mcp:\n  transport:\n    allow: [stdio, http]\n")
+        child, _ = load_policy("mcp:\n  transport:\n    allow: [streamable-http, sse]\n")
+        merged = merge_policies(parent, child)
+        self.assertEqual(merged.mcp.transport.allow, ("streamable-http",))

@@ -4,7 +4,7 @@ description: >-
   Expert on GitHub authentication, EMU, GHE, ADO, and APM's AuthResolver
   architecture. Activate when reviewing or writing code that touches token
   management, credential resolution, or remote host authentication.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # Auth Expert

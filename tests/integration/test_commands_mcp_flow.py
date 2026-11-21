@@ -121,12 +121,17 @@ class TestMcpGroupHelp:
         runner = CliRunner()
         result = runner.invoke(mcp, ["install", "--help"])
         assert result.exit_code == 0
-        description, options = result.output.split("Options:", 1)
-        assert "Forwarded install options" in description
-        assert "--transport [stdio|http|sse|streamable-http]" in description
-        assert "--mcp-version VER" in description
-        assert "Common options" not in options
-        assert "--transport [stdio|http|sse|streamable-http]" not in options
+        # Forwarded options render as their own section after the alias's
+        # own "Options:" section, cloned from ``apm install`` (#3633).
+        own_part, forwarded = result.output.split("Forwarded install options:", 1)
+        description, own_options = own_part.split("Options:", 1)
+        assert "'--mcp NAME' is implied" in " ".join(description.split())
+        assert "--help" in own_options
+        assert "--transport [stdio|http|sse|streamable-http]" in forwarded
+        assert "--mcp-version TEXT" in forwarded
+        assert "Common options" not in result.output
+        assert "--transport" not in own_options
+        assert "--mcp-version" not in own_options
 
 
 class TestMcpSearch:
@@ -777,12 +782,18 @@ class TestHandleRegistryNetworkError:
 
         env = {k: v for k, v in os.environ.items() if k != "MCP_REGISTRY_URL"}
         with patch.dict(os.environ, env, clear=True):
-            result = _handle_registry_network_error(
-                Exception("x"), mock_reg, mock_console, None, "query"
-            )
+            with patch("apm_cli.utils.console._rich_echo") as mock_echo:
+                result = _handle_registry_network_error(
+                    Exception("x"), mock_reg, mock_console, None, "query"
+                )
 
         assert result is True
-        mock_console.print.assert_called()
+        texts = [c.args[0] for c in mock_echo.call_args_list]
+        assert any("Could not query MCP registry at https://r.example.com" in t for t in texts)
+        assert any("Retry shortly" in t for t in texts)
+        # Error and hint both render on stderr (red lines route there by default).
+        for c in mock_echo.call_args_list:
+            assert c.kwargs.get("err") or c.kwargs.get("color") == "red"
 
 
 # ===========================================================================
@@ -1688,6 +1699,7 @@ class TestLocalPathFailureReason:
         assert result is None
 
     def test_nonexistent_path_returns_reason(self, tmp_path: Path) -> None:
+        from apm_cli.core.remediation import LOCAL_PACKAGE_PATH_MISSING
         from apm_cli.install.validation import _local_path_failure_reason
 
         dep_ref = MagicMock()
@@ -1697,8 +1709,9 @@ class TestLocalPathFailureReason:
         result = _local_path_failure_reason(dep_ref)
         assert result == (
             f"Local package path does not exist: {dep_ref.local_path}. "
-            "Restore the source or correct the dependency path, then rerun apm install."
+            f"{LOCAL_PACKAGE_PATH_MISSING.sentence()}"
         )
+        assert "apm install" in result
 
     def test_file_path_returns_reason(self, tmp_path: Path) -> None:
         from apm_cli.install.validation import _local_path_failure_reason

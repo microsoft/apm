@@ -201,7 +201,9 @@ class _DownloaderStub:
                             ref_type=GitReferenceType.TAG,
                             resolved_commit=sha,
                             ref_name=ref_value,
-                        )
+                        ),
+                        # Every download result carries licence records (#3556).
+                        "carried_licenses": (),
                     },
                 )()
 

@@ -9,9 +9,12 @@ from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import click
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.mcp import mcp
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -243,6 +246,23 @@ class TestMcpShow:
             result = runner.invoke(mcp, ["show", "io.github.acme/cool-server"])
 
         assert result.exit_code == 0
+
+    def test_show_install_guide_offers_only_working_commands(self):
+        """No "coming soon" step or GitHub-toolsets claim for io.github.* names (#3994)."""
+        runner = make_runner()
+        table = MagicMock()
+        with (
+            patch_registry(detail_result=FAKE_SERVER_DETAIL),
+            patch("apm_cli.commands.mcp._get_console", return_value=MagicMock()),
+            patch("rich.table.Table", table),
+        ):
+            result = runner.invoke(mcp, ["show", "io.github.acme/cool-server"])
+
+        assert result.exit_code == 0
+        rows = " ".join(str(c.args) for c in table.return_value.add_row.call_args_list)
+        assert "apm install --mcp io.github.acme/cool-server" in rows
+        assert "coming soon" not in rows
+        assert "GITHUB_TOOLSETS" not in rows
 
     def test_show_rich_not_found_exits_1(self):
         """show with Rich console exits 1 when server not found."""
@@ -573,6 +593,22 @@ class TestMcpInstallAlias:
             assert "fetch" in forwarded
             assert "npx" in forwarded
             assert "@modelcontextprotocol/server-fetch" in forwarded
+
+    @pytest.mark.parametrize("code", [0, 1, 2])
+    def test_exit_code_comes_from_the_forwarded_install(self, code):
+        """#3666: the alias exits with the install outcome, never a swallowed code."""
+        from apm_cli.cli import cli
+
+        @click.command(context_settings={"ignore_unknown_options": True})
+        @click.argument("argv", nargs=-1, type=click.UNPROCESSED)
+        @click.pass_context
+        def fake_install(ctx, argv):
+            ctx.exit(code)
+
+        runner = make_runner()
+        with patch.dict(cli.commands, {"install": fake_install}):
+            result = runner.invoke(mcp, ["install", "srv", "--", "npx", "srv"])
+        assert result.exit_code == code
 
     def test_forwards_transport_options(self):
         runner = make_runner()
@@ -934,7 +970,7 @@ class TestMcpRegistryEnvVar:
             with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
                 result = make_runner().invoke(mcp, ["list"])
         assert result.exit_code == 1
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        printed = result.stderr
         assert "mcp-registry-url is set in apm config" in printed
         assert "MCP_REGISTRY_URL is set" not in printed
 
@@ -980,7 +1016,7 @@ class TestMcpRegistryEnvVar:
             with patch("apm_cli.commands.mcp._get_console", return_value=mock_console):
                 result = runner.invoke(mcp, ["search", "x"])
         assert result.exit_code == 1
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        printed = result.stderr
         assert "Could not reach MCP registry" in printed
         assert ("https", "busted.internal.example.com") in _printed_urls(printed)
         assert "MCP_REGISTRY_URL" in printed

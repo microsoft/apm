@@ -1,0 +1,11 @@
+name: heal-consumer
+version: 1.0.0
+dependencies:
+  apm: []
+  mcp:
+  - name: heal-http
+    registry: false
+    transport: http
+    url: https://http.example.invalid/mcp
+  - name: io.github.apm-fixture/heal-registry
+    registry: __REGISTRY_URL__

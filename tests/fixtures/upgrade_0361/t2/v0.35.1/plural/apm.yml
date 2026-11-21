@@ -1,0 +1,13 @@
+name: plural
+version: 1.0.0
+targets:
+- claude
+- copilot
+dependencies:
+  apm:
+  - path: ../pkg
+  mcp:
+  - name: srv
+    registry: false
+    transport: http
+    url: https://mcp.example.com/mcp

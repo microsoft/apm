@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from apm_cli.core.remediation import CODEX_PLUGIN_USER_SCOPE
 from apm_cli.core.scope import InstallScope
 
 MINIMUM_CODEX_VERSION = "0.163.0"
@@ -42,17 +45,51 @@ def is_qualified_codex_version(output: str) -> bool:
     return core > minimum or (core == minimum and match.group(4) is None)
 
 
+def _offline_launch_dir() -> Path:
+    """A private working directory whose project layer keeps app-server startup offline.
+
+    At startup the app-server syncs its curated plugin marketplace over the network
+    unless plugins are off in the startup configuration. Plugins are turned off
+    only for this trusted directory, so the startup tasks stay offline while
+    requests that load the configuration of a marketplace path still see plugins.
+    """
+    launch_dir = Path(tempfile.mkdtemp(prefix="apm-codex-")).resolve()
+    try:
+        (launch_dir / ".codex").mkdir(mode=0o700)
+        config = os.open(
+            launch_dir / ".codex" / "config.toml",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(config, "w", encoding="utf-8") as handle:
+            handle.write("[features]\nplugins = false\n")
+    except OSError:
+        shutil.rmtree(launch_dir, ignore_errors=True)
+        raise
+    return launch_dir
+
+
+def _offline_launch_args(launch_dir: Path) -> list[str]:
+    """Trust only the private launch directory, for this process and nothing else."""
+    return ["-c", f'projects={{{json.dumps(str(launch_dir))}={{trust_level="trusted"}}}}']
+
+
 class CodexRpc:
     """One bounded stdio connection to the public app-server protocol."""
 
-    def __init__(self, executable: Path, cwd: Path) -> None:
-        self._process = subprocess.Popen(
-            [str(executable), "app-server", "--stdio"],
-            cwd=cwd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
+    def __init__(self, executable: Path) -> None:
+        self._launch_dir = _offline_launch_dir()
+        try:
+            self._process = subprocess.Popen(
+                [str(executable), "app-server", "--stdio", *_offline_launch_args(self._launch_dir)],
+                cwd=self._launch_dir,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            shutil.rmtree(self._launch_dir, ignore_errors=True)
+            raise
         self._responses: queue.Queue[dict[str, Any] | Exception] = queue.Queue(maxsize=32)
         self._reader_error: Exception | None = None
         self._request_id = 0
@@ -155,6 +192,7 @@ class CodexRpc:
         self._reader.join(timeout=1)
         if self._process.stdout is not None:
             self._process.stdout.close()
+        shutil.rmtree(self._launch_dir, ignore_errors=True)
 
     def __exit__(self, *_exc: object) -> None:
         self.close()
@@ -181,8 +219,8 @@ class CodexNativeClient:
         """Refuse unsupported scopes before inspecting any user-native state."""
         if scope is not InstallScope.USER:
             raise CodexNativeError(
-                "Codex compatibility plugins are qualified only at user scope. "
-                "Use 'apm install -g --target codex'; no project plugin was registered."
+                "Codex compatibility plugins are qualified only at user scope; no project "
+                "plugin was registered. " + CODEX_PLUGIN_USER_SCOPE.sentence()
             )
 
     @classmethod
@@ -219,7 +257,7 @@ class CodexNativeClient:
 
     def connect(self) -> CodexRpc:
         """Create a short-lived connection without starting an agent thread."""
-        return CodexRpc(self.executable, self.cwd)
+        return CodexRpc(self.executable)
 
     @staticmethod
     def read_config(rpc: CodexRpc) -> NativeUserConfig:

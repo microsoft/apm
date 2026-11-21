@@ -16,6 +16,8 @@ from apm_cli.utils.patterns import (
     yaml_plain_scalar,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.windows_compat
 @pytest.mark.parametrize("render", [yaml_plain_scalar, yaml_globs_scalar])

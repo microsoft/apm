@@ -1,0 +1,4 @@
+{
+  "doc": "Strict expected failures for tests/quality/test_cli_docs_surface.py: known gaps between the apm Click tree and the reference CLI docs or the apm-usage commands guide. Each entry names its tracking issue. An unlisted gap fails; a listed gap that no longer occurs fails until its entry is removed. Keep entries sorted by path, kind, detail.",
+  "expected_failures": []
+}

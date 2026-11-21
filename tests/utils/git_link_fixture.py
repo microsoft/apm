@@ -51,7 +51,9 @@ EXPECTED_PKG: dict[str, bytes] = {
     "tool.sh": b"#!/bin/sh\necho ok\n",
 }
 EXPECTED_PKG_EXECUTABLE = {"run", "tool.sh"}
-GOLDEN_PKG_HASH = "sha256:b735a61a5d032a7a98add763d20db6d75706d0b56baf48ac557cf13dba587fb9"
+# Framed stream (lockfile version 4); the legacy stream digest was
+# sha256:b735a61a5d032a7a98add763d20db6d75706d0b56baf48ac557cf13dba587fb9.
+GOLDEN_PKG_HASH = "sha256:1dbf36c51714f26e5aefe94cd0563d869e352dcc58351cc96b6119c8d7367250"
 
 
 def neutral_git_env() -> dict[str, str]:

@@ -9,8 +9,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.export.sbom import export_sbom
+
+pytestmark = pytest.mark.component
 
 _TS = "2024-01-01T00:00:00+00:00"
 _GOLDEN = Path(__file__).parent / "golden"
@@ -49,6 +53,18 @@ def _fixture_lockfile() -> LockFile:
             source="local",
             local_path="./packages/local-helper",
             content_hash="sha256:aaa111",
+        )
+    )
+    # The shape real lockfiles record for a default-host GitHub subdirectory
+    # package: host-less repo_url, `host: github.com`, and a content hash.
+    lf.add_dependency(
+        LockedDependency(
+            repo_url="acme/skills",
+            host="github.com",
+            resolved_commit="feed01",
+            virtual_path="skills/review",
+            is_virtual=True,
+            content_hash="sha256:bbb222",
         )
     )
     lf.add_dependency(

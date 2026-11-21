@@ -17,6 +17,7 @@ from apm_cli.integration.cleanup import (
 )
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
+from tests.utils.deployment_evidence import no_evidence, receipted_evidence
 
 
 @pytest.fixture
@@ -93,6 +94,12 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=receipted_evidence(project_root),
+            recorded_hashes={
+                ".agents/skills/my-skill/SKILL.md": compute_file_hash(
+                    project_root / ".agents/skills/my-skill/SKILL.md"
+                )
+            },
         )
         assert ".agents/skills/my-skill/SKILL.md" in result.deleted
         assert ".agents/skills/my-skill" in result.deleted
@@ -129,6 +136,7 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=receipted_evidence(project_root),
             recorded_hashes=recorded_hashes,
         )
         assert ".agents/skills/my-skill" in result.deleted
@@ -160,6 +168,7 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=receipted_evidence(project_root),
             recorded_hashes=recorded_hashes,
         )
 
@@ -174,7 +183,7 @@ class TestSkillDirectoryCleanup:
         assert result.skipped_unmanaged == []
 
     def test_skill_dir_preserves_untracked_loose_pyc(self, project_root, diagnostics):
-        _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        skill_md = _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
         loose_pyc = project_root / ".agents" / "skills" / "my-skill" / "notes.pyc"
         loose_pyc.write_bytes(b"user-content")
 
@@ -187,6 +196,7 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=receipted_evidence(skill_md, deploy_root=project_root),
         )
 
         assert loose_pyc.exists()
@@ -197,7 +207,7 @@ class TestSkillDirectoryCleanup:
         project_root,
         diagnostics,
     ):
-        _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        skill_md = _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
         note = _make_file(
             project_root,
             ".agents/skills/my-skill/scripts/__pycache__/notes.txt",
@@ -213,6 +223,7 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=receipted_evidence(skill_md, deploy_root=project_root),
         )
 
         assert note.exists()
@@ -220,7 +231,7 @@ class TestSkillDirectoryCleanup:
 
     def test_skill_dir_not_removed_when_user_file_present(self, project_root, diagnostics):
         """Skill dir is NOT removed when it contains user-created files."""
-        _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        skill_md = _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
         # User adds their own file in the skill directory
         _make_file(project_root, ".agents/skills/my-skill/my-notes.txt", "user notes\n")
         stale = [
@@ -233,6 +244,12 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=receipted_evidence(skill_md, deploy_root=project_root),
+            recorded_hashes={
+                ".agents/skills/my-skill/SKILL.md": compute_file_hash(
+                    project_root / ".agents/skills/my-skill/SKILL.md"
+                )
+            },
         )
         # SKILL.md is deleted (it is a file entry)
         assert ".agents/skills/my-skill/SKILL.md" in result.deleted
@@ -251,12 +268,17 @@ class TestSkillDirectoryCleanup:
         asset = _make_file(
             project_root,
             ".agents/skills/my-skill/references/guide.md",
-            "edited content\n",
+            "deployed content\n",
         )
-        # Recorded hash does NOT match current content
         recorded_hashes = {
-            ".agents/skills/my-skill/references/guide.md": "sha256:" + "0" * 64,
+            ".agents/skills/my-skill/SKILL.md": compute_file_hash(
+                project_root / ".agents/skills/my-skill/SKILL.md"
+            ),
+            ".agents/skills/my-skill/references/guide.md": compute_file_hash(asset),
         }
+        evidence = receipted_evidence(project_root)
+        # The user edits the guide after APM deployed it.
+        asset.write_text("edited content\n", encoding="utf-8")
         stale = [
             ".agents/skills/my-skill",
             ".agents/skills/my-skill/SKILL.md",
@@ -268,11 +290,12 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=evidence,
             recorded_hashes=recorded_hashes,
         )
-        # SKILL.md deleted (no hash recorded -> falls through)
+        # SKILL.md deleted (receipt matches)
         assert ".agents/skills/my-skill/SKILL.md" in result.deleted
-        # guide.md skipped (hash mismatch -> user edit)
+        # guide.md skipped (receipt mismatch -> user edit)
         assert ".agents/skills/my-skill/references/guide.md" in result.skipped_user_edit
         # Directory skipped because guide.md is still there with mismatch
         assert ".agents/skills/my-skill" in result.skipped_unmanaged
@@ -288,6 +311,7 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=no_evidence(project_root),
         )
         assert result.deleted == []
         assert ".github/prompts" in result.skipped_unmanaged
@@ -302,14 +326,15 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=no_evidence(project_root),
         )
         # Not an error, not a warning -- just silently clean
         assert result.deleted == []
         assert result.failed == []
         assert result.skipped_unmanaged == []
 
-    def test_backward_compat_no_hashes_empty_dir_removed(self, project_root, diagnostics):
-        """Legacy lockfile without hashes: skill dir removed when empty."""
+    def test_no_hashes_keep_skill_file_and_dir(self, project_root, diagnostics):
+        """Without deployment evidence nothing is deleted (#3663, #3701)."""
         _make_file(project_root, ".agents/skills/old-skill/SKILL.md", "# Old\n")
         stale = [
             ".agents/skills/old-skill",
@@ -321,11 +346,13 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=no_evidence(project_root),
             recorded_hashes=None,
         )
-        assert ".agents/skills/old-skill/SKILL.md" in result.deleted
-        assert ".agents/skills/old-skill" in result.deleted
-        assert not (project_root / ".agents/skills/old-skill").exists()
+        assert result.deleted == []
+        assert ".agents/skills/old-skill/SKILL.md" in result.skipped_unmanaged
+        assert ".agents/skills/old-skill" in result.skipped_unmanaged
+        assert (project_root / ".agents/skills/old-skill/SKILL.md").exists()
 
     def test_skill_dir_with_subdirs_removed_when_all_tracked(self, project_root, diagnostics):
         """Skill bundle with scripts/ and assets/ subdirs, all tracked."""
@@ -349,6 +376,7 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=receipted_evidence(project_root),
             recorded_hashes=recorded_hashes,
         )
         assert ".agents/skills/full-skill" in result.deleted
@@ -362,13 +390,14 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=no_evidence(project_root),
         )
         assert result.deleted == []
         assert result.skipped_unmanaged == [".agents/skills/../../../etc"]
 
     def test_symlink_inside_skill_dir_blocks_removal(self, project_root, diagnostics):
         """Symlinks inside a skill directory are treated as user content."""
-        _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        skill_md = _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
         # Create a symlink inside the skill directory
         link = project_root / ".agents/skills/my-skill/link.txt"
         target = project_root / "some-other-file.txt"
@@ -384,9 +413,63 @@ class TestSkillDirectoryCleanup:
             dep_key="pkg",
             targets=None,
             diagnostics=diagnostics,
+            evidence=receipted_evidence(skill_md, deploy_root=project_root),
+            recorded_hashes={
+                ".agents/skills/my-skill/SKILL.md": compute_file_hash(
+                    project_root / ".agents/skills/my-skill/SKILL.md"
+                )
+            },
         )
         assert ".agents/skills/my-skill/SKILL.md" in result.deleted
         assert ".agents/skills/my-skill" in result.skipped_unmanaged
         # Symlink and its target remain
         assert link.is_symlink()
         assert target.exists()
+
+
+class TestDepartingOwnerReleasesUserContentDirectory:
+    """Orphan cleanup releases a skill dir kept only for user content (#3677)."""
+
+    def test_orphan_cleanup_releases_dir_holding_only_user_files(self, project_root, diagnostics):
+        skill_md = _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        notes = _make_file(project_root, ".agents/skills/my-skill/my-notes.txt", "user notes\n")
+
+        result = remove_stale_deployed_files(
+            [".agents/skills/my-skill", ".agents/skills/my-skill/SKILL.md"],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=receipted_evidence(skill_md, deploy_root=project_root),
+            recorded_hashes={".agents/skills/my-skill/SKILL.md": compute_file_hash(skill_md)},
+            failed_path_retained=False,
+        )
+
+        assert notes.exists()
+        assert result.released == [".agents/skills/my-skill"]
+        assert result.retained == []
+
+    def test_orphan_cleanup_retains_dir_with_edited_apm_member(self, project_root, diagnostics):
+        _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        guide = _make_file(project_root, ".agents/skills/my-skill/guide.md", "deployed\n")
+        recorded = {".agents/skills/my-skill/guide.md": compute_file_hash(guide)}
+        evidence = receipted_evidence(project_root)
+        guide.write_text("edited\n", encoding="utf-8")
+
+        result = remove_stale_deployed_files(
+            [
+                ".agents/skills/my-skill",
+                ".agents/skills/my-skill/SKILL.md",
+                ".agents/skills/my-skill/guide.md",
+            ],
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+            evidence=evidence,
+            recorded_hashes=recorded,
+            failed_path_retained=False,
+        )
+
+        assert result.released == []
+        assert ".agents/skills/my-skill" in result.retained

@@ -866,13 +866,24 @@ def build_clone_failure_message(
     last_error: Exception | None,
     last_attempt_scheme: str | None,
     public_github_non_auth_failure: bool = False,
+    repository_not_found: bool = False,
 ) -> str:
     """Build the aggregate ``RuntimeError`` message for a failed transport plan.
 
     Extracted from :meth:`GitHubPackageDownloader._execute_transport_plan`
     to keep that module under the file-length guardrail. Pure formatting:
-    no I/O, no clone attempts.
+    no I/O, no clone attempts. A host that answered "not found" gets the
+    canonical not-found message alone: protocol fallback and network advice
+    cannot help a missing repository.
     """
+    if repository_not_found:
+        return auth_resolver.build_not_found_message(
+            dep_host or default_host_fn(),
+            repo_url_base,
+            dependency_repository_owner(dep_ref) if dep_ref else None,
+            port=dep_ref.port if dep_ref else None,
+            host_type=dep_ref.host_type if dep_ref else None,
+        )
     if plan.strict and len(plan.attempts) >= 1:
         tried = plan.attempts[0].label
         error_msg = f"Failed to clone repository {repo_url_base} via {tried}. "
@@ -894,6 +905,18 @@ def build_clone_failure_message(
             "and is readable, then inspect the matching rule with "
             "'git config --show-origin --get-regexp ^url\\..*\\.insteadOf$'."
         )
+    elif is_ado and getattr(last_error, "attempts", None) is not None:
+        # The exhausted ADO chain names every credential step in order; it
+        # leads the message and replaces the generic "Last error" suffix.
+        error_msg += f"{last_error} " + auth_resolver.build_error_context(
+            dep_host or "dev.azure.com",
+            "clone",
+            org=dep_ref.ado_organization if dep_ref else None,
+            port=dep_ref.port if dep_ref else None,
+            dep_url=dep_ref.repo_url if dep_ref else None,
+            attempts=last_error.attempts,
+        )
+        return error_msg
     elif is_ado and not has_ado_token:
         host = dep_host or "dev.azure.com"
         error_msg += auth_resolver.build_error_context(

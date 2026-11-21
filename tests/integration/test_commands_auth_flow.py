@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -26,7 +27,6 @@ from apm_cli.commands.install import (
 from apm_cli.commands.pack import pack_cmd
 from apm_cli.core.auth import (
     AuthResolver,
-    BearerFallbackOutcome,
     HostInfo,
     _org_to_env_suffix,
 )
@@ -39,7 +39,6 @@ from apm_cli.deps.plugin_parser import (
     _mcp_servers_to_apm_deps,
     _read_mcp_file,
     _read_mcp_json,
-    _substitute_plugin_root,
     normalize_plugin_directory,
     parse_plugin_manifest,
     synthesize_plugin_json_from_apm_yml,
@@ -579,8 +578,8 @@ class TestEmitStalePat:
             resolver.emit_stale_pat_diagnostic("dev.azure.com")
 
         # Should only emit once per host
-        azure_lines = [w for w in warnings if "dev.azure.com" in w]
-        assert len(azure_lines) == 1
+        hosts_warned = [m.group(1) for w in warnings if (m := re.search(r"rejected for (\S+);", w))]
+        assert hosts_warned == ["dev.azure.com"]
 
     def test_different_hosts_each_emit_once(self) -> None:
         resolver = AuthResolver()
@@ -592,19 +591,8 @@ class TestEmitStalePat:
             resolver.emit_stale_pat_diagnostic("org1.visualstudio.com")
             resolver.emit_stale_pat_diagnostic("org2.visualstudio.com")
 
-        hosts_warned = {w for w in warnings if "visualstudio.com" in w}
-        assert len(hosts_warned) == 2
-
-
-class TestBearerFallbackOutcome:
-    def test_named_tuple_fields(self) -> None:
-        bfo = BearerFallbackOutcome(outcome="result", bearer_attempted=True)
-        assert bfo.outcome == "result"
-        assert bfo.bearer_attempted is True
-
-    def test_bearer_not_attempted(self) -> None:
-        bfo = BearerFallbackOutcome(outcome=None, bearer_attempted=False)
-        assert bfo.bearer_attempted is False
+        hosts_warned = [m.group(1) for w in warnings if (m := re.search(r"rejected for (\S+);", w))]
+        assert sorted(hosts_warned) == ["org1.visualstudio.com", "org2.visualstudio.com"]
 
 
 # ===========================================================================
@@ -743,38 +731,6 @@ class TestReadMcpFile:
         plugin_root.mkdir()
         servers = _read_mcp_file(plugin_root, "nonexistent.json", logging.getLogger("test"))
         assert servers == {}
-
-
-class TestSubstitutePluginRoot:
-    def test_substitutes_placeholder_in_string_values(self, tmp_path: Path) -> None:
-        import logging
-
-        servers = {
-            "my-srv": {
-                "command": "node",
-                "args": ["${CLAUDE_PLUGIN_ROOT}/server.js"],
-            }
-        }
-        result = _substitute_plugin_root(servers, "/abs/path", logging.getLogger("test"))
-        assert result["my-srv"]["args"][0] == "/abs/path/server.js"
-
-    def test_substitutes_in_nested_dict(self, tmp_path: Path) -> None:
-        import logging
-
-        servers = {
-            "srv": {
-                "env": {"MY_PATH": "${CLAUDE_PLUGIN_ROOT}/data"},
-            }
-        }
-        result = _substitute_plugin_root(servers, "/base", logging.getLogger("test"))
-        assert result["srv"]["env"]["MY_PATH"] == "/base/data"
-
-    def test_no_placeholder_unchanged(self) -> None:
-        import logging
-
-        servers = {"srv": {"command": "node"}}
-        result = _substitute_plugin_root(servers, "/base", logging.getLogger("test"))
-        assert result == servers
 
 
 class TestExtractMcpServers:

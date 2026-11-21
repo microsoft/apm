@@ -65,8 +65,8 @@ def _seed_signal(project: Path, target: str) -> None:
 
 
 def _copilot_mcp_path(project: Path) -> Path:
-    """Project-scoped copilot MCP config path."""
-    return project / ".github" / "mcp.json"
+    """Project-scoped copilot MCP config path (shared with Claude Code)."""
+    return project / ".mcp.json"
 
 
 def _cursor_mcp_path(project: Path) -> Path:
@@ -112,7 +112,7 @@ class TestMCPTargetsGatingE2E:
         pre-fix, foreign-signal directories silently received MCP writes
         despite the explicit whitelist.
 
-        The Copilot CLI adapter writes `.github/mcp.json` at project scope.
+        The Copilot adapter writes `.mcp.json` at project scope.
         The load-bearing assertions are:
 
         * ``.cursor/mcp.json`` is NOT written
@@ -138,7 +138,7 @@ class TestMCPTargetsGatingE2E:
         )
 
         captured = capsys.readouterr()
-        assert "Targeting declared target from apm.yml: copilot" in captured.out
+        assert "Targets: copilot  (source: apm.yml)" in captured.out
 
         assert not _cursor_mcp_path(project).exists(), (
             "cursor MCP config MUST NOT be written when cursor is absent "
@@ -210,7 +210,7 @@ class TestMCPTargetsGatingE2E:
         )
 
         captured = capsys.readouterr()
-        assert "Skipping all MCP config writes" in captured.out, (
+        assert "Skipping all MCP config writes" in captured.out + captured.err, (
             "Greenfield project must surface the closed-gate decision "
             "with a red [x] error -- silent no-op is exactly the "
             "asymmetry vs `apm install` that PR #1336 closes."
@@ -223,3 +223,4 @@ class TestMCPTargetsGatingE2E:
             "not receive a silent copilot-vscode MCP write -- the "
             "pre-#1336 fallback is gone."
         )
+        assert not _copilot_mcp_path(project).exists()

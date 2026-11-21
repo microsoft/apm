@@ -10,7 +10,7 @@ description: >-
   top-level imports) in the APM CLI. Encodes Big O analysis, the modern
   package-manager performance playbook, and caching/indexing best practices
   applied to APM's git-first dependency model.
-model: claude-opus-4.6
+model: claude-opus-5.5
 ---
 
 # Performance Expert

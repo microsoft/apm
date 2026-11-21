@@ -1,15 +1,17 @@
-"""Cold-restore adoption of unchanged deployed skill trees (#3391, #3625).
+"""Cold-restore adoption of unchanged deployed skill trees (#3391, #3625, #3883).
 
-Without any local deployment receipt for it, an existing skill directory is
-adopted only when its whole file tree equals what this install would write:
-every admitted source member after final link rendering, with no extra or
-missing files. During ``apm update`` the tree may instead equal what the
-currently locked version renders, materialized from its locked commit, so
-unchanged committed output can be replaced by the new version. The verified
-on-disk hash then stands in for the missing baseline, so the guarded write
-path rewrites the files and records receipts. Lockfile hashes are never
-consulted. Any difference returns no adoption, so the caller keeps its
-fail-closed refusal.
+Without a local deployment receipt trusted for the current lock claim (none
+in a new worktree, or one written under another checkout's lock), an existing
+skill directory is adopted only when its whole file tree equals what this
+install would write: every admitted source member after final link
+rendering, with no extra or missing files. When the commit being installed
+differs from the locked one (``apm update``, or ``apm install`` after an
+``apm.yml`` ref change), the tree may instead equal what the currently locked
+version renders, materialized from its locked commit, so unchanged committed
+output can be replaced by the new version. The verified on-disk hash then
+stands in for the missing baseline, so the guarded write path rewrites the
+files and records receipts. Lockfile hashes never grant a baseline. Any
+difference returns no adoption, so the caller keeps its fail-closed refusal.
 """
 
 from __future__ import annotations
@@ -85,11 +87,14 @@ def adoptable_skill_members(
     walk_source: WalkSource,
     ignore: Callable[[str, list[str]], list[str]],
     resolve_links: ResolveLinks,
+    trusted: Callable[[Path], str | None] | None = None,
 ) -> frozenset[Path]:
     """Return destination members when the tree equals this install's output, else empty.
 
-    Call before copying so earlier writes in the same pass cannot complete a
-    tree that was not identical on disk.
+    A member matches when its bytes equal the render or its own *trusted*
+    receipt (bytes this installation wrote there). Call before
+    copying so earlier writes in the same pass cannot complete a tree that
+    was not identical on disk.
     """
     if destination.is_symlink() or not destination.is_dir():
         return frozenset()
@@ -112,11 +117,29 @@ def adoptable_skill_members(
         for target, member in expected.items():
             if member.is_symlink() or not member.is_file() or not target.is_file():
                 return frozenset()
+            receipted = trusted(target) if trusted is not None else None
+            if receipted is not None and compute_file_hash(target) == receipted:
+                continue
             if target.read_bytes() != _expected_bytes(resolve_links, member, target, source):
                 return frozenset()
     except (OSError, UnicodeError):
         return frozenset()
     return frozenset(expected)
+
+
+def tree_equals_install_output(
+    integrator: Any, source: Path, destination: Path, ignore: Callable[[str, list[str]], list[str]]
+) -> bool:
+    """Return whether *destination* already holds exactly what this install writes."""
+    return bool(
+        adoptable_skill_members(
+            source,
+            destination,
+            walk_source=integrator.walk_source_tree,
+            ignore=ignore,
+            resolve_links=integrator.resolve_links,
+        )
+    )
 
 
 def adoption_baselines(
@@ -127,39 +150,80 @@ def adoption_baselines(
     ignore: Callable[[str, list[str]], list[str]],
     resolve_links: ResolveLinks,
     owned: Callable[[Path], bool],
+    trusted: Callable[[Path], str | None] | None = None,
 ) -> dict[Path, str]:
     """Map adoptable members to verified on-disk hashes when every member is claimed.
 
     Identical files without an ownership claim never gain local authority.
     """
     members = adoptable_skill_members(
-        source, destination, walk_source=walk_source, ignore=ignore, resolve_links=resolve_links
+        source,
+        destination,
+        walk_source=walk_source,
+        ignore=ignore,
+        resolve_links=resolve_links,
+        trusted=trusted,
     )
     if not all(owned(path) for path in members):
         return {}
     return {path: compute_file_hash(path) for path in members}
 
 
+def all_files_receipted(destination: Path, held: Callable[[Path], bool]) -> bool:
+    """Return whether every file under *destination* still holds its receipted bytes."""
+    if destination.is_symlink() or not destination.is_dir():
+        return True
+    return all(
+        not (Path(directory) / name).is_symlink() and held(Path(directory) / name)
+        for directory, _directories, filenames in os.walk(destination)
+        for name in filenames
+    )
+
+
+def installing_commit(package_info: Any) -> str | None:
+    """Return the commit this install materializes for *package_info*, when known."""
+    return getattr(getattr(package_info, "resolved_reference", None), "resolved_commit", None)
+
+
 class LockedSkillSources:
-    """Materialize each updated package's currently locked source at most once (#3625).
+    """Materialize each changed package's currently locked source at most once (#3625).
 
     *fetch* downloads the locked commit of one owner into a private scratch
     directory and returns its package info, or ``None`` when the lockfile has
-    no immutable remote pin for it. Any failure yields no plan, so callers
-    keep their refusal.
+    no immutable remote pin for it. *locked_commit* names that commit, so an
+    install of the same commit skips the redundant download. Any failure
+    yields no plan, so callers keep their refusal.
     """
 
-    def __init__(self, fetch: Callable[[str, Path], Any]) -> None:
+    def __init__(
+        self,
+        fetch: Callable[[str, Path], Any],
+        locked_commit: Callable[[str], str | None] | None = None,
+    ) -> None:
         self._fetch = fetch
+        self._locked_commit = locked_commit
         self._scratch: Path | None = None
         self._plans: dict[str, tuple[DeployableSourcePlan, Any] | None] = {}
 
     def plan(
-        self, owner: str, current: DeployableSourcePlan, targets: Sequence[Any]
+        self,
+        owner: str,
+        current: DeployableSourcePlan,
+        targets: Sequence[Any],
+        installing: str | None = None,
     ) -> DeployableSourcePlan | None:
-        """Return the locked source authorized like *current*, or ``None``."""
+        """Return the locked source authorized like *current*, or ``None``.
+
+        ``None`` too when *installing* is the locked commit: its render is
+        the current source's, which the caller already compared.
+        """
         if owner not in self._plans:
-            self._plans[owner] = self._materialize(owner, current, targets)
+            unchanged = (
+                installing is not None
+                and self._locked_commit is not None
+                and self._locked_commit(owner) == installing
+            )
+            self._plans[owner] = None if unchanged else self._materialize(owner, current, targets)
         materialized = self._plans[owner]
         return materialized[0] if materialized is not None else None
 
@@ -206,8 +270,8 @@ class LockedSkillSources:
 
 
 def locked_skill_sources(ctx: Any) -> LockedSkillSources | None:
-    """Fetch currently locked sources on demand, only for ``apm update`` runs."""
-    if not ctx.update_refs or ctx.existing_lockfile is None or ctx.downloader is None:
+    """Fetch currently locked sources on demand whenever an install has a lockfile (#3883)."""
+    if ctx.existing_lockfile is None or ctx.downloader is None:
         return None
     from apm_cli.drift import build_download_ref
 
@@ -229,7 +293,11 @@ def locked_skill_sources(ctx: Any) -> LockedSkillSources | None:
             return None
         return downloader.download_package(reference, destination)
 
-    return LockedSkillSources(fetch)
+    def locked_commit(owner: str) -> str | None:
+        locked = lockfile.get_dependency(owner)
+        return locked.resolved_commit if locked is not None else None
+
+    return LockedSkillSources(fetch, locked_commit)
 
 
 def skill_tree_baselines(
@@ -243,21 +311,37 @@ def skill_tree_baselines(
     plan: DeployableSourcePlan | None = None,
     owner: str | None = None,
     targets: Sequence[Any] | None = None,
+    commit: str | None = None,
 ) -> dict[Path, str]:
-    """Return adoption baselines for a skill tree without any local receipt.
+    """Return adoption baselines for members of a skill tree without a trusted receipt.
 
     The single decision shared by skill preflight and materialization: compare
-    with the source being installed first, then, during update, with the
-    currently locked source rendered under the same copy filter. *plan*,
-    *owner* and *targets* default to the integrator's current package.
+    with the source being installed first, then, when *commit* (the one being
+    installed) differs from the lock, with the currently locked source
+    rendered under the same copy filter. *plan*, *owner*, *targets* and
+    *commit* default to the integrator's current package. A tree whose files
+    all still hold the bytes this installation receipted needs no adoption;
+    the session's baseline decides it. A missing, or no longer held, receipt
+    (another worktree or checkout) falls through to the renders, where a
+    member matches its trusted receipt or the render, so bytes equal to what
+    APM renders are never refused or kept.
     """
     session = integrator._materialization_session
-    if session is None or force or session.has_receipt(destination / "SKILL.md"):
+    if session is None or force:
         return {}
     plan = plan or integrator._skill_source_plan
-    owner = owner or integrator._skill_current_owner
+    if owner is None:
+        owner, commit = integrator._skill_current_owner, integrator._skill_current_commit
     targets = targets if targets is not None else integrator._skill_targets or ()
-    compare = partial(adoption_baselines, walk_source=integrator.walk_source_tree, owned=owned)
+
+    def trusted(path: Path) -> str | None:
+        return session.baseline(path, targets)
+
+    if all_files_receipted(destination, session.receipt_held):
+        return {}
+    compare = partial(
+        adoption_baselines, walk_source=integrator.walk_source_tree, owned=owned, trusted=trusted
+    )
     adopted = compare(source, destination, ignore=ignore, resolve_links=integrator.resolve_links)
     locked_sources: LockedSkillSources | None = session.locked_sources
     rebased = getattr(ignore, "rebased", None)
@@ -267,7 +351,7 @@ def skill_tree_baselines(
         relative = source.resolve().relative_to(plan.source_root)
     except ValueError:
         return {}
-    locked = locked_sources.plan(owner, plan, targets)
+    locked = locked_sources.plan(owner, plan, targets, commit)
     locked_source = locked.source_root / relative if locked is not None else None
     if locked_source is None or locked_source.is_symlink() or not locked_source.is_dir():
         return {}

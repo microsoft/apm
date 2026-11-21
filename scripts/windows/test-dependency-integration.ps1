@@ -175,7 +175,8 @@ scripts:
 
         # Install multiple dependencies
         Write-DepInfo "Installing multiple real dependencies"
-        & $ApmBinary install
+        # The previous test left apm.lock.yaml here; under CI it would replay frozen.
+        & $ApmBinary install --no-frozen
         if ($LASTEXITCODE -ne 0) {
             Write-DepError "Failed to install multiple dependencies"
             return $false

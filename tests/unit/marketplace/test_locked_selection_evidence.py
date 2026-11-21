@@ -1,10 +1,12 @@
 """Pure locked-selection proofs shared by marketplace install and audit."""
 
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.drift import detect_ref_change, marketplace_ref_mismatch
 from apm_cli.install.phases.lockfile import LockfileBuilder
@@ -195,3 +197,97 @@ def test_marketplace_rediscovery_does_not_reuse_incomplete_timestamp_evidence(
     LockfileBuilder(context)._attach_marketplace_provenance(lock)
 
     assert current.resolved_at == refreshed_at
+
+
+class _CatalogContacted(RuntimeError):
+    pass
+
+
+def _resolve_marketplace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    lock: LockFile,
+    declaration: DependencyReference,
+    **resolver_options: object,
+) -> DependencyReference:
+    def contacted(*_args: object, **_kwargs: object) -> None:
+        raise _CatalogContacted
+
+    monkeypatch.setattr("apm_cli.marketplace.resolver.resolve_marketplace_plugin", contacted)
+    resolver = APMDependencyResolver(
+        apm_modules_dir=tmp_path / "apm_modules", existing_lockfile=lock, **resolver_options
+    )
+    return resolver._resolve_marketplace_dep(declaration)
+
+
+@pytest.mark.parametrize(
+    ("version", "options", "replays"),
+    [
+        ("^1.0.0", {}, True),
+        ("^1.0.0", {"frozen": True}, True),
+        ("^2.0.0", {}, False),
+        ("^1.0.0", {"update_refs": True}, False),
+    ],
+)
+def test_resolver_replays_matching_lock_row_without_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    version: str,
+    options: dict[str, object],
+    replays: bool,
+) -> None:
+    """Only new, changed or explicitly updated declarations reach the catalog (#3911)."""
+    locked = _locked()
+    lock = LockFile(dependencies={locked.get_unique_key(): locked})
+    if not replays:
+        with pytest.raises(_CatalogContacted):
+            _resolve_marketplace(monkeypatch, tmp_path, lock, _selection(version), **options)
+        return
+    replayed = _resolve_marketplace(monkeypatch, tmp_path, lock, _selection(version), **options)
+    assert replayed.get_unique_key() == locked.get_unique_key()
+    assert replayed.reference == locked.resolved_ref
+    assert not replayed.is_marketplace
+
+
+def test_frozen_refuses_unlocked_marketplace_declaration_without_catalog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--frozen never asks the catalog for a declaration the lock cannot replay."""
+    with pytest.raises(ValueError, match=r"--frozen replays marketplace dependencies"):
+        _resolve_marketplace(monkeypatch, tmp_path, LockFile(), _selection(), frozen=True)
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+@pytest.mark.parametrize(
+    ("host", "provenance"),
+    [
+        (None, {"mcp_config_provenance": {"server": "tool"}}),
+        (None, {"mcp_config_provenance": {"server": ["other", "tool"]}}),
+        (None, {"lsp_config_provenance": {"server": "package:owner/package"}}),
+        (
+            "git.example.test",
+            {"lsp_config_provenance": {"server": "package:git.example.test/owner/package"}},
+        ),
+        ("git.example.test", {"lsp_config_provenance": {"server": "package:owner/package"}}),
+    ],
+)
+def test_catalog_defined_servers_replay_only_from_a_materialized_copy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    host: str | None,
+    provenance: dict[str, dict],
+    frozen: bool,
+) -> None:
+    """The lock cannot rebuild catalog-inline servers, so a cold copy re-resolves.
+
+    LSP ownership is recorded for the lock key or, on a first install, the
+    package's ``apm_modules``-relative path.
+    """
+    locked = _locked(name="tool", host=host)
+    lock = LockFile(dependencies={locked.get_unique_key(): locked}, **provenance)
+    with pytest.raises(_CatalogContacted):
+        _resolve_marketplace(monkeypatch, tmp_path, lock, _selection(), frozen=frozen)
+    replayed = locked.to_dependency_ref()
+    replayed.get_install_path(tmp_path / "apm_modules").mkdir(parents=True)
+    replayed = _resolve_marketplace(monkeypatch, tmp_path, lock, _selection(), frozen=frozen)
+    assert replayed.get_unique_key() == locked.get_unique_key()

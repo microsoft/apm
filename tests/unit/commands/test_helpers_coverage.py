@@ -20,6 +20,10 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # _rich_blank_line
 # ---------------------------------------------------------------------------
@@ -31,8 +35,8 @@ class TestRichBlankLineNoConsole:
         from apm_cli.commands._helpers import _rich_blank_line
 
         with (
-            patch("apm_cli.commands._helpers._get_console", return_value=None),
-            patch("apm_cli.commands._helpers.click") as mock_click,
+            patch("apm_cli.utils.themed_console._get_console", return_value=None),
+            patch("apm_cli.utils.themed_console.click") as mock_click,
         ):
             _rich_blank_line()
 
@@ -196,14 +200,15 @@ class TestUpdateGitignoreReadError:
             return real_open(path, mode, *args, **kwargs)
 
         with (
-            patch("apm_cli.commands._helpers.GITIGNORE_FILENAME", str(gitignore)),
+            patch("apm_cli.install.helpers.gitignore.GITIGNORE_FILENAME", str(gitignore)),
             patch("builtins.open", side_effect=patched_open),
-            patch("apm_cli.commands._helpers._rich_warning") as mock_warn,
+            patch("apm_cli.install.helpers.gitignore._rich_warning") as mock_warn,
         ):
             _update_gitignore_for_apm_modules(logger=None)
 
         mock_warn.assert_called_once()
         assert ".gitignore" in mock_warn.call_args[0][0].lower()
+        assert gitignore.read_text() == "some content\n"
 
 
 class TestUpdateGitignoreWriteError:
@@ -225,14 +230,15 @@ class TestUpdateGitignoreWriteError:
             return real_open(path, mode, *args, **kwargs)
 
         with (
-            patch("apm_cli.commands._helpers.GITIGNORE_FILENAME", str(gitignore)),
+            patch("apm_cli.install.helpers.gitignore.GITIGNORE_FILENAME", str(gitignore)),
             patch("builtins.open", side_effect=patched_open),
-            patch("apm_cli.commands._helpers._rich_warning") as mock_warn,
+            patch("apm_cli.install.helpers.gitignore._rich_warning") as mock_warn,
         ):
             _update_gitignore_for_apm_modules(logger=None)
 
         mock_warn.assert_called_once()
         assert ".gitignore" in mock_warn.call_args[0][0].lower()
+        assert gitignore.read_text() == "node_modules/\n"
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +354,25 @@ class TestLazyConfirmSuccess:
 
 
 class TestCheckOrphanedPackages:
+    def test_returns_empty_when_manifest_has_no_modules_dir(self, tmp_path, monkeypatch) -> None:
+        """A project with apm.yml but no apm_modules/ has no orphans."""
+        from apm_cli.commands._helpers import _check_orphaned_packages
+
+        (tmp_path / "apm.yml").write_text("name: demo\nversion: 1.0.0\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        assert _check_orphaned_packages() == []
+
+    def test_returns_empty_when_manifest_cannot_be_parsed(self, tmp_path, monkeypatch) -> None:
+        """An unparsable apm.yml next to apm_modules/ reports no orphans."""
+        from apm_cli.commands._helpers import _check_orphaned_packages
+
+        (tmp_path / "apm.yml").write_text("name: [unclosed\n", encoding="utf-8")
+        (tmp_path / "apm_modules" / "org" / "pkg").mkdir(parents=True)
+        monkeypatch.chdir(tmp_path)
+
+        assert _check_orphaned_packages() == []
+
     def test_returns_empty_when_no_apm_yml(self, tmp_path) -> None:
         """Line 299: APM_YML_FILENAME doesn't exist → []."""
         from apm_cli.commands._helpers import _check_orphaned_packages

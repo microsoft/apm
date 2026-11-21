@@ -5,7 +5,8 @@ from unittest.mock import Mock, call
 import pytest
 
 from apm_cli.core.command_logger import InstallLogger
-from apm_cli.deps.lockfile import LockfileConflictError, LockfileFormatError
+from apm_cli.core.remediation import FROZEN_LOCK_STATE_DRIFT
+from apm_cli.deps.lockfile import LockfileFormatError
 from apm_cli.install.errors import (
     AuthenticationError,
     DirectDependencyError,  # noqa: F401
@@ -15,6 +16,8 @@ from apm_cli.install.errors import (
     log_frozen_install_error,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize("error_type", [RuntimeError, OSError, LockfileFormatError])
 def test_non_conflict_install_failures_keep_existing_prefix(error_type):
@@ -23,18 +26,12 @@ def test_non_conflict_install_failures_keep_existing_prefix(error_type):
     )
 
 
-def test_install_conflict_message_remains_canonical(tmp_path):
-    error = LockfileConflictError(tmp_path / "apm.lock.yaml")
-    assert install_failure_message(error) == str(error)
-
-
 @pytest.mark.parametrize(
     ("tip", "expected_tip"),
     [
         (
             None,
-            "Tip: rerun 'apm install' without --frozen to create or repair package lock state, "
-            "retaining the original options, including --root DIR or --global if specified.",
+            f"Tip: {FROZEN_LOCK_STATE_DRIFT.bind(lock_state='package lock state').sentence()}",
         ),
         ("", None),
         ("Keep the explicit remedy.", "Keep the explicit remedy."),
@@ -93,3 +90,11 @@ class TestAuthenticationError:
         err = AuthenticationError("msg", diagnostic_context=diag)
         assert "\n" in err.diagnostic_context
         assert "ADO_APM_PAT" in err.diagnostic_context
+
+
+def test_lockfile_generator_refusal_message_stays_canonical():
+    from apm_cli.deps.lockfile_generator import LockfileGeneratorError
+    from apm_cli.install.errors import install_failure_message
+
+    error = LockfileGeneratorError("Refusing to run 'apm install' on apm.lock.yaml: x")
+    assert install_failure_message(error) == str(error)

@@ -10,17 +10,30 @@ See the [CNCF definition of an adopter](https://github.com/cncf/toc/blob/main/FA
 
 | Organization | Type | Adoption Level | Description |
 | ------------ | ---- | -------------- | ----------- |
+| ENCAMINA | Consultancy, End-User Organization, Project | Production | Uses APM to govern skills, instructions, agents, and MCP distributions and configurations across initiatives managed in both Azure DevOps and GitHub. |
 | EPAM | Consultancy, Contributor, End-User Organization | Production | Uses, actively contributes to, and consults on APM. |
 | Grupo Universal | End-User Organization | Production | Uses APM to package and distribute agent skills, prompts and MCP configurations across internal agent DevOps projects. |
+| Lloyds Banking Group | End-User Organization | Production | Uses APM as dev tool for AI Skills distribution. |
+| oh-my-agent | Project | Production | Publishes the oh-my-agent multi-agent harness as an APM package from a single plugin.json source of truth; users install its skills, agents, workflows, and rules via apm. |
+| PRODYNA SE | Consultancy, Contributor, End-User Organization | Production | Uses, contributes to, and consults on APM. |
 | Sopra Steria | End-User Organization | Production | Uses APM. |
+| Supermodular | Consultancy, Contributor, End-User Organization | Production | Uses APM internally and at customers to package and distribute agent skills and agents. Contributed `apm auth` for git host credentials. |
+| WTW | End-User Organization | Production | Uses APM. |
 
 Type and adoption level are optional. Blank fields mean that the information
 is not publicly specified, not that usage is absent.
 
 ## Add or update an entry
 
-Submit a pull request with one row per organization or project, sorted
-alphabetically by the Organization column:
+No issue or scope approval is needed. Two ways, pick the easier one:
+
+- **Fill in the [adopter form](https://github.com/microsoft/apm/issues/new?template=adopter.yml).**
+  A maintainer opens the PR and asks you to confirm the wording.
+- **Open a one-row pull request** yourself. You can skip the PR template
+  sections; a one-line description is enough.
+
+Each row describes one organization or project, sorted alphabetically by the
+Organization column:
 
 - **Organization:** the name approved for public listing. An approved industry
   description may be used instead when the organization needs to remain anonymous.

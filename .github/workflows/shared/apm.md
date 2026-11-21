@@ -10,7 +10,7 @@
 # Pre-agent-steps then download all bundles and restore them in one apm-action call.
 #
 # Source of truth: https://github.com/microsoft/apm/blob/main/.github/workflows/shared/apm.md
-# apm-action pin:  microsoft/apm-action@v1.10.0
+# apm-action pin:  microsoft/apm-action@v1.12.0
 # To check whether a vendored copy is current, compare these two lines.
 #
 # Documentation: https://microsoft.github.io/apm/integrations/gh-aw/
@@ -510,7 +510,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - name: Pack APM packages
         id: pack
-        uses: microsoft/apm-action@v1.10.0
+        uses: microsoft/apm-action@v1.12.0
         env:
           # Pin APM's selected non-per-org credential chain end to end.
           # GITHUB_APM_PAT has module-fetch precedence, GITHUB_TOKEN keeps
@@ -600,7 +600,7 @@ steps:
       [ ${#list[@]} -gt 0 ] || { echo '::error::no apm bundles found'; exit 1; }
       printf '%s\n' "${list[@]}" > /tmp/gh-aw/apm-bundle-list.txt
   - name: Restore APM packages (all bundles)
-    uses: microsoft/apm-action@v1.10.0
+    uses: microsoft/apm-action@v1.12.0
     with:
       apm-version: ${{ github.aw.import-inputs.apm-version }}
       bundles-file: /tmp/gh-aw/apm-bundle-list.txt
@@ -613,8 +613,8 @@ This shared workflow installs APM packages in a dedicated `apm` job that runs
 in parallel one matrix replica per credential group, packs each group's packages
 with `microsoft/apm-action`, and uploads a per-group bundle artifact. The agent
 job's pre-agent-steps then download all bundles and restore them in a single
-`apm-action` invocation (using the `bundles-file:` input shipped in
-`microsoft/apm-action@v1.10.0`).
+`apm-action` invocation (using the `bundles-file:` input of
+`microsoft/apm-action@v1.12.0`).
 
 ### How it works
 
@@ -628,7 +628,7 @@ job's pre-agent-steps then download all bundles and restore them in a single
 3. **Restore** (agent pre-agent-steps): all `apm-*` artifacts are downloaded,
    validated against the matrix manifest (defends against same-run artifact-name
    collision attacks), and restored in one call via the `bundles-file:` input
-   on `microsoft/apm-action@v1.10.0`.
+   on `microsoft/apm-action@v1.12.0`.
 
 ### Authentication
 

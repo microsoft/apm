@@ -20,6 +20,8 @@ from apm_cli.cli import cli
 from apm_cli.copilot_plugins.constants import ENABLED_PLUGINS_KEY, EXTRA_MARKETPLACES_KEY
 from apm_cli.copilot_plugins.registrar import catalog_path_for, ledger_path_for
 from apm_cli.install.native_plugin_admission import finalize_native_plugin
+from apm_cli.models.dependency.reference import DependencyReference
+from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.security.executables import (
     TRUST_DENIED,
     TRUST_GATED,
@@ -199,17 +201,17 @@ def test_resync_gate_drops_exec_blocked_locked_dependencies(tmp_path: Path) -> N
 # ---------------------------------------------------------------------------
 
 
-def _native_package_info():
-    server = SimpleNamespace(executables=(), command="printf", server_type="stdio")
-    components = SimpleNamespace(mcp_servers=(server,))
-    package = SimpleNamespace(agent_plugin=SimpleNamespace(components=components))
+def _native_package_info(tmp_path: Path):
+    """An installed Agent Plugin whose root mcp.json runs a stdio server."""
+    root = write_agent_plugin(tmp_path / "plugin", name="owner-plugin")
     return SimpleNamespace(
-        package=package,
-        dependency_ref=SimpleNamespace(canonical_string=lambda: "owner/plugin"),
+        package=SimpleNamespace(),
+        dependency_ref=DependencyReference.parse("owner/plugin"),
+        install_path=root,
     )
 
 
-def test_denied_exec_policy_refuses_native_registration_and_records_status() -> None:
+def test_denied_exec_policy_refuses_native_registration_and_records_status(tmp_path: Path) -> None:
     """A default-deny for MCP refuses native admission; exec_status is non-None."""
     trust_ctx = build_exec_trust_context(
         policy=None,
@@ -221,7 +223,7 @@ def test_denied_exec_policy_refuses_native_registration_and_records_status() -> 
 
     finalized = finalize_native_plugin(
         result,
-        _native_package_info(),
+        _native_package_info(tmp_path),
         "owner/plugin",
         [SimpleNamespace(name="copilot")],
         hooks_approved=True,
@@ -245,7 +247,7 @@ def test_denied_exec_policy_refuses_native_registration_and_records_status() -> 
     assert "apm approve owner/plugin" in refusal
 
 
-def test_approved_exec_policy_admits_native_registration() -> None:
+def test_approved_exec_policy_admits_native_registration(tmp_path: Path) -> None:
     """The same plugin with MCP approved is admitted natively."""
     trust_ctx = build_exec_trust_context(
         policy=None,
@@ -256,7 +258,7 @@ def test_approved_exec_policy_admits_native_registration() -> None:
 
     finalized = finalize_native_plugin(
         result,
-        _native_package_info(),
+        _native_package_info(tmp_path),
         "owner/plugin",
         [SimpleNamespace(name="copilot")],
         hooks_approved=True,
@@ -272,7 +274,7 @@ def test_approved_exec_policy_admits_native_registration() -> None:
     assert finalized["native_plugin"] is True
 
 
-def test_record_native_exec_status_folds_and_never_downgrades() -> None:
+def test_record_native_exec_status_folds_and_never_downgrades(tmp_path: Path) -> None:
     """A partial MCP grant must not downgrade a worse status the gate recorded.
 
     Item 2: ``check_executable_approval`` records the worst-case status over
@@ -294,7 +296,7 @@ def test_record_native_exec_status_folds_and_never_downgrades() -> None:
         package_exec_status={"owner/plugin": TRUST_GATED},
     )
 
-    record_native_exec_status(ctx, "owner/plugin", _native_package_info(), ("mcp",))
+    record_native_exec_status(ctx, "owner/plugin", _native_package_info(tmp_path), ("mcp",))
 
     assert ctx.package_exec_status["owner/plugin"] == TRUST_GATED
 
@@ -320,7 +322,7 @@ def test_on_disk_hooks_absent_from_ir_still_refuse_native_registration(
     package = SimpleNamespace(agent_plugin=SimpleNamespace(components=components), version="1.0.0")
     package_info = SimpleNamespace(
         package=package,
-        dependency_ref=SimpleNamespace(canonical_string=lambda: "owner/plugin"),
+        dependency_ref=DependencyReference.parse("owner/plugin"),
         install_path=install_path,
     )
     ctx = SimpleNamespace(exec_trust_ctx=None, package_exec_status={})
@@ -344,14 +346,14 @@ def test_on_disk_hooks_absent_from_ir_still_refuse_native_registration(
     assert finalized["native_plugin"] is False
 
 
-def test_finalize_drops_native_when_copilot_target_excluded() -> None:
+def test_finalize_drops_native_when_copilot_target_excluded(tmp_path: Path) -> None:
     """finalize_native_plugin refuses admission when copilot is not a target."""
     ctx = SimpleNamespace(exec_trust_ctx=None, package_exec_status={})
     result = {"native_plugin": False}
 
     finalized = finalize_native_plugin(
         result,
-        _native_package_info(),
+        _native_package_info(tmp_path),
         "owner/plugin",
         [SimpleNamespace(name="claude")],
         hooks_approved=True,
@@ -383,10 +385,10 @@ def test_integrity_gate_failure_leaves_no_registration(
     write_agent_plugin(source, name="sentinel")
     _write_project(project, [str(source)])
 
-    def _boom(_ctx):
+    def _boom(_ctx, _lockfile):
         raise PolicyViolationError("require_hashes: missing content hash")
 
-    monkeypatch.setattr("apm_cli.install.pipeline._enforce_require_hashes", _boom)
+    monkeypatch.setattr("apm_cli.install.pipeline.check_before_lockfile", _boom)
 
     result = _install(monkeypatch, project)
 
@@ -641,6 +643,13 @@ def test_update_and_frozen_restore_never_discover_a_copilot_binary(
     assert _install(monkeypatch, project).exit_code == 0
 
     _forbid_copilot_discovery(monkeypatch)
+    # Update reads org policy for packages with executables (#3990), and a
+    # no-change update applies it through the install preflight (#4458); no org here.
+    for target in (
+        "apm_cli.policy.discovery.discover_policy_with_chain",
+        "apm_cli.policy.install_preflight.discover_policy_with_chain",
+    ):
+        monkeypatch.setattr(target, lambda *_args, **_kwargs: PolicyFetchResult(outcome="absent"))
 
     updated = CliRunner().invoke(
         cli,

@@ -19,7 +19,7 @@ from click.testing import CliRunner
 from apm_cli.deps.lockfile import LockedDependency, LockFile, LockfileSymlinkError
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.platform_sensitive]
 
 _PATCH_UPDATES = "apm_cli.commands._helpers.check_for_updates"
 
@@ -127,8 +127,10 @@ def test_commands_fail_closed_on_symlinked_lockfile(symlinked_project: Path, arg
     assert result.exit_code != 0, output
     assert "[x]" in output
     assert "symbolic link" in output
-    assert "apm.lock.yaml" in output
-    assert "shared.lock.yaml" in output
+    # The terminal wraps long paths mid-name; compare file names unwrapped.
+    compact = "".join(output.split())
+    assert "apm.lock.yaml" in compact
+    assert "shared.lock.yaml" in compact
     assert "Lockfile written" not in output
     assert link.is_symlink(), "the lockfile link must not be replaced by a regular file"
     assert os.readlink(link) == "shared.lock.yaml"

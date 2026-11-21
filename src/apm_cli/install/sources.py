@@ -32,6 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.primitive_classification import warn_unrecognized_plugin_schema
 from apm_cli.install.registry_wiring import (
@@ -40,10 +41,17 @@ from apm_cli.install.registry_wiring import (
     resolver_last_registry_resolution,
 )
 from apm_cli.install.source_helpers import (
+    content_hash_mismatch_hint,
+    download_registry_package,
     ensure_carried_licenses_match,
+    header_ref,
+    locked_content_mismatch,
+    locked_content_mismatch_line,
     locked_parent_identity,
     materialized_manifest_snapshot,
     record_carried_package_hash,
+    record_package_digests,
+    update_accepts_new_content,
 )
 from apm_cli.install.source_helpers import (
     format_package_type_label as _format_package_type_label,
@@ -77,7 +85,7 @@ class Materialization:
     package_info: PackageInfo | None
     install_path: Path
     dep_key: str
-    deltas: dict[str, int] = field(default_factory=lambda: {"installed": 1})
+    deltas: dict[str, int] = field(default_factory=lambda: {"installed": 0})
 
 
 class DependencySource(ABC):
@@ -123,14 +131,15 @@ class LocalDependencySource(DependencySource):
     def acquire(self) -> Materialization | None:
         from apm_cli.agent_plugins.errors import AgentPluginError
         from apm_cli.bundle.local_bundle import route_agent_plugin_package
-        from apm_cli.constants import APM_YML_FILENAME
         from apm_cli.core.scope import InstallScope
         from apm_cli.deps._shared import materialize_marketplace_manifest
         from apm_cli.deps.installed_package import (
             InstalledPackage,
             extensions_from_resolved_package,
         )
+        from apm_cli.deps.path_anchoring import USER_SCOPE_RELATIVE_PATH_ERROR, local_dep_base_dir
         from apm_cli.install.phases.local_content import _copy_local_package
+        from apm_cli.install.source_helpers import package_digests
         from apm_cli.models.apm_package import (
             APMPackage,
             GitReferenceType,
@@ -139,7 +148,6 @@ class LocalDependencySource(DependencySource):
             ResolvedReference,
         )
         from apm_cli.models.validation import validate_apm_package
-        from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
 
         ctx = self.ctx
         dep_ref = self.dep_ref
@@ -148,39 +156,24 @@ class LocalDependencySource(DependencySource):
         diagnostics = ctx.diagnostics
         logger = ctx.logger
 
-        # User scope: relative paths are project-relative and have no
-        # meaningful root outside a project, so reject them.  Absolute
-        # paths are unambiguous and supported.
-        if ctx.scope is InstallScope.USER:
-            local_path_str = dep_ref.local_path or ""
-            if not local_path_str or not Path(local_path_str).expanduser().is_absolute():
-                diagnostics.warn(
-                    f"Skipped local package '{local_path_str}' "
-                    "-- relative local paths are not supported at user scope "
-                    "(--global). Use an absolute path or a remote reference "
-                    "(owner/repo) instead.",
-                    package=local_path_str,
-                )
-                if logger:
-                    logger.verbose_detail(
-                        f"  Skipping {local_path_str} (relative local paths "
-                        "are project-relative and have no root at user scope)"
-                    )
-                return None
-
-        # Determine the anchor for relative ``local_path`` (#857). For
-        # direct deps from the root project this is ``ctx.source_root``
-        # (which equals ``ctx.project_root`` unless ``apm install --root``
-        # redirects writes -- then it stays at $PWD).  For transitive
-        # deps declared inside another local package, the parent's
-        # source directory was captured during resolve via
-        # ``ctx.dep_base_dirs`` -- it is already absolute, so ``--root``
-        # has nothing to do.
-        base_dir = (
-            ctx.source_root
-            if dep_ref.replacement is not None
-            else getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.source_root
+        # The declaring package anchors relative paths (#857, #4153); resolve
+        # captured it in ``ctx.dep_base_dirs``.
+        base_dir = local_dep_base_dir(
+            dep_ref.local_path or "",
+            declaring_dir=(
+                None
+                if dep_ref.replacement is not None
+                else getattr(ctx, "dep_base_dirs", {}).get(dep_key)
+            ),
+            source_root=ctx.source_root,
+            user_scope=ctx.scope is InstallScope.USER,
         )
+        if base_dir is None:
+            diagnostics.error(
+                f"{dep_ref.local_path} -- {USER_SCOPE_RELATIVE_PATH_ERROR}",
+                package=dep_ref.local_path,
+            )
+            return None
         original_src = Path(dep_ref.local_path).expanduser()
         if not original_src.is_absolute():
             original_src = (base_dir / original_src).resolve()
@@ -219,9 +212,8 @@ class LocalDependencySource(DependencySource):
         if logger:
             logger.download_complete(dep_ref.local_path, ref_suffix="local")
 
-        # Capture the validated copy before manifest synthesis or integration
-        # transforms it. Frozen preflight hashes this same materialization.
-        local_content_hash = _compute_hash(install_path)
+        # Hash the validated copy before synthesis or integration, as frozen preflight does.
+        local_digests = package_digests(ctx, install_path)
         materialize_marketplace_manifest(dep_ref, install_path)
         validation = validate_apm_package(
             install_path,
@@ -234,7 +226,7 @@ class LocalDependencySource(DependencySource):
             details = "; ".join(validation.errors) or "validator returned no package"
             raise DirectDependencyError(f"Local Agent Plugin is invalid: {details}")
         elif validation.legacy_metadata_only:
-            local_apm_yml = install_path / APM_YML_FILENAME
+            local_apm_yml = manifest_file(install_path)
             local_pkg = APMPackage.from_apm_yml(
                 local_apm_yml,
                 source_path=original_src,
@@ -283,7 +275,7 @@ class LocalDependencySource(DependencySource):
             )
         )
         if install_path.is_dir():
-            ctx.package_hashes[dep_key] = local_content_hash
+            record_package_digests(ctx, dep_key, local_digests)
 
         if local_info.package_type:
             ctx.package_types[dep_key] = local_info.package_type.value
@@ -329,6 +321,8 @@ class CachedDependencySource(DependencySource):
         dep_ref = self.dep_ref
 
         cached_commit: str | None = None
+        lock = ctx.existing_lockfile
+        locked_dep = lock.get_dependency(dep_key) if lock else None
         if self.fetched_this_run:
             cached_commit = ctx.callback_downloaded.get(dep_key)
             if (
@@ -338,14 +332,12 @@ class CachedDependencySource(DependencySource):
                 and resolved_ref.resolved_commit != "cached"
             ):
                 cached_commit = resolved_ref.resolved_commit
-        elif ctx.existing_lockfile:
-            locked_dep = ctx.existing_lockfile.get_dependency(dep_key)
-            if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
-                cached_commit = locked_dep.resolved_commit
-        if not cached_commit:
-            # A registry reference is a semver range, not a commit identity.
-            if dep_ref.source != "registry":
-                cached_commit = dep_ref.reference
+        elif locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
+            cached_commit = locked_dep.resolved_commit
+        proxy_row = locked_dep is not None and bool(locked_dep.registry_prefix)
+        # Registry ranges and registry-proxy rows lock no commit identity (#3657).
+        if not cached_commit and dep_ref.source != "registry" and not proxy_row:
+            cached_commit = dep_ref.reference
         return cached_commit
 
     def _cached_source_pin(self, cached_commit: str | None) -> str:
@@ -380,7 +372,6 @@ class CachedDependencySource(DependencySource):
     def acquire(self) -> Materialization | None:
         from apm_cli.agent_plugins.errors import AgentPluginError
         from apm_cli.bundle.local_bundle import route_agent_plugin_package
-        from apm_cli.constants import APM_YML_FILENAME
         from apm_cli.deps.installed_package import (
             InstalledPackage,
             extensions_from_resolved_package,
@@ -409,7 +400,7 @@ class CachedDependencySource(DependencySource):
         display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
         _rref = getattr(dep_ref, "resolved_reference", None)
         if _rref and getattr(_rref, "ref_name", None):
-            _ref = _rref.ref_name
+            _ref = header_ref(_rref, dep_ref, dep_locked_chk)
         elif dep_locked_chk and getattr(dep_locked_chk, "resolved_ref", None):
             _ref = dep_locked_chk.resolved_ref
         elif dep_ref.source == "registry":
@@ -484,7 +475,7 @@ class CachedDependencySource(DependencySource):
                 )
             pkg_type = validation_result.package_type
         else:
-            apm_yml_path = install_path / APM_YML_FILENAME
+            apm_yml_path = manifest_file(install_path)
             pkg_type, _ = detect_package_type(install_path)
             pkg_type = preserve_normalized_marketplace_plugin_type(
                 install_path,
@@ -659,6 +650,7 @@ class FreshDependencySource(DependencySource):
             extensions_from_resolved_package,
         )
         from apm_cli.drift import build_download_ref
+        from apm_cli.install.transaction import stage_existing_copy
         from apm_cli.utils.path_security import safe_rmtree
 
         ctx = self.ctx
@@ -675,11 +667,8 @@ class FreshDependencySource(DependencySource):
             display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
             short_name = display_name.split("/")[-1] if "/" in display_name else display_name
 
-            # Workstream B (#1116): per-dep progress is owned by the
-            # shared InstallTui ``ctx.tui``; legacy local Progress is
-            # only wired when integrate is invoked outside the install
-            # pipeline (no callers do this today, but the parameter is
-            # kept for back-compat).
+            # Workstream B (#1116): the shared InstallTui ``ctx.tui`` owns per-dep
+            # progress; legacy local Progress is kept only for back-compat.
             task_id = None
             if progress is not None:
                 task_id = progress.add_task(
@@ -696,6 +685,9 @@ class FreshDependencySource(DependencySource):
                 ref_changed=ref_changed,
             )
 
+            stage_existing_copy(
+                ctx, install_path, dep_locked_chk, skip=dep_key in ctx.pre_download_results
+            )
             if dep_key in ctx.pre_download_results:
                 package_info = ctx.pre_download_results[dep_key]
             elif dep_ref.source == "registry":
@@ -752,9 +744,8 @@ class FreshDependencySource(DependencySource):
                         version=dep_locked_chk.version,
                     )
                 else:
-                    package_info = _registry_resolver.download_package(
-                        download_ref,
-                        install_path,
+                    package_info = download_registry_package(
+                        ctx, download_ref, install_path, dep_locked_chk
                     )
             else:
                 package_info = ctx.downloader.download_package(
@@ -779,13 +770,10 @@ class FreshDependencySource(DependencySource):
             deltas: dict[str, int] = {"installed": 1}
 
             resolved = getattr(package_info, "resolved_reference", None)
+            _ref = header_ref(resolved, dep_ref, dep_locked_chk)
             if logger:
-                _ref = ""
-                _sha = ""
-                if resolved:
-                    _ref = resolved.ref_name if resolved.ref_name else ""
-                    # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
-                    _sha = format_short_sha(resolved.resolved_commit)
+                # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
+                _sha = format_short_sha(resolved.resolved_commit) if resolved else ""
                 logger.download_complete(display_name, ref=_ref, sha=_sha)
                 # Only emit the per-package git auth diagnostic for git deps.
                 # Registry-sourced deps don't talk to git hosts; resolving
@@ -806,7 +794,7 @@ class FreshDependencySource(DependencySource):
             else:
                 _ref_suffix = ""
                 if resolved:
-                    _r = resolved.ref_name if resolved.ref_name else ""
+                    _r = _ref
                     _s = format_short_sha(resolved.resolved_commit)
                     if _r and _s:
                         _ref_suffix = f" #{_r} @{_s}"
@@ -862,46 +850,42 @@ class FreshDependencySource(DependencySource):
             )
             _carried_paths = record_carried_package_hash(ctx, dep_key, install_path, package_info)
 
-            # Supply-chain protection: verify content hash on fresh
-            # downloads when the lockfile already records a hash.
-            # Skip when ``ctx.expected_hash_change_deps`` marks this dep
-            # (set by resolve.py's BFS callback and _resolve_download_strategy
-            # when branch-ref drift or the v<=0.12.2 self-heal forces a
-            # re-download whose hash is legitimately expected to differ from
-            # the lockfile record).
-            # Thread-safety: resolve phase completes before integrate runs,
-            # so the set is stable here.  integrate.py's own .add() is
-            # idempotent (set semantics) and runs single-threaded.
+            # Supply-chain protection: verify content hash on fresh downloads
+            # when the lockfile records one, unless an update moved the commit
+            # or ``ctx.expected_hash_change_deps`` marks this dep (resolve.py's
+            # BFS callback and _resolve_download_strategy set it when branch-ref
+            # drift or the v<=0.12.2 self-heal makes a hash change expected).
+            # Thread-safety: the set is stable once resolve completes, and
+            # integrate.py's own .add() is idempotent and single-threaded.
             _expected_hash_deps = ctx.expected_hash_change_deps
             if (
-                not ctx.update_refs
+                not update_accepts_new_content(ctx, dep_locked_chk, resolved_commit)
                 and dep_key not in _expected_hash_deps
                 and dep_locked_chk
                 and dep_locked_chk.content_hash
                 and dep_key in ctx.package_hashes
             ):
                 _fresh_hash = ctx.package_hashes[dep_key]
-                if _fresh_hash != dep_locked_chk.content_hash:
-                    from apm_cli.install.legacy_plugin_compat import (
-                        matches_fresh_legacy_plugin_hash,
-                    )
-
-                    if not matches_fresh_legacy_plugin_hash(
-                        install_path,
-                        dep_key,
-                        lockfile=ctx.existing_lockfile,
-                        package_type=getattr(package_info, "package_type", None),
-                        exclude=_carried_paths,
-                    ):
-                        safe_rmtree(install_path, ctx.apm_modules_dir)
-                        raise DirectDependencyError(
-                            f"Content hash mismatch for {dep_key}: "
-                            f"expected {dep_locked_chk.content_hash}, got {_fresh_hash}. "
-                            "The downloaded content differs from the lockfile record. "
-                            "This may indicate a supply-chain attack. Use "
-                            "'apm install --update' to accept new content and update the lockfile."
+                if locked_content_mismatch(
+                    dep_key,
+                    dep_locked_chk,
+                    install_path,
+                    lockfile=ctx.existing_lockfile,
+                    package_info=package_info,
+                    exclude=_carried_paths,
+                    fresh_hash=_fresh_hash,
+                ):
+                    safe_rmtree(install_path, ctx.apm_modules_dir)
+                    raise DirectDependencyError(
+                        locked_content_mismatch_line(
+                            dep_key, dep_locked_chk.content_hash, _fresh_hash
                         )
-            ensure_carried_licenses_match(ctx, dep_key, install_path, dep_locked_chk)
+                        + " The downloaded content differs from the lockfile record. "
+                        + content_hash_mismatch_hint(ctx, dep_key)
+                    )
+            ensure_carried_licenses_match(
+                ctx, dep_key, install_path, dep_locked_chk, resolved_commit
+            )
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value

@@ -13,10 +13,14 @@ from __future__ import annotations
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.install.manifest_reconcile import reconcile_target_deployed_files
+from apm_cli.install.manifest_reconcile import (
+    SelectedCleanupOutcome,
+    reconcile_target_deployed_files,
+)
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 class _RecordingLogger:
@@ -26,8 +30,8 @@ class _RecordingLogger:
         self.stale_cleanup_calls: list[tuple[str, int]] = []
         self.user_edit_calls: list[tuple[str, str]] = []
 
-    def stale_cleanup(self, dep_key: str, count: int) -> None:
-        self.stale_cleanup_calls.append((dep_key, count))
+    def stale_cleanup(self, dep_key: str, cleanup) -> None:
+        self.stale_cleanup_calls.append((dep_key, len(cleanup.announced_paths)))
 
     def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str) -> None:
         self.user_edit_calls.append((rel_path, dep_key))
@@ -70,6 +74,7 @@ def test_contraction_deletion_is_surfaced_at_default_verbosity(tmp_path):
         active_targets=[KNOWN_TARGETS["claude"]],
         declared_targets=[KNOWN_TARGETS["claude"]],
         diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
         logger=logger,
     )
 
@@ -85,6 +90,7 @@ def test_contraction_user_edit_skip_is_surfaced(tmp_path):
     """A user-edited dropped-target file MUST be kept AND reported via
     ``logger.cleanup_skipped_user_edit`` so the user learns APM preserved it."""
     lockfile, _claude_rel, cursor_rel, _claude_abs, cursor_abs = _seed_lockfile(tmp_path)
+    evidence = receipted_evidence(tmp_path)
     cursor_abs.write_text("# cursor rule\nUSER EDIT\n", encoding="utf-8")
     logger = _RecordingLogger()
 
@@ -94,6 +100,7 @@ def test_contraction_user_edit_skip_is_surfaced(tmp_path):
         active_targets=[KNOWN_TARGETS["claude"]],
         declared_targets=[KNOWN_TARGETS["claude"]],
         diagnostics=DiagnosticCollector(),
+        evidence=evidence,
         logger=logger,
     )
 
@@ -117,6 +124,7 @@ def test_contraction_without_logger_still_deletes(tmp_path):
         active_targets=[KNOWN_TARGETS["claude"]],
         declared_targets=[KNOWN_TARGETS["claude"]],
         diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
     )
 
     assert changed is True
@@ -154,6 +162,7 @@ def test_contraction_removes_only_selected_removed_target_ownership(tmp_path):
         active_targets=[KNOWN_TARGETS["agent-skills"]],
         declared_targets=[KNOWN_TARGETS["agent-skills"]],
         diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
         dependency_keys={removed.get_unique_key()},
         remove_selected_ownership=True,
         user_scope=True,
@@ -193,6 +202,7 @@ def test_selected_ownership_cleanup_removes_unique_active_target_file(tmp_path):
         active_targets=[KNOWN_TARGETS["opencode"]],
         declared_targets=[KNOWN_TARGETS["opencode"]],
         diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
         dependency_keys={removed.get_unique_key()},
         remove_selected_ownership=True,
         user_scope=True,
@@ -200,6 +210,97 @@ def test_selected_ownership_cleanup_removes_unique_active_target_file(tmp_path):
 
     assert survivor_abs.exists()
     assert not removed_abs.exists()
+
+
+def test_selected_cleanup_outcome_keeps_lock_truthful_after_partial_removal(tmp_path):
+    """A refused removal records only the files still on disk (#3656)."""
+    target = KNOWN_TARGETS["opencode"]
+    kept_rel = ".config/opencode/agents/kept.md"
+    gone_rel = ".config/opencode/agents/gone.md"
+    kept_abs = tmp_path / kept_rel
+    gone_abs = tmp_path / gone_rel
+    for path in (kept_abs, gone_abs):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# managed\n", encoding="utf-8")
+    removed = LockedDependency(
+        repo_url="https://github.com/acme/removed",
+        deployed_files=[kept_rel, gone_rel],
+        deployed_file_hashes={
+            kept_rel: compute_file_hash(kept_abs),
+            gone_rel: compute_file_hash(gone_abs),
+        },
+    )
+    lockfile = LockFile()
+    lockfile.add_dependency(removed)
+    evidence = receipted_evidence(tmp_path)
+    kept_abs.write_text("# edited\n", encoding="utf-8")
+    key = removed.get_unique_key()
+    outcome = SelectedCleanupOutcome()
+
+    reconcile_target_deployed_files(
+        project_root=tmp_path,
+        lockfile=lockfile,
+        active_targets=[target],
+        declared_targets=[target],
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        dependency_keys={key},
+        remove_selected_ownership=True,
+        selected_outcome=outcome,
+        user_scope=True,
+    )
+
+    assert kept_abs.exists() and not gone_abs.exists()
+    assert outcome.retained_paths == {kept_rel}
+    assert lockfile.get_dependency(key).deployed_files == [kept_rel, gone_rel]
+    outcome.apply_to(lockfile)
+    dependency = lockfile.get_dependency(key)
+    assert dependency.deployed_files == [kept_rel]
+    assert set(dependency.deployed_file_hashes) == {kept_rel}
+
+
+def test_selected_cleanup_outcome_keeps_preserved_profile_rows(tmp_path):
+    """Rows another profile keeps stay claimed when the removal is refused."""
+    target = KNOWN_TARGETS["opencode"]
+    kept_rel = ".config/opencode/agents/kept.md"
+    shared_rel = ".config/opencode/agents/shared.md"
+    for rel in (kept_rel, shared_rel):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("# managed\n", encoding="utf-8")
+    removed = LockedDependency(
+        repo_url="https://github.com/acme/removed",
+        deployed_files=[kept_rel, shared_rel],
+        deployed_file_hashes={
+            rel: compute_file_hash(tmp_path / rel) for rel in (kept_rel, shared_rel)
+        },
+    )
+    lockfile = LockFile()
+    lockfile.add_dependency(removed)
+    evidence = receipted_evidence(tmp_path)
+    (tmp_path / kept_rel).write_text("# edited\n", encoding="utf-8")
+    key = removed.get_unique_key()
+    outcome = SelectedCleanupOutcome()
+
+    reconcile_target_deployed_files(
+        project_root=tmp_path,
+        lockfile=lockfile,
+        active_targets=[target],
+        declared_targets=[target],
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        dependency_keys={key},
+        remove_selected_ownership=True,
+        selected_outcome=outcome,
+        user_scope=True,
+        preserved_selected_values=frozenset({shared_rel}),
+    )
+
+    assert (tmp_path / shared_rel).exists()
+    assert outcome.retained_paths == {kept_rel}
+    outcome.apply_to(lockfile)
+    dependency = lockfile.get_dependency(key)
+    assert sorted(dependency.deployed_files) == sorted([kept_rel, shared_rel])
+    assert set(dependency.deployed_file_hashes) == {kept_rel, shared_rel}
 
 
 if __name__ == "__main__":

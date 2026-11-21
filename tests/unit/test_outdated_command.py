@@ -14,6 +14,8 @@ from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Patch targets -- imports are lazy (inside function body), so we patch
 # at the source module level.
@@ -217,6 +219,47 @@ class TestOutdatedCommand:
             assert "v1.0.0" in result.output
             assert "v2.0.0" in result.output
             assert "outdated" in result.output.lower()
+
+    @patch(_PATCH_AUTH)
+    @patch(_PATCH_DOWNLOADER)
+    @patch(_PATCH_MIGRATE)
+    @patch(_PATCH_GET_LOCKFILE_PATH)
+    @patch(_PATCH_GET_APM_DIR)
+    @patch(_PATCH_LOCKFILE)
+    def test_long_package_name_folds_instead_of_clipping(
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
+    ):
+        """At 80 columns the package name wraps; it is never clipped (#3994)."""
+        name = "acme-enterprise-tools/agent-skills-marketplace-catalog-x"
+        with self._chdir_tmp() as tmp:
+            mock_get_apm_dir.return_value = tmp
+            mock_get_path.return_value = tmp / "apm.lock.yaml"
+            deps = {name: _locked_dep(name, resolved_ref="v1.0.0")}
+            mock_lf_cls.read.return_value = _make_lockfile(deps)
+            mock_downloader = MagicMock()
+            mock_dl_cls.return_value = mock_downloader
+            mock_downloader.list_remote_refs.side_effect = [
+                [_remote_tag("v2.0.0"), _remote_tag("v1.0.0")],
+            ]
+
+            result = self.runner.invoke(cli, ["outdated"], env={"COLUMNS": "80"})
+
+            assert result.exit_code == 0
+            assert "\u2026" not in result.output
+            assert "..." not in result.output
+            rows = [line for line in result.output.splitlines() if "|" in line]
+            cells = "".join(line.split("|")[1].strip() for line in rows)
+            assert name in cells
+            # No row is wider than the terminal, so Rich never crops the Source column.
+            assert all(len(line) <= 80 for line in rows), result.output
+            source = "".join(line.split("|")[-2].strip() for line in rows[2:])
+            assert source.endswith("git tags") or "tags" in source, result.output
 
     # --- Branch ref (SHA-based comparison) ---
 
@@ -1272,28 +1315,3 @@ class TestOutdatedCommand:
             assert remote.scheme == "https"
             assert remote.hostname == "dev.azure.com"
             assert remote.path == "/myorg/myproject/_git/myrepo"
-
-
-class TestPackageBasename:
-    """Direct unit tests for _package_basename edge cases."""
-
-    @pytest.mark.parametrize(
-        "virtual_path,expected",
-        [
-            ("packages/agent-dev-workflow", "agent-dev-workflow"),
-            ("packages/agent-dev-workflow/", "agent-dev-workflow"),
-            ("packages/deep/nested/pkg", "pkg"),
-            ("pkg", "pkg"),
-        ],
-    )
-    def test_virtual_subdir_basename_variants(self, virtual_path, expected):
-        """Trailing slashes, deep nesting, and simple names all resolve correctly."""
-        dep = LockedDependency(
-            repo_url="org/monorepo",
-            resolved_ref="v1.0.0",
-            is_virtual=True,
-            virtual_path=virtual_path,
-        )
-        from apm_cli.commands.outdated import _package_basename
-
-        assert _package_basename(dep) == expected

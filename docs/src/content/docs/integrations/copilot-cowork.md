@@ -20,7 +20,7 @@ Until the flag is enabled, the `copilot-cowork` target stays inert: it is hidden
 When the `copilot-cowork` flag is enabled, APM can deploy package skills to Microsoft 365 Copilot Cowork at user scope. APM writes each deployed skill to Cowork's fixed OneDrive convention:
 
 ```text
-<onedrive-root>/Documents/Cowork/skills/<package-name>/SKILL.md
+<onedrive-root>/Documents/Cowork/skills/<skill-name>/SKILL.md
 ```
 
 ## Enable the flag
@@ -142,4 +142,4 @@ This keeps the lockfile portable across machines, users, and OneDrive tenants. A
 - Project-scope error: rerun with `--global`.
 - Non-skill primitives skipped: expected behaviour. Cowork only deploys skills.
 
-See also [IDE and Tool Integration](../ide-tool-integration/) and [apm experimental](../../reference/experimental/).
+See also [IDE and Tool Integration](../../consumer/choose-harnesses/) and [apm experimental](../../reference/experimental/).

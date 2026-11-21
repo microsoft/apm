@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from ...cache.url_normalize import SCP_LIKE_RE
 from .object_fields import apply_optional_dependency_fields
+from .subsets import EdgeSelection, merge_edge_selections
 
 if TYPE_CHECKING:
     from ..apm_package import APMPackage
@@ -258,6 +259,16 @@ class ReplacementBinding:
             if not binding.requests:
                 binding.original = replace(edge, alias=original.alias)
             binding.record(edge, request["parent"], request["dev"])
+        if len(binding.requests) > 1:
+            # The node carries the merged selection of every incoming edge (#3735).
+            merged = merge_edge_selections(
+                EdgeSelection((), request.skills, request.targets) for request in binding.requests
+            )
+            binding.original = replace(
+                binding.original,
+                skill_subset=None if merged.skill_subset is None else list(merged.skill_subset),
+                target_subset=None if merged.target_subset is None else list(merged.target_subset),
+            )
         return binding
 
     def local_source_path(self, consumer_root: Path | None = None) -> Path:
@@ -289,7 +300,6 @@ class ReplacementIndex:
         self._rules = list(rules)
         self._by_key: dict[tuple[str, int | None, str, str | None], ReplacementRule] = {}
         self._bindings: dict[tuple[str, int | None, str, str | None], ReplacementBinding] = {}
-        self._slots: dict[str, str] = {}
         self._identities: dict[str, str] = {}
         for rule in self._rules:
             key = rule.selector.key
@@ -333,17 +343,16 @@ class ReplacementIndex:
         """Apply the consumer's table once, before graph deduplication/admission."""
         if not self._rules or dep.replacement is not None:
             return dep
+        # Distinct packages sharing one directory are rejected by
+        # MaterializationSlots for every graph, with or without rules (#3696).
         identity = dep.get_identity()
-        slot = dep.get_install_path(modules_dir)
-        key = dep.get_unique_key()
-        for occupied, entry in ((self._slots, slot.as_posix()), (self._identities, key)):
-            previous = occupied.setdefault(entry, identity)
-            if previous != identity:
-                raise ReplacementCollisionError(
-                    f"Replacement graph identities {previous!r} and {identity!r} "
-                    f"share the existing materialization slot {slot}. "
-                    "Use distinct original package identities and destinations."
-                )
+        previous = self._identities.setdefault(dep.get_unique_key(), identity)
+        if previous != identity:
+            raise ReplacementCollisionError(
+                f"Replacement graph identities {previous!r} and {identity!r} "
+                "share one original package identity. "
+                "Use distinct original package identities."
+            )
         rule = self.lookup(dep)
         if rule is None:
             return dep
@@ -578,13 +587,14 @@ def build_replacement_index(rules: list[ReplacementRule]) -> ReplacementIndex:
 
 
 def project_manifest_dependencies(
-    manifest: APMPackage, *, modules_dir: Path | None = None
+    manifest: APMPackage, *, modules_dir: Path | None = None, include_dev: bool = True
 ) -> list[DependencyReference]:
     """Project direct root declarations without changing manifest ownership."""
-    groups = (
+    groups: tuple[tuple[bool, list[DependencyReference]], ...] = (
         (False, manifest.get_apm_dependencies()),
-        (True, manifest.get_dev_apm_dependencies()),
     )
+    if include_dev:
+        groups += ((True, manifest.get_dev_apm_dependencies()),)
     if not manifest.replace_rules:
         return [dep for _, dependencies in groups for dep in dependencies]
     root = Path(manifest.source_path or manifest.package_path).resolve()

@@ -38,11 +38,42 @@ detection repo-wide.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+
+USER_SCOPE_RELATIVE_PATH_ERROR = (
+    "relative local paths are not supported at user scope (--global). "
+    "Use an absolute path or a remote reference (owner/repo) instead"
+)
+
+
+def local_dep_base_dir(
+    local_path: str,
+    *,
+    declaring_dir: Path | None,
+    source_root: Path | None,
+    user_scope: bool,
+) -> Path | None:
+    """Return the directory a dependency's ``local_path`` resolves against.
+
+    The single install-time anchor decision (#857, #4153). A path declared
+    by another package anchors on that package's directory at every scope.
+    A root-declared path anchors on *source_root* at project scope; at user
+    scope the root manifest has no project, so only an absolute path is
+    admitted. ``None`` means the path cannot be anchored and the caller
+    must fail the dependency with :data:`USER_SCOPE_RELATIVE_PATH_ERROR`.
+    """
+    if declaring_dir is not None:
+        return declaring_dir
+    if not user_scope and source_root is not None:
+        return source_root
+    raw = Path(local_path).expanduser()
+    return Path(raw.anchor) if raw.is_absolute() else None
 
 
 class LocalResolutionError(Exception):
@@ -100,6 +131,25 @@ def resolve_local_dep_dir(
         parent_index=index,
         resolved_cache=cache,
         seen=set(),
+    )
+
+
+def resolve_local_dep_base(
+    lock_dep: LockedDependency,
+    lockfile: LockFile | None,
+    project_root: Path,
+    *,
+    parent_index: dict[str, tuple[LockedDependency, ...]] | None = None,
+) -> Path:
+    """Return the directory a locked local dep's ``local_path`` is admitted from.
+
+    Mirrors install: a local replacement is anchored on the consumer root;
+    any other local dep on the directory of the package that declared it.
+    """
+    if lock_dep.replacement is not None:
+        return project_root
+    return resolve_local_dep_dir(
+        replace(lock_dep, local_path="."), lockfile, project_root, parent_index=parent_index
     )
 
 
