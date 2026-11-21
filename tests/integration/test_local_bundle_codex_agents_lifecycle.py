@@ -21,6 +21,8 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.promise("P-OWN-bundle-native-layout-lowering", "P-INV-I1", "P-INV-I3"),
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
@@ -218,4 +220,5 @@ def test_codex_bundle_agent_user_scope_lock_and_audit(
     lock = load_yaml(world.isolated.config_root / "apm.lock.yaml")
     assert _AGENT in lock["local_deployed_files"]
     assert lock["local_deployed_file_hashes"][_AGENT] == compute_file_hash(home / _AGENT)
-    world.apm(world.isolated.config_root, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+    audit = world.apm(world.isolated.config_root, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+    assert audit.returncode == 0, _output(audit)
