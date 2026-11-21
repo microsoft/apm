@@ -2,7 +2,7 @@
  "counts": {
   "baseline_by_lane": {
    "T-1": 254,
-   "T-2": 496,
+   "T-2": 408,
    "T-3": 243,
    "T-6a": 201,
    "T-6b": 141,
@@ -50,8 +50,9 @@
   "row_steps": 204,
   "rows": 17,
   "status": {
-   "baseline": 1468,
-   "required": 1023
+   "baseline": 1380,
+   "known-failing": 1,
+   "required": 1110
   }
  },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
@@ -6687,11 +6688,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=bundle-install|SRC=local-bundle|PRIM=lsp": {
+   "credited_by": [
+    "T3|install|bundle|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=bundle-install|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
@@ -6749,11 +6754,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=bin": {
+   "credited_by": [
+    "T3|compile|bundle|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=canvas": {
    "family": "T3",
@@ -6900,11 +6909,15 @@
    "strength": "e2e"
   },
   "T3|OP=compile|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|compile|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=native-plugin|PRIM=other-file": {
    "family": "T3",
@@ -6914,11 +6927,15 @@
    "strength": "e2e"
   },
   "T3|OP=compile|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|compile|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -7215,11 +7232,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|install|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
@@ -7236,18 +7257,26 @@
    "strength": "e2e"
   },
   "T3|OP=install|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|install|native|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|install|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -7365,11 +7394,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=bin": {
+   "credited_by": [
+    "T3|lock|bundle|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=canvas": {
    "family": "T3",
@@ -7379,25 +7412,37 @@
    "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=hook": {
+   "credited_by": [
+    "T3|lock|bundle|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=lsp": {
+   "credited_by": [
+    "T3|lock|bundle|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=mcp": {
+   "credited_by": [
+    "T3|lock|bundle|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=skill": {
    "family": "T3",
@@ -7608,11 +7653,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|lock|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
@@ -7629,18 +7678,26 @@
    "strength": "e2e"
   },
   "T3|OP=lock|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|lock|native|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|lock|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -8101,11 +8158,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=prune|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|prune|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=prune|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
@@ -8122,18 +8183,26 @@
    "strength": "e2e"
   },
   "T3|OP=prune|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|prune|native|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=prune|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|prune|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=prune|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -8433,11 +8502,15 @@
    "strength": "e2e"
   },
   "T3|OP=uninstall|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|uninstall|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=uninstall|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
@@ -8454,18 +8527,26 @@
    "strength": "e2e"
   },
   "T3|OP=uninstall|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|uninstall|native|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=uninstall|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|uninstall|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=uninstall|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -8784,11 +8865,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|update|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
@@ -8805,18 +8890,26 @@
    "strength": "e2e"
   },
   "T3|OP=update|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|update|native|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|update|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -9633,11 +9726,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=compile|SRC=local-bundle|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|compile|bundle"
+   ],
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=compile|SRC=local-path|DRYRUN=on": {
    "family": "T5",
@@ -13179,11 +13276,15 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|FORCE=on": {
+   "credited_by": [
+    "X|install|bundle|FORCE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|GATE=allowed": {
    "family": "pair",
@@ -13221,11 +13322,15 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|bundle|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|LOCK=absent": {
    "family": "pair",
@@ -13263,11 +13368,15 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|NET=online": {
+   "credited_by": [
+    "X|install|bundle|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|NOPOLICY=on": {
    "family": "pair",
@@ -13306,11 +13415,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|PRIM=lsp": {
+   "credited_by": [
+    "T3|install|bundle|lsp"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|PRIM=mcp": {
    "credited_by": [
@@ -13338,11 +13451,15 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|SCOPE=project": {
+   "credited_by": [
+    "X|install|bundle|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|SCOPE=user": {
    "family": "pair",
@@ -13352,19 +13469,31 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|SELECT=on": {
+   "credited_by": [
+    "X|install|bundle|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|SRC=local-bundle": {
    "credited_by": [
     "T3|install|bundle|bin",
     "T3|install|bundle|hook",
+    "T3|install|bundle|lsp",
     "T3|install|bundle|mcp",
     "T5|dry-run|install|bundle",
-    "T5|real|install|bundle"
+    "T5|real|install|bundle",
+    "X|install|bundle|FORCE=on",
+    "X|install|bundle|GATE=unapproved-exec",
+    "X|install|bundle|NET=online",
+    "X|install|bundle|SCOPE=project",
+    "X|install|bundle|SELECT=on",
+    "X|install|bundle|TGT=multi-unchanged",
+    "X|install|bundle|TGT=single-unchanged"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -13381,11 +13510,15 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|install|bundle|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|TGT=multi-widened": {
    "family": "pair",
@@ -13402,11 +13535,15 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|TGT=single-unchanged": {
+   "credited_by": [
+    "X|install|bundle|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|TGT=single-widened": {
    "family": "pair",
@@ -13658,11 +13795,20 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=compile|SRC=local-bundle": {
+   "credited_by": [
+    "T3|compile|bundle|bin",
+    "T3|compile|bundle|hook",
+    "T3|compile|bundle|lsp",
+    "T3|compile|bundle|mcp",
+    "T5|dry-run|compile|bundle",
+    "T5|real|compile|bundle"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=compile|SRC=local-path": {
    "family": "pair",
@@ -13719,6 +13865,9 @@
   },
   "pair|OP=compile|SRC=native-plugin": {
    "credited_by": [
+    "T3|compile|native|bin",
+    "T3|compile|native|mcp",
+    "T3|compile|native|skill",
     "T5|dry-run|compile|native",
     "T5|real|compile|native"
    ],
@@ -14104,7 +14253,16 @@
    "credited_by": [
     "T3|install|inline-mcp|mcp",
     "T5|dry-run|install|inline-mcp",
-    "T5|real|install|inline-mcp"
+    "T5|real|install|inline-mcp",
+    "X|install|inline-mcp|FORCE=on",
+    "X|install|inline-mcp|FROZEN=on",
+    "X|install|inline-mcp|GATE=unapproved-exec",
+    "X|install|inline-mcp|NET=online",
+    "X|install|inline-mcp|SCOPE=project",
+    "X|install|inline-mcp|SELECT=on",
+    "X|install|inline-mcp|TGT=multi-unchanged",
+    "X|install|inline-mcp|TGT=single-unchanged",
+    "X|install|inline-mcp|UPDATE=on"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -14137,7 +14295,17 @@
     "T5|dry-run|install|marketplace-object",
     "T5|dry-run|install|plugin-at-mkt",
     "T5|real|install|marketplace-object",
-    "T5|real|install|plugin-at-mkt"
+    "T5|real|install|plugin-at-mkt",
+    "X|install|marketplace-object|GATE=none",
+    "X|install|plugin-at-mkt|FORCE=on",
+    "X|install|plugin-at-mkt|FROZEN=on",
+    "X|install|plugin-at-mkt|GATE=unapproved-exec",
+    "X|install|plugin-at-mkt|NET=online",
+    "X|install|plugin-at-mkt|SCOPE=project",
+    "X|install|plugin-at-mkt|SELECT=on",
+    "X|install|plugin-at-mkt|TGT=multi-unchanged",
+    "X|install|plugin-at-mkt|TGT=single-unchanged",
+    "X|install|plugin-at-mkt|UPDATE=on"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -14157,7 +14325,16 @@
    "credited_by": [
     "T3|install|mcp-registry|mcp",
     "T5|dry-run|install|mcp-registry",
-    "T5|real|install|mcp-registry"
+    "T5|real|install|mcp-registry",
+    "X|install|mcp-registry|FORCE=on",
+    "X|install|mcp-registry|FROZEN=on",
+    "X|install|mcp-registry|GATE=unapproved-exec",
+    "X|install|mcp-registry|NET=online",
+    "X|install|mcp-registry|SCOPE=project",
+    "X|install|mcp-registry|SELECT=on",
+    "X|install|mcp-registry|TGT=multi-unchanged",
+    "X|install|mcp-registry|TGT=single-unchanged",
+    "X|install|mcp-registry|UPDATE=on"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -14168,8 +14345,20 @@
   },
   "pair|OP=install|SRC=native-plugin": {
    "credited_by": [
+    "T3|install|native|bin",
+    "T3|install|native|mcp",
+    "T3|install|native|skill",
     "T5|dry-run|install|native",
-    "T5|real|install|native"
+    "T5|real|install|native",
+    "X|install|native|FORCE=on",
+    "X|install|native|FROZEN=on",
+    "X|install|native|GATE=unapproved-exec",
+    "X|install|native|NET=online",
+    "X|install|native|SCOPE=project",
+    "X|install|native|SELECT=on",
+    "X|install|native|TGT=multi-unchanged",
+    "X|install|native|TGT=single-unchanged",
+    "X|install|native|UPDATE=on"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -14185,7 +14374,16 @@
     "T3|install|pkg-registry|mcp",
     "T3|install|pkg-registry|skill",
     "T5|dry-run|install|pkg-registry",
-    "T5|real|install|pkg-registry"
+    "T5|real|install|pkg-registry",
+    "X|install|pkg-registry|FORCE=on",
+    "X|install|pkg-registry|FROZEN=on",
+    "X|install|pkg-registry|GATE=none",
+    "X|install|pkg-registry|GATE=unapproved-exec",
+    "X|install|pkg-registry|NET=online",
+    "X|install|pkg-registry|SCOPE=project",
+    "X|install|pkg-registry|SELECT=on",
+    "X|install|pkg-registry|TGT=multi-unchanged",
+    "X|install|pkg-registry|TGT=single-unchanged"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -14505,11 +14703,19 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=lock|SRC=local-bundle": {
+   "credited_by": [
+    "T3|lock|bundle|bin",
+    "T3|lock|bundle|hook",
+    "T3|lock|bundle|lsp",
+    "T3|lock|bundle|mcp",
+    "T5|real|lock|bundle"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=lock|SRC=local-path": {
    "family": "pair",
@@ -14563,6 +14769,9 @@
   },
   "pair|OP=lock|SRC=native-plugin": {
    "credited_by": [
+    "T3|lock|native|bin",
+    "T3|lock|native|mcp",
+    "T3|lock|native|skill",
     "T5|real|lock|native"
    ],
    "family": "pair",
@@ -15755,6 +15964,9 @@
   },
   "pair|OP=prune|SRC=native-plugin": {
    "credited_by": [
+    "T3|prune|native|bin",
+    "T3|prune|native|mcp",
+    "T3|prune|native|skill",
     "T5|dry-run|prune|native",
     "T5|real|prune|native"
    ],
@@ -16148,6 +16360,9 @@
   },
   "pair|OP=uninstall|SRC=native-plugin": {
    "credited_by": [
+    "T3|uninstall|native|bin",
+    "T3|uninstall|native|mcp",
+    "T3|uninstall|native|skill",
     "T5|dry-run|uninstall|native",
     "T5|real|uninstall|native"
    ],
@@ -16544,7 +16759,8 @@
     "T5|dry-run|update|marketplace-object",
     "T5|dry-run|update|plugin-at-mkt",
     "T5|real|update|marketplace-object",
-    "T5|real|update|plugin-at-mkt"
+    "T5|real|update|plugin-at-mkt",
+    "X|update|marketplace-object|DEPLOYED=clean"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -16575,6 +16791,9 @@
   },
   "pair|OP=update|SRC=native-plugin": {
    "credited_by": [
+    "T3|update|native|bin",
+    "T3|update|native|mcp",
+    "T3|update|native|skill",
     "T5|dry-run|update|native",
     "T5|real|update|native"
    ],
@@ -16592,7 +16811,8 @@
     "T3|update|pkg-registry|mcp",
     "T3|update|pkg-registry|skill",
     "T5|dry-run|update|pkg-registry",
-    "T5|real|update|pkg-registry"
+    "T5|real|update|pkg-registry",
+    "X|update|pkg-registry|DEPLOYED=clean"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -18939,18 +19159,26 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|FORCE=on": {
+   "credited_by": [
+    "X|install|inline-mcp|FORCE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|FROZEN=on": {
+   "credited_by": [
+    "X|install|inline-mcp|FROZEN=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|GATE=allowed": {
    "family": "pair",
@@ -18988,11 +19216,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|inline-mcp|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|LOCK=absent": {
    "family": "pair",
@@ -19030,11 +19262,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|NET=online": {
+   "credited_by": [
+    "X|install|inline-mcp|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|NOPOLICY=on": {
    "family": "pair",
@@ -19052,11 +19288,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-16-source-refusals]"
   },
   "pair|SRC=inline-mcp|SCOPE=project": {
+   "credited_by": [
+    "X|install|inline-mcp|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|SCOPE=user": {
    "family": "pair",
@@ -19066,11 +19306,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|SELECT=on": {
+   "credited_by": [
+    "X|install|inline-mcp|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|TGT=multi-narrowed": {
    "family": "pair",
@@ -19080,11 +19324,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|install|inline-mcp|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|TGT=multi-widened": {
    "family": "pair",
@@ -19101,11 +19349,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|TGT=single-unchanged": {
+   "credited_by": [
+    "X|install|inline-mcp|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|TGT=single-widened": {
    "family": "pair",
@@ -19115,11 +19367,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|UPDATE=on": {
+   "credited_by": [
+    "X|install|inline-mcp|UPDATE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|DEPLOYED=absent": {
    "family": "pair",
@@ -19158,6 +19414,7 @@
   },
   "pair|SRC=local-bundle|DRYRUN=on": {
    "credited_by": [
+    "T5|dry-run|compile|bundle",
     "T5|dry-run|install|bundle"
    ],
    "family": "pair",
@@ -19168,11 +19425,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|FORCE=on": {
+   "credited_by": [
+    "X|install|bundle|FORCE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|FROZEN=on": {
    "family": "pair",
@@ -19217,11 +19478,15 @@
    "strength": "e2e"
   },
   "pair|SRC=local-bundle|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|bundle|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|LOCK=absent": {
    "family": "pair",
@@ -19259,11 +19524,15 @@
    "strength": "e2e"
   },
   "pair|SRC=local-bundle|NET=online": {
+   "credited_by": [
+    "X|install|bundle|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|NOPOLICY=on": {
    "family": "pair",
@@ -19274,7 +19543,9 @@
   },
   "pair|SRC=local-bundle|PRIM=bin": {
    "credited_by": [
-    "T3|install|bundle|bin"
+    "T3|compile|bundle|bin",
+    "T3|install|bundle|bin",
+    "T3|lock|bundle|bin"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -19292,7 +19563,9 @@
   },
   "pair|SRC=local-bundle|PRIM=hook": {
    "credited_by": [
-    "T3|install|bundle|hook"
+    "T3|compile|bundle|hook",
+    "T3|install|bundle|hook",
+    "T3|lock|bundle|hook"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -19302,15 +19575,23 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|PRIM=lsp": {
+   "credited_by": [
+    "T3|compile|bundle|lsp",
+    "T3|install|bundle|lsp",
+    "T3|lock|bundle|lsp"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
-    "T3|install|bundle|mcp"
+    "T3|compile|bundle|mcp",
+    "T3|install|bundle|mcp",
+    "T3|lock|bundle|mcp"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -19327,11 +19608,15 @@
    "strength": "e2e"
   },
   "pair|SRC=local-bundle|SCOPE=project": {
+   "credited_by": [
+    "X|install|bundle|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|SCOPE=user": {
    "family": "pair",
@@ -19341,11 +19626,15 @@
    "strength": "e2e"
   },
   "pair|SRC=local-bundle|SELECT=on": {
+   "credited_by": [
+    "X|install|bundle|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|TGT=multi-narrowed": {
    "family": "pair",
@@ -19355,11 +19644,15 @@
    "strength": "e2e"
   },
   "pair|SRC=local-bundle|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|install|bundle|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|TGT=multi-widened": {
    "family": "pair",
@@ -19376,11 +19669,15 @@
    "strength": "e2e"
   },
   "pair|SRC=local-bundle|TGT=single-unchanged": {
+   "credited_by": [
+    "X|install|bundle|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|TGT=single-widened": {
    "family": "pair",
@@ -19947,11 +20244,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|DEPLOYED=clean": {
+   "credited_by": [
+    "X|update|marketplace-object|DEPLOYED=clean"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|DEPLOYED=edited": {
    "family": "pair",
@@ -19995,18 +20296,26 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|FORCE=on": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|FORCE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|FROZEN=on": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|FROZEN=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|GATE=allowed": {
    "family": "pair",
@@ -20030,11 +20339,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|GATE=none": {
+   "credited_by": [
+    "X|install|marketplace-object|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -20044,11 +20357,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|HOSTID=bare-default": {
    "family": "pair",
@@ -20107,11 +20424,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|NET=online": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|NOPOLICY=on": {
    "family": "pair",
@@ -20199,11 +20520,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|SCOPE=project": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|SCOPE=user": {
    "family": "pair",
@@ -20213,11 +20538,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|SELECT=on": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|TGT=multi-narrowed": {
    "family": "pair",
@@ -20227,11 +20556,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|TGT=multi-widened": {
    "family": "pair",
@@ -20248,11 +20581,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|TGT=single-unchanged": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|TGT=single-widened": {
    "family": "pair",
@@ -20262,11 +20599,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|UPDATE=on": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|UPDATE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-local|DEPLOYED=absent": {
    "family": "pair",
@@ -20581,11 +20922,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|SRC=mcp-registry|FROZEN=on": {
+   "credited_by": [
+    "X|install|mcp-registry|FROZEN=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=mcp-registry|GATE=allowed": {
    "family": "pair",
@@ -20623,11 +20968,15 @@
    "strength": "e2e"
   },
   "pair|SRC=mcp-registry|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|mcp-registry|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=mcp-registry|LOCK=absent": {
    "family": "pair",
@@ -20758,11 +21107,15 @@
    "strength": "e2e"
   },
   "pair|SRC=mcp-registry|UPDATE=on": {
+   "credited_by": [
+    "X|install|mcp-registry|UPDATE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|DEPLOYED=absent": {
    "family": "pair",
@@ -20815,18 +21168,26 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|FORCE=on": {
+   "credited_by": [
+    "X|install|native|FORCE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|FROZEN=on": {
+   "credited_by": [
+    "X|install|native|FROZEN=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|GATE=allowed": {
    "family": "pair",
@@ -20864,11 +21225,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|native|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|LOCK=absent": {
    "family": "pair",
@@ -20906,11 +21271,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|NET=online": {
+   "credited_by": [
+    "X|install|native|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|NOPOLICY=on": {
    "family": "pair",
@@ -20920,11 +21289,20 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|compile|native|bin",
+    "T3|install|native|bin",
+    "T3|lock|native|bin",
+    "T3|prune|native|bin",
+    "T3|uninstall|native|bin",
+    "T3|update|native|bin"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|PRIM=hook": {
    "family": "pair",
@@ -20941,25 +21319,47 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|compile|native|mcp",
+    "T3|install|native|mcp",
+    "T3|lock|native|mcp",
+    "T3|prune|native|mcp",
+    "T3|uninstall|native|mcp",
+    "T3|update|native|mcp"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|compile|native|skill",
+    "T3|install|native|skill",
+    "T3|lock|native|skill",
+    "T3|prune|native|skill",
+    "T3|uninstall|native|skill",
+    "T3|update|native|skill"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|SCOPE=project": {
+   "credited_by": [
+    "X|install|native|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|SCOPE=user": {
    "family": "pair",
@@ -20969,11 +21369,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|SELECT=on": {
+   "credited_by": [
+    "X|install|native|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|TGT=multi-narrowed": {
    "family": "pair",
@@ -20983,11 +21387,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|install|native|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|TGT=multi-widened": {
    "family": "pair",
@@ -21004,11 +21412,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|TGT=single-unchanged": {
+   "credited_by": [
+    "X|install|native|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|TGT=single-widened": {
    "family": "pair",
@@ -21018,11 +21430,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|UPDATE=on": {
+   "credited_by": [
+    "X|install|native|UPDATE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|DEPLOYED=absent": {
    "family": "pair",
@@ -21032,11 +21448,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|DEPLOYED=clean": {
+   "credited_by": [
+    "X|update|pkg-registry|DEPLOYED=clean"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|DEPLOYED=edited": {
    "family": "pair",
@@ -21075,18 +21495,26 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|FORCE=on": {
+   "credited_by": [
+    "X|install|pkg-registry|FORCE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|FROZEN=on": {
+   "credited_by": [
+    "X|install|pkg-registry|FROZEN=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|GATE=allowed": {
    "family": "pair",
@@ -21110,11 +21538,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|GATE=none": {
+   "credited_by": [
+    "X|install|pkg-registry|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -21124,11 +21556,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|pkg-registry|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|LOCK=absent": {
    "family": "pair",
@@ -21166,11 +21602,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|NET=online": {
+   "credited_by": [
+    "X|install|pkg-registry|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|NOPOLICY=on": {
    "family": "pair",
@@ -21258,11 +21698,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|SCOPE=project": {
+   "credited_by": [
+    "X|install|pkg-registry|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|SCOPE=user": {
    "family": "pair",
@@ -21272,11 +21716,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|SELECT=on": {
+   "credited_by": [
+    "X|install|pkg-registry|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|TGT=multi-narrowed": {
    "family": "pair",
@@ -21286,11 +21734,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|install|pkg-registry|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|TGT=multi-widened": {
    "family": "pair",
@@ -21307,11 +21759,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|TGT=single-unchanged": {
+   "credited_by": [
+    "X|install|pkg-registry|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|TGT=single-widened": {
    "family": "pair",
@@ -21321,11 +21777,16 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|UPDATE=on": {
+   "credited_by": [
+    "X|install|pkg-registry|UPDATE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4572",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|TGT=multi-narrowed|DRYRUN=on": {
    "family": "pair",
@@ -23735,5 +24196,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "3f822aa713828f811f9f55383310a207b57fbef488b7c68d313cd6d1a9532706"
+ "sha256": "c610e1c8e61ef532f390025ae5e65fb50553524c8545e91055120ae8d1400188"
 }
