@@ -728,7 +728,8 @@ def test_a_users_lsp_entry_is_never_taken_over(lifecycle_world) -> None:
     # the MCP native-conflict path does (#4282); the rerun changes nothing.
     known = {"I7": Known("#4697", r"failed install changed the lockfile")}
     for line, cells in (("install", known), ("install --force", None)):
-        step = scenario.run(line, exit=1, known=cells)
+        credit = {} if cells else {"credit": [_pair("unowned", PRIM="lsp")], "refusal": True}
+        step = scenario.run(line, exit=1, known=cells, **credit)
         assert f"LSP server '{LSP_SERVER}' conflicts with the existing" in step.output, line
         assert "Preserved that entry" in step.output, line
         tree.assert_intact(line)

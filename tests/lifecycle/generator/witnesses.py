@@ -287,6 +287,7 @@ SCENARIO_MODULES = (
     "test_network_offline",
     "test_ownership_siblings",
     "test_platform",
+    "test_policy_pairs",
 )
 
 
