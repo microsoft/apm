@@ -15,12 +15,22 @@ whose signature the lifecycle conftest enforces.
 from __future__ import annotations
 
 import ast
+import json
+import os
 from pathlib import Path
 
 import pytest
 
 from tests.lifecycle.known import TRACKING, KnownFailure
-from tests.quality.known_cell_issues import ROOT, cited_issues, known_cells, load_snapshot
+from tests.quality.known_cell_issues import (
+    ROOT,
+    cited_issues,
+    closing_issues,
+    known_cells,
+    load_snapshot,
+    pr_closing_issues,
+    unflipped_cells,
+)
 
 RATCHET_TEST_SCOPE = "repository"
 
@@ -58,6 +68,41 @@ def test_no_known_cell_cites_a_closed_issue() -> None:
         "strict known cells cite closed issues: rerun each cell; move it to required if it "
         f"passes, report a product bug or re-key it to an open issue if not: {closed}"
     )
+
+
+def test_a_pr_that_closes_a_cited_issue_flips_its_cells() -> None:
+    """In CI, a PR whose body closes an issue must flip every strict cell citing it.
+
+    Outside a pull_request event (local runs, push, merge_group) nothing closes.
+    """
+    closing = pr_closing_issues(os.environ.get("GITHUB_EVENT_PATH"))
+    remedies = unflipped_cells(closing)
+    assert not remedies, "\n".join(remedies)
+
+
+def test_the_flip_check_reads_closing_keywords_only(tmp_path: Path) -> None:
+    """Negative control: closing a cited issue without flipping its cell fails."""
+    cells = {
+        "generated:G|marketplace-install|org-deny|bin": "#3703",
+        "source:tests/lifecycle/scenarios/test_x.py:61": "#4594",
+        "journey:E01:e01-sarif-audit-prints-no-advice": "#4570",
+    }
+    assert closing_issues("Refs #3703. See #4594 and microsoft/apm#4570.") == set()
+    assert closing_issues("This fixed 3 bugs; closes the gap.") == set()
+    assert closing_issues("Closes https://github.com/microsoft/apm/issues/4570") == {4570}
+    body = "Fixes #3703\nThis closes microsoft/apm#4594; resolved: #9"
+    assert closing_issues(body) == {3703, 4594, 9}
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"pull_request": {"body": body}}), encoding="utf-8")
+    assert unflipped_cells(pr_closing_issues(str(event)), cells) == [
+        "PR closes #3703 but strict cell G|marketplace-install|org-deny|bin in "
+        "tests/quality/generated_obligations.json still cites it: flip it to required "
+        "in this PR.",
+        "PR closes #4594 but strict cell line 61 in tests/lifecycle/scenarios/test_x.py "
+        "still cites it: flip it to required in this PR.",
+    ]
+    event.write_text(json.dumps({"merge_group": {"head_sha": "abc"}}), encoding="utf-8")
+    assert pr_closing_issues(str(event)) == set()
 
 
 def _raw_xfail_uses(path: Path) -> list[int]:

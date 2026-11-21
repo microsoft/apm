@@ -174,6 +174,12 @@ regression trap; tighten the oracle.
   `tests/integration/test_architecture_owner_rule_mutations.py`, kept
   sorted by `guard_id`, that disables ONLY that guard.
 - Never patch the owner under test in the test.
+- Fixing a bug that a strict known cell cites means flipping the cell in
+  the same PR: delete its `KnownFailure`, `KnownCell` or journey
+  `known_cells` entry so the row turns required, regenerate the
+  obligations, and refresh `tests/quality/known_cell_issue_states.json`
+  (`python -m tests.quality.known_cell_issues --write`). The known-cell
+  gate fails a PR that closes an issue a strict cell still cites.
 
 ### Step 7 -- run green, then the neighbours
 
