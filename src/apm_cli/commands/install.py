@@ -1906,10 +1906,32 @@ def _install_apm_packages(ctx, outcome):
         and not has_any_apm_deps
         and any(k != _LOCK_SELF_KEY for k in _existing_lock.dependencies)
     )
-    from apm_cli.install.service_integration import ServiceReconciliation, adopt_pipeline_result
+    from apm_cli.install.service_integration import ServiceReconciliation
+
+    def _adopt(install_result: InstallResult) -> None:
+        ctx.target_decision = install_result.target_decision
+        ctx.exec_allow_map = install_result.exec_allow_map
+        ctx.exec_allow_resolved = install_result.exec_allow_resolved
+        ctx.mcp_policy_enforced = install_result.mcp_policy_enforced
+
+    def _service_options(install_result: InstallResult | None) -> dict[str, Any]:
+        if install_result is not None:
+            _adopt(install_result)
+        return dict(
+            diagnostics=install_result.diagnostics if install_result is not None else None,
+            explicit_target=ctx.target or ctx.runtime,
+            target_decision=ctx.target_decision,
+            active_package_keys=(
+                install_result.active_package_keys if install_result is not None else None
+            ),
+            claude_native_keys=(
+                install_result.claude_native_keys if install_result is not None else frozenset()
+            ),
+        )
 
     reconcile_services = ServiceReconciliation(
         ctx,
+        _service_options,
         apm_package=apm_package,
         mcp_deps=mcp_deps,
         lock_path=_lock_path,
@@ -1921,6 +1943,9 @@ def _install_apm_packages(ctx, outcome):
         old_mcp_target_servers_present=old_mcp_target_servers_present,
         frozen_disposition=frozen_disposition,
     )
+    # Reconciled before native registration commits the lockfile (#4329); --frozen writes none.
+    if not frozen_disposition.withhold_lockfile_writes:
+        pipeline_options["reconcile_services"] = reconcile_services
     apm_diagnostics = None
     install_result = None
     if should_install_apm and (
@@ -1937,15 +1962,7 @@ def _install_apm_packages(ctx, outcome):
 
         try:
             install_result = _install_apm_dependencies(
-                apm_package,
-                ctx.update,
-                ctx.verbose,
-                ctx.only_packages,
-                **pipeline_options,
-                # --frozen writes no lockfile, so services keep their later order.
-                reconcile_services=(
-                    None if frozen_disposition.withhold_lockfile_writes else reconcile_services
-                ),
+                apm_package, ctx.update, ctx.verbose, ctx.only_packages, **pipeline_options
             )
             if not isinstance(install_result, InstallResult):
                 install_result = InstallResult(
@@ -1954,7 +1971,7 @@ def _install_apm_packages(ctx, outcome):
                 )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
-            adopt_pipeline_result(ctx, install_result)
+            _adopt(install_result)
             if install_result.disposition not in {
                 InstallDisposition.SUCCESS,
                 InstallDisposition.PARTIAL_SUCCESS,
@@ -2004,8 +2021,6 @@ def _install_apm_packages(ctx, outcome):
     elif should_install_apm and not has_any_apm_deps:
         logger.verbose_detail("No APM dependencies found in apm.yml")
 
-    # The pipeline reconciled MCP/LSP before native registration (#4329);
-    # otherwise reconcile here.
     service_result = reconcile_services.settle(install_result)
     ctx.target_decision = service_result.target_decision
     mcp_count = service_result.mcp_count

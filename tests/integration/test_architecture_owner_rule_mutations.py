@@ -779,6 +779,12 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
             "                    pass\n",
             id="commit-order-rollback-keeps-created-roots",
         ),
+        pytest.param(
+            "src/apm_cli/install/pipeline.py",
+            '            _run_phase("services", services, ctx)\n',
+            "",
+            id="commit-order-native-commit-before-services",
+        ),
     ],
 )
 def test_audit_gated_deploy_snapshot_is_owned_by_the_transaction(

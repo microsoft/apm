@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -262,14 +263,6 @@ def run_service_integrations(  # noqa: PLR0913
     return ServiceIntegrationResult(mcp_count, lsp_count, target_decision)
 
 
-def adopt_pipeline_result(ctx: Any, install_result: InstallResult) -> None:
-    """Carry what the package pipeline decided into the command's service context."""
-    ctx.target_decision = install_result.target_decision
-    ctx.exec_allow_map = install_result.exec_allow_map
-    ctx.exec_allow_resolved = install_result.exec_allow_resolved
-    ctx.mcp_policy_enforced = install_result.mcp_policy_enforced
-
-
 class ServiceReconciliation:
     """One install's MCP/LSP reconciliation, rendered as the install reports it.
 
@@ -279,8 +272,15 @@ class ServiceReconciliation:
     the command calls it with the pipeline's result, or ``None``.
     """
 
-    def __init__(self, ctx: Any, **options: Any) -> None:
+    def __init__(
+        self,
+        ctx: Any,
+        call_options: Callable[[InstallResult | None], dict[str, Any]],
+        **options: Any,
+    ) -> None:
         self._ctx = ctx
+        # Options read from the pipeline's result at call time.
+        self._call_options = call_options
         self._options = options
         self.result: ServiceIntegrationResult | None = None
         self.failure: Exception | None = None
@@ -305,28 +305,13 @@ class ServiceReconciliation:
         from apm_cli.policy.install_preflight import PolicyBlockError
 
         ctx = self._ctx
-        if install_result is not None:
-            adopt_pipeline_result(ctx, install_result)
+        call_options = self._call_options(install_result)
         if ctx.update:
             from apm_cli.models.apm_package import clear_apm_yml_cache
 
             clear_apm_yml_cache()
         try:
-            return run_service_integrations(
-                ctx,
-                diagnostics=install_result.diagnostics if install_result is not None else None,
-                explicit_target=ctx.target or ctx.runtime,
-                target_decision=ctx.target_decision,
-                active_package_keys=(
-                    install_result.active_package_keys if install_result is not None else None
-                ),
-                claude_native_keys=(
-                    install_result.claude_native_keys
-                    if install_result is not None
-                    else frozenset()
-                ),
-                **self._options,
-            )
+            return run_service_integrations(ctx, **call_options, **self._options)
         except PolicyBlockError as exc:
             refuse_blocked_mcp(ctx.logger, exc)
         except RequiredIntegrationError as exc:

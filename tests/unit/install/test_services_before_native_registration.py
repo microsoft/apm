@@ -130,4 +130,3 @@ def test_an_install_finalize_fails_reconciles_nothing(tmp_path: Path) -> None:
     services.run(ctx)
 
     reconcile.assert_not_called()
-
