@@ -1,0 +1,19 @@
+{
+  "issue": 3471,
+  "summary": "Traps registry-only proxy exact pins installing idempotently and frozen replay; needs proxy, git shim and cache clean.",
+  "failure_modes": [
+    "cache",
+    "idempotency",
+    "reference"
+  ],
+  "properties": [
+    "cache.successful_reads_refresh_recency",
+    "idempotency.byte_stable",
+    "lockfile.frozen_preserves_bytes",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_registry_only_chain_lifecycle.py::test_registry_only_exact_pin_chain_is_idempotent",
+    "tests/integration/test_registry_only_chain_lifecycle.py::test_registry_only_frozen_replays_lock_written_through_proxy"
+  ]
+}

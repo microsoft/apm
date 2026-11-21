@@ -123,6 +123,12 @@ _ORIGIN_ENTRY_POINTS = (
         "resolve_marketplace_plugin",
     ),
     (
+        "src/apm_cli/install/local_content_verdict.py",
+        "local_catalog_selection_reasons",
+        "require_locked_catalog_origin",
+        "resolve_marketplace_plugin",
+    ),
+    (
         "src/apm_cli/commands/install.py",
         "_resolve_package_references",
         "require_locked_catalog_origin",

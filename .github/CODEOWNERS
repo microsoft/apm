@@ -5,4 +5,7 @@ README.md @danielmeppiel
 
 # Workflow files - Lead Maintainer review required for any change to CI
 # definitions, especially anything touching `pull_request_target` or secrets.
+# Composite actions run inside those workflows (the lint chain lives in
+# .github/actions/lint-chain), so they carry the same review bar.
 .github/workflows/** @danielmeppiel
+.github/actions/** @danielmeppiel

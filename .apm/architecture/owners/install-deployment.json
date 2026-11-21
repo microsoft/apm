@@ -136,13 +136,14 @@
     {
       "id": "install-commit-order",
       "decision": "Every install check completes before the lockfile and deployed files are committed; a failing check leaves no committed state (req-pl-002)",
-      "owner": "install/commit_gate.py (check_before_deploy before the first integrator write in phases/integrate.py; check_before_lockfile on the staged lockfile in install/pipeline.py before its writer scope commits it (#4086); merged MCP policy via enforce_mcp_policy from a closed list of preflight sites; install --mcp and apm mcp install judge their server, with its target projection, through enforce_mcp_policy and refuse it through refuse_blocked_mcp, as apm install does); the frozen pre-deploy hash check runs in InstallService.run before the pipeline; install/transaction.py (InstallTransaction) owns completion and rollback of the attempt, including the audit-gated deploy snapshot: when the install-time content audit can block, InstallTransaction.snapshot_deploy_targets captures every path integration can write (install/deploy_snapshot.py) before the integrate phase, rollback restores it byte for byte, and release_deploy_targets discards it once the audit passed; no snapshot is taken while the audit is off; every rollback also removes the target roots the attempt created (track_created_target_roots) when they are left empty (#4159)",
+      "owner": "install/commit_gate.py (check_before_deploy before the first integrator write in phases/integrate.py; check_before_lockfile on the staged lockfile in install/pipeline.py before its writer scope commits it (#4086); merged MCP policy via enforce_mcp_policy from a closed list of preflight sites; install --mcp and apm mcp install judge their server, with its target projection, through enforce_mcp_policy and refuse it through refuse_blocked_mcp, as apm install does); the frozen pre-deploy hash check runs in InstallService.run before the pipeline; install/transaction.py (InstallTransaction) owns completion and rollback of the attempt, including the lazy deploy journal (#4282): from InstallTransaction.journal_deploy_writes before the integrate phase it listens at the integrator write seam (integration/write_seam.py, which every integrator file write calls first) and records the prior bytes or absence of each path the first time it is written (install/deploy_snapshot.py stores the units under the APM home install-snapshots directory); rollback restores them and discards the staged lockfile; release_deploy_targets after the install-time audit keeps the journal only until the staged lockfile commits; the next install reaps a journal a killed install left; every rollback also removes the target roots the attempt created (track_created_target_roots) when they are left empty (#4159)",
       "selectors": [
         "src/apm_cli/install/commit_gate.py",
         "src/apm_cli/install/deploy_snapshot.py",
-        "src/apm_cli/install/transaction.py"
+        "src/apm_cli/install/transaction.py",
+        "src/apm_cli/integration/write_seam.py"
       ],
-      "guards": ["install-deployment-install-commit-order", "install-deployment-install-lockfile-preflight", "install-deployment-uninstall-preflight"]
+      "guards": ["install-deployment-install-commit-order", "install-deployment-deploy-write-seam", "install-deployment-install-lockfile-preflight", "install-deployment-uninstall-preflight"]
     },
     {
       "id": "authorized-deployable-source-paths",
@@ -176,9 +177,10 @@
     {
       "id": "dependency-selection-merge",
       "decision": "Selection (skills:, targets:) one dependency node carries when several edges declare it: exact per-edge pairing, the union over edges of skills x targets where an unrestricted axis absorbs for that edge (OpenAPM req-rs-018), recorded as flat unions plus canonical subset_pairings when the flat product would over-select, with target names recorded as canonical identifiers (vscode and agents are copilot; canonical_target_subset) and older locks that recorded an alias read canonically; alias stays the shallowest declaration with a divergence warning",
-      "owner": "models/dependency/subsets.py (merge_edge_selections, NodeSelection, merge_edge_pairings, SkillTargetSelection, union_selection_names); deps/apm_resolver.py records every edge (_record_edge_selection) before dedup and applies the merge; deps/lockfile.py decodes subset_pairings only through SkillTargetSelection.from_lock_fields; install/package_resolution.py (effective_dependency_selection) hands skill_pairing to every integrate_package_primitives call; deps/reachability.py (declared_node_selections) recomputes it for uninstall shrink and audit skill-subset-consistency; InstallService.enforce_frozen_selections refuses a changed selection before deployment",
+      "owner": "models/dependency/subsets.py (merge_edge_selections, NodeSelection, merge_edge_pairings, SkillTargetSelection, union_selection_names); deps/apm_resolver.py records every edge (_record_edge_selection) before dedup and applies the merge; deps/lockfile.py decodes subset_pairings only through SkillTargetSelection.from_lock_fields; install/package_resolution.py (effective_dependency_selection) hands skill_pairing to every integrate_package_primitives call; deps/reachability.py (declared_node_selections) recomputes it for uninstall shrink and audit skill-subset-consistency; commands/uninstall/selection_shrink.py applies the uninstall shrink and names the files it retires for the evidence preflight (#4313); InstallService.enforce_frozen_selections refuses a changed selection before deployment",
       "selectors": [
-        "src/apm_cli/models/dependency/subsets.py"
+        "src/apm_cli/models/dependency/subsets.py",
+        "src/apm_cli/commands/uninstall/selection_shrink.py"
       ],
       "guards": ["install-deployment-selection-merge"]
     },
@@ -381,7 +383,8 @@
       "selectors": [
         "src/apm_cli/install/deployed_paths.py",
         "src/apm_cli/commands/uninstall/engine.py",
-        "src/apm_cli/commands/uninstall/local_survivors.py"
+        "src/apm_cli/commands/uninstall/local_survivors.py",
+        "src/apm_cli/commands/uninstall/recorded_targets.py"
       ],
       "guards": ["install-deployment-skills-root-derivation"]
     },

@@ -46,7 +46,7 @@ APM uses a tiered approach to integration testing:
 - **Drift guard**: `tests/quality/test_ci_topology.py` independently collects the full, merge-group-only, required, and every sharded selection. It verifies their set relationships, each shard's timeout and worker bounds, the aggregate's failure behavior, the full-integration execution path, step-level `APM_E2E_TESTS: "1"` binding, network/credential prohibitions, and required-check membership.
 - **Fixture controls**: lifecycle helpers set `APM_TEST_LOOPBACK_PORTS` for a port-scoped local registry and `APM_TEST_FAIL_LOCK_REPLACE=1` for atomic-write fault injection, and `APM_TEST_LOCK_COMMIT` (`hold:<marker>` or `kill`) to stop a command at its lockfile commit point. These are internal test controls, not user-facing APM settings.
 - **Source and ownership fixtures**: downloader stubs must return real `PackageInfo` and `ResolvedReference` values and materialize each package at the requested path, including staging directories. Native MCP cleanup tests must generate managed baselines through the real writer, then prove both authorized removal and unchanged bytes on unverifiable or foreign entries. Keep successful transitive-service, frozen replay, and exact-byte assertions; a mock-error exit is not success.
-- **Learning ledger**: `tests/fixtures/lifecycle_bug_ledger.json` maps representative escaped defects to generalized laws, oracle tiers, phases, and executable regression node IDs, including coverage of already-correct behavior. Use same-workspace transitions to prove survivor ownership and scoped cleanup. It is not a bug-count census; `tests/quality/test_lifecycle_bug_ledger.py` validates its taxonomy and links.
+- **Learning ledger**: `tests/fixtures/lifecycle_bug_ledger/` (one JSON file per row, such as `bugs/<issue>.json`, so concurrent PRs do not conflict) maps representative escaped defects to generalized laws, oracle tiers, phases, and executable regression node IDs, including coverage of already-correct behavior. Use same-workspace transitions to prove survivor ownership and scoped cleanup. It is not a bug-count census; `tests/quality/test_lifecycle_bug_ledger.py` validates its taxonomy and links.
 - **Spine state machine**: `tests/lifecycle/machines/test_m_spine.py` uses Hypothesis to generate guarded install, dry-run, audit, tamper, repair, declaration, prune, update, lock, compile and frozen sequences through the lifecycle driver (`python -m apm_cli.cli` on PR, the packaged binary on the nightly). The model tracks declaration, materialization, integrity, and lock state independently of the product lockfile. Its mandatory and generated project, global-canonical, and global-aliased replays verify that ordinary reinstall preserves edited skill bytes and their original deployment hashes. After prune removes ownership, ordinary install must refuse the retained user file without changing its bytes or durable state. Deliberate repair uses existing `install --force` consent, then checks exact source bytes, installed lock state, and a clean audit. Every command, including those the shared helpers run, is followed by `check_cross_cutting`, so each step keeps I1-I9 and earns receipts; per-rule write-set snapshots stay as before. The mandatory spine replays once per world; later examples restore that post-spine world in place. PR shards run 4 derandomized examples per variant; the nightly explores 25 (`APM_SPINE_MAX_EXAMPLES=25`).
 - **GATE state machine**: `tests/lifecycle/machines/test_m_gate.py` drives the lifecycle driver (`python -m apm_cli.cli` on PR, the packaged binary on the nightly) through declare, approve, deny, revoke, org-policy tightening, install, `install --frozen`, update, uninstall, prune and `audit --ci` for hook, LSP and native-plugin content, at project scope and at user scope with `APM_HOME` outside `HOME`. After every step `check_cross_cutting` (`tests/lifecycle/oracles.py`) checks lock/deployed agreement, idempotence, frozen/audit agreement, gate monotonicity (relative to the model: after each successful mutating step nothing is deployed that current approvals and policy do not allow), write sets, ASCII output, failure atomicity, exit codes and duplicated output. A cell that fails on `main` is a strict expected failure naming its tracking issue. Every step emits a `cell:` event; the mandatory spine must cover `tests/quality/gate_cell_obligations.json`, and a recorded mutant that skips the approval check must fail the machine. PR shards run 4 derandomized examples per scope; `.github/workflows/gate-machine-nightly.yml` builds the binary and explores 25 fresh examples per scope (`APM_LIFECYCLE_DRIVER=binary`, `APM_GATE_MAX_EXAMPLES=25`).
 - **Lifecycle family core**: `tests/lifecycle/` holds the shared pieces: a pure reference model (`model/state.py`, `model/expected.py`), a driver (`driver.py`, `APM_LIFECYCLE_DRIVER=engine|binary`), the cross-cutting oracle (`oracles.py`) and receipts (`receipts.py`). Each oracle law that applies to a step and passes writes one receipt; only the oracle module may write receipts. `tests/quality/promise_obligations.json` lists every obligation as `required`, with the witness test that must earn its receipt (checked inside the lifecycle shards), or in the `baseline` with the lane that will cover it. A new obligation must be in one of the two lists, and the 0.37 release needs an empty baseline.
@@ -61,6 +61,19 @@ APM uses a tiered approach to integration testing:
     --shard-durations .github/ci-durations/linux-x86_64.json \
     -n 4 --dist loadgroup --durations=20 \
     -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
+  ```
+
+### 3b. **Owner Surface Check** (required on every PR)
+- **Location**: `.github/workflows/owner-surface.yml`, selection in `scripts/owner_surface.py`.
+- **Purpose**: run, on every pull request, the slice of the merge-time integration suite that an owner or install-path change can break. Owner-guard and install regressions then show on the PR, not on `main`.
+- **Trigger**: a change to `src/apm_cli/install/*`, `src/apm_cli/deps/lockfile*`, `.apm/architecture/*`, `scripts/architecture_linter/*`, `tests/integration/test_architecture_*.py`, `tests/integration/test_install_*.py`, or any file an owner registry selector names.
+- **Slice**: owner-rule mutation cases and `test_architecture_*.py` files that name a changed file or an affected owner, guard or rule; plus every `test_install_*.py` file for install-path changes. It runs hermetic tests in 3 duration-balanced shards (target under 10 min).
+- **Result**: `Owner Surface Check` always reports and is required by `gate` in every context. It passes when no owner surface changed (the slice steps are skipped) and on merge_group and merge trains (as the `owner` tier), where the full suite runs.
+- **Run it locally**:
+  ```bash
+  python3 -m scripts.owner_surface plan --base origin/main --out /tmp/changed.txt
+  APM_E2E_TESTS=1 uv run --extra dev python -m scripts.owner_surface run \
+    --base origin/main --changed /tmp/changed.txt -- -n 4 --dist loadgroup
   ```
 
 ### 4. **Live Guardrailing Hero** (scheduled/manual)
@@ -653,6 +666,62 @@ release qualification or change required checks.
 - Test builds (uploads as workflow artifacts)
 - Allows testing the full build pipeline without creating a release, even when dispatched from a tag ref
 - Useful for validating changes before tagging
+
+### Tier 1 and Tier 2 on every push to main
+
+`main-push-gate.yml` runs the whole PR gate suite (`ci.yml`, including every
+Lifecycle Smoke shard) and the full integration suite (`ci-integration.yml`,
+every shard) on each push to `main`. Its `main-push-gate` job fails the run
+when any tier job fails, so a red `main` shows on the commit. It is
+not a required check and never saves caches to the `main` scope.
+
+### Merge-train proof
+
+`merge-train.yml` proves one exact merge result before it lands. Push the
+merged tree (main plus the queued PRs) to a `queue/*` branch and read the
+single `train-gate` check at that SHA:
+
+| Ref | Runs | Time |
+|---|---|---|
+| `queue/t<id>/p<k>-guard` | `scope`, `guard`, `train-gate` | about 5-10 min |
+| `queue/t<id>/p<k>-full` | the guard plus `tier1` (ci.yml), `tier2` (ci-integration.yml), `spec` (spec-conformance.yml) and `owner` (owner-surface.yml) | about 30-35 min |
+| `queue/b<sha12>/p0-full` | a full proof of a `main` SHA | about 30-35 min |
+
+`guard` runs the Lint chain (`.github/actions/lint-chain`, shared with the
+`Lint` job), the architecture ratchet contracts, every other `tests/quality`
+module and the NOTICE check. The ratchets compare against the merge base with
+`main`; a `Queue-Base: <sha>` trailer must name exactly that commit. A full
+train runs every check the `merge_group` gate requires. `train-gate` passes only
+when every job is green.
+
+Queue refs are real branches: only write-access users can push them, and every
+job tests the triggering commit. Train jobs restore caches (including `main`'s)
+read-only and never save one. After `train-gate` reports, the `cleanup` job
+deletes the train branch, so push it again to re-run (a manual dispatch with
+`--ref <queue branch>` works only while the branch exists).
+
+A green `train-gate` found by SHA alone is not a full proof: the same SHA can
+also carry a guard-only run. A full proof is a successful merge-train run on the
+`-full` branch (`queue/t<id>/p<k>-full` or `queue/b<sha12>/p0-full`) at that
+exact SHA:
+
+```bash
+git push origin HEAD:refs/heads/queue/t0001/p1-full
+gh run list --workflow merge-train.yml --branch queue/t0001/p1-full \
+  --commit "$(git rev-parse HEAD)" --json conclusion,url
+```
+
+The run must show `"conclusion": "success"`; cite its `url` as the proof.
+
+`scripts/merge_queue/` composes these trains automatically (shadow mode: it
+builds and proves trains but never merges). It reads PRs labeled `queue:ready`
+with an `apm-queue-ticket` marker comment, builds `queue-build/t<id>` through
+the merges API, publishes the prefix refs, and logs `would-land` events:
+
+```bash
+python -m scripts.merge_queue.runner tick      # one pass; state in ~/.apm-queue
+python -m scripts.merge_queue.runner metrics   # shadow summary from events.jsonl
+```
 
 ### Windows unit hang diagnostics
 

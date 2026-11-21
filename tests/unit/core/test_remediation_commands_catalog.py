@@ -120,6 +120,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "update-undeclared-package": "covered by the update undeclared-package refusal lifecycle test, which asserts the printed next step",
     "bundle-executables-allow": "printed by 'apm approve --pending' for a parked local bundle; full sentence asserted by test_remediation_gate9_call_sites",
     "lockfile-unmanaged-paths": "needs a lockfile that records paths APM does not manage; test_uninstall_refusal_atomicity_lifecycle reaches the refusal",
+    "uninstall-new-target-undeployed": "needs a target change between install and uninstall; "
+    "the T-6a history cells test_command_after_a_target_change[*-uninstall] run it (#4636)",
 }
 
 

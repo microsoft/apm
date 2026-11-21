@@ -1206,22 +1206,20 @@ def _cleanup_transitive_orphans(
     return removed, actual_orphans
 
 
-def _shrink_surviving_selections(
-    lockfile, packages_to_remove, apm_modules_dir, apm_yml_path, logger
-) -> builtins.set[str]:
-    """Narrow survivors' locked selections to what surviving edges still declare.
+def project_shrunk_selections(
+    lockfile, packages_to_remove, apm_modules_dir, apm_yml_path, logger=None
+) -> dict:
+    """Return ``{lock key: NodeSelection}`` for survivors whose selection changes.
 
     A node's ``skill_subset``/``target_subset`` is the merge over every edge
     that declares it (#3735). Once a parent is uninstalled its contribution
     must leave the union. The merge is recomputed from the surviving
     manifests through the canonical owner; an incomplete walk keeps the
     locked union, because missing evidence is not proof a selection is unused.
-
-    Returns the lock keys whose selection changed; their deployed files must
-    be removed and re-integrated with the new selection.
+    Read-only: the evidence preflight and the shrink itself share it (#4313).
     """
     if not lockfile or apm_yml_path is None or not apm_modules_dir.exists():
-        return builtins.set()
+        return {}
     from ...deps.reachability import declared_node_selections
 
     direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
@@ -1229,12 +1227,13 @@ def _shrink_surviving_selections(
         lockfile, apm_yml_path.parent, apm_modules_dir, direct_refs, dev_refs=dev_refs
     )
     if not declared.complete:
-        logger.verbose_detail(
-            "    Kept recorded skill and target selections: "
-            f"{len(declared.unverifiable)} package manifest(s) could not be verified"
-        )
-        return builtins.set()
-    changed = builtins.set()
+        if logger is not None:
+            logger.verbose_detail(
+                "    Kept recorded skill and target selections: "
+                f"{len(declared.unverifiable)} package manifest(s) could not be verified"
+            )
+        return {}
+    changed = {}
     for key, selection in declared.selections.items():
         locked = lockfile.get_dependency(key)
         if locked is None:
@@ -1243,15 +1242,8 @@ def _shrink_surviving_selections(
             unchanged = locked.selection() == selection.lock_selection()
         except ValueError:
             unchanged = False  # invalid recorded pairing: rewrite it from the survivors
-        if unchanged:
-            continue
-        locked.skill_subset = list(selection.skill_subset or ())
-        locked.target_subset = list(selection.target_subset or ())
-        exact = selection.subset_pairings
-        locked.subset_pairings = exact.to_lock_records() if exact is not None else None
-        changed.add(key)
-        label = "local dependency" if _is_private_local_identity(key) else key
-        logger.verbose_detail(f"    Updated selection of {label} to its surviving declarations")
+        if not unchanged:
+            changed[key] = selection
     return changed
 
 
@@ -1294,6 +1286,7 @@ def _preflight_uninstall_survivors(
         enforce_agent_plugin_deployment_boundary,
         preflight_reintegration_survivors,
     )
+    from ...install.phases.local_content import LocalPackageError, staged_local_package_image
     from ...models.apm_package import PackageInfo
     from ...models.validation import validate_apm_package
 
@@ -1307,17 +1300,23 @@ def _preflight_uninstall_survivors(
             source_path = Path(dep_ref.local_path).expanduser()
             if not source_path.is_absolute():
                 source_path = (source_root / source_path).resolve()
-            validation = validate_apm_package(source_path, source_path=source_path)
-            if validation.is_valid and validation.package is not None:
-                with contextlib.suppress(AgentPluginTargetExcludedError):
-                    enforce_agent_plugin_deployment_boundary(
-                        PackageInfo(
-                            package=validation.package,
-                            install_path=source_path,
-                            dependency_ref=dep_ref,
-                            package_type=validation.package_type,
+            # Validate a staged image: validation normalizes plugins in place (#4566).
+            with contextlib.ExitStack() as stack:
+                try:
+                    image = stack.enter_context(staged_local_package_image(dep_ref, source_root))
+                except (LocalPackageError, PathTraversalError):
+                    continue
+                validation = validate_apm_package(image, source_path=source_path)
+                if validation.is_valid and validation.package is not None:
+                    with contextlib.suppress(AgentPluginTargetExcludedError):
+                        enforce_agent_plugin_deployment_boundary(
+                            PackageInfo(
+                                package=validation.package,
+                                install_path=image,
+                                dependency_ref=dep_ref,
+                                package_type=validation.package_type,
+                            )
                         )
-                    )
     if lockfile is not None:
         refs = [
             dependency.to_dependency_ref()
@@ -1435,6 +1434,7 @@ def _sync_integrations_after_uninstall(
         with_every_skill_layout,
     )
     from ...primitives.discovery import clear_discovery_cache
+    from .recorded_targets import reconciled_targets
 
     installed_modules_dir = modules_dir or Path(APM_MODULES_DIR)
     config_target = list(apm_package.canonical_targets)
@@ -1444,6 +1444,7 @@ def _sync_integrations_after_uninstall(
     _base_targets = resolve_reintegration_targets(
         project_root, user_scope=user_scope, explicit_target=_explicit
     )
+    _base_targets = reconciled_targets(_base_targets, lockfile, logger)  # #4636
     _resolved_targets = resolve_skill_layout(
         _base_targets, recorded_paths=recorded_deployed_paths(lockfile)
     )

@@ -741,3 +741,92 @@ def _detect_circular_references(
                     continue
 
     return errors
+
+
+def _markdown_link_destination(raw: str) -> str:
+    """Return the destination of a Markdown link body, without a title or ``<>``."""
+    body = raw.strip()
+    if body.startswith("<") and ">" in body:
+        return body[1 : body.index(">")]
+    return body.split()[0] if body else body
+
+
+def _deployed_link_text(path: Path) -> str | None:
+    """Return the linkable text of a deployed Markdown file or Codex TOML agent."""
+    content = path.read_text(encoding="utf-8")
+    if path.suffix == ".md":
+        return content
+    import tomllib
+
+    instructions = tomllib.loads(content).get("developer_instructions")
+    return instructions if isinstance(instructions, str) else None
+
+
+def missing_module_link_targets(
+    project_root: Path, package: str | None = None
+) -> builtins.list[tuple[str, str]]:
+    """Return ``(deployed file, target)`` for each link into apm_modules that is missing.
+
+    Installation rewrites a dependency's context links to point under
+    ``apm_modules``, so a committed deployed file is incomplete until
+    ``apm install`` materializes them, for example after a fresh clone
+    (#3143). Scans the Markdown files and Codex TOML agents apm.lock.yaml
+    records as deployed (workspace files included), or only *package*'s;
+    each claim passes the deploy-path safety gate before it is read. Both
+    returned paths are project-relative.
+    """
+    import os
+    import tomllib
+
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.integration.base_integrator import BaseIntegrator
+
+    lockfile = LockFile.read(get_lockfile_path(project_root))
+    if lockfile is None:
+        return []
+    if package is None:
+        deployed = builtins.set(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile))
+    else:
+        dependency = lockfile.dependencies.get(package)
+        deployed = builtins.set(dependency.deployed_files if dependency else ())
+    root = os.path.normpath(str(project_root))
+    missing: builtins.list[tuple[str, str]] = []
+    for relative in sorted(path for path in deployed if path.endswith((".md", ".toml"))):
+        source = project_root / relative
+        try:
+            if not BaseIntegrator.validate_deploy_path(relative, project_root):
+                continue
+            if source.is_symlink() or not source.is_file():
+                continue
+            content = _deployed_link_text(source)
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            continue
+        for match in UnifiedLinkResolver.LINK_PATTERN.finditer(content or ""):
+            destination = _markdown_link_destination(match.group(2))
+            target, _suffix = UnifiedLinkResolver._split_link_target(destination)
+            if "://" in target or target.startswith("//"):
+                continue
+            if "apm_modules" not in target.replace("\\", "/").split("/"):
+                continue
+            resolved = os.path.normpath(os.path.join(os.path.dirname(str(source)), target))
+            if os.path.exists(resolved):
+                continue
+            try:
+                shown = os.path.relpath(resolved, root).replace(os.sep, "/")
+            except ValueError:  # another drive (Windows)
+                shown = target
+            if (relative, shown) not in missing:
+                missing.append((relative, shown))
+    return missing
+
+
+def warn_missing_module_links(project_root: Path, logger, package: str | None = None) -> None:
+    """Warn once per deployed file link into apm_modules whose target is missing (#3143)."""
+    from apm_cli.core.remediation import DEPENDENCIES_NOT_INSTALLED
+
+    for deployed, target in missing_module_link_targets(project_root, package):
+        logger.warning(
+            f"{deployed} links to {target}, which is missing. "
+            f"{DEPENDENCIES_NOT_INSTALLED.sentence()}"
+        )

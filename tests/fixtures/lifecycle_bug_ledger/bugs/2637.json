@@ -1,0 +1,15 @@
+{
+  "issue": 2637,
+  "summary": "Traps marketplace package --category round-trip into pack outputs; marketplace and pack are outside replay vocabulary.",
+  "failure_modes": [
+    "outcome",
+    "transaction"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_package_category_lifecycle.py::test_marketplace_package_category_round_trip"
+  ]
+}

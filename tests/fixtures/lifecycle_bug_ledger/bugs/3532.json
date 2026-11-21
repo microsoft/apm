@@ -1,0 +1,17 @@
+{
+  "issue": 3532,
+  "summary": "Symlinked lockfile refusal is an explicitly excluded symlink edge case.",
+  "failure_modes": [
+    "observation",
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_lockfile_symlink_update_uninstall_lifecycle.py::test_target_only_update_with_symlinked_lock_refuses_before_deploying",
+    "tests/integration/test_lockfile_symlink_update_uninstall_lifecycle.py::test_unchanged_installs_still_read_through_symlinked_lock",
+    "tests/integration/test_lockfile_symlink_update_uninstall_lifecycle.py::test_uninstall_with_symlinked_lock_refuses_before_deleting",
+    "tests/integration/test_lockfile_symlink_update_uninstall_lifecycle.py::test_update_with_symlinked_lock_refuses_before_deploying"
+  ]
+}

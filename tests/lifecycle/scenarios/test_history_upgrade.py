@@ -238,26 +238,12 @@ def _row_assignments(row: str, tgt: str) -> list[dict[str, str]]:
     return [{**item, **overrides} for item in _assignments(op, tgt, packages)]
 
 
-# uninstall deploys the remaining packages to a newly declared target without
-# recording the files in apm.lock.yaml (I1); strict until #4636 is fixed.
-_UNINSTALL_UNRECORDED = Known("#4636", r"^deployed file is not in the lock: ")
-KNOWN_ROWS = {
-    ("uninstall", tgt): {"I1": _UNINSTALL_UNRECORDED}
-    for tgt in ("single-narrowed", "single-widened")
-}
-# On multi-widened the same path shows #4636 as a repeated "Skipped .gemini/commands/"
-# hint (I9), which the strict output cell uninstall-new-target-skipped-hint-repeats
-# owns (tests/utils/lifecycle_evidence.py); the row credits nothing until it is fixed.
-UNCREDITED_ROWS = {*KNOWN_ROWS, ("uninstall", "multi-widened")}
-
-
 @pytest.mark.parametrize("tgt", sorted(TARGET_HISTORIES))
 @pytest.mark.parametrize("row", sorted(HISTORY_ROWS))
 def test_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
     line, _, packages, _ = HISTORY_ROWS[row]
     scenario = _history(lifecycle_world, tgt, packages if row == "pack" else _PACKAGES)
-    credit = () if (row, tgt) in UNCREDITED_ROWS else _row_assignments(row, tgt)
-    step = scenario.run(line, credit=credit, known=KNOWN_ROWS.get((row, tgt)))
+    step = scenario.run(line, credit=_row_assignments(row, tgt))
     # Every row must succeed to earn its receipts (scenario-lane pairs are success pairs).
     assert step.result.returncode == 0, step.output
     scenario.finish()
@@ -312,7 +298,6 @@ CREDITS = credits(
             f"test_command_after_a_target_change[{tgt}-{row}]": _row_assignments(row, tgt)
             for row in HISTORY_ROWS
             for tgt in TARGET_HISTORIES
-            if (row, tgt) not in UNCREDITED_ROWS
         },
     },
 )

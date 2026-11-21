@@ -33,6 +33,7 @@ from apm_cli.core.remediation import HOOK_PATH_ESCAPES_PACKAGE
 from apm_cli.core.scope import InstallScope, manifest_file
 from apm_cli.hook_contract import HOOK_COMMAND_KEYS as _HOOK_COMMAND_KEYS
 from apm_cli.hook_contract import walk_hook_commands
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.hook_bundle import (
     copy_deployed_hook_bundle,
@@ -84,7 +85,6 @@ from apm_cli.integration.hook_source_selection import (
     resolve_relative_hook_script,
     select_hook_sources,
 )
-from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import (
@@ -1034,7 +1034,7 @@ class HookIntegrator(BaseIntegrator):
 
         root_dir = target.root_dir if target else ".github"
         hooks_dir = project_root / root_dir / "hooks"
-        hooks_dir.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(hooks_dir, parents=True, exist_ok=True)
         deploy_root_for_rewrite = self._deploy_root_for_hook_rewrite(project_root, user_scope)
         home_reference = self._home_reference_for_hook_rewrite(target, user_scope)
 
@@ -1513,7 +1513,7 @@ class HookIntegrator(BaseIntegrator):
 
         drop_source_entries(json_config[container], owned_markers, keep_events=cleared_events)
         # Shared configs are cleaned by ownership, never file-level deletion.
-        json_path.parent.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(json_path.parent, parents=True, exist_ok=True)
 
         if config.schema_strict:
             sidecar_out = _extract_apm_source_sidecar(json_config.get(container, {}))
@@ -1521,12 +1521,12 @@ class HookIntegrator(BaseIntegrator):
             # Write sidecar
             sidecar_path = target_dir / _APM_HOOKS_SIDECAR
             if sidecar_out:
-                atomic_write_text(
+                write_seam.atomic_write_text(
                     sidecar_path,
                     json.dumps(sidecar_out, indent=2) + "\n",
                 )
             elif sidecar_path.exists():
-                sidecar_path.unlink()
+                write_seam.unlink(sidecar_path)
 
         # Display only finalized, schema-clean native entries.
         for _label, _path, _hook_file, _file_event_entries in pending_display:
@@ -1541,7 +1541,7 @@ class HookIntegrator(BaseIntegrator):
 
         # Cursor's strict config must not be observable half-written by its watcher.
         rendered = json.dumps(json_config, indent=2) + "\n"
-        changed = self.write_text_if_changed(json_path, rendered, atomic_write_text)
+        changed = self.write_text_if_changed(json_path, rendered, write_seam.atomic_write_text)
 
         return HookIntegrationResult(
             files_integrated=hooks_integrated if changed else 0,
@@ -1851,16 +1851,16 @@ class HookIntegrator(BaseIntegrator):
                 )
                 return
             if native_modified:
-                atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
+                write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if native_modified or sidecar_had_source:
                 if sidecar_out:
-                    atomic_write_text(
+                    write_seam.atomic_write_text(
                         sidecar_path,
                         json.dumps(sidecar_out, indent=2) + "\n",
                     )
                 elif sidecar_path.exists():
-                    sidecar_path.unlink()
+                    write_seam.unlink(sidecar_path)
                 stats["files_removed"] += 1
         except (json.JSONDecodeError, OSError, TypeError):
             stats["errors"] += 1
@@ -1920,7 +1920,7 @@ class HookIntegrator(BaseIntegrator):
             if hooks_dir.exists():
                 for hook_file in hooks_dir.glob("*-apm.json"):
                     try:
-                        hook_file.unlink()
+                        write_seam.unlink(hook_file)
                         stats["files_removed"] += 1
                     except Exception:
                         stats["errors"] += 1
@@ -2070,7 +2070,7 @@ class HookIntegrator(BaseIntegrator):
 
             if container not in data:
                 if sidecar_path is not None and sidecar_path.exists():
-                    sidecar_path.unlink()
+                    write_seam.unlink(sidecar_path)
                 return
 
             had_sidecar = sidecar_path is not None and sidecar_path.exists()
@@ -2087,14 +2087,14 @@ class HookIntegrator(BaseIntegrator):
                 del data[container]
 
             if modified:
-                with open(json_path, "w", encoding="utf-8") as f:
+                with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2)
                     f.write("\n")
                 stats["files_removed"] += 1
             if kept:
-                atomic_write_text(sidecar_path, json.dumps(kept, indent=2) + "\n")
+                write_seam.atomic_write_text(sidecar_path, json.dumps(kept, indent=2) + "\n")
             elif had_sidecar:
-                sidecar_path.unlink()
+                write_seam.unlink(sidecar_path)
         except (json.JSONDecodeError, OSError):
             stats["errors"] += 1
             stats.setdefault("failed_paths", []).append(json_path.as_posix())

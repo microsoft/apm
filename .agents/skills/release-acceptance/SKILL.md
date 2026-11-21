@@ -108,7 +108,7 @@ listed lessons and decisions, and write the one-page wisdom block into
 ### P2 -- plan (risk-ranked queue)
 
 1. List what changed since the last tag: `git log --oneline <tag>..<sha>`
-   and the `[Unreleased]` block of `CHANGELOG.md`.
+   the `changelog.d/` fragments, and the `[Unreleased]` block of `CHANGELOG.md`.
 2. Map changed files to owners (`.apm/architecture/owners/`) and owners
    to journeys and lenses with `references/lenses.md`.
 3. Rank journey x lens pairs: golden journeys first, then pairs that
@@ -124,7 +124,9 @@ Read `references/walker-brief.md` and `references/lenses.md` now.
 
 - Wave 1: plain journeys with lenses L1 and L2.
 - Gate: merge the new findings
-  (`python3 scripts/findings.py add --ledger findings.json --findings <worker>/findings.jsonl`),
+  (`python3 scripts/findings.py add --ledger findings.json --findings <worker>/findings.jsonl --sha <sha>`;
+  `--sha` binds the ledger even when a wave finds nothing, and an unbound
+  ledger never yields GO),
   drop duplicates, check whether the PR head moved (if it did, record
   the new SHA and re-run only the affected steps), and re-rank.
 - Wave 2: lenses L3 to L6 on the ranked journeys.

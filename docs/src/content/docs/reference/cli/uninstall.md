@@ -107,7 +107,10 @@ What gets removed, in order:
    `.gemini/settings.json`, and `.kiro/hooks/` that the removed packages
    contributed. Remaining packages -- including transitive dependencies still
    required by another package -- have their hook entries rebuilt from the
-   post-removal lockfile.
+   post-removal lockfile. Remaining packages are rebuilt only into targets
+   `apm.lock.yaml` records: when `apm.yml` now declares a target the project
+   was not installed for, uninstall leaves it alone and says once to run
+   `apm install`, which deploys and records it.
 6. MCP and LSP servers contributed only by the removed packages. For current
    lockfiles, MCP cleanup touches only the runtimes recorded as owners in
    `mcp_target_servers`. An explicitly empty ownership map is a no-op. Older
@@ -177,8 +180,11 @@ Uninstall deletes a removed package's files only with evidence that APM wrote
 their current bytes: a local deployment receipt, or byte equality with what the
 locked version renders. It renders before removing the package from
 `apm_modules/`, fetching the locked commit when the checkout is gone; a lockfile
-hash alone is never evidence. If a file it would delete was edited or has no
-evidence, uninstall exits 1 before changing anything: `apm.yml`,
+hash alone is never evidence. The same check covers files a surviving shared
+package stops deploying because the removed package was the only one selecting
+them (for example a skill only it chose from a shared bundle). If a file it
+would delete was edited or has no evidence, uninstall exits 1 before changing
+anything: `apm.yml`,
 `apm.lock.yaml`, `apm_modules/` and every file stay as they were. It names each
 file and why, then offers two remedies:
 

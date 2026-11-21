@@ -1,0 +1,15 @@
+{
+  "issue": 4432,
+  "fixed_in": "Unreleased",
+  "summary": "A local native Codex plugin install at user scope stays offline: APM starts the Codex app-server with plugins off in its startup configuration, so no curated marketplace sync reaches the network or writes under the Codex home.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "filesystem.open_world_observation"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/world/test_world.py::test_each_package_installs_through_the_real_cli",
+    "tests/integration/test_approve_parked_native_plugin_lifecycle.py::test_codex_bundle_parks_until_the_printed_command_approves_it"
+  ]
+}
