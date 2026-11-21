@@ -6,7 +6,9 @@ Covers:
 - Integration with DependencyReference.parse / parse_from_dict / get_install_path
 """
 
+import os
 import shutil  # noqa: F401
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
@@ -15,6 +17,8 @@ from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
     PathTraversalError,
     decode_url_path_segments,
+    ensure_path_within_resolved,
+    has_symlink_component,
     parse_url_path_segments,
     validate_path_segments,
 )
@@ -328,5 +332,67 @@ class TestDependencyParseTraversalRejection:
 
 
 # ---------------------------------------------------------------------------
-# DependencyReference.get_install_path containment
+# URL path decoding and symlink containment (mutation owner seams)
 # ---------------------------------------------------------------------------
+
+
+def test_decode_url_path_segments_names_its_context_in_errors() -> None:
+    with pytest.raises(PathTraversalError) as default:
+        decode_url_path_segments("a//b")
+    assert str(default.value) == "Invalid URL path: path segments must not be empty"
+
+    with pytest.raises(PathTraversalError) as custom:
+        decode_url_path_segments("a//b", context="registry URL")
+    assert str(custom.value) == "Invalid registry URL: path segments must not be empty"
+
+
+class TestHasSymlinkComponentFailsClosed:
+    def test_outside_base_counts_as_linked(self, tmp_path: Path) -> None:
+        assert has_symlink_component(tmp_path / "base", tmp_path / "other") is True
+
+    def test_access_error_counts_as_linked_unless_asked_to_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _denied(self: Path) -> None:
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(Path, "lstat", _denied)
+
+        assert has_symlink_component(tmp_path, tmp_path / "a") is True
+        with pytest.raises(PermissionError):
+            has_symlink_component(tmp_path, tmp_path / "a", raise_on_error=True)
+
+    def test_an_existing_unlinked_path_is_not_linked(self, tmp_path: Path) -> None:
+        (tmp_path / "real").mkdir()
+        (tmp_path / "real" / "f").write_text("x", encoding="utf-8")
+
+        assert has_symlink_component(tmp_path, tmp_path / "real" / "f") is False
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges")
+    def test_detects_linked_component(self, tmp_path: Path) -> None:
+        (tmp_path / "real").mkdir()
+        (tmp_path / "link").symlink_to(tmp_path / "real")
+
+        assert has_symlink_component(tmp_path, tmp_path / "link" / "x") is True
+        assert has_symlink_component(tmp_path, tmp_path / "real" / "x") is False
+
+
+class TestContainmentRefusalNamesThePaths:
+    def test_an_escape_names_the_path_its_target_and_the_base(self, tmp_path: Path) -> None:
+        base = (tmp_path / "base").resolve()
+        path = tmp_path / "base" / ".." / "outside"
+        with pytest.raises(PathTraversalError) as raised:
+            ensure_path_within_resolved(path, base)
+        # PathTraversalError is a ValueError, so today the refusal is also
+        # wrapped in the "Cannot verify containment" message; pin only the cause.
+        assert (
+            f"Path '{path}' resolves to '{path.resolve()}' which is outside "
+            f"the allowed base directory '{base}'"
+        ) in str(raised.value)
+
+    def test_an_uncomparable_base_is_refused_with_its_cause(self, tmp_path: Path) -> None:
+        path = tmp_path / "x"
+        with pytest.raises(PathTraversalError) as raised:
+            ensure_path_within_resolved(path, 42)  # type: ignore[arg-type]
+        assert str(raised.value).startswith(f"Cannot verify containment of '{path}' within '42': ")
+        assert isinstance(raised.value.__cause__, TypeError)

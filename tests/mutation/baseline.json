@@ -28,6 +28,49 @@
         "tests/unit/core/test_apm_home_resolution.py"
       ]
     },
+    "credential-origin-scope": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {
+        "apm_cli.utils.http_credentials._comparable_paths__mutmut_27": "Prepending '/' to an already rooted path only adds a leading empty segment, which _remove_dot_segments and _collapse_slashes both absorb (checked exhaustively over '', '.', '..' and name segments up to depth 5).",
+        "apm_cli.utils.http_credentials.origin_bound_refusal__mutmut_3": "urlsplit sets username to a string (possibly empty) whenever the netloc contains '@', so the username test alone already refuses every userinfo URL; regrouping or dropping the password and '@' clauses cannot change the result.",
+        "apm_cli.utils.http_credentials.origin_bound_refusal__mutmut_4": "urlsplit sets username to a string (possibly empty) whenever the netloc contains '@', so the username test alone already refuses every userinfo URL; regrouping or dropping the password and '@' clauses cannot change the result.",
+        "apm_cli.utils.http_credentials.origin_bound_refusal__mutmut_7": "urlsplit sets username to a string (possibly empty) whenever the netloc contains '@', so the username test alone already refuses every userinfo URL; regrouping or dropping the password and '@' clauses cannot change the result."
+      },
+      "functions": [
+        "strip_cross_origin_credential_headers",
+        "origin_bound_refusal",
+        "_origin_key",
+        "_comparable_paths",
+        "_path_within",
+        "_comparable_host"
+      ],
+      "kill_rate_floor": 0.9636,
+      "source": "src/apm_cli/utils/http_credentials.py",
+      "test_seams": [
+        "tests/unit/utils/test_http_credentials.py",
+        "tests/unit/utils/test_http_credentials_owner.py"
+      ]
+    },
+    "deterministic-atomic-text-writes": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {
+        "apm_cli.utils.atomic_io.atomic_write_text__mutmut_29": "fd_wrapped is only read as 'not fd_wrapped'; None and False are both falsy, so the initial None changes no branch.",
+        "apm_cli.utils.atomic_io.atomic_write_text__mutmut_57": "Python codec names are case-insensitive, so 'UTF-8' and 'utf-8' select the same codec and write identical bytes.",
+        "apm_cli.utils.atomic_io.write_text_lf__mutmut_9": "Python codec names are case-insensitive, so 'UTF-8' and 'utf-8' select the same codec and write identical bytes."
+      },
+      "functions": [
+        "normalize_crlf_to_lf",
+        "write_text_lf",
+        "atomic_write_text",
+        "_validate_temp_name_fragment"
+      ],
+      "kill_rate_floor": 0.9711,
+      "source": "src/apm_cli/utils/atomic_io.py",
+      "test_seams": [
+        "tests/unit/utils/test_atomic_io.py",
+        "tests/unit/utils/test_atomic_io_owner.py"
+      ]
+    },
     "egress-route-policy": {
       "accepted_survivors": [],
       "equivalent_survivors": {},
@@ -60,6 +103,53 @@
       "test_seams": [
         "tests/unit/security/test_resolve_exec_decision.py",
         "tests/unit/security/test_exec_trust_context.py"
+      ]
+    },
+    "frontmatter-bom-bounded-yaml": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {
+        "apm_cli.utils.yaml_io.load_frontmatter__mutmut_2": "Python codec names are case-insensitive, so 'UTF-8-SIG' selects the same BOM-stripping codec as 'utf-8-sig'.",
+        "apm_cli.utils.yaml_io.load_frontmatter__mutmut_3": "Every branch of the following if/elif/else assigns text before it is read, so the initial placeholder value is never observed.",
+        "apm_cli.utils.yaml_io.load_frontmatter__mutmut_4": "Every branch of the following if/elif/else assigns text before it is read, so the initial placeholder value is never observed.",
+        "apm_cli.utils.yaml_io.loads_frontmatter__mutmut_20": "text already had its leading BOM removed at the top of the function, so this second removeprefix is a no-op; removing a different, never-present prefix is also a no-op.",
+        "apm_cli.utils.yaml_io.loads_frontmatter__mutmut_21": "'\\uFEFF' and '\\ufeff' are the same one-character string literal (escape case only), so the mutant source is identical at runtime.",
+        "apm_cli.utils.yaml_io.loads_frontmatter__mutmut_6": "'\\uFEFF' and '\\ufeff' are the same one-character string literal (escape case only), so the mutant source is identical at runtime."
+      },
+      "functions": [
+        "loads_frontmatter",
+        "load_frontmatter",
+        "_bounded_load"
+      ],
+      "kill_rate_floor": 0.9076,
+      "source": "src/apm_cli/utils/yaml_io.py",
+      "test_seams": [
+        "tests/unit/test_yaml_io.py",
+        "tests/unit/utils/test_frontmatter_horizontal_rules.py",
+        "tests/unit/utils/test_frontmatter_owner.py"
+      ]
+    },
+    "host-credential-resolution": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {
+        "apm_cli.core.auth_outcome._classify_response__mutmut_6": "classify_auth_outcome only calls _classify_response after checking getattr(candidate, 'status_code', None) is not None, so the attribute always exists and dropping the default cannot raise.",
+        "apm_cli.core.auth_outcome._transport_kind__mutmut_1": "For None or a str error, _cause_chain yields nothing (it only walks BaseException instances), so the loop returns None exactly like the early return.",
+        "apm_cli.core.auth_outcome.classify_auth_outcome__mutmut_14": "kind_name is only ever compared with 'ado' (is_ado = host_kind == 'ado'); None, 'XXgenericXX', 'GENERIC' and a non-string truthy kind all compare unequal exactly like 'generic'.",
+        "apm_cli.core.auth_outcome.classify_auth_outcome__mutmut_17": "kind_name is only ever compared with 'ado' (is_ado = host_kind == 'ado'); None, 'XXgenericXX', 'GENERIC' and a non-string truthy kind all compare unequal exactly like 'generic'.",
+        "apm_cli.core.auth_outcome.classify_auth_outcome__mutmut_18": "kind_name is only ever compared with 'ado' (is_ado = host_kind == 'ado'); None, 'XXgenericXX', 'GENERIC' and a non-string truthy kind all compare unequal exactly like 'generic'.",
+        "apm_cli.core.auth_outcome.classify_auth_outcome__mutmut_19": "kind_name is only ever compared with 'ado' (is_ado = host_kind == 'ado'); None, 'XXgenericXX', 'GENERIC' and a non-string truthy kind all compare unequal exactly like 'generic'.",
+        "apm_cli.core.auth_outcome.is_ado_signin_location__mutmut_8": "A location without a hostname becomes 'xxxx', which is neither an ADO sign-in host nor ends with the sign-in suffix, exactly like the empty string; the path check still decides."
+      },
+      "functions": [
+        "classify_auth_outcome",
+        "is_ado_signin_location",
+        "_classify_response",
+        "_transport_kind"
+      ],
+      "kill_rate_floor": 0.9768,
+      "source": "src/apm_cli/core/auth_outcome.py",
+      "test_seams": [
+        "tests/unit/core/test_auth_outcome_owner.py",
+        "tests/unit/core/test_auth_outcome.py"
       ]
     },
     "install-commit-order": {
@@ -111,7 +201,6 @@
     },
     "lockfile-normalization": {
       "accepted_survivors": [
-        "apm_cli.deps.lockfile._normalize_exec_status__mutmut_12",
         "apm_cli.deps.lockfile._normalize_lockfile_host_type__mutmut_13"
       ],
       "equivalent_survivors": {},
@@ -119,7 +208,7 @@
         "_normalize_lockfile_host_type",
         "_normalize_exec_status"
       ],
-      "kill_rate_floor": 0.9259,
+      "kill_rate_floor": 0.9629,
       "source": "src/apm_cli/deps/lockfile.py",
       "test_seams": [
         "tests/unit/deps/test_lockfile_field_properties.py"
@@ -152,6 +241,19 @@
       "source": "src/apm_cli/deps/lockfile_write_authority.py",
       "test_seams": [
         "tests/unit/deps/test_lockfile_write_authority.py"
+      ]
+    },
+    "network-host-loopback-classification": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {},
+      "functions": [
+        "parse_host_address",
+        "is_loopback_host"
+      ],
+      "kill_rate_floor": 1.0,
+      "source": "src/apm_cli/utils/net.py",
+      "test_seams": [
+        "tests/unit/utils/test_net.py"
       ]
     },
     "policy-outcome-routing": {
@@ -189,6 +291,19 @@
         "tests/unit/policy/test_cache_merged_effective_logic.py::test_policy_serializer_covers_every_dataclass_leaf",
         "tests/unit/policy/test_cache_merged_effective_logic.py::test_policy_serializer_preserves_sparse_bin_deploy_shapes",
         "tests/unit/policy/test_cache_merged_effective.py::TestPolicyRoundTrip::test_all_effective_policy_fields_survive_cache_round_trip"
+      ]
+    },
+    "read-only-lockfile-path": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {},
+      "functions": [
+        "resolve_lockfile_path_for_read",
+        "resolve_reproducible_timestamp"
+      ],
+      "kill_rate_floor": 1.0,
+      "source": "src/apm_cli/deps/lockfile.py",
+      "test_seams": [
+        "tests/unit/deps/test_lockfile_read_path.py"
       ]
     },
     "remediation-advice": {
@@ -268,6 +383,21 @@
       "source": "src/apm_cli/install/plan.py",
       "test_seams": [
         "tests/unit/install/test_plan.py"
+      ]
+    },
+    "url-path-containment-decoding": {
+      "accepted_survivors": [],
+      "equivalent_survivors": {},
+      "functions": [
+        "decode_url_path_segments",
+        "has_symlink_component",
+        "ensure_path_within"
+      ],
+      "kill_rate_floor": 1.0,
+      "source": "src/apm_cli/utils/path_security.py",
+      "test_seams": [
+        "tests/unit/test_path_security.py",
+        "tests/unit/test_path_security_io.py"
       ]
     }
   },

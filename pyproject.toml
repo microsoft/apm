@@ -178,6 +178,13 @@ only_mutate = [
     "src/apm_cli/core/scope.py",
     "src/apm_cli/deps/egress_route.py",
     "src/apm_cli/core/remediation.py",
+    "src/apm_cli/utils/http_credentials.py",
+    "src/apm_cli/utils/path_security.py",
+    "src/apm_cli/utils/net.py",
+    "src/apm_cli/core/auth_outcome.py",
+    "src/apm_cli/utils/atomic_io.py",
+    "src/apm_cli/utils/yaml_io.py",
+    "src/apm_cli/deps/lockfile.py",
 ]
 pytest_add_cli_args = [
     "-n0",
@@ -205,6 +212,19 @@ pytest_add_cli_args_test_selection = [
     "tests/unit/core/test_apm_home_resolution.py",
     "tests/unit/deps/test_egress_route.py",
     "tests/unit/core/test_remediation.py",
+    "tests/unit/utils/test_http_credentials.py",
+    "tests/unit/utils/test_http_credentials_owner.py",
+    "tests/unit/test_path_security.py",
+    "tests/unit/test_path_security_io.py",
+    "tests/unit/utils/test_net.py",
+    "tests/unit/core/test_auth_outcome_owner.py",
+    "tests/unit/core/test_auth_outcome.py",
+    "tests/unit/utils/test_atomic_io.py",
+    "tests/unit/utils/test_atomic_io_owner.py",
+    "tests/unit/test_yaml_io.py",
+    "tests/unit/utils/test_frontmatter_horizontal_rules.py",
+    "tests/unit/utils/test_frontmatter_owner.py",
+    "tests/unit/deps/test_lockfile_read_path.py",
 ]
 timeout_constant = 1.0
 timeout_multiplier = 5.0
