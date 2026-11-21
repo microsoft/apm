@@ -22,9 +22,9 @@ from apm_cli.core.deployment_state import (
     DeploymentReconcileResult,
     DeploymentRecord,
     LocatorKind,
+    validate_deployment_rows,
 )
 from apm_cli.core.legacy_lock_evidence import legacy_bytes_owned, legacy_lock_hashes
-from apm_cli.core.receipt_migration import LocklessRootReceiptMigration
 from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -166,7 +166,7 @@ def materialization_evidence_paths(project_root: Path, scope: InstallScope) -> t
     return state_path, root / LOCAL_STATE_DIR / "installation"
 
 
-class DeploymentMaterializationSession(LocklessRootReceiptMigration):
+class DeploymentMaterializationSession:
     """Installation-local rendered-write evidence, subordinate to current ownership.
 
     Only live install and uninstall survivor boundaries create writing sessions. The checkout holds
@@ -387,6 +387,29 @@ class DeploymentMaterializationSession(LocklessRootReceiptMigration):
         """Return whether *path* still holds the bytes this installation receipted there."""
         record = self._records.get(self._physical_keys.get(path.resolve().as_posix(), ""))
         return record is not None and self._holds(path, record)
+
+    def adopt_lockless_root_receipts(self) -> list[str]:
+        """Bind user-root receipts a pre-0.38 ``install -g`` wrote without a lock (#3772).
+
+        Those installs receipted root-local writes but recorded no claim. A
+        receipt qualifies only at user scope, for the root owner, for a path
+        the lock does not claim, while the file still holds its bytes; it is
+        bound to the self-entry claim this install then commits. Returns the
+        adopted lock values.
+        """
+        if self.scope.value != "user":
+            return []
+        adopted: list[str] = []
+        for key, record in self._records.items():
+            value, physical = record.locator.value, self._destinations.get(key)
+            if record.active_owner != "." or self._claims.get(value) or physical is None:
+                continue
+            if self._holds(Path(physical), record):
+                self._claims[value] = [record]
+                self._bindings[key] = [".", self._claim_signature(value)]
+                self._dirty = True
+                adopted.append(value)
+        return sorted(adopted)
 
     def keep(self, path: Path, targets: Sequence[TargetProfile]) -> None:
         """Record a declared member this run deliberately left on disk unwritten."""
@@ -1986,40 +2009,7 @@ class DeploymentLedgerCodec:
         root = scoped.managed_deploy_root if scoped is not None else None
         return root.resolve().as_posix() if root is not None else None
 
-    @staticmethod
-    def validate_rows(rows: Any) -> None:
-        """Reject any malformed deployment row before ledger construction."""
-        if not isinstance(rows, list):
-            raise ValueError("Lockfile deployments must be a list")
-        for index, row in enumerate(rows):
-            if not isinstance(row, dict):
-                raise ValueError(f"Lockfile deployment row {index} must be a mapping")
-            try:
-                LocatorKind(str(row["kind"]))
-                target = row["target"]  # architecture-authority-exempt: ledger-row
-                value = row["value"]
-                scope = row["scope"]
-            except (KeyError, TypeError, ValueError) as exc:
-                raise ValueError(f"Lockfile deployment row {index} has invalid locator") from exc
-            if not all(isinstance(item, str) and item for item in (target, value, scope)):
-                raise ValueError(
-                    f"Lockfile deployment row {index} locator fields must be non-empty strings"
-                )
-            owners = row.get("owners")
-            active_owner = row.get("active_owner")
-            if (
-                not isinstance(owners, list)
-                or not owners
-                or not all(isinstance(owner, str) and owner for owner in owners)
-                or not isinstance(active_owner, str)
-                or active_owner not in owners
-            ):
-                raise ValueError(f"Lockfile deployment row {index} has invalid owners")
-            content_hash = row.get("content_hash")
-            if content_hash is not None and not isinstance(content_hash, str):
-                raise ValueError(
-                    f"Lockfile deployment row {index} content_hash must be a string or null"
-                )
+    validate_rows = staticmethod(validate_deployment_rows)
 
     @staticmethod
     def _add_legacy_paths(

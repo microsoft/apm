@@ -287,15 +287,8 @@ def test_real_reinstall_changes_deployments_but_not_lock_inside_phase(
         previous_lock = current_lock
         persisted = LockFile.read(get_lockfile_path(fixture.metadata))
         assert persisted is not None
-        if scope is InstallScope.PROJECT:
-            assert ".agents/skills/shared" in persisted.local_deployed_files
-        else:
-            dependency = persisted.get_dependency(
-                fixture.package.get_apm_dependencies()[0].get_unique_key()
-            )
-            assert dependency is not None
-            assert ".agents/skills/shared" in dependency.deployed_files
-            assert persisted.local_deployed_files == []
+        # Root-local writes are claimed at both scopes (#3772).
+        assert ".agents/skills/shared" in persisted.local_deployed_files
 
     first, second = evidence.contexts
     assert first is not second
