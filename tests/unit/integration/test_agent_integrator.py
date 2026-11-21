@@ -1111,8 +1111,9 @@ def _verbatim_copy_agent_targets() -> list[str]:
     Derived from ``KNOWN_TARGETS`` (instead of a hardcoded literal list) so a
     future verbatim-copy target is automatically covered by the Codex-leakage
     regression test below. ``codex_agent`` is this suite's own transform;
-    ``kiro_agent`` renders/filters the markdown body and is not byte-identical
-    to the source, so both are excluded on purpose, as are targets with no
+    ``kiro_agent`` and ``gemini_agent`` render/filter the frontmatter and are
+    not byte-identical to the source, so all three are excluded on purpose, as
+    are targets with no
     ``agents`` primitive mapping at all (they never reach the copy path).
     """
     from apm_cli.integration.targets import KNOWN_TARGETS
@@ -1121,7 +1122,7 @@ def _verbatim_copy_agent_targets() -> list[str]:
         name
         for name, profile in KNOWN_TARGETS.items()
         if (mapping := profile.primitives.get("agents")) is not None
-        and mapping.format_id not in {"codex_agent", "kiro_agent"}
+        and mapping.format_id not in {"codex_agent", "kiro_agent", "gemini_agent"}
     )
 
 

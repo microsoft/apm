@@ -1047,12 +1047,16 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # per-file rules from .gemini/rules/.
     # Commands are TOML files under .gemini/commands/.
     # Hooks merge into .gemini/settings.json (same pattern as Claude Code).
+    # Agents are validated Markdown files under .gemini/agents/ (local
+    # subagents; the frontmatter allowlist lives in agent_integrator.py).
     # Ref: https://geminicli.com/docs/cli/gemini-md/
     # Ref: https://geminicli.com/docs/reference/configuration/
+    # Ref: https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/core/subagents.md
     "gemini": TargetProfile(
         capability=TARGET_CAPABILITIES["gemini"],
         root_dir=".gemini",
         primitives={
+            "agents": PrimitiveMapping("agents", ".md", "gemini_agent"),
             "commands": PrimitiveMapping(
                 "commands", ".toml", "gemini_command", prompt_fields=("prompt",)
             ),
