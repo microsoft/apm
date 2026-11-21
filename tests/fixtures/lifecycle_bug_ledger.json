@@ -1423,8 +1423,8 @@
         "routing.authorized_targets_only"
       ],
       "regression_tests": [
+        "tests/integration/test_local_bundle_codex_agents_lifecycle.py::test_codex_bundle_agent_project_lifecycle",
         "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_bundle_reinstall_migrates_pre_3705_staging_claims",
-        "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_codex_bundle_install_skips_markdown_agents_with_one_warning_each",
         "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_instructions_only_bundle_upgrade_keeps_install_time_hash",
         "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_prune_retires_staging_records_whose_root_is_gone",
         "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_staged_instruction_edits_are_reported_as_hash_drift",

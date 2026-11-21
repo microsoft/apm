@@ -14,9 +14,16 @@ LSP, canvas), marketplace object, ``plugin@marketplace``, local bundle, native
 Claude plugin, package registry object (experimental ``registries``), MCP
 registry server and inline MCP server. ``apm lock`` has no ``--dry-run`` flag,
 so its T5 cells are ``real`` only; the local bundle is a side door with no
-manifest entry, so only ``install`` applies to it; an MCP server is removed by
-editing ``apm.yml`` (``apm uninstall`` refuses it: a U8 refusal cell of the
-covering replay).
+manifest entry, so only ``install`` applies to it (update, prune and uninstall
+of a bundle are U8 rule cells of the covering replay); an MCP server
+is removed by editing ``apm.yml`` (``apm uninstall`` refuses it: a U8 refusal
+cell of the covering replay).
+
+Context ids ``X|<op>|<form>|<FACTOR>=<value>`` (``X_CONTEXT``) name the state a
+real step ran in: scope, network, target change, gate, a clean prior
+deployment and the ``--force``, ``--update``, ``--frozen`` and ``--target``
+modifiers. A step earns one only when its form is acted on in that state, and
+the generator reads it as the assignment {OP, SRC, FACTOR}.
 
 A dry-run step must leave every durable byte unchanged (I5 read-only); the real
 command then runs and every package whose lock row, deployed skill or MCP entry
@@ -39,13 +46,14 @@ from hypothesis.stateful import initialize, rule, run_state_machine_as_test
 
 from tests.lifecycle.machines._kit import (
     Bench,
+    KnownCell,
     MachineBase,
     Step,
     WorldPool,
     earned_cells,
     machine_settings,
 )
-from tests.lifecycle.model.state import ModelState
+from tests.lifecycle.model.state import UNGATED_KINDS, ModelState
 from tests.lifecycle.oracles import Evidence, Observation, check_obligation
 from tests.lifecycle.receipts import current_node
 from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED
@@ -141,11 +149,21 @@ _PREVIEW_LINE = re.compile(r"^\s*\[[i!+\-~]\]\s+(?:-\s+)?(\S+)")
 
 @dataclass(frozen=True)
 class Choice:
-    """One dependency form and the world package it declares."""
+    """One dependency form and the world package it declares.
+
+    ``kinds`` are what the oracle observes; ``prims`` are the primitives the
+    package carries, which name its T3 cells (a native plugin is observed as
+    one gated ``native`` unit but carries a skill and an MCP server or bin/).
+    """
 
     form: str
     package: str
     kinds: frozenset[str]
+    carries: frozenset[str] | None = None
+
+    @property
+    def prims(self) -> frozenset[str]:
+        return self.kinds if self.carries is None else self.carries
 
     @property
     def slot(self) -> str:
@@ -157,17 +175,20 @@ class Choice:
 
 _SKILL = frozenset({"skill"})
 _EXEC = frozenset({"hook", "bin", "mcp"})
+_NATIVE = frozenset({"native"})
 CHOICES = (
     Choice("shorthand", "p-skill", _SKILL),
     Choice("git-object", "p-skill", _SKILL),
     Choice("marketplace-object", "p-skill", _SKILL),
     Choice("plugin-at-mkt", "p-exec", _EXEC),
     Choice("bundle", "p-exec-bundle", _EXEC),
+    Choice("bundle", "p-lsp-bundle", frozenset({"lsp"})),
     Choice("local-path", "p-parent", _SKILL),
     Choice("local-path", "p-parent2", _SKILL),
     Choice("local-path", "p-lsp", frozenset({"lsp"})),
     Choice("local-path", "p-canvas", frozenset({"canvas"})),
-    Choice("native", "p-native-claude", frozenset({"native"})),
+    Choice("native", "p-native-claude", _NATIVE, frozenset({"skill", "mcp"})),
+    Choice("native", "p-native-claude-bin", _NATIVE, frozenset({"skill", "bin"})),
     Choice("pkg-registry", "p-skill", _SKILL),
     Choice("pkg-registry", "p-exec", _EXEC),
     Choice("mcp-registry", "p-registry", frozenset({"mcp"})),
@@ -183,7 +204,9 @@ KINDS: Mapping[str, frozenset[str]] = {
     "p-skill": _SKILL,
     "p-exec": _EXEC,
     "p-child": _SKILL,
-    **{c.package: c.kinds for c in CHOICES if c.form in ("local-path", "native")},
+    # A native plugin is gated as one unit; its carried skill and MCP server are observed
+    # too, so an unapproved native deployment is an I4 violation (bin/ has no surface here).
+    **{c.package: c.kinds | c.prims for c in CHOICES if c.form in ("local-path", "native")},
 }
 _NAMES = sorted({*KINDS, "p-registry", INLINE_SERVER}, key=len, reverse=True)
 
@@ -202,7 +225,7 @@ def t3_cells() -> frozenset[str]:
         for op in OPS
         for choice in CHOICES
         if applies(op, choice.form)
-        for kind in choice.kinds
+        for kind in choice.prims
     )
 
 
@@ -214,6 +237,48 @@ def t5_cells() -> frozenset[str]:
         for form in FORMS
         if applies(op, form)
         for mode in (("real",) if op in _NO_DRY_RUN else ("dry-run", "real"))
+    )
+
+
+_COMMON = (
+    "SCOPE=project",
+    "NET=online",
+    "TGT=single-unchanged",
+    "TGT=multi-unchanged",
+    "SELECT=on",
+    "FORCE=on",
+    "UPDATE=on",
+)
+_UNAPPROVED = "GATE=unapproved-exec"
+_MANIFEST_CONTEXT = (*_COMMON, _UNAPPROVED, "FROZEN=on")
+# (op, form) -> the context ids its real steps must earn (``context_pass`` and the
+# ordinary steps of the spine reach every one).
+X_CONTEXT: Mapping[tuple[str, str], tuple[str, ...]] = {
+    ("install", "inline-mcp"): _MANIFEST_CONTEXT,
+    ("install", "mcp-registry"): _MANIFEST_CONTEXT,
+    ("install", "plugin-at-mkt"): _MANIFEST_CONTEXT,
+    ("install", "native"): _MANIFEST_CONTEXT,
+    ("install", "pkg-registry"): _MANIFEST_CONTEXT,
+    # A local bundle has no manifest entry (``install --frozen`` never reads it) and
+    # its install refuses ``--update`` (exit 2).
+    ("install", "bundle"): (*(c for c in _COMMON if c != "UPDATE=on"), _UNAPPROVED),
+    ("update", "marketplace-object"): ("DEPLOYED=clean",),
+    ("update", "pkg-registry"): ("DEPLOYED=clean",),
+}
+_FLAG_CONTEXT = {
+    "--force": "FORCE=on",
+    "--update": "UPDATE=on",
+    "--frozen": "FROZEN=on",
+    "--target": "SELECT=on",
+}
+
+
+def x_cells() -> frozenset[str]:
+    """Context obligation cells (see the module docstring)."""
+    return frozenset(
+        f"X|{op}|{form}|{context}"
+        for (op, form), contexts in X_CONTEXT.items()
+        for context in contexts
     )
 
 
@@ -266,8 +331,37 @@ def _mcp_servers(observation: Observation) -> frozenset[str]:
     return frozenset(json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {})
 
 
+# The cache marker a git-sourced p-skill leaves behind (src/apm_cli/install/cache_pin.py).
+_STALE_PIN = "apm_modules/lifecycle/p-skill/.apm-pin"
+_STALE_PIN_ISSUE = "#4572"
+
+
+def _stale_pin(machine, op, before=None, after=None, result=None) -> bool:
+    """A registry p-skill keeps the git source's .apm-pin until ``install --update`` drops it."""
+    del after
+    return (
+        result is not None
+        and result.returncode == 0
+        and op.name == "install"
+        and "--update" in result.command
+        and machine.converged
+        and machine.network != "offline"
+        and machine.slots.get("remote-skill") is _REGISTRY_SKILL
+        and before is not None
+        and _STALE_PIN in before.artifacts.snapshot("project").paths
+    )
+
+
 # Strict known cells this machine discharges; #4214 is fixed (LSP-only packages survive uninstall).
-KNOWN_CELLS: tuple = ()
+KNOWN_CELLS = (
+    KnownCell(
+        "registry-source-switch-stale-pin",
+        "I2",
+        _STALE_PIN_ISSUE,
+        rf"^converged install rewrote files: \['project:{re.escape(_STALE_PIN)}'\]$",
+        _stale_pin,
+    ),
+)
 
 
 class SourceMachine(MachineBase):
@@ -283,6 +377,9 @@ class SourceMachine(MachineBase):
         self.network = "online"
         self.converged = False
         self.registered = False
+        # Slot -> targets of the last resolving step that handled it: a later step under
+        # the same targets is "unchanged" for that slot.
+        self.resolved_targets: dict[str, frozenset[str]] = {}
 
     # -- model -----------------------------------------------------------------
 
@@ -310,8 +407,29 @@ class SourceMachine(MachineBase):
             if not applies(op, choice.form):
                 continue
             cells.append(f"T5|{mode}|{op}|{choice.form}")
-            cells += [f"T3|{op}|{choice.form}|{kind}" for kind in choice.kinds]
+            cells += [f"T3|{op}|{choice.form}|{kind}" for kind in choice.prims]
         return cells
+
+    def contexts(self, step: Step, op: str, args: tuple[str, ...], choice: Choice) -> list[str]:
+        """The ``X`` ids of *choice* that this successful real step of *op* ran in."""
+        found = {f"SCOPE={self.bench.scope}"}
+        if self.network == "online":
+            found.add("NET=online")
+        if self.model.targets == self.resolved_targets.get(choice.slot, self.model.targets):
+            shape = "single" if len(self.model.targets) == 1 else "multi"
+            found.add(f"TGT={shape}-unchanged")
+        found |= {context for flag, context in _FLAG_CONTEXT.items() if flag in args}
+        # GATE=none is "no executables gate configured" (factors.py GateLevel "none");
+        # with the gate on, only the executable kinds of a package have a gate level.
+        if "executables" not in self.bench.manifest():
+            found.add("GATE=none")
+        else:
+            gated = choice.kinds - UNGATED_KINDS
+            found |= {f"GATE={self.model.gate(choice.package, kind)}" for kind in gated}
+        if any(cell.startswith(f"{choice.package}/") for cell in step.before.deployed):
+            found.add("DEPLOYED=clean")
+        listed = X_CONTEXT.get((op, choice.form), ())
+        return [f"X|{op}|{choice.form}|{context}" for context in sorted(found & set(listed))]
 
     # -- manifest ----------------------------------------------------------------
 
@@ -378,9 +496,12 @@ class SourceMachine(MachineBase):
         )
         self.egress(step)
         if step.result.returncode == 0:
-            self.credit(step, op, choices, preview)
+            self.credit(step, op, args, choices, preview)
             self.model = requested
             self.converged = op not in _KEEPING or self.converged
+            if op not in _KEEPING:
+                for choice in choices:
+                    self.resolved_targets[choice.slot] = self.model.targets
         return step
 
     def preview(
@@ -411,7 +532,9 @@ class SourceMachine(MachineBase):
         incomplete = frozenset({"*incomplete"}) if _INCOMPLETE.search(output) else frozenset()
         return step, preview_names(output) | incomplete
 
-    def credit(self, step: Step, op: str, choices: Collection[Choice], preview) -> None:
+    def credit(
+        self, step: Step, op: str, args: tuple[str, ...], choices: Collection[Choice], preview
+    ) -> None:
         observed = expected = True
         if preview is not None:
             changed, removed = real_changes(preview[0].before, step.after)
@@ -420,7 +543,13 @@ class SourceMachine(MachineBase):
             if "*incomplete" not in named:
                 unnamed |= removed - named
             observed, expected = sorted(unnamed), []
-        for cell in self.cells(op, "real", choices):
+        cells = self.cells(op, "real", choices)
+        for choice in choices:
+            if applies(op, choice.form):
+                cells += self.contexts(step, op, args, choice)
+        for cell in dict.fromkeys(cells):
+            if cell in KNOWN_CELLS_BY_ID:
+                continue
             check_obligation(
                 cell,
                 strength="e2e-evidence",
@@ -498,13 +627,14 @@ class SourceMachine(MachineBase):
         self.slots[choice.slot] = choice
         self.converged = False
 
-    def declare_by_cli(self, choice: Choice, dry_run: bool) -> None:
+    def declare_by_cli(self, choice: Choice, dry_run: bool, flags: tuple[str, ...] = ()) -> None:
         if choice.form == "mcp-registry":
             args: tuple[str, ...] = ("--mcp", REGISTRY_SERVER)
         elif choice.form == "inline-mcp":
             args = ("--mcp", INLINE_SERVER, "--", INERT_COMMAND, "--stdio")
         elif choice.form == "bundle":
-            args = (self.bench.world.packages["p-exec:bundle"].spec,)
+            source = choice.package.removesuffix("-bundle")
+            args = (self.bench.world.packages[f"{source}:bundle"].spec, *flags)
         else:
             args = (f"p-exec@{MARKET}",)
         had = self.slots.get(choice.slot)
@@ -542,6 +672,22 @@ class SourceMachine(MachineBase):
         args = ("--yes",) if op == "update" else ()
         choices = [c for c in self._choices() if c.form != "bundle"]
         self.command(op, args, choices, dry_run)
+
+    def context_pass(self) -> None:
+        """Install every declared form under --force/--update/--target and --frozen, multi-target."""
+        self.retarget(TARGET_SETS[1])
+        self.reconcile("install", False)
+        selected = ("--target", ",".join(sorted(self.model.targets)))
+        manifest = [c for c in self._choices() if c.form != "bundle"]
+        self.command("install", ("--force", "--update", *selected), manifest, False)
+        self.command("install", ("--frozen",), manifest, False)
+        bundle = next((c for c in self._choices() if c.form == "bundle"), None)
+        if bundle is not None:
+            # The first install under the new targets widens them; the second is unchanged.
+            self.declare_by_cli(bundle, False)
+            self.declare_by_cli(bundle, False, ("--force", *selected))
+        self.retarget(TARGET_SETS[0])
+        self.reconcile("install", False)
 
     @rule(slot=st.sampled_from(sorted({c.slot for c in CHOICES})), dry_run=st.booleans())
     def uninstall(self, slot: str, dry_run: bool) -> None:
@@ -611,13 +757,17 @@ def replay_spine(machine: SourceMachine) -> None:
         if choice.form in ("local-path", "native"):
             machine.declare(choice, False)
     for form in ("plugin-at-mkt", "bundle", "mcp-registry", "inline-mcp"):
-        machine.declare(_BY_FORM[form], True)
+        for choice in CHOICES:
+            if choice.form == form:
+                machine.declare(choice, True)
     remote_skills = (*(_BY_FORM[f] for f in ("shorthand", "git-object", "marketplace-object")),)
     remote_skills += (_REGISTRY_SKILL,)
     for choice in remote_skills:
         machine.declare(choice, False)
         for op in ("install", "update", "prune", "compile", "lock"):
             machine.reconcile(op, True)
+        if choice is _REGISTRY_SKILL:
+            machine.context_pass()
     # p-lsp still survives this uninstall (#4214).
     machine.uninstall("remote-skill", False)
     for slot in ("remote-exec", "p-lsp"):
@@ -630,7 +780,7 @@ def replay_spine(machine: SourceMachine) -> None:
         machine.declare(choice, False)
         machine.reconcile("install", False)
         machine.uninstall("remote-skill", True)
-    for slot in ("p-parent", "p-canvas", "p-native-claude"):
+    for slot in ("p-parent", "p-canvas", "p-native-claude", "p-native-claude-bin"):
         machine.uninstall(slot, True)
     for slot in _MCP_SERVERS:
         machine.undeclare(slot)
@@ -652,9 +802,9 @@ def test_source_spine_covers_every_form_and_op(lifecycle_template, tmp_path: Pat
     replay_spine(machine)
     strict = {cell.label for cell in machine.known}
     assert machine.expected_seen == strict, sorted(strict - machine.expected_seen)
-    earned = earned_cells(current_node(), "T")
-    missing = (t3_cells() | t5_cells()) - earned - set(KNOWN_CELLS_BY_ID)
-    assert not missing, f"T3/T5 cells without an oracle receipt: {sorted(missing)}"
+    earned = earned_cells(current_node(), "T") | earned_cells(current_node(), "X|")
+    missing = (t3_cells() | t5_cells() | x_cells()) - earned - set(KNOWN_CELLS_BY_ID)
+    assert not missing, f"T3/T5/X cells without an oracle receipt: {sorted(missing)}"
 
 
 def test_source_generated_sequences_keep_cross_cutting_laws(
@@ -669,4 +819,4 @@ def test_source_generated_sequences_keep_cross_cutting_laws(
 
 
 # T3/T5 cells whose oracle fails on main -> tracking issue (a strict known cell discharges them).
-KNOWN_CELLS_BY_ID: dict[str, str] = {}
+KNOWN_CELLS_BY_ID: dict[str, str] = {"X|install|pkg-registry|UPDATE=on": _STALE_PIN_ISSUE}
