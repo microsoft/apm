@@ -86,7 +86,9 @@ apm install ./dist/review-skills-1.1.0.zip --target copilot
 ```
 
 APM checks the files against the hashes `apm pack` recorded in the bundle,
-deploys them and records them in `apm.lock.yaml`. It does not edit `apm.yml`. A reinstall
+deploys them and records them in `apm.lock.yaml`. It does not edit an existing `apm.yml`;
+in a project without one it creates the same minimal `apm.yml` that `apm install <pkg>` does, so
+`apm audit --ci` can check the install. A reinstall
 removes bundle MCP and LSP servers that are no longer shipped, are denied or are not
 approved. Bundle MCP servers are recorded in the lockfile, so they pass `apm audit --ci`
 and `apm install --frozen` and survive other installs and uninstalls; `apm install -g

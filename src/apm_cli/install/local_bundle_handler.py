@@ -326,7 +326,7 @@ def install_local_bundle(
                 force=force,
             )
 
-        # Persist into project lockfile -- never mutate apm.yml (per design).
+        # Persist into project lockfile -- never edit an existing apm.yml.
         staged_fallbacks = result.get("staged_file_fallback_hashes", {})
         if deployed or staged_instructions or staged_fallbacks:
             from ..deps.lockfile import migrate_lockfile_if_needed
@@ -383,6 +383,8 @@ def install_local_bundle(
                 )
             )
 
+            if not global_:
+                _bootstrap_project_manifest(logger)
             lockfile.write(lockfile_path)
             # The lockfile write commits this install; the pending record joins it.
             if bundle_record is not None:
@@ -740,6 +742,27 @@ def _home_relative_claims(
     return [_relative(path) for path in deployed], {
         _relative(path): digest for path, digest in hashes.items()
     }
+
+
+def _bootstrap_project_manifest(logger) -> None:
+    """Create the bootstrap apm.yml a bundle install needs to be auditable (RA-017).
+
+    A project lockfile without apm.yml fails ``apm audit --ci``
+    (manifest-missing), so a bundle installed into a directory with no
+    manifest gets the same minimal one ``apm install <pkg>`` creates. An
+    existing apm.yml is never edited.
+    """
+    from ..constants import APM_YML_FILENAME
+    from ..core.project_name import resolve_bootstrap_project_name
+    from ..core.scope import InstallScope, get_manifest_path
+    from ..models.manifest_bootstrap import bootstrap_config, write_minimal_manifest
+
+    manifest_path = get_manifest_path(InstallScope.PROJECT)
+    if manifest_path.exists():
+        return
+    project_name = resolve_bootstrap_project_name(manifest_path.parent.name)
+    write_minimal_manifest(bootstrap_config(project_name), target_path=manifest_path)
+    logger.success(f"Created {APM_YML_FILENAME}")
 
 
 def _bundle_lock_root(user_scope: bool) -> Path:
