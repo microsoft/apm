@@ -178,6 +178,12 @@ def run_service_integrations(  # noqa: PLR0913
             mcp_targets=mcp_targets or [],
             lsp_target_servers={
                 target: LSPIntegrator.expressible_server_names(prepared_lsp.dependencies, target)
+                - LSPIntegrator.matching_entry_names(
+                    prepared_lsp.dependencies,
+                    target,
+                    project_root=ctx.project_root,
+                    user_scope=ctx.scope is InstallScope.USER,
+                )
                 for target in prepared_lsp.target_runtimes or []
             },
             current_mcp=prepared_mcp.current_view,

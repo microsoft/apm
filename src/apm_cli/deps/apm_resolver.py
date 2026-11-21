@@ -664,7 +664,7 @@ class APMDependencyResolver:
         lock before any catalog, alias or registration I/O
         (:func:`~apm_cli.drift.locked_marketplace_replay`); ``--frozen``
         refuses a declaration with no matching lock row instead of asking the
-        marketplace. Otherwise uses
+        marketplace, and a local catalog that no longer selects its lock row. Otherwise uses
         :func:`resolve_marketplace_plugin` to look up the plugin in the
         registered marketplace and returns a resolved git-backed reference.
         Prefers the structured ``dependency_reference`` from the resolution
@@ -689,8 +689,10 @@ class APMDependencyResolver:
         """
         from apm_cli.drift import (
             MARKETPLACE_CATALOG_METADATA,
+            MARKETPLACE_LOCAL_CATALOG,
             catalog_metadata_refusal,
             frozen_marketplace_refusal,
+            local_catalog_refusal,
             locked_marketplace_replay,
         )
 
@@ -745,11 +747,14 @@ class APMDependencyResolver:
             else DependencyReference.parse(resolution.canonical)
         )
         # A cold server-owning row reads the catalog for server metadata only;
-        # the lock row still pins the download (#3989).
+        # the lock row still pins the download (#3989). A frozen local catalog
+        # must still select its lock row (#4639).
         if decision.reason == MARKETPLACE_CATALOG_METADATA:
             refusal = catalog_metadata_refusal(dep_ref, resolved, self._existing_lockfile)
-            if refusal is not None:
-                raise refusal
+        elif decision.reason == MARKETPLACE_LOCAL_CATALOG and self._frozen:
+            refusal = local_catalog_refusal(dep_ref, resolved, self._existing_lockfile)
+        if refusal is not None:
+            raise refusal
         manifest = getattr(resolution.plugin, "manifest", None)
         if isinstance(manifest, dict) and manifest:
             resolved.marketplace_manifest = dict(manifest)
