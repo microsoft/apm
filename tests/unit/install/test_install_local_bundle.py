@@ -1298,4 +1298,4 @@ def test_tampered_bundle_fails_integrity_before_executable_approval_advice(
     assert "To approve this exact local bundle" not in result.stdout
     assert "To approve this exact local bundle" not in result.stderr
     assert "[x] Bundle integrity check failed:" in result.stderr
-    assert "Unlisted bundle file (not in pack.bundle_files): .lsp.json" in result.stdout
+    assert "Unlisted bundle file (not in pack.bundle_files): .lsp.json" in result.stderr

@@ -191,8 +191,7 @@ class CIAuditResult:
             if not check.passed:
                 artifact = _CHECK_ARTIFACT_MAP.get(check.name, "apm.lock.yaml")
                 content_details = {
-                    f"unicode: {finding.file}{finding.pointer or ''}"
-                    for finding in check.content_findings
+                    f"unicode: {finding.location}" for finding in check.content_findings
                 }
                 results.extend(
                     {**finding_to_sarif(finding), "ruleId": check.name}

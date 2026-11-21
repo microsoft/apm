@@ -248,11 +248,16 @@ def plugin_bundle_integrity(bundle_info: Any, logger: Any) -> IntegrityCheck:
             from ..core.remediation import BUNDLE_INTEGRITY_FAILED
             from .errors import InstallFailureAlreadyRendered
 
-            logger.error("Bundle integrity check failed:")
-            for err in errors:
-                logger.error_detail(err)
-            logger.error(
-                f"The bundle changed after it was packed. {BUNDLE_INTEGRITY_FAILED.sentence()}"
+            # One refusal, one stream: headline, reasons and remedy all on stderr.
+            logger.refusal(
+                "\n".join(
+                    (
+                        "Bundle integrity check failed:",
+                        *(f"  {err}" for err in errors),
+                        f"The bundle changed after it was packed. "
+                        f"{BUNDLE_INTEGRITY_FAILED.sentence()}",
+                    )
+                )
             )
             raise InstallFailureAlreadyRendered("Bundle integrity check failed")
         logger.verbose_detail("Bundle integrity verified")

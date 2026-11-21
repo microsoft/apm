@@ -1067,12 +1067,8 @@ def _check_content_integrity(
 
     details: list[str] = []
     for entry in scan.incomplete:
-        details.append(f"incomplete-coverage: {entry.file}{entry.pointer}: {entry.diagnostic}")
-    details.extend(
-        dict.fromkeys(
-            f"unicode: {finding.file}{finding.pointer or ''}" for finding in critical_findings
-        )
-    )
+        details.append(f"incomplete-coverage: {entry.location}: {entry.diagnostic}")
+    details.extend(dict.fromkeys(f"unicode: {finding.location}" for finding in critical_findings))
     for rel_path in missing_ownership:
         details.append(f"missing-ownership: {rel_path}")
     for rel_path in unresolved_hash_paths:
