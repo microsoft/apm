@@ -24,7 +24,7 @@ see [Primitive types](../primitive-types/).
 | grok-build      | `.grok/`               |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [ ] |
 | cursor          | `.cursor/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
 | codex           | `.codex/` + `.agents/` |     [ ]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
-| gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
+| gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
 | antigravity     | `.agents/`             |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
@@ -227,12 +227,43 @@ Gemini CLI.
 
 - **Detection.** `.gemini/` directory, or `GEMINI.md`.
 - **Deploy directory.** `.gemini/` (project and user scope).
-- **Supported primitives.** commands, skills, hooks, mcp.
+- **Supported primitives.** agents, commands, skills, hooks, mcp.
 - **File conventions.**
+  - agents: `.gemini/agents/<name>.md` (project) or `~/.gemini/agents/<name>.md` (user scope)
   - commands: `.gemini/commands/<name>.toml`
   - skills: `.agents/skills/<name>/SKILL.md`
   - hooks: merged into `.gemini/settings.json`
 - **Compile output.** `GEMINI.md`. Gemini CLI does not read per-file rules from `.gemini/rules/`, so `instructions` is compile-only.
+- **Agents.** Qualified against Gemini CLI v0.70.0 local subagents
+  ([docs](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/core/subagents.md)). The Gemini agent loader rejects a file
+  with any frontmatter key outside its schema
+  ([`agentLoader.ts`](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/packages/core/src/agents/agentLoader.ts)), so APM
+  writes only `name`, `description`, `tools`, `model`, `display_name`,
+  `temperature`, `max_turns` and `timeout_mins`, and drops other keys. `name`
+  defaults to the file stem and must be a lowercase slug; `description` is
+  required. `tools` must use Gemini tool names
+  ([tools reference](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/reference/tools.md)), `mcp_<server>_<tool>`, or
+  the `*`, `mcp_*` and `mcp_<server>_*` wildcards. APM accepts `model: inherit`
+  (Gemini's documented default) or a `gemini-*` id. APM does not map other
+  providers' tool or model names. An omitted `tools` stays omitted; Gemini
+  documents that the agent then inherits all tools from the parent session.
+  An agent that declares agent-scoped MCP servers (`mcp_servers`,
+  `mcpServers`, `mcp-servers`), `disallowedTools`, `permissionMode` or
+  `kind: remote`, or that fails any of the checks above, is not deployed and
+  gets a warning; other agents in the package still deploy. APM does not
+  write Gemini's trust, acknowledgement or `agents.overrides` settings. Gemini
+  registers a project agent only after it has been acknowledged for its
+  current content; a new or changed agent file is reported for
+  acknowledgement instead. In v0.70.0 that acknowledgement is the
+  interactive "New Agents Discovered" dialog, so headless runs do not use a
+  new or updated project agent until it has been accepted once. Gemini also
+  skips project agents in an untrusted folder; folder trust
+  (`security.folderTrust.enabled`) defaults to `true`
+  ([configuration reference](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/reference/configuration.md),
+  [`registry.ts`](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/packages/core/src/agents/registry.ts),
+  [`AppContainer.tsx`](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/packages/cli/src/ui/AppContainer.tsx)). Local bundle
+  installs (`apm install <bundle>`) skip agents for this target; install from
+  source instead.
 
 ## antigravity
 
