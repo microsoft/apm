@@ -45,6 +45,15 @@ host and uses the earliest credential it finds:
 these hosts. A GitHub Enterprise Server host joins the chain only when the
 `GITHUB_HOST` environment variable names it.
 
+To keep these tokens on one host, set `APM_STRICT_HOST_CREDENTIALS=1`.
+`GITHUB_APM_PAT_<ORG>`, `GITHUB_APM_PAT`, `GITHUB_TOKEN` and `GH_TOKEN` then
+reach only the configured host (`GITHUB_HOST`, else `github.com`). For any
+other `github.com` or `*.ghe.com` host, APM runs `gh auth token` and
+`git credential fill` without those variables, and warns once naming the host.
+Sign in for that host with `gh auth login --hostname <host>` or a credential
+helper. Values `0`, `false`, `no`, `off` or empty keep the default; any value
+APM does not recognise turns strict mode on and prints a warning.
+
 A token for one kind of host is never sent to another: a `GITHUB_TOKEN` set
 in CI never reaches GitLab. APM sends credentials as an HTTPS header, never
 in a URL, and does not store them. Every variable:
