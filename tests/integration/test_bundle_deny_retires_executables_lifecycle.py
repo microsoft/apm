@@ -101,3 +101,10 @@ def test_deny_then_install_retires_every_bundle_executable(
     assert _executables(world) == {"hook": [], "mcp": []}, _evidence(denied)
     _ok(world, "install", "--frozen")
     _ok(world, "audit", "--ci")
+
+    # A reinstall of the denied bundle names the deny, not a pending approval (RA-041).
+    again = _ok(world, "install", spec)
+    text = " ".join(f"{again.stdout} {again.stderr}".split())
+    assert f"mcp is denied for this exact bundle ({key.group(1)})" in text, _evidence(again)
+    assert "To approve this exact local bundle's mcp" not in text, _evidence(again)
+    assert _executables(world)["mcp"] == [], _evidence(again)

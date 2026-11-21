@@ -5,11 +5,11 @@ Mirrors the MCP integration pattern with runtime-neutral target selection.
 
 import builtins
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.scope import manifest_file
 
@@ -234,37 +234,72 @@ def _bundle_owner_aliases(owner: str) -> frozenset[str]:
     return frozenset({canonical, owner})
 
 
-def _withdrawn_bundle_names(
-    bundle_names: set[str],
-    provenance: Mapping[str, str],
+@dataclass(frozen=True)
+class WithdrawnBundleLspServer:
+    """A deployed bundle LSP server whose bundle's LSP grant was withdrawn (RA-041)."""
+
+    owner: str
+    server: str
+
+    def describe(self) -> str:
+        return (
+            f"{self.owner}: bundle LSP server '{self.server}' is deployed, but the "
+            "bundle's approval no longer grants lsp"
+        )
+
+
+def withdrawn_bundle_lsp_servers(
+    lockfile: "LockFile | None", scope_dir: Path, trust_context: Callable[[], Any]
+) -> list[WithdrawnBundleLspServer]:
+    """Bundle-owned LSP servers in *lockfile* that a deny or revoke withdrew (RA-041).
+
+    The one rule ``apm install`` retires them by and ``apm install --frozen``
+    and ``apm audit --ci`` refuse them by. *trust_context* is called once, and
+    only when a bundle owning a recorded LSP server has an install record.
+    """
+    from apm_cli.install.local_bundle_pending import bundle_grant_withdrawn, recorded_bundle_keys
+    from apm_cli.security.executables import EXEC_TYPE_LSP
+
+    raw = getattr(lockfile, "lsp_config_provenance", None)
+    provenance = dict(raw) if isinstance(raw, dict) else {}
+    owners = {
+        name: owner.removeprefix(_BUNDLE_LSP_OWNER_PREFIX)
+        for name, owner in sorted(provenance.items())
+        if not _is_regular_owner(owner)
+    }
+    if not any(recorded_bundle_keys(scope_dir, owner) for owner in owners.values()):
+        return []
+    context = trust_context()
+    if context is None:
+        return []
+    return [
+        WithdrawnBundleLspServer(owner, name)
+        for name, owner in owners.items()
+        if bundle_grant_withdrawn(scope_dir, owner, context, EXEC_TYPE_LSP)
+    ]
+
+
+def withdrawn_bundle_lsp_for_scope(
+    lockfile: "LockFile | None",
     scope_dir: Path,
     project_root: Path,
     *,
     user_scope: bool,
     no_policy: bool,
-) -> set[str]:
-    """Bundle-owned LSP servers whose bundle's LSP grant a deny or revoke withdrew (RA-041)."""
-    if not bundle_names:
-        return set()
-    from apm_cli.install.local_bundle_pending import bundle_grant_withdrawn, recorded_bundle_keys
-    from apm_cli.security.executables import EXEC_TYPE_LSP
+) -> list[WithdrawnBundleLspServer]:
+    """:func:`withdrawn_bundle_lsp_servers` under the scope's grants and org policy.
+
+    ``apm install``, ``apm install --frozen`` and ``apm audit --ci`` all ask
+    here, through the trust owner's admission, so they reach one verdict.
+    """
     from apm_cli.security.trust import McpAdmission
 
-    owners = {
-        name: provenance[name].removeprefix(_BUNDLE_LSP_OWNER_PREFIX) for name in bundle_names
-    }
-    if not any(recorded_bundle_keys(scope_dir, owner) for owner in owners.values()):
-        return set()
-    context = McpAdmission.for_project(
-        project_root, user_scope=user_scope, no_policy=no_policy
-    ).context
-    if context is None:
-        return set()
-    return {
-        name
-        for name, owner in owners.items()
-        if bundle_grant_withdrawn(scope_dir, owner, context, EXEC_TYPE_LSP)
-    }
+    def _context() -> Any:
+        return McpAdmission.for_project(
+            project_root, user_scope=user_scope, no_policy=no_policy
+        ).context
+
+    return withdrawn_bundle_lsp_servers(lockfile, scope_dir, _context)
 
 
 def _clean_target_differences(
@@ -696,14 +731,16 @@ def run_lsp_integration(  # noqa: PLR0913
         bundle_names = {
             name for name, owner in old_lsp_provenance.items() if not _is_regular_owner(owner)
         }
-        withdrawn = _withdrawn_bundle_names(
-            bundle_names,
-            old_lsp_provenance,
-            apm_modules_path.parent,
-            project_root,
-            user_scope=user_scope,
-            no_policy=no_policy,
-        )
+        withdrawn = bundle_names & {
+            item.server
+            for item in withdrawn_bundle_lsp_for_scope(
+                existing_lock,
+                apm_modules_path.parent,
+                project_root,
+                user_scope=user_scope,
+                no_policy=no_policy,
+            )
+        }
         bundle_names -= withdrawn
         old_regular_names = {
             name for name, owner in old_lsp_provenance.items() if _is_regular_owner(owner)

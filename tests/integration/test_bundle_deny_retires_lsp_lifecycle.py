@@ -1,9 +1,10 @@
 """APMLifecycle: a deny retires an installed local bundle's LSP server (RA-041).
 
 PROMISE: P-INV-I4 -- deny, revoke and tightening never widen what is deployed.
-The LSP twin of RA-025: after ``apm deny <bundle key>``, the ``apm install``
-the deny names retires the bundle's LSP server, and ``install --frozen`` and
-``apm audit --ci`` agree on the converged state (I3).
+The LSP twin of RA-025: after ``apm deny <bundle key>``, ``apm audit --ci``
+and ``apm install --frozen`` both refuse the deployed server (I3, nothing
+written), the ``apm install`` the deny names retires it, and a reinstall of
+the bundle says the server is denied, not merely awaiting approval.
 """
 
 from __future__ import annotations
@@ -78,6 +79,15 @@ def _lsp_bundle(world: World) -> str:
     return bundle.as_posix()
 
 
+def _state(world: World) -> dict[str, bytes]:
+    root = world.project
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and not {".git"} & set(path.relative_to(root).parts)
+    }
+
+
 def _lsp_deployed(world: World) -> list[str]:
     root = world.project
     return sorted(
@@ -108,11 +118,31 @@ def test_deny_then_install_retires_the_bundle_lsp_server(
     assert _lsp_deployed(world), "the approved bundle LSP server must deploy"
 
     denied = _ok(world, "deny", key.group(1))
-    # The deny names the command that retires the bundle's executables; run it.
     hint = " ".join(f"{denied.stdout} {denied.stderr}".split())
     assert "Run 'apm install'" in hint, _evidence(denied)
-    _ok(world, "install")
 
+    # I3: before the install, audit --ci and --frozen both refuse the server.
+    before = _state(world)
+    audit = _apm(world, "audit", "--ci")
+    assert audit.returncode == 1, _evidence(audit)
+    assert f"bundle LSP server '{_SERVER}'" in audit.stdout + audit.stderr, _evidence(audit)
+    frozen = _apm(world, "install", "--frozen")
+    assert frozen.returncode == 1, _evidence(frozen)
+    frozen_text = " ".join(f"{frozen.stdout} {frozen.stderr}".split())
+    assert f"bundle LSP server '{_SERVER}'" in frozen_text, _evidence(frozen)
+    assert "apm install" in frozen_text, _evidence(frozen)
+    assert _state(world) == before, "a refused --frozen changed durable state"
+
+    # The deny's hinted command retires the server; then both commands pass.
+    _ok(world, "install")
     assert _lsp_deployed(world) == [], _evidence(denied)
     _ok(world, "install", "--frozen")
     _ok(world, "audit", "--ci")
+
+    # A reinstall of the denied bundle names the deny, not a pending approval.
+    again = _ok(world, "install", bundle)
+    text = " ".join(f"{again.stdout} {again.stderr}".split())
+    assert f"lsp is denied for this exact bundle ({key.group(1)})" in text, _evidence(again)
+    assert "lift your deny of this exact local bundle's lsp" in text, _evidence(again)
+    assert "To approve this exact local bundle's lsp" not in text, _evidence(again)
+    assert _lsp_deployed(world) == [], _evidence(again)

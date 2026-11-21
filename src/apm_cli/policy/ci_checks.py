@@ -369,6 +369,15 @@ def _check_exec_status_current(
         targets=list(targets),
         fallback_allow_executables=getattr(manifest, "allow_executables", None),
     )
+    if not indeterminate:
+        from ..install.lsp.integration import withdrawn_bundle_lsp_for_scope
+
+        stale = [
+            *stale,
+            *withdrawn_bundle_lsp_for_scope(
+                lock, modules_root.parent, project_root, user_scope=user_scope, no_policy=False
+            ),
+        ]
     if not stale:
         return CheckResult(
             name="exec-status-current",
