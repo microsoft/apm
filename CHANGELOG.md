@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm unpack` into a project leaves `apm.lock.yaml` unchanged when it already records the unpacked files with the same content, so restores keep tracked files clean. (closes #4556, #4580)
 - The first `apm install` after a dependency moves from git to a registry removes its stale `.apm-pin`; repeat installs and `install --update` change no bytes. (closes #4572, #4597)
 - `apm uninstall` refuses before any change when a shared bundle's shrinking skill selection would delete an edited or unproven file. (closes #4313, #4588)
-- `apm uninstall` no longer writes `apm.yml` or `.apm/` into a surviving local dependency's source directory; it validates a staged copy. (closes #4566, #4610)
+- `apm uninstall` no longer writes `apm.yml` or `.apm/` into a surviving local dependency's source directory; it validates a staged copy. (closes #4566, #4649)
 
 ### Security
 
