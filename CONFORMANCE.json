@@ -374,19 +374,21 @@
     {
       "behavioral_tests": [
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lockfile_replay_hash_mismatch_fails_before_any_extraction",
-        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lockfile_replay_with_matching_hash_extracts"
+        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lockfile_replay_with_matching_hash_extracts",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_url_mismatch_with_wrong_hash_fails_closed_before_extraction"
       ],
       "conformance_class": "consumer",
       "id": "req-lk-013",
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 4,
+      "test_count": 5,
       "tests": [
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lockfile_replay_hash_mismatch_fails_before_any_extraction",
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lockfile_replay_with_matching_hash_extracts",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_integrity_field_when_remote",
-        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_hash_mismatch_fails_closed"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_hash_mismatch_fails_closed",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_url_mismatch_with_wrong_hash_fails_closed_before_extraction"
       ]
     },
     {
@@ -1280,6 +1282,38 @@
       ]
     },
     {
+      "behavioral_tests": [
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_declared_name_wins_and_is_never_registered",
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_root_manifest_map_is_accepted_and_validated"
+      ],
+      "conformance_class": "consumer",
+      "id": "req-mf-028",
+      "keyword": "MUST",
+      "section": "4.2.5",
+      "status": "active",
+      "test_count": 2,
+      "tests": [
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_declared_name_wins_and_is_never_registered",
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_root_manifest_map_is_accepted_and_validated"
+      ]
+    },
+    {
+      "behavioral_tests": [
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_dependency_declared_map_is_refused",
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_transitive_reference_must_name_a_root_declared_entry"
+      ],
+      "conformance_class": "consumer",
+      "id": "req-mf-029",
+      "keyword": "MUST",
+      "section": "4.2.5",
+      "status": "active",
+      "test_count": 2,
+      "tests": [
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_dependency_declared_map_is_refused",
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_transitive_reference_must_name_a_root_declared_entry"
+      ]
+    },
+    {
       "behavioral_tests": [],
       "conformance_class": "consumer",
       "id": "req-na-001",
@@ -1713,6 +1747,7 @@
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_recognition_grammar_and_scope",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics",
         "tests/spec_conformance/test_policy_reqs.py::test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile",
+        "tests/spec_conformance/test_policy_reqs.py::test_require_reads_the_lock_row_written_for_an_explicit_proxy_url",
         "tests/spec_conformance/test_policy_reqs.py::test_required_package_matching_follows_source_replacement"
       ],
       "conformance_class": "governance",
@@ -1720,12 +1755,13 @@
       "keyword": "MUST",
       "section": "6.3.1",
       "status": "active",
-      "test_count": 5,
+      "test_count": 6,
       "tests": [
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_qualified_patterns_match_effective_host",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_recognition_grammar_and_scope",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics",
         "tests/spec_conformance/test_policy_reqs.py::test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile",
+        "tests/spec_conformance/test_policy_reqs.py::test_require_reads_the_lock_row_written_for_an_explicit_proxy_url",
         "tests/spec_conformance/test_policy_reqs.py::test_required_package_matching_follows_source_replacement"
       ]
     },
@@ -2284,6 +2320,8 @@
     {
       "behavioral_tests": [
         "tests/integration/test_registry_mirror_lock_replay_lifecycle.py::test_lock_replay_fetches_hash_matching_bytes_from_a_declared_mirror",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_url_mismatch_is_satisfied_by_configured_registry_when_hash_matches",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_url_mismatch_with_wrong_hash_fails_closed_before_extraction",
         "tests/spec_conformance/test_resolve_behavior_reqs.py::test_lock_replay_accepts_mirror_bytes_matching_the_locked_hash"
       ],
       "conformance_class": "consumer",
@@ -2291,9 +2329,11 @@
       "keyword": "MUST",
       "section": "7.5.1",
       "status": "active",
-      "test_count": 3,
+      "test_count": 5,
       "tests": [
         "tests/integration/test_registry_mirror_lock_replay_lifecycle.py::test_lock_replay_fetches_hash_matching_bytes_from_a_declared_mirror",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_url_mismatch_is_satisfied_by_configured_registry_when_hash_matches",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_url_mismatch_with_wrong_hash_fails_closed_before_extraction",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_tilde_range",
         "tests/spec_conformance/test_resolve_behavior_reqs.py::test_lock_replay_accepts_mirror_bytes_matching_the_locked_hash"
       ]
@@ -3259,7 +3299,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 107,
+      "active": 109,
       "partial": 1,
       "skipped": 3,
       "text-only": 3,
@@ -3291,5 +3331,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 149
+  "total_requirements": 151
 }

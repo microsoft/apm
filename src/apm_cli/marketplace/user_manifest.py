@@ -1,14 +1,17 @@
-"""Owner of the user-manifest ``marketplaces:`` declaration.
+"""Owner of the ``marketplaces:`` declaration grammar.
 
-The user manifest (the ``apm.yml`` at the effective APM user root) may list
-marketplaces to register. Each entry is a ``name`` plus a ``source`` in any
-form ``apm marketplace add`` accepts, with an optional ``ref`` that mirrors
-``--ref``. ``apm install -g`` reconciles the list into the marketplace
-registry (see :mod:`apm_cli.marketplace.reconcile`).
+Each entry is a ``name`` plus a ``source`` in any form ``apm marketplace
+add`` accepts, with an optional ``ref`` that mirrors ``--ref``.
 
-Project and package manifests cannot declare marketplaces: registering a
-marketplace is user-level discovery configuration, never something a
-project or a dependency may impose.
+* The user manifest (the ``apm.yml`` at the effective APM user root) lists
+  marketplaces to register; ``apm install -g`` reconciles the list into the
+  marketplace registry (see :mod:`apm_cli.marketplace.reconcile`).
+* A root project ``apm.yml`` may declare the same map; it resolves that
+  project's ``marketplace: <name>`` entries and is never registered (see
+  :mod:`apm_cli.marketplace.project_marketplaces`, #2903).
+* A dependency's ``marketplaces:`` is refused: a package can never add a
+  marketplace (#3006). The resolver enforces it with
+  :func:`dependency_marketplaces_error`.
 """
 
 from __future__ import annotations
@@ -18,38 +21,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..core.remediation import (
-    MARKETPLACE_REGISTER_MANUAL,
-    MARKETPLACES_OUTSIDE_USER_MANIFEST,
-    either_sentence,
-)
-
 MARKETPLACES_KEY = "marketplaces"
 _ENTRY_KEYS = ("name", "source", "ref")
 
 
 @dataclass(frozen=True)
 class DeclaredMarketplace:
-    """One validated ``marketplaces:`` entry from the user manifest."""
+    """One validated ``marketplaces:`` entry (user or root project manifest)."""
 
     name: str
     source: str
     ref: str | None = None
-
-
-def user_manifest_path() -> Path:
-    """Return the user manifest path at the effective APM user root."""
-    from ..core.scope import InstallScope, get_manifest_path
-
-    return get_manifest_path(InstallScope.USER)
-
-
-def is_user_manifest(manifest_path: Path) -> bool:
-    """Return True when *manifest_path* is the user manifest."""
-    try:
-        return manifest_path.resolve() == user_manifest_path().resolve()
-    except OSError:
-        return False
 
 
 def _ascii(value: object) -> str:
@@ -57,15 +39,13 @@ def _ascii(value: object) -> str:
     return ascii(text)[1:-1]
 
 
-def outside_user_manifest_error(manifest_path: Path) -> str:
-    """Actionable error for ``marketplaces:`` outside the user manifest."""
+def dependency_marketplaces_error(package_name: str) -> str:
+    """Actionable error for ``marketplaces:`` declared by a dependency."""
     return (
-        f"'{MARKETPLACES_KEY}' is not allowed in {_ascii(manifest_path.as_posix())}. "
-        "Project and package manifests cannot declare marketplaces. "
-        + either_sentence(
-            MARKETPLACES_OUTSIDE_USER_MANIFEST.bind(path=_ascii(user_manifest_path().as_posix())),
-            MARKETPLACE_REGISTER_MANUAL,
-        )
+        f"Dependency '{_ascii(package_name)}' declares '{MARKETPLACES_KEY}', which only "
+        "the root project's apm.yml may declare: a package cannot add marketplaces. "
+        "Declare the marketplace in your project's apm.yml under 'marketplaces:', "
+        "or ask the package author to remove it."
     )
 
 
@@ -162,17 +142,19 @@ def parse_declared_marketplaces(
     return declared
 
 
-def validate_marketplaces_declaration(data: Mapping[str, Any], manifest_path: Path) -> None:
-    """Reject ``marketplaces:`` outside the user manifest; validate it inside.
+def validate_marketplaces_declaration(
+    data: Mapping[str, Any], manifest_path: Path
+) -> tuple[DeclaredMarketplace, ...] | None:
+    """Validate a manifest's ``marketplaces:`` declaration and return it.
 
-    Called for every parsed ``apm.yml`` (project root, dependency and user
-    manifest), so neither a project nor a package can declare marketplaces.
+    Called for every parsed ``apm.yml``. Returns ``None`` when the key is
+    absent. Whether a declaration counts depends on the manifest's role:
+    the user manifest's is reconciled into the registry, the root project's
+    resolves that project, and a dependency's is refused by the resolver.
 
     Raises:
-        ValueError: The key appears outside the user manifest or is malformed.
+        ValueError: The declaration is malformed or names a duplicate.
     """
     if MARKETPLACES_KEY not in data:
-        return
-    if not is_user_manifest(manifest_path):
-        raise ValueError(outside_user_manifest_error(manifest_path))
-    parse_declared_marketplaces(data, manifest_path)
+        return None
+    return tuple(parse_declared_marketplaces(data, manifest_path))
