@@ -7,7 +7,7 @@ $ apm install --frozen
 [exit 0]
 --- stdout
 [>] Installing dependencies from apm.yml...
-[i] Targeting declared targets from apm.yml: claude, copilot
+[i] Targets: claude, copilot  (source: apm.yml)
 +- MCP Servers (2)
 [i] Using MCP registry: https://mcp-registry.lifecycle.test (from --registry or the apm.yml registry field)
 [>] Looking up 1 MCP server in registry https://mcp-registry.lifecycle.test...
