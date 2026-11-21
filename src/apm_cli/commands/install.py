@@ -53,6 +53,7 @@ from apm_cli.install.errors import (
     DirectDependencyError,
     FrozenInstallError,
     InstallFailureAlreadyRendered,
+    MCPNativeConflictError,
     PolicyViolationError,
     RequiredIntegrationError,
     install_failure_message,
@@ -2003,35 +2004,42 @@ def _install_apm_packages(ctx, outcome):
     from apm_cli.install.service_integration import run_service_integrations
     from apm_cli.policy.install_preflight import PolicyBlockError
 
-    try:
-        service_result = run_service_integrations(
-            ctx,
-            apm_package=apm_package,
-            mcp_deps=mcp_deps,
-            lock_path=_lock_path,
-            existing_lock=_existing_lock,
-            old_mcp_servers=old_mcp_servers,
-            old_mcp_configs=old_mcp_configs,
-            old_mcp_provenance=old_mcp_provenance,
-            old_mcp_target_servers=old_mcp_target_servers,
-            old_mcp_target_servers_present=old_mcp_target_servers_present,
-            diagnostics=apm_diagnostics,
-            explicit_target=ctx.target or ctx.runtime,
-            target_decision=ctx.target_decision,
-            active_package_keys=(
-                install_result.active_package_keys if install_result is not None else None
-            ),
-            claude_native_keys=(
-                install_result.claude_native_keys if install_result is not None else frozenset()
-            ),
-            frozen_disposition=frozen_disposition,
-        )
-    except PolicyBlockError as exc:
-        refuse_blocked_mcp(logger, exc)
-    except RequiredIntegrationError as exc:
-        logger.error(str(exc))
-        logger.render_summary()
-        raise InstallFailureAlreadyRendered(str(exc)) from exc
+    try:  # A failed MCP/LSP write restores the deploys and the lockfile (#4594).
+        try:
+            service_result = run_service_integrations(
+                ctx,
+                apm_package=apm_package,
+                mcp_deps=mcp_deps,
+                lock_path=_lock_path,
+                existing_lock=_existing_lock,
+                old_mcp_servers=old_mcp_servers,
+                old_mcp_configs=old_mcp_configs,
+                old_mcp_provenance=old_mcp_provenance,
+                old_mcp_target_servers=old_mcp_target_servers,
+                old_mcp_target_servers_present=old_mcp_target_servers_present,
+                diagnostics=apm_diagnostics,
+                explicit_target=ctx.target or ctx.runtime,
+                target_decision=ctx.target_decision,
+                active_package_keys=(
+                    install_result.active_package_keys if install_result is not None else None
+                ),
+                claude_native_keys=(
+                    install_result.claude_native_keys if install_result is not None else frozenset()
+                ),
+                frozen_disposition=frozen_disposition,
+            )
+        except PolicyBlockError as exc:
+            refuse_blocked_mcp(logger, exc)
+        except RequiredIntegrationError as exc:
+            logger.error(str(exc))
+            logger.render_summary()
+            raise InstallFailureAlreadyRendered(str(exc)) from exc
+    except MCPNativeConflictError:
+        raise  # A collision keeps the writes that reached disk (#4268).
+    except BaseException:
+        if ctx.transaction is not None:
+            ctx.transaction.rollback()
+        raise
 
     ctx.target_decision = service_result.target_decision
     mcp_count = service_result.mcp_count
