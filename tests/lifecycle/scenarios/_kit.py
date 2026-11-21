@@ -24,6 +24,7 @@ Package names in a command line are replaced by their spec, as in rows.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -48,6 +49,7 @@ from tests.lifecycle.oracles import (
     check_cross_cutting,
     check_obligation,
     operation_for,
+    user_kept_cells,
 )
 from tests.lifecycle.snapshot import LifecycleSurfaceRoots
 from tests.utils.apm_lifecycle_runner import CommandResult
@@ -233,6 +235,8 @@ class Scenario:
         self.model = ModelState(targets=frozenset(targets), scope=scope, policy=policy)
         self.expected_seen: set[str] = set()
         self.expected_all: set[str] = set()
+        # I1-X2: deploy-root-relative path -> sha256 of the bytes the user wrote there.
+        self.user_bytes: dict[str, str] = {}
         self.steps: list[Step] = []
         self.set_targets(*targets)
 
@@ -274,6 +278,27 @@ class Scenario:
         """An input outside the CLI moved (a new tag, an edited cache): not converged."""
         self.model = replace(self.model, converged=False)
 
+    def user_write(self, relative: str, content: str) -> str:
+        """Write the user's own bytes at *relative* under the deploy root (an input edit).
+
+        An edited deployed file, or a user file at a package's path: I1-X2
+        exempts it from lock==disk while it holds exactly these bytes, and
+        fails any step that changes or removes them. An input edit: the model
+        is no longer converged.
+        """
+        path = self.deploy_root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = content.encode("ascii")
+        path.write_bytes(data)
+        self.user_bytes[relative] = hashlib.sha256(data).hexdigest()
+        self.source_moved()
+        return relative
+
+    def release_user_write(self, relative: str) -> None:
+        """The user lets APM replace *relative* (``install --force``): I1-X2 stops guarding it."""
+        del self.user_bytes[relative]
+        self.source_moved()
+
     def drop_from_manifest(self, *names: str) -> None:
         """Edit apm.yml by hand: remove *names* from ``dependencies.apm`` (an input edit)."""
         manifest = self.manifest_root / "apm.yml"
@@ -299,11 +324,13 @@ class Scenario:
 
     # -- observation -----------------------------------------------------------
 
-    def deployed(self) -> tuple[frozenset[str], frozenset[str]]:
-        """(``pkg/kind/target`` cells found, package-owned paths) under the deploy root."""
+    def deployed(self) -> tuple[frozenset[str], frozenset[str], dict[str, frozenset[str]]]:
+        """(``pkg/kind/target`` cells found, package-owned paths, each cell's paths)."""
         root = self.deploy_root
         deployed: set[str] = set()
         managed: set[str] = set()
+        cell_paths: dict[str, frozenset[str]] = {}
+        users = self._user_files()
         for package, kinds in self.kinds.items():
             for kind in kinds:
                 for target in self.model.targets:
@@ -316,16 +343,41 @@ class Scenario:
                     hits = [
                         path
                         for path in root.glob(pattern.format(pkg=name))
-                        if path.is_file() and marker in path.read_text(encoding="utf-8")
+                        if path.is_file()
+                        and marker in path.read_text(encoding="utf-8")
+                        and path.relative_to(root).as_posix() not in users
                     ]
                     if hits:
-                        deployed.add(f"{package}/{kind}/{target}")
+                        cell = f"{package}/{kind}/{target}"
+                        deployed.add(cell)
+                        found = frozenset(path.relative_to(root).as_posix() for path in hits)
+                        cell_paths[cell] = found
                         if not marker:
-                            managed.update(path.relative_to(root).as_posix() for path in hits)
-        return frozenset(deployed), frozenset(managed)
+                            managed.update(found)
+        return frozenset(deployed), frozenset(managed), cell_paths
+
+    def _user_files(self) -> frozenset[str]:
+        """I1-X2: declared user writes the lock does not record: the user's files.
+
+        An edited file the lock still records stays a deployment of its package.
+        """
+        lock = self.lock()
+        recorded = (
+            {path for dep in lock.get_package_dependencies() for path in dep.deployed_files}
+            if lock is not None
+            else set()
+        )
+        root = self.deploy_root
+        return frozenset(
+            relative
+            for relative, digest in self.user_bytes.items()
+            if relative not in recorded
+            and (root / relative).is_file()
+            and hashlib.sha256((root / relative).read_bytes()).hexdigest() == digest
+        )
 
     def observe(self) -> Observation:
-        deployed, managed = self.deployed()
+        deployed, managed, cell_paths = self.deployed()
         cache_root = getattr(self.world, "cache_root", None) or self.world.root / "cache"
         state = LifecycleStateSnapshot.capture(
             self.manifest_root,
@@ -340,6 +392,8 @@ class Scenario:
             deploy_root=self.deploy_root,
             lock=self.lock(),
             managed_paths=managed,
+            user_bytes=dict(self.user_bytes),
+            cell_paths=cell_paths,
         )
 
     def snapshot(self) -> ArtifactSnapshotSet:
@@ -354,7 +408,7 @@ class Scenario:
         )
 
     def assert_deployed(self) -> None:
-        observed, _ = self.deployed()
+        observed, _, _ = self.deployed()
         wanted = self.expected_cells()
         assert observed == wanted, f"deployed {sorted(observed)}, model {sorted(wanted)}"
 
@@ -404,7 +458,7 @@ class Scenario:
         model = StepModel(requested, self.kinds, converged, cells, self.expected_seen)
         before = self.observe()
         result = self._drive(args, output_cells=bool(set(cells) & _OUTPUT_LAWS))
-        after = self.observe()
+        after = self._detect_user_keeps(self.observe(), result, model, op)
         self._check_exit(args, result, allowed_exit, exit_cell)
         check_cross_cutting(before, after, result, model, op)
         self._advance(op, args, requested, result)
@@ -459,6 +513,17 @@ class Scenario:
             f"strict expected failure {label} did not fail; remove its expectation"
         )
         assert re.search(cell.match, message), f"{label} failed differently: {message}"
+
+    def _detect_user_keeps(
+        self, after: Observation, result: CommandResult, model: StepModel, op: Operation
+    ) -> Observation:
+        """I4-X2: run ``audit --ci`` once when the step kept user bytes the gate refuses."""
+        if not op.mutating or result.returncode != 0:
+            return after
+        if not user_kept_cells(after, model.allowed_surfaces()):
+            return after
+        audit = driver.run(self.world, ("audit", "--ci"), scope=self.scope)
+        return replace(after, audit_ci=(audit.returncode, f"{audit.stdout}\n{audit.stderr}"))
 
     def _drive(self, args: tuple[str, ...], *, output_cells: bool) -> CommandResult:
         """Run *args*; a step with a known output-law cell bypasses the global hook.
