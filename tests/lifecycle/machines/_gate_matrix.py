@@ -30,8 +30,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from tests.lifecycle.machines._kit import Bench, Step, StepRunner
+from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import Evidence, check_obligation
+from tests.lifecycle.rows import _SURFACE_GLOBS
 from tests.lifecycle.world.scopes import use_policy
 from tests.lifecycle.world.services import REGISTRY_SERVER
 from tests.utils.local_package import LocalPackageFactory
@@ -53,10 +55,20 @@ KINDS: Mapping[str, frozenset[str]] = {
 OBSERVED: Mapping[str, frozenset[str]] = {
     name: kinds - {"other-file"} for name, kinds in KINDS.items()
 }
+# bin/ deploys only for a Claude marketplace plugin at user scope (U-BIN,
+# install/exec_gate.py plugin_bin_deployable); no spine step can observe a bin
+# gate outcome, so the matrix credits no bin cell.
+_UNOBSERVED = frozenset({"bin"})
 _PLAIN = frozenset({"skill", "other-file"})
 _MIXED_SKILL = f".agents/skills/{MIXED}/SKILL.md"
 # Project surfaces of every primitive but MCP: install --mcp must leave them alone (U7).
-_NON_MCP = (".agents/skills", ".github/hooks", ".github/lsp.json", ".github/extensions")
+_NON_MCP = (
+    ".agents/skills",
+    ".github/hooks",
+    ".github/lsp.json",
+    ".github/extensions",
+    ".github/instructions",
+)
 _DURABLE = ("apm.yml", "apm.lock.yaml", "apm_modules", ".agents", ".github", ".mcp.json")
 _HOOK = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo mixed"}]}]}}
 _INSTRUCTION = '---\napplyTo: "**"\n---\n\nKeep the lifecycle world mixed.\n'
@@ -147,7 +159,7 @@ class GateMatrix(StepRunner):
             {
                 f"G1|{command.op}|{kind}|{self.state.gate(package, kind)}|{self.scope}"
                 for package in command.packages
-                for kind in KINDS[package]
+                for kind in KINDS[package] - _UNOBSERVED
             }
         )
 
@@ -167,6 +179,7 @@ class GateMatrix(StepRunner):
         requested = self._requested(command)
         if not self.dry:
             args = (*words, *(self.spec(p) for p in named))
+            servers = _mcp_servers(self.bench.deploy_root)
             step = self.step(
                 args,
                 exits=command.exits,
@@ -175,6 +188,7 @@ class GateMatrix(StepRunner):
                 converged=False,
                 mutating=self._reconciles(op, words),
             )
+            self._check_outcome(command, requested, step, servers)
             self._credit(command, cells, step)
         # Every exit is pinned: a refused command leaves the inputs as they were.
         if 0 in command.exits:
@@ -228,15 +242,35 @@ class GateMatrix(StepRunner):
             }
         return state
 
+    def _check_outcome(
+        self, command: Command, requested: GateState, step: Step, servers: frozenset[str]
+    ) -> None:
+        """What I1-I9 cannot see: the deployed set a step must leave behind."""
+        before, after = step.before.deployed, step.after.deployed
+        if command.op == "mcp-install":
+            # The requested server is configured under its short name ("p-registry").
+            requested_names = {REGISTRY_SERVER, REGISTRY_SERVER.rsplit("/", 1)[-1]}
+            added = _mcp_servers(self.bench.deploy_root) - servers - requested_names
+            assert not added, f"install --mcp configured other servers: {sorted(added)}"
+        elif command.op == "prune" and self.state.denied_by_policy:
+            # The prune ruling's floor: under a dependency deny prune never widens.
+            assert after <= before, f"prune deployed {sorted(after - before)}"
+        elif command.op in ("install", "update") and step.result.returncode == 0:
+            # I4 rejects what is not allowed; a resolving command must also deploy
+            # everything it allows (as RowReplay.check_then does).
+            wanted = {
+                "/".join(cell)
+                for cell in expected_deployed(requested.model(), OBSERVED)
+                if (cell[1], cell[2]) in _SURFACE_GLOBS
+            }
+            assert set(after) == wanted, f"deployed {sorted(after)}, model {sorted(wanted)}"
+
     def _credit(self, command: Command, cells: Collection[str], step: Step) -> None:
         exit_code = step.result.returncode
         unchanged: dict[str, tuple[str, ...]] = {"outside": ("*",)}
         present: dict[str, list[str]] = {}
         if command.op == "mcp-install":
             unchanged["project"] = _NON_MCP
-            assert _mcp_servers(step.before) - {REGISTRY_SERVER} >= (
-                _mcp_servers(step.after) - {REGISTRY_SERVER}
-            ), f"install --mcp configured another server: {_mcp_servers(step.after)}"
         elif exit_code != 0:
             unchanged["project"] = _DURABLE
         if (
@@ -361,8 +395,9 @@ def matrix_cells(scope: str) -> frozenset[str]:
     return frozenset(machine.credited)
 
 
-def _mcp_servers(observation) -> frozenset[str]:
-    path = observation.deploy_root / ".mcp.json"
+def _mcp_servers(deploy_root: Path) -> frozenset[str]:
+    """Server names in the deploy root's .mcp.json, read now (an immutable set)."""
+    path = deploy_root / ".mcp.json"
     if not path.is_file():
         return frozenset()
     return frozenset(json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {})
