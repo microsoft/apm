@@ -3235,7 +3235,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:eff0adddaba18a07be2ecb50fbc02003d7446e3633dc2c82659b2eba2328dd83
+  content_hash: sha256:ea13c16f55ee1564dd774f34b3af658eff3d9997a3ba40cf533a8eb1d65f964e
 - kind: project-relative
   target: copilot
   value: .github/instructions/python.instructions.md
@@ -3738,6 +3738,6 @@ local_deployed_file_hashes:
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696
   .github/instructions/encoding.instructions.md: sha256:93db7377dc896f6efecf2c5d8c5d89255a555562f468d034d64c42edd5cf46d5
   .github/instructions/integrators.instructions.md: sha256:19919cbd04031a8a09be8aa0860aa941640b8313df74439e7bfac31310aa1b13
-  .github/instructions/linting.instructions.md: sha256:eff0adddaba18a07be2ecb50fbc02003d7446e3633dc2c82659b2eba2328dd83
+  .github/instructions/linting.instructions.md: sha256:ea13c16f55ee1564dd774f34b3af658eff3d9997a3ba40cf533a8eb1d65f964e
   .github/instructions/python.instructions.md: sha256:8acd2bb824eb8d70a1977dfef309a5a122b49320d22222dd8d3544ca08712bca
   .github/instructions/tests.instructions.md: sha256:8ab7221fbf45bd4a3c0ea8c9f87edb036c659ed4cade79f408ba5674dd556b36
