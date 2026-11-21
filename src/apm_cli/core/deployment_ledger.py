@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core import _deployment_queries
 from apm_cli.core.deployment_state import (
     DeploymentIntent,
     DeploymentLedger,
@@ -898,24 +899,23 @@ class DeploymentLedgerCodec:
 
     @staticmethod
     def recorded_target_names(
-        lockfile: LockFile,
-        *,
-        scope: str,
-        supported_targets: Collection[str],
+        lockfile: LockFile, *, scope: str, supported_targets: Collection[str]
     ) -> tuple[str, ...]:
         """Project concrete target identities from recorded deployment state."""
-        ledger = lockfile.deployment_ledger
-        # A compatibility ledger inferred from paths is not installed target intent.
-        if not lockfile._deployments_present or ledger is None:
-            return ()
-        return tuple(
-            sorted(
-                {
-                    record.locator.target
-                    for record in ledger.records.values()
-                    if record.locator.scope == scope and record.locator.target in supported_targets
-                }
-            )
+        rows = _deployment_queries.recorded_rows(lockfile) or ()
+        targets = {r.locator.target for r in rows if r.locator.scope == scope}
+        return tuple(sorted(targets.intersection(supported_targets)))
+
+    @staticmethod
+    def recorded_owner_index(
+        lockfile: LockFile, *, scope: str
+    ) -> dict[str, tuple[DeploymentRecord, ...]] | None:
+        """Group the recorded deployment rows in scope by owner, in one pass."""
+        rows = _deployment_queries.recorded_rows(lockfile)
+        if rows is None:
+            return None
+        return _deployment_queries.group_owner_records(
+            row for row in rows if DeploymentLedgerCodec.locator_in_scope(row.locator, scope)
         )
 
     @staticmethod
