@@ -59,6 +59,11 @@ integration suite runs only at merge time via GitHub Merge Queue
 6. **`main-architecture-ratchets.yml`** - `push` to main only
    - Re-runs ci.yml's `test-architecture-contracts` job (check `Architecture Ratchet Contracts (main)`), so a change that reaches main without a `merge_group` run cannot leave main silently red on the ratchet contracts.
    - Never opts into provisional baselines. `tests/quality/test_ci_topology.py` pins the job to ci.yml's, so the two cannot drift.
+7. **`merge-train.yml`** - `push` to `queue/t*/p*` and `queue/b*/p*` only, plus `workflow_dispatch` (#4574)
+   - Proves one exact speculative SHA (main plus queued PRs) and reports ONE check, `train-gate`. The ref suffix sets the scope: `-guard` runs `scope`, `guard` and `train-gate`; `-full` also runs `tier1` (ci.yml) and `tier2` (ci-integration.yml, `secrets: inherit`) through their `workflow_call` triggers.
+   - `guard` runs the `.github/actions/lint-chain` composite (the single owner of the Lint steps, also used by ci.yml's `Lint` job), the ratchet contracts, the other `tests/quality` modules and the NOTICE check. The base is the head commit's `Queue-Base:` trailer, else the merge base with `main`.
+   - `train-gate` (`if: always()`) passes only when every job is green, with the tiers skipped on `-guard`. Shared caches stay off in its own jobs (#4531). Every job checks out the triggering commit only. A manual probe dispatches with `--ref <queue branch>` (`gh workflow run merge-train.yml --ref queue/t<id>/p<k>-full`); the workflow takes no inputs and `scope` fails on any other ref.
+   - Never add `pull_request_target` or another push branch. `tests/quality/test_ci_topology.py` pins the triggers, the merge_group coverage of a full train, the gate and the lint-chain owner.
 
 ## Platform Testing Strategy
 - **PR time**: Linux-only combined build-and-test in `ci.yml`. Catches logic bugs and dependency issues before merge. Windows is tested on every push to main; macOS and full integration run nightly, on dispatch and on release tags.

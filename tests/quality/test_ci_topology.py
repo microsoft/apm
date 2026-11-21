@@ -3256,13 +3256,28 @@ def _assert_merge_train_triggers(train: WorkflowNode) -> None:
     assert isinstance(triggers, dict)
     assert set(triggers) == {"push", "workflow_dispatch"}, sorted(triggers)
     assert triggers["push"] == {"branches": TRAIN_BRANCHES}
-    inputs = triggers["workflow_dispatch"]["inputs"]
-    assert list(inputs) == ["ref"] and inputs["ref"]["required"] is False
+    # A probe dispatches the queue branch itself; no input may name another commit.
+    assert not triggers["workflow_dispatch"], triggers["workflow_dispatch"]
     assert train["permissions"] == {"contents": "read"}
     assert train["concurrency"] == {
         "group": "merge-train-${{ github.ref }}",
         "cancel-in-progress": False,
     }
+
+
+def _assert_train_checkouts_default_ref(train: WorkflowNode) -> None:
+    """Every train job tests the triggering commit, never a requested one (CodeQL
+    cache poisoning)."""
+    checkouts = [
+        (job_id, step)
+        for job_id, job in train["jobs"].items()
+        for step in _run_steps(job)
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    ]
+    assert checkouts
+    for job_id, step in checkouts:
+        with_block = step.get("with") or {}
+        assert "ref" not in with_block and "repository" not in with_block, job_id
 
 
 def _permission_union(workflow: WorkflowNode) -> dict[str, str]:
@@ -3399,10 +3414,14 @@ def test_merge_train_triggers_only_on_queue_refs() -> None:
     _assert_merge_train_triggers(_train_workflows()[MERGE_TRAIN_WORKFLOW])
 
 
-@pytest.mark.parametrize("mutation", ["pull-request-target", "push-main", "drop-pattern"])
+@pytest.mark.parametrize(
+    "mutation", ["pull-request-target", "push-main", "drop-pattern", "dispatch-input"]
+)
 def test_merge_train_trigger_drift_fails(mutation: str) -> None:
     train = _train_workflows()[MERGE_TRAIN_WORKFLOW]
-    if mutation == "pull-request-target":
+    if mutation == "dispatch-input":
+        train["on"]["workflow_dispatch"] = {"inputs": {"ref": {"type": "string"}}}
+    elif mutation == "pull-request-target":
         train["on"]["pull_request_target"] = {"branches": ["main"]}
     elif mutation == "push-main":
         train["on"]["push"]["branches"].append("main")
@@ -3488,49 +3507,51 @@ def test_train_gate_passes_only_when_every_job_is_green(
     assert "| ref | sha | scope | base |" in (tmp_path / "s.md").read_text(encoding="utf-8")
 
 
-SHA_A = "a" * 40
-SHA_B = "b" * 40
-
-
 @pytest.mark.parametrize(
-    ("event", "ref", "requested", "expected"),
+    ("ref", "expected"),
     [
-        ("push", "queue/t0001/p1-guard", "", ("guard", SHA_A)),
-        ("push", "queue/t0001/p3-full", "", ("full", SHA_A)),
-        ("push", "queue/b0123456789ab/p0-full", "", ("full", SHA_A)),
-        ("push", "queue/t0001/p1", "", None),
-        ("push", "queue/t0001/p1-fast", "", None),
-        ("push", "queue/tx/p1-full", "", None),
-        ("workflow_dispatch", "main", "", ("full", SHA_A)),
-        ("workflow_dispatch", "queue/t0001/p2-guard", SHA_B, ("guard", SHA_B)),
-        ("workflow_dispatch", "queue/t0001/p2-full", SHA_A, ("full", SHA_A)),
-        ("workflow_dispatch", "queue/t0001/p2-full", SHA_B, None),
-        ("workflow_dispatch", "queue/t0001/p2-guard", "main", None),
+        ("queue/t0001/p1-guard", "guard"),
+        ("queue/t0001/p3-full", "full"),
+        ("queue/b0123456789ab/p0-full", "full"),
+        ("queue/b0123456789ab/p1-full", None),
+        ("queue/b0123456789ab/p0-guard", None),
+        ("queue/t0001/p1", None),
+        ("queue/t0001/p1-fast", None),
+        ("queue/tx/p1-full", None),
+        ("main", None),
+        ("feature/queue/t0001/p1-full", None),
     ],
 )
-def test_train_scope_parses_only_train_refs(
-    tmp_path: Path, event: str, ref: str, requested: str, expected: tuple[str, str] | None
-) -> None:
+def test_train_scope_parses_only_train_refs(tmp_path: Path, ref: str, expected: str | None) -> None:
+    """Push or dispatch, only a queue branch name sets a scope."""
     step = workflow_step(
         workflow_job(_train_workflows()[MERGE_TRAIN_WORKFLOW], TRAIN_SCOPE_JOB), TRAIN_SCOPE_STEP
     )
     output = tmp_path / "output"
-    result = run_bash(
-        step["run"],
-        env={
-            "EVENT_NAME": event,
-            "REF_NAME": ref,
-            "HEAD_SHA": SHA_A,
-            "REQUESTED_SHA": requested,
-            "GITHUB_OUTPUT": str(output),
-        },
-    )
+    result = run_bash(step["run"], env={"REF_NAME": ref, "GITHUB_OUTPUT": str(output)})
     if expected is None:
         assert result.returncode != 0, result.stdout
+        assert not output.exists()
         return
     assert result.returncode == 0, result.stdout + result.stderr
-    scope, sha = expected
-    assert output.read_text(encoding="utf-8").splitlines() == [f"scope={scope}", f"sha={sha}"]
+    assert output.read_text(encoding="utf-8").splitlines() == [f"scope={expected}"]
+
+
+def test_merge_train_checks_out_only_the_triggering_commit() -> None:
+    _assert_train_checkouts_default_ref(_train_workflows()[MERGE_TRAIN_WORKFLOW])
+
+
+@pytest.mark.parametrize("job_id", [TRAIN_SCOPE_JOB, TRAIN_GUARD_JOB])
+def test_merge_train_checkout_ref_fails(job_id: str) -> None:
+    train = _train_workflows()[MERGE_TRAIN_WORKFLOW]
+    checkout = next(
+        step
+        for step in train["jobs"][job_id]["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    checkout.setdefault("with", {})["ref"] = "${{ github.event.inputs.ref }}"
+    with pytest.raises(AssertionError):
+        _assert_train_checkouts_default_ref(train)
 
 
 def test_merge_train_and_lint_chain_use_no_shared_cache() -> None:

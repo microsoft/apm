@@ -8,7 +8,10 @@
 #   queue/t<id>/p<k>-guard  cheap guards only (lint chain, ratchets, tests/quality)
 #   queue/t<id>/p<k>-full   guards plus Tier 1 (ci.yml) and Tier 2 (ci-integration.yml)
 #   queue/b<sha12>/p0-full  full proof of a main SHA (base probe)
-# `*` does not cross `/`, so no other branch triggers this workflow.
+# `*` does not cross `/`, so no other branch triggers this workflow. A manual
+# probe dispatches the queue branch itself (`gh workflow run merge-train.yml
+# --ref queue/t<id>/p<k>-full`); the scope job fails on any other ref. Every
+# job checks out the triggering commit only, never an input ref.
 #
 # Base: the head commit's `Queue-Base: <40-hex>` trailer, else the merge base
 # with origin/main. The lint chain's shrink-only ratchets compare against it.
@@ -27,13 +30,6 @@ on:
   push:
     branches: ['queue/t*/p*', 'queue/b*/p*']
   workflow_dispatch:
-    inputs:
-      ref:
-        description: >-
-          Optional full commit SHA. Dispatch on the queue branch (--ref
-          queue/...); a full-scope run requires this to equal the branch tip.
-        required: false
-        type: string
 
 # One run per ref, never cancelled: refs are unique and the runner cancels
 # abandoned runs itself.
@@ -56,43 +52,25 @@ jobs:
       contents: read
     outputs:
       scope: ${{ steps.scope.outputs.scope }}
-      sha: ${{ steps.scope.outputs.sha }}
       base_sha: ${{ steps.base.outputs.base_sha }}
     steps:
     - name: Parse scope
       id: scope
       env:
-        EVENT_NAME: ${{ github.event_name }}
         REF_NAME: ${{ github.ref_name }}
-        HEAD_SHA: ${{ github.sha }}
-        REQUESTED_SHA: ${{ inputs.ref }}
       run: |
-        if [[ "$REF_NAME" =~ ^queue/(t[0-9]+|b[0-9a-f]{12})/p[0-9]+-(guard|full)$ ]]; then
-          scope="${BASH_REMATCH[2]}"
-        elif [ "$EVENT_NAME" = workflow_dispatch ]; then
+        if [[ "$REF_NAME" =~ ^queue/t[0-9]+/p[0-9]+-(guard|full)$ ]]; then
+          scope="${BASH_REMATCH[1]}"
+        elif [[ "$REF_NAME" =~ ^queue/b[0-9a-f]{12}/p0-full$ ]]; then
           scope=full
         else
-          echo "::error::'$REF_NAME' is not a train ref (queue/t<id>/p<k>-guard|-full or queue/b<sha12>/p0-full)."
+          echo "::error::'$REF_NAME' is not a train ref (queue/t<id>/p<k>-guard|-full or queue/b<sha12>/p0-full); dispatch with --ref <queue branch>."
           exit 1
         fi
-        sha="$HEAD_SHA"
-        if [ -n "$REQUESTED_SHA" ]; then
-          if ! [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::Input ref must be a full 40-hex commit SHA."
-            exit 1
-          fi
-          if [ "$scope" = full ] && [ "$REQUESTED_SHA" != "$HEAD_SHA" ]; then
-            echo "::error::Tier 1 and Tier 2 test the dispatched branch tip ($HEAD_SHA); dispatch on the queue branch whose tip is $REQUESTED_SHA."
-            exit 1
-          fi
-          sha="$REQUESTED_SHA"
-        fi
         echo "scope=$scope" >> "$GITHUB_OUTPUT"
-        echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
-        ref: ${{ steps.scope.outputs.sha }}
         fetch-depth: 0
         filter: blob:none
         persist-credentials: false
@@ -126,8 +104,6 @@ jobs:
       contents: read
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        ref: ${{ needs.scope.outputs.sha }}
 
     - name: Set up Python
       uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -205,7 +181,7 @@ jobs:
     - name: Require every train job
       env:
         REF: ${{ github.ref_name }}
-        SHA: ${{ needs.scope.outputs.sha }}
+        SHA: ${{ github.sha }}
         SCOPE: ${{ needs.scope.outputs.scope }}
         BASE_SHA: ${{ needs.scope.outputs.base_sha }}
         SCOPE_RESULT: ${{ needs.scope.result }}

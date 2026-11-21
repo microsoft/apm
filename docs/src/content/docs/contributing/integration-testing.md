@@ -668,9 +668,12 @@ module and the NOTICE check. The ratchets compare against the head commit's
 `Queue-Base: <sha>` trailer, else the merge base with `main`. A full train runs
 every check the `merge_group` gate requires. `train-gate` passes only when
 every job is green. Only write-access users can push `queue/*` branches.
+Every job tests the triggering commit. To re-run a probe by hand, dispatch with
+`--ref <queue branch>`; any other ref fails.
 
 ```bash
 git push origin HEAD:refs/heads/queue/t0001/p1-full
+gh workflow run merge-train.yml --ref queue/t0001/p1-full
 gh api "repos/microsoft/apm/commits/$(git rev-parse HEAD)/check-runs?check_name=train-gate"
 ```
 
