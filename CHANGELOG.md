@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Root `apm.yml` `marketplaces:` resolve without registration and win over same-named registrations and stale locks; policy `marketplace.allow` restricts their origins. (closes #2903, #4006)
+- `apm uninstall --trust-lockfile` deletes a file lacking deployment evidence only when its bytes match apm.lock.yaml and no receipt or render exists; other files are kept. (closes #4295, #4603)
 
 ### Added
 
