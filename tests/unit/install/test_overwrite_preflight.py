@@ -33,34 +33,45 @@ class _Prompts:
         raise self.error
 
 
-def _plan(found: Path, error: BaseException) -> list:
+def _refuse(found: Path, error: BaseException) -> SimpleNamespace:
+    """Run the commit gate's refusal over one package whose plan fails after a find."""
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
     target = SimpleNamespace(name="copilot", primitives={"prompts": object()})
     ctx = SimpleNamespace(
-        integrators={"prompt": _Prompts(found, error)},
+        integrators={"prompt": _Prompts(found, error), "skill": None},
         project_root=found.parent,
         force=False,
         scope=None,
+        targets=[],
+        diagnostics=DiagnosticCollector(),
+        overwrite_preflight_refused=False,
     )
+    ctx.integrators["skill"] = SimpleNamespace(_materialization_session=object())
     plan = SimpleNamespace(
         source_plan=object(),
         codex_native=None,
         target_selection=SimpleNamespace(targets=[target]),
         projection_targets=[target],
     )
-    skill = SimpleNamespace(_materialization_session=None)
     package = SimpleNamespace(dependency_ref=None)
     with patch("apm_cli.copilot_plugins.capability.admits_native_plugin", return_value=False):
-        return commit_gate._planned_keeps(ctx, skill, package, plan, None)
+        commit_gate._refuse_unproven_overwrites(ctx, [(package, plan, None)])
+    return ctx
 
 
-def test_a_planning_failure_keeps_the_unproven_files_already_found(tmp_path: Path) -> None:
-    found = tmp_path / "review.prompt.md"
+def test_a_planning_failure_still_refuses_the_unproven_files_already_found(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ctx = _refuse(tmp_path / "review.prompt.md", RuntimeError("render failed"))
+    ctx.diagnostics.render_summary()
 
-    kept = _plan(found, RuntimeError("render failed"))
-
-    assert kept == [(".", found, None)]
+    captured = capsys.readouterr()
+    output = " ".join((captured.out + captured.err).split())
+    assert ctx.overwrite_preflight_refused is True
+    assert "Kept review.prompt.md" in output, output
 
 
 def test_a_planned_write_is_never_swallowed(tmp_path: Path) -> None:
     with pytest.raises(write_seam.PlannedWriteError):
-        _plan(tmp_path / "review.prompt.md", write_seam.PlannedWriteError("wrote"))
+        _refuse(tmp_path / "review.prompt.md", write_seam.PlannedWriteError("wrote"))
