@@ -236,20 +236,6 @@ _AUTHOR_INSTALL_STATE_KEYS = (
 )
 
 
-def _bundle_lockfile_version(lockfile: LockFile) -> str:
-    """The schema version of the lock without the packager's local hashes.
-
-    Local deployed-file hashes alone make a lock current schema (RA-018); the
-    bundle strips them, so they must not set the bundle lock's version.
-    """
-    import copy
-
-    shipped = copy.copy(lockfile)
-    shipped.local_deployed_file_hashes = {}
-    shipped.sync_lockfile_version()
-    return shipped.lockfile_version
-
-
 def enrich_lockfile_for_pack(
     lockfile: LockFile,
     fmt: str | BundleFormat,
@@ -314,8 +300,6 @@ def enrich_lockfile_for_pack(
     if isinstance(data, dict):
         for key in _AUTHOR_INSTALL_STATE_KEYS:
             data.pop(key, None)
-        if "lockfile_version" in data:
-            data["lockfile_version"] = _bundle_lockfile_version(lockfile)
         # The bundle lock is a new artifact: its generator is the packer, so a
         # consumer older than this APM is warned (#3962).
         from apm_cli.deps.lockfile import installed_apm_version
