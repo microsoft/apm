@@ -1,0 +1,18 @@
+{
+  "issue": 4639,
+  "fixed_in": "Unreleased",
+  "summary": "A plugin installed from a local marketplace (catalog directory or direct marketplace.json) made apm install --frozen and apm audit --ci fail on the converged project, because the frozen comparison demanded a locked commit; local catalog rows are now locked by their content, so frozen replays them with no writes, while a changed catalog entry or plugin content still fails frozen before any write.",
+  "failure_modes": [
+    "outcome",
+    "reference"
+  ],
+  "properties": [
+    "lockfile.frozen_preserves_bytes",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_local_catalog_frozen_lifecycle.py::test_local_catalog_plugin_passes_frozen_and_refuses_changes_without_writes",
+    "tests/unit/marketplace/test_locked_selection_evidence.py::test_local_catalog_rows_are_locked_by_content_not_commit",
+    "tests/unit/marketplace/test_locked_selection_evidence.py::test_local_catalog_rows_reread_the_catalog_and_frozen_keeps_the_lock"
+  ]
+}

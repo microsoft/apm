@@ -790,6 +790,12 @@ EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
         "P-LAW-ownership.preserve_unowned",
         "commands/approve.py: approve acts only on packages the lockfile records",
     ),
+    "pair|PRIM=lsp|DEPLOYED=unowned": ExpectedRefusal(
+        1,
+        r"LSP server '\S+' conflicts with the existing",
+        "P-LAW-ownership.preserve_unowned",
+        "integration/lsp_integrator.py: a user's LSP entry of the same name is preserved (#4628)",
+    ),
     "pair|PRIM=bin|DEPLOYED=unowned": ExpectedRefusal(
         1,
         r"already exists and the previous apm\.lock\.yaml does not record it",
