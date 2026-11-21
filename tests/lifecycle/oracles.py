@@ -2,7 +2,7 @@
 
 ``check_cross_cutting(before, after, result, model, op)`` runs after every
 generated step. Each law aliases the lifecycle-ledger properties it refines
-(``tests/fixtures/lifecycle_bug_ledger.json``); laws with no ledger property
+(``tests/fixtures/lifecycle_bug_ledger/``); laws with no ledger property
 are output contracts the ledger does not cover.
 
 A law violation that a model declares as a known failing cell is a STRICT
@@ -28,13 +28,14 @@ from typing import Protocol
 
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.content_hash import compute_file_hash
+from scripts.lifecycle_ledger import read_ledger
 from tests.lifecycle import receipts
 from tests.lifecycle.model.expected import exit_contract
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
-LEDGER_PATH = Path(__file__).parents[1] / "fixtures" / "lifecycle_bug_ledger.json"
+_REPO_ROOT = Path(__file__).parents[2]
 
 # Machine step names -> the OP factor of the obligation vocabulary.
 _OP_FAMILIES: Mapping[str, str] = {
@@ -54,14 +55,22 @@ class OracleLaw:
 
 
 ORACLE_LAWS: Mapping[str, OracleLaw] = {
-    "I1": OracleLaw("lock and deployed files agree", ("outcome.status_matches_state",)),
+    "I1": OracleLaw(
+        "lock and deployed files agree "
+        "(I1-X2: a path holding exactly the bytes a scenario declared as a user write "
+        "is exempt from lock==disk and earns no I1 receipt; APM must keep those bytes)",
+        ("outcome.status_matches_state",),
+    ),
     "I2": OracleLaw("a converged operation repeats as a byte no-op", ("idempotency.byte_stable",)),
     "I3": OracleLaw(
         "install --frozen succeeds iff audit --ci is clean",
         ("outcome.status_matches_state", "lockfile.frozen_preserves_bytes"),
     ),
     "I4": OracleLaw(
-        "deny, revoke and tightening never widen what is deployed",
+        "deny, revoke and tightening never widen what is deployed "
+        "(I4-X2: a gate surface whose every deployed path holds exactly declared user "
+        "bytes (Scenario.user_write) is exempt from I4 only if the step announces the "
+        "keep AND audit --ci fails naming the path; it earns no I4 receipt)",
         ("routing.authorized_targets_only",),
     ),
     "I5": OracleLaw(
@@ -133,6 +142,14 @@ class Observation:
     surface_paths: Mapping[str, frozenset[str]] = field(default_factory=dict)
     # True when deploy_root is the user deploy root, where native plugin roots live.
     user_scope: bool = False
+    # I1-X2: deploy-root-relative path -> sha256 of the bytes a scenario wrote
+    # there as a declared user write (Scenario.user_write).
+    user_bytes: Mapping[str, str] = field(default_factory=dict)
+    # I4-X2: deployed cell -> the deploy-root-relative paths found for it.
+    cell_paths: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # I4-X2: (exit code, output) of ``audit --ci`` run right after the step,
+    # when a cell the gate does not allow holds only declared user bytes.
+    audit_ci: tuple[int, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -262,7 +279,7 @@ class OracleModel(Protocol):
 
 def ledger_property_ids() -> frozenset[str]:
     """Return the property ids the oracle laws may alias."""
-    ledger = json.loads(LEDGER_PATH.read_text(encoding="ascii"))
+    ledger = read_ledger(_REPO_ROOT)
     return frozenset(row["id"] for row in ledger["property_catalog"])
 
 
@@ -390,8 +407,9 @@ def _i1_lock_deployed(
 ) -> list[Violation] | None:
     del before, result, model, op
     lock = after.lock
+    found, user = _user_write_violations(after)
     if lock is None and not after.managed_paths and not after.services:
-        return None
+        return found or None
     recorded: dict[str, str | None] = {}
     if lock is not None:
         for record in lock.deployment_ledger.records.values():
@@ -400,22 +418,41 @@ def _i1_lock_deployed(
         for dependency in lock.get_package_dependencies():
             recorded.update(dependency.deployed_file_hashes)
         recorded.update(lock.local_deployed_file_hashes)
-    found = []
     for relative, digest in sorted(recorded.items()):
         path = after.deploy_root / relative
         # A record without a hash may be a directory (a deployed skill); it must exist.
         if not (path.is_file() if digest else path.exists()):
             found.append(Violation("I1", f"recorded file is missing: {relative}"))
         # The lock records line-ending-normalized hashes (apm#1952), so CRLF on Windows matches.
-        elif digest and digest != compute_file_hash(path):
+        elif digest and digest != compute_file_hash(path) and relative not in user:
             found.append(Violation("I1", f"recorded hash does not match disk: {relative}"))
     native, native_found = _native_plugin_recorded(after)
     found.extend(native_found)
-    for relative in sorted(after.managed_paths - set(recorded) - native):
+    for relative in sorted(after.managed_paths - set(recorded) - native - user):
         if (after.deploy_root / relative).exists():
             found.append(Violation("I1", f"deployed file is not in the lock: {relative}"))
     found.extend(_service_claim_violations(after))
-    return found
+    # An exempted path earns no I1 receipt for the step (I1-X2).
+    return found if found or not user else None
+
+
+def _user_write_violations(after: Observation) -> tuple[list[Violation], set[str]]:
+    """I1-X2: (violations, exempt paths) of the scenario's declared user writes.
+
+    A declared path is the user's while it holds exactly the declared bytes;
+    APM must keep them, so any other content (or a removal) is a violation.
+    """
+    found: list[Violation] = []
+    exempt: set[str] = set()
+    for relative, declared in sorted(after.user_bytes.items()):
+        path = after.deploy_root / relative
+        if not path.is_file():
+            found.append(Violation("I1", f"I1-X2: the user's file was removed: {relative}"))
+        elif hashlib.sha256(path.read_bytes()).hexdigest() != declared:
+            found.append(Violation("I1", f"I1-X2: the user's bytes were changed: {relative}"))
+        else:
+            exempt.add(relative)
+    return found, exempt
 
 
 def _native_plugin_recorded(after: Observation) -> tuple[set[str], list[Violation]]:
@@ -542,10 +579,53 @@ def _i4_gate_monotonicity(
     del before
     if not op.mutating or (result is not None and result.returncode != 0):
         return None
-    return [
-        Violation("I4", f"{surface} still deployed but not allowed")
-        for surface in sorted(after.deployed - model.allowed_surfaces())
-    ]
+    output = "" if result is None else f"{result.stdout}\n{result.stderr}"
+    found: list[Violation] = []
+    exempt = False
+    for surface in sorted(after.deployed - model.allowed_surfaces()):
+        gap = _i4_keep_gap(surface, after, output)
+        if gap is None:
+            exempt = True
+        else:
+            found.append(Violation("I4", f"{surface} still deployed but not allowed{gap}"))
+    # An exempted surface earns no I4 receipt for the step (I4-X2).
+    return found if found or not exempt else None
+
+
+def user_kept_cells(after: Observation, allowed: frozenset[str]) -> frozenset[str]:
+    """I4-X2: deployed cells the gate does not allow whose every path holds user bytes."""
+    return frozenset(
+        cell
+        for cell in after.deployed - allowed
+        if after.cell_paths.get(cell)
+        and all(_holds_user_bytes(after, path) for path in after.cell_paths[cell])
+    )
+
+
+def _holds_user_bytes(after: Observation, relative: str) -> bool:
+    declared = after.user_bytes.get(relative)
+    path = after.deploy_root / relative
+    return (
+        declared is not None
+        and path.is_file()
+        and hashlib.sha256(path.read_bytes()).hexdigest() == declared
+    )
+
+
+def _i4_keep_gap(surface: str, after: Observation, output: str) -> str | None:
+    """I4-X2: None for an announced, detected keep of user bytes; else what is missing."""
+    if surface not in user_kept_cells(after, frozenset()):
+        return ""
+    paths = sorted(after.cell_paths[surface])
+    silent = [p for p in paths if not re.search(rf"\bKept\b[^\n]*{re.escape(p)}", output)]
+    if silent:
+        return f" (I4-X2: the keep is not announced: {silent})"
+    code, text = after.audit_ci or (0, "")
+    flat = " ".join(text.split())
+    unnamed = [p for p in paths if p not in flat]
+    if code == 0 or unnamed:
+        return f" (I4-X2: an undetected keep: audit --ci exited {code}, not naming {unnamed})"
+    return None
 
 
 def _i5_write_set(

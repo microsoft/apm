@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +23,6 @@ import pytest
 from scripts import check_lifecycle_evidence as gate
 from scripts.lifecycle_contracts import (
     CONTRACT_ID,
-    LEDGER,
     REQUIRED_WITNESSES,
     EvidenceError,
     candidate_contract,
@@ -32,6 +32,7 @@ from scripts.lifecycle_contracts import (
     validate_contracts,
     validate_execution,
 )
+from scripts.lifecycle_ledger import LEDGER_DIR, read_ledger, write_ledger
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.isolated_apm_environment import DURABLE_ENVIRONMENT_ROOTS, IsolatedApmEnvironment
 from tests.utils.lifecycle_evidence import (
@@ -50,7 +51,7 @@ pytest_plugins = ["pytester"]
 
 
 def _ledger() -> dict[str, Any]:
-    return load_ledger((gate.ROOT / LEDGER).read_text(encoding="utf-8"))
+    return load_ledger(gate.ROOT)
 
 
 def _sample() -> tuple[dict[str, Any], dict[str, Any]]:
@@ -170,13 +171,11 @@ def test_contract_edits_cannot_vacuously_remove_proof(mutation: str) -> None:
 def test_legacy_records_cannot_disappear(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str
 ) -> None:
-    original = json.loads((gate.ROOT / LEDGER).read_text())
+    original = read_ledger(gate.ROOT)
     current = copy.deepcopy(original)
     current[field].pop()
-    path = tmp_path / LEDGER
-    path.parent.mkdir(parents=True)
-    path.write_text(json.dumps(current))
-    monkeypatch.setattr("scripts.lifecycle_contracts.git", lambda *_: json.dumps(original))
+    write_ledger(tmp_path, current)
+    monkeypatch.setattr("scripts.lifecycle_contracts.read_ledger_at", lambda *_: original)
     with pytest.raises(EvidenceError, match="legacy"):
         candidate_contract(tmp_path, "a" * 40, command_inventory())
 
@@ -612,9 +611,9 @@ def external_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     schema = checkout / "tests/fixtures/lifecycle_completion.schema.json"
     schema.parent.mkdir(parents=True)
     schema.write_bytes((gate.ROOT / "tests/fixtures/lifecycle_completion.schema.json").read_bytes())
-    ledger = (gate.ROOT / LEDGER).read_text(encoding="utf-8")
-    (checkout / LEDGER).write_text(ledger, encoding="utf-8")
-    monkeypatch.setattr("scripts.lifecycle_contracts.git", lambda *_: ledger)
+    shutil.copytree(gate.ROOT / LEDGER_DIR, checkout / LEDGER_DIR)
+    ledger = read_ledger(gate.ROOT)
+    monkeypatch.setattr("scripts.lifecycle_contracts.read_ledger_at", lambda *_: ledger)
     monkeypatch.setattr(gate, "ROOT", checkout)
     return checkout
 

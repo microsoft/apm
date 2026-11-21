@@ -1,0 +1,20 @@
+{
+  "issue": 3670,
+  "summary": "Traps pack/marketplace producer bugs: phantom --allow-head, missing tags, hook scripts, dropped symlinks (#3670); pack and marketplace block a row.",
+  "failure_modes": [
+    "outcome",
+    "reference",
+    "transaction"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "source.ref_cache_coherent",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_pack_producer_refs_lifecycle.py::test_branch_ref_pack_failure_names_a_real_recovery",
+    "tests/integration/test_marketplace_pack_producer_refs_lifecycle.py::test_pack_carries_relative_hook_script_like_install",
+    "tests/integration/test_marketplace_pack_producer_refs_lifecycle.py::test_pack_names_each_dropped_source_symlink",
+    "tests/integration/test_marketplace_pack_producer_refs_lifecycle.py::test_package_add_and_set_refuse_a_missing_tag"
+  ]
+}

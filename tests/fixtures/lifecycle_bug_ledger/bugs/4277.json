@@ -1,0 +1,17 @@
+{
+  "issue": 4277,
+  "fixed_in": "Unreleased",
+  "summary": "A dependency chain deeper than the transitive depth cap dropped the dependency past the cap and installed an incomplete graph instead of failing.",
+  "failure_modes": [
+    "outcome",
+    "transaction"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_dependency_depth_cap_lifecycle.py::test_install_fails_when_the_chain_exceeds_the_depth_cap",
+    "tests/spec_conformance/test_resolve_behavior_reqs.py::test_exceeding_depth_cap_fails_naming_the_chain"
+  ]
+}

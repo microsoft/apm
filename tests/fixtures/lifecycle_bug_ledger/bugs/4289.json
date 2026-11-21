@@ -1,0 +1,14 @@
+{
+  "issue": 4289,
+  "fixed_in": "Unreleased",
+  "summary": "A legacy MCP entry left in a config file that two targets share (Claude Code and Copilot CLI read .mcp.json) is reported once per file.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_slashed_server_cleanup_lifecycle.py::test_removing_slashed_server_keeps_user_and_declared_short_name_entries"
+  ]
+}

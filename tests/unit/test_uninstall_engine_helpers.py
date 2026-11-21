@@ -870,3 +870,118 @@ class TestValidateUninstallPackagesMarketplace:
         mock_resolve.assert_called_once_with(
             "my-plugin", "official", auth_resolver=None, enforce_ref_pins=False
         )
+
+
+# ===========================================================================
+# shrink_retired_paths (#4313)
+# ===========================================================================
+
+
+class _ShrunkNode:
+    def __init__(self, skills, targets):
+        from apm_cli.models.dependency.subsets import SkillTargetSelection
+
+        self._selection = SkillTargetSelection.from_lock_fields(skills, targets)
+
+    def lock_selection(self):
+        return self._selection
+
+
+class TestShrinkRetiredPaths:
+    """The files a shrinking survivor selection stops deploying."""
+
+    def _lockfile(self):
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/bundle",
+                resolved_commit="abc",
+                deployed_files=[
+                    ".agents/skills/alpha",
+                    ".agents/skills/alpha/SKILL.md",
+                    ".agents/skills/beta",
+                    ".agents/skills/beta/SKILL.md",
+                    ".claude/skills/alpha",
+                    ".claude/skills/alpha/SKILL.md",
+                ],
+            )
+        )
+        return lockfile
+
+    def test_unselected_skills_and_dropped_targets_retire_with_their_members(self):
+        from apm_cli.commands.uninstall.selection_shrink import shrink_retired_paths
+
+        retired = shrink_retired_paths(
+            self._lockfile(), {"org/bundle": _ShrunkNode(["alpha"], ["copilot"])}
+        )
+
+        assert retired == {
+            ".agents/skills/beta",
+            ".agents/skills/beta/SKILL.md",
+            ".claude/skills/alpha",
+            ".claude/skills/alpha/SKILL.md",
+        }
+
+    def test_an_unrestricted_survivor_retires_nothing(self):
+        from apm_cli.commands.uninstall.selection_shrink import shrink_retired_paths
+
+        assert shrink_retired_paths(self._lockfile(), {"org/bundle": _ShrunkNode(None, None)}) == (
+            set()
+        )
+
+    def test_a_skill_selected_for_another_target_retires_from_this_root(self):
+        from apm_cli.commands.uninstall.selection_shrink import shrink_retired_paths
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        node = _ShrunkNode(None, None)
+        node._selection = merge_edge_pairings([(["alpha"], ["claude"]), (["beta"], ["copilot"])])
+
+        retired = shrink_retired_paths(self._lockfile(), {"org/bundle": node})
+
+        assert retired == {".agents/skills/alpha", ".agents/skills/alpha/SKILL.md"}
+
+    def test_a_retired_skill_takes_its_hash_only_members(self):
+        from apm_cli.commands.uninstall.selection_shrink import shrink_retired_paths
+
+        lockfile = self._lockfile()
+        lockfile.get_dependency("org/bundle").deployed_file_hashes = {
+            ".agents/skills/beta/assets/data.json": "sha256:" + "0" * 64
+        }
+
+        retired = shrink_retired_paths(lockfile, {"org/bundle": _ShrunkNode(["alpha"], None)})
+
+        assert ".agents/skills/beta/assets/data.json" in retired
+
+    def test_a_path_another_shrinking_survivor_keeps_is_retained(self):
+        from apm_cli.commands.uninstall.selection_shrink import shrink_path_split
+
+        lockfile = self._lockfile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/other",
+                resolved_commit="def",
+                deployed_files=[".agents/skills/beta", ".agents/skills/beta/SKILL.md"],
+            )
+        )
+
+        retired, retained = shrink_path_split(
+            lockfile,
+            {
+                "org/bundle": _ShrunkNode(["alpha"], None),
+                "org/other": _ShrunkNode(None, None),
+            },
+        )
+
+        assert ".agents/skills/beta/SKILL.md" in retired & retained
+
+    def test_dynamic_root_targets_are_never_resolved(self):
+        from apm_cli.commands.uninstall.selection_shrink import _skill_root_sharers
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        dynamic = {n for n, p in KNOWN_TARGETS.items() if p.user_root_resolver is not None}
+        assert dynamic, "a dynamic-root target must exist for this check"
+
+        sharers = _skill_root_sharers()
+
+        assert ".agents/skills" in sharers
+        assert not dynamic & set().union(*sharers.values())

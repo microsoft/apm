@@ -177,8 +177,11 @@ Uninstall deletes a removed package's files only with evidence that APM wrote
 their current bytes: a local deployment receipt, or byte equality with what the
 locked version renders. It renders before removing the package from
 `apm_modules/`, fetching the locked commit when the checkout is gone; a lockfile
-hash alone is never evidence. If a file it would delete was edited or has no
-evidence, uninstall exits 1 before changing anything: `apm.yml`,
+hash alone is never evidence. The same check covers files a surviving shared
+package stops deploying because the removed package was the only one selecting
+them (for example a skill only it chose from a shared bundle). If a file it
+would delete was edited or has no evidence, uninstall exits 1 before changing
+anything: `apm.yml`,
 `apm.lock.yaml`, `apm_modules/` and every file stay as they were. It names each
 file and why, then offers two remedies:
 

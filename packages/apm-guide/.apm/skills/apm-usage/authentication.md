@@ -342,6 +342,12 @@ and to any `*.ghe.com` host a dependency names. There is no per-host token;
 `GITHUB_APM_PAT_{ORG}` scopes a token to one organization name on any of
 these hosts. GHES joins this chain only when `GITHUB_HOST` names it.
 
+`APM_STRICT_HOST_CREDENTIALS=1` (also `true`/`yes`/`on`; unrecognised values
+turn it on with a warning) keeps those env tokens on the configured host
+(`GITHUB_HOST`, else `github.com`). Other `github.com` / `*.ghe.com` hosts get
+`gh auth token` and `git credential fill` run without GitHub token variables;
+sign in with `gh auth login --hostname <host>` or a credential helper.
+
 ## Enterprise Managed Users (EMU)
 
 - EMU orgs live on `github.com` (e.g., `contoso-microsoft`) or `*.ghe.com`

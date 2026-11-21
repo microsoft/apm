@@ -1,0 +1,13 @@
+{
+  "issue": 3671,
+  "summary": "The deps-list to uninstall-key interface is a distinct command contract.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_deps_list_uninstall_key_lifecycle.py::test_listed_key_uninstalls_a_self_hosted_gitlab_dependency"
+  ]
+}

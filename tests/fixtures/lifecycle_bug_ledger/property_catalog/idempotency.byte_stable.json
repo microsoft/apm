@@ -1,0 +1,6 @@
+{
+  "id": "idempotency.byte_stable",
+  "phase": 1,
+  "oracle_tier": "open-world",
+  "law": "Repeating a converged operation leaves durable bytes unchanged."
+}

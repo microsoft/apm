@@ -71,16 +71,18 @@
     {
       "id": "native-lifecycle-evidence",
       "decision": "Bounded #2867 fresh source-Python lifecycle evidence, immutable witness bindings and candidate-bound native completion; not repository shipping policy",
-      "owner": "scripts/lifecycle_contracts.py (authored obligations and execution validation) + scripts/check_lifecycle_evidence.py (candidate identity and completion) + tests/utils/lifecycle_evidence.py (fresh runner/Hypothesis observation)",
+      "owner": "scripts/lifecycle_contracts.py (authored obligations and execution validation) + scripts/check_lifecycle_evidence.py (candidate identity and completion) + tests/utils/lifecycle_evidence.py (fresh runner/Hypothesis observation) + scripts/lifecycle_ledger.py (the one bug-ledger reader: per-row directory, else the legacy file)",
       "selectors": [
         "scripts/check_lifecycle_evidence.py",
         "scripts/lifecycle_contracts.py",
+        "scripts/lifecycle_ledger.py",
         "tests/utils/lifecycle_evidence.py",
         "tests/utils/apm_lifecycle_runner.py",
         "tests/utils/isolated_apm_environment.py",
-        "tests/fixtures/lifecycle_bug_ledger.json",
+        "tests/fixtures/lifecycle_bug_ledger/*",
         "tests/fixtures/lifecycle_completion.schema.json",
         "tests/unit/scripts/test_lifecycle_evidence.py",
+        "tests/unit/scripts/test_lifecycle_ledger.py",
         "tests/integration/test_architecture_native_lifecycle_evidence.py"
       ],
       "guards": ["contracts-tooling-native-lifecycle-evidence"]
