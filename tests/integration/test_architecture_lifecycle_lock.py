@@ -8,7 +8,7 @@ import pytest
 
 from scripts.architecture_linter.runner import run_selected_rules
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 _ROOT = Path(__file__).resolve().parents[2]
 _RULE_ID = "install-deployment-lifecycle-serialization"
