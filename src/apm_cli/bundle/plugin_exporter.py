@@ -163,8 +163,12 @@ def _collect_apm_components(
     # agents/ -> agents/
     _collect_flat(apm_dir / "agents", "agents", components, skipped=skipped_links)
 
-    # skills/ -> skills/ (preserve sub-directory structure)
-    _collect_recursive(apm_dir / "skills", "skills", components, skipped=skipped_links)
+    # skills/ -> skills/ (preserve sub-directory structure). When .apm/ authors
+    # no skill, the root skills/ install deploys is packed instead (#4709).
+    if _packs_root_skills(apm_dir.parent):
+        _collect_recursive(apm_dir.parent / "skills", "skills", components, skipped=skipped_links)
+    else:
+        _collect_recursive(apm_dir / "skills", "skills", components, skipped=skipped_links)
 
     # prompts/ -> commands/ (rename .prompt.md -> .md)
     _collect_recursive(
@@ -184,6 +188,25 @@ def _collect_apm_components(
     _collect_recursive(apm_dir / "extensions", "extensions", components, skipped=skipped_links)
 
     return components
+
+
+def _packs_root_skills(package_root: Path) -> bool:
+    """Whether pack takes skills from root ``skills/`` beside an ``.apm/`` tree.
+
+    Only when ``.apm/skills/`` authors no skill and the root ``skills/`` holds
+    one: the skills a path install deploys then come from the root (see
+    ``SkillIntegrator.skill_source_paths``). With skills in both, ``.apm/``
+    stays the publishing source and the root directory is reported skipped.
+    """
+    from ..integration.skill_integrator import SkillIntegrator
+
+    root = package_root / "skills"
+    if root.is_symlink() or any((package_root / ".apm" / "skills").glob("*/SKILL.md")):
+        return False
+    return any(
+        source.parent == root
+        for source in SkillIntegrator.skill_source_paths(package_root).values()
+    )
 
 
 def _collect_root_plugin_components(
@@ -230,6 +253,8 @@ def _warn_skipped_source_links(project_root: Path, links: list[Path], logger=Non
 def _warn_skipped_root_components(project_root: Path, logger=None) -> None:
     """Explain why plugin-native root sources are not packed."""
     for source in find_plugin_root_sources(project_root):
+        if source == "skills" and _packs_root_skills(project_root):
+            continue
         if source == "hooks.json":
             message = (
                 "Skipping root-level hooks.json because .apm/ is present. "
