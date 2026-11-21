@@ -239,6 +239,19 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/install/exec_gate.py", 717, 'target.name == "claude"'),
         ),
     ),
+    "U-BIN-OPS": (
+        "a gate level of PRIM=bin under audit, prune, pack, marketplace or a local bundle "
+        "install is vacuous (OP x PRIM x GATE only): bin/ deploys only for a marketplace "
+        "plugin at user scope (exec_gate.plugin_bin_deployable), these commands have no "
+        "user-scope form, and a local bundle is never a marketplace plugin, so no gate "
+        "level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees "
+        "proves nothing about the gate). An org-policy level stays its own cell (U2 "
+        "no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses",
+        (
+            Ev("src/apm_cli/install/exec_gate.py", 713, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 714, "InstallScope.USER"),
+        ),
+    ),
     "U9": (
         "approve/deny with no prior decision is reachable; --list and --pending are read-only",
         (Ev(_APPROVE, 291, "if list_decisions:"), Ev(_APPROVE, 295, "if pending:")),
@@ -468,6 +481,8 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
         return "U8"
     if u_bin_applies(cell) and u_bin_pinned():
         return "U-BIN"
+    if u_bin_ops_applies(cell) and u_bin_pinned():
+        return "U-BIN-OPS"
     if (deployed in ("clean", "edited") and lock == "absent") or (
         deployed == "present-provenance-unknown" and lock not in (None, "absent")
     ):
@@ -497,11 +512,18 @@ def _u8_target(cell: Mapping[str, str]) -> dict[str, str] | str | None:
 
 
 def _source_mapping(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | None:
-    """(target, rule) of a mapping the source decides: U8, or U-FIRST-PARTY-MCP."""
+    """(target, rule) of a mapping the source decides: U8, or U-FIRST-PARTY-MCP.
+
+    ``install --mcp NAME`` declares NAME in the root apm.yml, so the server it
+    installs is first-party too: its executable-gate levels map the same way.
+    """
     target = _u8_target(cell)
     if target is not None:
         return target, "U8"
-    if cell.get("SRC") in MCP_SOURCES and GATE_AUTHORITY.get(cell.get("GATE")) == "executable-gate":
+    first_party = cell.get("SRC") in MCP_SOURCES or (
+        cell.get("OP") == "mcp-install" and cell.get("PRIM") == "mcp" and "SRC" not in cell
+    )
+    if first_party and GATE_AUTHORITY.get(cell.get("GATE")) == "executable-gate":
         return FIRST_PARTY_MCP_CELL, "U-FIRST-PARTY-MCP"
     return None
 
@@ -601,6 +623,20 @@ U_BIN_PIN = "a2fb54bea5abdfe3d5aababbe1a10461fc5a89ec357c94f0dbca9e21b57e6851"
 def u_bin_applies(cell: Mapping[str, str]) -> bool:
     """bin/ at project scope: the shape U-BIN defines away (exec_gate.py:679)."""
     return cell.get("PRIM") == "bin" and cell.get("SCOPE") == "project"
+
+
+# Commands with no user-scope form, and the local bundle install: bin/ never deploys there.
+BIN_LESS_OPS = frozenset({"audit", "prune", "pack", "marketplace", "bundle-install"})
+
+
+def u_bin_ops_applies(cell: Mapping[str, str]) -> bool:
+    """U-BIN-OPS: an OP x PRIM x GATE cell of bin/ under a command bin/ never reaches."""
+    return (
+        set(cell) == {"OP", "PRIM", "GATE"}
+        and cell["PRIM"] == "bin"
+        and cell["OP"] in BIN_LESS_OPS
+        and GATE_AUTHORITY.get(cell["GATE"]) != "org-policy"
+    )
 
 
 def u_bin_pinned() -> bool:

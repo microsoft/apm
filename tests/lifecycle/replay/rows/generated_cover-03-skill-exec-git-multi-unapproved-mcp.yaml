@@ -67,13 +67,11 @@ when:
   - pair|OP=lock|GATE=unapproved-exec
 - run: apm audit
   cells:
-  - T1|OP=audit|PRIM=bin|GATE=unapproved-exec
   - T1|OP=audit|PRIM=hook|GATE=unapproved-exec
   - T1|OP=audit|PRIM=mcp|GATE=unapproved-exec
   - pair|OP=audit|GATE=unapproved-exec
 - run: apm pack --dry-run
   cells:
-  - T1|OP=pack|PRIM=bin|GATE=unapproved-exec
   - T1|OP=pack|PRIM=hook|GATE=unapproved-exec
   - T1|OP=pack|PRIM=mcp|GATE=unapproved-exec
   - T1|OP=pack|PRIM=skill|GATE=none
@@ -98,13 +96,11 @@ when:
   - pair|GATE=allowed|TGT=multi-unchanged
 - run: apm pack --dry-run
   cells:
-  - T1|OP=pack|PRIM=bin|GATE=allowed
   - T1|OP=pack|PRIM=hook|GATE=allowed
   - T1|OP=pack|PRIM=mcp|GATE=allowed
   - pair|OP=pack|GATE=allowed
 - run: apm prune --dry-run
   cells:
-  - T1|OP=prune|PRIM=bin|GATE=allowed
   - T1|OP=prune|PRIM=hook|GATE=allowed
   - T1|OP=prune|PRIM=mcp|GATE=allowed
   - pair|OP=prune|GATE=allowed
