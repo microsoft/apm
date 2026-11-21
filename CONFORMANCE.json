@@ -70,9 +70,11 @@
       "keyword": "MUST",
       "section": "5.4",
       "status": "active",
-      "test_count": 1,
+      "test_count": 3,
       "tests": [
-        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_declares_apiversion"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_installed_plugins_schema_rejects_non_array_container",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_declares_apiversion",
+        "tests/spec_conformance/test_lockfile_reqs.py::test_nonempty_installed_plugins_require_v3_in_schema"
       ]
     },
     {
