@@ -72,6 +72,7 @@ from apm_cli.core.scope import manifest_file
 
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger
+from ..core.deprecations import UPDATE_REFRESHES_DEPENDENCIES, deprecation_message
 from ..core.target_catalog import target_help_fragment
 from ..core.target_detection import TargetParamType
 from ..deps.github_downloader import GitHubPackageDownloader
@@ -605,8 +606,11 @@ def _no_ref_change_summary(exec_reconciled: bool, provenance_restored: bool) -> 
     return "Restored dependency cache without changing refs."
 
 
-def _reverified_lock(lockfile, lock_path: Path, logger, *, dry_run: bool):
+def _reverified_lock(lockfile, lock_path: Path, logger, *, dry_run: bool, marketplaces=None):
     """Re-verify locked marketplace provenance before planning; fail closed (#4228).
+
+    *marketplaces* is the root project's ``marketplaces:`` map (``None`` at user
+    scope): its names resolve through apm.yml, not a registration (#2903).
 
     Returns ``(lockfile, restored)``: the lockfile with restored rows applied
     in memory, and their provenance for the lockfile phase. The update's one
@@ -616,6 +620,7 @@ def _reverified_lock(lockfile, lock_path: Path, logger, *, dry_run: bool):
     from apm_cli.marketplace.catalog_origin import locked_provenance, reverify_locked_provenance
     from apm_cli.marketplace.client import catalog_cache_writes_on_success
     from apm_cli.marketplace.errors import MarketplaceError
+    from apm_cli.marketplace.project_marketplaces import bind_project_marketplaces
 
     rows = lockfile.dependencies if lockfile is not None else {}
     before = {key: locked_provenance(dep) for key, dep in rows.items()}
@@ -623,7 +628,10 @@ def _reverified_lock(lockfile, lock_path: Path, logger, *, dry_run: bool):
         # A refused re-verification leaves the catalog cache unchanged; a
         # completed one persists what it fetched, validators included, and a
         # dry run persists nothing (#4484).
-        with catalog_cache_writes_on_success(commit=not dry_run):
+        with (
+            bind_project_marketplaces(marketplaces),
+            catalog_cache_writes_on_success(commit=not dry_run),
+        ):
             restored = reverify_locked_provenance(lockfile, manifest_file(lock_path.parent))
     except MarketplaceError as exc:
         _rich_error(str(exc), symbol="error")
@@ -781,11 +789,7 @@ def update(
                     f"(no apm.yml found). {CLI_BINARY_OUTDATED.sentence()}",
                     symbol="warning",
                 )
-            _rich_warning(
-                "'apm update' refreshes APM dependencies. "
-                f"{CLI_BINARY_OUTDATED.sentence()} Forwarding for back-compat (deprecated).",
-                symbol="warning",
-            )
+            _rich_warning(deprecation_message("update-self-updater"), symbol="warning")
             ctx.invoke(_self_update_cmd, check=check_only)
             return
 
@@ -798,13 +802,7 @@ def update(
                     "Use 'apm update --dry-run' to preview dependency changes.",
                     symbol="warning",
                 )
-            _rich_warning(
-                "'apm update --check' is the deprecated self-updater shim. "
-                "Use 'apm update --dry-run' to preview dependency changes, "
-                "or 'apm self-update --check' to check for a new CLI binary. "
-                "Forwarding for back-compat (deprecated).",
-                symbol="warning",
-            )
+            _rich_warning(deprecation_message("update-check"), symbol="warning")
             ctx.invoke(_self_update_cmd, check=True)
             return
 
@@ -906,7 +904,7 @@ def _run_dep_update_locked(
     # the CLI binary.
     if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
         _rich_info(
-            f"'apm update' refreshes APM dependencies. {CLI_BINARY_OUTDATED.sentence()}",
+            f"{UPDATE_REFRESHES_DEPENDENCIES} {CLI_BINARY_OUTDATED.sentence()}",
             symbol="info",
         )
 
@@ -1081,7 +1079,13 @@ def _run_dep_update_locked(
     _mcp_lsp_project_root = get_deploy_root(scope)
     _lock_path = get_lockfile_path(_apm_dir)
     _existing_lock, _restored_provenance = _reverified_lock(
-        LockFile.read(_lock_path), _lock_path, logger, dry_run=dry_run
+        LockFile.read(_lock_path),
+        _lock_path,
+        logger,
+        dry_run=dry_run,
+        marketplaces=None
+        if scope is InstallScope.USER
+        else getattr(apm_package, "marketplaces", None),
     )
     _cache_rehydration_required = _module_cache_needs_rehydration(
         _existing_lock,

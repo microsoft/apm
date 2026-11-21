@@ -23,6 +23,7 @@ import click
 import yaml
 
 from ..core.apm_yml import parse_targets_field
+from ..core.deprecations import deprecation_message
 from ..core.target_catalog import (
     DEPRECATED_TARGET_ALIASES,
     canonical_target_token,
@@ -152,16 +153,13 @@ def _warn_deprecated_manifest_keys(data: Mapping[str, Any], manifest_path: Path)
             declaration = ManifestTargetDeclaration.from_mapping(
                 {"target": data["target"]}, manifest_path
             )
-            message = (
-                f"{label} uses the deprecated 'target:' key; 'target:' will be removed in a "
-                "future release in favor of 'targets:'. "
-                + _target_replacement_hint(declaration, user_scope=user_scope)
+            message = deprecation_message(
+                "manifest-target-key",
+                label=label,
+                hint=_target_replacement_hint(declaration, user_scope=user_scope),
             )
         elif key == "compilation.target":
-            message = (
-                f"{label} sets 'compilation.target', which APM ignores; targets come from "
-                "'targets:' or auto-detection. Delete it; a future release will reject it."
-            )
+            message = deprecation_message("manifest-compilation-target", label=label)
         else:
             message = deprecated_target_alias_message(key, where=label, key=alias_key)
         _rich_warning(message, symbol="warning", err=True)
