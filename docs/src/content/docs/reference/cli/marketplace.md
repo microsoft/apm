@@ -60,6 +60,9 @@ machine, list them under `marketplaces:` in the user manifest
 (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`) and run
 `apm install -g`. Manual registrations always win a name conflict. See
 [Declare marketplaces in your user manifest](../../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest).
+A project can commit its marketplaces in its own `apm.yml` instead; that map
+is never registered and wins inside the project. See
+[Declare marketplaces in a project](../../../consumer/installing-from-marketplaces/#declare-marketplaces-in-a-project).
 
 Accepted forms:
 

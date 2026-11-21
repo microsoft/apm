@@ -655,7 +655,9 @@ class APMDependencyResolver:
             self._reject_remote_parent_local_path(child_dep, parent_pkg, str(exc))
             return None
 
-    def _resolve_marketplace_dep(self, dep_ref: DependencyReference) -> DependencyReference:
+    def _resolve_marketplace_dep(
+        self, dep_ref: DependencyReference, *, required_by: str | None = None
+    ) -> DependencyReference:
         """Resolve a marketplace dependency to a concrete DependencyReference.
 
         A declaration that still matches its lock row is replayed from the
@@ -671,6 +673,9 @@ class APMDependencyResolver:
 
         Args:
             dep_ref: An unresolved marketplace DependencyReference.
+            required_by: The declaring package for a transitive declaration,
+                which must name a marketplace the root ``marketplaces:`` map
+                declares (#2903).
 
         Returns:
             A concrete (non-marketplace) DependencyReference.
@@ -689,6 +694,14 @@ class APMDependencyResolver:
             locked_marketplace_replay,
         )
 
+        if required_by is not None:
+            from apm_cli.marketplace.project_marketplaces import (
+                require_root_declared_marketplace,
+            )
+
+            require_root_declared_marketplace(
+                dep_ref.marketplace_name, dep_ref.marketplace_plugin_name, required_by=required_by
+            )
         decision = locked_marketplace_replay(
             dep_ref,
             self._existing_lockfile,
@@ -760,6 +773,8 @@ class APMDependencyResolver:
         dep_ref: DependencyReference,
         tree: DependencyTree,
         context: str,
+        *,
+        required_by: str | None = None,
     ) -> DependencyReference | None:
         """Try to resolve a marketplace dep; record an error on the tree on failure.
 
@@ -772,6 +787,7 @@ class APMDependencyResolver:
             tree: The dependency tree to record errors on.
             context: Human-readable context for error messages
                      (e.g. ``"required by owner/repo"``).
+            required_by: Declaring package of a transitive declaration.
 
         Returns:
             Resolved DependencyReference on success, ``None`` on known failure.
@@ -783,15 +799,17 @@ class APMDependencyResolver:
             MarketplaceNotFoundError,
             MarketplaceOriginConflictError,
             PluginNotFoundError,
+            UndeclaredMarketplaceError,
         )
 
         try:
-            return self._resolve_marketplace_dep(dep_ref)
+            return self._resolve_marketplace_dep(dep_ref, required_by=required_by)
         except (
             DependencyConfusionError,
             MarketplaceNotFoundError,
             MarketplaceOriginConflictError,
             PluginNotFoundError,
+            UndeclaredMarketplaceError,
             MarketplaceFetchError,
             BuildError,
             ValueError,
@@ -1178,7 +1196,10 @@ class APMDependencyResolver:
                                 continue
                         if sub_dep.is_marketplace:
                             resolved = self._resolve_marketplace_or_record_error(
-                                sub_dep, tree, f"required by {node.dependency_ref.repo_url}"
+                                sub_dep,
+                                tree,
+                                f"required by {node.dependency_ref.repo_url}",
+                                required_by=node.dependency_ref.repo_url,
                             )
                             if resolved is not None:
                                 sub_dep = resolved
@@ -1795,6 +1816,12 @@ class APMDependencyResolver:
         had_existing_install: bool,
     ) -> APMPackage:
         """Publish one validated candidate and remap its package paths."""
+        if package.marketplaces is not None:
+            # Only the root project's map counts; a package can never add a
+            # marketplace (#3006, #2903). Refused before activation.
+            from apm_cli.marketplace.user_manifest import dependency_marketplaces_error
+
+            raise DownloadedPackageError(dependency_marketplaces_error(package.name))
         if downloaded_candidate is None or self._activation_callback is None:
             return package
         try:

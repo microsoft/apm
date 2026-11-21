@@ -88,7 +88,11 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # 4. Run dependency policy checks
     # ------------------------------------------------------------------
-    from apm_cli.policy.policy_checks import run_dependency_policy_checks
+    from apm_cli.policy.policy_checks import (
+        MarketplaceOrigins,
+        marketplace_resolution_origins,
+        run_dependency_policy_checks,
+    )
 
     mcp_deps = getattr(ctx, "direct_mcp_deps", None)
 
@@ -120,6 +124,16 @@ def run(ctx: InstallContext) -> None:
         declared_refs=getattr(ctx, "declared_direct_refs", None) or None,
         # This install locks deps_to_install; a required one it adds is not absent.
         installing=True,
+        # Root ``marketplaces:`` origins, and the catalog origins of locked
+        # and freshly resolved marketplace deps, meet marketplace.allow (#2903).
+        marketplace_origins=MarketplaceOrigins(
+            getattr(apm_package, "marketplaces", None),
+            marketplace_resolution_origins(
+                ctx.existing_lockfile,
+                keys=[d.get_unique_key() for d in ctx.deps_to_install],
+                provenance=getattr(ctx, "marketplace_provenance", None),
+            ),
+        ),
         **extra_kwargs,
     )
 
