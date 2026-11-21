@@ -281,7 +281,7 @@ Fix: restore the exact value the message names (keep the `:-.` default), or rena
 [x] LSP server 'pyright' conflicts with the existing copilot entry in .github/lsp.json. Preserved that entry. Rename or remove the conflicting entry yourself, then retry the same install command. --force does not take ownership of user entries.
 ```
 
-Cause: an LSP config (for example `.github/lsp.json`) already has a server with that name that APM did not write. APM keeps it, configures the other servers, and exits 1.
+Cause: an LSP config (for example `.github/lsp.json`) already has a server with that name that APM did not write. APM keeps it, configures the other servers, and exits 1. An entry that already equals the package's server is kept without an error, and APM never records it as its own.
 
 Fix: rename or remove your entry, then re-run the same install.
 

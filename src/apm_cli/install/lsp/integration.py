@@ -373,29 +373,36 @@ def run_owned_lsp_integration(
     if not dependencies and not old_owned:
         return 0
 
+    from apm_cli.install.errors import LSPUserEntryConflictError
+
     old_targets = _target_server_sets(lockfile)
+    supported_target_runtimes = LSPIntegrator.supported_target_runtimes(target_runtimes)
+    count = 0
+    user_conflict = None
+    kept: dict[str, set[str]] = {}
+    if dependencies:
+        require_lsp_capable_target(supported_target_runtimes, bundle=True)
+        try:
+            count = LSPIntegrator.install(
+                dependencies,
+                project_root=project_root,
+                user_scope=user_scope,
+                logger=logger,
+                target_runtimes=supported_target_runtimes,
+                fail_on_write_error=fail_on_write_error,
+                managed_target_servers=old_targets,
+                force=force,
+                kept_unowned=kept,
+            )
+        except LSPUserEntryConflictError as exc:
+            # The other servers were written; record them, then fail (#4628).
+            user_conflict = exc
     new_targets = {runtime: set(names) for runtime, names in old_targets.items()}
     for names in new_targets.values():
         names.difference_update(old_owned)
-    supported_target_runtimes = LSPIntegrator.supported_target_runtimes(target_runtimes)
-    if dependencies:
-        require_lsp_capable_target(supported_target_runtimes, bundle=True)
     for runtime in supported_target_runtimes:
         new_targets.setdefault(runtime, set()).update(
-            LSPIntegrator.expressible_server_names(dependencies, runtime)
-        )
-
-    count = 0
-    if dependencies:
-        count = LSPIntegrator.install(
-            dependencies,
-            project_root=project_root,
-            user_scope=user_scope,
-            logger=logger,
-            target_runtimes=supported_target_runtimes,
-            fail_on_write_error=fail_on_write_error,
-            managed_target_servers=old_targets,
-            force=force,
+            LSPIntegrator.expressible_server_names(dependencies, runtime) - kept.get(runtime, set())
         )
     _clean_target_differences(
         old_targets=old_targets,
@@ -406,12 +413,19 @@ def run_owned_lsp_integration(
         fail_on_write_error=fail_on_write_error,
     )
 
+    recorded = new_names - _unowned_everywhere(kept, new_targets)
     for name in old_owned:
         lockfile.lsp_configs.pop(name, None)
         lockfile.lsp_config_provenance.pop(name, None)
-    lockfile.lsp_servers = sorted((set(lockfile.lsp_servers) - old_owned) | new_names)
-    lockfile.lsp_configs.update(LSPIntegrator.get_server_configs(dependencies))
-    lockfile.lsp_config_provenance.update(dict.fromkeys(new_names, owner_token))
+    lockfile.lsp_servers = sorted((set(lockfile.lsp_servers) - old_owned) | recorded)
+    lockfile.lsp_configs.update(
+        {
+            name: config
+            for name, config in LSPIntegrator.get_server_configs(dependencies).items()
+            if name in recorded
+        }
+    )
+    lockfile.lsp_config_provenance.update(dict.fromkeys(recorded, owner_token))
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
     DeploymentLedgerCodec.replace_lsp_target_servers(
@@ -423,6 +437,8 @@ def run_owned_lsp_integration(
         },
     )
     lockfile.write(lock_path)
+    if user_conflict is not None:
+        raise user_conflict
     return count
 
 
@@ -632,13 +648,9 @@ def _legacy_lsp_owner_names(names: set[str], targets_recorded: bool) -> dict:
     return {} if targets_recorded or not names else {"legacy_server_names": set(names)}
 
 
-def _preserved_everywhere(conflict, new_targets: dict[str, set[str]]) -> set[str]:
-    """Preserved server names APM wrote on no target, so the lock never claims them (#4628)."""
-    if conflict is None:
-        return set()
-    preserved = set().union(*conflict.preserved.values())
-    written = set().union(*new_targets.values(), set())
-    return preserved - written
+def _unowned_everywhere(kept: dict[str, set[str]], new_targets: dict[str, set[str]]) -> set[str]:
+    """Kept user entries APM owns on no target, so the lock never claims them (#4628)."""
+    return set().union(*kept.values(), set()) - set().union(*new_targets.values(), set())
 
 
 def run_lsp_integration(  # noqa: PLR0913
@@ -779,6 +791,7 @@ def run_lsp_integration(  # noqa: PLR0913
             )
 
         conflict = None
+        kept: dict[str, set[str]] = {}
         if lsp_deps:
             if fail_on_write_error:
                 require_lsp_capable_target(target_runtimes)
@@ -793,6 +806,7 @@ def run_lsp_integration(  # noqa: PLR0913
                     fail_on_write_error=fail_on_write_error,
                     managed_target_servers=old_lsp_targets,
                     force=force,
+                    kept_unowned=kept,
                     **_legacy_lsp_owner_names(old_lsp_servers, old_lsp_targets_present),
                 )
             except LSPUserEntryConflictError as exc:
@@ -808,7 +822,7 @@ def run_lsp_integration(  # noqa: PLR0913
         for target_runtime in target_runtimes or []:
             new_targets.setdefault(target_runtime, set()).update(
                 LSPIntegrator.expressible_server_names(lsp_deps, target_runtime)
-                - (conflict.preserved.get(target_runtime, set()) if conflict else set())
+                - kept.get(target_runtime, set())
             )
         if old_lsp_targets_present:
             _clean_target_differences(
@@ -820,8 +834,8 @@ def run_lsp_integration(  # noqa: PLR0913
                 fail_on_write_error=fail_on_write_error,
             )
 
-        # A server preserved on every target was never written: record nothing for it.
-        unwritten = _preserved_everywhere(conflict, new_targets)
+        # A server kept as the user's on every target is not APM's: record nothing for it.
+        unwritten = _unowned_everywhere(kept, new_targets)
         new_regular_configs = LSPIntegrator.get_server_configs(lsp_deps)
         new_configs = {
             name: config for name, config in old_lsp_configs.items() if name in bundle_names

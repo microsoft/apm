@@ -90,3 +90,83 @@ def test_install_preserves_a_same_name_user_lsp_entry_and_configures_the_rest(
     assert result.returncode == 0, result.stdout + result.stderr
     assert _servers(project)["p-lsp"]["command"] == "pkg-lsp-v2"
     assert _servers(project)["user-lsp"] == {"command": "u"}
+
+
+def _project(isolated, name: str, *, lsp=(), targets=("copilot",)) -> Path:
+    return (
+        LocalPackageFactory(isolated.work_root)
+        .create(name, lsp_dependencies=tuple(lsp), targets=targets)
+        .root
+    )
+
+
+def _seed(project: Path, servers: dict) -> None:
+    (project / ".github").mkdir(exist_ok=True)
+    (project / _LSP).write_text(json.dumps({"lspServers": servers}) + "\n", encoding="ascii")
+
+
+def test_an_identical_user_lsp_entry_is_kept_but_never_owned(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Equality alone never makes APM the owner: removal later keeps the entry."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "lsp-same", base_env=dict(os.environ))
+    declared = {"name": "p-lsp", "command": "pkg-lsp", "extensionToLanguage": {".p": "p"}}
+    project = _project(isolated, "consumer", lsp=(declared,))
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+    env = isolated.subprocess_env()
+    # The user's own file already holds exactly the entry install would write.
+    assert _install(runner, project, env).returncode == 0
+    (project / "apm.lock.yaml").unlink()
+    seeded = (project / _LSP).read_bytes()
+
+    for args in ((), ("--frozen",)):
+        result = _install(runner, project, env, *args)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (project / _LSP).read_bytes() == seeded, args
+        lock = load_yaml(project / "apm.lock.yaml")
+        assert "p-lsp" not in lock.get("lsp_servers", []), "lock claims the user's entry"
+
+    manifest = load_yaml(project / "apm.yml")
+    manifest["dependencies"]["lsp"] = []
+    dump_yaml(manifest, project / "apm.yml")
+    result = _install(runner, project, env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (project / _LSP).read_bytes() == seeded, "removal deleted the user's entry"
+
+
+def test_a_bundle_records_what_it_wrote_before_failing_on_a_user_lsp_entry(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    isolated = IsolatedApmEnvironment.create(tmp_path / "lsp-bundle", base_env=dict(os.environ))
+    factory = LocalPackageFactory(isolated.work_root)
+    producer = factory.create(
+        "lsp-bundler",
+        version="1.0.0",
+        lsp_dependencies=(
+            {"name": "p-lsp", "command": "pkg-lsp", "extensionToLanguage": {".p": "p"}},
+            {"name": "other-lsp", "command": "other", "extensionToLanguage": {".o": "o"}},
+        ),
+        targets=("copilot",),
+    )
+    factory.add_skill(producer, "b-skill", "---\nname: b-skill\ndescription: b.\n---\n\nUse b.\n")
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+    env = isolated.subprocess_env()
+    out = tmp_path / "out"
+    packed = runner.run(("pack", "-o", str(out)), cwd=producer.root, env=env)
+    assert packed.returncode == 0, packed.stdout + packed.stderr
+    (bundle,) = [path for path in out.iterdir() if path.is_dir()]
+    project = _project(isolated, "consumer")
+    _seed(project, {"p-lsp": _MINE})
+
+    result = _install(runner, project, env, str(bundle))
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, output
+    assert "LSP server 'p-lsp' conflicts with the existing copilot entry" in output
+    servers = _servers(project)
+    assert servers["p-lsp"] == _MINE
+    assert servers["other-lsp"]["command"] == "other"
+    lock = load_yaml(project / "apm.lock.yaml")
+    assert lock["lsp_servers"] == ["other-lsp"], lock.get("lsp_servers")
+    assert lock["lsp_target_servers"] == {"copilot": ["other-lsp"]}
+    deployed = json.dumps(lock.get("local_deployed_files") or lock)
+    assert "b-skill" in deployed, "the bundle's deployed files went unrecorded"
