@@ -505,9 +505,16 @@ def test_tampered_bundle_refusal_names_the_reason_and_remedy(
     consumer = world.consumer("tamper-consumer", targets=("claude",))
     before = tree_bytes(consumer)
 
-    text = output(world.apm(consumer, "install", str(tampered), "--no-policy", expect=1))
-    assert "Bundle integrity check failed" in text, text
-    assert "Hash mismatch for skills/hs/SKILL.md" in text, text
-    assert BUNDLE_INTEGRITY_FAILED.sentence() in text, text
-    assert "Error installing dependencies" not in text, text
+    result = world.apm(consumer, "install", str(tampered), "--no-policy", expect=1)
+    # One refusal, one stream: headline, reason and remedy all on stderr.
+    stderr = " ".join(result.stderr.split())
+    refusal = (
+        "Bundle integrity check failed:",
+        "Hash mismatch for skills/hs/SKILL.md",
+        BUNDLE_INTEGRITY_FAILED.sentence(),
+    )
+    for part in refusal:
+        assert part in stderr, result.stderr
+        assert part not in result.stdout, result.stdout
+    assert "Error installing dependencies" not in result.stdout + result.stderr
     assert tree_bytes(consumer) == before
