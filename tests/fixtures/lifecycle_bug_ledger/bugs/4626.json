@@ -1,0 +1,21 @@
+{
+  "issue": 4626,
+  "fixed_in": "Unreleased",
+  "summary": "apm install silently replaced user edits to deployed hook files, copied hook scripts, canvas extension files and APM-managed LSP server entries; they now go through the same overwrite gate as other managed files and are kept and named without deployment evidence.",
+  "failure_modes": [
+    "ownership",
+    "outcome"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept",
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_outputs_block_an_update_and_unedited_ones_update",
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_unproven_mismatch_is_kept",
+    "tests/unit/integration/test_lsp_integrator.py::TestManagedEntryKeptEdits::test_drift_edit_is_kept_with_a_warning_and_other_servers_update",
+    "tests/unit/integration/test_lsp_integrator.py::TestManagedEntryKeptEdits::test_edit_that_blocks_a_new_render_fails",
+    "tests/unit/integration/test_lsp_integrator.py::TestManagedEntryKeptEdits::test_entry_without_a_locked_render_is_an_unproven_keep"
+  ]
+}

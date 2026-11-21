@@ -372,6 +372,8 @@ class TestRunLspIntegration:
             fail_on_write_error=False,
             managed_target_servers={},
             force=False,
+            locked_configs={},
+            kept_servers={},
         )
 
     @patch(_PATCH_TARGET)

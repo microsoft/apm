@@ -840,29 +840,23 @@ class LSPIntegrator:
     ) -> dict[str, dict] | None:
         """The entries APM renders for *spec* from the locked server configs (#4626).
 
-        Only servers this install renders are judged; a locked config that no
-        longer parses proves nothing. ``None`` without locked configs.
+        Only servers this install renders are judged; each locked config goes
+        through the same rendering as a fresh declaration, with the declaring
+        package's current root. ``None`` without locked configs.
         """
-        from apm_cli.models.dependency.lsp import LSPDependency
-
         if locked_configs is None:
             return None
-        roots = {dep.name: dep for dep in runtime_deps if hasattr(dep, "name")}
-        locked: list[LSPDependency] = []
-        for name, config in locked_configs.items():
-            if name not in roots or not isinstance(config, dict):
-                continue
-            try:
-                dep = LSPDependency.from_dict({**config, "name": name})
-            except (TypeError, ValueError):
-                continue
-            dep.plugin_root = getattr(roots[name], "plugin_root", None)
-            locked.append(dep)
+        names = {dep.name for dep in runtime_deps if hasattr(dep, "name")}
+        locked = [
+            {**config, "name": name}
+            for name, config in locked_configs.items()
+            if name in names and isinstance(config, dict)
+        ]
         servers = LSPIntegrator._servers_for_target(
             LSPIntegrator._base_server_entries(locked), spec, warn=lambda _message: None
         )
         return LSPIntegrator._render_plugin_roots(
-            servers, locked, spec, project_root=project_root, user_scope=user_scope
+            servers, runtime_deps, spec, project_root=project_root, user_scope=user_scope
         )
 
     @staticmethod

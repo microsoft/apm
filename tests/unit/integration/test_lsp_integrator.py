@@ -480,6 +480,76 @@ class TestInstallCopilotTarget:
         }
 
 
+_LOCKED = {"pyright": {"name": "pyright", "command": "pyright-langserver"}}
+
+
+class TestManagedEntryKeptEdits:
+    """A managed entry is judged per server against the locked render (#4626)."""
+
+    def _deploy(self, tmp_path, pyright: dict) -> Path:
+        config = tmp_path / ".github" / "lsp.json"
+        config.parent.mkdir(parents=True)
+        servers = {"pyright": pyright, "ruff": {"command": "old-ruff", "args": []}}
+        config.write_text(json.dumps({"userKey": 1, "lspServers": servers}), encoding="utf-8")
+        return config
+
+    def _install(self, tmp_path, *, locked=_LOCKED, command="pyright-langserver") -> dict:
+        diagnostics, kept = MagicMock(), {}
+        LSPIntegrator.install(
+            [
+                _make_dep("pyright", command=command, extension_to_language=None),
+                _make_dep("ruff", extension_to_language=None),
+            ],
+            project_root=tmp_path,
+            target_runtimes=["copilot"],
+            managed_target_servers={"copilot": {"pyright", "ruff"}},
+            locked_configs={**locked, "ruff": {"name": "ruff", "command": "old-ruff"}},
+            kept_servers=kept,
+            diagnostics=diagnostics,
+        )
+        return {"kept": kept, "diagnostics": diagnostics}
+
+    def test_drift_edit_is_kept_with_a_warning_and_other_servers_update(self, tmp_path):
+        edited = {"command": "my-pyright", "args": []}
+        config = self._deploy(tmp_path, edited)
+
+        outcome = self._install(tmp_path)
+
+        data = json.loads(config.read_text())
+        assert data["lspServers"]["pyright"] == edited
+        assert data["lspServers"]["ruff"]["command"] == "ruff-langserver"
+        assert data["userKey"] == 1
+        assert outcome["kept"] == {"pyright": "drift"}
+        (message,) = outcome["diagnostics"].warn.call_args.args
+        assert message.startswith("Kept LSP server 'pyright' in .github/lsp.json: it was modified")
+        outcome["diagnostics"].error.assert_not_called()
+
+    def test_edit_that_blocks_a_new_render_fails(self, tmp_path):
+        self._deploy(tmp_path, {"command": "my-pyright", "args": []})
+
+        outcome = self._install(tmp_path, command="pyright-v2")
+
+        assert outcome["kept"] == {"pyright": "blocked"}
+        outcome["diagnostics"].error.assert_called_once()
+
+    def test_entry_without_a_locked_render_is_an_unproven_keep(self, tmp_path):
+        self._deploy(tmp_path, {"command": "my-pyright", "args": []})
+
+        outcome = self._install(tmp_path, locked={})
+
+        assert outcome["kept"] == {"pyright": "unproven"}
+        (message,) = outcome["diagnostics"].error.call_args.args
+        assert "no local deployment receipt or locked render" in message
+
+    def test_unedited_entry_updates_silently(self, tmp_path):
+        config = self._deploy(tmp_path, {"command": "pyright-langserver", "args": []})
+
+        outcome = self._install(tmp_path, command="pyright-v2")
+
+        assert json.loads(config.read_text())["lspServers"]["pyright"]["command"] == "pyright-v2"
+        assert outcome["kept"] == {}
+
+
 class TestResolveLspTargets:
     def test_targets_copilot_when_binary_present(self, tmp_path):
         with patch(
