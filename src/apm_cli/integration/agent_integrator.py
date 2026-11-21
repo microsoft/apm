@@ -1172,6 +1172,16 @@ class AgentIntegrator(BaseIntegrator):
     @staticmethod
     def _gemini_agent_problem(fm: dict, filename: str) -> str | None:
         """Return why Gemini would reject *fm* (or APM must not deploy it), or None."""
+        return (
+            AgentIntegrator._gemini_restriction_problem(fm)
+            or AgentIntegrator._gemini_identity_problem(fm, filename)
+            or AgentIntegrator._gemini_capability_problem(fm)
+            or AgentIntegrator._gemini_optional_field_problem(fm)
+        )
+
+    @staticmethod
+    def _gemini_restriction_problem(fm: dict) -> str | None:
+        """Keys Gemini cannot carry without losing a restriction or the agent type."""
         rejected = sorted(str(k) for k in fm if k in _GEMINI_AGENT_REJECTED_FIELDS)
         rejected += [
             f"{k}: {str(v).lower()}" for k, v in _GEMINI_AGENT_REJECTED_FLAGS if fm.get(k) is v
@@ -1183,15 +1193,32 @@ class AgentIntegrator(BaseIntegrator):
             )
         if fm.get("kind", "local") != "local":
             return "only local agents are supported ('kind' must be 'local' or omitted)"
+        return None
+
+    @staticmethod
+    def _gemini_identity_problem(fm: dict, filename: str) -> str | None:
+        """``name`` and ``description`` as the Gemini loader and APM identity need them."""
         name = fm.get("name", filename)
         if not isinstance(name, str) or not _GEMINI_AGENT_NAME_RE.fullmatch(name):
             return (
                 "'name' must be a lowercase slug (a-z, 0-9, '-', '_'). "
                 "Fix: set 'name', or rename the file to a slug"
             )
+        # Gemini identifies an agent by 'name', APM by file path; keeping them
+        # equal lets APM's collision checks see a clash with a user's agent.
+        if name != filename:
+            return (
+                f"'name' {name!a} does not match the file name {filename!a}. "
+                f"Fix: rename the source to {name}.agent.md, or remove 'name'"
+            )
         description = fm.get("description")
         if not isinstance(description, str) or not description.strip():
             return "'description' is required. Fix: add a one-line 'description'"
+        return None
+
+    @staticmethod
+    def _gemini_capability_problem(fm: dict) -> str | None:
+        """``tools`` and ``model``: Gemini values only, never mapped from other providers."""
         if "tools" in fm:
             tools = fm["tools"]
             if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
@@ -1211,7 +1238,7 @@ class AgentIntegrator(BaseIntegrator):
                     "other providers' models. Fix: use a Gemini model, or omit 'model' to "
                     "use the session model"
                 )
-        return AgentIntegrator._gemini_optional_field_problem(fm)
+        return None
 
     @staticmethod
     def _gemini_optional_field_problem(fm: dict) -> str | None:

@@ -190,6 +190,7 @@ def test_gemini_agent_empty_tools_list_is_kept(tmp_path: Path) -> None:
         ("a.agent.md", "---\ndescription: '  '\n---\nBody\n", "'description' is required"),
         ("a.agent.md", "---\nname: Code Reviewer\ndescription: d\n---\nB\n", "lowercase slug"),
         ("Reviewer.agent.md", "---\ndescription: d\n---\nB\n", "lowercase slug"),
+        ("code-review.agent.md", "---\nname: reviewer\ndescription: d\n---\nB\n", "rename"),
         ("a.agent.md", "---\ndescription: d\ntools: [Read, Grep]\n---\nB\n", "'Grep', 'Read'"),
         ("a.agent.md", "---\ndescription: d\ntools: [codebase]\n---\nB\n", "'codebase'"),
         ("a.agent.md", "---\ndescription: d\ntools: read_file\n---\nB\n", "must be a list"),
@@ -274,6 +275,25 @@ def test_gemini_non_restricting_flag_values_deploy_with_dropped_warning(
     key = flag.split(":")[0]
     messages = [d.message for ds in diagnostics.by_category().values() for d in ds]
     assert any(f"'{key}' was dropped" in m for m in messages)
+
+
+def test_gemini_name_mismatch_cannot_shadow_a_user_agent(tmp_path: Path) -> None:
+    # A package file code-review.md naming itself "reviewer" would shadow the
+    # user's reviewer.md in Gemini while APM saw no file collision.
+    _write_agent(
+        tmp_path, "code-review.agent.md", "---\nname: reviewer\ndescription: Pkg\n---\nPkg.\n"
+    )
+    user_agent = tmp_path / ".gemini" / "agents" / "reviewer.md"
+    user_agent.parent.mkdir(parents=True)
+    user_agent.write_text("---\nname: reviewer\ndescription: Mine\n---\nMine.\n", encoding="utf-8")
+
+    result, diagnostics = _integrate(tmp_path)
+
+    assert result.files_integrated == 0
+    assert not (tmp_path / ".gemini" / "agents" / "code-review.md").exists()
+    assert user_agent.read_text(encoding="utf-8").endswith("Mine.\n")
+    [message] = _warnings(diagnostics)
+    assert "rename the source to reviewer.agent.md" in message
 
 
 def test_gemini_invalid_agent_does_not_block_siblings(tmp_path: Path) -> None:
