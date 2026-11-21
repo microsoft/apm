@@ -191,7 +191,9 @@ def record_unpacked_files(output_dir: Path, files: Sequence[str], logger: Any) -
     """Record the files ``apm unpack`` wrote, or announce that they are untracked.
 
     The record goes through the shared local-bundle lockfile owner, so audit
-    checks the files and a later install reconciles them.
+    checks the files and a later install reconciles them. A file the lockfile
+    already records with the same content hash stays with its recorded owner;
+    when no file is left to record, the lockfile is not touched (#4556).
     """
     root = unpack_record_root(output_dir)
     if root is None:
@@ -204,17 +206,28 @@ def record_unpacked_files(output_dir: Path, files: Sequence[str], logger: Any) -
         return
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..core.scope import InstallScope
-    from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+    from ..deps.lockfile import (
+        LEGACY_LOCKFILE_NAME,
+        LockFile,
+        get_lockfile_path,
+        migrate_lockfile_if_needed,
+    )
     from ..utils.content_hash import compute_file_hash
 
-    migrate_lockfile_if_needed(root)
     lockfile_path = get_lockfile_path(root)
-    lockfile = LockFile.read(lockfile_path) or LockFile()
+    lockfile = LockFile.read(lockfile_path) or LockFile.read(root / LEGACY_LOCKFILE_NAME)
+    claimed = DeploymentLedgerCodec.deployed_file_hashes(lockfile) if lockfile else {}
+    hashes = {
+        rel: digest
+        for rel in files
+        if claimed.get(rel) != (digest := compute_file_hash(root / rel))
+    }
+    if not hashes:
+        return
+    migrate_lockfile_if_needed(root)
+    lockfile = lockfile or LockFile()
     DeploymentLedgerCodec.record_local_bundle_files(
-        lockfile,
-        list(files),
-        {rel: compute_file_hash(root / rel) for rel in files},
-        scope=InstallScope.PROJECT,
+        lockfile, list(hashes), hashes, scope=InstallScope.PROJECT
     )
     lockfile.write(lockfile_path)
 
