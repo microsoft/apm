@@ -94,6 +94,11 @@ at the start of each phase and after every tool return.
 Run `scripts/list-changes-since-tag.sh` (no arguments). It emits
 JSON on stdout: one object per merged PR with fields `pr`, `title`,
 `labels`, `author`, `paths_summary`, `is_user_facing_guess`.
+It enumerates merged PRs with `gh pr list` and keeps those whose merge
+commit is in `<last-tag>..HEAD`; without gh it warns and parses both
+`Merge pull request #N` and squash `(#N)` subjects from `git log`.
+`scripts/list-changes-since-tag.sh --self-test` checks that parser
+offline.
 
 The script's heuristic for `is_user_facing_guess` is
 intentionally conservative -- it flags as INTERNAL only when the

@@ -31,8 +31,10 @@ materialize_local_package
     the uninstall survivor refresh and the audit replay.
 """
 
+import contextlib
 import shutil
 import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -245,6 +247,24 @@ def materialize_local_package(
             safe_rmtree(install_path, install_path.parent.parent)
         raise
     return install_path
+
+
+@contextlib.contextmanager
+def staged_local_package_image(dep_ref: DependencyReference, base_dir: Path) -> Iterator[Path]:
+    """Yield a private copy of a local package's image, removed on exit (#4566).
+
+    Validation normalizes a plugin directory in place (a synthesized
+    ``apm.yml`` and ``.apm/``); a consumer-owned source directory must never
+    receive those writes, so callers validate this copy instead.
+
+    Raises:
+        LocalPackageError: The source cannot be admitted.
+        PathTraversalError: A link escapes the package, is broken or loops.
+    """
+    from apm_cli.config import get_apm_temp_dir
+
+    with tempfile.TemporaryDirectory(prefix="apm-local-image-", dir=get_apm_temp_dir()) as stage:
+        yield materialize_local_package(dep_ref, Path(stage) / "package", base_dir)
 
 
 def materialize_local_package_for_replay(
