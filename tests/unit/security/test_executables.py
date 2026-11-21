@@ -863,3 +863,33 @@ def test_approve_hints_are_one_shell_word_per_package_and_keep_the_scope() -> No
         approve_command("owner/repo", user_scope=True, user_store=True)
         == "apm approve -g --user owner/repo"
     )
+
+
+@pytest.mark.parametrize(
+    ("deployed", "deployed_files", "expected"),
+    [
+        pytest.param(("mcp",), [], (), id="mcp-only-is-not-a-rebuild-kind"),
+        pytest.param(
+            ("hooks", "bin"), [".claude/skills/p/SKILL.md"], ("hooks",), id="bin-not-deployed"
+        ),
+        pytest.param(("bin",), [".claude/skills/p/bin/tool"], ("bin",), id="bin-deployed"),
+        pytest.param(("lsp", "canvas"), [], ("lsp", "canvas"), id="declared-order"),
+    ],
+)
+def test_rebuild_retired_kinds_needs_deployment_evidence(deployed, deployed_files, expected):
+    """#4567: only kinds the rebuild removes, bin/ only when a bin file was deployed."""
+    withheld = set(deployed)
+    assert ex.rebuild_retired_kinds(deployed, withheld, deployed_files) == expected
+
+
+@pytest.mark.parametrize(
+    ("kinds", "expected"),
+    [
+        (("hooks",), "hooks"),
+        (("hooks", "lsp", "hooks"), "hooks and LSP server(s)"),
+        (("hooks", "lsp", "canvas"), "hooks, LSP server(s) and canvas extension(s)"),
+        ((), ""),
+    ],
+)
+def test_exec_kinds_phrase_names_each_kind_once(kinds, expected):
+    assert ex.exec_kinds_phrase(kinds) == expected

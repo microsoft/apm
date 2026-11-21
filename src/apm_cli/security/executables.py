@@ -70,26 +70,29 @@ EXEC_KIND_LABELS = {
 }
 
 
-def rebuild_retired_kinds(declared, withheld, package_info) -> tuple[str, ...]:
-    """Kinds a gated survivor rebuild removes: *withheld* among *declared*, in order.
+def rebuild_retired_kinds(deployed, withheld, deployed_files) -> tuple[str, ...]:
+    """Kinds a gated survivor rebuild removes: *withheld* among *deployed*, in order.
 
-    MCP servers are retired and reported by MCP admission, not the rebuild;
-    bin/ files deploy only for a marketplace plugin.
+    MCP servers are retired and reported by MCP admission, not the rebuild.
+    bin/ counts only when *deployed_files* records a file under a ``bin/``
+    directory, since bin/ deploys only in some scopes and targets.
     """
-    from apm_cli.models.apm_package import PackageType
+    from pathlib import PurePosixPath
 
-    bin_deploys = getattr(package_info, "package_type", None) is PackageType.MARKETPLACE_PLUGIN
+    bin_deployed = any("bin" in PurePosixPath(path).parts[:-1] for path in deployed_files or ())
     return tuple(
         kind
-        for kind in declared
-        if kind in withheld and kind != EXEC_TYPE_MCP and (kind != EXEC_TYPE_BIN or bin_deploys)
+        for kind in deployed
+        if kind in withheld and kind != EXEC_TYPE_MCP and (kind != EXEC_TYPE_BIN or bin_deployed)
     )
 
 
 def exec_kinds_phrase(kinds) -> str:
     """Join kind labels once each: ``hooks``, ``hooks and LSP server(s)``."""
-    labels = list(dict.fromkeys(EXEC_KIND_LABELS.get(kind, kind) for kind in kinds)) or ["hooks"]
-    return labels[0] if len(labels) == 1 else f"{', '.join(labels[:-1])} and {labels[-1]}"
+    labels = list(dict.fromkeys(EXEC_KIND_LABELS.get(kind, kind) for kind in kinds))
+    if len(labels) < 2:
+        return "".join(labels)
+    return f"{', '.join(labels[:-1])} and {labels[-1]}"
 
 
 @dataclass(frozen=True)

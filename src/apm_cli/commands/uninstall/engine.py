@@ -1866,9 +1866,12 @@ def gate_retired_hook_survivors(
     for key, why in sorted(denied.items()):
         logger.warning(f"{key} is no longer allowed ({why}); removing its integrated files")
     for key, why in sorted(hooks.items()):
-        if key not in denied:
-            kinds = exec_kinds_phrase(retirements.retired_kinds.get(key, ()))
-            logger.warning(f"{key} {kinds} are no longer allowed ({why}); removing them")
+        kinds = retirements.retired_kinds.get(key, ())
+        # No kind the rebuild removes (e.g. MCP only): MCP admission reports it.
+        if key not in denied and kinds:
+            logger.warning(
+                f"{key} {exec_kinds_phrase(kinds)} are no longer allowed ({why}); removing them"
+            )
     return refreshed | set(denied) | set(hooks), set(denied)
 
 

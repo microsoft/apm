@@ -490,9 +490,10 @@ def locked_hooks_retired(
     enabled gate leaves hooks out of the types it allows. A package named in
     *pinned* (its pinned hook approval no longer admits a file) is retired
     too. A package that cannot be read is left to install, which reports it.
-    The withheld kinds are the package's declared executable types the gate
-    no longer allows (``hooks`` for a pin mismatch), so callers name what
-    they retire (#4567).
+    The withheld kinds are the types the lock records as deployed that the
+    gate no longer allows (``hooks`` for a pin mismatch), so callers name
+    what they retire (#4567); the tuple is empty when none is a kind the
+    rebuild removes.
     """
     from apm_cli.install.drift import _build_package_info
     from apm_cli.security.executables import (
@@ -526,9 +527,11 @@ def locked_hooks_retired(
             why, withheld = ("denied" if status == TRUST_DENIED else "not approved"), set()
         else:
             continue
-        declared = _declared_exec_types(package_info, dep.get_unique_key())[3]
-        withheld.update(t for t in declared if t not in allowed)
-        retired[key] = (why, rebuild_retired_kinds(declared, withheld, package_info))
+        deployed = _recorded_deployed_types(
+            dep, _declared_exec_types(package_info, dep.get_unique_key())[3]
+        )
+        withheld.update(t for t in deployed if t not in allowed)
+        retired[key] = (why, rebuild_retired_kinds(deployed, withheld, dep.deployed_files))
     return retired
 
 

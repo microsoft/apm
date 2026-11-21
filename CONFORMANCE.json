@@ -2763,6 +2763,7 @@
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[listed-type-approved]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[missing-map-denied]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[unlisted-denied]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_names_only_the_kinds_the_lock_recorded_as_deployed",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_withholds_each_unapproved_executable_kind[listed-kept]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_withholds_each_unapproved_executable_kind[unlisted-retired-with-its-kind]"
       ],
@@ -2771,13 +2772,14 @@
       "keyword": "MUST",
       "section": "10.13",
       "status": "active",
-      "test_count": 12,
+      "test_count": 13,
       "tests": [
         "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_denies_unapproved_manifest_referenced_mcp",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[gate-disabled]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[listed-type-approved]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[missing-map-denied]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[unlisted-denied]",
+        "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_names_only_the_kinds_the_lock_recorded_as_deployed",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_withholds_each_unapproved_executable_kind[listed-kept]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_gate_retirement_withholds_each_unapproved_executable_kind[unlisted-retired-with-its-kind]",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_deny_executable_primitive_without_allowexecutables_approval",

@@ -104,3 +104,40 @@ def test_gate_retirement_withholds_each_unapproved_executable_kind(
     trust = build_exec_trust_context(policy=None, project_data={"executables": {"allow": allow}})
 
     assert locked_hooks_retired(lockfile, modules, lambda: trust, pinned=set()) == expected
+
+
+@pytest.mark.req("req-sc-009")
+def test_gate_retirement_names_only_the_kinds_the_lock_recorded_as_deployed(
+    tmp_path: Path,
+) -> None:
+    """#4567: a kind the lock never recorded as deployed is not reported as removed."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.exec_gate import locked_hooks_retired
+    from apm_cli.utils.yaml_io import dump_yaml
+
+    package = tmp_path / "apm_modules" / PKG
+    hooks = package / ".apm" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "session.json").write_text(
+        '{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo"}]}]}}',
+        encoding="utf-8",
+    )
+    server = {"name": "s", "command": "inert", "args": [], "extensionToLanguage": {".x": "x"}}
+    dump_yaml(
+        {"name": "tools", "version": "1.0.0", "dependencies": {"lsp": [server]}},
+        package / "apm.yml",
+    )
+    lockfile = LockFile()
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url=PKG,
+            resolved_commit="a" * 40,
+            exec_status=ex.TRUST_GATED,
+            exec_allowed_types=["hooks"],
+        )
+    )
+    trust = build_exec_trust_context(policy=None, project_data={"executables": {"allow": {}}})
+
+    retired = locked_hooks_retired(lockfile, tmp_path / "apm_modules", lambda: trust, pinned=set())
+
+    assert retired == {"acme/tools": ("not approved", ("hooks",))}
