@@ -430,6 +430,24 @@ def _u8_target(cell: Mapping[str, str]) -> dict[str, str] | str | None:
     return None
 
 
+def _rule_cell_target(cell: Mapping[str, str]) -> tuple[str, str] | None:
+    """The rule cell (and rule) U-MKT or U10 maps *cell* onto, or None.
+
+    An org-policy GATE level is never mapped (U2 no-collapse: a dependency
+    deny stays its own cell), and OP x SRC x PRIM (T3) stays with the source lane.
+    """
+    op, prim = cell.get("OP"), cell.get("PRIM")
+    if GATE_AUTHORITY.get(cell.get("GATE")) == "org-policy":
+        return None
+    if op == "marketplace" and prim is not None and "SRC" not in cell:
+        return MARKETPLACE_UNTOUCHED, "U-MKT"
+    if op == "compile" and prim in ("hook", "lsp"):
+        return "rule|U10|compile-render-only-non-mutation", "U10"
+    if op == "compile" and prim == "mcp":
+        return "rule|U10|compile-validate-reads-mcp", "U10"
+    return None
+
+
 def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | None:
     """(target cell or rule cell id, rule) of a partial equivalence, or None.
 
@@ -443,17 +461,11 @@ def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | N
     source_target = _u8_target(cell)
     if source_target is not None:
         return source_target, "U8"
-    policy_level = GATE_AUTHORITY.get(gate) == "org-policy"
-    # U2 no-collapse: a dependency deny stays its own cell (witnessed directly).
-    # OP x SRC x PRIM (T3) stays with the source lane.
-    if op == "marketplace" and prim is not None and "SRC" not in cell and not policy_level:
-        return MARKETPLACE_UNTOUCHED, "U-MKT"
-    if op == "compile" and prim in ("hook", "lsp", "mcp") and policy_level:
-        return None
-    if op == "compile" and prim in ("hook", "lsp"):
-        return "rule|U10|compile-render-only-non-mutation", "U10"
-    if op == "compile" and prim == "mcp":
-        return "rule|U10|compile-validate-reads-mcp", "U10"
+    rule_target = _rule_cell_target(cell)
+    if rule_target is not None:
+        return rule_target
+    if op == "compile" and prim in ("hook", "lsp", "mcp"):
+        return None  # an org-policy level stays its own cell (U2 no-collapse)
     if (
         prim in PLAIN_PRIMS
         and GATE_AUTHORITY.get(gate) == "executable-gate"
