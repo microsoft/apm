@@ -220,6 +220,7 @@ SCENARIO_MODULES = (
     "test_cache_presence",
     "test_concurrency",
     "test_failure_phase",
+    "test_file_routing",
     "test_graph_version",
     "test_history_upgrade",
     "test_ownership_siblings",
