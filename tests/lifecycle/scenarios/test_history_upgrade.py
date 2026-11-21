@@ -219,8 +219,12 @@ HISTORY_ROWS = {
     "prune": ("prune", "prune", _PACKAGES, {}),
     "compile": ("compile", "compile", _PACKAGES, {}),
     "lock": ("lock", "lock", _PACKAGES, {}),
-    "audit": ("audit --ci", "audit", _PACKAGES, {}),
-    "pack": ("pack", "pack", _PACKAGES, {}),
+    # audit --ci reports a target change as drift (exit 1, by design); plain audit
+    # scans the deployed content and succeeds.
+    "audit": ("audit", "audit", _PACKAGES, {}),
+    # pack refuses local-path dependencies (development only), so its history holds
+    # only the git dependency.
+    "pack": ("pack", "pack", ("p-skill:git",), {}),
     "deny": ("deny p-exec", "approve-deny", ("p-exec",), {"GATE": "denied-executable"}),
     "install-dry-run": ("install --dry-run", "install", _PACKAGES, {"DRYRUN": "on"}),
     "install-force": ("install --force", "install", _PACKAGES, {"FORCE": "on"}),
@@ -250,10 +254,12 @@ UNCREDITED_ROWS = {*KNOWN_ROWS, ("uninstall", "multi-widened")}
 @pytest.mark.parametrize("tgt", sorted(TARGET_HISTORIES))
 @pytest.mark.parametrize("row", sorted(HISTORY_ROWS))
 def test_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
-    scenario = _history(lifecycle_world, tgt)
-    line = HISTORY_ROWS[row][0]
+    line, _, packages, _ = HISTORY_ROWS[row]
+    scenario = _history(lifecycle_world, tgt, packages if row == "pack" else _PACKAGES)
     credit = () if (row, tgt) in UNCREDITED_ROWS else _row_assignments(row, tgt)
-    scenario.run(line, credit=credit, known=KNOWN_ROWS.get((row, tgt)))
+    step = scenario.run(line, credit=credit, known=KNOWN_ROWS.get((row, tgt)))
+    # Every row must succeed to earn its receipts (scenario-lane pairs are success pairs).
+    assert step.result.returncode == 0, step.output
     scenario.finish()
 
 
