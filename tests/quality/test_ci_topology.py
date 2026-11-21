@@ -3187,6 +3187,9 @@ def test_lifecycle_journeys_resolve_refuses_untracked_refs(
 
 
 _EARLY_STOP_FLAGS = ("--maxfail", "-x", "--exitfirst")
+# Env vars whose value reaches pytest as arguments: PYTEST_ADDOPTS is read by
+# pytest itself, PYTEST_EXTRA_ARGS by scripts/test-integration.sh.
+_PYTEST_ARG_ENV = ("PYTEST_ADDOPTS", "PYTEST_EXTRA_ARGS")
 
 
 def _early_stopping_coverage_runs(workflows_dir: Path) -> list[str]:
@@ -3199,23 +3202,37 @@ def _early_stopping_coverage_runs(workflows_dir: Path) -> list[str]:
     return found
 
 
+def _pytest_argument_tokens(
+    workflow: WorkflowNode, job: WorkflowNode, step: WorkflowNode
+) -> list[str]:
+    """Every pytest argument one step can see, across run and inherited env.
+
+    pytest merges PYTEST_ADDOPTS with its command line, so a coverage flag in
+    one source and an early stop in another still stop the coverage run.
+    """
+    env = effective_env(workflow, job, step)
+    tokens = [token for key in _PYTEST_ARG_ENV for token in str(env.get(key, "")).split()]
+    for line in str(step.get("run", "")).replace("\\\n", " ").splitlines():
+        words = line.split()
+        if any("pytest" in word for word in words):
+            tokens.extend(words)
+    return tokens
+
+
 def _early_stopping_in(name: str, workflow: WorkflowNode) -> list[str]:
     found: list[str] = []
     for job_id, job in (workflow.get("jobs") or {}).items():
         for step in (job or {}).get("steps") or []:
-            texts = [str(step.get("run", ""))]
-            texts += [str(value) for value in (step.get("env") or {}).values()]
-            for text in texts:
-                tokens = text.replace("\\\n", " ").split()
-                if not any(token.startswith("--cov") for token in tokens):
-                    continue
-                stops = [
-                    token
-                    for token in tokens
-                    if token in _EARLY_STOP_FLAGS or token.startswith("--maxfail=")
-                ]
-                if stops:
-                    found.append(f"{name}:{job_id}:{step.get('name', step.get('uses'))}:{stops}")
+            tokens = _pytest_argument_tokens(workflow, job, step)
+            if not any(token.startswith("--cov") for token in tokens):
+                continue
+            stops = [
+                token
+                for token in tokens
+                if token in _EARLY_STOP_FLAGS or token.startswith("--maxfail=")
+            ]
+            if stops:
+                found.append(f"{name}:{job_id}:{step.get('name', step.get('uses'))}:{stops}")
     return found
 
 
@@ -3224,12 +3241,24 @@ def test_coverage_runs_never_stop_early() -> None:
     assert _early_stopping_coverage_runs(REPO_ROOT / ".github" / "workflows") == []
 
 
+@pytest.mark.parametrize(
+    "scope",
+    ["extra-args", "step-addopts", "job-addopts", "workflow-addopts", "run-command"],
+)
 @pytest.mark.parametrize("flag", ["--maxfail 10", "--maxfail=1", "-x", "--exitfirst"])
-def test_coverage_run_with_early_stop_fails(flag: str) -> None:
+def test_coverage_run_with_early_stop_fails(flag: str, scope: str) -> None:
     workflow = load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW)
-    step = workflow_step(
-        workflow_job(workflow, MERGE_GROUP_INTEGRATION_JOB), MERGE_GROUP_INTEGRATION_STEP
-    )
-    step["env"]["PYTEST_EXTRA_ARGS"] = f"{step['env']['PYTEST_EXTRA_ARGS']} {flag}"
+    job = workflow_job(workflow, MERGE_GROUP_INTEGRATION_JOB)
+    step = workflow_step(job, MERGE_GROUP_INTEGRATION_STEP)
+    if scope == "extra-args":
+        step["env"]["PYTEST_EXTRA_ARGS"] = f"{step['env']['PYTEST_EXTRA_ARGS']} {flag}"
+    elif scope == "step-addopts":
+        step["env"]["PYTEST_ADDOPTS"] = flag
+    elif scope == "job-addopts":
+        job.setdefault("env", {})["PYTEST_ADDOPTS"] = flag
+    elif scope == "workflow-addopts":
+        workflow.setdefault("env", {})["PYTEST_ADDOPTS"] = flag
+    else:
+        step["run"] = f"{step['run']}uv run pytest tests/integration {flag}\n"
 
     assert _early_stopping_in("ci-integration.yml", workflow)
