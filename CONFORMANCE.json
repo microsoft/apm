@@ -1715,6 +1715,7 @@
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_recognition_grammar_and_scope",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics",
         "tests/spec_conformance/test_policy_reqs.py::test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile",
+        "tests/spec_conformance/test_policy_reqs.py::test_require_reads_the_lock_row_written_for_an_explicit_proxy_url",
         "tests/spec_conformance/test_policy_reqs.py::test_required_package_matching_follows_source_replacement"
       ],
       "conformance_class": "governance",
@@ -1722,12 +1723,13 @@
       "keyword": "MUST",
       "section": "6.3.1",
       "status": "active",
-      "test_count": 5,
+      "test_count": 6,
       "tests": [
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_qualified_patterns_match_effective_host",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_recognition_grammar_and_scope",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics",
         "tests/spec_conformance/test_policy_reqs.py::test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile",
+        "tests/spec_conformance/test_policy_reqs.py::test_require_reads_the_lock_row_written_for_an_explicit_proxy_url",
         "tests/spec_conformance/test_policy_reqs.py::test_required_package_matching_follows_source_replacement"
       ]
     },

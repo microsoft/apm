@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A rebound marketplace refusal under `apm install -g` no longer says to restore `~/.apm/apm.lock.yaml` from version control; it prints runnable re-record steps. (#4555)
 - `apm install` (including `--frozen`) replays a registry package after its registry moves, fetching from the configured registry when the locked hash matches; mismatches fail before extraction. (closes #4013, #4022)
+- `apm audit --ci` and `apm install` find the lockfile entry of a required package declared as an explicit registry-proxy URL (`host/artifactory/...`), so a `<proxy-host>/owner/repo` entry in `dependencies.require` passes `required-packages-deployed`. (#4067)
 
 ### Security
 

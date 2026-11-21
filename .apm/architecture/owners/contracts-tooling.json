@@ -176,8 +176,8 @@
     {
       "id": "read-only-lockfile-path",
       "decision": "Lockfile read path, timestamp emission, reproducible fallback, and marketplace declaration association",
-      "owner": "deps/lockfile.py (resolve_lockfile_path_for_read, LockFile.write, resolve_reproducible_timestamp, LockedDependency alias projection, LockFile.get_dependency)",
-      "selectors": ["src/apm_cli/deps/lockfile.py"],
+      "owner": "deps/lockfile.py (resolve_lockfile_path_for_read, LockFile.write, resolve_reproducible_timestamp, LockedDependency alias projection, LockFile.get_dependency; deps/lockfile_lookup.py locked_row_for reads the row from_dependency_ref wrote)",
+      "selectors": ["src/apm_cli/deps/lockfile.py", "src/apm_cli/deps/lockfile_lookup.py"],
       "guards": [
         "contracts-tooling-lockfile-read",
         "contracts-tooling-lockfile-symlink-write-guard",
