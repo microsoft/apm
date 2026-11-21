@@ -202,6 +202,7 @@ def test_current_native_profiles_are_characterized() -> None:
         "gemini": (
             ".gemini",
             {
+                "agents": ("agents", ".md", "gemini_agent", None, False),
                 "commands": ("commands", ".toml", "gemini_command", None, False),
                 "skills": ("skills", "/SKILL.md", "skill_standard", ".agents", False),
                 "hooks": ("hooks", ".json", "gemini_hooks", None, False),

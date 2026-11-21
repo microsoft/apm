@@ -276,7 +276,7 @@ not every file in a skill bundle.
 | Claude | `.claude/rules/*.md`, `agents/*.md`, `commands/*.md`, `skills/**/SKILL.md` | `.claude/hooks/*.json`, `.claude/settings.json`; nested `prompt`/`agent` handlers' `prompt` field |
 | Cursor | `.cursor/rules/*.mdc`, `agents/*.md`, `commands/*.md`; shared skills | `.cursor/hooks/*.json`, `.cursor/hooks.json`; flat command handlers and prompt handlers' `prompt` field; nested handlers are unsupported |
 | Kiro | `.kiro/steering/*.md`, `agents/*.md`, `prompts/*.md`, `skills/**/SKILL.md` | `.kiro/hooks/*.json`; v1 `hooks[].action.prompt` for agent actions |
-| Gemini | `.gemini/commands/*.toml`: `prompt`; shared skills | `.gemini/hooks/*.json`, `.gemini/settings.json`; nested command handlers |
+| Gemini | `.gemini/agents/*.md`, `commands/*.toml`: `prompt`; shared skills | `.gemini/hooks/*.json`, `.gemini/settings.json`; nested command handlers |
 | Codex | `.codex/agents/*.toml`: `developer_instructions`; shared skills | `.codex/hooks.json`; nested command handlers |
 | Antigravity | `.agents/rules/*.md`, skills | `.agents/hooks.json`; named containers, nested tool events and flat other events |
 | Windsurf | `.windsurf/rules/*.md`, `workflows/*.md`; shared skills | `.windsurf/hooks.json`; flat or APM-preserved nested command handlers |

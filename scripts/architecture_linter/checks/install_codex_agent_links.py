@@ -1,7 +1,8 @@
 """Keep Codex agent conversion on the shared install-time link resolver (#2966).
 
-The production Codex branch of ``AgentIntegrator.integrate_agents_for_target``
-must hand ``_render_codex_agent`` the ``BaseIntegrator.resolve_links`` owner and
+The production Codex branch of ``AgentIntegrator._render_agent_for_target`` (the
+single agent-renderer dispatch that ``integrate_agents_for_target`` calls) must
+hand ``_render_codex_agent`` the ``BaseIntegrator.resolve_links`` owner and
 report the renderer's resolved-link count. The renderer must call that owner
 with its own source and target and serialize the resolved body. Direct static
 callers of ``_write_codex_agent`` (tests, spec conformance) stay exempt.
@@ -20,7 +21,7 @@ from scripts.architecture_linter.models import Violation
 
 GUARD_CODEX_AGENT_LINKS = "install-deployment-codex-agent-link-resolution"
 _CONSUMER = "src/apm_cli/integration/agent_integrator.py"
-_INTEGRATE = "AgentIntegrator.integrate_agents_for_target"
+_INTEGRATE = "AgentIntegrator._render_agent_for_target"
 _WRITER = "AgentIntegrator._render_codex_agent"
 _HOOK = "resolve_links"
 _OWNER_CALL = f"self.{_HOOK}"

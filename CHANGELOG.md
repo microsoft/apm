@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm install` deploys agents to Gemini CLI (`.gemini/agents/`, `~/.gemini/agents/`), skipping with a warning any agent whose tools, model or access restrictions Gemini cannot keep. -- by @mohitmishra786 (#4593)
 - Root `apm.yml` `marketplaces:` resolve without registration and win over same-named registrations and stale locks; policy `marketplace.allow` restricts their origins. (closes #2903, #4006)
 
 ### Added
