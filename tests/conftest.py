@@ -376,6 +376,7 @@ _LAZY_CONSUMERS = (
     "apm_cli.deps.artifactory_orchestrator",
     "apm_cli.deps.clone_engine",
     "apm_cli.deps.download_strategies",
+    "apm_cli.deps.file_provenance",
     "apm_cli.deps.git_reference_resolver",
     "apm_cli.deps.git_semver_resolver",
     "apm_cli.deps.github_downloader",
