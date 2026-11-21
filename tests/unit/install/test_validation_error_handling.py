@@ -254,6 +254,10 @@ class TestGenericHostAmbiguousSubpathHint:
         assert reason is not None
         assert "GITLAB_HOST=gitlab.company.com" in reason
         assert "APM_GITLAB_HOSTS" in reason
+        assert (
+            "If this is GitHub Enterprise Server, set GITHUB_HOST=gitlab.company.com, "
+            "write github.com/ before apm.yml entries for packages on GitHub, and re-run."
+        ) in reason
 
 
 # ---------------------------------------------------------------------------

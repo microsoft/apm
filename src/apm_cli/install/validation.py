@@ -195,7 +195,9 @@ def _generic_host_ambiguous_subpath_hint(dep_ref) -> str | None:
     return (
         f"'{host}' was treated as a single repository path "
         f"('{dep_ref.repo_url}') because it isn't recognised as GitHub, "
-        f"Azure DevOps, or GitLab. If this is a self-hosted GitLab instance, "
+        f"Azure DevOps, or GitLab. If this is GitHub Enterprise Server, set "
+        f"GITHUB_HOST={host}, write github.com/ before apm.yml entries for "
+        f"packages on GitHub, and re-run. If this is a self-hosted GitLab instance, "
         f"set GITLAB_HOST={host} (or add it to the comma-separated "
         f"APM_GITLAB_HOSTS) and re-run to enable repo/subpath resolution for "
         f"nested groups. Otherwise, use an explicit 'git:' + 'path:' entry "
