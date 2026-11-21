@@ -199,7 +199,9 @@ class CurrentMcpConfigView:
         root_names = set(_get_server_configs(root_deps))
         dependencies = tuple(_deduplicate(root_deps + collected.dependencies))
         configs = _get_server_configs(dependencies)
-        bundle_owned = _bundle_owned_baseline(lockfile, declared=configs)
+        bundle_owned = _granted_bundle_servers(
+            _bundle_owned_baseline(lockfile, declared=configs), admission, modules_root
+        )
         configs.update({name: lockfile.mcp_configs[name] for name in bundle_owned})
         return cls(
             dependencies=dependencies,
@@ -613,6 +615,35 @@ BUNDLE_MCP_OWNER_PREFIX = "bundle:"
 def bundle_mcp_owner_token(owner: str) -> str:
     """Return the ``mcp_config_provenance`` token for a local bundle's MCP servers."""
     return f"{BUNDLE_MCP_OWNER_PREFIX}{owner}"
+
+
+def _granted_bundle_servers(
+    owned: dict[str, str], admission: McpAdmission, modules_root: Path
+) -> dict[str, str]:
+    """Keep the bundle servers whose recorded bundle approval still grants MCP (RA-025).
+
+    A local bundle is not in apm.yml, so its servers stay on the lock's
+    baseline; a deny or a revoked approval of the exact bundle key the install
+    recorded (``install/local_bundle_pending.py``) drops them here, so install
+    retires them as it retires the bundle's hooks. A bundle without a record
+    keeps its baseline.
+    """
+    if not owned:
+        return owned
+    context = admission.context
+    if context is None:
+        return owned
+    from apm_cli.install.local_bundle_pending import recorded_bundle_keys
+    from apm_cli.security.executables import EXEC_TYPE_MCP, resolve_exec_decision
+
+    granted: dict[str, str] = {}
+    for name, token in owned.items():
+        keys = recorded_bundle_keys(modules_root.parent, token[len(BUNDLE_MCP_OWNER_PREFIX) :])
+        if not keys or any(
+            resolve_exec_decision(context, key, EXEC_TYPE_MCP).allowed for key in keys
+        ):
+            granted[name] = token
+    return granted
 
 
 def _bundle_owned_baseline(
