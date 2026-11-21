@@ -483,21 +483,17 @@ def test_c3b_half_forged_lock_hash_follows_the_deployment_ledger(
 _SINGLE = ".github/instructions/tools.instructions.md"
 
 
-@pytest.mark.parametrize("lock", ["half-forged", "recorded"])
 def test_c3c_nothing_written_kept_line_says_what_the_lock_did(
-    tmp_path: Path, apm_binary_path: Path, lock: str
+    tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """RA-009 residue: a failed install that writes no file names what happened
     to apm.lock.yaml. The red team's upg.sh 0.36.1 world: one Copilot file, a
     v0.36.1 lock (lockfile_version 1, real release binary), edited after install.
 
-    half-forged: only deployed_file_hashes is forged to the edit. The install
-    writes no file but rewrites the lock (v1 -> 4, the hash normalized to the
-    ledger row), so it says the lock is rewritten; the repeat install leaves the
-    lock untouched and says it keeps the previous entries.
-    recorded: no forge. The upgrade install keeps the edit as a proven drift
-    (exit 0); the next one writes nothing, leaves the lock untouched and keeps
-    the previous entries.
+    Only deployed_file_hashes is forged to the edit. The install writes no file
+    but rewrites the lock (v1 -> 4, the hash normalized to the ledger row), so it
+    says the lock is rewritten; the repeat install leaves the lock untouched and
+    says it keeps the previous entries. (The unforged upgrade is c3d.)
     """
     from apm_cli.utils.content_hash import compute_file_hash
 
@@ -508,29 +504,23 @@ def test_c3c_nothing_written_kept_line_says_what_the_lock_did(
     recorded = compute_file_hash(target)
     target.write_bytes(target.read_bytes() + _USER_EDIT.encode("ascii"))
     edited_bytes = target.read_bytes()
-    if lock == "half-forged":
-        text = lock_path.read_text(encoding="utf-8")
-        pattern = f"{_SINGLE}: {recorded}"
-        assert text.count(pattern) == 1, text
-        lock_path.write_text(
-            text.replace(pattern, f"{_SINGLE}: {compute_file_hash(target)}"), "utf-8"
-        )
-        lock_before = lock_path.read_bytes()
-        code, out, err = world.run("install")
-        assert code == 1, f"{out}\n{err}"
-        assert target.read_bytes() == edited_bytes
-        assert lock_path.read_bytes() != lock_before
-        assert lock_path.read_text(encoding="utf-8").startswith("lockfile_version: '4'\n")
-        assert _kept_entry(world, _SINGLE) == (recorded, [recorded])
-        assert _kept_lines(err) == [_unproven_line(_SINGLE)]
-        assert _kept_lines(out) == []
-        flat_err = " ".join(err.split())
-        assert "This install wrote" not in " ".join((out + err).split())
-        assert flat_err.endswith(_keep_only_sentence(1, lock_rewritten=True)), flat_err
-        assert "keeps the previous entries" not in " ".join((out + err).split())
-    else:
-        world.ok("install")
-        assert target.read_bytes() == edited_bytes
+    text = lock_path.read_text(encoding="utf-8")
+    pattern = f"{_SINGLE}: {recorded}"
+    assert text.count(pattern) == 1, text
+    lock_path.write_text(text.replace(pattern, f"{_SINGLE}: {compute_file_hash(target)}"), "utf-8")
+    lock_before = lock_path.read_bytes()
+    code, out, err = world.run("install")
+    assert code == 1, f"{out}\n{err}"
+    assert target.read_bytes() == edited_bytes
+    assert lock_path.read_bytes() != lock_before
+    assert lock_path.read_text(encoding="utf-8").startswith("lockfile_version: '4'\n")
+    assert _kept_entry(world, _SINGLE) == (recorded, [recorded])
+    assert _kept_lines(err) == [_unproven_line(_SINGLE)]
+    assert _kept_lines(out) == []
+    flat_err = " ".join(err.split())
+    assert "This install wrote" not in " ".join((out + err).split())
+    assert flat_err.endswith(_keep_only_sentence(1, lock_rewritten=True)), flat_err
+    assert "keeps the previous entries" not in " ".join((out + err).split())
 
     lock_before = lock_path.read_bytes()
     code, out, err = world.run("install")
@@ -543,6 +533,53 @@ def test_c3c_nothing_written_kept_line_says_what_the_lock_did(
     assert "This install wrote" not in " ".join((out + err).split())
     assert flat_err.endswith(_keep_only_sentence(1, lock_rewritten=False)), flat_err
     assert "is rewritten in the current format" not in " ".join((out + err).split())
+
+
+def test_c3d_upgrade_keeps_the_edit_proof_on_every_install(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """RA-012/RA-010: the v1 -> 4 lock upgrade keeps the evidence for a kept edit.
+
+    The red team's upg.sh 0.36.1 world, no forge. The 0.36.1 lock proves the
+    user edited the file; the upgrade install keeps it as a proven drift and
+    receipts the bytes 0.36.1 deployed, so every later install (lock now
+    stamped 0.37) proves the same edit: the same reason line and exit code.
+    Both read-only verifiers flag the drift (I3), and the printed remedies
+    converge.
+    """
+    world = _World(tmp_path / "c3d", apm_binary_path, FIXTURES / "v0.36.1-copilot-single")
+    target = world.project / _SINGLE
+    lock_path = world.project / "apm.lock.yaml"
+    assert lock_path.read_text(encoding="utf-8").startswith("lockfile_version: '1'\n")
+    target.write_bytes(target.read_bytes() + _USER_EDIT.encode("ascii"))
+    edited_bytes = target.read_bytes()
+
+    verdicts = []
+    for _ in range(3):
+        code, out, err = world.run("install")
+        assert target.read_bytes() == edited_bytes
+        verdicts.append((code, _kept_lines(out), _kept_lines(err)))
+    assert verdicts == [(0, [_kept_line(_SINGLE)], [])] * 3, verdicts
+    assert lock_path.read_text(encoding="utf-8").startswith("lockfile_version: '4'\n")
+
+    audit, frozen = world.run("audit", "--ci"), world.run("install", "--frozen")
+    assert (audit[0], frozen[0]) == (1, 1), (audit, frozen)
+    assert _SINGLE in audit[1] + audit[2], audit
+    assert target.read_bytes() == edited_bytes
+    # Remedy: export the edit. The package is a local path whose source already
+    # lives on disk, so there is nothing to export upstream; the edit is kept.
+    patches = world.project.parent / "c3d-patches"
+    exported = " ".join(world.ok("export-patch", "--out", str(patches)).split())
+    assert "nothing to export upstream" in exported, exported
+    assert target.read_bytes() == edited_bytes
+    # Then move the kept file aside; the next install restores it and converges.
+    aside = world.project.parent / "c3d-aside"
+    target.rename(aside)
+    world.ok("install")
+    _assert_lock_matches_disk(world)
+    world.ok("audit", "--ci")
+    assert _kept_lines(world.ok("install")) == []
+    assert aside.read_bytes() == edited_bytes
 
 
 def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_path: Path) -> None:

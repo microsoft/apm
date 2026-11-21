@@ -530,8 +530,10 @@ class DeploymentMaterializationSession:
         written: Mapping[Path, str],
         targets: Sequence[TargetProfile],
         owner: str,
+        *,
+        evidence_only: bool = False,
     ) -> None:
-        """Accumulate successful rendered writes for one atomic end-of-batch flush."""
+        """Accumulate rendered writes (or, *evidence_only*, earlier ones) for one flush."""
         from apm_cli.install.deployed_paths import deployed_path_entry
 
         if not written:
@@ -562,7 +564,8 @@ class DeploymentMaterializationSession:
                 record.active_owner,
                 self._claim_signature(value),
             ]
-            self._written[key] = value
+            if not evidence_only:
+                self._written[key] = value
         self._dirty = True
 
     def written_entries(self) -> list[str]:
@@ -717,17 +720,21 @@ class OverwriteGate:
             path, claim, self.targets
         )
 
-    def keep(self, path: Path, *, edit: str | None = None) -> bool:
+    def keep(self, path: Path, claim: str, *, edit: str | None = None) -> bool:
         """Record a kept dependency file; its prior lock entry stays (reported at finalize).
 
-        *edit* classifies a file a pre-0.37 lock proves edited: ``"drift"`` or
-        ``"blocked"`` (#4398).
+        *edit* classifies a file a pre-0.37 lock or a receipt proves edited:
+        ``"drift"`` or ``"blocked"`` (#4398, RA-012).
         """
         if self.session is None or self.owner == ".":
             return False
         self.session.kept_overwrites.append((self.owner, path))
         if edit is not None:
             self.session.kept_edit_kinds[path.resolve().as_posix()] = edit
+            # Keep the pre-0.37 proof across the lock upgrade (RA-012).
+            legacy = self.session.legacy_recorded_hash(claim)
+            if legacy is not None:
+                self.session.record({path: legacy}, self.targets, self.owner, evidence_only=True)
         return True
 
     def adopt_legacy(self, path: Path, claim: str) -> bool:

@@ -869,7 +869,7 @@ class BaseIntegrator:
             if gate is not None
             else None
         )
-        if gate is not None and gate.keep(target_path, edit=edit):
+        if gate is not None and gate.keep(target_path, rel_path, edit=edit):
             # The claim stays with its prior lock entry; finalize names the file.
             target_paths.append(target_path)
             return True, False
