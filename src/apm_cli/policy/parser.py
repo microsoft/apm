@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from ..core.deprecations import deprecation_message
 from ..mcp_transport import POLICY_TRANSPORTS, canonical_transport_names
 from ..models.extension_keys import is_extension_key
 from ..utils.yaml_io import load_yaml_str
@@ -276,10 +277,8 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
 def _validate_executables(data: dict, warnings: list[str]) -> None:
     """Warn on deprecated ``bin_deploy`` and the inert ``executables.enforce``."""
     if data.get("bin_deploy") is not None:
-        warnings.append(
-            "'bin_deploy' is deprecated; use 'executables' (deny_all/deny) instead. "
-            "bin_deploy is still honored as a bin-scoped deny alias for one minor cycle."
-        )
+        warnings.append(deprecation_message("policy-bin-deploy"))
+
     execs = data.get("executables")
     if isinstance(execs, dict) and execs.get("enforce"):
         warnings.append(
