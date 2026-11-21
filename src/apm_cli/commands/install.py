@@ -148,7 +148,7 @@ from apm_cli.marketplace.errors import MarketplaceFreshnessError
 from apm_cli.marketplace.version_pins import staged_ref_pin_keys, withdraw_ref_pins
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
 from apm_cli.models.results import InstallDisposition, InstallResult
-from apm_cli.policy.install_preflight import identity_policy_scope
+from apm_cli.policy.install_preflight import identity_policy_refuses, identity_policy_scope
 from apm_cli.policy.outcome_routing import discover_trust_policy
 from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
 
@@ -286,7 +286,6 @@ def _resolve_package_references(
     Returns the validation outcomes, manifest entries, and change state.
     """
     from ..install.registry_wiring import should_skip_github_probe_for_dep, validate_registry_ref
-    from ..policy.install_preflight import active_identity_policy, identity_policy_denial
 
     valid_outcomes = []  # (canonical, already_present) tuples
     invalid_outcomes = []  # (package, reason) tuples
@@ -445,9 +444,7 @@ def _resolve_package_references(
         verbose = bool(logger and logger.verbose)
         # Registry routing is authoritative: it validates its own version
         # selectors before git semver eligibility can defer the raw-ref probe.
-        # Org policy refuses a denied identity: never contact its source; the
-        # install's policy gate reports the refusal.
-        denied = identity_policy_denial(dep_ref, active_identity_policy()) is not None
+        denied = identity_policy_refuses(dep_ref)  # never contact a denied source
         if not denied and (
             existing_source_is_registry
             or should_skip_github_probe_for_dep(dep_ref, default_registry)

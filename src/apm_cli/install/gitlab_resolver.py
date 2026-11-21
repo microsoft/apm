@@ -3,7 +3,7 @@
 from apm_cli.core.auth import AuthResolver
 from apm_cli.install.validation import _validate_package_exists
 from apm_cli.models.apm_package import DependencyReference
-from apm_cli.policy.install_preflight import active_identity_policy, identity_policy_denial
+from apm_cli.policy.install_preflight import identity_policy_refuses
 
 _GITLAB_DIRECT_SHORTHAND_UNRESOLVED = (
     "Direct GitLab host/path did not resolve to a reachable repository with an "
@@ -32,9 +32,7 @@ def _try_resolve_gitlab_direct_shorthand(
         candidate = DependencyReference.from_gitlab_shorthand_probe(
             host, repo_url, virtual_suffix, ref
         )
-        if identity_policy_denial(candidate, active_identity_policy()) is not None:
-            # Org policy refuses this identity: never probe it; the policy gate
-            # reports the refusal.
+        if identity_policy_refuses(candidate):
             return candidate
         if _validate_package_exists(
             package,

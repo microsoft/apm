@@ -271,3 +271,11 @@ def identity_policy_scope(policy_root: Path, *, no_policy: bool = False) -> Iter
 def active_identity_policy():
     """The blocking policy of the enclosing :func:`identity_policy_scope`, if any."""
     return _IDENTITY_POLICY.get()
+
+
+def identity_policy_refuses(dependency) -> bool:
+    """Whether the enclosing scope's policy refuses *dependency*, so it is never probed.
+
+    The install's policy gate reports the refusal.
+    """
+    return identity_policy_denial(dependency, active_identity_policy()) is not None
