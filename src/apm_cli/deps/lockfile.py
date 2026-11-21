@@ -429,6 +429,20 @@ def _normalize_exec_allowed_types(raw: Any) -> tuple[str, ...]:
     return tuple(sorted(set(raw)))
 
 
+def _ledger_without_owner(ledger: DeploymentLedger, owner: str) -> DeploymentLedger:
+    """Return *ledger* with *owner*'s claims removed (records it alone owned drop)."""
+    records = {}
+    for key, record in ledger.records.items():
+        owners = tuple(claimant for claimant in record.owners if claimant != owner)
+        if not owners:
+            continue
+        if owners != record.owners:
+            active = record.active_owner if record.active_owner in owners else owners[0]
+            record = replace(record, owners=owners, active_owner=active)
+        records[key] = record
+    return DeploymentLedger(records=records)
+
+
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
     """Return values without duplicates, preserving first-seen order."""
     return list(dict.fromkeys(values))
@@ -1477,10 +1491,8 @@ class LockFile:
     def without_author_local_state(self) -> LockFile:
         """Return a shallow copy without the packager's own local install state.
 
-        ``to_yaml`` derives ``lockfile_version`` from content, and local
-        deployed-file hashes alone promote it (RA-018). A bundle lock ships no
-        author-local receipts, so its version must follow the shipped
-        dependencies only, or packing before and after ``apm install`` differs
+        Local deployed-file hashes alone promote ``lockfile_version`` (RA-018);
+        a bundle ships none, so its version follows the shipped dependencies
         (RA-031). This lockfile is not mutated.
         """
         import copy
@@ -1494,8 +1506,9 @@ class LockFile:
         shipped.local_deployed_file_hashes = {}
         shipped.local_staged_files = []
         shipped.local_staged_file_hashes = {}
-        # Rebuilt from the shipped dependencies, so no author receipt re-projects.
-        shipped.deployment_ledger = DeploymentLedger(records={})
+        # Keep the shipped dependencies' records (to_yaml projects their
+        # deployed_files from them); drop only the author's own claims.
+        shipped.deployment_ledger = _ledger_without_owner(self.deployment_ledger, _SELF_KEY)
         return shipped
 
     def sync_lockfile_version(self) -> None:
