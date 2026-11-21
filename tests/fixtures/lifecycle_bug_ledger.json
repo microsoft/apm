@@ -2207,7 +2207,8 @@
       "failure_modes": ["observation", "outcome"],
       "properties": ["filesystem.open_world_observation", "outcome.status_matches_state"],
       "regression_tests": [
-        "tests/integration/test_audit_root_only_hooks_drift_e2e.py::test_root_only_hooks_without_dependencies_get_a_lockfile_audit_replays"
+        "tests/integration/test_audit_root_only_hooks_drift_e2e.py::test_root_only_hooks_without_dependencies_get_a_lockfile_audit_replays",
+        "tests/integration/test_audit_root_only_hooks_drift_e2e.py::test_root_only_kiro_hooks_get_a_lockfile_audit_replays"
       ]
     },
     {
