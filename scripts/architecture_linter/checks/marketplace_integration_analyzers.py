@@ -49,6 +49,9 @@ from scripts.architecture_linter.checks.marketplace_package_and_registration imp
 from scripts.architecture_linter.checks.marketplace_package_and_registration import (
     RULES as _PACKAGE_REGISTRATION_RULES,
 )
+from scripts.architecture_linter.checks.marketplace_project_map import (
+    RULES as _PROJECT_MAP_RULES,
+)
 from scripts.architecture_linter.checks.marketplace_ref_pin_commit import (
     RULES as _REF_PIN_COMMIT_RULES,
 )
@@ -72,6 +75,7 @@ RULES = (
     + _PACK_CREDENTIAL_FILE_RULES
     + _REF_PIN_COMMIT_RULES
     + _CODEX_OFFLINE_LAUNCH_RULES
+    + _PROJECT_MAP_RULES
 )
 COLLECTORS = (
     _TAG_VERSION_COLLECTORS

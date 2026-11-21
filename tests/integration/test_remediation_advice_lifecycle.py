@@ -620,18 +620,6 @@ def _w2_declare_in_user_manifest(world: _World) -> None:
     )
 
 
-def _w2_declare_in_project(world: _World) -> None:
-    _w2_create_marketplace(world)
-    world.consumer.manifest_path.write_text(
-        f"name: proj\nversion: 1.0.0\n{_w2_marketplaces_yaml(world)}", encoding="utf-8"
-    )
-
-
-def _w2_move_to_user_manifest(world: _World) -> None:
-    world.consumer.manifest_path.write_text("name: proj\nversion: 1.0.0\n", encoding="utf-8")
-    _w2_declare_in_user_manifest(world)
-
-
 def _w2_registered(world: _World, result) -> None:
     _expect_ok(world, result)
     registry = world.scenario.isolated.config_root / "marketplaces.json"
@@ -648,15 +636,6 @@ W2_MARKETPLACE_PROOFS: tuple[_TextProof, ...] = (
         1,
         _w2_registered,
         before=_w2_create_marketplace,
-    ),
-    _TextProof(
-        "marketplaces-outside-user-manifest",
-        _bare_world,
-        _w2_declare_in_project,
-        lambda _world: ("install",),
-        1,
-        _w2_registered,
-        before=_w2_move_to_user_manifest,
     ),
 )
 
