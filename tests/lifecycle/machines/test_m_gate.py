@@ -184,6 +184,14 @@ def test_gate_matrix_credits_op_prim_gate_cells(
     assert machine.expected_seen == set(), sorted(machine.expected_seen)
     missing = matrix_cells(scope) - earned_cells(current_node(), "G1|")
     assert not missing, f"GATE matrix ids without an oracle receipt: {sorted(missing)}"
+    # The spine ends by uninstalling every package under the dependency deny.
+    leftovers = [
+        p
+        for p in (".agents/skills", ".github/hooks", ".github/extensions")
+        if (machine.bench.deploy_root / p).exists()
+        and any((machine.bench.deploy_root / p).iterdir())
+    ]
+    assert not leftovers, f"uninstall left deployed surfaces: {leftovers}"
 
 
 def test_gate_machine_kills_the_recorded_approval_mutant(tmp_path: Path) -> None:
