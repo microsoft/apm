@@ -672,7 +672,7 @@ $ apm install acme/evil-pkg
 [>] Installing 1 new package...
 [!] Policy: org:contoso/.github -- enforcement=block
 [x] Policy violation: github.com/acme/evil-pkg -- denied by pattern: acme/evil-pkg
-  Blocked by org policy at org:contoso/.github (dependency-denylist). Nothing was changed. Contact your policy admin to allow it. Run `apm policy status` to see the active policy.
+  Blocked by org policy at org:contoso/.github (dependency-denylist). Nothing was changed. Choose a package the policy allows, or contact your policy admin to allow it. Run `apm policy status` to see the active policy.
 [i] apm.yml restored to its previous state.
 [x] Install blocked by org policy -- see violations above
 ```
