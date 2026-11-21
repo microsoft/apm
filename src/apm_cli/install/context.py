@@ -89,6 +89,10 @@ class InstallContext:
     # Dependency keys routed to native Claude this run, admitted or parked.
     claude_native_keys: set[str] = field(default_factory=set)
     lsp_preflight: Any = None  # LspPreflight when services integrate LSP after this pipeline
+    # The caller's MCP/LSP reconciliation, run before native Claude
+    # registration commits the lockfile (install/phases/services.py, #4329).
+    reconcile_services: Any = None
+    service_failure: Exception | None = None
 
     dry_run: bool = False
     lockfile_only: bool = False

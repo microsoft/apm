@@ -394,6 +394,12 @@ def run(ctx: InstallContext) -> InstallResult:
     return result_from_install_context(ctx)
 
 
+def kept_overwrites_fail_install(ctx: InstallContext) -> bool:
+    """Whether finalize will fail this install on kept managed files (#4360)."""
+    kinds = getattr(ctx, "kept_overwrite_kinds", {})
+    return any(kinds.get(entry) != "drift" for _owner, entry in ctx.kept_overwrites or ())
+
+
 def _report_kept_overwrites(ctx: InstallContext) -> None:
     """Fail on managed files install kept without deployment evidence (#4360).
 
