@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,10 +53,11 @@ from tests.lifecycle.machines._kit import (
     earned_cells,
     machine_settings,
 )
+from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import UNGATED_KINDS, ModelState
 from tests.lifecycle.oracles import Evidence, Observation, check_obligation
 from tests.lifecycle.receipts import current_node
-from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED
+from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED, _SURFACE_GLOBS
 from tests.lifecycle.world import registry
 from tests.lifecycle.world.packages import INERT_COMMAND
 from tests.lifecycle.world.services import (
@@ -129,6 +130,12 @@ WORLD_HOSTS = frozenset(
 INLINE_SERVER = "p-inline"
 # MCP server slots -> the server name their ``dependencies.mcp`` entry carries.
 _MCP_SERVERS = {"p-registry": REGISTRY_SERVER, INLINE_SERVER: INLINE_SERVER}
+# The exact names a configured or locked entry of each slot may carry (a registry
+# server is keyed by its full id or by its short name).
+_MCP_NAMES = {
+    "p-registry": frozenset({REGISTRY_SERVER, REGISTRY_SERVER.rsplit("/", 1)[-1]}),
+    INLINE_SERVER: frozenset({INLINE_SERVER}),
+}
 _CLOSED_PROXY = "http://127.0.0.1:9"
 _NO_DRY_RUN = frozenset({"lock"})
 # Ops that do not resolve: they may keep what is deployed (``apm lock`` never deletes).
@@ -250,12 +257,15 @@ _COMMON = (
     "UPDATE=on",
 )
 _UNAPPROVED = "GATE=unapproved-exec"
-_MANIFEST_CONTEXT = (*_COMMON, _UNAPPROVED, "FROZEN=on")
+# GATE=none: the gate-off pass (no ``executables`` block, the default user path).
+_MANIFEST_CONTEXT = (*_COMMON, _UNAPPROVED, "GATE=none", "FROZEN=on")
+# A root-declared MCP server has no executable-gate level (first-party, never parked).
+_ROOT_MCP_CONTEXT = (*_COMMON, "GATE=none", "FROZEN=on")
 # (op, form) -> the context ids its real steps must earn (``context_pass`` and the
 # ordinary steps of the spine reach every one).
 X_CONTEXT: Mapping[tuple[str, str], tuple[str, ...]] = {
-    ("install", "inline-mcp"): _MANIFEST_CONTEXT,
-    ("install", "mcp-registry"): _MANIFEST_CONTEXT,
+    ("install", "inline-mcp"): _ROOT_MCP_CONTEXT,
+    ("install", "mcp-registry"): _ROOT_MCP_CONTEXT,
     ("install", "plugin-at-mkt"): _MANIFEST_CONTEXT,
     ("install", "native"): _MANIFEST_CONTEXT,
     ("install", "pkg-registry"): _MANIFEST_CONTEXT,
@@ -361,7 +371,9 @@ class SourceMachine(MachineBase):
         names |= {"p-exec"} if "remote-exec" in self.slots else set()
         if names & _DIAMOND:
             names.add("p-child")
-        return ModelState(declared=frozenset(names), targets=self.model.targets)
+        return ModelState(
+            declared=frozenset(names), targets=self.model.targets, exec_gate=self.model.exec_gate
+        )
 
     def remote(self) -> bool:
         return bool({"remote-skill", "remote-exec", "p-registry"} & set(self.slots))
@@ -395,7 +407,8 @@ class SourceMachine(MachineBase):
         # with the gate on, only the executable kinds of a package have a gate level.
         if "executables" not in self.bench.manifest():
             found.add("GATE=none")
-        else:
+        elif choice.form not in _MCP_FORMS:
+            # The project's own MCP servers are first-party: the gate never parks them.
             gated = choice.kinds - UNGATED_KINDS
             found |= {f"GATE={self.model.gate(choice.package, kind)}" for kind in gated}
         if any(cell.startswith(f"{choice.package}/") for cell in step.before.deployed):
@@ -449,7 +462,12 @@ class SourceMachine(MachineBase):
     # -- steps -------------------------------------------------------------------
 
     def command(
-        self, op: str, args: tuple[str, ...], choices: Collection[Choice], dry_run: bool
+        self,
+        op: str,
+        args: tuple[str, ...],
+        choices: Collection[Choice],
+        dry_run: bool,
+        verify: Callable[[Step], None] | None = None,
     ) -> Step:
         """Run *op* (after its ``--dry-run`` preview when asked) and credit T3/T5 cells."""
         requested = self.declared_model()
@@ -468,6 +486,8 @@ class SourceMachine(MachineBase):
         )
         self.egress(step)
         if step.result.returncode == 0:
+            if verify is not None:
+                verify(step)
             self.credit(step, op, args, choices, preview)
             self.model = requested
             self.converged = op not in _KEEPING or self.converged
@@ -645,6 +665,77 @@ class SourceMachine(MachineBase):
         choices = [c for c in self._choices() if c.form != "bundle"]
         self.command(op, args, choices, dry_run)
 
+    def gate_off_pass(self) -> None:
+        """No executables gate: every declared form deploys without approval (GATE=none).
+
+        Restoring the gate then retires every package executable that is no longer
+        approved, while the project's own MCP servers (declared in its apm.yml, so
+        first-party) stay configured.
+        """
+        saved = self.bench.manifest()["executables"]
+
+        def set_gate(value: object) -> Callable[[], None]:
+            def change() -> None:
+                data = self.bench.manifest()
+                data.pop("executables", None)
+                if value is not None:
+                    data["executables"] = value
+                self.bench.write_manifest(data)
+
+            return change
+
+        self.edit("executables-gate-off", set_gate(None))
+        self.model = self.model.with_exec_gate(False)
+        self.converged = False
+        manifest = [c for c in self._choices() if c.form != "bundle"]
+        self.command("install", (), manifest, False, verify=self.gate_off_deploys_everything)
+        self.edit("executables-gate-on", set_gate(saved))
+        self.model = self.model.with_exec_gate(True)
+        self.converged = False
+        self.command("install", (), manifest, False, verify=self.gate_on_keeps_first_party_mcp)
+
+    def deploys_what_the_model_allows(self, step: Step) -> None:
+        """A resolving step deploys exactly the observable surfaces the model allows."""
+        wanted = {
+            "/".join(cell)
+            for cell in expected_deployed(self.declared_model(), self.kinds)
+            if (cell[1], cell[2]) in _SURFACE_GLOBS
+        }
+        deployed = set(step.after.deployed)
+        assert deployed == wanted, f"deployed {sorted(deployed)}, model {sorted(wanted)}"
+
+    def root_mcp_problems(self, step: Step) -> list[str]:
+        """The project's declared MCP servers that are not configured or not locked."""
+        lock = step.after.lock
+        places = {
+            "configured in .mcp.json": set(_mcp_servers(step.after)),
+            "recorded in the lock": set(lock.mcp_servers if lock else ()),
+        }
+        problems = []
+        for choice in self._choices():
+            if choice.form in _MCP_FORMS:
+                names = _MCP_NAMES[choice.package]
+                problems += [
+                    f"{choice.package} not {place}"
+                    for place, found in places.items()
+                    if not names & found
+                ]
+        return problems
+
+    def gate_off_deploys_everything(self, step: Step) -> None:
+        """No gate: every allowed surface is deployed and no MCP server is parked."""
+        self.deploys_what_the_model_allows(step)
+        problems = self.root_mcp_problems(step)
+        assert not problems, "; ".join(problems)
+        output = f"{step.result.stdout}\n{step.result.stderr}"
+        assert "Parked MCP server" not in output, output
+
+    def gate_on_keeps_first_party_mcp(self, step: Step) -> None:
+        """Gate restored: package executables retire; the project's own MCP servers stay."""
+        self.deploys_what_the_model_allows(step)
+        problems = self.root_mcp_problems(step)
+        assert not problems, "; ".join(problems)
+
     def context_pass(self) -> None:
         """Install every declared form under --force/--update/--target and --frozen, multi-target."""
         self.retarget(TARGET_SETS[1])
@@ -740,6 +831,7 @@ def replay_spine(machine: SourceMachine) -> None:
             machine.reconcile(op, True)
         if choice is _REGISTRY_SKILL:
             machine.context_pass()
+            machine.gate_off_pass()
     # p-lsp still survives this uninstall (#4214).
     machine.uninstall("remote-skill", False)
     for slot in ("remote-exec", "p-lsp"):
