@@ -59,7 +59,6 @@ def run_service_integrations(  # noqa: PLR0913
     target_decision: EffectiveTargetDecision | None,
     active_package_keys: frozenset[str] | None = None,
     claude_native_keys: frozenset[str] = frozenset(),
-    receipted_owners: frozenset[str] = frozenset(),
     frozen_disposition: FrozenDisposition,
 ) -> ServiceIntegrationResult:
     """Resolve once, then reconcile package-declared MCP and LSP services."""
@@ -228,7 +227,6 @@ def run_service_integrations(  # noqa: PLR0913
             claude_native_keys=claude_native_keys,
             executable_context=(ctx.exec_allow_map, ctx.exec_allow_resolved),
             pre_install_lock=existing_lock,
-            receipted_owners=receipted_owners,
             frozen=frozen_disposition.withhold_lockfile_writes,
             policy_enforced=getattr(ctx, "mcp_policy_enforced", False) is True,
             # The one server apm install --mcp adds (install/mcp/entry_integration.py).

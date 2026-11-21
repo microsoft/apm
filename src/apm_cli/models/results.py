@@ -42,8 +42,6 @@ class InstallResult:
     active_package_keys: frozenset[str] | None = None
     # Dependencies whose Claude servers Claude loads from the native plugin.
     claude_native_keys: frozenset[str] = frozenset()
-    # Dependencies whose prior deployment came from local receipts (no lock row).
-    receipted_owners: frozenset[str] = frozenset()
     # The commit gate already enforced org policy on the merged MCP set.
     mcp_policy_enforced: bool = False
     # Unedited files an APM before 0.37 rendered, adopted as committed (#4398).

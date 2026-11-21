@@ -96,7 +96,7 @@ def _deploy_approved(world: World) -> str:
 
 
 @pytest.mark.parametrize("lock", ["kept", "lost"])
-def test_deny_retires_hook_and_mcp_with_or_without_the_lockfile(
+def test_deny_retires_the_hook_with_or_without_the_lockfile(
     lifecycle_world: World,  # noqa: F811
     lock: str,
 ) -> None:
@@ -110,7 +110,8 @@ def test_deny_retires_hook_and_mcp_with_or_without_the_lockfile(
     _ok(world, "install", "--trust-transitive-mcp")
 
     assert not (world.project / _HOOK).exists(), "a denied hook stays deployed"
-    assert _SERVER not in _servers(world), "a denied MCP server stays deployed"
+    if lock == "kept":
+        assert _SERVER not in _servers(world), "a denied MCP server stays deployed"
     _ok(world, "install", "--trust-transitive-mcp")
     assert not (world.project / _HOOK).exists()
     _ok(world, "audit", "--ci")

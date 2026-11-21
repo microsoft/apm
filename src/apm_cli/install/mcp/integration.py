@@ -332,7 +332,6 @@ def run_mcp_integration(  # noqa: PLR0913
     active_package_keys: frozenset[str] | None = None,
     executable_context: tuple[dict | None, bool] = (None, False),
     pre_install_lock: "LockFile | None" = None,
-    receipted_owners: frozenset[str] = frozenset(),
     frozen: bool = False,
     claude_native_keys: frozenset[str] = frozenset(),
     policy_enforced: bool = False,
@@ -377,9 +376,6 @@ def run_mcp_integration(  # noqa: PLR0913
             package phase may already have rewritten *lock_path* with the
             running version, so retired-destination heal eligibility is read
             from this snapshot.
-        receipted_owners: Lock keys whose prior deployment this install read
-            from local receipts because no lock recorded it; only their parked
-            servers may be retired when the install started without a lock.
         frozen: ``--frozen`` replay; recorded pre-#3825 plugin roots are kept.
         mcp_entry: The server ``apm install --mcp`` adds (#4085). Only it is
             installed and re-targeted; the commit gate judged it before
@@ -831,34 +827,6 @@ def run_mcp_integration(  # noqa: PLR0913
             mcp_config_provenance=old_mcp_provenance,
             logger=logger,
             fail_on_write_error=True,
-        )
-
-    if (
-        should_install
-        and not frozen
-        and pre_install_lock is None
-        and current_view is not None
-        and current_view.parked
-    ):
-        from apm_cli.install.mcp.parked_retirement import retire_unrecorded_parked_servers
-
-        selected = (
-            [runtime]
-            if runtime is not None
-            else (
-                target_decision.runtime_targets_for_scope(user_scope=user_scope)
-                if target_decision is not None
-                else None
-            )
-        )
-        retire_unrecorded_parked_servers(
-            current_view.parked,
-            runtimes=[name for name in selected or () if name != exclude],
-            receipted_owners=receipted_owners,
-            project_root=project_root,
-            user_scope=user_scope,
-            scope=scope,
-            logger=logger,
         )
 
     if prepared.omission_view is not None and lockfile_exists(lock_path):

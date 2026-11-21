@@ -253,8 +253,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "executable-gate level of an MCP source is one must-cover cell that witnesses it "
         "(an org policy dependency deny still applies)",
         (
-            Ev(_MCP_VIEW, 1229, "Parked MCP server '{name}' from transitive package"),
-            Ev(_MCP_VIEW, 1241, "Parked MCP server '{name}' ({package})"),
+            Ev(_MCP_VIEW, 1220, "Parked MCP server '{name}' from transitive package"),
+            Ev(_MCP_VIEW, 1232, "Parked MCP server '{name}' ({package})"),
             Ev("docs/src/content/docs/enterprise/control-executables.mdx", 19, "from dependencies"),
             Ev("docs/src/content/docs/consumer/install-mcp-servers.md", 168, "Re-declare it"),
         ),

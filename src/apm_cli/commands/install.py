@@ -2024,9 +2024,6 @@ def _install_apm_packages(ctx, outcome):
             claude_native_keys=(
                 install_result.claude_native_keys if install_result is not None else frozenset()
             ),
-            receipted_owners=(
-                install_result.receipted_owners if install_result is not None else frozenset()
-            ),
             frozen_disposition=frozen_disposition,
         )
     except PolicyBlockError as exc:

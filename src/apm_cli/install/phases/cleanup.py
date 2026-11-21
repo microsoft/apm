@@ -354,7 +354,7 @@ def _receipted_stand_in(ctx: InstallContext, dep_key: str) -> _ReceiptedDeployme
     deployment, so a lost lock converges like a kept one; lockfile assembly
     reconciles the same record. Deletion stays gated by deployment evidence.
     """
-    receipted = deployment_evidence(ctx).receipted_claims(dep_key)
+    receipted = deployment_evidence(ctx).receipted_claims(dep_key, ctx.targets or ())
     if not receipted:
         return None
     stand_ins = getattr(ctx, "receipted_prior_deployments", None)

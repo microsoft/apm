@@ -57,6 +57,7 @@ from .base_integrator import BaseIntegrator
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.targets import TargetProfile
 
 AUTHORIZED = "authorized"
 EDITED = "edited"
@@ -166,22 +167,31 @@ class DeploymentEvidence:
             owned_receipts=owned_receipts,
         )
 
-    def receipted_claims(self, owner: str) -> dict[str, str]:
-        """Map each deploy-root-relative file receipted for *owner* to the hash APM wrote.
+    def receipted_claims(self, owner: str, targets: Iterable[TargetProfile]) -> dict[str, str]:
+        """Map each lock value this installation receipted for *owner* to the hash APM wrote.
 
         Stands in for a package's prior ``deployed_files`` and hashes when the
         lock has no record of it (for example after the lockfile was lost), so
         stale-file cleanup still retires what the package no longer deploys.
-        Deletion stays gated by :meth:`verdict`.
+        Each receipt is spelled by the canonical deployment-path codec for
+        *targets* (``cowork://`` for an external root), as current claims are;
+        a receipt no target can spell is left to the lock. Deletion stays
+        gated by :meth:`verdict`.
         """
-        from apm_cli.utils.paths import portable_relpath
+        from apm_cli.install.deployed_paths import deployed_path_entry
+        from apm_cli.utils.path_security import PathTraversalError
 
         if self._owned_receipts is None:
             return {}
-        return {
-            portable_relpath(Path(physical), self._deploy_root): content_hash
-            for physical, content_hash in sorted(self._owned_receipts(owner).items())
-        }
+        targets = list(targets)
+        claims: dict[str, str] = {}
+        for physical, content_hash in sorted(self._owned_receipts(owner).items()):
+            try:
+                value = deployed_path_entry(Path(physical), self._deploy_root, targets)
+            except (PathTraversalError, RuntimeError, ValueError):
+                continue
+            claims[value] = content_hash
+        return claims
 
     def add_rendered(self, rendered: Mapping[Path, str]) -> None:
         """Add hashes this install rendered from the source it holds (#4360).
