@@ -1044,6 +1044,8 @@ class HookIntegrator(BaseIntegrator):
         target_paths: list[Path] = []
         display_payloads: list = []
         materializations: list[MaterializationResult] = []
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.content_hash import compute_file_hash
 
         for hook_file in hook_files:
             data = self._parse_hook_json(hook_file)
@@ -1101,8 +1103,6 @@ class HookIntegrator(BaseIntegrator):
                         package=package_name,
                         detail="; ".join(validation.errors),
                     )
-                from apm_cli.integration.targets import KNOWN_TARGETS
-
                 materializations.append(
                     MaterializationResult(
                         locator=DeploymentLedgerCodec.locator_for_path(
@@ -1129,9 +1129,6 @@ class HookIntegrator(BaseIntegrator):
                     self.note_rendered_write(target_path)
                 scripts_adopted += 1
             target_paths.append(target_path)
-            from apm_cli.integration.targets import KNOWN_TARGETS
-            from apm_cli.utils.content_hash import compute_file_hash
-
             materializations.append(
                 MaterializationResult(
                     locator=DeploymentLedgerCodec.locator_for_path(
@@ -1185,6 +1182,9 @@ class HookIntegrator(BaseIntegrator):
             scripts_copied=scripts_copied,
             files_adopted=scripts_adopted,
             display_payloads=display_payloads,
+            hooks_registered=sum(
+                m.status is MaterializationStatus.WRITTEN for m in materializations
+            ),
             materializations=tuple(materializations),
         )
 
@@ -1549,8 +1549,8 @@ class HookIntegrator(BaseIntegrator):
             files_skipped=0,
             target_paths=target_paths,
             scripts_copied=scripts_copied,
-            # An unchanged merged config is unchanged, never an adoption (RA-007).
-            files_adopted=scripts_adopted,
+            files_adopted=scripts_adopted,  # an unchanged config is no adoption (RA-007)
+            hooks_registered=hooks_integrated,
             display_payloads=display_payloads,
         )
 

@@ -425,6 +425,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     # (per the 1/2/3+ collapse rule), not one per target.
     # Structure: { prim_name: {"files": int, "adopted": int, "label": str, "paths": [str]} }
     _per_kind: dict[str, dict[str, Any]] = {}
+    _hooks_registered = 0
 
     for _prim_name, _entry in _dispatch.items():
         if _entry.multi_target:
@@ -527,6 +528,8 @@ def integrate_package_primitives(  # noqa: PLR0913
             # Treat anything that is not a real int as 0 so we never
             # invent fake adopt counts.
             _adopted = _adopted_attr if isinstance(_adopted_attr, int) else 0
+            _registered = getattr(_int_result, "hooks_registered", 0)
+            _hooks_registered += _registered if isinstance(_registered, int) else 0
             # Show the per-kind line whenever ANY work happened -- either
             # a fresh integrate or a silent adopt of pre-existing
             # byte-identical files. Adopt-only runs (e.g. re-install
@@ -669,9 +672,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     _total_integrated += _skill_count
     _total_integrated += int(skill_result.bin_deployed)
     result["files_changed"] = _total_integrated
-    # Merged hook entries this package contributes, written or unchanged (#4033).
-    _hooks = _per_kind.get("hooks", {})
-    result["hooks_contributed"] = _hooks.get("files", 0) + _hooks.get("adopted", 0)
+    # Hook files this package registers, written or unchanged (#4033).
+    result["hooks_contributed"] = _hooks_registered
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 
