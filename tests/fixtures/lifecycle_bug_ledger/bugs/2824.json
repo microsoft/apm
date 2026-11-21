@@ -1,0 +1,14 @@
+{
+  "issue": 2824,
+  "fixed_in": "Unreleased",
+  "summary": "A user-scope Claude plugin whose hook module reads ../../.claude-plugin/plugin.json (Codex Companion) crashed: hooks were deployed as a partial scripts/ copy. The plugin now deploys whole to .agents/plugins/<name>/ at user and project scope, so CLAUDE_PLUGIN_ROOT is the complete publisher tree (#3191, #3921).",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_claude_native_hook_lifecycle.py::test_hook_reading_the_plugin_manifest_finds_it_in_the_native_root"
+  ]
+}

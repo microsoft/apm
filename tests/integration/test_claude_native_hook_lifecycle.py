@@ -922,3 +922,89 @@ def test_frozen_install_verifies_native_plugin_files_like_audit(
     assert tool.read_bytes() == locked_tool
     run("install", "--frozen", "--global", "--trust-bin")
     assert lock.read_bytes() == locked
+
+
+def _companion_plugin(root: Path) -> Path:
+    """The #2824 shape (Codex Companion): a hook script whose module reads
+    ``../../.claude-plugin/plugin.json`` relative to itself."""
+    plugin = root / "companion"
+    (plugin / ".claude-plugin").mkdir(parents=True)
+    (plugin / ".claude-plugin/plugin.json").write_text(
+        json.dumps({"name": "companion", "version": "1.0.0", "description": "d"}),
+        encoding="ascii",
+    )
+    command = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-gate.mjs"'
+    (plugin / "hooks").mkdir()
+    (plugin / "hooks/hooks.json").write_text(
+        json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}}),
+        encoding="ascii",
+    )
+    (plugin / "scripts/lib").mkdir(parents=True)
+    (plugin / "scripts/package.json").write_text('{"type": "module"}\n', encoding="ascii")
+    (plugin / "scripts/lib/manifest.mjs").write_text(
+        'import fs from "node:fs";\n'
+        'const url = new URL("../../.claude-plugin/plugin.json", import.meta.url);\n'
+        'export const MANIFEST = JSON.parse(fs.readFileSync(url, "utf8"));\n',
+        encoding="ascii",
+    )
+    (plugin / "scripts/stop-gate.mjs").write_text(
+        'import { MANIFEST } from "./lib/manifest.mjs";\nconsole.log(`gate:${MANIFEST.name}`);\n',
+        encoding="ascii",
+    )
+    return plugin
+
+
+@pytest.mark.parametrize("scope", ["user", "project"])
+def test_hook_reading_the_plugin_manifest_finds_it_in_the_native_root(
+    tmp_path: Path, apm_binary_path: Path, scope: str
+) -> None:
+    """#2824: a hook module that reads ``../../.claude-plugin/plugin.json`` runs.
+
+    The plugin deploys whole to ``.agents/plugins/<name>/`` (#3191 at user scope,
+    #3921 at project scope), so ``${CLAUDE_PLUGIN_ROOT}`` is the complete
+    publisher tree, not a partial copy of its scripts.
+    """
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
+    plugin = _companion_plugin(isolated.root / "packages")
+    runner = ApmLifecycleRunner((str(apm_binary_path),))
+    flags = ("--global",) if scope == "user" else ()
+    cwd = isolated.config_root if scope == "user" else isolated.work_root
+    base = isolated.home if scope == "user" else isolated.work_root
+
+    def run(*args: str):
+        result = runner.run(args, scenario_id=f"claude-native-2824-{scope}", cwd=cwd, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result
+
+    run("install", *flags, str(plugin), "--target", "claude")
+    run("approve", *flags, "--all")
+    run("install", *flags, "--target", "claude")
+    root = base / ".agents/plugins/companion"
+    for relative in (
+        ".claude-plugin/plugin.json",
+        "hooks/hooks.json",
+        "scripts/package.json",
+        "scripts/lib/manifest.mjs",
+        "scripts/stop-gate.mjs",
+    ):
+        assert (root / relative).read_bytes() == (plugin / relative).read_bytes(), relative
+    # No partial loose copy of the scripts is deployed beside the native root.
+    assert not (base / ".claude/hooks").exists()
+    assert not scenario.trap.exists()
+
+    if shutil.which("node") is None or os.name == "nt":
+        pytest.skip("Deployment checks passed; hook execution needs node on POSIX.")
+    hooks = json.loads((root / "hooks/hooks.json").read_text(encoding="utf-8"))
+    completed = subprocess.run(
+        hooks["hooks"]["Stop"][0]["hooks"][0]["command"],
+        shell=True,
+        text=True,
+        capture_output=True,
+        env=dict(env, CLAUDE_PLUGIN_ROOT=str(root)),
+        cwd=isolated.work_root,
+        timeout=30,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "gate:companion"
