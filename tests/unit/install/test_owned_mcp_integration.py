@@ -210,33 +210,59 @@ def test_owned_mcp_retires_only_servers_targets_no_longer_select(tmp_path) -> No
     assert updated.mcp_target_servers == {"codex": ["b"]}
 
 
+class _Warnings:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def warning(self, message: str, symbol: str = "warning") -> None:
+        self.messages.append(message)
+
+    def __getattr__(self, name: str):
+        return lambda *args, **kwargs: None
+
+
 def test_owned_mcp_records_only_servers_this_install_claims(tmp_path) -> None:
-    """A server left to an identical entry APM does not manage is not recorded (#4634)."""
+    """A server left to an entry APM does not manage is not recorded and is named (#4634).
+
+    A server skipped for another reason (no entry exists) is neither recorded nor named.
+    """
     lock_path = tmp_path / "apm.lock.yaml"
     lockfile = LockFile()
     lockfile.mcp_config_provenance = {"other": "bundle:bundle-b"}
     lockfile.mcp_configs = {"other": {"name": "other"}}
     lockfile.mcp_servers = ["other"]
     lockfile.write(lock_path)
+    user_entry = {"command": "echo", "args": []}
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"unmanaged": user_entry}}), encoding="utf-8"
+    )
 
     def fake_install(dependencies, **kwargs):
-        # "unmanaged" matched a foreign entry: the integrator claims only "owned".
-        kwargs["managed_target_servers"].setdefault("codex", set()).add("owned")
+        # "unmanaged" matched a foreign entry and "skipped" was not written:
+        # the integrator claims only "owned".
+        kwargs["managed_target_servers"].setdefault("copilot", set()).add("owned")
         return 1
 
+    logger = _Warnings()
     with patch(
         "apm_cli.integration.mcp_integrator.MCPIntegrator.install", side_effect=fake_install
     ):
         run_owned_mcp_integration(
-            dependencies=[_dependency("owned"), _dependency("unmanaged")],
+            dependencies=[_dependency("owned"), _dependency("unmanaged"), _dependency("skipped")],
             owner="bundle-a",
             lock_path=lock_path,
             project_root=tmp_path,
             user_scope=False,
-            target_runtimes=["codex"],
+            target_runtimes=["copilot"],
+            logger=logger,
         )
 
     updated = LockFile.from_yaml(lock_path.read_text(encoding="utf-8"))
     assert updated.mcp_servers == ["other", "owned"]
     assert set(updated.mcp_configs) == {"other", "owned"}
     assert updated.mcp_config_provenance == {"other": "bundle:bundle-b", "owned": "bundle:bundle-a"}
+    assert [m.split(" -- ")[0] for m in logger.messages] == [
+        "Skipping MCP server 'unmanaged' from bundle bundle-a"
+    ]
+    on_disk = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
+    assert on_disk["mcpServers"]["unmanaged"] == user_entry

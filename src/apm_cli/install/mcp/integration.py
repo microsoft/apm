@@ -286,7 +286,13 @@ def run_owned_mcp_integration(
     )
     if conflict is None:
         _report_unrecorded_bundle_servers(
-            logger, owner, dependencies, new_names - recorded, target_runtimes
+            logger,
+            owner,
+            dependencies,
+            new_names - recorded,
+            target_runtimes,
+            project_root=project_root,
+            user_scope=user_scope,
         )
     lockfile.write(lock_path)
     if conflict is not None:
@@ -316,25 +322,66 @@ def _record_bundle_servers(
 
 
 def _report_unrecorded_bundle_servers(
-    logger, owner: str, dependencies: list, unrecorded: set[str], target_runtimes: list[str]
+    logger,
+    owner: str,
+    dependencies: list,
+    unrecorded: set[str],
+    target_runtimes: list[str],
+    *,
+    project_root: Path,
+    user_scope: bool,
 ) -> None:
-    """Name each selected bundle server left to an existing entry APM does not manage."""
-    from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
+    """Name each unrecorded bundle server left to an existing entry APM does not manage.
 
-    selected = {
-        name
-        for runtime in target_runtimes
-        for name in mcp_servers_for_runtime(dependencies, runtime)
-    }
-    if logger is None:
+    A server can also stay unclaimed because a runtime skipped it (for example
+    an unsupported transport); the integrator reports that itself, so only a
+    server whose entry is present in a selected runtime's config is named.
+    """
+    if logger is None or not unrecorded:
         return
-    for name in sorted(unrecorded & selected):
+    foreign = _unmanaged_entry_names(
+        unrecorded, dependencies, target_runtimes, project_root=project_root, user_scope=user_scope
+    )
+    for name in sorted(foreign):
         logger.warning(
             f"Skipping MCP server '{name}' from bundle {owner} -- an entry with that name "
             "exists that APM does not manage. Remove the entry, then reinstall the bundle "
             "to manage it.",
             symbol="warning",
         )
+
+
+def _unmanaged_entry_names(
+    names: set[str],
+    dependencies: list,
+    target_runtimes: list[str],
+    *,
+    project_root: Path,
+    user_scope: bool,
+) -> set[str]:
+    """The *names* a selected runtime's native MCP config already holds an entry for."""
+    from apm_cli.core.conflict_detector import MCPConflictDetector
+    from apm_cli.factory import ClientFactory
+    from apm_cli.install.mcp.ownership import _native_config_key
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
+
+    configs = MCPIntegrator.get_server_configs(dependencies)
+    found: set[str] = set()
+    for runtime in target_runtimes:
+        wanted = names & mcp_servers_for_runtime(dependencies, runtime)
+        if not wanted:
+            continue
+        client = ClientFactory.create_client(
+            runtime, project_root=project_root, user_scope=user_scope
+        )
+        existing = MCPConflictDetector(client).get_existing_server_configs()
+        found |= {
+            name
+            for name in wanted
+            if _native_config_key(client, name, stored_config=configs.get(name)) in existing
+        }
+    return found
 
 
 def _legacy_cleanup_runtimes(
