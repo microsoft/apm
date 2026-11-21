@@ -1,0 +1,16 @@
+{
+  "issue": 4444,
+  "fixed_in": "Unreleased",
+  "summary": "apm update retires a deployed native Claude plugin MCP server whose definition changed since approval, through the gate retirement owner install uses (install/exec_gate.py gate_retirements), instead of reporting every dependency up to date and keeping it.",
+  "failure_modes": [
+    "cleanup",
+    "routing"
+  ],
+  "properties": [
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_native_plugin_retirement_lifecycle.py::test_update_retires_a_native_plugin_whose_definition_changed",
+    "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
+  ]
+}

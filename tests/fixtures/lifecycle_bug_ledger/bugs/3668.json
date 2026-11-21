@@ -1,0 +1,19 @@
+{
+  "issue": 3668,
+  "summary": "Traps prune/install dropping a still-transitive dependency after its direct line is removed (#3668); needs hand-edited apm.yml, prune and lock depth fields.",
+  "failure_modes": [
+    "cleanup",
+    "idempotency",
+    "reference"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "lockfile.frozen_preserves_bytes",
+    "ownership.preserve_unowned",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_dropped_direct_dependency_transitive_lifecycle.py::test_install_after_drop_keeps_shared_transitive",
+    "tests/integration/test_dropped_direct_dependency_transitive_lifecycle.py::test_prune_after_drop_keeps_still_reachable_transitive"
+  ]
+}

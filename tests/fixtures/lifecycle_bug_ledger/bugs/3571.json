@@ -1,0 +1,24 @@
+{
+  "issue": 3571,
+  "summary": "Traps cold update moving/dropping/adding transitives and plugin restamp; needs git tags, clones, cache corruption, baseline binary.",
+  "failure_modes": [
+    "cache",
+    "idempotency",
+    "reference"
+  ],
+  "properties": [
+    "cache.successful_reads_refresh_recency",
+    "idempotency.byte_stable",
+    "lockfile.frozen_preserves_bytes",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_cold_update_transitive_plugin_lifecycle.py::test_cold_update_moves_drops_and_adds_transitive_dependencies",
+    "tests/integration/test_cold_update_transitive_plugin_lifecycle.py::test_plugin_redownload_and_update_restamp_verify_on_fresh_clone",
+    "tests/integration/test_cold_update_transitive_plugin_lifecycle.py::test_v0351_deployed_tree_upgrades_without_false_drift",
+    "tests/integration/test_local_dependency_graph_chain_lifecycle.py::test_local_parent_edit_reconciles_graph_and_keeps_shared_dep",
+    "tests/integration/test_local_dependency_graph_chain_lifecycle.py::test_local_source_edited_between_install_and_frozen_fails_closed",
+    "tests/integration/test_targeted_install_unselected_local_edit_lifecycle.py::test_targeted_commands_skip_unselected_local_edit",
+    "tests/integration/test_targeted_install_unselected_local_edit_lifecycle.py::test_targeted_install_rereads_selected_local_package"
+  ]
+}

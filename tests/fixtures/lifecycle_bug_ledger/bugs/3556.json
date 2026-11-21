@@ -1,0 +1,19 @@
+{
+  "issue": 3556,
+  "summary": "Traps licence files carried, locked, audited and removed with subdirectory packages (#3556); needs LICENSE bytes, carried_licenses lock fields, git subdirectories.",
+  "failure_modes": [
+    "cleanup",
+    "idempotency",
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "filesystem.open_world_observation",
+    "idempotency.byte_stable",
+    "outcome.status_matches_state",
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_carried_license_lifecycle.py::test_licence_is_carried_recorded_audited_and_uninstalled"
+  ]
+}

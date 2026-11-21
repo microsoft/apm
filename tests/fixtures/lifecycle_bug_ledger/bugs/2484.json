@@ -1,0 +1,16 @@
+{
+  "issue": 2484,
+  "fixed_in": "0.28.0",
+  "summary": "A changed aliased ref reused stale cached content.",
+  "failure_modes": [
+    "reference",
+    "cache"
+  ],
+  "properties": [
+    "source.ref_cache_coherent",
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/integration/test_consume_source_ref_cache_matrix.py::test_source_ref_transition_applies_once_and_invalid_twin_preserves_state"
+  ]
+}
