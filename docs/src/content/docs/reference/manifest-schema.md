@@ -650,8 +650,10 @@ Local path dependency (development only):
 Local `path:` and string entries accept directory packages or one file ending
 in `.agent.md`, `.instructions.md`, or `.prompt.md`. Single-file packages contain
 only that file; companion assets require a directory package. Relative paths
-resolve against the declaring local package. User-scope installs require
-absolute or expanded `~/...` paths, and single-file symlinks are rejected.
+resolve against the declaring local package, even when that lands outside
+the project root (e.g. `../shared-skills`). At user scope, an entry in
+`~/.apm/apm.yml` must be absolute or `~/...`. Single-file symlinks, and links
+inside a package that point outside it, are rejected.
 
 When the declaring package came from a remote repo, `path:` remains scoped to
 that same repo only. The resolved path must stay inside the parent's cloned repo

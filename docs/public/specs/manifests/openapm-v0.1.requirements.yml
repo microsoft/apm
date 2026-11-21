@@ -92,6 +92,7 @@ requirements:
     keyword: MUST
     section: "4.3.5"
     conformance_class: consumer
+    notes: "PROPOSED amendment 0.1.74 (#2818), Section 9.3 pending: replaces the refusal of local paths escaping the project root with clauses (a)-(g): recognition; anchor on the declaring local package (or the root manifest directory for a direct project-scope entry); trusted-local admission of anchored paths outside the project root; refusal of relative direct entries at user scope; remote-declared paths contained in the authenticated repository; symlinks contained in the copied package; contained materialization and deployment destinations"
   - id: req-mf-017
     keyword: MUST
     section: "4.7"

@@ -197,17 +197,190 @@ def test_producer_rejects_unknown_registries_keys():
         validate_against("manifest-v0.1.41.schema.json", doc)
 
 
+def _local_package(path: Path, name: str) -> Path:
+    path.mkdir(parents=True)
+    (path / "apm.yml").write_text(f"name: {name}\nversion: 1.0.0\n", encoding="utf-8")
+    return path
+
+
 @pytest.mark.req("req-mf-016")
-def test_consumer_rejects_absolute_paths_in_apm_source():
-    """Spec restricts apm-source `path:` to relative form."""
-    assert_spec_contains("path")
-    waive(
-        "Path-shape negative test requires apm_cli's path-policy loader "
-        "to be invokable from the test harness; the JSON Schema currently "
-        "models `path` as a free-form string. Tracked as a follow-up: "
-        "tighten the schema to forbid leading `/` and document the "
-        "absolute-path rejection in the schema additionalProperties."
+def test_consumer_recognises_local_path_entries(tmp_path):
+    """Clause (a): the seven prefixes and `path:`-only objects are local."""
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    for entry in ("./a", "../a", "/abs/a", "~/a", ".\\a", "..\\a", "~\\a"):
+        assert DependencyReference.is_local_path(entry), entry
+    for entry in ("owner/repo", "github.com/owner/repo", "https://h/o/r"):
+        assert not DependencyReference.is_local_path(entry), entry
+    package = APMPackage.from_mapping(
+        {"name": "p", "version": "1.0.0", "dependencies": {"apm": [{"path": "../shared"}]}},
+        package_path=tmp_path,
     )
+    (dependency,) = package.get_apm_dependencies()
+    assert dependency.is_local and dependency.local_path == "../shared"
+
+
+@pytest.mark.req("req-mf-016")
+def test_consumer_admits_anchored_sibling_outside_project_root(tmp_path):
+    """Clauses (b) and (c): anchors are the declaring manifest, not the root."""
+    from apm_cli.install.phases.local_content import copy_local_dependency
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    app = _local_package(tmp_path / "work" / "app", "app")
+    _local_package(tmp_path / "work" / "shared-skills", "shared-skills")
+    libs_a = _local_package(tmp_path / "libs" / "a", "a")
+    _local_package(tmp_path / "libs" / "b", "b")
+    modules = app / "apm_modules"
+
+    direct = DependencyReference.parse("../shared-skills")
+    target = direct.get_install_path(modules)
+    assert (
+        copy_local_dependency(direct, target, declaring_dir=None, source_root=app, user_scope=False)
+        is None
+    )
+    assert (target / "apm.yml").read_text(encoding="utf-8").startswith("name: shared-skills")
+
+    # A transitive `../b` anchors on its declaring package at every scope (#4153),
+    # never on the project root, where `../b` does not exist.
+    for user_scope in (False, True):
+        transitive = DependencyReference.parse("../b")
+        target = modules / f"transitive-{user_scope}"
+        assert (
+            copy_local_dependency(
+                transitive,
+                target,
+                declaring_dir=libs_a,
+                source_root=app,
+                user_scope=user_scope,
+            )
+            is None
+        )
+        assert (target / "apm.yml").read_text(encoding="utf-8").startswith("name: b")
+
+    missing = DependencyReference.parse("../missing")
+    failure = copy_local_dependency(
+        missing,
+        modules / "missing",
+        declaring_dir=None,
+        source_root=app,
+        user_scope=False,
+    )
+    assert failure is not None and "../missing" in failure
+
+
+@pytest.mark.req("req-mf-016")
+def test_consumer_refuses_unanchored_relative_entry_at_user_scope(tmp_path, monkeypatch):
+    """Clause (d): no implicit anchor at user scope; absolute stays admitted."""
+    from apm_cli.deps.path_anchoring import USER_SCOPE_RELATIVE_PATH_ERROR
+    from apm_cli.install.phases.local_content import copy_local_dependency
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    user_dir = tmp_path / "home" / ".apm"
+    user_dir.mkdir(parents=True)
+    _local_package(tmp_path / "home" / "child", "child")
+    monkeypatch.chdir(user_dir)
+    relative = DependencyReference.parse("../child")
+    target = user_dir / "apm_modules" / "child"
+    failure = copy_local_dependency(
+        relative, target, declaring_dir=None, source_root=user_dir, user_scope=True
+    )
+    assert failure == f"../child -- {USER_SCOPE_RELATIVE_PATH_ERROR}"
+    assert not target.exists()
+
+    absolute = DependencyReference.parse((tmp_path / "home" / "child").as_posix())
+    assert (
+        copy_local_dependency(
+            absolute, target, declaring_dir=None, source_root=user_dir, user_scope=True
+        )
+        is None
+    )
+
+
+@pytest.mark.req("req-mf-016")
+def test_consumer_contains_remote_declared_paths_in_repository(tmp_path):
+    """Clause (e): same-repo paths expand remotely; other paths are refused."""
+    from apm_cli.deps.apm_resolver import APMDependencyResolver
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    modules = tmp_path / "apm_modules"
+    parent = DependencyReference.parse("microsoft/mono/packages/frontend#feature")
+    source = parent.get_install_path(modules)
+    source.mkdir(parents=True)
+    package = APMPackage(name="frontend", version="1.0.0")
+    package.source = "microsoft/mono"
+    package.source_path = source
+    resolver = APMDependencyResolver(apm_modules_dir=modules)
+
+    sibling = resolver.expand_transitive_declaration(
+        parent, package, DependencyReference.parse("../shared")
+    )
+    assert sibling is not None and not sibling.is_local
+    assert (sibling.repo_url, sibling.virtual_path, sibling.reference) == (
+        "microsoft/mono",
+        "packages/shared",
+        "feature",
+    )
+    for escaping in ("../../../outside", "/etc/outside", "~/outside"):
+        child = DependencyReference.parse(escaping)
+        assert resolver.expand_transitive_declaration(parent, package, child) is None
+        assert resolver._try_load_dependency_package(child, parent_pkg=package) is None
+        assert child.get_unique_key() in resolver._rejected_remote_local_keys
+
+
+@pytest.mark.req("req-mf-016")
+def test_consumer_contains_symlinks_within_local_package(tmp_path):
+    """Clause (f): in-package links copy as content; escaping links fail clean."""
+    import os
+
+    from apm_cli.install.phases.local_content import LocalPackageError, materialize_local_package
+    from apm_cli.models.dependency.reference import DependencyReference
+    from apm_cli.utils.path_security import PathTraversalError
+
+    package = _local_package(tmp_path / "pkg", "pkg")
+    (package / "real.md").write_text("inside\n", encoding="utf-8")
+    (tmp_path / "secret.md").write_text("outside\n", encoding="utf-8")
+    try:
+        os.symlink(package / "real.md", package / "alias.md")
+    except (OSError, NotImplementedError):
+        pytest.skip("platform cannot create symbolic links")
+    dependency = DependencyReference.parse((tmp_path / "pkg").as_posix())
+    destination = tmp_path / "apm_modules" / "_local" / "pkg"
+
+    materialize_local_package(dependency, destination, tmp_path)
+    assert not (destination / "alias.md").is_symlink()
+    assert (destination / "alias.md").read_text(encoding="utf-8") == "inside\n"
+
+    os.symlink(tmp_path / "secret.md", package / "leak.md")
+    with pytest.raises(PathTraversalError, match="escapes"):
+        materialize_local_package(dependency, destination, tmp_path)
+    assert not destination.exists()
+
+    (package / "leak.md").unlink()
+    os.symlink(tmp_path / "missing.md", package / "broken.md")
+    with pytest.raises(PathTraversalError, match="broken"):
+        materialize_local_package(dependency, destination, tmp_path)
+    assert not destination.exists()
+
+    (tmp_path / "agent.agent.md").write_text("---\nname: a\n---\nbody\n", encoding="utf-8")
+    os.symlink(tmp_path / "agent.agent.md", tmp_path / "linked.agent.md")
+    single = DependencyReference.parse((tmp_path / "linked.agent.md").as_posix())
+    with pytest.raises(LocalPackageError, match="symlink"):
+        materialize_local_package(single, tmp_path / "apm_modules" / "single", tmp_path)
+
+
+@pytest.mark.req("req-mf-016")
+def test_consumer_derives_local_destination_inside_dependency_directory(tmp_path):
+    """Clause (g): the destination ignores the source location and stays contained."""
+    from apm_cli.models.dependency.reference import DependencyReference
+    from apm_cli.utils.path_security import PathTraversalError
+
+    modules = tmp_path / "app" / "apm_modules"
+    for entry in ("../../far/away/shared", "/abs/elsewhere/shared"):
+        destination = DependencyReference.parse(entry).get_install_path(modules)
+        assert destination == modules / "_local" / "shared"
+    unsafe = DependencyReference(repo_url="_local/x", local_path="pkg/..", is_local=True)
+    with pytest.raises(PathTraversalError):
+        unsafe.get_install_path(modules)
 
 
 @pytest.mark.req("req-mf-017")

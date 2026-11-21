@@ -62,7 +62,9 @@ package is resolved relative to THAT package's own directory (npm/pip/cargo
 parity). Sibling layouts that resolve outside the consuming project root
 (e.g. `../sibling-pkg` from a local dep at the project edge) are
 supported -- the consuming developer authored the manifest chain and
-already trusts the layout.
+already trusts the layout. At user scope (`-g`), entries in `~/.apm/apm.yml`
+have no declaring package, so they must be absolute or `~/...`; relative
+ones are rejected. Links inside a local package must stay inside it.
 
 Remote-cloned packages may declare a relative `path:` only when it resolves
 inside the same authenticated remote repo root. APM expands that path to the
