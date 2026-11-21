@@ -543,6 +543,13 @@ An explicit `--policy` path, URL, or `owner/repo` that cannot be loaded
 warn-by-default behaviour. CI JSON/SARIF report `policy.enforced` so a
 wrapper can tell whether policy checks actually ran.
 
+`apm install --policy <source>` and `apm update --policy <source>` add a
+policy on top of discovery (tighten-only). The named source fails closed
+the same way: if it cannot be loaded the command exits non-zero before any
+write, whatever `policy.fetch_failure_default` says; a cached copy within
+the stale-cache window counts as loaded. A failed discovered policy keeps
+following `policy.fetch_failure_default`.
+
 ## Install-time enforcement
 
 **Note:** Install-time policy enforcement (issue #827) is in active development. The behaviour described below reflects the shipping design.

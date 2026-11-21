@@ -1206,9 +1206,7 @@ def test_explicit_install_source_alone_when_nothing_discovered(tmp_path, monkeyp
 
 @pytest.mark.req("req-pl-022")
 @pytest.mark.parametrize("default", ["warn", "block"])
-def test_unloadable_explicit_install_source_follows_fetch_failure_default(
-    tmp_path, monkeypatch, default
-):
+def test_unloadable_explicit_install_source_fails_closed(tmp_path, monkeypatch, default):
     from apm_cli.install.errors import PolicyViolationError
     from apm_cli.policy.discovery import PolicyFetchResult
     from apm_cli.policy.outcome_routing import route_discovery_outcome
@@ -1232,22 +1230,19 @@ def test_unloadable_explicit_install_source_follows_fetch_failure_default(
             pass
 
     logger = _Logger()
-    # (c) block terminates naming the source and cause; warn continues with discovery.
-    if default == "block":
-        with pytest.raises(PolicyViolationError, match=r"policy\.invalid"):
-            route_discovery_outcome(result, logger=logger, fetch_failure_default=default)
-    else:
-        policy = route_discovery_outcome(result, logger=logger, fetch_failure_default=default)
-        assert policy is not None and policy.enforcement == "block"
+    # (c) the named source fails closed whatever fetch_failure_default says,
+    # naming the source and the cause.
+    with pytest.raises(PolicyViolationError, match=r"explicit policy source .*policy\.invalid"):
+        route_discovery_outcome(result, logger=logger, fetch_failure_default=default)
     assert logger.unavailable["source"] == unreachable.source
     assert logger.unavailable["error"] == "connection refused"
+    assert logger.unavailable["blocking"] is True
 
 
 @pytest.mark.req("req-pl-022")
 def test_spec_scopes_replacement_rules_and_names_composition():
     assert_spec_contains(
-        "that replaces discovery",
-        "follows [req-pl-022](#req-pl-022) instead",
+        "composes it with the discovered policy under\n[req-pl-022](#req-pl-022)",
         "as parent, and the explicit\npolicy, as child",
-        "a `warn` default fails\n> open",
+        "whatever the consumer `policy.fetch_failure_default`",
     )

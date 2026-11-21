@@ -25,7 +25,7 @@ EXPLICIT_POLICY_SOURCE_HELP = (
     "Also enforce this policy, combined with auto-discovered org policy "
     "(tighten-only: it can add constraints, never remove them). "
     + POLICY_SOURCE_FORMS_HELP
-    + " An unreachable source follows policy.fetch_failure_default in apm.yml. "
+    + " A source that cannot be loaded fails the command before any write. "
     "Not valid with --global."
 )
 

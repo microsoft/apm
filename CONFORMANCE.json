@@ -1849,8 +1849,8 @@
       "behavioral_tests": [
         "tests/spec_conformance/test_policy_reqs.py::test_explicit_install_source_alone_when_nothing_discovered",
         "tests/spec_conformance/test_policy_reqs.py::test_explicit_install_source_composes_tighten_only",
-        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_follows_fetch_failure_default[block]",
-        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_follows_fetch_failure_default[warn]"
+        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_fails_closed[block]",
+        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_fails_closed[warn]"
       ],
       "conformance_class": "governance",
       "id": "req-pl-022",
@@ -1862,8 +1862,8 @@
         "tests/spec_conformance/test_policy_reqs.py::test_explicit_install_source_alone_when_nothing_discovered",
         "tests/spec_conformance/test_policy_reqs.py::test_explicit_install_source_composes_tighten_only",
         "tests/spec_conformance/test_policy_reqs.py::test_spec_scopes_replacement_rules_and_names_composition",
-        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_follows_fetch_failure_default[block]",
-        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_follows_fetch_failure_default[warn]"
+        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_fails_closed[block]",
+        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_fails_closed[warn]"
       ]
     },
     {

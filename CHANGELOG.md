@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install <bundle>` renders bundle agents to Codex TOML in `.codex/agents/` instead of skipping them; an agent without a description gets one from its leading heading or name, one Codex cannot load (empty name or body) is skipped with a warning, and other targets still copy bundle files. (closes #3714, #4007)
 - The CLI reference lists every deprecation with its replacement, the version that deprecated it and its removal horizon; warning text is unchanged. (closes #4019, #4035)
 - Private hosted `marketplace.json` catalogs registered with `--name` authenticate with `APM_MARKETPLACE_TOKEN_<NAME>` (Bearer) or `APM_MARKETPLACE_USER_`/`PASS_<NAME>` (Basic). (closes #3300, #4020)
-- `apm install --policy` and `apm update --policy` enforce a local, URL or `owner/repo` policy on plain-git and air-gapped setups, tighten-only with discovered policy. (closes #1925, #4001)
+- `apm install --policy` and `apm update --policy` enforce a local, URL or `owner/repo` policy, tighten-only with discovered policy, failing closed if it cannot load. (closes #1925, #4001)
 
 ### Changed
 

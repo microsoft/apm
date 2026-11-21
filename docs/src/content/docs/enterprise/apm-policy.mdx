@@ -153,8 +153,10 @@ apm install --policy https://policies.corp.example/apm-policy.yml
 - **Adds, never removes.** The source combines with any discovered org policy under
   the tighten-only merge below. It cannot re-allow what the org policy denies or lower
   its enforcement.
-- **Unreachable sources follow `fetch_failure_default`.** `warn` (default) reports the
-  source and continues with any discovered policy; `block` fails closed.
+- **Fails closed.** A source that cannot be loaded (unreachable, missing, malformed, or
+  publishing no policy) stops the command before anything is written, whatever
+  `policy.fetch_failure_default` says. A cached copy within the stale-cache window counts
+  as loaded. A failed *discovered* policy still follows `fetch_failure_default`.
 - **Reported.** The effective sources print at any verbosity, for example
   `[i] Policy: org:contoso/.github + file:/repo/vendor/apm-policy.yml -- enforcement=warn`.
 - `policy.hash` pins the discovered org policy, not the explicit source. `--policy` is
