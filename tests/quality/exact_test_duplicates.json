@@ -102,41 +102,14 @@
     "tests/integration/test_command_integrator_hermetic.py": [
       "TestExtractInputNames::test_none_returns_empty_lists"
     ],
-    "tests/integration/test_commands_auth_flow.py": [
-      "TestCheckPackageConflicts::test_empty_deps_returns_empty_set",
-      "TestCheckPackageConflicts::test_string_dep_is_parsed",
-      "TestDetectTokenType::test_token_type_detection"
-    ],
-    "tests/integration/test_commands_config_coverage.py": [
-      "TestConfigCommandFinalPaths::test_config_get_audit_on_install_when_set",
-      "TestConfigCommandFlagPaths::test_config_get_no_key_shows_audit_on_install_when_flag_on"
-    ],
-    "tests/integration/test_commands_mcp_flow.py": [
-      "TestCheckPackageConflicts::test_empty_deps_returns_empty_set",
-      "TestLocalPathNoMarkersHint::test_no_sub_packages_no_output"
-    ],
     "tests/integration/test_copilot_app_targets_coverage.py": [
       "TestExperimentalFlags::test_flags_contains_copilot_cowork",
       "TestNormaliseFlagName::test_already_snake_case_unchanged",
       "TestNormaliseFlagName::test_hyphen_converted_to_underscore"
     ],
-    "tests/integration/test_deep_coverage_adapters.py": [
-      "TestCopilotClientAdapter::test_copilot_adapter_env_substitution_enabled",
-      "TestCopilotClientAdapter::test_copilot_adapter_mcp_servers_key",
-      "TestCopilotEnvPlaceholderTranslation::test_translate_env_placeholder_legacy_angle_syntax"
-    ],
     "tests/integration/test_deep_coverage_deps_policy.py": [
       "TestHashVerification::test_verify_hash_pin_with_string",
-      "TestPolicyChecks::test_load_raw_apm_yml_missing_file",
       "TestPolicyDiscovery::test_verify_hash_pin_match"
-    ],
-    "tests/integration/test_deps_models_validation.py": [
-      "TestCloseRepoAndDebug::test_close_repo_calls_clear_cache_and_close",
-      "TestCloseRepoAndDebug::test_close_repo_none_is_noop"
-    ],
-    "tests/integration/test_deps_resolver_resolution.py": [
-      "TestGitHubDownloaderCloseRepo::test_close_repo_clears_cache",
-      "TestGitHubDownloaderCloseRepo::test_close_repo_with_none"
     ],
     "tests/integration/test_download_copilot_end_to_end.py": [
       "TestBuildUnsupportedOrMissingError::test_fallback_ref_included_in_message",
@@ -153,73 +126,15 @@
       "TestCopilotPureHelpers::test_translate_vscode_env_prefix"
     ],
     "tests/integration/test_integrators_end_to_end.py": [
-      "TestBuildSelfDefinedInfo::test_tools_override_embedded",
-      "TestIsVscodeAvailable::test_vscode_dir_makes_available",
-      "TestMCPConfigDrift::test_new_dep_not_in_stored_ignored",
-      "TestMCPIntegratorCollectTransitive::test_returns_empty_when_apm_modules_empty",
-      "TestMCPIntegratorCollectTransitive::test_returns_empty_when_no_apm_modules",
-      "TestMCPIntegratorRemoveStale::test_empty_stale_set_is_noop",
-      "TestMCPIntegratorRemoveStale::test_exclude_prevents_cleanup",
-      "TestMCPIntegratorRemoveStale::test_removes_from_gemini_settings",
-      "TestMCPIntegratorRemoveStale::test_removes_from_opencode_json",
-      "TestMCPIntegratorRemoveStale::test_vscode_file_absent_is_noop",
-      "TestMCPIntegratorServerHelpers::test_get_server_names_empty",
-      "TestMCPIntegratorUpdateLockfile::test_noop_when_lockfile_absent",
-      "TestRunMcpInstall::test_empty_deps_returns_zero",
       "TestRunMcpInstall::test_project_scope_sets_user_scope_false",
       "TestRunMcpInstall::test_run_mcp_install_verbose_no_crash",
-      "TestRunMcpInstall::test_stored_mcp_configs_none_defaults_to_empty_dict",
-      "TestValidateSkillName::test_empty_name_invalid",
-      "TestValidateSkillName::test_single_char_valid",
-      "TestValidateSkillName::test_uppercase_invalid"
-    ],
-    "tests/integration/test_integrators_hooks_execution.py": [
-      "TestHookIntegratorFindHookFiles::test_empty_package_returns_empty"
+      "TestRunMcpInstall::test_stored_mcp_configs_none_defaults_to_empty_dict"
     ],
     "tests/integration/test_integrators_validation_rules.py": [
-      "TestIsTlsFailure::test_runtime_error_with_tls_prefix",
       "TestIsTlsFailure::test_ssl_error_detected",
       "TestRunMcpInstallRuntimeDetection::test_stored_mcp_configs_none_defaults_empty",
       "TestRunMcpInstallRuntimeDetection::test_verbose_true_no_crash_on_empty_deps",
       "TestRunMcpInstallScopeHandling::test_project_scope_enum_propagates_no_exception"
-    ],
-    "tests/integration/test_marketplace_adapters_coverage.py": [
-      "TestBaseAdapterHelpers::test_registry_field_required_default",
-      "TestBaseAdapterHelpers::test_registry_field_required_explicit_false",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_bool_false",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_bool_true",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_int",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_dollar_brace",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_env_prefix"
-    ],
-    "tests/integration/test_marketplace_e2e.py": [
-      "test_marketplace_install_resolves_and_deploys"
-    ],
-    "tests/integration/test_mcp_coverage.py": [
-      "TestMCPCommandIntegration::test_mcp_install_subcommand_exists",
-      "TestMCPInstallForwarding::test_mcp_install_exists"
-    ],
-    "tests/integration/test_mcp_install_flow.py": [
-      "TestRunMcpInstallEarlyReturns::test_empty_deps_returns_zero"
-    ],
-    "tests/integration/test_mcp_integrator_install_flow.py": [
-      "TestGetServerNames::test_empty_list"
-    ],
-    "tests/integration/test_pack_install_flow.py": [
-      "TestCheckPackageConflicts::test_empty_deps",
-      "TestCheckPackageConflicts::test_string_dep_parsed"
-    ],
-    "tests/integration/test_uninstall_policy_pack_flow.py": [
-      "TestDeriveLeafHost::test_org_source_two_parts_returns_github_com",
-      "TestExtractExtendsHost::test_empty_returns_none",
-      "TestStripSourcePrefix::test_file_prefix_stripped",
-      "TestStripSourcePrefix::test_org_prefix_stripped",
-      "TestStripSourcePrefix::test_url_prefix_stripped"
-    ],
-    "tests/integration/test_utils_coverage.py": [
-      "TestInstallTui::test_should_animate_always_mode",
-      "TestInstallTui::test_should_animate_never_mode",
-      "TestReflink::test_reflink_supported_respects_env_var"
     ],
     "tests/integration/test_wave2_adapters_coverage.py": [
       "TestBaseAdapterHelpers::test_extract_legacy_angle_vars_non_string",
@@ -227,91 +142,17 @@
       "TestBaseAdapterHelpers::test_has_env_placeholder_env_prefix",
       "TestBaseAdapterHelpers::test_has_env_placeholder_legacy",
       "TestBaseAdapterHelpers::test_has_env_placeholder_non_string",
-      "TestBaseAdapterHelpers::test_registry_field_is_required_default",
-      "TestBaseAdapterHelpers::test_registry_field_is_required_explicit_false",
       "TestBaseAdapterHelpers::test_stringify_env_literal_bool_false",
       "TestBaseAdapterHelpers::test_stringify_env_literal_bool_true",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_int",
       "TestBaseAdapterHelpers::test_stringify_env_literal_string_passthrough",
       "TestBaseAdapterHelpers::test_translate_env_placeholder_brace_var",
       "TestBaseAdapterHelpers::test_translate_env_placeholder_env_prefix",
       "TestBaseAdapterHelpers::test_translate_env_placeholder_legacy_angle",
-      "TestInstallTui::test_should_animate_always_env",
-      "TestInstallTui::test_should_animate_never_env",
       "TestMacOSReflink::test_reflink_supported_no_reflink_env",
       "TestReflink::test_reflink_supported_apm_no_reflink_env"
     ],
     "tests/integration/test_wave3_deps_models_coverage.py": [
       "TestGitHubDownloaderLogic::test_close_repo_with_none"
-    ],
-    "tests/integration/test_wave4_adapters_registry_coverage.py": [
-      "TestCopilotClientAdapter::test_copilot_adapter_env_substitution_enabled",
-      "TestCopilotClientAdapter::test_copilot_adapter_mcp_servers_key",
-      "TestCopilotClientAdapter::test_copilot_adapter_target_name",
-      "TestCopilotEnvPlaceholders::test_translate_legacy_angle_vars",
-      "TestCopilotEnvPlaceholders::test_translate_posix_vars_passthrough",
-      "TestCopilotEnvPlaceholders::test_translate_vscode_env_syntax",
-      "TestDriftCheck::test_json_key_diff_empty_objects",
-      "TestEdgeCases::test_json_key_diff_empty_objects",
-      "TestErrorHandling::test_mcp_operations_initialization_no_errors",
-      "TestErrorHandling::test_runtime_manager_initialization_no_errors",
-      "TestIntegrationScenarios::test_copilot_config_with_env_placeholders",
-      "TestMCPServerOperations::test_mcp_operations_initialization",
-      "TestRuntimeManager::test_runtime_manager_initialization"
-    ],
-    "tests/integration/test_wave6_audit_discovery_coverage.py": [
-      "TestDeriveLeafHost::test_org_two_parts",
-      "TestExtractExtendsHost::test_empty_returns_none",
-      "TestStripSourcePrefix::test_file_prefix",
-      "TestStripSourcePrefix::test_org_prefix",
-      "TestStripSourcePrefix::test_url_prefix"
-    ],
-    "tests/integration/test_wave6_deps_cli_coverage.py": [
-      "TestDepsTree::test_tree_with_lockfile_one_dep",
-      "TestDepsTree::test_tree_with_lockfile_transitive",
-      "TestDepsTreeTextFallback::test_tree_text_output_with_lockfile",
-      "TestDepsTreeTextFallback::test_tree_text_output_with_transitive"
-    ],
-    "tests/integration/test_wave6_formatters_lockfile_coverage.py": [
-      "TestDependencyReferenceParsing::test_parse_ado_format",
-      "TestDependencyReferenceParsing::test_parse_github_url",
-      "TestDependencyReferenceParsing::test_parse_local_path"
-    ],
-    "tests/integration/test_wave6_init_pack_coverage.py": [
-      "TestInitDeprecatedFlags::test_init_plugin_flag_shows_deprecation",
-      "TestPluginInit::test_plugin_init_yes"
-    ],
-    "tests/integration/test_wave6_integrators_coverage.py": [
-      "TestHookIntegratorFindHookFiles::test_returns_empty_when_no_hooks",
-      "TestIsVscodeAvailable::test_vscode_dir_makes_it_available",
-      "TestMCPIntegratorBuildSelfDefinedInfo::test_with_tools_override",
-      "TestMCPIntegratorCollectTransitive::test_returns_empty_when_apm_modules_empty",
-      "TestMCPIntegratorCollectTransitive::test_returns_empty_when_no_apm_modules_dir",
-      "TestMCPIntegratorDriftDetection::test_ignores_new_deps_not_in_stored",
-      "TestMCPIntegratorGetServerNames::test_empty_list",
-      "TestMCPIntegratorRemoveStale::test_empty_stale_names_is_noop",
-      "TestMCPIntegratorRemoveStale::test_exclude_removes_runtime_from_set",
-      "TestMCPIntegratorRemoveStale::test_removes_from_gemini_settings",
-      "TestMCPIntegratorRemoveStale::test_removes_from_opencode_json",
-      "TestMCPIntegratorRemoveStale::test_skips_vscode_when_file_absent",
-      "TestMCPIntegratorUpdateLockfile::test_noop_when_lockfile_absent",
-      "TestValidateSkillName::test_empty_name",
-      "TestValidateSkillName::test_single_char",
-      "TestValidateSkillName::test_uppercase"
-    ],
-    "tests/integration/test_wave6_validation_uninstall_coverage.py": [
-      "TestTLSHelpers::test_is_tls_failure_with_tls_prefix"
-    ],
-    "tests/integration/test_wave7_depref_sources_coverage.py": [
-      "TestDependencyReferenceProperties::test_is_azure_devops_true",
-      "TestDependencyReferenceProperties::test_is_local_true",
-      "TestDependencyReferenceSshUrls::test_https_url"
-    ],
-    "tests/integration/test_wave7_marketplace_install_coverage.py": [
-      "TestInstallInternalHelpers::test_check_package_conflicts_empty"
-    ],
-    "tests/integration/test_wave7_policy_registry_coverage.py": [
-      "TestLoadRawApmYml::test_file_absent_returns_none"
     ],
     "tests/red_team/env/test_denylist_suffix_gaps.py": [
       "TestSuffixGapHeaderExpansion::test_blocked_name_blocked_in_header",
@@ -342,9 +183,6 @@
       "TestIsValidCredentialToken::test_over_1024_chars_invalid",
       "TestResolveCredentialFromGit::test_file_not_found_returns_none"
     ],
-    "tests/unit/core/test_auth_validation.py": [
-      "TestDetectTokenType::test_token_prefixes"
-    ],
     "tests/unit/core/test_experimental.py": [
       "TestCoworkFlagRegistration::test_cowork_flag_is_registered",
       "TestNormaliseFlagName::test_hyphens_converted_to_underscores",
@@ -362,35 +200,14 @@
     "tests/unit/deps/test_git_remote_ops.py": [
       "TestValidateLsRemoteTagOutput::test_invalid_or_ambiguous_records_are_rejected"
     ],
-    "tests/unit/install/test_skill_path_migration.py": [
-      "TestLegacySkillPattern::test_rejects_non_legacy",
-      "TestPathTraversalRejection::test_regex_near_miss_rejects"
-    ],
     "tests/unit/install/test_validation_error_handling.py": [
       "TestIsTlsFailure::test_ssl_error_returns_true"
-    ],
-    "tests/unit/install/test_validation_local_path.py": [
-      "TestLocalPathNoMarkersHint::test_no_sub_packages_produces_no_output"
     ],
     "tests/unit/integration/test_agent_integrator.py": [
       "TestAgentIntegrator::test_should_integrate_always_returns_true"
     ],
-    "tests/unit/integration/test_base_integrator.py": [
-      "TestPartitionBucketKey::test_agents_copilot_aliased",
-      "TestPartitionBucketKey::test_commands_claude_aliased",
-      "TestPartitionBucketKey::test_instructions_claude_aliased",
-      "TestPartitionBucketKey::test_instructions_cursor_aliased",
-      "TestPartitionBucketKey::test_prompts_copilot_aliased"
-    ],
     "tests/unit/integration/test_command_integrator.py": [
       "TestExtractInputNames::test_none"
-    ],
-    "tests/unit/integration/test_data_driven_dispatch.py": [
-      "TestPartitionBucketKey::test_claude_commands_alias",
-      "TestPartitionBucketKey::test_claude_instructions_alias",
-      "TestPartitionBucketKey::test_copilot_agents_alias",
-      "TestPartitionBucketKey::test_copilot_prompts_alias",
-      "TestPartitionBucketKey::test_cursor_instructions_alias"
     ],
     "tests/unit/integration/test_instruction_integrator.py": [
       "TestInstructionSyncIntegration::test_sync_handles_missing_instructions_dir"
@@ -491,7 +308,6 @@
       "TestAuditOutcomeCause::test_no_git_remote"
     ],
     "tests/integration/test_commands_auth_flow.py": [
-      "TestCheckPackageConflicts::test_empty_deps_returns_empty_set",
       "TestGenerateApmYml::test_author_dict_uses_name_field",
       "TestGenerateApmYml::test_mcp_deps_injected",
       "TestTryWithFallback::test_auth_first_succeeds"
@@ -507,7 +323,6 @@
     ],
     "tests/integration/test_commands_mcp_flow.py": [
       "TestCheckPackageConflicts::test_dict_dep_parsed",
-      "TestCheckPackageConflicts::test_empty_deps_returns_empty_set",
       "TestEmitJsonErrorOrRaise::test_non_json_mode_raises_click_exception",
       "TestFindDuplicateNames::test_no_duplicates_returns_empty_string",
       "TestIsTlsFailure::test_chained_ssl_error_returns_true",
@@ -544,10 +359,6 @@
       "TestParseLsRemoteOutput::test_simple_tag",
       "TestSortRemoteRefs::test_branches_sorted_alphabetically",
       "TestSortRemoteRefs::test_tags_before_branches"
-    ],
-    "tests/integration/test_deep_coverage_adapters.py": [
-      "TestCopilotClientAdapter::test_copilot_adapter_env_substitution_enabled",
-      "TestCopilotClientAdapter::test_copilot_adapter_mcp_servers_key"
     ],
     "tests/integration/test_deps_models_validation.py": [
       "TestCheckLogger::test_scratch_root_emits_when_verbose",
@@ -657,15 +468,12 @@
       "TestCopySkillToTarget::test_skips_when_no_skill_md",
       "TestIsVscodeAvailable::test_no_vscode_dir_and_no_binary",
       "TestMCPIntegratorCollectTransitive::test_collects_mcp_from_valid_package",
-      "TestMCPIntegratorCollectTransitive::test_returns_empty_when_apm_modules_empty",
       "TestMCPIntegratorCollectTransitive::test_skips_invalid_apm_yml",
       "TestMCPIntegratorDeduplicate::test_deduplicates_by_name",
       "TestMCPIntegratorDeduplicate::test_handles_dict_deps",
       "TestMCPIntegratorDetectRuntimes::test_empty_scripts_returns_empty",
       "TestMCPIntegratorRemoveStale::test_removes_from_claude_project_mcp_json",
       "TestMCPIntegratorRemoveStale::test_removes_from_cursor_mcp_json",
-      "TestMCPIntegratorRemoveStale::test_removes_from_gemini_settings",
-      "TestMCPIntegratorRemoveStale::test_removes_from_opencode_json",
       "TestMCPIntegratorRemoveStale::test_removes_from_vscode_mcp_json",
       "TestMCPIntegratorUpdateLockfile::test_noop_when_lockfile_absent",
       "TestPromoteSubSkills::test_skips_dir_without_skill_md",
@@ -689,12 +497,6 @@
       "TestLocalPathFailureReason::test_path_does_not_exist"
     ],
     "tests/integration/test_marketplace_adapters_coverage.py": [
-      "TestBaseAdapterHelpers::test_stringify_env_literal_bool_false",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_bool_true",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_int",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_env_prefix",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_legacy_angle",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_non_string_passthrough",
       "TestCodexClientAdapter::test_get_current_config_missing_file",
       "TestKiroClientAdapter::test_get_current_config_missing_file",
       "TestNormalizeDepEntry::test_string_passthrough"
@@ -776,7 +578,6 @@
     "tests/integration/test_uninstall_policy_pack_flow.py": [
       "TestDeriveLeafHost::test_file_source_falls_back_to_git_remote",
       "TestDetectGarbage::test_none_content_returns_none",
-      "TestExtractExtendsHost::test_empty_returns_none",
       "TestExtractExtendsHost::test_no_slash_returns_none",
       "TestExtractExtendsHost::test_three_part_ref_returns_host",
       "TestExtractExtendsHost::test_two_part_ref_returns_none",
@@ -802,12 +603,6 @@
       "TestSelectRemoteWithUrl::test_returns_none_when_all_empty"
     ],
     "tests/integration/test_wave2_adapters_coverage.py": [
-      "TestBaseAdapterHelpers::test_stringify_env_literal_bool_false",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_bool_true",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_int",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_env_prefix",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_legacy_angle",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_non_string_passthrough",
       "TestCodexClientAdapter::test_get_config_path_user_scope",
       "TestCodexClientAdapter::test_get_current_config_missing_file",
       "TestDependencyTypes::test_parse_git_reference_semver_tag",
@@ -821,10 +616,6 @@
       "TestSkillIntegratorFindMethods::test_find_context_files",
       "TestSkillIntegratorFindMethods::test_find_instruction_files"
     ],
-    "tests/integration/test_wave4_adapters_registry_coverage.py": [
-      "TestCopilotClientAdapter::test_copilot_adapter_env_substitution_enabled",
-      "TestCopilotClientAdapter::test_copilot_adapter_mcp_servers_key"
-    ],
     "tests/integration/test_wave4_cli_commands_coverage.py": [
       "TestRunCommand::test_run_verbose_flag"
     ],
@@ -836,7 +627,6 @@
       "TestAuditOutcomeCause::test_absent",
       "TestAuditOutcomeCause::test_empty",
       "TestAuditOutcomeCause::test_no_git_remote",
-      "TestExtractExtendsHost::test_empty_returns_none",
       "TestExtractExtendsHost::test_two_part_ref_returns_none",
       "TestHasActionableFindings::test_no_findings",
       "TestRenderSummary::test_critical_findings",
@@ -858,15 +648,12 @@
       "TestIntegratePackageHooksCursor::test_skips_when_cursor_dir_absent",
       "TestIsVscodeAvailable::test_no_vscode_dir_and_no_binary",
       "TestMCPIntegratorCollectTransitive::test_collects_mcp_from_valid_package",
-      "TestMCPIntegratorCollectTransitive::test_returns_empty_when_apm_modules_empty",
       "TestMCPIntegratorCollectTransitive::test_skips_invalid_apm_yml",
       "TestMCPIntegratorDeduplicate::test_deduplicates_by_name",
       "TestMCPIntegratorDeduplicate::test_handles_dict_deps",
       "TestMCPIntegratorDetectRuntimes::test_empty_scripts_returns_empty",
       "TestMCPIntegratorRemoveStale::test_removes_from_claude_project_mcp_json",
       "TestMCPIntegratorRemoveStale::test_removes_from_cursor_mcp_json",
-      "TestMCPIntegratorRemoveStale::test_removes_from_gemini_settings",
-      "TestMCPIntegratorRemoveStale::test_removes_from_opencode_json",
       "TestMCPIntegratorRemoveStale::test_removes_from_vscode_mcp_json",
       "TestMCPIntegratorUpdateLockfile::test_noop_when_lockfile_absent",
       "TestPromoteSubSkills::test_skips_dir_without_skill_md",
