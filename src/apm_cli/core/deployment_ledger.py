@@ -1284,12 +1284,15 @@ class DeploymentLedgerCodec:
         staged: Collection[str] = (),
         staged_hashes: Mapping[str, str] | None = None,
         staged_fallback_hashes: Mapping[str, str] | None = None,
+        targets: Mapping[str, str] | None = None,
     ) -> None:
         """Persist imperative bundle files without making them replayable source.
 
         *scope* is the install scope that deployed *files*; their rows record
         it, so a user-scope bundle keeps ``scope: user`` (#3995). It has no
-        default: the owner never guesses a scope.
+        default: the owner never guesses a scope. *targets* names the target
+        of a claim its path cannot attribute (under an external root such as
+        ``$CODEX_HOME``), so audit resolves it through that target (#3714).
 
         *staged* is compile input under ``apm_modules/<slug>/.apm/`` (#3705):
         it is recorded in ``local_staged_files`` and never claimed. Every prior
@@ -1327,11 +1330,11 @@ class DeploymentLedgerCodec:
             merged_hashes,
         )
 
-        scope_value = scope.value
         DeploymentLedgerCodec._mark_local_bundle_paths(
             lockfile,
             prior_bundle_paths.union(files),
-            scopes=dict.fromkeys(files, scope_value),
+            scopes=dict.fromkeys(files, scope.value),
+            targets=targets,
         )
         lockfile.local_staged_files = sorted(
             set(lockfile.local_staged_files).union(staged, retired_paths)
@@ -1663,10 +1666,11 @@ class DeploymentLedgerCodec:
         bundle_paths: frozenset[str],
         *,
         scopes: Mapping[str, str] | None = None,
+        targets: Mapping[str, str] | None = None,
     ) -> None:
         """Mark existing ledger rows as hash-audited imperative bundle output.
 
-        *scopes* records the install scope of a path's bundle claim.
+        *scopes* and *targets* record the install scope and target of a claim.
         """
         if not bundle_paths:
             return
@@ -1679,11 +1683,8 @@ class DeploymentLedgerCodec:
             _require_local_bundle_hash(path, record.content_hash)
             owners = tuple(owner for owner in record.owners if owner != _LOCAL_BUNDLE_OWNER)
             scope = (scopes or {}).get(path, record.locator.scope)
-            locator = (
-                record.locator
-                if scope == record.locator.scope
-                else replace(record.locator, scope=scope)
-            )
+            target = (targets or {}).get(path, record.locator.target)
+            locator = replace(record.locator, scope=scope, target=target)
             del records[key]
             records[locator.key] = DeploymentRecord(
                 locator=locator,

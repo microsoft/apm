@@ -29,10 +29,11 @@ POLICY_VARIANTS = (
     "deny-lsp",
     "deny-native",
     "exec-gate-on",
+    "deny-all-deps",
 )
 # Policy variants that deny packages by name; ``policy_denied`` names which.
 # exec-gate-on recommends a package the world never serves, so it denies nothing.
-PACKAGE_DENY_POLICIES = frozenset({"deny-pkg", "deny-lsp", "deny-native"})
+PACKAGE_DENY_POLICIES = frozenset({"deny-pkg", "deny-lsp", "deny-native", "deny-all-deps"})
 # Policy variants whose effect on an install the model does not predict.
 UNPREDICTED_POLICIES = frozenset({"unreachable", "hash-mismatch", "chain-cycle"})
 DECISIONS = ("allowed", "denied")
@@ -53,6 +54,8 @@ class ModelState:
     edited: frozenset[str] = frozenset()
     cache: str = "cold"
     converged: bool = False
+    # False when no layer opts into the executables gate: every executable deploys.
+    exec_gate: bool = True
 
     def __post_init__(self) -> None:
         assert self.scope in SCOPES, self.scope
@@ -65,7 +68,7 @@ class ModelState:
 
     def gate(self, package: str, kind: str) -> str:
         """The GATE factor of one (package, kind) cell."""
-        if kind in UNGATED_KINDS:
+        if kind in UNGATED_KINDS or not self.exec_gate:
             return "none"
         decision = self.decisions.get((package, kind))
         if decision is not None:

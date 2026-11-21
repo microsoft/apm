@@ -103,6 +103,7 @@ POLICY_VARIANTS = (
     "malformed",
     "garbage_response",
     "cached_stale",
+    "deny-all-deps",
 )
 DENIED_PACKAGE = "p-exec"
 # exec-gate-on: any org executables signal turns the gate on
@@ -156,6 +157,16 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
             **base,
             "dependencies": {
                 "deny": ["**/p-native-claude", "**/p-native-codex", "**/p-native-claude-bin"]
+            },
+        },
+        # Every package the M-GATE matrix declares (machines/_gate_matrix.py).
+        "deny-all-deps": {
+            "name": "deny-all-deps",
+            **base,
+            "dependencies": {
+                "deny": [
+                    f"**/{name}" for name in ("p-skill", "p-exec", "p-lsp", "p-canvas", "p-mixed")
+                ]
             },
         },
         "malformed": MALFORMED_POLICY,
