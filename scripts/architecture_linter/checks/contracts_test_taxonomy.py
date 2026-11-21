@@ -107,18 +107,7 @@ _LOCKFILE_CONSUMERS = (
     "src/apm_cli/commands/lock.py",
     "src/apm_cli/install/bundle_admission.py",
 )
-# Consumers whose read-only lockfile read lives in one function (the rest may migrate).
-_LOCKFILE_READ_SCOPES = {
-    "src/apm_cli/commands/lock.py": "lock_export",
-    "src/apm_cli/install/bundle_admission.py": "_recorded_lockfile",
-}
-_READ_ONLY_CONSTANT_CONSUMERS = frozenset(
-    {
-        "src/apm_cli/commands/outdated.py",
-        "src/apm_cli/commands/lock.py",
-        "src/apm_cli/install/bundle_admission.py",
-    }
-)
+_LOCKFILE_READ_SCOPES = {"lock.py": "lock_export", "bundle_admission.py": "_recorded_lockfile"}
 
 
 def _facts_for(provider: FactsProvider, path: str, rule_id: str):
@@ -282,15 +271,12 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
         if consumer_failures or consumer.tree_index is None:
             continue
         nodes = consumer.tree_index.nodes
-        scope_name = _LOCKFILE_READ_SCOPES.get(consumer_path)
-        if scope_name is not None:
-            scope = consumer.tree_index.function(scope_name)
-            if scope is None:
-                findings.append(
-                    _summary(rule_id, consumer_path, f"Lockfile read scope {scope_name} must exist")
-                )
+        if (scope := _LOCKFILE_READ_SCOPES.get(consumer_path.rsplit("/", 1)[-1])) is not None:
+            export = consumer.tree_index.function(scope)
+            if export is None:
+                findings.append(_summary(rule_id, consumer_path, f"{scope} must exist"))
                 continue
-            nodes = consumer.tree_index.own_scope(scope)
+            nodes = consumer.tree_index.own_scope(export)
         imported = {
             alias.name for node in nodes if isinstance(node, ast.ImportFrom) for alias in node.names
         }
@@ -305,7 +291,7 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
                 and keyword.value.value is True
                 for keyword in calls[0].keywords
             )
-            if consumer_path in _READ_ONLY_CONSTANT_CONSUMERS
+            if scope is not None or consumer_path == "src/apm_cli/commands/outdated.py"
             else _keyword_is_name(calls[0], "read_only", "dry_run")
         )
         if (
