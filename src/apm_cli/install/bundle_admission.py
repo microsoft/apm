@@ -187,6 +187,13 @@ def unpack_record_root(output_dir: Path) -> Path | None:
     return output_dir if manifest_file(output_dir).is_file() else None
 
 
+def _recorded_lockfile(root: Path) -> Any:
+    """Read the project's lockfile without migrating a legacy ``apm.lock``."""
+    from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
+
+    return LockFile.read(resolve_lockfile_path_for_read(root, read_only=True))
+
+
 def record_unpacked_files(output_dir: Path, files: Sequence[str], logger: Any) -> None:
     """Record the files ``apm unpack`` wrote, or announce that they are untracked.
 
@@ -206,16 +213,10 @@ def record_unpacked_files(output_dir: Path, files: Sequence[str], logger: Any) -
         return
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..core.scope import InstallScope
-    from ..deps.lockfile import (
-        LEGACY_LOCKFILE_NAME,
-        LockFile,
-        get_lockfile_path,
-        migrate_lockfile_if_needed,
-    )
+    from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
     from ..utils.content_hash import compute_file_hash
 
-    lockfile_path = get_lockfile_path(root)
-    lockfile = LockFile.read(lockfile_path) or LockFile.read(root / LEGACY_LOCKFILE_NAME)
+    lockfile = _recorded_lockfile(root)
     claimed = DeploymentLedgerCodec.deployed_file_hashes(lockfile) if lockfile else {}
     hashes = {
         rel: digest
@@ -224,7 +225,8 @@ def record_unpacked_files(output_dir: Path, files: Sequence[str], logger: Any) -
     }
     if not hashes:
         return
-    migrate_lockfile_if_needed(root)
+    # Only a write migrates a legacy apm.lock; a no-op restore leaves it as is.
+    lockfile_path = resolve_lockfile_path_for_read(root, read_only=False)
     lockfile = lockfile or LockFile()
     DeploymentLedgerCodec.record_local_bundle_files(
         lockfile, list(hashes), hashes, scope=InstallScope.PROJECT

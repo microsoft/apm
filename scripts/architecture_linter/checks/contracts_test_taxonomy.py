@@ -105,6 +105,19 @@ _LOCKFILE_CONSUMERS = (
     "src/apm_cli/bundle/agent_plugin_exporter.py",
     "src/apm_cli/commands/outdated.py",
     "src/apm_cli/commands/lock.py",
+    "src/apm_cli/install/bundle_admission.py",
+)
+# Consumers whose read-only lockfile read lives in one function (the rest may migrate).
+_LOCKFILE_READ_SCOPES = {
+    "src/apm_cli/commands/lock.py": "lock_export",
+    "src/apm_cli/install/bundle_admission.py": "_recorded_lockfile",
+}
+_READ_ONLY_CONSTANT_CONSUMERS = frozenset(
+    {
+        "src/apm_cli/commands/outdated.py",
+        "src/apm_cli/commands/lock.py",
+        "src/apm_cli/install/bundle_admission.py",
+    }
 )
 
 
@@ -269,12 +282,15 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
         if consumer_failures or consumer.tree_index is None:
             continue
         nodes = consumer.tree_index.nodes
-        if consumer_path == "src/apm_cli/commands/lock.py":
-            export = consumer.tree_index.function("lock_export")
-            if export is None:
-                findings.append(_summary(rule_id, consumer_path, "Lockfile export must exist"))
+        scope_name = _LOCKFILE_READ_SCOPES.get(consumer_path)
+        if scope_name is not None:
+            scope = consumer.tree_index.function(scope_name)
+            if scope is None:
+                findings.append(
+                    _summary(rule_id, consumer_path, f"Lockfile read scope {scope_name} must exist")
+                )
                 continue
-            nodes = consumer.tree_index.own_scope(export)
+            nodes = consumer.tree_index.own_scope(scope)
         imported = {
             alias.name for node in nodes if isinstance(node, ast.ImportFrom) for alias in node.names
         }
@@ -289,7 +305,7 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
                 and keyword.value.value is True
                 for keyword in calls[0].keywords
             )
-            if consumer_path in {"src/apm_cli/commands/outdated.py", "src/apm_cli/commands/lock.py"}
+            if consumer_path in _READ_ONLY_CONSTANT_CONSUMERS
             else _keyword_is_name(calls[0], "read_only", "dry_run")
         )
         if (
