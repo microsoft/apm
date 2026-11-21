@@ -1,37 +1,38 @@
 {
  "counts": {
   "baseline_by_lane": {
-   "T-1": 133,
-   "T-2": 418,
-   "T-3": 243,
+   "T-1": 95,
+   "T-2": 412,
+   "T-3": 238,
    "T-6a": 201,
    "T-6b": 141,
    "T-6c": 28,
    "T-6e": 42,
-   "T-7b": 47
+   "T-7b": 46
   },
   "exception_pairs": 94,
-  "mapped": 427,
+  "mapped": 460,
   "mapped_by_rule": {
-   "E3": 131,
+   "E3": 128,
+   "U-MKT": 42,
    "U1": 84,
    "U10": 44,
-   "U2": 78,
+   "U2": 72,
    "U5": 5,
    "U8": 85
   },
   "must_cover": 76,
   "obligations": {
-   "T1": 387,
+   "T1": 360,
    "T2": 12,
    "T3": 375,
    "T4": 80,
    "T5": 57,
-   "pair": 1527,
+   "pair": 1521,
    "refusal": 43,
-   "rule": 10
+   "rule": 11
   },
-  "obligations_total": 2491,
+  "obligations_total": 2459,
   "raw_candidates": {
    "T1": 504,
    "T2": 12,
@@ -50,9 +51,9 @@
   "row_steps": 204,
   "rows": 17,
   "status": {
-   "baseline": 1253,
+   "baseline": 1203,
    "known-failing": 1,
-   "required": 1237
+   "required": 1255
   }
  },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
@@ -549,11 +550,160 @@
     "U2"
    ]
   },
-  "T1|OP=marketplace|PRIM=other-file|GATE=allowed": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+  "T1|OP=marketplace|PRIM=bin|GATE=allowed": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "U2",
-    "E3"
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=bin|GATE=denied-executable": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=bin|GATE=none": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=bin|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=bin|GATE=unapproved-exec": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=canvas|GATE=allowed": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=canvas|GATE=denied-executable": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=canvas|GATE=none": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=canvas|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=canvas|GATE=unapproved-exec": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=hook|GATE=allowed": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=hook|GATE=denied-executable": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=hook|GATE=none": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=hook|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=hook|GATE=unapproved-exec": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=lsp|GATE=allowed": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=lsp|GATE=denied-executable": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=lsp|GATE=none": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=lsp|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=lsp|GATE=unapproved-exec": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=mcp|GATE=allowed": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=mcp|GATE=denied-executable": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=mcp|GATE=none": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=mcp|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=mcp|GATE=unapproved-exec": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=other-file|GATE=allowed": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=other-file|GATE=denied-dependency": {
@@ -563,47 +713,57 @@
    ]
   },
   "T1|OP=marketplace|PRIM=other-file|GATE=denied-executable": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "U2",
-    "E3"
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=other-file|GATE=none": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "E3"
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=other-file|GATE=revoked-after-deploy": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=revoked-after-deploy",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "E3"
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=other-file|GATE=unapproved-exec": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "U2",
-    "E3"
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=skill|GATE=allowed": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "U2"
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=skill|GATE=denied-executable": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "U2"
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=skill|GATE=none": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=skill|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=skill|GATE=unapproved-exec": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "U2"
+    "U-MKT"
    ]
   },
   "T1|OP=mcp-install|PRIM=other-file|GATE=allowed": {
@@ -2265,10 +2425,46 @@
     "U1"
    ]
   },
-  "pair|OP=marketplace|PRIM=other-file": {
-   "maps_to": "pair|OP=marketplace|PRIM=skill",
+  "pair|OP=marketplace|PRIM=bin": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "E3"
+    "U-MKT"
+   ]
+  },
+  "pair|OP=marketplace|PRIM=canvas": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "pair|OP=marketplace|PRIM=hook": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "pair|OP=marketplace|PRIM=lsp": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "pair|OP=marketplace|PRIM=mcp": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "pair|OP=marketplace|PRIM=other-file": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "pair|OP=marketplace|PRIM=skill": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
    ]
   },
   "pair|OP=marketplace|SCOPE=user": {
@@ -4457,13 +4653,6 @@
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
-  "T1|OP=marketplace|PRIM=bin|GATE=allowed": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T1|OP=marketplace|PRIM=bin|GATE=denied-dependency": {
    "family": "T1",
    "issue": "#4095",
@@ -4471,203 +4660,54 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T1|OP=marketplace|PRIM=bin|GATE=denied-executable": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=bin|GATE=none": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=bin|GATE=revoked-after-deploy": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=bin|GATE=unapproved-exec": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=canvas|GATE=allowed": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T1|OP=marketplace|PRIM=canvas|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|canvas|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=canvas|GATE=denied-executable": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=canvas|GATE=none": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=canvas|GATE=revoked-after-deploy": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=canvas|GATE=unapproved-exec": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=hook|GATE=allowed": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=marketplace|PRIM=hook|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|hook|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=hook|GATE=denied-executable": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=hook|GATE=none": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=hook|GATE=revoked-after-deploy": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=hook|GATE=unapproved-exec": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=lsp|GATE=allowed": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=marketplace|PRIM=lsp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|lsp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=lsp|GATE=denied-executable": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=lsp|GATE=none": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=lsp|GATE=revoked-after-deploy": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=lsp|GATE=unapproved-exec": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=mcp|GATE=allowed": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=marketplace|PRIM=mcp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|mcp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=mcp|GATE=denied-executable": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=mcp|GATE=none": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=mcp|GATE=revoked-after-deploy": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=mcp|GATE=unapproved-exec": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=marketplace|PRIM=skill|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|skill|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4675,26 +4715,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
-  },
-  "T1|OP=marketplace|PRIM=skill|GATE=none": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=skill|GATE=revoked-after-deploy": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "must_cover": true,
-   "rules": [
-    "U2"
-   ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=bin|GATE=allowed": {
    "family": "T1",
@@ -5844,11 +5867,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=lsp|GATE=allowed": {
+   "credited_by": [
+    "G1|uninstall|lsp|allowed|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=lsp|GATE=denied-dependency": {
    "credited_by": [
@@ -6356,11 +6383,18 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T2|SCOPE=user|GATE=allowed|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|canvas|allowed|user",
+    "G1|install-frozen|hook|allowed|user",
+    "G1|install-frozen|lsp|allowed|user",
+    "G1|install-frozen|mcp|allowed|user"
+   ],
    "family": "T2",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "T2|SCOPE=user|GATE=denied-dependency|FROZEN=on": {
    "family": "T2",
@@ -6370,32 +6404,62 @@
    "strength": "e2e"
   },
   "T2|SCOPE=user|GATE=denied-executable|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|canvas|denied-executable|user",
+    "G1|install-frozen|hook|denied-executable|user",
+    "G1|install-frozen|lsp|denied-executable|user",
+    "G1|install-frozen|mcp|denied-executable|user"
+   ],
    "family": "T2",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "T2|SCOPE=user|GATE=none|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|canvas|none|user",
+    "G1|install-frozen|hook|none|user",
+    "G1|install-frozen|lsp|none|user",
+    "G1|install-frozen|mcp|none|user",
+    "G1|install-frozen|skill|none|user"
+   ],
    "family": "T2",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "T2|SCOPE=user|GATE=revoked-after-deploy|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|canvas|revoked-after-deploy|user",
+    "G1|install-frozen|hook|revoked-after-deploy|user",
+    "G1|install-frozen|lsp|revoked-after-deploy|user",
+    "G1|install-frozen|mcp|revoked-after-deploy|user",
+    "G1|install-frozen|skill|revoked-after-deploy|user"
+   ],
    "family": "T2",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "T2|SCOPE=user|GATE=unapproved-exec|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|canvas|unapproved-exec|user",
+    "G1|install-frozen|hook|unapproved-exec|user",
+    "G1|install-frozen|lsp|unapproved-exec|user",
+    "G1|install-frozen|mcp|unapproved-exec|user"
+   ],
    "family": "T2",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "T3|OP=approve-deny|SRC=git|PRIM=bin": {
    "family": "T3",
@@ -15346,11 +15410,19 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|canvas|denied-dependency|project",
+    "G1|marketplace|hook|denied-dependency|project",
+    "G1|marketplace|lsp|denied-dependency|project",
+    "G1|marketplace|mcp|denied-dependency|project",
+    "G1|marketplace|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=marketplace|GATE=denied-executable": {
    "family": "pair",
@@ -15416,48 +15488,6 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|NET=online": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=marketplace|PRIM=bin": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=marketplace|PRIM=canvas": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=marketplace|PRIM=hook": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=marketplace|PRIM=lsp": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=marketplace|PRIM=mcp": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=marketplace|PRIM=skill": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
@@ -17701,6 +17731,7 @@
     "G1|install-frozen|canvas|denied-dependency|project",
     "G1|install|canvas|denied-dependency|project",
     "G1|lock|canvas|denied-dependency|project",
+    "G1|marketplace|canvas|denied-dependency|project",
     "G1|mcp-install|canvas|denied-dependency|project",
     "G1|prune|canvas|denied-dependency|project",
     "G1|uninstall|canvas|denied-dependency|project",
@@ -17961,6 +17992,7 @@
     "G1|install-frozen|hook|denied-dependency|project",
     "G1|install|hook|denied-dependency|project",
     "G1|lock|hook|denied-dependency|project",
+    "G1|marketplace|hook|denied-dependency|project",
     "G1|mcp-install|hook|denied-dependency|project",
     "G1|prune|hook|denied-dependency|project",
     "G1|uninstall|hook|denied-dependency|project",
@@ -18221,6 +18253,7 @@
     "G1|install-frozen|lsp|denied-dependency|project",
     "G1|install|lsp|denied-dependency|project",
     "G1|lock|lsp|denied-dependency|project",
+    "G1|marketplace|lsp|denied-dependency|project",
     "G1|mcp-install|lsp|denied-dependency|project",
     "G1|prune|lsp|denied-dependency|project",
     "G1|uninstall|lsp|denied-dependency|project",
@@ -18481,6 +18514,7 @@
     "G1|install-frozen|mcp|denied-dependency|project",
     "G1|install|mcp|denied-dependency|project",
     "G1|lock|mcp|denied-dependency|project",
+    "G1|marketplace|mcp|denied-dependency|project",
     "G1|prune|mcp|denied-dependency|project",
     "G1|uninstall|mcp|denied-dependency|project",
     "G1|update|mcp|denied-dependency|project"
@@ -18759,6 +18793,7 @@
     "G1|install-frozen|skill|denied-dependency|project",
     "G1|install|skill|denied-dependency|project",
     "G1|lock|skill|denied-dependency|project",
+    "G1|marketplace|skill|denied-dependency|project",
     "G1|mcp-install|skill|denied-dependency|project",
     "G1|prune|skill|denied-dependency|project",
     "G1|uninstall|skill|denied-dependency|project",
@@ -19035,6 +19070,11 @@
     "G1|lock|lsp|denied-dependency|project",
     "G1|lock|mcp|denied-dependency|project",
     "G1|lock|skill|denied-dependency|project",
+    "G1|marketplace|canvas|denied-dependency|project",
+    "G1|marketplace|hook|denied-dependency|project",
+    "G1|marketplace|lsp|denied-dependency|project",
+    "G1|marketplace|mcp|denied-dependency|project",
+    "G1|marketplace|skill|denied-dependency|project",
     "G1|mcp-install|canvas|denied-dependency|project",
     "G1|mcp-install|hook|denied-dependency|project",
     "G1|mcp-install|lsp|denied-dependency|project",
@@ -19303,11 +19343,26 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
   },
   "pair|SCOPE=user|GATE=allowed": {
+   "credited_by": [
+    "G1|deny|canvas|allowed|user",
+    "G1|deny|hook|allowed|user",
+    "G1|deny|lsp|allowed|user",
+    "G1|deny|mcp|allowed|user",
+    "G1|install-frozen|canvas|allowed|user",
+    "G1|install-frozen|hook|allowed|user",
+    "G1|install-frozen|lsp|allowed|user",
+    "G1|install-frozen|mcp|allowed|user",
+    "G1|install|canvas|allowed|user",
+    "G1|install|hook|allowed|user",
+    "G1|install|lsp|allowed|user",
+    "G1|install|mcp|allowed|user"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "pair|SCOPE=user|GATE=denied-dependency": {
    "family": "pair",
@@ -19317,32 +19372,87 @@
    "strength": "e2e"
   },
   "pair|SCOPE=user|GATE=denied-executable": {
+   "credited_by": [
+    "G1|install-frozen|canvas|denied-executable|user",
+    "G1|install-frozen|hook|denied-executable|user",
+    "G1|install-frozen|lsp|denied-executable|user",
+    "G1|install-frozen|mcp|denied-executable|user",
+    "G1|install|canvas|denied-executable|user",
+    "G1|install|hook|denied-executable|user",
+    "G1|install|lsp|denied-executable|user",
+    "G1|install|mcp|denied-executable|user"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "pair|SCOPE=user|GATE=none": {
+   "credited_by": [
+    "G1|approve|canvas|none|user",
+    "G1|approve|hook|none|user",
+    "G1|approve|lsp|none|user",
+    "G1|approve|mcp|none|user",
+    "G1|approve|skill|none|user",
+    "G1|deny|skill|none|user",
+    "G1|install-frozen|canvas|none|user",
+    "G1|install-frozen|hook|none|user",
+    "G1|install-frozen|lsp|none|user",
+    "G1|install-frozen|mcp|none|user",
+    "G1|install-frozen|skill|none|user",
+    "G1|install|canvas|none|user",
+    "G1|install|hook|none|user",
+    "G1|install|lsp|none|user",
+    "G1|install|mcp|none|user",
+    "G1|install|skill|none|user"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "pair|SCOPE=user|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|install-frozen|canvas|revoked-after-deploy|user",
+    "G1|install-frozen|hook|revoked-after-deploy|user",
+    "G1|install-frozen|lsp|revoked-after-deploy|user",
+    "G1|install-frozen|mcp|revoked-after-deploy|user",
+    "G1|install-frozen|skill|revoked-after-deploy|user",
+    "G1|install|canvas|revoked-after-deploy|user",
+    "G1|install|hook|revoked-after-deploy|user",
+    "G1|install|lsp|revoked-after-deploy|user",
+    "G1|install|mcp|revoked-after-deploy|user",
+    "G1|install|skill|revoked-after-deploy|user",
+    "G1|uninstall|canvas|revoked-after-deploy|user",
+    "G1|uninstall|hook|revoked-after-deploy|user",
+    "G1|uninstall|lsp|revoked-after-deploy|user",
+    "G1|uninstall|mcp|revoked-after-deploy|user",
+    "G1|uninstall|skill|revoked-after-deploy|user"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "pair|SCOPE=user|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|install-frozen|canvas|unapproved-exec|user",
+    "G1|install-frozen|hook|unapproved-exec|user",
+    "G1|install-frozen|lsp|unapproved-exec|user",
+    "G1|install-frozen|mcp|unapproved-exec|user"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "pair|SCOPE=user|LOCK=absent": {
    "family": "pair",
@@ -23436,6 +23546,21 @@
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-15-refusals]"
   },
+  "rule|U-MKT|marketplace-never-touches-deployed": {
+   "credited_by": [
+    "rule|U-MKT|marketplace-never-touches-deployed"
+   ],
+   "family": "rule",
+   "issue": "#4095",
+   "lane": "T-1",
+   "must_cover": true,
+   "rules": [
+    "U-MKT"
+   ],
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+  },
   "rule|U10|compile-render-only-non-mutation": {
    "family": "rule",
    "issue": "#4099",
@@ -24812,6 +24937,14 @@
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
+  "U-MKT": {
+   "evidence": [
+    "src/apm_cli/commands/marketplace/__init__.py:357",
+    "docs/src/content/docs/reference/cli/marketplace.md:251",
+    "docs/src/content/docs/consumer/installing-from-marketplaces.md:111"
+   ],
+   "text": "marketplace commands act on catalogs, never on deployed primitives: add, list, browse, update, remove and validate read or refresh the catalog cache, and the authoring commands edit the marketplace block; a primitive reaches a project only through install of plugin@marketplace (OP=install, SRC=marketplace-*). Every OP=marketplace x PRIM cell but the org-policy GATE level (U2 no-collapse) maps onto one rule cell witnessed at the allowed and the revoked GATE level (deployed surfaces and the lock byte-identical)"
+  },
   "U1": {
    "evidence": [],
    "text": "a modifier the command does not accept is one refusal cell per command"
@@ -24886,5 +25019,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "74d4c98dc02f655aeb71f79466b9f08a726c67c8d483c55a70e408022709ab00"
+ "sha256": "a4a03cb2efdaa1456a4bcd780ef72e08d86a53b6172c3e668ecc3a52bf84a34a"
 }

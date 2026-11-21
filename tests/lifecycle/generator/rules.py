@@ -240,6 +240,24 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",
         (Ev(_COMPILE, 695, "def _run_validation_mode"), Ev(_COMPILE, 729, "get_mcp_dependencies")),
     ),
+    "U-MKT": (
+        "marketplace commands act on catalogs, never on deployed primitives: add, list, "
+        "browse, update, remove and validate read or refresh the catalog cache, and the "
+        "authoring commands edit the marketplace block; a primitive reaches a project only "
+        "through install of plugin@marketplace (OP=install, SRC=marketplace-*). Every "
+        "OP=marketplace x PRIM cell but the org-policy GATE level (U2 no-collapse) maps onto "
+        "one rule cell witnessed at the allowed and the revoked GATE level (deployed "
+        "surfaces and the lock byte-identical)",
+        (
+            Ev("src/apm_cli/commands/marketplace/__init__.py", 357, "def add(source, name"),
+            Ev("docs/src/content/docs/reference/cli/marketplace.md", 251, "apm marketplace update"),
+            Ev(
+                "docs/src/content/docs/consumer/installing-from-marketplaces.md",
+                111,
+                "refreshes the cached",
+            ),
+        ),
+    ),
     "E1": (
         "hosts are equivalent except lock identity (HOSTID)",
         (Ev("src/apm_cli/models/dependency/identity.py", 246, "def build_dependency_unique_key"),),
@@ -324,8 +342,12 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
 # the fixed output matches). The cell is known-failing until that output appears.
 RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {}
 
+# U-MKT: every OP=marketplace x PRIM cell maps here (Q&L ruling 2026-11-21).
+MARKETPLACE_UNTOUCHED = "rule|U-MKT|marketplace-never-touches-deployed"
+
 # Rule cells: must-cover singletons a rule names on its own.
 RULE_CELLS: Mapping[str, str] = {
+    MARKETPLACE_UNTOUCHED: "U-MKT",
     "rule|U9|approve-list-read-only": "U9",
     "rule|U9|approve-pending-read-only": "U9",
     "rule|U10|compile-validate-reads-mcp": "U10",
@@ -335,6 +357,7 @@ RULE_CELLS: Mapping[str, str] = {
 # Rule cells whose evidence is a state fact (nothing written).
 STATE_FACT_RULE_CELLS = frozenset(
     {
+        MARKETPLACE_UNTOUCHED,
         "rule|U9|approve-list-read-only",
         "rule|U9|approve-pending-read-only",
         "rule|U10|compile-render-only-non-mutation",
@@ -421,6 +444,10 @@ def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | N
     if source_target is not None:
         return source_target, "U8"
     policy_level = GATE_AUTHORITY.get(gate) == "org-policy"
+    # U2 no-collapse: a dependency deny stays its own cell (witnessed directly).
+    # OP x SRC x PRIM (T3) stays with the source lane.
+    if op == "marketplace" and prim is not None and "SRC" not in cell and not policy_level:
+        return MARKETPLACE_UNTOUCHED, "U-MKT"
     if op == "compile" and prim in ("hook", "lsp", "mcp") and policy_level:
         return None
     if op == "compile" and prim in ("hook", "lsp"):

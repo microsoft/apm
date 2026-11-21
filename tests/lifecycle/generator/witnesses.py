@@ -79,6 +79,7 @@ GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "approve": ("approve-deny", ()),
     "deny": ("approve-deny", ()),
     "mcp-install": ("mcp-install", ()),
+    "marketplace": ("marketplace", ()),
 }
 
 
@@ -123,6 +124,8 @@ def _lock_assignment(key: str) -> dict[str, str] | None:
 
 
 def _gate_assignment(key: str) -> dict[str, str]:
+    if key.startswith("rule|"):
+        return {}
     _, op, prim, gate, scope, *_ = key.split("|")
     name, flags = GATE_OPS[op]
     return {"OP": name, "PRIM": prim, "GATE": gate, "SCOPE": scope, **dict.fromkeys(flags, ON)}
@@ -182,8 +185,10 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
     """
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
-        for key in implied(cell.assignment):
-            if cell.anchor and f"|{cell.anchor}=" not in key:
+        # A rule cell id (rule|...) is its own obligation; it implies nothing else.
+        keys = [cell.id] if cell.id.startswith("rule|") else implied(cell.assignment)
+        for key in keys:
+            if cell.anchor and not key.startswith("rule|") and f"|{cell.anchor}=" not in key:
                 continue
             if key in obligations:
                 by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
