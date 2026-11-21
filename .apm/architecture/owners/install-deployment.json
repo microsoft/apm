@@ -194,11 +194,12 @@
     {
       "id": "bundle-native-layout-lowering",
       "decision": "Bundle-native directory and filename lowering to APM primitive kinds and target deploy layout, including which packed agents are rendered (codex_agent) instead of copied, which one rendering of a primitive a plugin bundle carries and a target deploys, and which packed instructions convert to a rule format",
-      "owner": "bundle/plugin_layout.py (PLUGIN_LAYOUT, plugin_command_prompt_name, PLUGIN_RENDERING_PREFERENCE, duplicate_plugin_renderings) consumed by bundle/plugin_exporter.py and install/local_bundle_paths.py (_lower_to_target, bundle_render_format_id, superseded_bundle_renderings, bundle_rule_format_id); rendered Codex agents deploy through install/local_bundle_agents.py via AgentIntegrator._render_codex_agent and _deploy_rendered_agent; packed instructions convert through InstructionIntegrator.convert_rule_content",
+      "owner": "bundle/plugin_layout.py (PLUGIN_LAYOUT, plugin_command_prompt_name, PLUGIN_RENDERING_PREFERENCE, duplicate_plugin_renderings) consumed by bundle/plugin_exporter.py and install/local_bundle_paths.py (_lower_to_target, bundle_render_format_id, superseded_bundle_renderings, bundle_rule_format_id); rendered Codex agents deploy through install/local_bundle_agents.py via AgentIntegrator._render_codex_agent and _deploy_rendered_agent; packed instructions convert in install/local_bundle_rules.py through InstructionIntegrator.convert_rule_content",
       "selectors": [
         "src/apm_cli/bundle/plugin_layout.py",
         "src/apm_cli/install/local_bundle_paths.py",
-        "src/apm_cli/install/local_bundle_agents.py"
+        "src/apm_cli/install/local_bundle_agents.py",
+        "src/apm_cli/install/local_bundle_rules.py"
       ],
       "guards": ["install-deployment-bundle-native-layout"]
     },

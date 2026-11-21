@@ -303,6 +303,7 @@ _LOCAL_BUNDLE_PATHS = "src/apm_cli/install/local_bundle_paths.py"
 _LOCAL_BUNDLE_AGENTS = "src/apm_cli/install/local_bundle_agents.py"
 _INSTALL_SERVICES = "src/apm_cli/install/services.py"
 _PLUGIN_EXPORTER_LAYOUT = "src/apm_cli/bundle/plugin_exporter.py"
+_LOCAL_BUNDLE_RULES = "src/apm_cli/install/local_bundle_rules.py"
 _TARGET_NAME_COMPARISON = re.compile(r"\btarget\.name\s*(?:==|!=)|(?:==|!=)\s*target\.name\b")
 
 
@@ -362,12 +363,18 @@ def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...
             inv,
             _RID_BUNDLE_LAYOUT,
             _INSTALL_SERVICES,
-            (
-                "_superseded_renderings(",
-                "_bundle_rule_format(",
-                "InstructionIntegrator.convert_rule_content(",
-            ),
+            ("_superseded_renderings(", "_bundle_rule_format(", "_render_bundle_rule("),
             "the bundle deploy loop must select and render renderings through the owners",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_BUNDLE_LAYOUT,
+            _LOCAL_BUNDLE_RULES,
+            ("InstructionIntegrator.convert_rule_content(",),
+            "packed instructions must convert through InstructionIntegrator",
         )
     )
     findings.extend(

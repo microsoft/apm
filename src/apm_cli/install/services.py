@@ -34,6 +34,7 @@ from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_err
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import superseded_bundle_renderings as _superseded_renderings
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
+from .local_bundle_rules import render_bundle_rule as _render_bundle_rule
 from .project_package import build_project_local_package_info
 from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
 from .target_warnings import log_canvas_skip as _log_canvas_skip
@@ -1216,39 +1217,6 @@ def integrate_local_bundle(
         "prompts": 0,
         "sub_skills": 0,
     }
-
-
-def _render_bundle_rule(
-    text: str | None,
-    rule_format: str | None,
-    *,
-    record: str,
-    diagnostics: DiagnosticCollector | None,
-    logger: InstallLogger | None,
-) -> tuple[str | None, bool]:
-    """Convert a packed APM instruction to *rule_format* (#3686).
-
-    Returns ``(text, unrenderable)``; *text* passes through unchanged when no
-    rule format applies.
-    """
-    if text is None or rule_format is None:
-        return text, False
-    import yaml
-
-    from ..integration.instruction_integrator import InstructionIntegrator
-
-    try:
-        return InstructionIntegrator.convert_rule_content(text, rule_format), False
-    except yaml.YAMLError:
-        message = (
-            f"Skipped {record}: its instruction frontmatter is not valid YAML. "
-            "Fix the frontmatter in the source package and pack again."
-        )
-        if diagnostics is not None:
-            diagnostics.warn(message)
-        elif logger is not None:
-            logger.warning(message)
-        return None, True
 
 
 def _hooks_denied_bundle(allow_executables: Any, approval_key: str | None) -> bool:
