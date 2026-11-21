@@ -137,7 +137,8 @@ def test_local_edit_advice_is_true_and_restores_each_kind(
     # The advice states what a plain install does to this kind: observe it.
     plain = apm("install", "--no-policy", ok=(0, 1))
     output = " ".join((plain.stdout + plain.stderr).split())
-    # Every kind keeps the edit (#4360); a non-skill file is named and exits 1.
+    # Every kind keeps the edit (#4360). A receipt proves the edit, and the
+    # package brings no new content, so install keeps it and exits 0 (RA-012).
     assert (root / edited).read_bytes().endswith(_EDIT.encode())
     assert "This install overwrites" not in output, output
     if kind.kept_by_install:
@@ -146,8 +147,8 @@ def test_local_edit_advice_is_true_and_restores_each_kind(
     else:
         assert remediation["id"] == "drift-restore-edited-overwrite"
         assert "keeps these edited" in remediation["fixes"]
-        assert plain.returncode == 1, output
-        assert f"Kept {edited}:" in output, output
+        assert plain.returncode == 0, output
+        assert f"Kept {edited}: it was modified since APM deployed it." in output, output
 
     # Executing the printed remedy (delete, then the command) clears audit --ci.
     (root / edited).unlink()
