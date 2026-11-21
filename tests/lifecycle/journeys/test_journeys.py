@@ -54,11 +54,14 @@ Journey YAML schema (``schema: 1``)
           output: [<line>]       # O2: consecutive lines of one text fence ("..." ok)
           pins: true             # O13: versions pinned in the fence == current release
         help_docs: reference/cli/install.md  # O7: --help flags == the page's option flags
-        remediate:               # O8 on a red step: follow the printed advice
+        remediate:               # O8a on a red step: follow the printed advice
           - {delete: <regex>}    # delete each project path the regex (group 1) lists
           - {advice: apm install}  # must print as 'apm install'; then it runs
-        rerun: [apm install --frozen]  # O8: must exit 0 after remediate (default:
+        rerun: [apm install --frozen]  # O8a: must exit 0 after remediate (default:
                                  # the step's failing apm commands)
+        diagnose:                # O8b on a red step: printed DIAGNOSTIC advice
+          advice: apm install --verbose <dep>  # must print as '<advice>'; then it runs
+          promises: [<line>]     # lines the advice prints that the step did not
         remediate_from: 4        # apply step 4's remediate to its output, in place
     known_cells:                 # STRICT expected failures on main
       - id: <slug>
@@ -126,7 +129,17 @@ from tests.utils.local_scripted_https_proxy import ScriptedResponse
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.integration,
-    pytest.mark.promise(*(f"P-INV-I{i}" for i in range(1, 10))),
+    pytest.mark.promise(
+        "P-INV-I1",
+        "P-INV-I2",
+        "P-INV-I3",
+        "P-INV-I4",
+        "P-INV-I5",
+        "P-INV-I6",
+        "P-INV-I7",
+        "P-INV-I8",
+        "P-INV-I9",
+    ),
 ]
 
 HERE = Path(__file__).parent
@@ -140,9 +153,12 @@ _JOURNEY_KEYS = {"schema", "id", "persona", "title", "docs", "steps"}
 _STEP_KEYS = {
     "n", "run", "exit", "edit", "cold_cache", "chdir", "converged", "drift", "git_clean",
     "files", "key_lines", "forbidden_lines", "docs", "help_docs", "remediate", "rerun",
-    "remediate_from", "note", "scope", "env", "file_lines",
+    "remediate_from", "note", "scope", "env", "file_lines", "diagnose",
 }  # fmt: skip
-_O_LAWS = {f"O{i}" for i in range(1, 14)} | {"KEY", "FORBID"}
+# O8 is split (#4571): O8a remediation advice, O8b diagnostic advice.
+_O_IDS = frozenset({*(f"O{i}" for i in range(1, 14) if i != 8), "O8a", "O8b"})
+_O_LAWS = _O_IDS | {"KEY", "FORBID"}
+_ADVICE_LAWS = frozenset({"O8a", "O8b"})
 # HOME paths a project command may write: receipts and bookkeeping (as in rows.py).
 _HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
 # $APM_HOME entries that user-configuration commands own (declared write set for I5).
@@ -218,10 +234,12 @@ def check_journey_file(path: Path, index: dict) -> list[str]:
     numbers = [step.get("n") for step in data.get("steps") or []]
     if numbers != [step["n"] for step in entry["steps"]]:
         problems.append(f"{jid}: steps {numbers} differ from the index's {len(entry['steps'])}")
+    oracles = {spec["n"]: set(spec.get("oracles") or ()) for spec in entry["steps"]}
     for step in data.get("steps") or []:
         unknown = set(step) - _STEP_KEYS
         if unknown:
             problems.append(f"{jid} step {step.get('n')}: unknown keys {sorted(unknown)}")
+        problems += [f"{jid} step {step.get('n')}: {p}" for p in _advice_problems(step, oracles)]
     for cell in data.get("known_cells") or []:
         if not re.fullmatch(r"#\d+", str(cell.get("tracking"))):
             problems.append(f"{jid}: known cell {cell.get('id')} needs tracking '#<n>'")
@@ -229,6 +247,23 @@ def check_journey_file(path: Path, index: dict) -> list[str]:
             problems.append(f"{jid}: known cell {cell.get('id')} has unknown law")
         if cell.get("step") not in numbers:
             problems.append(f"{jid}: known cell {cell.get('id')} names no step")
+    return problems
+
+
+def _advice_problems(step: dict, oracles: Mapping[int, set[str]]) -> list[str]:
+    """Each advice line is either remediation (O8a, ``remediate``) or diagnostic (O8b,
+    ``diagnose`` with the information it promises), as the index marks the step."""
+    laws = oracles.get(step.get("n"), set())
+    diagnose = step.get("diagnose")
+    problems = []
+    if step.get("remediate") and diagnose:
+        problems.append("advice is remediation or diagnostic, not both")
+    if "O8b" in laws and not (diagnose and diagnose.get("advice") and diagnose.get("promises")):
+        problems.append("O8b needs diagnose: {advice, promises}")
+    if diagnose and "O8b" not in laws:
+        problems.append("diagnose advice needs O8b in the index")
+    if step.get("remediate") and "O8a" not in laws and not step.get("remediate_from"):
+        problems.append("remediate advice needs O8a in the index")
     return problems
 
 
@@ -718,7 +753,8 @@ class JourneyRun:
             "O2": self._o2,
             "O6": self._o6,
             "O7": self._o7,
-            "O8": self._o8,
+            "O8a": self._o8a,
+            "O8b": self._o8b,
             "O9": self._o9,
             "O10": self._o10,
             "O11": self._o11,
@@ -730,8 +766,8 @@ class JourneyRun:
             wanted.add("O2")
         if (step.get("docs") or {}).get("commands"):
             wanted.add("O13")
-        if "O8" in wanted and not any(c.result.returncode for c in facts.apm):
-            wanted.discard("O8")  # O8 applies to red steps only
+        if not any(c.result.returncode for c in facts.apm):
+            wanted -= _ADVICE_LAWS  # O8a and O8b apply to red steps only
         checks.update({law: check for law, check in optional.items() if law in wanted})
         found: list[tuple[str, str]] = []
         for law, check in checks.items():
@@ -982,13 +1018,13 @@ class JourneyRun:
             )
         return self._experimental
 
-    def _o8(self, facts: _StepFacts) -> list[str]:
-        """Follow the printed advice in a copy of the project; the failing command then passes."""
+    def _o8a(self, facts: _StepFacts) -> list[str]:
+        """Remediation: follow the printed advice in a copy; the failing command then passes."""
         step = facts.step
         if not step.get("remediate"):
             if not re.search(r"'apm [^']+'", facts.text):
                 return ["the red step prints no 'apm ...' advice to follow"]
-            return ["red step names O8 but has no remediate actions"]
+            return ["red step names O8a but has no remediate actions"]
         copy = self.world.root / f"o8-{self.journey['id']}-{step['n']}"
         shutil.copytree(self.world.project, copy, symlinks=True)
         probe = replace(self.world, project=copy)
@@ -999,8 +1035,65 @@ class JourneyRun:
                 result = self._execute(line, probe).result
                 if result.returncode != 0:
                     found.append(f"after the advice {line!r} still exits {result.returncode}")
-                facts.record("O8", Evidence(exit=0), result)
+                facts.record("O8a", Evidence(exit=0), result)
         finally:
+            with contextlib.suppress(OSError):
+                remove_tree(copy)
+        return found
+
+    def _o8b(self, facts: _StepFacts) -> list[str]:
+        """Diagnostic: the printed advice reveals why the step failed; it does not fix it.
+
+        In a copy of the project the advice runs, writes no durable state and exits 0
+        or with the failing command's exit; it prints every promised line, none of
+        which the failing step printed (strictly more information); and the failing
+        command still exits as it did (the advice keeps the exit class).
+        """
+        spec = facts.step.get("diagnose")
+        if not spec:
+            return ["red step names O8b but has no diagnose advice"]
+        failing = [c for c in facts.apm if c.result.returncode]
+        code = failing[-1].result.returncode
+        advice = _sub(spec["advice"])
+        promises = [_sub(line) for line in spec.get("promises") or ()]
+        found = [] if promises else ["diagnose names no promised information"]
+        if f"'{advice}'" not in facts.text:
+            found.append(f"advice '{advice}' is not printed")
+        found += [f"the failing step already prints {p!r}" for p in promises if p in facts.text]
+        copy = self.world.root / f"o8b-{self.journey['id']}-{facts.step['n']}"
+        shutil.copytree(self.world.project, copy, symlinks=True)
+        probe = replace(self.world, project=copy)
+        saved = dict(self.world.env)
+        # The same state as the failing step: its project and its environment.
+        self.world.env.update({k: str(v) for k, v in (facts.step.get("env") or {}).items()})
+        try:
+            before = ArtifactSnapshotSet.capture({"project": copy})
+            ran = self._execute(advice, probe)
+            after = ArtifactSnapshotSet.capture({"project": copy})
+            if ran.result.returncode not in (0, code):
+                found.append(f"advice {advice!r} exited {ran.result.returncode}, not 0 or {code}")
+            text = f"{ran.stdout}\n{ran.stderr}"
+            found += [f"advice {advice!r} does not print {p!r}" for p in promises if p not in text]
+            changed = sorted(_delta(before.snapshot("project"), after.snapshot("project")))
+            found += [f"diagnostic advice changed {path}" for path in changed]
+            for command in failing:
+                again = self._execute(command.line, probe).result
+                if again.returncode != command.result.returncode:
+                    found.append(
+                        f"after the advice {command.line!r} exits {again.returncode}, "
+                        f"not {command.result.returncode}"
+                    )
+            facts.record(
+                "O8b",
+                Evidence(
+                    exit=ran.result.returncode,
+                    output_matches=[re.escape(p) for p in promises],
+                ),
+                ran.result,
+            )
+        finally:
+            self.world.env.clear()
+            self.world.env.update(saved)
             with contextlib.suppress(OSError):
                 remove_tree(copy)
         return found
@@ -1356,7 +1449,7 @@ def _credited(step: dict, law: str) -> bool:
         return True
     if law == "O2":
         return any(str(line).strip() != "..." for line in docs.get("output") or ())
-    if law == "O8":
+    if law in _ADVICE_LAWS:
         return any(
             line.split()[0] == "apm" and code != 0
             for line, code in zip(step["run"], _exits(step), strict=True)
@@ -1444,6 +1537,31 @@ def test_journey_files_agree_with_the_index() -> None:
                     f"{path.stem} step {step['n']}: {p}" for p in docs_problems(step["docs"])
                 ]
     assert problems == []
+
+
+@pytest.mark.parametrize(
+    ("step", "laws", "problem"),
+    [
+        ({"remediate": [{"advice": "apm list"}]}, {"O8b"}, "O8b needs diagnose"),
+        ({"diagnose": {"advice": "apm list"}}, {"O8b"}, "O8b needs diagnose"),
+        ({"diagnose": {"advice": "apm list", "promises": ["x"]}}, {"O8a"}, "needs O8b"),
+        ({"remediate": [{"advice": "apm install"}]}, {"O5"}, "needs O8a"),
+        (
+            {
+                "remediate": [{"advice": "apm install"}],
+                "diagnose": {"advice": "a", "promises": ["b"]},
+            },
+            {"O8a", "O8b"},
+            "not both",
+        ),
+    ],
+)
+def test_advice_kind_follows_the_index(step: dict, laws: set[str], problem: str) -> None:
+    """#4571: remediation advice is O8a, diagnostic advice is O8b; the index decides."""
+    problems = _advice_problems({"n": 4, **step}, {4: laws})
+    assert any(problem in p for p in problems), problems
+    sound = {"n": 4, "diagnose": {"advice": "apm list", "promises": ["x"]}}
+    assert _advice_problems(sound, {4: {"O5", "O8b"}}) == []
 
 
 @pytest.mark.parametrize("path", _params())
