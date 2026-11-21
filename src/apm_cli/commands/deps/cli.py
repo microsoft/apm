@@ -528,7 +528,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
                     if is_orphaned
                     else declared_sources.get(logical_name, "github"),
                     "primitives": primitives,
-                    "targets": package_targets(
+                    "recorded_targets": package_targets(
                         owned_records,
                         mcp_count=mcps.count,
                         has_primitives=any(count > 0 for count in primitives.values()),
@@ -639,10 +639,14 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
                 else f" APM Dependencies ({scope_label})"
             ),
             show_header=True,
-            collapse_padding=True,
             header_style="bold cyan",
         )
-        table.add_column("Package", style="bold white", overflow="fold")
+        table.add_column(
+            "Package",
+            style="bold white",
+            overflow="fold",
+            min_width=max(len(pkg["name"]) for pkg in installed_packages),
+        )
         table.add_column("Version", style="yellow")
         table.add_column("Source", style="blue")
         if insecure_only:
@@ -668,11 +672,13 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
                 str(p.get("skills", 0)) if p.get("skills", 0) > 0 else "-",
                 str(p.get("hooks", 0)) if p.get("hooks", 0) > 0 else "-",
                 format_mcps(pkg.get("mcps")),
-                format_targets(pkg.get("targets")),
+                format_targets(pkg.get("recorded_targets")),
             )
 
-        console.print(table)
-        legend = targets_legend(pkg.get("targets") for pkg in installed_packages)
+        # Expand only when the table needs more room for its contents.
+        measured_width = console.measure(table, options=console.options.update_width(sys.maxsize))
+        console.print(table, width=max(console.width, measured_width.maximum), crop=False)
+        legend = targets_legend(pkg.get("recorded_targets") for pkg in installed_packages)
         if legend:
             console.print(legend, style="dim", markup=False, highlight=False)
 
@@ -720,7 +726,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             skills = str(p.get("skills", 0)) if p.get("skills", 0) > 0 else "-"
             hooks = str(p.get("hooks", 0)) if p.get("hooks", 0) > 0 else "-"
             mcps = format_mcps(pkg.get("mcps"))
-            targets = format_targets(pkg.get("targets"))
+            targets = format_targets(pkg.get("recorded_targets"))
             if insecure_only:
                 click.echo(
                     f"{name:<30} {version:<10} {source:<12} {insecure_via:<18} "
@@ -732,7 +738,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
                     f"{name:<30} {version:<10} {source:<12} {prompts:>7} {instructions:>7} "
                     f"{agents:>7} {skills:>7} {hooks:>7} {mcps:>4} {targets}"
                 )
-        legend = targets_legend(pkg.get("targets") for pkg in installed_packages)
+        legend = targets_legend(pkg.get("recorded_targets") for pkg in installed_packages)
         if legend:
             click.echo(legend)
 
