@@ -811,12 +811,22 @@ model: inherit              # optional; inherit or a gemini-* id
 ---
 ```
 
-APM skips the agent with a warning (other agents still deploy) when:
-`description` is missing; `name` is not a lowercase slug; a `tools` value is
-not a Gemini tool name (APM does not map Claude or Copilot names such as
-`Read` or `codebase`); `model` is not `inherit` or `gemini-*`; or the source
-declares agent-scoped MCP servers (`mcp_servers`, `mcpServers`,
-`mcp-servers`), `disallowedTools`, `permissionMode`, or `kind: remote`.
+Other keys are dropped with a warning naming them. APM skips the whole
+agent with a warning (other agents still deploy) when:
+
+- `description` is missing, or `name` is not a lowercase slug equal to the
+  file stem, or the file name starts with `_`;
+- a `tools` value is not a Gemini tool name, `mcp_<server>_<tool>`,
+  `mcp_<server>_*`, `mcp_*`, `*` or `discovered_tool_<name>` (APM does not
+  map Claude or Copilot names such as `Read` or `codebase`);
+- `model` is not `inherit` or `gemini-*`;
+- the source declares a key Gemini cannot carry without losing a restriction
+  or changing the agent type: `mcp_servers`, `mcpServers`, `mcp-servers`,
+  `disallowedTools`, `disallowed-tools`, `permissionMode`, `hooks`,
+  `isolation`, `permissions`, `permission`, `kind: remote`, `agent_card_url`,
+  `agent_card_json`, `auth`, `readonly: true`,
+  `disable-model-invocation: true`, `infer: false`, `disabled`/`disable: true`.
+
 APM does not write Gemini's folder trust or agent acknowledgement state.
 Refs: [subagents](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/core/subagents.md),
 [tools](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/reference/tools.md),

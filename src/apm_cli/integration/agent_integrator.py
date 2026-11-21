@@ -114,6 +114,9 @@ def is_kiro_agent_tool(value: str) -> bool:
 #   https://github.com/google-gemini/gemini-cli/blob/v0.70.0/packages/core/src/tools/tool-names.ts
 #   https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/core/subagents.md
 #   https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/reference/tools.md
+# Project agents register only after acknowledgement of their current content
+# (registry.ts), which v0.70.0 offers only in the interactive UI
+# (packages/cli/src/ui/AppContainer.tsx); APM never writes that state.
 # The loader schema is strict (one unknown key rejects the file), so the
 # renderer emits only these keys. A value Gemini would reject, or one APM
 # cannot carry without changing the agent's access, blocks deployment of
