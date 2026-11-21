@@ -88,7 +88,9 @@ extract_release_asset_digest() {
 # Retry transient GitHub API failures (5xx, resets) so one blip cannot fail
 # setup. --retry-all-errors needs curl 7.71+; older curl keeps plain --retry.
 curl_retry_flags() {
-    if curl --help all 2>/dev/null | grep -q -- '--retry-all-errors'; then
+    local help
+    help="$(curl --help all 2>/dev/null || true)"
+    if [[ "$help" == *--retry-all-errors* ]]; then
         echo "--retry 3 --retry-all-errors --retry-delay 2"
     else
         echo "--retry 3 --retry-delay 2"
@@ -113,13 +115,17 @@ fetch_github_api() {
     fi
 
     if command -v curl >/dev/null 2>&1; then
-        local -a retry
+        local -a retry auth=()
+        local body status=0
         read -r -a retry <<< "$(curl_retry_flags)"
-        if [[ -n "$token" ]]; then
-            curl -fsSL "${retry[@]}" -H "Authorization: Bearer $token" "$url"
-        else
-            curl -fsSL "${retry[@]}" "$url"
-        fi
+        [[ -n "$token" ]] && auth=(-H "Authorization: Bearer $token")
+        # A file output (not stdout) lets curl discard a partial body before
+        # it retries; emit the body only once a whole response arrived.
+        body="$(mktemp "${TMPDIR:-/tmp}/apm-codex-metadata.XXXXXX")" || return 1
+        curl -fsSL "${retry[@]}" ${auth[@]+"${auth[@]}"} -o "$body" "$url" || status=$?
+        [[ "$status" -eq 0 ]] && cat "$body"
+        rm -f "$body"
+        return "$status"
     elif command -v wget >/dev/null 2>&1; then
         if [[ -n "$token" ]]; then
             wget -qO- --header="Authorization: Bearer $token" "$url"
