@@ -1,7 +1,7 @@
-"""Advice never names a way around org policy (RA-015).
+"""No refusal string names a way around org policy (RA-015).
 
-Every remediation in the catalog, and every refusal APM prints, names the fix
-for its cause. ``--no-policy`` and ``APM_POLICY_DISABLE`` may only appear where
+The remediation catalog is guarded in ``test_remediation_block_proofs``; this
+guard covers every other string APM can print. ``--no-policy`` and ``APM_POLICY_DISABLE`` may only appear where
 APM declares the escape hatch itself (the CLI options, the notice that it is
 active, the reader of the variable) or reports that policy was not consulted.
 """
@@ -12,8 +12,6 @@ import ast
 from pathlib import Path
 
 import pytest
-
-from apm_cli.core.remediation import catalog
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-remediation-advice")]
 
@@ -32,16 +30,6 @@ _DECLARES_THE_ESCAPE_HATCH = frozenset(
         ("policy/install_preflight.py", "run_policy_preflight"),
     }
 )
-
-
-def test_no_remediation_advises_a_policy_bypass() -> None:
-    offenders = [
-        entry.id
-        for entry in catalog().values()
-        for text in (entry.command, entry.fixes_promise, entry.before or "", entry.then or "")
-        if any(bypass in text for bypass in _BYPASS)
-    ]
-    assert offenders == []
 
 
 def _docstrings(tree: ast.AST) -> set[int]:
