@@ -150,8 +150,8 @@ class DeploymentEvidence:
             session = DeploymentMaterializationSession(deploy_root, scope, None)
             receipts = session.receipt_hashes()
             owned_receipts = session.receipt_hashes
-            # A store present but unbound was not read: it never counts as empty (#4295).
-            receipts_readable = not session.receipts_unbound
+            # A store no installation marker binds went unread: never empty (#4295).
+            receipts_readable = session.identity_path.exists() or not session.state_path.exists()
         except (OSError, ValueError) as exc:
             diagnostics.warn(f"Ignored local deployment receipts: {exc}")
             receipts = {}

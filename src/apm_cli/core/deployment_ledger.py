@@ -374,11 +374,6 @@ class DeploymentMaterializationSession:
         dependency_ref = getattr(package_info, "dependency_ref", None)
         return dependency_ref.get_unique_key() if dependency_ref is not None else "."
 
-    @property
-    def receipts_unbound(self) -> bool:
-        """Whether a receipt store exists that no installation identity binds, so it went unread."""
-        return self._state_present and self._installation is None
-
     def receipt_hashes(self, owner: str | None = None) -> dict[str, str]:
         """Map each receipted physical path (of *owner*, if given) to the hash APM wrote (#3701)."""
         return {
