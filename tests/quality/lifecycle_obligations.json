@@ -5227,11 +5227,15 @@
    "strength": "e2e"
   },
   "T1|OP=pack|PRIM=canvas|GATE=allowed": {
+   "credited_by": [
+    "G1|pack|canvas|allowed|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=pack|PRIM=canvas|GATE=denied-dependency": {
    "family": "T1",
@@ -5241,32 +5245,51 @@
    "strength": "e2e"
   },
   "T1|OP=pack|PRIM=canvas|GATE=denied-executable": {
+   "credited_by": [
+    "G1|pack|canvas|denied-executable|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4714",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=pack|PRIM=canvas|GATE=none": {
+   "credited_by": [
+    "G1|pack|canvas|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=pack|PRIM=canvas|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|pack|canvas|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4714",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=pack|PRIM=canvas|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|pack|canvas|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4714",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=pack|PRIM=hook|GATE=allowed": {
    "family": "T1",
@@ -5450,6 +5473,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T1|OP=pack|PRIM=skill|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|pack|skill|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -5457,8 +5483,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=prune|PRIM=bin|GATE=denied-dependency": {
    "family": "T1",
@@ -17330,11 +17357,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "pair|OP=pack|PRIM=canvas": {
+   "credited_by": [
+    "G1|pack|canvas|allowed|project",
+    "G1|pack|canvas|none|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "pair|OP=pack|PRIM=hook": {
    "family": "pair",
@@ -17345,11 +17377,19 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "pair|OP=pack|PRIM=lsp": {
+   "credited_by": [
+    "G1|pack|lsp|allowed|project",
+    "G1|pack|lsp|denied-executable|project",
+    "G1|pack|lsp|none|project",
+    "G1|pack|lsp|revoked-after-deploy|project",
+    "G1|pack|lsp|unapproved-exec|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "pair|OP=pack|PRIM=mcp": {
    "family": "pair",

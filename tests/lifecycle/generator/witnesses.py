@@ -174,7 +174,7 @@ def machine_cells() -> list[MachineCell]:
     """Every machine cell id with a factor translation, sorted by id."""
     from tests.lifecycle.machines import test_m_gate, test_m_scope_lock, test_m_source
     from tests.lifecycle.machines._gate_bin import KNOWN_DD, bin_cells
-    from tests.lifecycle.machines._gate_bundle import bundle_cells, pack_cells
+    from tests.lifecycle.machines._gate_bundle import KNOWN_PACK, bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
     from tests.lifecycle.machines.test_m_scope_lock import drift_cells
 
@@ -207,8 +207,12 @@ def machine_cells() -> list[MachineCell]:
     for witness, keys in side_doors:
         for key in sorted(keys):
             assignment = _gate_assignment(key)
-            tracking = KNOWN_DD.get(key)
+            tracking = KNOWN_DD.get(key) or KNOWN_PACK.get(key)
             cells.append(MachineCell(key, witness, "T-1", assignment, tracking, anchor="GATE"))
+            if witness == GATE_PACK_SPINE:
+                # A real pack over the primitive also proves the OP x PRIM pair.
+                context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}
+                cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)

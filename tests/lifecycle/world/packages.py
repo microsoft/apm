@@ -33,6 +33,9 @@ PACKAGE_NAMES = (
 # The packages whose source is a git repository on the world's local HTTPS server
 # (also listed in the world marketplace).
 GIT_PUBLISHED = ("p-skill", "p-exec", "p-lsp", "p-native-claude", "p-native-claude-bin")
+# Served from git too, but only so ``apm pack`` (which refuses local-path
+# dependencies) can bundle a canvas; not a marketplace plugin or covering source.
+GIT_PACK_ONLY = ("p-canvas",)
 MCP_SERVER = "p-exec-mcp"
 LSP_SERVER = "p-lsp-server"
 # A command that must never run: a deployed MCP or LSP entry is configuration only.
