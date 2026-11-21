@@ -23,12 +23,32 @@ def _isolate_registry(tmp_path, monkeypatch):
     yield
 
 
+def _registry_file() -> Path:
+    """The registry path with its parent directory created (no registry file)."""
+    path = Path(registry_mod._marketplaces_path())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 class TestRegistryBasicOps:
     """CRUD operations on marketplace registry."""
 
     def test_empty_registry(self):
         assert registry_mod.get_registered_marketplaces() == []
         assert registry_mod.marketplace_count() == 0
+
+    def test_reads_never_create_the_registry(self):
+        """A missing registry reads as empty and nothing is written (#4600)."""
+        config_dir = Path(registry_mod._marketplaces_path()).parent
+        assert registry_mod.get_registered_marketplaces() == []
+        assert registry_mod.marketplace_names() == []
+        with pytest.raises(MarketplaceNotFoundError):
+            registry_mod.get_marketplace_by_name("acme")
+        assert not config_dir.exists()
+
+        registry_mod.add_marketplace(MarketplaceSource(name="acme", owner="o", repo="r"))
+        written = json.loads(Path(registry_mod._marketplaces_path()).read_text())
+        assert [entry["name"] for entry in written["marketplaces"]] == ["acme"]
 
     def test_add_and_get(self):
         src = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
@@ -112,7 +132,7 @@ class TestRegistryPersistence:
         assert fetched.owner == "acme-org"
 
     def test_corrupted_file_returns_empty(self, tmp_path):
-        path = registry_mod._ensure_file()
+        path = _registry_file()
         with open(path, "w") as f:
             f.write("not json")
 
@@ -120,7 +140,7 @@ class TestRegistryPersistence:
         assert registry_mod.get_registered_marketplaces() == []
 
     def test_invalid_persisted_source_does_not_hide_valid_entries(self):
-        path = Path(registry_mod._ensure_file())
+        path = _registry_file()
         path.write_text(
             json.dumps(
                 {
@@ -168,9 +188,7 @@ class TestRegistryUtf8RoundTrip:
         Windows locales where the default open() would fail to decode."""
         import json as _json
 
-        path = registry_mod._marketplaces_path()
-        # Ensure parent dir exists.
-        registry_mod._ensure_file()
+        path = _registry_file()
         payload = {
             "marketplaces": [
                 {"name": "cafe-mkt", "owner": "o", "repo": "repo-\u4e2d\u6587"},

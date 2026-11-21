@@ -63,6 +63,19 @@ APM uses a tiered approach to integration testing:
     -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
   ```
 
+### 3b. **Owner Surface Check** (PR-time, advisory until required)
+- **Location**: `.github/workflows/owner-surface.yml`, selection in `scripts/owner_surface.py`.
+- **Purpose**: run, on every pull request, the slice of the merge-time integration suite that an owner or install-path change can break. Owner-guard and install regressions then show on the PR, not on `main`.
+- **Trigger**: a change to `src/apm_cli/install/*`, `src/apm_cli/deps/lockfile*`, `.apm/architecture/*`, `scripts/architecture_linter/*`, `tests/integration/test_architecture_*.py`, `tests/integration/test_install_*.py`, or any file an owner registry selector names.
+- **Slice**: owner-rule mutation cases and `test_architecture_*.py` files that name a changed file or an affected owner, guard or rule; plus every `test_install_*.py` file for install-path changes. It runs hermetic tests in 3 duration-balanced shards (target under 10 min).
+- **Result**: `Owner Surface Check` always reports. It passes when no owner surface changed (the slice is skipped) and on merge_group, where the full suite runs.
+- **Run it locally**:
+  ```bash
+  python3 -m scripts.owner_surface plan --base origin/main --out /tmp/changed.txt
+  APM_E2E_TESTS=1 uv run --extra dev python -m scripts.owner_surface run \
+    --base origin/main --changed /tmp/changed.txt -- -n 4 --dist loadgroup
+  ```
+
 ### 4. **Live Guardrailing Hero** (scheduled/manual)
 - **Location**: `tests/integration/test_guardrailing_hero_e2e.py`
 - **Purpose**: Preserve the real remote, token-gated packaged CLI hero without multiplying it across the default packaged platform matrix
