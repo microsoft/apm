@@ -1364,6 +1364,19 @@ diagnostic naming its path and the manual resolution. A consumer that
 needs the dependency's source to establish the render MUST establish it
 before removing that source. Removing a consumer-managed final symbolic
 link removes no file content and is outside this requirement.
+One consent exception applies, only to an uninstall the user explicitly
+consents to on that invocation: for a file that lacks evidence because
+the consumer read its local deployment records without error and holds
+none for the file, and no render of its owning locked dependency could be
+produced, the consumer MAY delete the file when its content hash, over
+the canonical domain of [req-lk-012](#req-lk-012), equals the single
+content hash the lockfile records for that path under its owning
+dependency, rechecked immediately before removal, and MUST name each file
+so deleted. The exception never applies when a deployment record or a
+render shows different bytes, when a render lacks the path, when the
+lockfile records no hash or conflicting hashes for the path, or when the
+file is unreadable or a symbolic link, and consent is never implied by
+another option or by configuration.
 
 <a id="req-lk-016"></a>
 **[req-lk-016]** A conforming **consumer** implementation MUST emit
@@ -4586,7 +4599,9 @@ For supported dependency aliases, [req-mf-025](#req-mf-025) constrains
 destinations and records canonical placement for later cleanup. Containment
 alone does not establish ownership or authorize deletion of existing content.
 [req-lk-024](#req-lk-024) requires deployment evidence, not a
-lockfile hash alone, before a lockfile-driven deletion.
+lockfile hash alone, before a lockfile-driven deletion; its only exception
+is an uninstall the user explicitly consents to per invocation, limited to
+files no deployment record or render can speak for.
 
 ### 10.8 Policy bypass via crafted manifest
 
@@ -5440,7 +5455,9 @@ renumbering of conformance classes.
 
 Conditional requirements retain the applicability limits in their bodies.
 In particular, [req-lk-023](#req-lk-023) applies only to the proposed
-staged-replacement capability, not every consumer implementation.
+staged-replacement capability, not every consumer implementation, and the
+proposed 0.1.75 consent exception of [req-lk-024](#req-lk-024) applies
+only to an explicitly consented uninstall.
 
 | ID                                       | Keyword | Section | Class       |
 |------------------------------------------|---------|---------|-------------|
@@ -5676,10 +5693,11 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.71  | 2026-11-20 | Amendment from the spec-conformance linking review (Part of #4092). Revised [req-lk-015](#req-lk-015) (Section 5.6.4, consumer MUST) in place, re-anchoring git-source integrity: every git-sourced lock entry records `content_hash`, a `sha256` envelope over the package tree whose byte stream follows [req-lk-016](#req-lk-016); a frozen install and `apm audit` recompute it at `resolved_commit` and fail closed with a diagnostic naming the entry, the expected envelope and the observed envelope. The canonical git tree hash `tree_sha256` and its Section 5.6.4 byte representation are reserved for v0.2; the Section 5.2 field table, the Section 5.6.4 editorial note, the Section 7.5 lockfile-replay prose and the informative lockfile examples are aligned. Under Section 9.2 this changes the field a normative statement names, so it is an amendment, not errata; the integrity obligation itself is unchanged. Schema bytes and `lockfile_version` are unchanged. Proposed and adopted 2026-11-20 in this Working Draft by editor decision (steward ruling, issue #4092), without the Section 9.3 reviewer-panel approval and public comment period. No statement added; the count remains 149 (144 MUST, 5 SHOULD). |
 | 0.1.72  | 2026-11-20 | Amendment from the spec-conformance linking review (Part of #4092). Revised [req-sc-005](#req-sc-005) (Section 10.3, consumer MUST) in place: beside identical eTLD+1 (a) and an explicit `aliases:` entry (b), a third basis (c) admits the built-in GitHub-operated host class, which is `github.com` and every `*.ghe.com` host, plus a GitHub Enterprise Server host only when the operator names it through the `GITHUB_HOST` setting, never through a manifest. An implementation that uses (c) documents the class in its conformance statement and applies it under the [req-sc-013](#req-sc-013) determinism and precedence rules. Basis (c) covers only those hosts and does not widen (a) or (b) for any other host. Under Section 9.2 this changes an evaluation defined by a normative statement, so it is an amendment, not errata. Proposed and adopted 2026-11-20 in this Working Draft by editor decision (steward ruling, issue #4092), without the Section 9.3 reviewer-panel approval and public comment period. No statement added; the count remains 149 (144 MUST, 5 SHOULD). |
 | 0.1.73 (proposed) | 2026-11-21 | Amendment for accepted issue #2903 (root project marketplace map). Added Section 4.2.5 `marketplaces` and two consumer MUSTs, both conditional on resolving marketplace references, which stay non-normative in v0.1. [req-mf-028](#req-mf-028): the root project manifest may declare a `marketplaces:` list (`name`, `source`, optional `ref`); malformed, unknown-key and duplicate-name entries are rejected; a declared name resolves through its entry, never through a same-named user or machine registration; names are manifest-local and the lockfile records the catalog origin and resolved commit; a declared entry is never persisted to a user-level or machine-level registry. [req-mf-029](#req-mf-029): a dependency whose manifest declares `marketplaces:` is refused, and when the root declares the list a transitive marketplace reference must name a root-declared entry or resolution fails with a diagnostic naming the entry to add. Under Section 9.2, a consumer that resolves marketplace references and ignores a dependency's `marketplaces:` key, or lets a same-named registration override a root declaration, no longer conforms; the reference implementation previously refused the key in every project and package manifest. Sections 1.3, 4.2, 4.9, 7.1, 11.3.2, Appendix C, the requirements manifest, a conformance fixture and conformance coverage are updated; schema bytes are unchanged (the manifest schemas already admit unknown top-level keys). Adds two MUSTs. Statement count: 149 -> 151 (146 MUST, 5 SHOULD). |
+| 0.1.75 (proposed) | 2026-11-21 | Amendment for accepted issue #4295 (uninstall consent for missing evidence). Revised [req-lk-024](#req-lk-024) (Section 5.2, consumer MUST) in place with one per-invocation consent exception: on an uninstall the user explicitly consents to, a file whose local deployment records were read without error and hold none for it, and for which no render of its owning locked dependency could be produced, MAY be deleted when its content hash over the [req-lk-012](#req-lk-012) domain equals the single hash the lockfile records for that path under its owner, rechecked before removal; each such deletion is named. A differing record or render, a render lacking the path, no or conflicting recorded hashes, an unreadable file or a symbolic link keeps the file; consent is never implied by another option or configuration. Without consent, behavior is unchanged. Sections 10.7 and Appendix C, the requirements manifest and conformance coverage are updated; schema bytes and `lockfile_version` are unchanged. Adds no statement. |
 
 In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63, 0.1.65 and 0.1.69 that is the adoption date, and each of those rows states its proposal date.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals, the adopted 0.1.63 and 0.1.69 amendments and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, and the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place; none adds a statement. Together, this
+0.1.60 proposals, the adopted 0.1.63 and 0.1.69 amendments and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the 0.1.75 proposal revises [req-lk-024](#req-lk-024) in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, and the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place; none adds a statement. Together, this
 working draft
 contains 151 statements (146 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), amendment 0.1.65 on the same date by editor decision (issue #3919), and amendment 0.1.69 on 2026-11-20 by editor decision (issue #3701), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.
