@@ -1348,13 +1348,11 @@ def _pending_declarations(manifest: Path, *, logger: CommandLogger) -> list:
 
 
 def _is_native_plugin(package_type: str | None, package_dir: Path) -> bool:
-    """A plugin a harness loads intact: an Agent Plugin, a Codex bundle, or a
-    Claude plugin, native at both scopes (#3290, #3921)."""
+    """A plugin a harness loads intact: an Agent Plugin, or a Claude plugin,
+    native at both scopes (#3290, #3921)."""
     if package_type == "agent_plugin":
         return True
     if package_type is None and _is_agent_plugin(package_dir):
-        return True
-    if (package_dir / ".codex-plugin" / "plugin.json").is_file():
         return True
     return (
         package_type in (None, "marketplace_plugin")

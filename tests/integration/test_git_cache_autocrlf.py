@@ -22,7 +22,7 @@ from apm_cli.utils.git_env import get_git_executable
 pytestmark = [
     pytest.mark.component,
     pytest.mark.windows_compat,
-    pytest.mark.promise("P-OWN-git-cache-key-normalization", "P-OWN-codex-native-plugin-lifecycle"),
+    pytest.mark.promise("P-OWN-git-cache-key-normalization"),
 ]
 
 _LF_BODY = b"---\nname: demo\n---\nhello\nworld\n"

@@ -117,7 +117,8 @@ def locked_content_mismatch(
     the locked commit (#4187). *fresh_hash* is the digest this run already
     recorded; without it the bytes are verified in the row's stream. Carried
     licences come from *exclude*, else *package_info*, else the lock row. A
-    0.28 marketplace plugin row may differ only by its normalization receipt.
+    0.28 marketplace plugin row may differ only by its normalization receipt, and
+    a bundle the retired Codex app-server route locked only by its conversion.
     """
     expected = getattr(locked_dep, "content_hash", None)
     if not expected:
@@ -138,14 +139,19 @@ def locked_content_mismatch(
         framed = getattr(locked_dep, "content_hash_framed", True)
         if verify_package_hash(package_path, expected, exclude=exclude, framed=framed):
             return False
-    from apm_cli.install.legacy_plugin_compat import matches_fresh_legacy_plugin_hash
+    from apm_cli.install.legacy_plugin_compat import (
+        matches_fresh_legacy_plugin_hash,
+        matches_retired_codex_route_hash,
+    )
 
-    return not matches_fresh_legacy_plugin_hash(
-        package_path,
-        dep_key,
-        lockfile=lockfile,
-        package_type=getattr(package_info, "package_type", None),
-        exclude=exclude,
+    known_delta = {
+        "lockfile": lockfile,
+        "package_type": getattr(package_info, "package_type", None),
+        "exclude": exclude,
+    }
+    return not (
+        matches_fresh_legacy_plugin_hash(package_path, dep_key, **known_delta)
+        or matches_retired_codex_route_hash(package_path, dep_key, **known_delta)
     )
 
 
@@ -227,11 +233,7 @@ def materialized_manifest_snapshot(
     """
     from apm_cli.models.apm_package import APMPackage, PackageType
 
-    if (
-        package.agent_plugin is not None
-        or package.codex_plugin is not None
-        or package_type == PackageType.MARKETPLACE_PLUGIN
-    ):
+    if package.agent_plugin is not None or package_type == PackageType.MARKETPLACE_PLUGIN:
         return package
     manifest = manifest_file(install_path)
     if not manifest.exists():

@@ -128,7 +128,6 @@ def test_prepared_native_plan_preserves_unmanaged_loose_skill(tmp_path: Path) ->
         allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
     assert plan.claude_native is not None
-    assert plan.codex_native is None
     assert plan.projection_targets == []
     assert plan.source_plan.includes("skills/review/SKILL.md")
     assert (
@@ -188,29 +187,45 @@ def test_a_per_target_skill_pairing_is_never_widened_to_a_whole_plugin(
     assert "owner/hooks" not in ctx.claude_native_plugins
 
 
-@pytest.mark.parametrize("native_target", ["claude", "codex"])
-def test_native_admission_keeps_selected_format_owner_with_both_targets(
-    tmp_path: Path, native_target: str
-) -> None:
-    """Both enabled targets must not reinterpret the other native package format."""
-    info = _fixture(tmp_path / ".apm/apm_modules/owned", native_target=native_target)
+def test_claude_plugin_with_both_targets_stays_native_for_claude(tmp_path: Path) -> None:
+    """Selecting Codex as well must not reinterpret a Claude plugin's native format."""
+    info = _fixture(tmp_path / ".apm/apm_modules/owned")
     before = {path: path.read_bytes() for path in info.install_path.rglob("*") if path.is_file()}
-    with patch("apm_cli.codex_plugins.client.CodexNativeClient.connect") as codex:
-        result, ctx = _integrate(
-            tmp_path, info, targets=[KNOWN_TARGETS["claude"], KNOWN_TARGETS["codex"]]
-        )
+    result, ctx = _integrate(
+        tmp_path, info, targets=[KNOWN_TARGETS["claude"], KNOWN_TARGETS["codex"]]
+    )
     assert result["native_plugin"] is True
-    assert result["hooks"] == 0
-    assert result["deployed_files"] == []
     assert not (tmp_path / ".claude/settings.json").exists()
-    assert not (tmp_path / ".codex/hooks.json").exists()
     assert {path: path.read_bytes() for path in before} == before
-    queued = ctx.claude_native_plugins if native_target == "claude" else ctx.codex_native_plugins
-    other = ctx.codex_native_plugins if native_target == "claude" else ctx.claude_native_plugins
-    assert set(queued) == {"owner/hooks"}
-    assert other == {}
+    assert set(ctx.claude_native_plugins) == {"owner/hooks"}
     assert not (tmp_path / ".agents").exists()
-    codex.assert_not_called()
+
+
+def test_codex_bundle_with_both_targets_is_split_for_codex_and_parked_for_claude(
+    tmp_path: Path,
+) -> None:
+    """A .codex-plugin bundle at user scope: Codex split-installs it, Claude parks it (#3920)."""
+    info = _fixture(tmp_path / ".apm/apm_modules/owned", native_target="codex")
+    before = {path: path.read_bytes() for path in info.install_path.rglob("*") if path.is_file()}
+    (tmp_path / ".codex").mkdir()
+    diagnostics = DiagnosticCollector()
+    result, ctx = _integrate(
+        tmp_path,
+        info,
+        targets=[KNOWN_TARGETS["claude"], KNOWN_TARGETS["codex"]],
+        diagnostics=diagnostics,
+    )
+    assert ctx.claude_native_plugins == {}
+    assert ctx.codex_split_plugins == {"owned-hooks"}
+    assert result["hooks"] == 1
+    assert (tmp_path / ".codex/hooks.json").is_file()
+    assert not (tmp_path / ".claude/settings.json").exists()
+    assert {path: path.read_bytes() for path in before} == before
+    parked = [d.message for d in diagnostics.by_category().get("warning", [])]
+    assert any(
+        "Parked native plugin owner/hooks" in message and "no .claude-plugin/plugin.json" in message
+        for message in parked
+    ), parked
 
 
 def test_native_admission_preserves_unowned_loose_hooks(tmp_path: Path) -> None:

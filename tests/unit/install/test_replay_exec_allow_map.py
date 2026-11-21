@@ -190,7 +190,7 @@ def test_recorded_exec_status_staleness(
 def _locked_hook_package(
     modules: Path,
     *,
-    codex_native: bool = False,
+    codex_bundle: bool = False,
     status: str | None = "deployed",
     bin_dir: bool = False,
     allowed: tuple[str, ...] = (),
@@ -208,7 +208,7 @@ def _locked_hook_package(
     if bin_dir:
         (root / "bin").mkdir(parents=True)
         (root / "bin" / "hooky").write_text("#!/bin/sh\n", encoding="utf-8")
-    if codex_native:
+    if codex_bundle:
         (root / ".codex-plugin").mkdir(parents=True)
         (root / ".codex-plugin" / "plugin.json").write_text(
             '{"name": "hooky", "version": "1.0.0"}', encoding="utf-8"
@@ -220,14 +220,14 @@ def _locked_hook_package(
     return SimpleNamespace(dependencies={lock_dep.get_unique_key(): lock_dep})
 
 
-@pytest.mark.parametrize("codex_native", [False, True], ids=["split", "codex-native"])
+@pytest.mark.parametrize("codex_bundle", [False, True], ids=["apm-hooks", "codex-bundle"])
 def test_update_probe_flags_a_deny_no_install_reconciled(
-    project: Path, tmp_path: Path, codex_native: bool
+    project: Path, tmp_path: Path, codex_bundle: bool
 ) -> None:
     from apm_cli.install.exec_gate import lock_exec_decisions_stale
 
     modules = tmp_path / "apm_modules"
-    lock = _locked_hook_package(modules, codex_native=codex_native)
+    lock = _locked_hook_package(modules, codex_bundle=codex_bundle)
     assert lock_exec_decisions_stale(
         lock, modules, project / "apm.yml", policy_provider=lambda: None
     )

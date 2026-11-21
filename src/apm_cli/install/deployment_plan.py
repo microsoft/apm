@@ -13,7 +13,6 @@ from .target_filter import log_package_target_restriction, resolve_effective_pac
 
 if TYPE_CHECKING:
     from apm_cli.claude_plugins.admission import ClaudeNativePlugin
-    from apm_cli.codex_plugins.admission import CodexNativePlugin
     from apm_cli.core.command_logger import InstallLogger
     from apm_cli.core.scope import InstallScope
     from apm_cli.install.context import InstallContext
@@ -31,15 +30,12 @@ class PackageDeploymentPlan:
     approvals: tuple[bool, bool, bool, bool, bool] = (False, False, False, False, False)
     skip_bin: bool = False
     bin_skip_reason: str | None = None
-    codex_native: CodexNativePlugin | None = None
     source_plan: DeployableSourcePlan | None = None
     claude_native: ClaudeNativePlugin | None = None
 
     @property
     def projection_targets(self) -> list[TargetProfile]:
         """Keep native bundles out of their unauthorized loose projections."""
-        if self.codex_native is not None:
-            return []
         targets = list(self.target_selection.targets)
         native_target_names = self.claude_native.harnesses if self.claude_native else set()
         return [target for target in targets if target.name not in native_target_names]
@@ -123,7 +119,6 @@ def prepare_package_deployment(  # noqa: PLR0913
     import sys
 
     from apm_cli.claude_plugins.admission import plan_native_claude_plugin
-    from apm_cli.codex_plugins.admission import plan_native_codex_plugin
     from apm_cli.core.scope import InstallScope
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 
@@ -135,43 +130,16 @@ def prepare_package_deployment(  # noqa: PLR0913
         return PackageDeploymentPlan(selection)
     native_subset = _native_skill_selection(skill_subset, skill_pairing, selection.targets)
     approvals = check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
-    hooks, bin_approved, mcp, canvas, lsp = approvals
+    hooks, bin_approved, _mcp, canvas, _lsp = approvals
     from .exec_gate import bin_deploy_denial, hook_file_admission, native_plugin_verdict
 
     hook_filter = hook_file_admission(package_name, package_info, allow_executables)
-    verdict = _warn_parked_plugin(
-        package_name, package_info, allow_executables, diagnostics, logger, ctx
-    )
-    # The trust owner already named a deny, change or missing grant (#4154).
-    parked_reported = bool(
-        verdict is not None
-        and not verdict.allowed
-        and (verdict.reason != "unapproved-executables" or verdict.detail)
-    )
+    _warn_parked_plugin(package_name, package_info, allow_executables, diagnostics, logger, ctx)
     skip_bin, reason = resolve_bin_skip(
         bin_approved, trust_bin, non_interactive=not sys.stdout.isatty()
     )
     if skip_bin and bin_skip_reason_override is not None:
         reason = bin_skip_reason_override
-    codex_native = plan_native_codex_plugin(
-        package_info,
-        package_name,
-        list(selection.targets),
-        scope=scope,
-        skill_subset=native_subset,
-        approvals={
-            # A native plugin loads every hook file live: per-file pins never
-            # admit it; a whole-plugin pin (or a type-level grant) does.
-            "hooks": hooks,
-            "mcp": mcp,
-            "bin": bin_approved and not skip_bin,
-            "canvas": canvas,
-            "lsp": lsp,
-        },
-        ctx=ctx,
-        read_only=read_only,
-        parked_reported=parked_reported,
-    )
     # The org policy the install gate fetched; callers that pass none
     # (preflight) defer to it, as effective_allow_map does for trust.
     org_policy = (
@@ -182,7 +150,7 @@ def prepare_package_deployment(  # noqa: PLR0913
     # The project's own content is never deployed as one of its native plugins.
     native_claude_plugin = (
         None
-        if codex_native is not None or is_first_party
+        if is_first_party
         else plan_native_claude_plugin(
             package_info,
             package_name=package_name,
@@ -199,10 +167,10 @@ def prepare_package_deployment(  # noqa: PLR0913
         )
     )
     projection_targets = PackageDeploymentPlan(
-        selection, codex_native=codex_native, claude_native=native_claude_plugin
+        selection, claude_native=native_claude_plugin
     ).projection_targets
     # A parked plugin deploys nothing natively; only its loose targets are planned.
-    native_plugin = codex_native or (
+    native_plugin = (
         native_claude_plugin
         if native_claude_plugin is not None and not native_claude_plugin.parked
         else None
@@ -249,5 +217,5 @@ def prepare_package_deployment(  # noqa: PLR0913
             elif logger is not None:
                 logger.warning(message)
     return PackageDeploymentPlan(
-        selection, approvals, skip_bin, reason, codex_native, source_plan, native_claude_plugin
+        selection, approvals, skip_bin, reason, source_plan, native_claude_plugin
     )

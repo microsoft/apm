@@ -3,7 +3,7 @@
 PROMISE: outcome.status_matches_state -- the approve hint a parked install prints
 reaches an approved, deployable state, and `apm approve` exits 1 when it
 approves nothing (source: issue #4154).
-CELL: OP=install,approve SRC=local PRIM=native-plugin(claude,codex)
+CELL: OP=install,approve SRC=local PRIM=native-plugin(claude),split-plugin(codex)
 SCOPE={user (APM_HOME outside HOME), project} GATE=executables.allow={}
 owner: executable-trust-context (security/trust.py approve_command,
 approval_scan_dir) + native-agent-plugin-registration-admission
@@ -22,7 +22,7 @@ import yaml
 
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
-from tests.utils.codex_stand_in import write_codex_stand_in
+from tests.utils.codex_spy import write_codex_spy
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 pytestmark = [
@@ -33,7 +33,7 @@ pytestmark = [
         "P-LAW-outcome.status_matches_state",
         "P-OWN-executable-trust-context",
         "P-OWN-native-agent-plugin-registration-admission",
-        "P-OWN-codex-native-plugin-lifecycle",
+        "P-OWN-codex-split-install",
     ),
 ]
 
@@ -201,69 +201,49 @@ def test_claude_plugin_is_approved_by_the_printed_command(
     assert not _claude_deployed(world, plugin), _evidence(retired)
 
 
-def _codex_world(tmp_path: Path, apm_binary_path: Path) -> tuple[_World, Path]:
+def _codex_world(tmp_path: Path, apm_binary_path: Path) -> tuple[_World, Path, Path]:
     world = _World(tmp_path, apm_binary_path, "user", "codex")
-    stand_in = write_codex_stand_in(world.packages.parent / "codex-bin")
-    world.env["PATH"] = os.pathsep.join((str(stand_in.parent), world.env["PATH"]))
-    return world, _codex_plugin(world.packages)
+    marker = world.packages.parent / "codex-ran"
+    spy = write_codex_spy(world.packages.parent / "codex-bin", marker)
+    world.env["PATH"] = os.pathsep.join((str(spy), world.env["PATH"]))
+    return world, _codex_plugin(world.packages), marker
 
 
-def _assert_codex_stayed_offline(world: _World) -> None:
-    """No Codex app-server start synced its curated marketplace from the network."""
-    sync_log = world.home / ".codex" / ".stand-in-curated-sync"
-    assert not sync_log.exists(), sync_log.read_text("utf-8")
-    # Every private launch directory is removed when its connection closes.
-    leftovers = sorted(Path(world.env["TMPDIR"]).glob("apm-codex-*"))
-    assert not leftovers, leftovers
-
-
-def _codex_registered(world: _World, plugin: Path) -> bool:
-    """The plugin is registered with Codex, and the lock and ownership ledger agree (I1)."""
+def _codex_mcp_live(world: _World, plugin: Path) -> bool:
+    """The plugin's MCP server is in Codex's config, and the lock agrees (I1)."""
     config = world.home / ".codex" / "config.toml"
-    text = config.read_text("utf-8") if config.is_file() else ""
-    registered = 'plugins."p-native-codex@' in text
-    ledger = json.loads((world.apm_home / ".codex-native" / "ownership.json").read_text("utf-8"))
-    record = ledger["plugins"].get(str(plugin))
-    assert registered == bool(record), (text, ledger)
-    assert registered == (_row(world, plugin)["exec_status"] == "deployed"), _row(world, plugin)
-    if record:
-        assert Path(record["installed_root"], ".codex-plugin", "plugin.json").is_file(), record
-    return registered
+    live = config.is_file() and "p-codex-mcp" in config.read_text("utf-8")
+    assert live == ("p-codex-mcp" in (_lock(world).get("mcp_servers") or [])), _lock(world)
+    return live
 
 
-def test_codex_bundle_parks_until_the_printed_command_approves_it(
+def _codex_skill(world: _World) -> Path:
+    return world.home / ".agents" / "skills" / "p-native-codex" / "SKILL.md"
+
+
+def test_codex_bundle_mcp_waits_for_the_printed_command_while_skills_split_install(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    world, plugin = _codex_world(tmp_path, apm_binary_path)
+    """A Codex bundle is split-installed (#3920); its MCP waits for approval (#4154)."""
+    world, plugin, marker = _codex_world(tmp_path, apm_binary_path)
     installed = world.apm("install", "-g", str(plugin))
 
-    # Parked, never silent: exit 0, one notice naming the package and the exact command.
+    # Never silent: exit 0, the skill lands, the MCP server waits for the printed command.
     assert installed.returncode == 0, _evidence(installed)
-    lines = installed.stdout.splitlines()
-    notice = f"[!] [{plugin}] Parked native plugin {plugin}: not approved"
-    assert [line.strip() for line in lines].count(notice) == 1, _evidence(installed)
-    hint = f"Review: apm approve -g --pending  |  Re-approve: apm approve -g {plugin}"
-    assert hint in [line.strip() for line in lines], _evidence(installed)
-    assert not any(line.startswith("[*] Installed") for line in lines), _evidence(installed)
-    assert not (world.home / ".codex" / "config.toml").exists()
+    flat = " ".join(installed.stdout.split())
+    assert "Codex: split-installed 1 plugin(s) at user scope (p-native-codex)" in flat, flat
+    assert _codex_skill(world).is_file(), _evidence(installed)
+    assert not _codex_mcp_live(world, plugin), _evidence(installed)
     row = _row(world, plugin)
-    assert row["exec_status"] == "gated_pending_approval" and not row.get("deployed_files"), row
+    assert row["exec_status"] == "gated_pending_approval", row
 
-    # While parked, --frozen and audit --ci fail and name the same command.
-    frozen = world.apm("install", "-g", "--frozen")
-    assert frozen.returncode == 1, _evidence(frozen)
-    assert f"apm approve -g {plugin}" in frozen.stdout + frozen.stderr, _evidence(frozen)
-    audit = world.runner.run(("audit", "--ci"), cwd=world.apm_home, env=world.env)
-    assert audit.returncode == 1, _evidence(audit)
-
-    approved = world.run_hint(installed.stdout, r"Re-approve: (apm approve -g \S+)")
+    approved = world.run_hint(installed.stdout, r"(apm approve -g \S+)")
     assert approved.returncode == 0, _evidence(approved)
     deployed = world.apm("install", "-g")
     assert deployed.returncode == 0, _evidence(deployed)
-    assert _codex_registered(world, plugin), _evidence(deployed)
-    for argv in (("install", "-g", "--frozen"),):
-        replay = world.apm(*argv)
-        assert replay.returncode == 0, _evidence(replay)
+    assert _codex_mcp_live(world, plugin), _evidence(deployed)
+    replay = world.apm("install", "-g", "--frozen")
+    assert replay.returncode == 0, _evidence(replay)
     audit = world.runner.run(("audit", "--ci"), cwd=world.apm_home, env=world.env)
     assert audit.returncode == 0, _evidence(audit)
 
@@ -271,16 +251,16 @@ def test_codex_bundle_parks_until_the_printed_command_approves_it(
     assert denied.returncode == 0, _evidence(denied)
     retired = world.apm("install", "-g")
     assert retired.returncode == 0, _evidence(retired)
-    assert not _codex_registered(world, plugin), _evidence(retired)
-    _assert_codex_stayed_offline(world)
+    assert not _codex_mcp_live(world, plugin), _evidence(retired)
+    assert not marker.exists(), "APM must never run the codex binary"
 
 
-def test_parked_codex_bundle_record_survives_and_uninstall_clears_it(
+def test_pending_codex_bundle_record_survives_and_uninstall_clears_it(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    world, plugin = _codex_world(tmp_path, apm_binary_path)
+    world, plugin, marker = _codex_world(tmp_path, apm_binary_path)
     assert world.apm("install", "-g", str(plugin)).returncode == 0
-    # A new process still sees the parked record.
+    # A new process still sees the pending record.
     pending = world.apm("approve", "-g", "--pending")
     assert str(plugin) in pending.stdout, _evidence(pending)
     assert _row(world, plugin)["exec_status"] == "gated_pending_approval"
@@ -291,9 +271,10 @@ def test_parked_codex_bundle_record_survives_and_uninstall_clears_it(
     rows = _lock(world).get("dependencies") or [] if lock_path.is_file() else []
     assert not any(r.get("local_path") == str(plugin) for r in rows)
     assert not (world.apm_home / "apm_modules" / "_local" / "p-native-codex").exists()
+    assert not _codex_skill(world).exists()
     gone = world.apm("approve", "-g", str(plugin))
     assert gone.returncode == 1, _evidence(gone)
-    _assert_codex_stayed_offline(world)
+    assert not marker.exists(), "APM must never run the codex binary"
 
 
 @pytest.mark.parametrize("scope", ["user", "project"])

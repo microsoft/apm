@@ -35,6 +35,7 @@ clients can fail closed with a clear message.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,6 +45,13 @@ if TYPE_CHECKING:
 
 MARKER_FILENAME = ".apm-pin"
 SCHEMA_VERSION = 1
+
+
+def is_full_source_pin(value: object) -> bool:
+    """Return whether a value is a full commit identity, the only valid source pin."""
+    return (
+        isinstance(value, str) and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", value) is not None
+    )
 
 
 class CachePinError(RuntimeError):

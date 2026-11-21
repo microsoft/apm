@@ -1849,6 +1849,13 @@ def _install_apm_packages(ctx, outcome):
                 list(prospective_plan.selected_apm_dependencies),
                 apm_package=apm_package,
             )
+            from apm_cli.install.phases.codex_plugins import report_codex_split_dry_run
+
+            report_codex_split_dry_run(
+                ctx,
+                list(prospective_plan.selected_apm_dependencies),
+                apm_package=apm_package,
+            )
         if preview is None:
             from apm_cli.install.pipeline_entry import preview_declared_policy
 

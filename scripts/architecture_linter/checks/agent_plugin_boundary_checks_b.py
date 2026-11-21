@@ -39,10 +39,9 @@ from scripts.architecture_linter.models import Violation
 def _catches_native_failure(handler: ast.ExceptHandler, name: str) -> bool:
     """Accept the native error tuple without permitting a broad exception fallback."""
     types = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
-    return all(isinstance(item, ast.Name) for item in types) and {item.id for item in types} in (
-        {name},
-        {name, "CodexNativeError"},
-    )
+    return all(isinstance(item, ast.Name) for item in types) and {item.id for item in types} == {
+        name
+    }
 
 
 def _check_integrate_phase(ctx: _Boundary) -> tuple[Violation, ...]:

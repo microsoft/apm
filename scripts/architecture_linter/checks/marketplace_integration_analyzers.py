@@ -22,9 +22,6 @@ from scripts.architecture_linter.checks.marketplace_catalog_and_contract import 
 from scripts.architecture_linter.checks.marketplace_catalog_freshness import (
     RULES as _CATALOG_FRESHNESS_RULES,
 )
-from scripts.architecture_linter.checks.marketplace_codex_offline_launch import (
-    RULES as _CODEX_OFFLINE_LAUNCH_RULES,
-)
 from scripts.architecture_linter.checks.marketplace_component_and_admission import (
     COLLECTORS as _COMPONENT_ADMISSION_COLLECTORS,
 )
@@ -74,7 +71,6 @@ RULES = (
     + _DEPENDENCY_CONFUSION_RULES
     + _PACK_CREDENTIAL_FILE_RULES
     + _REF_PIN_COMMIT_RULES
-    + _CODEX_OFFLINE_LAUNCH_RULES
     + _PROJECT_MAP_RULES
 )
 COLLECTORS = (
