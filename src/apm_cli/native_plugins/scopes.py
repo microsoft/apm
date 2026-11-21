@@ -17,6 +17,7 @@ User scope keeps per-machine files and an absolute path.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 from collections.abc import Collection
@@ -104,13 +105,21 @@ def native_source_current(locked: Any, source_root: Path) -> bool:
     return observed == record.fingerprint
 
 
-def native_harnesses(lockfile: Any, dep_key: str) -> frozenset[str]:
+def native_harnesses(lockfile: Any, dep_key: str, package_info: Any = None) -> frozenset[str]:
     """Harnesses that load a locked dependency whole through its ``native_plugin`` record.
 
     A rebuild (uninstall's survivor re-integration) must never also deploy
-    the dependency loose to them.
+    the dependency loose to them. *package_info*, rebuilt from the normalized
+    ``apm_modules`` copy, takes the package type the lock recorded, as audit
+    replay does, so its own deployment plan routes it (parked or native) as
+    install did rather than as a loose APM package.
     """
     locked = None if lockfile is None else lockfile.dependencies.get(dep_key)
+    if package_info is not None and getattr(locked, "package_type", None):
+        from apm_cli.models.apm_package import PackageType
+
+        with contextlib.suppress(ValueError):
+            package_info.package_type = PackageType(locked.package_type)
     record = getattr(locked, "native_plugin", None)
     if record is None:
         return frozenset()

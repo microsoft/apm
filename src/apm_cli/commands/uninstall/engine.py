@@ -1489,6 +1489,7 @@ def _sync_integrations_after_uninstall(
     for dep_ref, pkg_info in validated_survivors:
         if (dep_key := dep_ref.get_unique_key()) in excluded_survivor_keys:
             continue
+        native = native_harnesses(lockfile, dep_key, pkg_info)  # route as install did (#3921)
         target_selection = resolve_effective_package_targets(
             _resolved_targets,
             effective_dependency_selection(dep_ref).target_subset,
@@ -1496,7 +1497,6 @@ def _sync_integrations_after_uninstall(
             None,
             dep_ref.get_identity(),
         )
-        native = native_harnesses(lockfile, dep_key)  # loaded whole, never loose (#3921)
         authorized_targets = []
         for target in target_selection.targets:
             if target.name not in native:
