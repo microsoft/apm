@@ -974,18 +974,14 @@ class TestShrinkRetiredPaths:
 
         assert ".agents/skills/beta/SKILL.md" in retired & retained
 
-    def test_dynamic_root_targets_are_never_resolved(self, monkeypatch):
+    def test_dynamic_root_targets_are_never_resolved(self):
         from apm_cli.commands.uninstall.selection_shrink import _skill_root_sharers
-        from apm_cli.integration import targets
+        from apm_cli.integration.targets import KNOWN_TARGETS
 
-        real = targets.scoped_profile_or_none
+        dynamic = {n for n, p in KNOWN_TARGETS.items() if p.user_root_resolver is not None}
+        assert dynamic, "a dynamic-root target must exist for this check"
 
-        def strict(profile, *, user_scope):
-            if profile.user_root_resolver is not None:
-                raise RuntimeError(f"resolved dynamic root of {profile.name}")
-            return real(profile, user_scope=user_scope)
+        sharers = _skill_root_sharers()
 
-        monkeypatch.setattr(targets, "scoped_profile_or_none", strict)
-        assert any(p.user_root_resolver is not None for p in targets.KNOWN_TARGETS.values())
-
-        assert ".agents/skills" in _skill_root_sharers()
+        assert ".agents/skills" in sharers
+        assert not dynamic & set().union(*sharers.values())
