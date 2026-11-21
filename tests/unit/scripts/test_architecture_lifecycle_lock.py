@@ -8,9 +8,9 @@ import pytest
 
 from scripts.architecture_linter.runner import run_selected_rules
 
-pytestmark = pytest.mark.component
+pytestmark = pytest.mark.unit
 
-_ROOT = Path(__file__).resolve().parents[2]
+_ROOT = Path(__file__).resolve().parents[3]
 _RULE_ID = "install-deployment-lifecycle-serialization"
 _CONFIG_PATH = "src/apm_cli/commands/config.py"
 _WATCHER_PATH = "src/apm_cli/commands/compile/watcher.py"
