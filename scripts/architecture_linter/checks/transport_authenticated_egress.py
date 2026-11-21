@@ -68,6 +68,7 @@ _HEADER_OWNERS: Mapping[str, str | None] = MappingProxyType(
     {
         "src/apm_cli/core/auth.py": None,
         "src/apm_cli/core/auth_chain.py": None,
+        "src/apm_cli/core/catalog_credentials.py": "CatalogCredential",
         "src/apm_cli/deps/registry/auth.py": "RegistryAuthContext",
         "src/apm_cli/deps/registry_proxy.py": None,
         "src/apm_cli/utils/github_host.py": "set_authorization_header_git_env",

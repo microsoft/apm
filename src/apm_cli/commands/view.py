@@ -253,8 +253,13 @@ def _display_marketplace_plugin(
         logger.error(str(exc))
         sys.exit(1)
 
+    from ..marketplace.errors import MarketplaceAuthError
+
     try:
         manifest = fetch_or_cache(source)
+    except MarketplaceAuthError as exc:
+        logger.error(str(exc))
+        sys.exit(1)
     except MarketplaceFetchError as exc:
         logger.error(str(exc))
         logger.progress("Check your network connection and try again.")
