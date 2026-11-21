@@ -30,6 +30,8 @@ from tests.workflow_contracts import (
     workflow_step_index,
 )
 
+pytestmark = pytest.mark.component
+
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build-release.yml"
 WINDOWS_RELEASE_VALIDATION = ROOT / "scripts" / "windows" / "test-release-validation.ps1"
@@ -47,7 +49,8 @@ MACOS_JOBS = {
     "build-and-validate-macos-intel": ("macos-15-intel", "apm-darwin-x86_64"),
     "build-and-validate-macos-arm": ("macos-latest", "apm-darwin-arm64"),
 }
-MACOS_RUN_UNIT = {"build-and-validate-macos-intel": "false", "build-and-validate-macos-arm": "true"}
+# macOS arm64 unit tests run in their own job, parallel to the arm64 build.
+MACOS_UNIT_JOB = "unit-macos-arm"
 MACOS_SUBSET_STEP = "Run platform-sensitive integration tests"
 HERMETIC = "not live and not requires_github_token and not requires_network_integration"
 NETWORK = "(requires_github_token or requires_network_integration) and not live"
@@ -110,7 +113,6 @@ def _assert_macos_startup_steps(workflow: dict) -> None:
         assert_unconditional(step, label=f"{job_id} startup step")
         assert job["runs-on"] == runner
         assert job["env"]["MACOS_BINARY"] == binary
-        assert job["env"]["MACOS_RUN_UNIT"] == MACOS_RUN_UNIT[job_id]
         assert effective_env(workflow, job, step).get("GITHUB_TOKEN") is None
         assert step["env"] == {
             "APM_E2E_TESTS": "1",
@@ -227,8 +229,19 @@ def _assert_sharded_linux_lanes(workflow: dict) -> None:
         assert step["timeout-minutes"] == 25
         args = re.findall(r"\$\{\{.*?\}\}|\S+", step["env"]["PYTEST_EXTRA_ARGS"])
         assert args[:2] == ["-p", "scripts.ci_sharding"]
-        assert args[args.index("--shard-count") + 1] == "${{ env.SHARD_COUNT }}"
-        assert args[args.index("--shard-index") + 1] == "${{ matrix.shard }}"
+        assert not any(arg in ("--shard-count", "--shard-index") for arg in args)
+        assert step["env"]["PYTEST_TARGETS"] == "@shard-files.txt"
+        select = re.findall(
+            r'"[^"]*"|(?:\$\{\{.*?\}\}|[^\s"])+',
+            workflow_step(job, "Select shard test files")["run"],
+        )
+        assert select[select.index("scripts.ci_sharding") + 1] == "files"
+        assert select[select.index("--shard-count") + 1] == "${{ env.SHARD_COUNT }}"
+        assert select[select.index("--shard-index") + 1] == "${{ matrix.shard }}"
+        assert select[select.index("--shard-durations") + 1] == ("shard-plan/${{ env.LANE }}.json")
+        assert select[select.index("-m", select.index("files")) + 1] == '"$LANE_MARK_EXPR"'
+        assert select[select.index("--out") + 1] == "shard-files.txt"
+        assert select[-1] == "tests/integration"
         assert args[args.index("-n") + 1] == "4"
         assert args[args.index("--dist") + 1] == "loadgroup"
         assert args.count("-n") == 1 and args.count("--dist") == 1
@@ -298,15 +311,15 @@ def test_macos_jobs_run_non_shell_binary_startup_after_build() -> None:
     _assert_macos_startup_steps(_workflow())
 
 
-def test_macos_capacity_is_two_jobs_with_no_fan_out() -> None:
-    """Scarce macOS runners: exactly one Intel and one ARM job, never a matrix."""
+def test_macos_capacity_is_three_jobs_with_no_fan_out() -> None:
+    """Scarce macOS runners: one Intel job and ARM build + unit jobs, never a matrix."""
     workflow = _workflow()
     macos = [
         job_id
         for job_id, job in workflow["jobs"].items()
         if str(job.get("runs-on", "")).startswith("macos")
     ]
-    assert sorted(macos) == sorted(MACOS_JOBS)
+    assert sorted(macos) == sorted([*MACOS_JOBS, MACOS_UNIT_JOB])
     for job_id in macos:
         assert "strategy" not in workflow["jobs"][job_id]
 
@@ -332,13 +345,32 @@ def test_only_verified_tags_publish() -> None:
     _assert_publication_gates(_workflow())
 
 
-@pytest.mark.parametrize(("job_id", "step_name"), RUNTIME_SETUP_STEPS)
+CI_INTEGRATION = ROOT / ".github" / "workflows" / "ci-integration.yml"
+# Merge-time steps whose scripts/test-integration.sh run sets up the Codex runtime (INFRA-1).
+CI_INTEGRATION_RUNTIME_SETUP_STEPS = (
+    ("integration-tests-shard", "Run integration tests (sharded + parallelized)"),
+    ("integration-network", "Run network-dependent integration tests"),
+    ("release-validation", "Run release validation tests"),
+)
+
+
+@pytest.mark.parametrize(
+    ("workflow_path", "job_id", "step_name"),
+    [
+        *((WORKFLOW, job_id, step_name) for job_id, step_name in RUNTIME_SETUP_STEPS),
+        *(
+            (CI_INTEGRATION, job_id, step_name)
+            for job_id, step_name in CI_INTEGRATION_RUNTIME_SETUP_STEPS
+        ),
+    ],
+)
 def test_runtime_setup_uses_builtin_github_api_token(
+    workflow_path: Path,
     job_id: str,
     step_name: str,
 ) -> None:
     """Public runtime metadata must not use the private-module PAT."""
-    workflow = _workflow()
+    workflow = load_workflow(workflow_path)
     step = workflow_step(workflow_job(workflow, job_id), step_name)
     assert step["env"]["GITHUB_API_TOKEN"] == "${{ github.token }}"
     assert step["env"]["GITHUB_APM_PAT"] == "${{ secrets.GH_CLI_PAT }}"

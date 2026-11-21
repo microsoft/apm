@@ -11,7 +11,11 @@ import re
 from dataclasses import dataclass
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.marketplace._shared import iter_semver_tags
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Test double

@@ -27,7 +27,10 @@ from apm_cli.compilation.distributed_compiler import (
     DistributedAgentsCompiler,
     PlacementResult,
 )
+from apm_cli.core.remediation import ORPHANED_AGENTS_MD
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -154,6 +157,7 @@ class TestCaseAGlobalInstructions:
             "suppressed_empty_paths must be non-empty when dedup fires and placement"
             " would be an empty shell"
         )
+        assert not any(path.exists() for path in result.suppressed_empty_paths)
 
     def test_case_a_no_dedup_still_writes_agents_md(self, project_global):
         """--no-dedup must always produce AGENTS.md even with .github/instructions/ present."""
@@ -271,6 +275,7 @@ class TestCaseBScopedInstructions:
         # be suppressed; root may or may not be in the placement depending on
         # context optimizer decisions.
         assert len(result.suppressed_empty_paths) >= 1
+        assert not any(path.exists() for path in result.suppressed_empty_paths)
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +357,7 @@ class TestInfoLogMessage:
             f"Expected INFO message containing 'not generated' and {coverage!r}.\n"
             f"Logged messages: {logged_messages}"
         )
+        assert not (tmp_path / "AGENTS.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +427,29 @@ class TestCleanRemovesEmptyShells:
             "Plain `apm compile` must NOT delete pre-existing AGENTS.md files."
         )
 
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_clean_reports_orphan_removal_without_clean_instruction(
+        self, project_with_stale_shell, dry_run: bool
+    ):
+        """--clean reports the orphan it removes, never 'run --clean to remove' it."""
+        tmp_path, primitives, _ = project_with_stale_shell
+        orphan = tmp_path / "stale" / "AGENTS.md"
+        orphan.parent.mkdir()
+        orphan.write_text(_apm_generated_marker_content(), encoding="utf-8")
+
+        result = AgentsCompiler(str(tmp_path))._compile_distributed(
+            CompilationConfig(target="codex", clean_orphaned=True, dry_run=dry_run),
+            primitives,
+        )
+
+        assert result.success
+        assert orphan.exists() is dry_run
+        expected = "Would clean up 1 orphaned" if dry_run else "+ Removed stale/AGENTS.md"
+        assert any(expected in warning for warning in result.warnings), result.warnings
+        assert all("apm compile --clean" not in warning for warning in result.warnings), (
+            result.warnings
+        )
+
     def test_failed_output_batch_preserves_stale_shell(self, project_with_stale_shell):
         """A failed output batch must not remove an orphan during --clean."""
         from unittest.mock import patch
@@ -480,9 +509,7 @@ class TestCleanRemovesEmptyShells:
             "global.instructions.md: No 'applyTo' pattern specified" in warning
             for warning in result.warnings
         )
-        assert all(
-            "run 'apm compile --clean' to remove" not in warning for warning in result.warnings
-        )
+        assert all(ORPHANED_AGENTS_MD.option() not in warning for warning in result.warnings)
 
     @pytest.mark.windows_compat
     def test_plain_compile_reports_managed_orphan_retention(self, project_with_stale_shell) -> None:
@@ -517,9 +544,7 @@ class TestCleanRemovesEmptyShells:
             "global.instructions.md: No 'applyTo' pattern specified" in warning
             for warning in result.warnings
         )
-        assert all(
-            "run 'apm compile --clean' to remove" not in warning for warning in result.warnings
-        )
+        assert all(ORPHANED_AGENTS_MD.option() not in warning for warning in result.warnings)
 
 
 # ---------------------------------------------------------------------------

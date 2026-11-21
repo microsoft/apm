@@ -101,69 +101,6 @@ class TestDownloadStrategiesDelegate:
             result = delegate.resilient_get("https://example.com/file", {}, max_retries=1)
             assert result.status_code == 429
 
-    def test_build_repo_url_github_https(self) -> None:
-        """build_repo_url constructs GitHub HTTPS URL correctly."""
-        mock_host = MagicMock()
-        mock_host.github_host = "github.com"
-        mock_host.github_token = "token123"
-        mock_host.auth_resolver = MagicMock()
-
-        delegate = DownloadDelegate(mock_host)
-
-        with patch("apm_cli.deps.download_strategies.backend_for") as mock_backend:
-            mock_backend_inst = MagicMock()
-            mock_backend_inst.kind = "github"
-            mock_backend_inst.is_github_family = True
-            mock_backend.return_value = mock_backend_inst
-
-            with patch("apm_cli.deps.download_strategies.build_https_clone_url") as mock_url:
-                mock_url.return_value = "https://token123@github.com/owner/repo.git"
-
-                result = delegate.build_repo_url("owner/repo", use_ssh=False)
-                assert "github.com/owner/repo" in result
-
-    def test_build_repo_url_github_ssh(self) -> None:
-        """build_repo_url constructs GitHub SSH URL correctly."""
-        mock_host = MagicMock()
-        mock_host.github_host = "github.com"
-        mock_host.auth_resolver = MagicMock()
-
-        delegate = DownloadDelegate(mock_host)
-
-        with patch("apm_cli.deps.download_strategies.backend_for") as mock_backend:
-            mock_backend_inst = MagicMock()
-            mock_backend_inst.kind = "github"
-            mock_backend_inst.is_github_family = True
-            mock_backend.return_value = mock_backend_inst
-
-            with patch("apm_cli.deps.download_strategies.build_ssh_url") as mock_url:
-                mock_url.return_value = "git@github.com:owner/repo.git"
-
-                result = delegate.build_repo_url("owner/repo", use_ssh=True)
-                assert "git@github.com" in result
-
-    def test_build_repo_url_suppresses_token_with_empty_string(self) -> None:
-        """build_repo_url respects empty string token suppression."""
-        mock_host = MagicMock()
-        mock_host.github_host = "github.com"
-        mock_host.github_token = "token123"
-        mock_host.auth_resolver = MagicMock()
-
-        delegate = DownloadDelegate(mock_host)
-
-        with patch("apm_cli.deps.download_strategies.backend_for") as mock_backend:
-            mock_backend_inst = MagicMock()
-            mock_backend_inst.kind = "github"
-            mock_backend_inst.is_github_family = True
-            mock_backend.return_value = mock_backend_inst
-
-            with patch("apm_cli.deps.download_strategies.build_https_clone_url") as mock_url:
-                mock_url.return_value = "https://github.com/owner/repo.git"
-
-                result = delegate.build_repo_url("owner/repo", token="")
-                # Should not contain token
-                assert "token123" not in result
-
 
 class TestGitHubDownloaderValidation:
     """Test github_downloader_validation helpers."""

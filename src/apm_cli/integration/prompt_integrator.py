@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
-from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.integration.write_seam import write_text_lf
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -16,6 +17,7 @@ from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.yaml_io import load_frontmatter, loads_frontmatter
 
 if TYPE_CHECKING:
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -178,6 +180,7 @@ class PromptIntegrator(BaseIntegrator):
         apm_package,
         project_root: Path,
         managed_files: set[str] | None = None,
+        evidence: DeploymentEvidence | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed prompt files for a single *target*."""
         mapping = target.primitives.get("prompts")
@@ -201,6 +204,7 @@ class PromptIntegrator(BaseIntegrator):
             legacy_glob_dir=legacy_dir,
             legacy_glob_pattern="*-apm.prompt.md",
             targets=[target],
+            evidence=evidence,
         )
 
     # ------------------------------------------------------------------
@@ -402,11 +406,12 @@ class PromptIntegrator(BaseIntegrator):
                 files_skipped += int(not adopted)
                 continue
 
-            prompts_dir.mkdir(parents=True, exist_ok=True)
+            write_seam.mkdir(prompts_dir, parents=True, exist_ok=True)
             if rendered is not None:
                 write_text_lf(target_path, rendered)
             else:
                 links_resolved = self.copy_prompt(source_file, target_path)
+            self.note_rendered_write(target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)
@@ -440,6 +445,7 @@ class PromptIntegrator(BaseIntegrator):
             prefix=".github/prompts/",
             legacy_glob_dir=prompts_dir,
             legacy_glob_pattern="*-apm.prompt.md",
+            evidence=None,
         )
 
 

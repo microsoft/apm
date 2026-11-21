@@ -288,8 +288,8 @@ def test_local_file_hash_matches_copied_package_without_changing_source(
     )
     digest = sha256()
     for relative in (f".apm/{directory}/{source.name}", "apm.yml"):
-        digest.update(relative.encode("utf-8"))
-        digest.update((destination / relative).read_bytes())
+        digest.update(relative.encode("utf-8") + b"\0")
+        digest.update(sha256((destination / relative).read_bytes()).digest())
     before = ArtifactSnapshot.capture(tmp_path)
     assert compute_local_package_hash(source) == f"sha256:{digest.hexdigest()}"
     assert_unchanged(before, ArtifactSnapshot.capture(tmp_path))

@@ -19,10 +19,12 @@ def _load_yaml_registries(yaml_path: Path) -> dict[str, str]:
     """Return {name: url} from a YAML file's top-level ``registries:`` block.
 
     Silently returns an empty dict on any parse error so a broken
-    workspace file never blocks a project install.
+    workspace file never blocks a project install. An entry whose URL the
+    scheme owner does not accept is left out.
     """
     try:
         from ...utils.yaml_io import load_yaml
+        from .url_scheme import registry_url_error
 
         data = load_yaml(yaml_path) or {}
         if not isinstance(data, dict):
@@ -36,7 +38,7 @@ def _load_yaml_registries(yaml_path: Path) -> dict[str, str]:
                 continue
             if isinstance(body, dict):
                 url = body.get("url")
-                if isinstance(url, str) and url.strip():
+                if registry_url_error(name, url, insecure=body.get("insecure")) is None:
                     result[name] = url.strip()
         return result
     except Exception:
@@ -53,6 +55,7 @@ def _load_config_json_registries(*, create_config: bool = False) -> dict[str, st
     """
     try:
         from ...config import _get_registries_section
+        from .url_scheme import registry_url_error
 
         result: dict[str, str] = {}
         for name, body in _get_registries_section(create_config=create_config).items():
@@ -60,7 +63,7 @@ def _load_config_json_registries(*, create_config: bool = False) -> dict[str, st
                 continue
             if isinstance(body, dict):
                 url = body.get("url")
-                if isinstance(url, str) and url.strip():
+                if registry_url_error(name, url, insecure=body.get("insecure")) is None:
                     result[name] = url.strip()
         return result
     except Exception:
@@ -100,6 +103,21 @@ def load_merged_registries(
         merged.update(policy_registries)
 
     return merged
+
+
+def user_registry_config_path(*, create_config: bool = False) -> Path | None:
+    """Return the $APM_HOME file that configures registries, or ``None``."""
+    from ...config import CONFIG_FILE, get_config_json_default_registry
+    from ...core.scope import InstallScope, get_manifest_path
+
+    if _load_config_json_registries(
+        create_config=create_config
+    ) or get_config_json_default_registry(create_config=create_config):
+        return Path(CONFIG_FILE)
+    workspace_yml = get_manifest_path(InstallScope.USER)
+    if workspace_yml.exists() and _load_yaml_registries(workspace_yml):
+        return workspace_yml
+    return None
 
 
 def resolve_effective_registries(

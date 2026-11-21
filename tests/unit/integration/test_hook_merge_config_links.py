@@ -9,6 +9,8 @@ import pytest
 from apm_cli.integration.hook_ownership import read_merged_hook_config
 from apm_cli.utils.path_security import PathTraversalError
 
+pytestmark = pytest.mark.component
+
 
 def _linked_settings(tmp_path: Path) -> tuple[Path, Path]:
     project = tmp_path / "project"

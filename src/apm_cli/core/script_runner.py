@@ -7,6 +7,8 @@ import sys
 import time
 from pathlib import Path
 
+from apm_cli.core.scope import manifest_file
+
 from ..output.script_formatters import ScriptExecutionFormatter
 from ..runtime.registry import (
     get_runtime_descriptor,
@@ -15,6 +17,7 @@ from ..runtime.registry import (
 )
 from ..runtime.utils import find_runtime_binary
 from .project_name import resolve_bootstrap_project_name
+from .remediation import DEPENDENCIES_NOT_INSTALLED
 from .token_manager import setup_runtime_environment
 
 
@@ -115,8 +118,7 @@ class ScriptRunner:
         error_msg += f"\nTo find available prompts, check:\n"  # noqa: F541
         error_msg += f"  - Local: .apm/prompts/, .github/prompts/, or project root\n"  # noqa: F541
         error_msg += f"  - Dependencies: apm_modules/*/.apm/prompts/\n"  # noqa: F541
-        error_msg += f"\nOr install a prompt package:\n"  # noqa: F541
-        error_msg += f"  apm install <owner>/<repo>/path/to/prompt.prompt.md\n"  # noqa: F541
+        error_msg += "\nRun 'apm list' to see each script and its command.\n"
 
         raise RuntimeError(error_msg)
 
@@ -219,7 +221,7 @@ class ScriptRunner:
 
     def _load_config(self) -> dict | None:
         """Load apm.yml from current directory."""
-        config_path = Path("apm.yml")
+        config_path = manifest_file(Path("."))
         if not config_path.exists():
             return None
 
@@ -353,7 +355,9 @@ class ScriptRunner:
         if not match:
             return None
 
-        args_before = match.group(1).strip()
+        # 'llm < x.prompt.md' redirects stdin in a shell; APM passes the compiled
+        # prompt itself, so a literal '<' must not reach the runtime (#3994).
+        args_before = re.sub(r"(?:^|\s)<$", "", match.group(1).strip()).strip()
         args_after = match.group(3).strip()
 
         # In the env-var path, non-codex runtimes strip -p flags (matches
@@ -389,6 +393,8 @@ class ScriptRunner:
         """
         prefix = f"{env_prefix} " if env_prefix else ""
         result = f"{prefix}codex exec"
+        # The documented 'codex exec <flags> x.prompt.md' already names exec (#3994).
+        args_before = re.sub(r"^exec(?:\s+|$)", "", args_before)
         if args_before:
             result += f" {args_before}"
         if args_after:
@@ -849,7 +855,9 @@ class ScriptRunner:
             return True
 
         except Exception as e:
-            print(f"  [x] Auto-install failed: {e}")
+            from ..utils.console import _rich_echo
+
+            _rich_echo(f"  [x] Auto-install failed: {e}", color="red")
             return False
 
     def _add_dependency_to_config(self, package_ref: str) -> None:
@@ -858,7 +866,7 @@ class ScriptRunner:
         Args:
             package_ref: Virtual package reference to add
         """
-        config_path = Path("apm.yml")
+        config_path = manifest_file(Path("."))
 
         # Skip if apm.yml doesn't exist (e.g., in test environments)
         if not config_path.exists():
@@ -1101,7 +1109,7 @@ class PromptCompiler:
             f"Prompt file '{prompt_file}' not found.\n"
             f"Searched in:\n"
             + "\n".join(searched_locations)
-            + f"\n\nTip: Run 'apm install' to ensure dependencies are installed."  # noqa: F541
+            + f"\n\nTip: {DEPENDENCIES_NOT_INSTALLED.sentence()}"
         )
 
     def _substitute_parameters(self, content: str, params: dict[str, str]) -> str:

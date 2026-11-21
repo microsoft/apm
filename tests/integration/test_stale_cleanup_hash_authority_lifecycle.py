@@ -3,8 +3,9 @@
 A lockfile row without a recorded content hash proves nothing about who
 wrote a file. On a fresh clone without receipts, a lockfile that claims a
 user's own skill and instruction must not make install or uninstall delete
-them; both commands route through the same cleanup gate. A forged matching
-hash remains documented lockfile authority (enterprise/security.md).
+them; both commands route through the same cleanup gate. A matching
+lockfile hash is no authority either: deletion needs a local receipt or the
+locked render (#3701).
 """
 
 from __future__ import annotations
@@ -58,12 +59,12 @@ def test_unhashed_lock_claims_never_delete_user_files(tmp_path, apm_binary_path)
     assert installed.returncode == 0, text
     _assert_user_files_kept(clone)
     for path in (_USER_SKILL, _USER_INSTRUCTION):
-        assert f"Kept {path}" in text and "no content hash" in text, text
+        assert f"Kept {path}" in text and "no local deployment receipt" in text, text
 
     removed = kit.run("uninstall", "test/kit", cwd=clone)
     refusal = output(removed)
     assert removed.returncode != 0, refusal
-    assert "could not remove tracked target files" in refusal, refusal
+    assert "Uninstall refused" in refusal, refusal
     assert _USER_INSTRUCTION in refusal, refusal
     _assert_user_files_kept(clone)
     assert "test/kit" in str(load_yaml(clone / "apm.yml")["dependencies"]["apm"])

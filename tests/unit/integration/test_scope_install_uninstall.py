@@ -23,6 +23,7 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 from apm_cli.models.validation import PackageType
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _set_home(monkeypatch, home: Path) -> None:
@@ -109,6 +110,20 @@ def _make_pkg(
     )
 
 
+def _with_skill_members(project_root: Path, deployed: set[str]) -> set[str]:
+    """Add each deployed skill directory's member files, as the lockfile records them."""
+    entries = set(deployed)
+    for rel in deployed:
+        path = project_root / rel
+        if path.is_dir():
+            entries.update(
+                member.relative_to(project_root).as_posix()
+                for member in path.rglob("*")
+                if member.is_file()
+            )
+    return entries
+
+
 def _posix_relpaths(project_root: Path, paths: list[Path]) -> set[str]:
     """Convert absolute target_paths to posix-format relative strings."""
     result = set()
@@ -181,13 +196,25 @@ class TestCopilotInstallUninstallCycle:
 
         # -- uninstall -----------------------------------------------------
         inst_sync = inst_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         agent_sync = agent_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         prompt_sync = prompt_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert inst_sync["errors"] == 0
@@ -250,13 +277,25 @@ class TestCopilotInstallUninstallCycle:
 
         # -- uninstall -----------------------------------------------------
         agent_sync = agent_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         inst_sync = inst_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         prompt_sync = prompt_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         assert agent_sync["errors"] == 0
         assert inst_sync["errors"] == 0
@@ -295,7 +334,11 @@ class TestCopilotInstallUninstallCycle:
         unmanaged.write_text("hand-authored, not APM-managed\n", encoding="utf-8")
 
         inst_sync = inst_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         assert inst_sync["errors"] == 0
         for p in deployed:
@@ -363,13 +406,25 @@ class TestClaudeInstallUninstallCycle:
 
         # -- uninstall -----------------------------------------------------
         inst_sync = inst_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         agent_sync = agent_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         cmd_sync = cmd_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert inst_sync["errors"] == 0
@@ -431,13 +486,25 @@ class TestClaudeInstallUninstallCycle:
 
         # -- uninstall -----------------------------------------------------
         inst_sync = inst_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         agent_sync = agent_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         cmd_sync = cmd_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         total_removed = (
@@ -468,7 +535,11 @@ class TestClaudeInstallUninstallCycle:
             assert p.startswith(".config/test-claude/agents/"), f"unexpected path: {p}"
 
         sync = integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         assert sync["files_removed"] == len(deployed)
         for p in deployed:
@@ -525,10 +596,18 @@ class TestCursorInstallUninstallCycle:
 
         # -- uninstall -----------------------------------------------------
         inst_sync = inst_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         agent_sync = agent_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert inst_sync["errors"] == 0
@@ -578,10 +657,18 @@ class TestCursorInstallUninstallCycle:
 
         # -- uninstall -----------------------------------------------------
         inst_sync = inst_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         agent_sync = agent_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert inst_sync["errors"] == 0
@@ -645,10 +732,18 @@ class TestOpenCodeInstallUninstallCycle:
 
         # -- uninstall -----------------------------------------------------
         agent_sync = agent_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         cmd_sync = cmd_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert agent_sync["errors"] == 0
@@ -703,10 +798,18 @@ class TestOpenCodeInstallUninstallCycle:
 
         # -- uninstall -----------------------------------------------------
         agent_sync = agent_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         cmd_sync = cmd_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert agent_sync["errors"] == 0
@@ -763,7 +866,11 @@ class TestCodexInstallUninstallCycle:
 
         # -- uninstall -----------------------------------------------------
         sync = agent_integrator.sync_for_target(
-            target, pkg_info.package, self.project_root, managed_files=deployed
+            target,
+            pkg_info.package,
+            self.project_root,
+            managed_files=deployed,
+            evidence=receipted_evidence(self.project_root),
         )
         assert sync["errors"] == 0
         assert sync["files_removed"] == len(deployed)
@@ -832,7 +939,11 @@ class TestCodexInstallUninstallCycle:
         assert not (home / ".codex").exists()
 
         sync = agent_integrator.sync_for_target(
-            target, pkg_info.package, home, managed_files=agents
+            target,
+            pkg_info.package,
+            home,
+            managed_files=agents,
+            evidence=receipted_evidence(home),
         )
         assert sync["errors"] == 0
         assert sync["files_removed"] == len(agents)
@@ -883,8 +994,9 @@ class TestSkillInstallUninstallCycle:
         sync = integrator.sync_integration(
             pkg_info.package,
             self.project_root,
-            managed_files=deployed,
+            managed_files=_with_skill_members(self.project_root, deployed),
             targets=[target],
+            evidence=receipted_evidence(self.project_root),
         )
         assert sync["errors"] == 0
         assert sync["files_removed"] >= 1
@@ -924,8 +1036,9 @@ class TestSkillInstallUninstallCycle:
         sync = integrator.sync_integration(
             pkg_info.package,
             self.project_root,
-            managed_files=deployed,
+            managed_files=_with_skill_members(self.project_root, deployed),
             targets=[target],
+            evidence=receipted_evidence(self.project_root),
         )
         assert sync["errors"] == 0
         assert sync["files_removed"] >= 1
@@ -968,8 +1081,9 @@ class TestSkillInstallUninstallCycle:
         sync = integrator.sync_integration(
             pkg_info.package,
             self.project_root,
-            managed_files=deployed,
+            managed_files=_with_skill_members(self.project_root, deployed),
             targets=[target],
+            evidence=receipted_evidence(self.project_root),
         )
         assert sync["errors"] == 0
         assert sync["files_removed"] >= 1
@@ -1006,8 +1120,9 @@ class TestSkillInstallUninstallCycle:
         sync = integrator.sync_integration(
             pkg_info.package,
             self.project_root,
-            managed_files=deployed,
+            managed_files=_with_skill_members(self.project_root, deployed),
             targets=[target],
+            evidence=receipted_evidence(self.project_root),
         )
         assert sync["errors"] == 0
         assert sync["files_removed"] >= 1
@@ -1065,8 +1180,9 @@ class TestSkillInstallUninstallCycle:
         sync = integrator.sync_integration(
             pkg_info.package,
             self.project_root,
-            managed_files=deployed,
+            managed_files=_with_skill_members(self.project_root, deployed),
             targets=[target],
+            evidence=receipted_evidence(self.project_root),
         )
         assert sync["errors"] == 0
         assert sync["files_removed"] >= 1

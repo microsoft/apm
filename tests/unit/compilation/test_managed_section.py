@@ -13,6 +13,8 @@ from apm_cli.compilation.managed_section import (
     apply_managed_section,
 )
 
+pytestmark = pytest.mark.component
+
 DEFAULT_START = "<!-- apm:start -->"
 DEFAULT_END = "<!-- apm:end -->"
 

@@ -587,13 +587,14 @@ def build_replacement_index(rules: list[ReplacementRule]) -> ReplacementIndex:
 
 
 def project_manifest_dependencies(
-    manifest: APMPackage, *, modules_dir: Path | None = None
+    manifest: APMPackage, *, modules_dir: Path | None = None, include_dev: bool = True
 ) -> list[DependencyReference]:
     """Project direct root declarations without changing manifest ownership."""
-    groups = (
+    groups: tuple[tuple[bool, list[DependencyReference]], ...] = (
         (False, manifest.get_apm_dependencies()),
-        (True, manifest.get_dev_apm_dependencies()),
     )
+    if include_dev:
+        groups += ((True, manifest.get_dev_apm_dependencies()),)
     if not manifest.replace_rules:
         return [dep for _, dependencies in groups for dep in dependencies]
     root = Path(manifest.source_path or manifest.package_path).resolve()

@@ -256,7 +256,7 @@ class TestDownloadStrategiesWithMockedHTTP:
         mock_get.assert_called_once()
 
     @mock.patch("apm_cli.deps.download_strategies.requests.get")
-    @mock.patch("apm_cli.deps.download_strategies.time.sleep")
+    @mock.patch("apm_cli.deps.download_strategies._backoff_sleep")
     def test_resilient_get_retry_on_429(
         self, mock_sleep: mock.MagicMock, mock_get: mock.MagicMock
     ) -> None:
@@ -288,7 +288,7 @@ class TestDownloadStrategiesWithMockedHTTP:
         """Test resilient_get() retries on connection error."""
         import requests
 
-        with mock.patch("apm_cli.deps.download_strategies.time.sleep"):
+        with mock.patch("apm_cli.deps.download_strategies._backoff_sleep"):
             success = mock.MagicMock()
             success.status_code = 200
             success.headers = {}
@@ -589,33 +589,6 @@ class TestGitHubDownloaderLogic:
         reporter = GitProgressReporter(progress_task_id=1, package_name="test")
         assert reporter.task_id == 1
         assert reporter.package_name == "test"
-
-
-class TestDownloadStrategiesBuildRepoUrl:
-    """Test URL building logic in DownloadDelegate.build_repo_url()."""
-
-    def test_build_repo_url_github_https(self) -> None:
-        """Test build_repo_url() for GitHub HTTPS."""
-        host_mock = mock.MagicMock()
-        host_mock.github_host = "github.com"
-        host_mock.github_token = "test-token"
-        host_mock.auth_resolver = mock.MagicMock()
-
-        delegate = DownloadDelegate(host_mock)
-
-        # Mock backend_for to return GitHub backend
-        with mock.patch("apm_cli.deps.download_strategies.backend_for") as mock_backend:
-            backend_mock = mock.MagicMock()
-            backend_mock.kind = "github"
-            backend_mock.is_github_family = True
-            mock_backend.return_value = backend_mock
-
-            url = delegate.build_repo_url(
-                "owner/repo",
-                use_ssh=False,
-                token="test-token",
-            )
-            assert url is not None
 
 
 if __name__ == "__main__":

@@ -40,10 +40,13 @@ try:
 except ImportError:
     _MODULE_EXISTS = False
 
-pytestmark = pytest.mark.skipif(
-    not _MODULE_EXISTS,
-    reason="apm_cli.bundle.local_bundle not yet implemented (TDD stub)",
-)
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.skipif(
+        not _MODULE_EXISTS,
+        reason="apm_cli.bundle.local_bundle not yet implemented (TDD stub)",
+    ),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +203,7 @@ class TestDetectLocalBundle:
         bundle = _make_plugin_bundle(tmp_path / "source")
         lock_path = bundle / "apm.lock.yaml"
         lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
-        lock["lockfile_version"] = "4"
+        lock["lockfile_version"] = "5"
         lock_path.write_text(yaml.safe_dump(lock), encoding="utf-8")
         source = {
             "directory": bundle,
@@ -210,7 +213,7 @@ class TestDetectLocalBundle:
 
         with pytest.raises(
             UnsupportedLockfileVersionError,
-            match=r"Unsupported lockfile version '4'; supported versions: 1, 2, 3",
+            match=r"Unsupported lockfile version '5'; supported versions: 1, 2, 3, 4",
         ):
             detect_local_bundle(source)
 
@@ -341,7 +344,7 @@ class TestDetectLocalBundle:
         )
         extraction = tmp_path / "controlled-extraction"
         monkeypatch.setattr(
-            "apm_cli.bundle.local_bundle.tempfile.mkdtemp",
+            "tempfile.mkdtemp",
             lambda **_kwargs: str(extraction),
         )
 

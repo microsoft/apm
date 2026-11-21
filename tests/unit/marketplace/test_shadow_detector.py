@@ -12,7 +12,7 @@ Covers:
 import logging
 from unittest.mock import MagicMock, patch  # noqa: F401
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.marketplace.models import (
     MarketplaceManifest,
@@ -20,6 +20,8 @@ from apm_cli.marketplace.models import (
     MarketplaceSource,
 )
 from apm_cli.marketplace.shadow_detector import ShadowMatch, detect_shadows
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers

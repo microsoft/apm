@@ -277,11 +277,11 @@ class TestCheckRequiredPackagesDeployed:
         assert not result.passed
         assert "1 required package" in result.message
 
-    def test_required_not_in_manifest_skipped(self):
-        # Package in require but not in deps -- check 3 handles it, not 4
+    def test_required_not_in_manifest_is_not_skipped(self):
+        # An undeclared required package cannot be located in the lock (#3993).
         policy = DependencyPolicy(require=("acme/missing",))
         result = _check_required_packages_deployed([], _lock(), policy)
-        assert result.passed
+        assert not result.passed
 
 
 class TestCheckRequiredPackageVersion:

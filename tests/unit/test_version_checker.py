@@ -1,10 +1,10 @@
 """Tests for version checker utility."""
 
-import tempfile
-import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+
+import pytest
 
 from apm_cli.utils.version_checker import (
     _get_github_token,
@@ -13,9 +13,9 @@ from apm_cli.utils.version_checker import (
     get_latest_version_from_github,
     is_newer_version,
     parse_version,
-    save_version_check_timestamp,
-    should_check_for_updates,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class TestVersionParser(unittest.TestCase):
@@ -385,62 +385,6 @@ class TestGitHubVersionFetchAuth(unittest.TestCase):
         self.assertEqual(result, "1.0.0")
 
 
-class TestVersionCheckCache(unittest.TestCase):
-    """Test version check caching functionality."""
-
-    def setUp(self):
-        """Set up test fixtures."""
-        self.temp_dir = tempfile.mkdtemp()
-        self.cache_file = Path(self.temp_dir) / "last_version_check"
-
-    def tearDown(self):
-        """Clean up test fixtures."""
-        import shutil
-
-        if Path(self.temp_dir).exists():
-            shutil.rmtree(self.temp_dir)
-
-    @patch("apm_cli.utils.version_checker.get_update_cache_path")
-    def test_should_check_no_cache(self, mock_cache_path):
-        """Test that check is needed when no cache exists."""
-        mock_cache_path.return_value = self.cache_file
-        self.assertTrue(should_check_for_updates())
-
-    @patch("apm_cli.utils.version_checker.get_update_cache_path")
-    def test_should_check_old_cache(self, mock_cache_path):
-        """Test that check is needed when cache is old."""
-        mock_cache_path.return_value = self.cache_file
-
-        # Create cache file with old timestamp
-        self.cache_file.touch()
-        # Set modification time to 2 days ago
-        old_time = time.time() - (2 * 86400)
-        import os
-
-        os.utime(self.cache_file, (old_time, old_time))
-
-        self.assertTrue(should_check_for_updates())
-
-    @patch("apm_cli.utils.version_checker.get_update_cache_path")
-    def test_should_not_check_recent_cache(self, mock_cache_path):
-        """Test that check is skipped when cache is recent."""
-        mock_cache_path.return_value = self.cache_file
-
-        # Create cache file with recent timestamp
-        self.cache_file.touch()
-
-        self.assertFalse(should_check_for_updates())
-
-    @patch("apm_cli.utils.version_checker.get_update_cache_path")
-    def test_save_timestamp(self, mock_cache_path):
-        """Test saving check timestamp."""
-        mock_cache_path.return_value = self.cache_file
-
-        save_version_check_timestamp()
-
-        self.assertTrue(self.cache_file.exists())
-
-
 class TestCheckForUpdates(unittest.TestCase):
     """Test the main check_for_updates function."""
 
@@ -599,21 +543,12 @@ class TestAirGappedEnvVars(unittest.TestCase):
         self.assertEqual(result, "1.5.0")
 
     @patch("requests.get")
-    @patch.dict("os.environ", {"VERSION": "not-a-version"}, clear=False)
     def test_invalid_version_env_var_returns_none(self, mock_get):
-        """An invalid VERSION value returns None without calling the API."""
-        result = get_latest_version_from_github()
+        """Invalid VERSION values, including a doubled v prefix, return None without an API call."""
+        for value in ("not-a-version", "vv1.2.3"):
+            with self.subTest(version=value), patch.dict("os.environ", {"VERSION": value}):
+                self.assertIsNone(get_latest_version_from_github())
         mock_get.assert_not_called()
-        self.assertIsNone(result)
-
-    @patch("requests.get")
-    @patch.dict("os.environ", {"VERSION": "vv1.2.3"}, clear=False)
-    def test_multiple_v_prefixes_are_rejected(self, mock_get):
-        """VERSION normalization must add or remove exactly one v prefix."""
-        result = get_latest_version_from_github()
-
-        mock_get.assert_not_called()
-        self.assertIsNone(result)
 
     @patch("requests.get")
     @patch.dict("os.environ", {"APM_REPO": "corp/apm-fork"}, clear=False)

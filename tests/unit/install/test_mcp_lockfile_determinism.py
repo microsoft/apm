@@ -21,6 +21,8 @@ from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.apm_package import APMPackage, DependencyReference, clear_apm_yml_cache
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 
+pytestmark = pytest.mark.component
+
 
 class _FixedDatetime:
     instant = datetime(2026, 1, 1, tzinfo=UTC)
@@ -513,7 +515,7 @@ def test_lockfile_write_failure_preserves_original_and_reports_error(tmp_path: P
     lock_path = get_lockfile_path(tmp_path)
     original_bytes = lock_path.read_bytes()
 
-    with patch("apm_cli.utils.atomic_io.os.replace", side_effect=OSError("replace blocked")):
+    with patch("os.replace", side_effect=OSError("replace blocked")):
         context = _run_lockfile_phase_and_mcp_persist(
             tmp_path,
             package,

@@ -24,6 +24,8 @@ from apm_cli.core.build_orchestrator import (
 from apm_cli.core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
 from apm_cli.marketplace.builder import BuildReport, MarketplaceOutputReport
 
+pytestmark = pytest.mark.component
+
 
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)

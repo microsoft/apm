@@ -22,6 +22,7 @@ from .schema import (
     ExecutablesPolicy,
     IntegrityPolicy,
     ManifestPolicy,
+    MarketplacePolicy,
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
@@ -72,6 +73,9 @@ def merge_policies(parent: ApmPolicy, child: ApmPolicy) -> ApmPolicy:
         manifest=_merge_manifest(parent.manifest, child.manifest),
         unmanaged_files=_merge_unmanaged_files(parent.unmanaged_files, child.unmanaged_files),
         registry_source=_merge_registry_source(parent.registry_source, child.registry_source),
+        marketplace=MarketplacePolicy(
+            allow=_intersect_allow(parent.marketplace.allow, child.marketplace.allow)
+        ),
         security=_merge_security(parent.security, child.security),
         bin_deploy=_merge_bin_deploy(parent.bin_deploy, child.bin_deploy),
         executables=_merge_executables(parent.executables, child.executables),

@@ -45,8 +45,8 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
         ),
         (
             "integration/skill_integrator.py",
-            "removed_paths.append(target)",
-            "pass",
+            "receipt_retirements=removed_paths,",
+            "receipt_retirements=None,",
         ),
         (
             "install/phases/cleanup.py",
@@ -77,6 +77,36 @@ def test_receipt_guard_accepts_current_owner_routing() -> None:
             "integration/skill_integrator.py",
             "session.requires_target_write(path, targets, owner)",
             "False",
+        ),
+        (
+            "integration/instruction_integrator.py",
+            "self.note_rendered_write(target_path)",
+            "pass",
+        ),
+        (
+            "install/services.py",
+            "with recorded_writes(integrators.skill, _integrator, [_target], package_info):",
+            "with contextlib.nullcontext():",
+        ),
+        (
+            "core/deployment_ledger.py",
+            'take = getattr(integrator, "take_rendered_writes", None)',
+            "take = None",
+        ),
+        (
+            "integration/cleanup.py",
+            "verdict = evidence.verdict(stale_path, stale_target)",
+            "verdict = AUTHORIZED",
+        ),
+        (
+            "integration/skill_integrator.py",
+            "cleanup = remove_synced_files(",
+            "cleanup = parallel_sync_removal(",
+        ),
+        (
+            "install/skill_path_migration.py",
+            "if not evidence.authorizes(plan.src_path, abs_path, rendered_as=plan.dst_path):",
+            "if False:",
         ),
         (
             "core/deployment_ledger.py",

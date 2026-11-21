@@ -1,5 +1,6 @@
 """The lightweight entrypoint must not reinterpret ordinary CLI arguments."""
 
+import os
 import sys
 from unittest.mock import patch
 
@@ -8,6 +9,15 @@ import pytest
 from apm_cli.entrypoint import main
 
 pytestmark = pytest.mark.component
+
+
+@pytest.fixture(autouse=True)
+def _restore_pythonioencoding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``main()`` sets PYTHONIOENCODING on Windows; let monkeypatch restore it."""
+    original = os.environ.get("PYTHONIOENCODING")
+    monkeypatch.setenv("PYTHONIOENCODING", original or "")
+    if original is None:
+        monkeypatch.delenv("PYTHONIOENCODING")
 
 
 @pytest.mark.parametrize(

@@ -16,9 +16,12 @@ from typing import TYPE_CHECKING, ClassVar
 
 import yaml
 
+from apm_cli.core.remediation import INSTRUCTION_FRONTMATTER_REJECTED
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import RULE_FORMATS
-from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
+from apm_cli.integration.write_seam import write_text_lf
+from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
 from apm_cli.utils.paths import portable_relpath
@@ -34,6 +37,7 @@ from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
 
 
@@ -134,7 +138,7 @@ class InstructionIntegrator(BaseIntegrator):
         """Raise the package-facing malformed-frontmatter error."""
         raise yaml.YAMLError(
             f"Rejected frontmatter in {source.name}: {exc}\n"
-            "Fix or remove the invalid frontmatter, then rerun apm install."
+            f"{INSTRUCTION_FRONTMATTER_REJECTED.sentence()}"
         ) from exc
 
     def _prepare_instruction(
@@ -396,7 +400,7 @@ class InstructionIntegrator(BaseIntegrator):
             }
 
         deploy_dir = target_root / mapping.subdir
-        deploy_dir.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(deploy_dir, parents=True, exist_ok=True)
 
         fmt = mapping.format_id
 
@@ -476,6 +480,7 @@ class InstructionIntegrator(BaseIntegrator):
                 continue
 
             write_text_lf(target_path, new_content)
+            self.note_rendered_write(target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)
@@ -497,6 +502,7 @@ class InstructionIntegrator(BaseIntegrator):
         apm_package,
         project_root: Path,
         managed_files: set[str] | None = None,
+        evidence: DeploymentEvidence | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed instruction files for a single *target*."""
         mapping = target.primitives.get("instructions")
@@ -512,6 +518,7 @@ class InstructionIntegrator(BaseIntegrator):
             managed_files,
             prefix=prefix,
             targets=[target],
+            evidence=evidence,
         )
 
     # ------------------------------------------------------------------

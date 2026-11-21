@@ -86,4 +86,4 @@ Remote servers are written with `url` and optional `headers` instead of `command
 - Skills not picked up at project scope: ensure Hermes' `skills.external_dirs` includes `.agents/skills/`.
 - Wrong home directory: set `HERMES_HOME` to the Hermes home you want to target.
 
-See also [IDE and Tool Integration](../ide-tool-integration/).
+See also [IDE and Tool Integration](../../consumer/choose-harnesses/).

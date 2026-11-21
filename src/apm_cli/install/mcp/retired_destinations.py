@@ -11,10 +11,15 @@ removes the entries APM wrote to those files:
   write fingerprint matches, or it equals the render that release wrote for
   the same self-defined declaration. Anything else (a user-authored or
   user-edited entry) stays where it is and is reported once.
-* Other keys and the file itself are kept. ``.vscode/mcp.json`` is deleted
-  only when APM created it: every server it held was removed by this heal and
+* Other keys and the file itself are kept. A retired file is deleted only
+  when APM created it: every server it held was removed by this heal and
   nothing but empty scaffolding (VS Code's ``inputs: []``) remains in it.
-  ``.github/mcp.json`` is never deleted (it is a target-detection signal).
+  ``.github/mcp.json`` is also a ``copilot`` target-detection signal, so it is
+  deleted only when ``copilot`` stays selected without it: ``apm.yml``
+  declares it, or another ``copilot`` signal remains (#4524). Its presence is
+  also the evidence that a ``--frozen`` install moved a pre-0.37 claim (the
+  lock is not restamped), so ``--frozen`` keeps it emptied and the next
+  install, which records the move, deletes it.
 
 The heal runs after the install wrote ``.mcp.json``, so an entry leaves its
 retired file only once its replacement exists (:func:`healable_names`).
@@ -26,7 +31,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -39,8 +44,10 @@ class RetiredMcpDestination:
     """One project MCP file APM no longer writes.
 
     ``deletable``: whether the heal may delete the file once APM's entries are
-    gone. ``.github/mcp.json`` is kept, because it is a ``copilot``
-    target-detection signal for projects that declare no targets.
+    gone. ``detection_signal``: the file also selects ``runtime`` for
+    projects that declare no targets, so it is deleted only while that
+    runtime stays selected without it, and never by a ``--frozen`` heal,
+    whose unrestamped lock still needs the file as proof of the move.
     """
 
     runtime: str
@@ -48,6 +55,7 @@ class RetiredMcpDestination:
     servers_key: str
     adapter: Callable[[Path], Any]
     deletable: bool
+    detection_signal: bool = False
 
 
 def _legacy_copilot_adapter(project_root: Path) -> Any:
@@ -68,7 +76,8 @@ RETIRED_PROJECT_MCP_DESTINATIONS: tuple[RetiredMcpDestination, ...] = (
         ".github/mcp.json",  # architecture-authority-exempt: retired MCP destination
         "mcpServers",
         _legacy_copilot_adapter,
-        deletable=False,
+        deletable=True,
+        detection_signal=True,
     ),
     RetiredMcpDestination(
         "vscode",
@@ -99,13 +108,15 @@ def lock_predates_root_mcp_json(apm_version: str | None) -> bool:
 
     Only such lockfiles name entries in the retired files; a newer lock's
     ``copilot`` ownership refers to ``.mcp.json`` and never heals anything.
+    A stamp that names no release (missing, empty, or ``unknown``) proves no
+    newer meaning, so it heals like a known pre-0.37 version (#4169).
     """
     if not isinstance(apm_version, str) or not apm_version:
         return True
     # Stdlib only: ``packaging`` is not a runtime dependency (#3908).
     match = _PEP440_RELEASE_PREFIX.match(apm_version.strip())
     if match is None:
-        return False
+        return True
     release = (int(match.group(1)), int(match.group(2) or 0))
     return release < _FIRST_ROOT_MCP_JSON_RELEASE
 
@@ -121,6 +132,27 @@ def lock_holds_untranslated_mcp_claims(
     """
     return lock_predates_root_mcp_json(apm_version) and any(
         target_servers.get(runtime) for runtime in ("copilot", "vscode")
+    )
+
+
+def _selected_without(destination: RetiredMcpDestination, project_root: Path) -> bool:
+    """Whether ``destination.runtime`` stays selected once its retired file is gone."""
+    from apm_cli.core.scope import manifest_file
+    from apm_cli.core.target_detection import detect_signals
+    from apm_cli.models.manifest_targets import read_manifest_target_declaration
+
+    declaration = read_manifest_target_declaration(manifest_file(project_root), lenient=True)
+    from apm_cli.core.errors import TargetResolutionError
+
+    try:
+        declared = declaration.restriction() if declaration is not None else None
+    except (TargetResolutionError, ValueError):
+        declared = None  # an unreadable declaration keeps the signal file
+    if declared and destination.runtime in declared:
+        return True
+    return any(
+        signal.target == destination.runtime and signal.source != destination.relative_path
+        for signal in detect_signals(project_root)
     )
 
 
@@ -166,9 +198,18 @@ def heal_retired_project_mcp_destinations(
     stored_configs: Mapping[str, dict],
     native_hashes: Mapping[str, Mapping[str, str]],
     project_root: Path,
+    keep_signal_files: bool,
 ) -> RetiredMcpHeal:
-    """Remove APM-written entries from retired project MCP files (never user entries)."""
-    from apm_cli.utils.atomic_io import atomic_write_text
+    """Remove APM-written entries from retired project MCP files (never user entries).
+
+    A retired file left with nothing but scaffolding is deleted when APM
+    created it: this heal removed every server it held, or it holds none and
+    the lock claims names there (an earlier ``--frozen`` heal emptied it).
+    ``keep_signal_files`` keeps such a file when it is also a target
+    detection signal; ``run_mcp_integration`` sets it for a ``--frozen``
+    replay from ``InstallService.frozen_disposition``.
+    """
+    from apm_cli.utils.json_config import write_json_config
 
     heal = RetiredMcpHeal(removed={}, kept={}, deleted_files=[])
     for destination in RETIRED_PROJECT_MCP_DESTINATIONS:
@@ -197,20 +238,103 @@ def heal_retired_project_mcp_destinations(
             else:
                 heal.kept.setdefault(destination.runtime, set()).add(name)
         removed_here = total - len(servers)
-        if not removed_here:
-            continue
         scaffolding_only = all(
             value in ([], {}) for key, value in data.items() if key != destination.servers_key
         )
-        if destination.deletable and not servers and removed_here == total and scaffolding_only:
+        if (
+            destination.deletable
+            and not servers
+            and removed_here == total
+            and scaffolding_only
+            and not (destination.detection_signal and keep_signal_files)
+            and (not destination.detection_signal or _selected_without(destination, project_root))
+        ):
             path.unlink()
             heal.deleted_files.append(destination.relative_path)
             continue
-        text = json.dumps(data, indent=2)
-        if raw.endswith("\n"):
-            text += "\n"
-        atomic_write_text(path, text)
+        if not removed_here:
+            continue
+        write_json_config(path, data, default_trailing_newline=raw.endswith("\n"))
     return heal
+
+
+@dataclass(frozen=True)
+class RetiredMcpPreview:
+    """Retired file -> APM-written servers the next project install takes out of it.
+
+    ``moves``: servers Copilot rewrites at ``.mcp.json``. ``removals``: servers
+    no longer declared, or no longer written there (another target, or Copilot
+    not selected). A declared server Copilot does not receive stays put and is
+    in neither.
+    """
+
+    moves: dict[str, list[str]] = field(default_factory=dict)
+    removals: dict[str, list[str]] = field(default_factory=dict)
+
+
+def preview_retired_mcp_moves(
+    lockfile: Any,
+    project_root: Path,
+    *,
+    declared: Collection[Any] = (),
+    target_runtimes: Collection[str] | None = None,
+) -> RetiredMcpPreview:
+    """Preview what the next project install heals out of the retired files.
+
+    Read-only preview for ``install --dry-run`` (#3967). It reads the claims
+    through :func:`split_mcp_claims`, applies the heal's own proof and splits
+    the result with :func:`healable_names`, the install's own rule, given the
+    *declared* MCP dependencies and the MCP *target_runtimes* the install
+    would select.
+    """
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
+
+    target_servers = {runtime: set(names) for runtime, names in lockfile.mcp_target_servers.items()}
+    claims = split_mcp_claims(
+        target_servers,
+        DeploymentLedgerCodec.mcp_native_hashes(lockfile),
+        apm_version=lockfile.apm_version,
+        project_root=project_root,
+        user_scope=False,
+        stored_configs=lockfile.mcp_configs,
+    )
+    provable: dict[str, set[str]] = {}
+    for destination in RETIRED_PROJECT_MCP_DESTINATIONS:
+        names = claims.names.get(destination.runtime)
+        found = _read_retired(destination, project_root) if names else None
+        if found is None:
+            continue
+        servers = found[3]
+        client = destination.adapter(project_root)
+        hashes = claims.hashes.get(destination.runtime, {})
+        for name in names:
+            stored = lockfile.mcp_configs.get(name)
+            key = _retired_key(name, stored, servers)
+            if key is not None and _written_by_apm(
+                client, name, servers[key], stored_config=stored, native_hash=hashes.get(name)
+            ):
+                provable.setdefault(destination.runtime, set()).add(name)
+    declared_deps = list(declared)
+    copilot_claims = (
+        mcp_servers_for_runtime(declared_deps, "copilot")
+        if "copilot" in (target_runtimes or ())
+        else None
+    )
+    healable = healable_names(
+        provable,
+        declared=set(MCPIntegrator.get_server_names(declared_deps)),
+        copilot_claims=copilot_claims,
+    )
+    preview = RetiredMcpPreview()
+    for runtime, names in healable.items():
+        retired = _RETIRED_PATHS[runtime]
+        for name in sorted(names):
+            moved = copilot_claims is not None and name in copilot_claims
+            bucket = preview.moves if moved else preview.removals
+            bucket.setdefault(retired, []).append(name)
+    return preview
 
 
 def _read_retired(

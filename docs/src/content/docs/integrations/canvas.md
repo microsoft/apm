@@ -61,8 +61,8 @@ apm install --target copilot
 
 APM deploys the bundle verbatim to `.github/extensions/my-canvas/`. The deploy
 is **atomic**: every file in the bundle is planned and validated first, and any
-unmanaged local collision skips the whole bundle (use `apm install --force` to
-overwrite) so you never end up with a half-updated executable extension.
+unmanaged local collision skips the whole bundle (move the local files aside,
+then rerun `apm install`) so you never end up with a half-updated executable extension.
 
 After a canvas deploys, start a new Copilot CLI session (exit and relaunch) --
 Copilot CLI discovers extensions at session start, so a freshly-deployed canvas
@@ -161,7 +161,7 @@ experimental flag, so a previously-installed canvas can always be removed.
   (`deny_all`, `deny`, `require`, `recommend`); a canvas-only policy knob is not
   planned for this experimental release.
 
-See the [primitives and targets](../../concepts/primitives-and-targets/) matrix
+See the [primitives and targets](../../reference/targets-matrix/) matrix
 for where the canvas primitive sits.
 
 ## Autopilot maintainer canvas

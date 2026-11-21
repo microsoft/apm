@@ -12,6 +12,8 @@ from apm_cli.models.manifest_targets import (
     reset_manifest_deprecation_warnings,
 )
 
+pytestmark = pytest.mark.component
+
 _TARGET_DEPRECATION = (
     "uses the deprecated 'target:' key; 'target:' will be removed in a future "
     "release in favor of 'targets:'."

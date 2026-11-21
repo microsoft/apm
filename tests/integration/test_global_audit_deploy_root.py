@@ -102,7 +102,7 @@ def test_global_install_audit_reads_home_deployment_root(
         env=environment,
     )
     assert audit.exit_code == 0, audit.output
-    payload = json.loads(audit.output[audit.output.index("{") :])
+    payload = json.loads(audit.stdout[audit.stdout.index("{") :])
     checks = {check["name"]: check for check in payload["checks"]}
     assert checks["deployed-files-present"]["passed"] is True
     assert checks["content-integrity"]["passed"] is True
@@ -186,7 +186,7 @@ def test_global_audit_external_target_is_read_only_and_detects_drift(
         env=environment,
     )
     assert audit.exit_code == 1, audit.output
-    payload = json.loads(audit.output[audit.output.index("{") :])
+    payload = json.loads(audit.stdout[audit.stdout.index("{") :])
     checks = {check["name"]: check for check in payload["checks"]}
     assert checks["drift"]["passed"] is False
     if mutation == "modified":
@@ -259,7 +259,7 @@ def test_global_audit_external_target_fails_closed_on_symlink_escape(
         env=environment,
     )
     assert audit.exit_code == 1, audit.output
-    payload = json.loads(audit.output[audit.output.index("{") :])
+    payload = json.loads(audit.stdout[audit.stdout.index("{") :])
     checks = {check["name"]: check for check in payload["checks"]}
     assert checks["deployed-files-present"]["passed"] is False
     assert checks["content-integrity"]["passed"] is False
@@ -316,7 +316,7 @@ def test_global_audit_scans_unrecorded_external_target_content(
         env=environment,
     )
     assert unmanaged_audit.exit_code == 0, unmanaged_audit.output
-    unmanaged_payload = json.loads(unmanaged_audit.output[unmanaged_audit.output.index("{") :])
+    unmanaged_payload = json.loads(unmanaged_audit.stdout[unmanaged_audit.stdout.index("{") :])
     unmanaged_checks = {check["name"]: check for check in unmanaged_payload["checks"]}
     assert unmanaged_checks["content-integrity"]["passed"] is True
     assert _tree_snapshot(external_root) == before_unmanaged_audit
@@ -332,7 +332,7 @@ def test_global_audit_scans_unrecorded_external_target_content(
         env=environment,
     )
     assert audit.exit_code == 1, audit.output
-    payload = json.loads(audit.output[audit.output.index("{") :])
+    payload = json.loads(audit.stdout[audit.stdout.index("{") :])
     checks = {check["name"]: check for check in payload["checks"]}
     assert checks["content-integrity"]["passed"] is False
     assert _tree_snapshot(external_root) == before_audit

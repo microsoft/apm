@@ -13,24 +13,19 @@ Two things changed in ``require_pinned_constraint``:
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from apm_cli.install.helpers import ref_reuse
-from apm_cli.models.apm_package import APMPackage, DependencyReference
-from apm_cli.models.dependency.replacement import project_manifest_dependencies
+from apm_cli.models.apm_package import DependencyReference
 from apm_cli.policy._constraint_pinning import (
     UnboundedReason,
     classify_unbounded_reason,
     collect_declared_refs,
 )
-from apm_cli.policy.policy_checks import _check_pinned_constraints, run_policy_checks
-from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
+from apm_cli.policy.policy_checks import _check_pinned_constraints
+from apm_cli.policy.schema import DependencyPolicy
 
-_REPLACE_SCHEMA = (
-    "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
-)
+pytestmark = pytest.mark.unit
 
 
 def _dep(spec: str) -> DependencyReference:
@@ -38,69 +33,9 @@ def _dep(spec: str) -> DependencyReference:
 
 
 # ---------------------------------------------------------------------------
-# Package-qualified literal tags
+# Package-qualified literal tags and exact package release tags (name@X.Y.Z),
+# #3731. Plain ref classification lives in test_pinned_constraint.py.
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "spec",
-    [
-        "acme/mono/packages/pkg-a#pkg-a-v1.1.0",
-        "acme/mono/packages/pkg-a#pkg-a--v1.1.0",
-        "acme/mono/packages/pkg-a#pkg-a-v1.1.0-rc.1",
-        "acme/mono/packages/pkg-a#pkg-a-v1.1.0+build.5",
-        "acme/widget#widget-v1.2.0",
-        "acme/widget#widget--v1.2.0",
-        "https://github.com/acme/widget.git#widget-v1.2.0",
-    ],
-)
-def test_package_qualified_literal_tag_for_own_name_is_pinned(spec):
-    assert classify_unbounded_reason(_dep(spec)) is None
-
-
-@pytest.mark.parametrize(
-    "spec",
-    [
-        # another package's tag on a subdirectory dep
-        "acme/mono/packages/pkg-a#pkg-b-v1.1.0",
-        # the repository's tag layout on a subdirectory dep
-        "acme/mono/packages/pkg-a#mono-v1.1.0",
-        # a subdirectory package's tag on the repository dep
-        "acme/mono#pkg-a-v1.1.0",
-        # version-looking suffix that is not a full semver
-        "acme/mono/packages/pkg-a#pkg-a-v1.1",
-        "acme/mono/packages/pkg-a#pkg-a-v1",
-        # arbitrary prefix
-        "acme/mono/packages/pkg-a#release-pkg-a-v1.1.0",
-        # layouts the resolver does not select from
-        "acme/mono/packages/pkg-a#pkg-a_v1.1.0",
-    ],
-)
-def test_other_names_and_near_misses_stay_bare_branch(spec):
-    assert classify_unbounded_reason(_dep(spec)) is UnboundedReason.BARE_BRANCH
-
-
-# ---------------------------------------------------------------------------
-# Exact package release tags (name@X.Y.Z), #3731
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "spec",
-    [
-        # Ruling change (#3731): pkg-a@1.1.0 used to be a bare branch.
-        # An exact name@X.Y.Z tag declares one release, like v1.2.3, and
-        # the name is not bound to the dependency's own name.
-        "acme/mono/packages/pkg-a#pkg-a@1.1.0",
-        "acme/mono/packages/pkg-a#pkg-a@v1.1.0",
-        "shadcn/ui#shadcn@4.12.0",
-        "upstash/context7/skills/context7-mcp#@upstash/context7-mcp@4.4.4",
-        "acme/mono/packages/pkg-a#@scope/pkg-a@1.1.0-rc.1",
-        "acme/mono#pkg-a@1.1.0+build.5",
-    ],
-)
-def test_exact_package_release_tag_is_pinned(spec):
-    assert classify_unbounded_reason(_dep(spec)) is None
 
 
 def _object_dep(ref: str) -> DependencyReference:
@@ -299,43 +234,3 @@ def test_each_declaration_keeps_its_own_package_name():
 # ---------------------------------------------------------------------------
 # replace: rules are judged by the selected source (Copilot review on #3652)
 # ---------------------------------------------------------------------------
-
-
-def _manifest(tmp_path: Path, fork_ref: str) -> APMPackage:
-    (tmp_path / "apm.yml").write_text(
-        f"$schema: {_REPLACE_SCHEMA}\n"
-        "name: consumer\n"
-        "version: 1.0.0\n"
-        "dependencies:\n"
-        "  apm:\n"
-        "    - acme/widget#^1.0.0\n"
-        "replace:\n"
-        "  - for: {git: https://github.com/acme/widget}\n"
-        f"    with: {{git: https://github.com/acme/fork, ref: {fork_ref}}}\n",
-        encoding="utf-8",
-    )
-    return APMPackage.from_apm_yml(tmp_path / "apm.yml")
-
-
-@pytest.mark.parametrize(("fork_ref", "passed"), [("main", False), ("v2.0.0", True)])
-def test_replacement_is_judged_by_its_selected_ref(tmp_path, fork_ref, passed):
-    # A bounded original is provenance, not a constraint on the replacement
-    # (manage-dependencies.md), so it must not cover an unbounded fork ref.
-    selected = project_manifest_dependencies(_manifest(tmp_path, fork_ref))
-    result = _check_pinned_constraints(
-        selected,
-        _policy(),
-        {dep.get_unique_key() for dep in selected},
-        declared_refs=collect_declared_refs(selected),
-    )
-    assert result.passed is passed, result.details
-
-
-@pytest.mark.parametrize(("fork_ref", "passed"), [("main", False), ("v2.0.0", True)])
-def test_audit_judges_a_replacement_by_its_selected_ref(tmp_path, fork_ref, passed):
-    # ``apm audit`` must agree with the install gate on a replaced dep.
-    _manifest(tmp_path, fork_ref)
-    policy = ApmPolicy(dependencies=DependencyPolicy(require_pinned_constraint=True))
-    result = run_policy_checks(tmp_path, policy, fail_fast=False)
-    (check,) = [c for c in result.checks if c.name == "dependency-pinned-constraint"]
-    assert check.passed is passed, check.details

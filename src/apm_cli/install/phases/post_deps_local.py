@@ -50,8 +50,10 @@ def run(ctx: InstallContext) -> None:
     if ctx.scope is not InstallScope.PROJECT:
         return
 
-    # Skip if there is no local content (current or previous).
-    if not ctx.local_deployed_files and not ctx.old_local_deployed:
+    # Skip if there is no local content (current or previous). Root hooks that
+    # only merge into shared configs still need a lockfile so that
+    # `apm audit --ci` replays them (#4033).
+    if not ctx.local_deployed_files and not ctx.old_local_deployed and not ctx.local_hooks_merged:
         return
 
     diagnostics = ctx.diagnostics
@@ -83,8 +85,11 @@ def run(ctx: InstallContext) -> None:
     # on-disk stale cleanup, so a multi-target deploy keeps content-integrity
     # coverage for every committed deploy target (issue #1716).
     from apm_cli.install.manifest_reconcile import reconcile_deployed_block
+    from apm_cli.install.phases.cleanup import kept_prior_values
     from apm_cli.install.phases.targets import declared_target_profiles
 
+    # Members this run skipped keep their prior rows and hashes (#4230).
+    _kept = kept_prior_values(ctx, list(_persist_lock.local_deployed_files))
     _current_files = sorted(ctx.local_deployed_files)
     _current_hashes = _hash_deployed(
         ctx.local_deployed_files,
@@ -100,6 +105,7 @@ def run(ctx: InstallContext) -> None:
                 f"Removed stale local lockfile path {path} (target not declared in apm.yml)"
             )
 
+    from apm_cli.install.phases.cleanup import deployment_evidence
     from apm_cli.integration.cleanup import CleanupResult
 
     def _surface_local_cleanup(cleanup: CleanupResult) -> None:
@@ -107,7 +113,7 @@ def run(ctx: InstallContext) -> None:
             return
         for skipped in cleanup.skipped_user_edit:
             logger.cleanup_skipped_user_edit(skipped, "<local .apm/>")
-        logger.stale_cleanup("<local .apm/>", len(cleanup.deleted))
+        logger.stale_cleanup("<local .apm/>", cleanup)
 
     _files, _hashes, _ledger = reconcile_deployed_block(
         project_root=ctx.project_root,
@@ -119,10 +125,12 @@ def run(ctx: InstallContext) -> None:
         active_targets=ctx.targets,
         declared_targets=declared_target_profiles(ctx),
         diagnostics=ctx.diagnostics,
+        evidence=deployment_evidence(ctx),
         on_ghost_drop=_log_local_ghost_drop,
         on_cleanup=_surface_local_cleanup,
         prior_ledger=_prior_ledger,
         current_run_trusted=not _local_had_errors,
+        retained_values=frozenset(_kept),
         include_ledger=True,
         user_scope=is_user_scope(getattr(ctx, "scope", None)),
     )

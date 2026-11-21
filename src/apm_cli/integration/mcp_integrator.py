@@ -26,23 +26,26 @@ import tomlkit
 import yaml
 from tomlkit.exceptions import TOMLKitError
 
+from apm_cli.adapters.client._remote_shapes import harness_label
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.core.remediation import MCP_LOCKFILE_UNWRITABLE
 from apm_cli.deps.lockfile import (
     LockFile,
     LockfileRefusal,
     get_lockfile_path,
     installed_apm_version,
 )
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.integration.mcp_config_view import (
     _collect_transitive_compat,
     _deduplicate,
     _get_server_configs,
     _get_server_provenance,
 )
+from apm_cli.integration.write_seam import atomic_write_text, write_json_config
 from apm_cli.mcp_transport import canonical_remote_transport
 from apm_cli.models.dependency.mcp import ManifestHeaderValue
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.console import (
     _get_console,  # noqa: F401 -- re-exported; mcp_integrator_install imports this via lazy import
     _rich_error,
@@ -56,6 +59,7 @@ from apm_cli.utils.yaml_io import load_yaml, yaml_to_str
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import CommandLogger
     from apm_cli.core.target_detection import EffectiveTargetDecision
+    from apm_cli.integration.mcp_integrator_install import ResolvedMcpTargets
 
 _log = logging.getLogger(__name__)
 
@@ -195,10 +199,12 @@ def _clean_json_mcp_config(
                 del nested[name]
             removed = sorted(builtins.set(removed) | builtins.set(nested_removed))
         if removed:
-            text = json.dumps(config, indent=2)
-            if trailing_newline:
-                text += "\n"
-            atomic_write_text(config_path, text, new_file_mode=0o600)
+            write_json_config(
+                config_path,
+                config,
+                default_trailing_newline=trailing_newline,
+                new_file_mode=0o600,
+            )
             for name in removed:
                 msg = f"Removed stale MCP server '{name}' from {label}"
                 if use_rich:
@@ -367,9 +373,10 @@ def _clean_claude_config(
         for name in removed:
             del servers[name]
         if removed:
-            atomic_write_text(
+            write_json_config(
                 config_path,
-                json.dumps(config, indent=2) + "\n",
+                config,
+                default_trailing_newline=True,
                 new_file_mode=0o600,
             )
             for name in removed:
@@ -1010,11 +1017,14 @@ class MCPIntegrator:
                 )
 
         if "windsurf" in target_runtimes:
+            from apm_cli.adapters.client.windsurf import WindsurfClientAdapter
+
             _clean_json_mcp_config(
                 Path.home() / ".codeium" / "windsurf" / "mcp_config.json",
                 expanded_stale,
                 logger,
-                "Windsurf config",
+                f"{WindsurfClientAdapter.user_wide_config_display} "
+                "(user-wide: all Windsurf workspaces)",
                 use_rich=True,
                 fail_on_write_error=fail_on_write_error,
             )
@@ -1236,7 +1246,7 @@ class MCPIntegrator:
         # is MCP state to record. Calls that clear the last server keep the
         # early return: they must not conjure a lockfile for a project that
         # never had one.
-        creating = not lock_path.exists()
+        creating = not lockfile_exists(lock_path)
         if creating and not (mcp_server_names or mcp_configs):
             return
         try:
@@ -1299,7 +1309,8 @@ class MCPIntegrator:
                 # level would hide the fix silently not applying.
                 message = (
                     f"Could not write {lock_path.name}; 'apm audit' will report it as "
-                    "missing. Ensure the directory is writable and re-run 'apm install'."
+                    "missing. "
+                    f"{MCP_LOCKFILE_UNWRITABLE.bind(lockfile=lock_path.name).sentence()}"
                 )
                 if logger is not None:
                     logger.warning(message)
@@ -1426,7 +1437,8 @@ class MCPIntegrator:
                         managed_fields=managed_fields,
                     )
                     if result["failed"]:
-                        logger.error(f"  Failed to install {dep}")
+                        # Name the runtime: one dependency fails once per runtime (#4288).
+                        logger.error(f"  Failed to install {dep} for {harness_label(runtime)}")
                         all_ok = False
                     elif result.get("installed") and installed_servers is not None:
                         installed_servers.add(dep)
@@ -1449,7 +1461,9 @@ class MCPIntegrator:
                         runtime,
                         exc_info=True,
                     )
-                    logger.error(f"  Failed to install {dep}: {install_error}")
+                    logger.error(
+                        f"  Failed to install {dep} for {harness_label(runtime)}: {install_error}"
+                    )
                     all_ok = False
 
             # Emit aggregated post-install diagnostics for runtimes that
@@ -1714,6 +1728,7 @@ class MCPIntegrator:
         prevalidated_registry_servers: builtins.dict[str, builtins.dict] | None = None,
         fail_on_write_error: bool = False,
         native_hashes: builtins.dict[str, builtins.dict[str, str]] | None = None,
+        resolved_targets: ResolvedMcpTargets | None = None,
     ) -> int:
         """Install MCP dependencies.
 
@@ -1741,24 +1756,28 @@ class MCPIntegrator:
         Returns:
             Number of MCP servers newly configured or updated.
         """
+        from apm_cli.core.command_logger import library_output
         from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
-        return run_mcp_install(
-            mcp_deps,
-            runtime=runtime,
-            exclude=exclude,
-            verbose=verbose,
-            apm_config=apm_config,
-            stored_mcp_configs=stored_mcp_configs,
-            project_root=project_root,
-            user_scope=user_scope,
-            explicit_target=explicit_target,
-            target_decision=target_decision,
-            logger=logger,
-            diagnostics=diagnostics,
-            scope=scope,
-            managed_target_servers=managed_target_servers,
-            prevalidated_registry_servers=prevalidated_registry_servers,
-            fail_on_write_error=fail_on_write_error,
-            native_hashes=native_hashes,
-        )
+        # Client adapters emit through the command's logger (#4089).
+        with library_output(logger):
+            return run_mcp_install(
+                mcp_deps,
+                runtime=runtime,
+                exclude=exclude,
+                verbose=verbose,
+                apm_config=apm_config,
+                stored_mcp_configs=stored_mcp_configs,
+                project_root=project_root,
+                user_scope=user_scope,
+                explicit_target=explicit_target,
+                target_decision=target_decision,
+                logger=logger,
+                diagnostics=diagnostics,
+                scope=scope,
+                managed_target_servers=managed_target_servers,
+                prevalidated_registry_servers=prevalidated_registry_servers,
+                fail_on_write_error=fail_on_write_error,
+                native_hashes=native_hashes,
+                resolved_targets=resolved_targets,
+            )

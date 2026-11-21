@@ -6,6 +6,7 @@ import os
 from collections.abc import Callable, MutableSequence, MutableSet
 from pathlib import Path
 
+from apm_cli.core.remediation import ROOT_CONTEXT_HAND_AUTHORED
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -230,6 +231,6 @@ def hand_authored_root_context_blocks_write(
     protected_paths.add(path)
     warnings.append(
         f"Protected {rel_path}: hand-authored file will not be overwritten. "
-        "To regenerate it, delete or rename the file, then re-run 'apm compile'."
+        f"{ROOT_CONTEXT_HAND_AUTHORED.sentence()}"
     )
     return True

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from ..factory import ClientFactory
-from ..utils.console import _rich_error, _rich_success, _rich_warning
+from .command_logger import library_logger
 from .conflict_detector import MCPConflictDetector
 
 
@@ -37,25 +37,13 @@ class InstallationSummary:
 
     def log_summary(self, logger=None):
         """Log a summary of installation results."""
+        logger = logger or library_logger()
         if self.installed:
-            if logger:
-                logger.success(f"[+] Installed: {', '.join(self.installed)}")
-            else:
-                _rich_success(f"[+] Installed: {', '.join(self.installed)}")
-
-        if self.skipped:
-            for item in self.skipped:
-                if logger:
-                    logger.warning(f"Skipped {item['server']}: {item['reason']}")
-                else:
-                    _rich_warning(f"[!]  Skipped {item['server']}: {item['reason']}")
-
-        if self.failed:
-            for item in self.failed:
-                if logger:
-                    logger.error(f"Failed {item['server']}: {item['reason']}")
-                else:
-                    _rich_error(f"[x] Failed {item['server']}: {item['reason']}")
+            logger.success(f"Installed: {', '.join(self.installed)}")
+        for item in self.skipped:
+            logger.warning(f"Skipped {item['server']}: {item['reason']}")
+        for item in self.failed:
+            logger.error(f"Failed {item['server']}: {item['reason']}")
 
 
 class SafeMCPInstaller:
@@ -83,7 +71,7 @@ class SafeMCPInstaller:
             user_scope=user_scope,
         )
         self.conflict_detector = MCPConflictDetector(self.adapter)
-        self.logger = logger
+        self.logger = logger or library_logger()
 
     def install_servers(
         self,
@@ -158,31 +146,21 @@ class SafeMCPInstaller:
 
     def _log_skip(self, server_ref: str):
         """Log when a server is skipped due to existing configuration."""
-        if self.logger:
-            self.logger.warning(f"  {server_ref} already configured, skipping")
-        else:
-            _rich_warning(f"  {server_ref} already configured, skipping")
+        self.logger.warning(f"  {server_ref} already configured, skipping")
 
     def _log_success(self, server_ref: str):
         """Log successful server installation."""
-        if self.logger:
-            self.logger.success(f"  + {server_ref}")
-        else:
-            _rich_success(f"  + {server_ref}")
+        # The integrator's install tree reports success once (#3994).
+        self.logger.verbose_detail(f"  + {server_ref}")
 
     def _log_failure(self, server_ref: str):
         """Log failed server installation."""
-        if self.logger:
-            self.logger.warning(f"  x {server_ref} installation failed")
-        else:
-            _rich_warning(f"  x {server_ref} installation failed")
+        # One line per runtime, so name it: the same server fails once per target.
+        self.logger.warning(f"  x {server_ref} installation failed for {self.runtime}")
 
     def _log_error(self, server_ref: str, error: Exception):
         """Log error during server installation."""
-        if self.logger:
-            self.logger.error(f"  x {server_ref}: {error}")
-        else:
-            _rich_error(f"  x {server_ref}: {error}")
+        self.logger.error(f"  x {server_ref}: {error}")
 
     def check_conflicts_only(self, server_references: list[str]) -> dict[str, Any]:
         """Check for conflicts without installing.

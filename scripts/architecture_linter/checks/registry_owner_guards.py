@@ -19,7 +19,10 @@ registry-delegation-policy-target-      Compilation-target policy judges
 projection                              EffectiveTargetDecision.canonical_targets
 registry-delegation-output-diagnostics  AC12 doctor-status STATUS_SYMBOLS
                                         owner check; #3754 policy discovery
-                                        returns diagnostics as data
+                                        returns diagnostics as data; #4089
+                                        adapters emit through CommandLogger
+registry-delegation-deprecation-catalog Deprecation warning text lives only
+                                        in core/deprecations.py (#4019)
 registry-delegation-compiled-output-    AC2 "Compiled output writes must use
 writes                                  CompiledOutputWriter"
 registry-delegation-build-id-verification Build IDs are verified in their
@@ -52,6 +55,13 @@ from scripts.architecture_linter.checks.python_semantics import (
     binding_nodes,
     direct_definitions,
     import_bound_name,
+)
+from scripts.architecture_linter.checks.registry_deprecation_catalog import (
+    DEPRECATION_CATALOG,
+    check_deprecation_catalog_text,
+)
+from scripts.architecture_linter.checks.registry_output_guards import (
+    library_output_findings,
 )
 from scripts.architecture_linter.checks.registry_shared import (
     _SRC,
@@ -247,7 +257,7 @@ _APM_HOME_OWNER = "src/apm_cli/core/scope.py"
 
 _APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
     "src/apm_cli/config.py": "CONFIG_DIR = os.fspath(get_apm_home())",
-    "src/apm_cli/core/lifecycle_scripts.py": 'return get_apm_home() / "apm.yml"',
+    "src/apm_cli/core/lifecycle_scripts.py": "return get_manifest_path(InstallScope.USER)",
     "src/apm_cli/core/script_trust.py": 'return get_apm_home() / "scripts-trust.json"',
     "src/apm_cli/core/script_executors.py": 'return get_apm_home() / "logs" / "scripts.log"',
     "src/apm_cli/install/locking.py": "lock_path = get_apm_home() / _LIFECYCLE_LOCK_NAME",
@@ -256,7 +266,7 @@ _APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
     ),
     "src/apm_cli/security/executables.py": 'return get_apm_home() / "approvals.yml"',
     "src/apm_cli/core/deployment_ledger.py": (
-        'self.state_path = apm_home / "deployment-receipts" / f"{key}.json"'
+        'state_path = get_apm_home() / "deployment-receipts" / f"{key}.json"'
     ),
 }
 
@@ -494,7 +504,7 @@ def _target_deprecation_findings(
         for definition in facts.definitions
     ):
         emitters.add(path)
-    if path != _TARGET_DEPRECATION_OWNER:
+    if path != DEPRECATION_CATALOG:
         findings.extend(
             violation(
                 rule_id,
@@ -569,6 +579,36 @@ def _target_deprecation_wiring(
     return findings
 
 
+# Raw apm.yml readers pass the manifest path so the deprecated-key warnings fire
+# (#3965). Only callers parsing a config an APMPackage reader already loaded
+# (and so already warned for) may omit it.
+_PATHLESS_RESTRICTION_READERS = frozenset(
+    {
+        "src/apm_cli/integration/mcp_integrator_install.py",
+        "src/apm_cli/integration/mcp_integrator.py",
+    }
+)
+
+
+def _pathless_restriction_reads(rule_id: str, path: str, index) -> list[Violation]:
+    if path in _PATHLESS_RESTRICTION_READERS:
+        return []
+    return [
+        violation(
+            rule_id,
+            path,
+            "manifest_target_restriction needs the manifest path so deprecated "
+            "target keys warn (#3965)",
+            line=node.lineno,
+        )
+        for node in index.nodes
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", getattr(node.func, "attr", None))
+        == "manifest_target_restriction"
+        and len(node.args) + len(node.keywords) < 2
+    ]
+
+
 def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
     """Package manifest targets are read only through the declaration owner.
 
@@ -596,6 +636,7 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
         index = provider.tree_index(path)
         if index is None:
             continue
+        findings.extend(_pathless_restriction_reads(rule_id, path, index))
         for node in index.nodes:
             reason = _raw_target_read(node, path)
             if reason is None:
@@ -623,7 +664,7 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
 
 
 _POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
-    {"run_dependency_policy_checks", "run_policy_preflight"}
+    {"enforce_mcp_policy", "run_dependency_policy_checks", "run_policy_preflight"}
 )
 _POLICY_TARGET_CHECK = "_check_compilation_target"
 _POLICY_TARGET_SEAM_PARAMETER = "effective_target"
@@ -726,7 +767,7 @@ def _check_policy_target_projection(provider: FactsProvider) -> Iterable[Violati
 
 
 _POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
-    {"run_dependency_policy_checks", "run_policy_preflight"}
+    {"enforce_mcp_policy", "run_dependency_policy_checks", "run_policy_preflight"}
 )
 _POLICY_TARGET_CHECK = "_check_compilation_target"
 _POLICY_TARGET_SEAM_PARAMETER = "effective_target"
@@ -842,6 +883,7 @@ def _check_audit_target_selection(provider: FactsProvider) -> Iterable[Violation
     for name, owner in (
         ("resolve_audit_targets", profile_owner),
         ("resolve_audit_target_decision", _EFFECTIVE_TARGET_OWNER),
+        ("resolve_deployment_target_decision", _EFFECTIVE_TARGET_OWNER),
     ):
         definers, failures = _defining_files(provider, rule_id, name, kinds=("function",))
         findings.extend(failures)
@@ -1000,14 +1042,17 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
 def _check_output_diagnostics(provider: FactsProvider) -> Iterable[Violation]:
     """User-facing output must route through the CommandLogger / console owner.
 
-    Combines the AC12 doctor-status guard with the #3754 policy-discovery
-    guard; both report under ``registry_delegation.output_diagnostics``.
+    Combines the AC12 doctor-status guard, the #3754 policy-discovery guard
+    and the #4089 library-output guard (MCP client adapters and the safe
+    installer emit through CommandLogger); all report under
+    ``registry_delegation.output_diagnostics``.
     """
     rule_id = "registry_delegation.output_diagnostics"
     return (
         *_doctor_status_findings(provider, rule_id),
         *_target_error_status_findings(provider, rule_id),
         *_policy_discovery_output_findings(provider, rule_id),
+        *library_output_findings(provider, rule_id),
     )
 
 
@@ -1919,9 +1964,19 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("registry-delegation-output-diagnostics",),
         description=(
             "User-facing status symbols must come from utils/console.py STATUS_SYMBOLS; "
-            "policy discovery returns diagnostics as data, not logger output."
+            "policy discovery returns diagnostics as data, not logger output; MCP client "
+            "adapters and the safe installer emit through CommandLogger."
         ),
         check=_check_output_diagnostics,
+    ),
+    Rule(
+        id="registry_delegation.deprecation_catalog",
+        group=GROUP,
+        guard_ids=("registry-delegation-deprecation-catalog",),
+        description="Deprecation warning text is spelled only in core/deprecations.py.",
+        check=lambda provider: check_deprecation_catalog_text(
+            provider, "registry_delegation.deprecation_catalog"
+        ),
     ),
     Rule(
         id="registry_delegation.compiled_output_writes",

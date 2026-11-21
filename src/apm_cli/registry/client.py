@@ -11,9 +11,12 @@ from urllib.parse import quote, urlparse, urlunparse
 
 import requests
 
+from ..core.deprecations import deprecation_message
 from ..mcp_transport import canonical_remote_transport
+from ..utils.http_credentials import CredentialScopedSession
 
 _log = logging.getLogger(__name__)
+_CACHE_UNSET = object()
 
 # Hard byte ceiling for an MCP registry HTTP body. The registry URL can come
 # from an untrusted cloned apm.yml (``MCPDependency.registry``), so the
@@ -227,6 +230,10 @@ def is_valid_mcp_server_name(server_name: object) -> bool:
     return isinstance(server_name, str) and _SERVER_NAME_RE.fullmatch(server_name) is not None
 
 
+class RegistryEgressRefusedError(RuntimeError):
+    """Raised when registry-only mode forbids a direct MCP registry request."""
+
+
 class ServerNotFoundError(ValueError):
     """Raised when a server lookup against the registry returns 404.
 
@@ -366,9 +373,60 @@ class SimpleRegistryClient:
         # is unreachable: a network blip against a private registry must not
         # look like a successful install.
         self._is_custom_url = source != "default"
-        self.session = requests.Session()
+        # Registry calls send only the credentials APM was given, never ~/.netrc.
+        self.session = CredentialScopedSession(ambient_credentials=False)
         self._timeout = _resolve_timeout()
-        self._http_cache = self._init_http_cache()
+        # Built on the first registry request: constructing an adapter (for
+        # example ``apm audit`` comparing native entries) writes nothing
+        # under the APM cache.
+        self._http_cache_value: Any = _CACHE_UNSET
+
+    def _refuse_direct_egress_when_proxy_only(self) -> None:
+        """Refuse an unsanctioned MCP registry when ``PROXY_REGISTRY_ONLY`` is set.
+
+        Registry-only mode sanctions no direct egress for dependency content;
+        MCP server metadata is dependency content. Only the registry the
+        operator configured (``--registry``, ``MCP_REGISTRY_URL``, or ``apm
+        config``) is the sanctioned mirror. The public default and a
+        manifest's own ``registry:`` URL are refused unless that URL names
+        the configured registry (#3994).
+        """
+        from apm_cli.deps.egress_route import EgressSurface, is_refused
+
+        if not is_refused(EgressSurface.MCP_REGISTRY, operator_mirror=self._is_operator_mirror()):
+            return
+        raise RegistryEgressRefusedError(
+            f"PROXY_REGISTRY_ONLY is set: refusing direct MCP registry lookup at "
+            f"{self.registry_url}. Point MCP_REGISTRY_URL (or 'apm config set "
+            "mcp-registry-url') at your proxied registry."
+        )
+
+    def _is_operator_mirror(self) -> bool:
+        """Return whether the registry URL is the one the operator configured.
+
+        ``--registry``, ``MCP_REGISTRY_URL`` and ``apm config`` name the
+        operator's registry. A manifest's own ``registry:`` URL counts only
+        when it names that configured registry; the public default never does.
+        """
+        if self.registry_url_source in {"flag", "env", "config"}:
+            return True
+        if self.registry_url_source != "explicit":
+            return False
+        configured, configured_source = resolve_mcp_registry_url(None)
+        return configured_source != "default" and redact_mcp_registry_url(
+            normalize_mcp_registry_url(configured)
+        ) == redact_mcp_registry_url(self.registry_url)
+
+    @property
+    def _http_cache(self) -> Any:
+        """The shared HTTP response cache, created on first use, or ``None``."""
+        if self._http_cache_value is _CACHE_UNSET:
+            self._http_cache_value = self._init_http_cache()
+        return self._http_cache_value
+
+    @_http_cache.setter
+    def _http_cache(self, value: Any) -> None:
+        self._http_cache_value = value
 
     @staticmethod
     def _init_http_cache():
@@ -405,6 +463,7 @@ class SimpleRegistryClient:
         Falls back to a plain ``session.get`` when the cache is disabled
         or unavailable.
         """
+        self._refuse_direct_egress_when_proxy_only()
         # Cache key includes query params so paginated/search URLs are
         # cached independently.
         cache_key = url
@@ -694,9 +753,7 @@ class SimpleRegistryClient:
         endpoint no longer exists on spec-compliant registries.
         """
         warnings.warn(
-            "SimpleRegistryClient.get_server_info(server_name) is deprecated; "
-            "use SimpleRegistryClient.get_server(server_name, version='latest'). "
-            "The parameter now means a server name per MCP Registry v0.1.",
+            deprecation_message("registry-get-server-info"),
             DeprecationWarning,
             stacklevel=2,
         )

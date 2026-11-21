@@ -13,7 +13,10 @@ Dispatches over a ``_FETCHERS`` table keyed by ``source.kind``:
 - ``local`` -> bare repo (``git --git-dir=... show <ref>:<file>``), working
   directory, or direct manifest file (path-containment guard); no cache.
 - ``url`` -> direct hosted ``marketplace.json`` over HTTPS with digest and
-  ETag/Last-Modified cache metadata.
+  ETag/Last-Modified cache metadata. A catalog bound by name sends only its
+  ``APM_MARKETPLACE_*`` credential (``catalog_binding.catalog_credential``),
+  never ambient ``.netrc``; a 401/403 or sign-in redirect raises
+  :class:`MarketplaceAccessDeniedError` and is never served from cache.
 
 When ``PROXY_REGISTRY_URL`` is set, GitHub/GHES fetches go through the
 Artifactory Archive Entry Download proxy first. Cache lives at
@@ -32,12 +35,18 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import quote, urlsplit
 
 import requests
 
+from ..core.remediation import (
+    MARKETPLACE_GIT_ACCESS_FAILED,
+    MARKETPLACE_GIT_REWRITE_REJECTED,
+)
 from ..utils.http_credentials import (
     CredentialScopedSession,
     RedirectRefusedError,
@@ -45,12 +54,15 @@ from ..utils.http_credentials import (
     origin_root,
 )
 from .errors import (
+    MarketplaceAuthError,
+    MarketplaceEgressRefusedError,
     MarketplaceError,
     MarketplaceFetchError,
     MarketplaceFreshnessError,
     MarketplaceNotCachedError,
 )
 from .models import (
+    ORIGIN_PROJECT,
     MarketplaceManifest,
     MarketplacePlugin,
     MarketplaceSource,
@@ -58,6 +70,9 @@ from .models import (
     parse_marketplace_json,
 )
 from .registry import get_registered_marketplaces
+
+if TYPE_CHECKING:
+    from ..core.catalog_credentials import CatalogCredential
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +126,8 @@ def _cache_dir() -> str:
     from ..config import CONFIG_DIR
 
     d = os.path.join(CONFIG_DIR, _CACHE_DIR_NAME)
-    os.makedirs(d, exist_ok=True)
+    if not _CACHE_READ_ONLY.get() and _CACHE_PENDING.get() is None:
+        os.makedirs(d, exist_ok=True)
     return d
 
 
@@ -133,6 +149,11 @@ def _sanitize_cache_name(name: str) -> str:
 def _cache_key(source: MarketplaceSource) -> str:
     """Cache key that includes kind+host to avoid collisions across hosts."""
     kind = source.kind
+    if source.origin == ORIGIN_PROJECT:
+        # A project name is local to its apm.yml: key by catalog, never by
+        # name, so it cannot share a cache entry with a same-named registration.
+        identity = "\0".join((kind, source.url, source.ref, source.path))
+        return f"project__{hashlib.sha256(identity.encode()).hexdigest()[:16]}"
     if kind == "url":
         return f"url__{hashlib.sha256(source.url.encode()).hexdigest()[:16]}"
     if kind == "local":
@@ -197,7 +218,23 @@ def _write_cache(
     etag: str = "",
     last_modified: str = "",
 ) -> None:
-    """Write marketplace data and metadata to cache."""
+    """Write marketplace data and metadata to cache, unless reads are read-only.
+
+    Inside :func:`catalog_cache_writes_on_success` the write is held and
+    persisted only when that scope completes.
+    """
+    if _CACHE_READ_ONLY.get():
+        return
+    pending = _CACHE_PENDING.get()
+    if pending is not None:
+        pending.append(
+            (
+                name,
+                data,
+                {"index_digest": index_digest, "etag": etag, "last_modified": last_modified},
+            )
+        )
+        return
     data_path = _cache_data_path(name)
     meta_path = _cache_meta_path(name)
     try:
@@ -245,14 +282,15 @@ def _http_get(
     *,
     headers: dict[str, str] | None = None,
     follow_cross_origin_without_credentials: bool = True,
+    base_url: str | None = None,
     **kwargs: object,
 ):
     """Issue HTTP GET through a shared session without persisting cookies.
 
     Redirects follow the shared origin-bounded owner: credentials are re-sent
-    only within the request's origin, and by default a hop to another HTTPS
-    origin is followed without any credential header. Callers whose redirects
-    carry an auth signal (Azure DevOps sign-in) pass
+    only within *base_url* (default: the request's origin), and by default a
+    hop outside it is followed over HTTPS without any credential header.
+    Callers whose redirects carry an auth signal (Azure DevOps sign-in) pass
     ``follow_cross_origin_without_credentials=False`` to get the refusal.
     """
     cookies = getattr(_HTTP_SESSION, "cookies", None)
@@ -262,7 +300,7 @@ def _http_get(
         _HTTP_SESSION,
         "GET",
         url,
-        base_url=origin_root(url),
+        base_url=base_url or origin_root(url),
         headers=headers,
         follow_cross_origin_without_credentials=follow_cross_origin_without_credentials,
         **kwargs,
@@ -321,14 +359,22 @@ def _read_capped_json(resp, label: str) -> dict:
 def _fetch_url_direct(
     url: str,
     *,
+    credential: "CatalogCredential",
     etag: str = "",
     last_modified: str = "",
     expected_digest: str = "",
 ) -> FetchResult | None:
     """Fetch a remote marketplace.json URL over HTTPS.
 
+    *credential* (required) is the catalog's credential decision. Its header
+    is sent only within its bound scope, re-checked on every redirect hop;
+    hops outside it continue anonymously. Ambient ``.netrc`` credentials are
+    never used, even for anonymous catalogs.
+
     Returns ``None`` for HTTP 304 so callers can serve cached data.
     """
+    from .catalog_binding import access_denied_error
+
     parsed = urlsplit(url)
     if parsed.scheme.lower() != "https":
         raise MarketplaceFetchError(url, "remote marketplace.json URLs must use HTTPS")
@@ -338,14 +384,26 @@ def _fetch_url_direct(
         headers["If-None-Match"] = etag
     if last_modified:
         headers["If-Modified-Since"] = last_modified
+    headers.update(credential.headers())
 
     resp = None
     try:
-        resp = _http_get(url, headers=headers, timeout=30, stream=True)
+        resp = _http_get(
+            url,
+            headers=headers,
+            base_url=credential.scope_url if credential.presented else None,
+            bind_query=credential.presented,
+            ambient_credentials=False,
+            timeout=30,
+            stream=True,
+        )
     except requests.exceptions.RequestException as exc:
         raise MarketplaceFetchError(url, str(exc)) from exc
 
     try:
+        denied = access_denied_error(credential, resp)
+        if denied is not None:
+            raise denied
         if resp.status_code == 304:
             return None
         if resp.status_code == 404:
@@ -636,10 +694,7 @@ def _fetch_git(
         return MarketplaceFetchError(
             source.name,
             reason,
-            retry_hint=(
-                "Correct the matching Git configuration, then run "
-                f"'apm marketplace update {source.name}' to retry."
-            ),
+            retry_hint=MARKETPLACE_GIT_REWRITE_REJECTED.bind(name=source.name).sentence(),
         )
 
     cache = GitCache(get_cache_root(), refresh=False)
@@ -700,9 +755,7 @@ def _fetch_git(
         raise MarketplaceFetchError(
             source.name,
             str(exc),
-            retry_hint=(
-                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
-            ),
+            retry_hint=MARKETPLACE_GIT_ACCESS_FAILED.bind(name=source.name).sentence(),
         ) from exc
     except subprocess.CalledProcessError as exc:
         # Map "object not found" / "couldn't find remote ref" to None so the
@@ -715,18 +768,14 @@ def _fetch_git(
         raise MarketplaceFetchError(
             source.name,
             "git fetch failed; verify the remote, configured Git credentials, or SSH key",
-            retry_hint=(
-                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
-            ),
+            retry_hint=MARKETPLACE_GIT_ACCESS_FAILED.bind(name=source.name).sentence(),
         ) from exc
     except Exception as exc:
         logger.debug("Generic-git fetch failed for '%s': %s", source.name, type(exc).__name__)
         raise MarketplaceFetchError(
             source.name,
             "git fetch failed; verify the remote, configured Git credentials, or SSH key",
-            retry_hint=(
-                f"Correct Git access, then run 'apm marketplace update {source.name}' to retry."
-            ),
+            retry_hint=MARKETPLACE_GIT_ACCESS_FAILED.bind(name=source.name).sentence(),
         ) from exc
 
     target = Path(checkout_dir) / file_path
@@ -1101,13 +1150,19 @@ def fetch_raw(
     if proxy_bytes is not None:
         return proxy_bytes
 
+    from ..deps.egress_route import EgressRoute, EgressSurface, route_for
     from ..deps.registry_proxy import RegistryConfig
 
-    cfg = RegistryConfig.from_env()
-    if cfg is not None and cfg.enforce_only:
+    if route_for(EgressSurface.MARKETPLACE_FILE) is not EgressRoute.DIRECT:
+        cfg = RegistryConfig.from_env()
         raise MarketplaceError(
             f"cannot verify {owner}/{repo}/{file_path}@{ref}: "
-            "PROXY_REGISTRY_ONLY blocks the GitHub fallback after a proxy miss"
+            "PROXY_REGISTRY_ONLY blocks the direct GitHub fetch"
+            + (
+                " after a proxy miss"
+                if cfg is not None
+                else "; set PROXY_REGISTRY_URL to route it through your proxy"
+            )
         )
 
     from ..core.auth import AuthResolver
@@ -1146,6 +1201,28 @@ def fetch_raw(
         raise MarketplaceError(f"fetching {owner}/{repo}/{file_path}@{ref}: {exc}") from exc
 
 
+def _refuse_direct_egress(source_name: str, what: str) -> None:
+    """Refuse a direct catalog fetch when ``PROXY_REGISTRY_ONLY`` is set.
+
+    Registry-only mode sanctions no direct egress. Only github/gitlab
+    catalogs route through ``PROXY_REGISTRY_URL``; every other remote kind,
+    and any kind without a configured proxy, would go direct.
+    """
+    from ..deps.egress_route import EgressRoute, EgressSurface, route_for
+
+    if route_for(EgressSurface.MARKETPLACE_FILE) is not EgressRoute.DIRECT:
+        # Drop any query string: a signed catalog URL must not reach CI logs.
+        what = re.sub(r"\?\S*", "", what)
+        raise MarketplaceEgressRefusedError(
+            source_name,
+            f"PROXY_REGISTRY_ONLY is set: refusing direct fetch of {what}",
+            retry_hint=(
+                "Register a GitHub or GitLab marketplace and set PROXY_REGISTRY_URL "
+                "to route it through your proxy."
+            ),
+        )
+
+
 def _fetch_file(
     source: MarketplaceSource,
     file_path: str,
@@ -1172,10 +1249,11 @@ def _fetch_file(
         proxy_result = _try_proxy_fetch(source, file_path)
         if proxy_result is not None:
             return proxy_result
+        from ..deps.egress_route import EgressSurface, is_proxy_only
         from ..deps.registry_proxy import RegistryConfig
 
-        cfg = RegistryConfig.from_env()
-        if cfg is not None and cfg.enforce_only:
+        if RegistryConfig.from_env() is not None and is_proxy_only(EgressSurface.MARKETPLACE_FILE):
+            # The proxy answered for this path: a miss is "not found".
             logger.debug(
                 "PROXY_REGISTRY_ONLY blocks direct fetch for %s/%s %s",
                 source.owner,
@@ -1183,6 +1261,9 @@ def _fetch_file(
                 file_path,
             )
             return None
+    if kind != "local":
+        # No proxy route: git, ado and url kinds, or no PROXY_REGISTRY_URL.
+        _refuse_direct_egress(source.name, f"{file_path} from {source.display_source}")
 
     host_info = None
     if kind in ("github", "gitlab"):
@@ -1307,9 +1388,13 @@ def fetch_marketplace(
     # Fetch from source
     try:
         if source.kind == "url":
+            _refuse_direct_egress(source.name, source.display_source)
+            from .catalog_binding import catalog_credential
+
             stale_meta = _read_stale_meta(cache_name) or {}
             result = _fetch_url_direct(
                 source.url,
+                credential=catalog_credential(source),
                 etag=stale_meta.get("etag", ""),
                 last_modified=stale_meta.get("last_modified", ""),
             )
@@ -1370,6 +1455,10 @@ def fetch_marketplace(
             _write_cache(cache_name, data)
         return manifest
     except MarketplaceFetchError as exc:
+        if isinstance(exc, (MarketplaceEgressRefusedError, MarketplaceAuthError)):
+            # Refused egress and denied access are never a cached read or a
+            # freshness retry; the last valid cache stays on disk untouched.
+            raise
         if strict:
             raise MarketplaceFreshnessError(source.name, exc.reason or str(exc)) from exc
         # Stale-while-revalidate (API kinds only): serve expired cache on network error
@@ -1423,6 +1512,37 @@ class _CatalogInvocation:
 
 _INVOCATION_LOCK = threading.RLock()
 _invocation: _CatalogInvocation | None = None
+_CACHE_READ_ONLY: ContextVar[bool] = ContextVar("marketplace_cache_read_only", default=False)
+_CACHE_PENDING: ContextVar[list | None] = ContextVar("marketplace_cache_pending", default=None)
+
+
+@contextlib.contextmanager
+def catalog_cache_writes_on_success(commit: bool = True) -> Iterator[None]:
+    """Hold catalog cache writes; persist them only if the scope completes.
+
+    A scope that raises (a refused re-verification) leaves the cache as it
+    was; one that completes persists what it fetched, validators included,
+    unless *commit* is false (``--dry-run``).
+    """
+    pending: list = []
+    token = _CACHE_PENDING.set(pending)
+    try:
+        yield
+    finally:
+        _CACHE_PENDING.reset(token)
+    if commit:
+        for name, data, validators in pending:
+            _write_cache(name, data, **validators)
+
+
+@contextlib.contextmanager
+def catalog_cache_read_only(enabled: bool = True) -> Iterator[None]:
+    """Read catalogs without persisting them to the cache (``--dry-run`` reads)."""
+    token = _CACHE_READ_ONLY.set(enabled)
+    try:
+        yield
+    finally:
+        _CACHE_READ_ONLY.reset(token)
 
 
 @contextlib.contextmanager

@@ -19,7 +19,9 @@ from apm_cli.integration.canvas_integrator import (
     is_canvas_bundle_path,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.diagnostics import DiagnosticCollector
+from tests.utils.deployment_evidence import receipted_evidence
 
 # ---------------------------------------------------------------------------
 # Config injection (mirrors tests/unit/test_external_scanners.py)
@@ -376,7 +378,9 @@ def test_user_scope_sync_prunes_dependency_canvas(tmp_path: Path, enable_canvas,
     )
     managed = {Path(p).relative_to(home).as_posix() for p in result.target_paths}
     assert managed  # sanity: something was deployed
-    stats = CanvasIntegrator().sync_for_target(user_target, None, home, managed_files=managed)
+    stats = CanvasIntegrator().sync_for_target(
+        user_target, None, home, managed_files=managed, evidence=receipted_evidence(home)
+    )
     assert stats["files_removed"] == len(managed)
     assert not (home / ".copilot" / "extensions" / "widget").exists()
 
@@ -469,7 +473,11 @@ def test_sync_removes_canvas_and_empty_dirs(tmp_path: Path, enable_canvas):
     assert (project / ".github" / "extensions" / "demo" / "extension.mjs").is_file()
 
     stats = integrator.sync_for_target(
-        _copilot(), SimpleNamespace(), project, managed_files=managed
+        _copilot(),
+        SimpleNamespace(),
+        project,
+        managed_files=managed,
+        evidence=receipted_evidence(project),
     )
     assert stats["files_removed"] >= 2
     assert not (project / ".github" / "extensions" / "demo").exists()
@@ -485,7 +493,11 @@ def test_sync_not_gated_by_flag(tmp_path: Path):
     (dest / "extension.mjs").write_text("export default {};\n")
     managed = {".github/extensions/demo/extension.mjs"}
     stats = CanvasIntegrator().sync_for_target(
-        _copilot(), SimpleNamespace(), project, managed_files=managed
+        _copilot(),
+        SimpleNamespace(),
+        project,
+        managed_files=managed,
+        evidence=receipted_evidence(project),
     )
     assert stats["files_removed"] == 1
     assert not dest.exists()
@@ -515,7 +527,11 @@ def test_sync_only_removes_managed_subset(tmp_path: Path, enable_canvas):
         if p.is_file()
     }
     CanvasIntegrator().sync_for_target(
-        _copilot(), SimpleNamespace(), project, managed_files=alpha_managed
+        _copilot(),
+        SimpleNamespace(),
+        project,
+        managed_files=alpha_managed,
+        evidence=receipted_evidence(project),
     )
     assert not (project / ".github" / "extensions" / "alpha").exists()
     # beta survives.
@@ -617,6 +633,7 @@ def test_dispatch_first_party_flag_deploys(tmp_path: Path, enable_canvas):
         package_name="owner/dep",
         ctx=SimpleNamespace(verbose=False),
         is_first_party=True,
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
 
     assert result["canvases"] == 1
@@ -643,6 +660,7 @@ def test_dispatch_dependency_deploys_with_trust(tmp_path: Path, enable_canvas):
         diagnostics=diags,
         package_name="owner/dep",
         ctx=SimpleNamespace(verbose=False),
+        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         # allow_executables=None means no enforcement; canvas deploys freely
     )
 

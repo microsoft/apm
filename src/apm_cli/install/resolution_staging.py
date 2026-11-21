@@ -12,6 +12,7 @@ from pathlib import Path
 
 from filelock import FileLock, Timeout
 
+from apm_cli.core.remediation import CASING_MIGRATION_SOURCE_MISSING
 from apm_cli.utils.file_ops import robust_replace
 from apm_cli.utils.path_security import ensure_path_within, safe_rmtree
 from apm_cli.utils.staging_guard import STAGING_DIR_NAME
@@ -29,6 +30,12 @@ class ResolutionStagingSession:
         """Create an empty staging session rooted below ``apm_modules``."""
         self._modules_dir = apm_modules_dir
         self._modules_existed = apm_modules_dir.exists()
+        # Missing parents (``~/.apm`` at user scope) go with an empty rollback.
+        self._missing_parents: list[Path] = []
+        parent = apm_modules_dir.parent
+        while not parent.exists() and parent != parent.parent:
+            self._missing_parents.append(parent)
+            parent = parent.parent
         # 12 hex chars (48 bits) is ample entropy for one install session and
         # keeps staged paths well clear of Windows MAX_PATH (issue #2896).
         self._staging_root = apm_modules_dir / STAGING_DIR_NAME / uuid.uuid4().hex[:12]
@@ -49,9 +56,9 @@ class ResolutionStagingSession:
             backup: Path | None = None
             if resolved.exists():
                 self._acquire_staging_lock()
-                resolved_base = ensure_path_within(self._modules_dir, self._modules_dir)
-                relative = resolved.relative_to(resolved_base)
-                backup = self._staging_root / "backups" / relative
+                # Opaque slots: a nested copy staged before its parent never
+                # occupies the parent's backup path.
+                backup = self._isolated_staging_path("backups", resolved)
                 backup.parent.mkdir(parents=True, exist_ok=True)
                 resolved.replace(backup)
             self._backups[resolved] = backup
@@ -156,7 +163,7 @@ class ResolutionStagingSession:
             if not source.exists():
                 raise FileNotFoundError(
                     f"Package directory disappeared before casing migration: {source}. "
-                    "Run 'apm install' again."
+                    f"{CASING_MIGRATION_SOURCE_MISSING.sentence()}"
                 )
             if destination.exists():
                 if not os.path.samefile(source, destination):
@@ -286,6 +293,9 @@ class ResolutionStagingSession:
                     and not any(self._modules_dir.iterdir())
                 ):
                     self._modules_dir.rmdir()
+                for created in self._missing_parents:
+                    if created.is_dir() and not any(created.iterdir()):
+                        created.rmdir()
             except OSError as exc:
                 cleanup_issues.append(
                     (self._modules_dir, f"could not remove empty directory: {exc}")

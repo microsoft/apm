@@ -117,6 +117,12 @@ def test_stale_module_copy_keeps_locked_skill_subset_on_first_frozen_install(
     for name in ("apm.yml", "apm.lock.yaml"):
         (project / name).write_bytes((upstream / name).read_bytes())
 
+    # #3964: audit derives expected state from the lock, as install does, and
+    # never reads (or repairs) the stale copy.
+    audit = runner.run(("audit", "--ci", "--no-policy"), cwd=project, env=env)
+    assert audit.returncode == 0, output(audit)
+    assert "skills" not in stale_copy.read_text(encoding="utf-8")
+
     frozen = runner.run((*install, "--frozen"), cwd=project, env=env)
     assert frozen.returncode == 0, output(frozen)
     assert "selections differ" not in output(frozen)

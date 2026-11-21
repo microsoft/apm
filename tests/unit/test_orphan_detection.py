@@ -8,9 +8,13 @@ instead of just base repo URLs.
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from src.apm_cli.integration.agent_integrator import AgentIntegrator
 from src.apm_cli.integration.prompt_integrator import PromptIntegrator
 from src.apm_cli.models.apm_package import APMPackage, DependencyReference
+
+pytestmark = pytest.mark.component
 
 
 def create_test_integrated_file(path: Path, source_repo: str, source_dependency: str = None):  # noqa: RUF013

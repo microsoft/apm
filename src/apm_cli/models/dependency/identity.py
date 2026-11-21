@@ -199,6 +199,30 @@ def normalize_policy_host(host: str) -> str:
     return host.translate(_ASCII_LOWER_TRANSLATION)
 
 
+def effective_policy_host(host: str | None, *, is_local: bool = False) -> str | None:
+    """Return the policy host of a dependency, or of a hostless policy entry.
+
+    An unwritten host resolves to the configured default host (``GITHUB_HOST``
+    or ``github.com``). Local paths have no host.
+    """
+    if is_local:
+        return None
+    return normalize_policy_host(host or default_host())
+
+
+def required_package_policy_hosts(entry: str) -> tuple[tuple[str | None, ...], str]:
+    """Return ``(hosts, path)`` an exact ``require`` entry identifies.
+
+    A host-qualified entry (``gitlab.example.com/group/pkg``) names that host
+    only. A hostless entry names the default host, plus host-less local paths.
+    The ``#ref`` suffix is excluded from *path*.
+    """
+    host, path = split_policy_pattern_host(entry.split("#", 1)[0])
+    if host is not None:
+        return (host,), path
+    return (effective_policy_host(None), None), path
+
+
 @lru_cache(maxsize=512)
 def split_policy_pattern_host(pattern: str) -> tuple[str | None, str]:
     """Split a dependency-policy pattern into ``(host, path_pattern)``.

@@ -23,7 +23,7 @@ from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.utils.staging_guard import STAGING_DIR_NAME
 
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
 _ROOT = "${CLAUDE_PLUGIN_ROOT}"
 _MANIFEST = {

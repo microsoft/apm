@@ -30,6 +30,8 @@ from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from apm_cli.adapters.client.windsurf import WindsurfClientAdapter
 from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
 
+pytestmark = pytest.mark.unit
+
 # Recognised values for ``TargetProfile.compile_family``.  Adding a new family
 # requires touching ``apm_cli.commands.compile.cli._resolve_compile_target``
 # AND this set.  Any other value would make the compile router silently

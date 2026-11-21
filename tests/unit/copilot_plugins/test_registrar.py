@@ -26,7 +26,7 @@ from apm_cli.copilot_plugins.settings import (
 )
 from apm_cli.core.scope import InstallScope
 
-from ._builders import read_json, write_agent_plugin
+from ._builders import write_agent_plugin
 
 pytestmark = pytest.mark.component
 
@@ -75,7 +75,7 @@ def test_direct_and_transitive_plugins_land_in_one_aggregate_catalog(tmp_path: P
         ],
     )
 
-    catalog = read_json(catalog_path_for(modules))
+    catalog = json.loads(catalog_path_for(modules).read_text(encoding="utf-8"))
     assert result.plugin_names == ("direct-plugin", "transitive-plugin")
     assert catalog["name"] == "apm"
     assert [entry["source"] for entry in catalog["plugins"]] == [
@@ -128,7 +128,7 @@ def test_direct_dependency_wins_a_plugin_name_collision_against_a_transitive(
         ],
     )
 
-    catalog = read_json(catalog_path_for(modules))
+    catalog = json.loads(catalog_path_for(modules).read_text(encoding="utf-8"))
     assert result.plugin_names == ("shared-plugin",)
     assert catalog["plugins"][0]["source"] == "./z-owner/pkg"
     assert len(result.collisions) == 1
@@ -203,6 +203,8 @@ def test_legacy_packages_are_not_registered_natively(tmp_path: Path) -> None:
     )
 
     assert result.plugin_names == ("native-plugin",)
+    catalog = json.loads(catalog_path_for(modules).read_text(encoding="utf-8"))
+    assert [entry["name"] for entry in catalog["plugins"]] == ["native-plugin"]
 
 
 def test_project_settings_use_a_repository_relative_marketplace_path(
@@ -214,7 +216,7 @@ def test_project_settings_use_a_repository_relative_marketplace_path(
 
     _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
 
-    settings = read_json(_settings(project))
+    settings = json.loads(_settings(project).read_text(encoding="utf-8"))
     source = settings[EXTRA_MARKETPLACES_KEY]["apm"]["source"]
     assert source == {"source": "directory", "path": "apm_modules"}
     assert settings[ENABLED_PLUGINS_KEY] == {"portable-plugin@apm": True}
@@ -237,7 +239,7 @@ def test_global_scope_records_an_absolute_marketplace_path(
         scope=InstallScope.USER,
     )
 
-    settings = read_json(home / ".copilot" / "settings.json")
+    settings = json.loads((home / ".copilot" / "settings.json").read_text(encoding="utf-8"))
     assert settings[EXTRA_MARKETPLACES_KEY]["apm"]["source"]["path"] == modules.as_posix()
     assert settings[ENABLED_PLUGINS_KEY] == {"global-plugin@apm": True}
 
@@ -257,7 +259,7 @@ def test_unrelated_user_settings_survive_the_merge(tmp_path: Path) -> None:
 
     _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
 
-    settings = read_json(settings_path)
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings["banner"] == "keep me"
     assert settings[EXTRA_MARKETPLACES_KEY]["team"] == {
         "source": {"source": "directory", "path": "x"}
@@ -301,7 +303,7 @@ def test_foreign_enabled_plugin_key_is_adopted_within_the_apm_namespace(
 
     _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
 
-    settings = read_json(settings_path)
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings[ENABLED_PLUGINS_KEY]["portable-plugin@apm"] is True
 
 
@@ -318,8 +320,8 @@ def test_registration_is_rebuilt_when_a_plugin_is_removed(tmp_path: Path) -> Non
 
     _sync(project, modules, candidates[:1])
 
-    catalog = read_json(catalog_path_for(modules))
-    settings = read_json(_settings(project))
+    catalog = json.loads(catalog_path_for(modules).read_text(encoding="utf-8"))
+    settings = json.loads(_settings(project).read_text(encoding="utf-8"))
     assert [entry["name"] for entry in catalog["plugins"]] == ["kept-plugin"]
     assert settings[ENABLED_PLUGINS_KEY] == {"kept-plugin@apm": True}
     assert (modules / "gone" / "plugin.json").is_file()
@@ -346,7 +348,7 @@ def test_dropped_plugin_is_retired_across_ledger_loss(tmp_path: Path) -> None:
             ResolvedPluginCandidate("beta", modules / "beta"),
         ],
     )
-    assert read_json(settings_path)[ENABLED_PLUGINS_KEY] == {
+    assert json.loads(settings_path.read_text(encoding="utf-8"))[ENABLED_PLUGINS_KEY] == {
         "alpha@apm": True,
         "beta@apm": True,
     }
@@ -356,7 +358,7 @@ def test_dropped_plugin_is_retired_across_ledger_loss(tmp_path: Path) -> None:
 
     _sync(project, modules, [ResolvedPluginCandidate("alpha", modules / "alpha")])
 
-    settings = read_json(settings_path)
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings[ENABLED_PLUGINS_KEY] == {"alpha@apm": True}
 
 
@@ -391,7 +393,7 @@ def test_namespace_sweep_retires_a_hand_written_apm_key_and_spares_other_namespa
 
     _sync(project, modules, [ResolvedPluginCandidate("alpha", modules / "alpha")])
 
-    settings = read_json(settings_path)
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings[ENABLED_PLUGINS_KEY] == {
         "alpha@apm": True,
         "vendor-tool@other-marketplace": True,
@@ -408,7 +410,7 @@ def test_emptying_the_graph_removes_the_apm_registration_entirely(tmp_path: Path
 
     _sync(project, modules, [])
 
-    settings = read_json(settings_path)
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert EXTRA_MARKETPLACES_KEY not in settings
     assert ENABLED_PLUGINS_KEY not in settings
     assert not catalog_path_for(modules).exists()
@@ -422,14 +424,14 @@ def test_removal_preserves_unrelated_settings(tmp_path: Path) -> None:
     write_agent_plugin(modules / "pkg", name="portable-plugin")
     settings_path = _settings(project)
     _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
-    document = read_json(settings_path)
+    document = json.loads(settings_path.read_text(encoding="utf-8"))
     document["banner"] = "keep me"
     document[ENABLED_PLUGINS_KEY]["team-plugin@team"] = True
     settings_path.write_text(json.dumps(document, indent=2), encoding="ascii")
 
     _sync(project, modules, [])
 
-    settings = read_json(settings_path)
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings["banner"] == "keep me"
     assert settings[ENABLED_PLUGINS_KEY] == {"team-plugin@team": True}
 
@@ -466,7 +468,7 @@ def test_target_exclusion_retracts_an_existing_registration(tmp_path: Path) -> N
     )
 
     assert not catalog_path_for(modules).exists()
-    assert read_json(_settings(project)) == {}
+    assert json.loads(_settings(project).read_text(encoding="utf-8")) == {}
 
 
 def test_direct_owner_promotion_write_failure_rolls_back_registration(
@@ -515,6 +517,7 @@ def test_ledger_records_ownership_and_drives_status(tmp_path: Path) -> None:
 
     _sync(project, modules, [ResolvedPluginCandidate("pkg", modules / "pkg")])
 
+    assert ledger_path_for(modules).is_file()
     ledger = read_ledger(ledger_path_for(modules))
     assert ledger.marketplace_owned is True
     assert ledger.enabled_plugins == ("portable-plugin@apm",)
@@ -563,7 +566,7 @@ def test_advisory_resync_drops_a_transitive_owner_repoint(tmp_path: Path) -> Non
     assert len(result.collisions) == 1
     assert not catalog_path_for(modules).exists()
     assert not ledger_path_for(modules).exists()
-    assert read_json(_settings(project)) == {}
+    assert json.loads(_settings(project).read_text(encoding="utf-8")) == {}
 
 
 def test_shared_project_settings_are_reused_when_apm_already_owns_them(
@@ -595,7 +598,9 @@ def test_shared_project_settings_are_reused_when_apm_already_owns_them(
 
     assert result.settings_path == shared
     assert not _settings(project).exists()
-    assert read_json(shared)[ENABLED_PLUGINS_KEY] == {"portable-plugin@apm": True}
+    assert json.loads(shared.read_text(encoding="utf-8"))[ENABLED_PLUGINS_KEY] == {
+        "portable-plugin@apm": True
+    }
 
 
 def test_plugin_outside_the_marketplace_root_is_refused(tmp_path: Path) -> None:
@@ -617,6 +622,7 @@ def test_catalog_lives_strictly_under_the_modules_dir(tmp_path: Path) -> None:
     relative = catalog.relative_to(modules)
     assert relative.parts[0] != ".."
     assert catalog.parent.parent == modules / ".github"
+    assert not catalog.exists()
 
 
 def test_registration_removal_never_climbs_above_the_modules_dir(tmp_path: Path) -> None:
@@ -673,3 +679,4 @@ def test_unreadable_ledger_derives_removal_keys_from_the_catalog(tmp_path: Path)
 
     assert healed.marketplace_owned is True
     assert healed.enabled_plugins == ("sentinel@apm",)
+    assert json.loads(catalog.read_text(encoding="ascii"))["plugins"][0]["name"] == "sentinel"

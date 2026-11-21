@@ -20,6 +20,8 @@ from apm_cli.marketplace.output_profiles import (
     known_output_names,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestProfileFields:
     """T-3a-01: Verify all registered profiles have path_env_var."""

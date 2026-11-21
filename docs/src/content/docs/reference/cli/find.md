@@ -21,7 +21,7 @@ apm find <PATH> [OPTIONS]
 
 The command is **read-only**. It performs zero network requests, zero auth calls, and zero file writes. It never modifies `apm.lock.yaml` or any deployed file.
 
-When multiple packages deployed the same file (common for shared harness files such as `AGENTS.md` or `CLAUDE.md` written by several contributors), `apm find` lists all of them, one per line.
+When multiple packages deployed the same file, `apm find` lists all of them, one per line. Compiled root files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) are written by `apm compile`, not recorded as deployments, so `apm find` does not trace them; trace the instruction files they include.
 
 ## Options
 
@@ -69,12 +69,12 @@ owner/repo
   apm.yml -> owner/repo
 ```
 
-### Multi-contributor file (AGENTS.md / CLAUDE.md)
+### File deployed by several packages
 
-Shared harness files can be contributed by more than one package. All contributors are listed:
+Every package that recorded the path is listed:
 
 ```bash
-apm find AGENTS.md
+apm find .agents/skills/shared/SKILL.md
 ```
 
 Output:
@@ -84,10 +84,10 @@ owner/repo-a
 owner/repo-b
 ```
 
-Combine with `--source` to see where each contributor came from:
+Combine with `--source` to see where each one came from:
 
 ```bash
-apm find AGENTS.md --source
+apm find .agents/skills/shared/SKILL.md --source
 ```
 
 Output:

@@ -123,10 +123,6 @@ def test_user_scope_writes_lsp_to_user_opencode_json(lsp_scene: _LspScene) -> No
     assert not (lsp_scene.project / "opencode.json").exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#3768: uninstall leaves LSP entries behind for every target (pre-existing)",
-)
 def test_uninstall_removes_the_opencode_lsp_entry(lsp_scene: _LspScene) -> None:
     (lsp_scene.project / "opencode.json").write_text(
         json.dumps({"theme": "fixture"}), encoding="utf-8"

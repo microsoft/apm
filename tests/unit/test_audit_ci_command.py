@@ -15,6 +15,8 @@ from apm_cli.agent_plugins import AgentPluginDeploymentBoundaryError
 from apm_cli.commands.audit import audit
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
+pytestmark = pytest.mark.component
+
 # -- Fixtures -------------------------------------------------------
 
 
@@ -232,12 +234,30 @@ class TestCIOutputFormats:
             assert drift["level"] == "error"
             assert str(error) in drift["message"]["text"]
 
+    def test_policy_blocked_drift_replay_is_a_failed_check(self, runner, tmp_path):
+        from apm_cli.install.errors import PolicyViolationError
+
+        _setup_clean_project(tmp_path)
+        error = PolicyViolationError("no enforceable org policy (fetch_failure_default=block)")
+        with (
+            patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path),
+            patch("apm_cli.install.drift.run_replay", side_effect=error),
+        ):
+            result = runner.invoke(audit, ["--ci", "--no-policy", "-f", "json"])
+
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        drift = next(check for check in payload["checks"] if check["name"] == "drift")
+        assert drift["passed"] is False
+        assert drift["message"].startswith("drift replay blocked")
+        assert drift["details"] == [str(error)]
+
     def test_json_output_with_failures(self, runner, tmp_path):
         _setup_failing_project(tmp_path)
         with patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path):
             result = runner.invoke(audit, ["--ci", "--no-drift", "-f", "json"])
         assert result.exit_code == 1
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert data["passed"] is False
         assert data["summary"]["failed"] > 0
 

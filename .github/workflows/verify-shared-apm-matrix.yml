@@ -483,7 +483,7 @@ jobs:
     steps:
       - name: Pack Copilot bundle with APM 0.28
         id: pack-copilot
-        uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
+        uses: microsoft/apm-action@64544310be26812256300543071bfbaa8bc93aad # v1.12.0
         with:
           dependencies: |
             - microsoft/apm-sample-package
@@ -496,7 +496,7 @@ jobs:
 
       - name: Pack Claude bundle with APM 0.28
         id: pack-claude
-        uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
+        uses: microsoft/apm-action@64544310be26812256300543071bfbaa8bc93aad # v1.12.0
         with:
           dependencies: |
             - microsoft/apm-sample-package
@@ -523,7 +523,7 @@ jobs:
 
       - name: Restore both APM 0.28 bundles
         id: restore
-        uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
+        uses: microsoft/apm-action@64544310be26812256300543071bfbaa8bc93aad # v1.12.0
         with:
           apm-version: '0.28.0'
           bundles-file: ${{ steps.bundle-list.outputs.path }}

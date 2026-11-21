@@ -31,8 +31,8 @@ from pathlib import Path
 
 import yaml
 
+from ...core.command_logger import library_logger
 from ...utils.atomic_io import atomic_write_text
-from ...utils.console import _rich_error, _rich_success
 from ...utils.yaml_io import load_yaml, yaml_to_str
 from ._remote_shapes import remote_shape_row
 from .copilot import CopilotClientAdapter
@@ -201,7 +201,7 @@ class HermesClientAdapter(CopilotClientAdapter):
         try:
             data = self._load_document()
         except _MalformedHermesConfig:
-            _rich_error(
+            library_logger().error(
                 f"{path} is malformed YAML; refusing to overwrite. "
                 "Fix or remove the file manually, then retry."
             )
@@ -233,7 +233,7 @@ class HermesClientAdapter(CopilotClientAdapter):
         runtime_vars=None,
     ):
         if not server_url:
-            _rich_error("server_url cannot be empty")
+            library_logger().error("server_url cannot be empty")
             return False
 
         try:
@@ -245,13 +245,13 @@ class HermesClientAdapter(CopilotClientAdapter):
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             ok = self.update_config({config_key: server_config}, enabled=enabled)
             if not ok:
-                _rich_error(f"Failed to write MCP config for '{config_key}' to Hermes")
+                library_logger().error(f"Failed to write MCP config for '{config_key}' to Hermes")
                 return False
 
-            _rich_success(f"Successfully configured MCP server '{config_key}' for Hermes")
+            # The integrator's install tree reports success once (#3994).
             return True
         except Exception:
             # Do not interpolate the exception message: registry URLs and
             # other inputs may carry embedded credentials.
-            _rich_error("Error configuring MCP server")
+            library_logger().error("Error configuring MCP server")
             return False

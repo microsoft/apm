@@ -176,6 +176,29 @@ class TestLockfileExecStatusIntegration:
         assert lockfile.dependencies["owner/repo"].exec_status == "gated_pending_approval"
         assert "exec_status: gated_pending_approval" in lockfile.to_yaml()
 
+    @pytest.mark.parametrize("lockfile_only", [True, False])
+    def test_lock_only_carries_recorded_exec_status_forward(self, lockfile_only: bool) -> None:
+        """``apm lock`` runs no gate, so recorded trust state survives (#4213)."""
+        existing = LockFile()
+        existing.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                exec_status="gated_pending_approval",
+                exec_allowed_types=("mcp",),
+            )
+        )
+        lockfile = LockFile()
+        lockfile.add_dependency(LockedDependency(repo_url="owner/repo"))
+        ctx = SimpleNamespace(
+            package_exec_status={}, existing_lockfile=existing, lockfile_only=lockfile_only
+        )
+
+        LockfileBuilder(ctx)._attach_exec_status(lockfile)
+
+        dep = lockfile.dependencies["owner/repo"]
+        expected = ("gated_pending_approval", ("mcp",)) if lockfile_only else (None, ())
+        assert (dep.exec_status, dep.exec_allowed_types) == expected
+
 
 class TestNonInteractiveExecutablePromptIntegration:
     """Integration: CI installs park executables instead of aborting."""
@@ -195,8 +218,14 @@ class TestNonInteractiveExecutablePromptIntegration:
         logger.info.assert_called_once()
         remedy = logger.info.call_args.args[0]
         assert "apm policy explain owner/repo" in remedy
-        # M4 (#1873): non-interactive remedy leads with the bulk one-liner.
-        assert "apm approve --recommended" in remedy
+        # The bulk one-liner appears only with an org recommend set (#3994).
+        assert "apm approve --recommended" not in remedy
+
+        logger.reset_mock()
+        policy = SimpleNamespace(executables=SimpleNamespace(recommend=("owner/repo",)))
+        ctx.policy_fetch = SimpleNamespace(policy=policy)
+        _run_executable_approval_prompt(ctx)
+        assert "apm approve --recommended" in logger.info.call_args.args[0]
 
     def test_interactive_decline_surfaces_parked_remedy(self, monkeypatch) -> None:
         # M3 (#1873): declining at the interactive prompt must still print a
@@ -383,13 +412,19 @@ class TestCheckExecutableApprovalIntegration:
         assert hooks_ok is True
         assert bin_ok is True
 
-    def test_none_allow_executables_means_all_approved(self, tmp_path: Path) -> None:
+    def test_gate_disabled_map_means_all_approved(self, tmp_path: Path) -> None:
+        from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
+
         pkg_info = self._make_pkg_info(tmp_path, "any-pkg", "1.0")
         hooks_ok, bin_ok, _mcp_ok, _canvas_ok, _lsp_ok = check_executable_approval(
-            "any-pkg", pkg_info, None
+            "any-pkg", pkg_info, authorized_exec_map(AUTHORIZED_GATE_DISABLED)
         )
         assert hooks_ok is True
         assert bin_ok is True
+
+    def test_missing_allow_executables_approves_nothing(self, tmp_path: Path) -> None:
+        pkg_info = self._make_pkg_info(tmp_path, "any-pkg", "1.0")
+        assert check_executable_approval("any-pkg", pkg_info, None) == (False,) * 5
 
     def test_empty_allow_executables_blocks_all(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
@@ -906,7 +941,8 @@ class TestApproveDenyCommandsIntegration:
         runner = CliRunner()
         result = runner.invoke(approve_cmd, ["nonexistent"])
 
-        assert result.exit_code == 0
+        # Approving nothing exits 1 (#4154).
+        assert result.exit_code == 1
         assert "not found" in result.output
 
     def test_approve_safe_package_no_executables(self, tmp_path: Path, monkeypatch) -> None:
@@ -920,7 +956,8 @@ class TestApproveDenyCommandsIntegration:
         runner = CliRunner()
         result = runner.invoke(approve_cmd, ["safe-pkg"])
 
-        assert result.exit_code == 0
+        # Approving nothing exits 1 (#4154).
+        assert result.exit_code == 1
         # safe-pkg has no executables so _scan_installed_packages skips it
         assert "not found" in result.output
 
@@ -935,7 +972,7 @@ class TestApproveDenyCommandsIntegration:
         runner = CliRunner()
         result = runner.invoke(approve_cmd, [])
 
-        assert result.exit_code == 1
+        assert result.exit_code == 2  # click usage error (#4262)
 
     def test_deny_package(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner
@@ -978,16 +1015,13 @@ class TestApproveDenyCommandsIntegration:
         monkeypatch.chdir(project)
 
         runner = CliRunner()
+        before = manifest.read_bytes()
         result = runner.invoke(deny_cmd, ["missing"])
 
-        assert result.exit_code == 0
-        # deny may target a not-yet-installed package (a pre-emptive block)
-        assert "Denied missing" in result.output
-
-        from apm_cli.utils.yaml_io import load_yaml
-
-        data = load_yaml(manifest)
-        assert "missing" in data["executables"]["deny"]
+        # A deny that matches no installed package is refused, never recorded (#4189).
+        assert result.exit_code == 1
+        assert "not found" in result.output
+        assert manifest.read_bytes() == before
 
     def test_approve_no_manifest_errors(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner

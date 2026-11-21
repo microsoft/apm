@@ -1,0 +1,14 @@
+# apm journey golden v1: J03 step 2
+$ apm install --frozen
+[exit 0]
+--- stdout
+[>] Installing dependencies from apm.yml...
+[i] Targets: claude, copilot  (source: apm.yml)
+  [+] github.com/github/awesome-copilot/skills/review-and-refactor @<SHA8> (cached)
+  |-- (files unchanged)
+  [+] microsoft/apm-sample-package #v1.0.0 @<SHA8> (cached)
+  |-- (files unchanged)
+
+[i] No changes -- install state already up to date in <DUR>.
+[i] Deployed files verified against apm.lock.yaml.
+--- stderr

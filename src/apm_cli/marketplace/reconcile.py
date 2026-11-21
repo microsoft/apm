@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..core.remediation import MARKETPLACE_MANUAL_KEPT, MARKETPLACE_RECONCILE_FAILED
 from .errors import MarketplaceError
 from .models import ORIGIN_MANIFEST, MarketplaceSource
 from .registration import ParsedSource, parse_registration_source, probe_registration
@@ -151,8 +152,8 @@ def _report_conflict(
         current = f" (currently {shown})"
     logger.warning(
         f"Kept manual marketplace '{name}'{current}: it was added with 'apm marketplace add', "
-        "so the user manifest entry was not applied. To let the user manifest manage it, "
-        f"run 'apm marketplace remove {name}' and re-run 'apm install -g'."
+        "so the user manifest entry was not applied. "
+        f"{MARKETPLACE_MANUAL_KEPT.bind(name=name).sentence()}"
     )
 
 
@@ -197,10 +198,10 @@ def reconcile_user_marketplaces(
         ValueError: The user manifest or its ``marketplaces:`` declaration
             is malformed. Raised before the registry is read or changed.
     """
-    from .registry import read_registered_marketplaces
+    from .registry import get_registered_marketplaces
 
     declared = parse_declared_marketplaces(_load_user_manifest(manifest_path), manifest_path)
-    registered = {s.name.lower(): s for s in read_registered_marketplaces()}
+    registered = {s.name.lower(): s for s in get_registered_marketplaces()}
     owned = [s for s in registered.values() if s.origin == ORIGIN_MANIFEST]
     report = MarketplaceReconcileReport()
     if not declared and not owned:
@@ -260,10 +261,8 @@ def reconcile_user_marketplaces_for_install(
         return True
     names = [name for name, _ in report.failed]
     target = f"'{names[0]}'" if len(names) == 1 else "each failed entry"
-    logger.error(
-        f"Marketplace reconcile failed for: {', '.join(names)}. Fix the source of {target} "
-        f"in {manifest_path.as_posix()} or remove it, then re-run 'apm install -g'."
-    )
+    fix = MARKETPLACE_RECONCILE_FAILED.bind(target=target, path=manifest_path.as_posix())
+    logger.error(f"Marketplace reconcile failed for: {', '.join(names)}. {fix.sentence()}")
     return False
 
 

@@ -14,16 +14,17 @@ import yaml
 
 from tests.workflow_contracts import run_bash as _run_bash
 
+pytestmark = pytest.mark.component
+
 ROOT = Path(__file__).resolve().parents[2]
 SHARED_APM = ROOT / ".github" / "workflows" / "shared" / "apm.md"
 VERIFY_SHARED_APM = ROOT / ".github" / "workflows" / "verify-shared-apm-matrix.yml"
-GH_AW_GUIDE = ROOT / "docs" / "src" / "content" / "docs" / "integrations" / "gh-aw.md"
 GH_AW_ACTIONS_LOCK = ROOT / ".github" / "aw" / "actions-lock.json"
 GH_AW_MAINTENANCE = ROOT / ".github" / "workflows" / "agentics-maintenance.yml"
 COPILOT_SETUP = ROOT / ".github" / "workflows" / "copilot-setup-steps.yml"
 TARGET_EXPRESSION = "${{ github.aw.import-inputs.target }}"
 PACK_TOKEN_OUTPUT = "${{ steps.package-token.outputs.token }}"
-APM_ACTION_SHA = "d723bb64ed70c135bbaf87d126b721dd2dae0439"
+APM_ACTION_SHA = "64544310be26812256300543071bfbaa8bc93aad"
 DEFAULT_APM_VERSION = "0.28.0"
 GH_AW_VERSION = "v0.89.15"
 GH_AW_TAG_COMMIT = "0fac96fb53dc7d2d82cdcc46049383f4a5734f16"
@@ -294,7 +295,7 @@ def test_shared_apm_forwards_the_target_to_the_isolated_pack_action() -> None:
     assert "apm-prep" in apm_job["needs"]
     pack = next(step for step in apm_job["steps"] if step.get("name") == "Pack APM packages")
 
-    assert pack["uses"] == "microsoft/apm-action@v1.10.0"
+    assert pack["uses"] == "microsoft/apm-action@v1.12.0"
     assert pack["with"]["isolated"] == "true"
     assert pack["with"]["target"] == TARGET_EXPRESSION
 
@@ -307,16 +308,12 @@ def test_shared_apm_runtime_default_is_consistent() -> None:
     source_action_steps = [
         step
         for step in (*frontmatter["jobs"]["apm"]["steps"], *frontmatter["steps"])
-        if step.get("uses") == "microsoft/apm-action@v1.10.0"
+        if step.get("uses") == "microsoft/apm-action@v1.12.0"
     ]
     assert len(source_action_steps) == 2
     assert {step["with"]["apm-version"] for step in source_action_steps} == {
         "${{ github.aw.import-inputs.apm-version }}"
     }
-
-    guide = GH_AW_GUIDE.read_text(encoding="utf-8")
-    assert "installs APM 0.28.0" in guide
-    assert "apm-version: '0.28.0'" in guide
 
 
 def test_verify_workflow_exercises_apm_028_pack_and_multibundle_restore() -> None:

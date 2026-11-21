@@ -17,6 +17,8 @@ from apm_cli.integration.prompt_integrator import (
     _parse_workflow_frontmatter,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestParseWorkflowFrontmatter:
     def test_defaults_when_only_interval(self):
@@ -47,37 +49,32 @@ class TestParseWorkflowFrontmatter:
         assert s.model == "gpt-5"
         assert s.reasoning_effort == "high"
 
-    def test_rejects_non_mapping(self):
-        with pytest.raises(ValueError, match=r"frontmatter must be a mapping"):
-            _parse_workflow_frontmatter("daily")
-
-    def test_rejects_unknown_interval(self):
-        with pytest.raises(ValueError, match=r"interval must be one of"):
-            _parse_workflow_frontmatter({"interval": "yearly"})
-
-    def test_rejects_out_of_range_hour(self):
-        with pytest.raises(ValueError, match=r"schedule_hour must be int 0..23"):
-            _parse_workflow_frontmatter({"interval": "daily", "schedule_hour": 99})
-
-    def test_rejects_out_of_range_day(self):
-        with pytest.raises(ValueError, match=r"schedule_day must be int 0..6"):
-            _parse_workflow_frontmatter({"interval": "weekly", "schedule_day": 9})
-
-    def test_rejects_non_int_hour(self):
-        with pytest.raises(ValueError, match=r"schedule_hour must be int 0..23"):
-            _parse_workflow_frontmatter({"interval": "daily", "schedule_hour": "nine"})
-
-    def test_rejects_unknown_mode(self):
-        with pytest.raises(ValueError, match=r"mode must be one of"):
-            _parse_workflow_frontmatter({"interval": "manual", "mode": "rogue"})
-
-    def test_rejects_autopilot_mode_with_diagnostic(self):
-        with pytest.raises(ValueError, match=r"autopilot"):
-            _parse_workflow_frontmatter({"interval": "manual", "mode": "autopilot"})
-
-    def test_rejects_non_string_model(self):
-        with pytest.raises(ValueError, match=r"model must be a string"):
-            _parse_workflow_frontmatter({"interval": "manual", "model": 42})
+    @pytest.mark.parametrize(
+        ("frontmatter", "match"),
+        [
+            ("daily", r"frontmatter must be a mapping"),
+            ({"interval": "yearly"}, r"interval must be one of"),
+            ({"interval": "daily", "schedule_hour": 99}, r"schedule_hour must be int 0..23"),
+            ({"interval": "weekly", "schedule_day": 9}, r"schedule_day must be int 0..6"),
+            ({"interval": "daily", "schedule_hour": "nine"}, r"schedule_hour must be int 0..23"),
+            ({"interval": "manual", "mode": "rogue"}, r"mode must be one of"),
+            ({"interval": "manual", "mode": "autopilot"}, r"autopilot"),
+            ({"interval": "manual", "model": 42}, r"model must be a string"),
+        ],
+        ids=[
+            "non-mapping",
+            "unknown-interval",
+            "out-of-range-hour",
+            "out-of-range-day",
+            "non-int-hour",
+            "unknown-mode",
+            "autopilot-mode",
+            "non-string-model",
+        ],
+    )
+    def test_rejects_invalid_frontmatter(self, frontmatter, match):
+        with pytest.raises(ValueError, match=match):
+            _parse_workflow_frontmatter(frontmatter)
 
 
 class TestIsWorkflowShape:

@@ -12,6 +12,8 @@ from apm_cli.utils.guards import (
     _ReadOnlyProjectGuard,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _bump_mtime(p):
     now_ns = time.time_ns()
@@ -24,6 +26,7 @@ def test_no_mutation_passes(tmp_path):
     (apm_dir / "x.md").write_text("x")
     with _ReadOnlyProjectGuard(tmp_path, [".apm"]):
         pass
+    assert (apm_dir / "x.md").read_text() == "x"
 
 
 def test_modification_raises(tmp_path):
@@ -60,6 +63,8 @@ def test_deletion_raises(tmp_path):
 def test_missing_path_tolerated(tmp_path):
     with _ReadOnlyProjectGuard(tmp_path, [".apm", "apm.lock.yaml"]):
         pass
+    assert not (tmp_path / ".apm").exists()
+    assert not (tmp_path / "apm.lock.yaml").exists()
 
 
 def test_existing_exception_not_masked(tmp_path):

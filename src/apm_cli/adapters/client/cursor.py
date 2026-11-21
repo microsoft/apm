@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from typing import ClassVar
 
+from ...core.command_logger import library_logger
 from ...core.token_manager import GitHubTokenManager
 from ...mcp_transport import canonical_remote_transport
 from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
@@ -270,7 +271,7 @@ class CursorClientAdapter(CopilotClientAdapter):
         Cursor-specific success message.
         """
         if not server_url:
-            print("Error: server_url cannot be empty")
+            library_logger().error("server_url cannot be empty")
             return False
 
         # Project scope is opt-in; global installs work from any directory.
@@ -286,12 +287,9 @@ class CursorClientAdapter(CopilotClientAdapter):
             config_key = self.determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
-            if self.update_config({config_key: server_config}) is False:
-                return False
-
-            print(f"Successfully configured MCP server '{config_key}' for Cursor")
-            return True
+            # The integrator's install tree reports success once (#3994).
+            return self.update_config({config_key: server_config}) is not False
 
         except Exception as e:
-            print(f"Error configuring MCP server: {e}")
+            library_logger().error(f"Error configuring MCP server: {e}")
             return False

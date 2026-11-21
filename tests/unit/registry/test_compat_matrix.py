@@ -26,6 +26,8 @@ from apm_cli.deps.registry.resolver import RegistryResolution
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.models.dependency.reference import DependencyReference
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def write_apm_yml(tmp_path):
@@ -295,7 +297,7 @@ class TestEnvVarPrefixCollision:
 class TestIdentityPreservation:
     """``DependencyReference.get_identity()`` must be stable across modes."""
 
-    @pytest.mark.xfail(reason="@registry shorthand deferred to v2", strict=True)
+    @pytest.mark.xfail(reason="#4543 @registry shorthand deferred to v2", strict=True)
     def test_identity_unchanged_by_registry_scope(self):
         d_git = DependencyReference.parse("acme/foo#1.0.0")
         d_reg = DependencyReference.parse("acme/foo@corp-main#1.0.0")
@@ -317,7 +319,7 @@ class TestIdentityPreservation:
         assert d_git.get_identity() == "acme/foo"
         assert d_reg_obj.get_identity().startswith("acme/foo/")
 
-    @pytest.mark.xfail(reason="@registry shorthand deferred to v2", strict=True)
+    @pytest.mark.xfail(reason="#4543 @registry shorthand deferred to v2", strict=True)
     def test_unique_key_includes_repo_url_for_both(self):
         d_git = DependencyReference.parse("acme/foo#1.0.0")
         d_reg = DependencyReference.parse("acme/foo@corp-main#1.0.0")

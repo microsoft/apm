@@ -12,6 +12,8 @@ from unittest.mock import Mock
 
 import pytest
 
+pytestmark = pytest.mark.component
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "run_mutation_pilot.py"
 
@@ -453,7 +455,7 @@ def test_write_report_preserves_existing_file_when_atomic_replace_fails(
     # _write_report routes through the canonical apm_cli.utils.atomic_io
     # atomic-write primitive, which performs its rename via os.replace
     # (not Path.replace) -- patch the real call site.
-    monkeypatch.setattr("apm_cli.utils.atomic_io.os.replace", fail_replace)
+    monkeypatch.setattr("os.replace", fail_replace)
 
     with pytest.raises(pilot.PilotError, match="failed to write mutation report"):
         pilot._write_report(report_path, {"status": "accepted"})

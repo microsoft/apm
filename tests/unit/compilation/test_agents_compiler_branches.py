@@ -1,7 +1,6 @@
 """Unit tests for apm_cli.compilation.agents_compiler.
 
 Focuses on:
-- CompilationConfig.__post_init__ (single_agents=True triggers strategy="single-file")
 - AgentsCompiler.compile() unknown frozenset target families
 - AgentsCompiler.compile() unknown string target
 - AgentsCompiler.compile() no-results (agent-skills, windsurf)
@@ -21,7 +20,6 @@ Focuses on:
   - file not APM-generated (skip)
   - APM-generated file removed
   - OSError on remove
-- AgentsCompiler._finalize_build_id()
   - placeholder present
   - placeholder absent
 - AgentsCompiler._generate_copilot_root_instructions_content()
@@ -39,6 +37,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.compilation.agents_compiler import (
     _COPILOT_ROOT_GENERATED_MARKER,
     AgentsCompiler,
@@ -47,6 +47,8 @@ from apm_cli.compilation.agents_compiler import (
     compile_agents_md,
 )
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -95,29 +97,6 @@ def _make_result(
         errors=errors or [],
         stats=stats or {},
     )
-
-
-# ---------------------------------------------------------------------------
-# CompilationConfig.__post_init__
-# ---------------------------------------------------------------------------
-
-
-class TestCompilationConfigPostInit(unittest.TestCase):
-    def test_single_agents_true_sets_strategy(self) -> None:
-        config = CompilationConfig(single_agents=True)
-        self.assertEqual(config.strategy, "single-file")
-
-    def test_single_agents_false_keeps_default_strategy(self) -> None:
-        config = CompilationConfig(single_agents=False)
-        self.assertEqual(config.strategy, "distributed")
-
-    def test_exclude_defaults_to_empty_list(self) -> None:
-        config = CompilationConfig()
-        self.assertEqual(config.exclude, [])
-
-    def test_exclude_none_becomes_empty_list(self) -> None:
-        config = CompilationConfig(exclude=None)
-        self.assertEqual(config.exclude, [])
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +171,7 @@ class TestAgentsCompilerNoResults(unittest.TestCase):
         result = compiler.compile(config, primitives, logger=logger)
         self.assertTrue(result.success)
         logger.progress.assert_called()
+        self.assertEqual(sorted(p.name for p in Path(self.tmp).glob("*.md")), [])
 
     def test_windsurf_target_returns_empty_success(self) -> None:
         compiler = AgentsCompiler(self.tmp)
@@ -326,37 +306,6 @@ class TestCompileGeminiMd(unittest.TestCase):
 
         self.assertFalse(result.success)
         self.assertTrue(any("write denied" in e for e in result.errors))
-
-
-# ---------------------------------------------------------------------------
-# AgentsCompiler._finalize_build_id()
-# ---------------------------------------------------------------------------
-
-
-class TestFinalizeBuildId(unittest.TestCase):
-    def test_with_placeholder_replaced_by_hash(self) -> None:
-        from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
-
-        compiler = AgentsCompiler("/tmp")
-        content = f"Line before\n{BUILD_ID_PLACEHOLDER}\nLine after\n"
-        result = compiler._finalize_build_id(content)
-        self.assertNotIn(BUILD_ID_PLACEHOLDER, result)
-        self.assertIn("<!-- Build ID:", result)
-
-    def test_without_placeholder_unchanged(self) -> None:
-        compiler = AgentsCompiler("/tmp")
-        content = "No placeholder here\nLine 2\n"
-        result = compiler._finalize_build_id(content)
-        self.assertEqual(result, content)
-
-    def test_hash_is_deterministic(self) -> None:
-        from apm_cli.compilation.constants import BUILD_ID_PLACEHOLDER
-
-        compiler = AgentsCompiler("/tmp")
-        content = f"A\n{BUILD_ID_PLACEHOLDER}\nB\n"
-        r1 = compiler._finalize_build_id(content)
-        r2 = compiler._finalize_build_id(content)
-        self.assertEqual(r1, r2)
 
 
 # ---------------------------------------------------------------------------
@@ -852,26 +801,6 @@ class TestValidatePrimitivesLinkErrors(unittest.TestCase):
         self.assertEqual(errors, [])
         # Broken link should be recorded as warning
         self.assertTrue(len(compiler.warnings) >= 1)
-
-
-# ---------------------------------------------------------------------------
-# AgentsCompiler._log() — delegates when logger wired
-# ---------------------------------------------------------------------------
-
-
-class TestLogDelegation(unittest.TestCase):
-    def test_log_delegates_to_logger(self) -> None:
-        compiler = AgentsCompiler("/tmp")
-        logger = MagicMock()
-        compiler._logger = logger
-        compiler._log("progress", "test message", symbol="info")
-        logger.progress.assert_called_once_with("test message", symbol="info")
-
-    def test_log_noop_when_no_logger(self) -> None:
-        compiler = AgentsCompiler("/tmp")
-        compiler._logger = None
-        # Should not raise
-        compiler._log("progress", "test")
 
 
 # ---------------------------------------------------------------------------

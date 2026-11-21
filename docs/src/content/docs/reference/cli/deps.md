@@ -41,7 +41,8 @@ roots and remain visible regardless of graph depth.
 Packages on a non-default host are listed by their host-qualified key, such as
 `gitlab.example.com/org/repo`, the key `apm deps tree` shows and
 `apm uninstall` accepts. The Source column follows the declared or locked host
-type, so a self-hosted GitLab declared with `type: gitlab` shows `gitlab`.
+type, so a self-hosted GitLab declared with `type: gitlab` shows `gitlab`, and a
+host APM does not recognize as GitHub, GitLab or Azure DevOps shows `git`.
 
 Orphan status uses the same selection as [`apm prune`](../prune/). Skills
 bundled inside a declared package, such as a whole-repository skill bundle,
@@ -144,7 +145,7 @@ apm deps update [PACKAGES...] [OPTIONS]
 |---|---|
 | `-v, --verbose` | Show detailed update information. |
 | `--force` | Overwrite locally-authored files on collision. |
-| `-t, --target` | Force deployment to specific targets. Comma-separated. Values: `agent-skills`, `agents`, `agy`, `all`, `antigravity`, `claude`, `codex`, `copilot`, `cursor`, `gemini`, `grok-bot`, `grok-build`, `hermes`, `intellij`, `kiro`, `opencode`, `vscode`, `windsurf`. Experimental targets (`copilot-app`, `copilot-cowork`, `grok-cloud`, `openclaw`) are also accepted when their feature flags are enabled. `all` excludes `agent-skills`, `antigravity`, `grok-bot`, `hermes`, experimental targets, and `intellij`. |
+| `-t, --target` | Force deployment to specific targets. Comma-separated. Values: `agent-skills`, `all`, `antigravity`, `claude`, `codex`, `copilot`, `cursor`, `gemini`, `grok-bot`, `grok-build`, `hermes`, `intellij`, `kiro`, `opencode`, `windsurf`. Aliases: `agents` for `copilot`, `agy` for `antigravity`; `vscode` is a deprecated alias of `copilot` and warns. Experimental targets (`copilot-app`, `copilot-cowork`, `grok-cloud`, `openclaw`) are also accepted when their feature flags are enabled. `all` excludes `agent-skills`, `antigravity`, `grok-bot`, `hermes`, experimental targets, and `intellij`. |
 | `--parallel-downloads N` | Max concurrent downloads. Default `4`. `0` disables parallelism. |
 | `-g, --global` | Update user-scope dependencies under `$APM_HOME` (default `~/.apm`). |
 | `--legacy-skill-paths` | Deploy skill files to per-client paths (`.cursor/skills/`, etc.) instead of the shared `.agents/skills/` directory. Env: `APM_LEGACY_SKILL_PATHS=1`. |

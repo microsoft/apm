@@ -197,6 +197,7 @@ _APM_REMOTE_CONTROL_ENV_NAMES = frozenset(
         "APM_POLICY_DISABLE",
         "ADO_HOST",
         "APM_TEST_FAIL_LOCK_REPLACE",
+        "APM_TEST_LOCK_COMMIT",
         "APM_TEST_LOOPBACK_PORTS",
         "GITHUB_HOST",
         "GITHUB_URL",
@@ -290,6 +291,8 @@ _PINNED_ENVIRONMENT_NAMES = (
     "GIT_COMMITTER_EMAIL",
     "GIT_AUTHOR_DATE",
     "GIT_COMMITTER_DATE",
+    "GH_TELEMETRY",
+    "DO_NOT_TRACK",
     "PYTHONPATH",
 )
 _PROTECTED_OVERRIDE_NAMES = frozenset(_PINNED_ENVIRONMENT_NAMES) | _STRIPPED_ENV_NAMES
@@ -445,6 +448,9 @@ class IsolatedApmEnvironment:
             "GIT_COMMITTER_EMAIL": "apm-test@example.invalid",
             "GIT_AUTHOR_DATE": "2000-01-01T00:00:00+00:00",
             "GIT_COMMITTER_DATE": "2000-01-01T00:00:00+00:00",
+            # gh >= 2.104 writes a telemetry device id under the isolated HOME.
+            "GH_TELEMETRY": "0",
+            "DO_NOT_TRACK": "1",
             "PYTHONPATH": str(guard_root),
         }
         if tuple(pinned_environment) != _PINNED_ENVIRONMENT_NAMES:

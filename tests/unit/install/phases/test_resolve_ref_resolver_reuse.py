@@ -13,6 +13,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
 
 from apm_cli.core.auth import AuthResolver
@@ -24,6 +26,8 @@ from apm_cli.deps.transport_selection import (
 from apm_cli.install.helpers.ref_reuse import maybe_resolve_git_semver, resolve_dep_auth
 from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 def _authorization_config_values(env: dict[str, str]) -> set[str]:
@@ -720,7 +724,7 @@ def test_semver_resolution_preserves_bearer_and_basic_auth_schemes(monkeypatch):
     ]
 
     cache = {}
-    with patch("apm_cli.marketplace.ref_resolver.subprocess.run", side_effect=_run):
+    with patch("subprocess.run", side_effect=_run):
         for dep in deps:
             _maybe_resolve_git_semver(
                 dep_ref=dep,
@@ -814,7 +818,7 @@ def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer(monkeypatch)
 
     dep = _ado_semver_dep()
 
-    with patch("apm_cli.marketplace.ref_resolver.subprocess.run", side_effect=_run):
+    with patch("subprocess.run", side_effect=_run):
         resolution = _maybe_resolve_git_semver(
             dep_ref=dep,
             existing_lockfile=None,

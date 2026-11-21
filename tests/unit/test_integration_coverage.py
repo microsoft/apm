@@ -8,6 +8,8 @@ import pytest
 
 from apm_cli.integration.coverage import check_primitive_coverage
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

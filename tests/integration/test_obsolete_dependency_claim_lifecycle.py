@@ -106,7 +106,9 @@ def test_ordinary_install_retires_obsolete_absent_dependency_claims(
         snapshots = [ArtifactSnapshot.capture(deploy_root / root) for root in roots]
         for _ in range(2):
             refused = run(*install, expected=1)
-            assert "no trustworthy local deployment baseline" in " ".join(refused.stdout.split())
+            assert "no trustworthy local deployment baseline" in " ".join(
+                (refused.stdout + refused.stderr).split()
+            )
             assert lock_path.read_bytes() == previous_lock
             for snapshot, root in zip(snapshots, roots, strict=True):
                 assert_unchanged(snapshot, ArtifactSnapshot.capture(deploy_root / root))
@@ -239,7 +241,9 @@ def test_historical_absence_respects_live_preservation_boundaries(
             assert personal not in dependency["deployed_file_hashes"]
             assert all(row["value"] != personal for row in repaired["deployments"])
         if protection in {"untracked-content", "edited-marker"}:
-            assert "no trustworthy local deployment baseline" in " ".join(result.stdout.split())
+            assert "no trustworthy local deployment baseline" in " ".join(
+                (result.stdout + result.stderr).split()
+            )
         assert not (scenario.deploy_root / shared).exists()
         if protection == "edited-marker":
             assert marker.read_bytes() == b"User-edited skill marker.\n"
@@ -364,25 +368,29 @@ def test_dependency_target_narrowing_keeps_cleanup_and_lock_scope_aligned(
     assert lock_path.read_bytes() == settled
     scenario.run("audit", "--ci", "--format", "json")
     uninstall = ("uninstall", *(("-g",) if user_scope else ()), owner)
-    refused = scenario.runner.run(
-        uninstall,
-        scenario_id="dependency-target-narrowing-protected-uninstall",
-        cwd=scenario.project,
-        env=scenario.environment.subprocess_env(),
-    )
-    assert refused.returncode == 1, (refused.command, refused.stdout, refused.stderr)
-    assert "Resolve or remove the listed files" in refused.stdout
-    assert untracked.read_bytes() == b"Untracked personal content.\n"
-    saved_personal = scenario.deploy_root / "personal.txt"
-    untracked.rename(saved_personal)
     removed = scenario.runner.run(
         uninstall,
         scenario_id="dependency-target-narrowing-uninstall",
         cwd=scenario.project,
         env=scenario.environment.subprocess_env(),
     )
+    # The user's file in the removed package's skill directory stays (#4162).
     assert removed.returncode == 0, (removed.command, removed.stdout, removed.stderr)
-    assert saved_personal.read_bytes() == b"Untracked personal content.\n"
+    # Terminal wrapping may split tokens, so compare without whitespace.
+    output = "".join((removed.stdout + removed.stderr).split())
+    kept = untracked.relative_to(scenario.deploy_root).as_posix()
+    assert "[!]" in output, removed.stdout
+    assert "Keptskilldirectory" in output, removed.stdout
+    assert f"notownedbyAPM:{kept}" in output, removed.stdout
+    assert untracked.read_bytes() == b"Untracked personal content.\n"
+    remaining = load_yaml(scenario.lock_root / "apm.yml")["dependencies"]["apm"]
+    assert all(entry.get("path") != owner for entry in remaining), remaining
+    locked = load_yaml(lock_path)
+    assert all(
+        dependency.get("local_path") != owner and owner not in str(dependency.get("repo_url"))
+        for dependency in locked.get("dependencies") or []
+    ), locked
+    assert all(kept != row["value"] for row in locked.get("deployments") or []), locked
     assert all(
         (scenario.deploy_root / value).read_bytes() == data for value, data in sibling_bytes.items()
     )
@@ -438,7 +446,7 @@ def test_replacement_table_survives_absent_repair_partial_install_and_narrowing(
     scenario.manifest(replace=[])
     before_refusal = ArtifactSnapshot.capture(tmp_path)
     refused = scenario.run("install", str(scenario.packages["a"]), expected=1)
-    assert "Replacement rules changed during a" in refused.stdout
+    assert "Replacement rules changed during a" in refused.stdout + refused.stderr
     assert_unchanged(before_refusal, ArtifactSnapshot.capture(tmp_path))
     scenario.run("install")
     assert load_yaml(lock_path)["replacements"] == []

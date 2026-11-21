@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 from tests.workflow_contracts import (
     load_workflow,
     shell_commands,
@@ -12,6 +14,8 @@ from tests.workflow_contracts import (
     workflow_step,
     workflow_step_index,
 )
+
+pytestmark = pytest.mark.component
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HERO_MODULE_PATH = Path("tests", "integration", "test_guardrailing_hero_e2e.py").as_posix()

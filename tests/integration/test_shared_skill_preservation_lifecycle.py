@@ -281,13 +281,15 @@ def test_shared_skill_partial_failure_does_not_claim_sibling_or_unwritten_assets
     result = scenario.run(
         "install", str(scenario.packages["a"]), "--target", "claude,codex", expected=1
     )
-    assert "Could not" in result.stdout or "failed" in result.stdout
+    output = result.stdout + result.stderr  # error lines go to stderr (RA-004)
+    assert "Could not" in output or "failed" in output
     after = load_yaml(scenario.lock_root / "apm.lock.yaml")
     assert after["deployments"] == before["deployments"]
     for previous, current in zip(before["dependencies"], after["dependencies"], strict=True):
         assert current["deployed_files"] == previous["deployed_files"]
         assert current["deployed_file_hashes"] == previous["deployed_file_hashes"]
-    assert (scenario.deploy_root / ".claude/skills/s/new.md").read_bytes() == b"new source asset\n"
+    # The install fails before its lockfile commits, so it restores what it wrote (#4282).
+    assert not (scenario.deploy_root / ".claude/skills/s/new.md").exists()
     assert not (scenario.deploy_root / ".agents/skills/s/new.md").exists()
     for root in _ROOTS:
         assert (scenario.deploy_root / root / "b.md").read_bytes() == b"b asset\n"
@@ -353,12 +355,17 @@ def test_native_skill_and_legacy_plugin_share_only_member_ownership(
         json.dumps({"name": "b", "version": "1.0.0", "skills": ["./skills/s"]}),
         encoding="utf-8",
     )
+    # At user scope a Claude plugin installs intact through Claude settings
+    # (#3290), so the two packages share member ownership only where the
+    # plugin still projects loose: the Codex root.
+    target = "codex" if user_scope else "claude,codex"
+    roots = {".agents/skills/s": "codex"} if user_scope else _ROOTS
     installed = []
     for owner in (*order, order[0]):
-        scenario.install(owner)
+        scenario.install(owner, target=target)
         if owner not in installed:
             installed.append(owner)
-        scenario.assert_state(owner, tuple(installed), installed=tuple(installed))
+        scenario.assert_state(owner, tuple(installed), installed=tuple(installed), roots=roots)
     lock = load_yaml(scenario.lock_root / "apm.lock.yaml")
     assert {row["package_type"] for row in lock["dependencies"]} == {
         "claude_skill",

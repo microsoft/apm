@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from apm_cli.cache.url_normalize import SCP_LIKE_RE, normalize_repo_url
+from apm_cli.core.remediation import MARKETPLACE_HOST_CONFLICT
 from apm_cli.utils.github_host import default_host, is_valid_fqdn, validate_ssh_user
 from apm_cli.utils.path_security import decode_url_path_segments, validate_path_segments
 
@@ -131,6 +132,20 @@ def same_marketplace_catalog(left: MarketplaceSource, right: MarketplaceSource) 
     return left.path == right.path and same_marketplace_origin(
         marketplace_origin(left), marketplace_origin(right)
     )
+
+
+def marketplace_policy_subject(origin_or_pattern: str) -> str:
+    """Return the ``host/path`` key ``marketplace.allow`` matches an origin by.
+
+    Applied to both sides: a recorded origin and an allow pattern, which may
+    be written with or without a scheme (``github.com/contoso/*``). Transport,
+    userinfo, default ports, a trailing ``.git`` and host case are ignored, as
+    in :func:`same_marketplace_origin`.
+    """
+    value = origin_or_pattern.strip()
+    if "://" not in value and not SCP_LIKE_RE.match(value):
+        value = f"https://{value}"
+    return _origin_comparison_key(value)
 
 
 def _origin_comparison_key(origin: str) -> str:
@@ -343,8 +358,15 @@ def _reject_conflicting_host(host_flag: str | None, embedded_host: str | None, s
 
         raise ValueError(
             "Conflicting host: --host does not match the host embedded in SOURCE.\n"
-            f"To fix: drop --host and run: apm marketplace add {shlex.quote(source)}"
+            f"{MARKETPLACE_HOST_CONFLICT.bind(source=shlex.quote(source)).sentence()}"
         )
+
+
+def is_shorthand_marketplace_source(raw: str) -> bool:
+    """Return whether *raw* is ``OWNER/REPO`` or ``HOST/OWNER/REPO`` shorthand."""
+    return not (
+        "://" in raw or _looks_like_local_marketplace_source(raw) or _SCP_PREFIX_RE.match(raw)
+    )
 
 
 def _looks_like_local_marketplace_source(raw: str) -> bool:

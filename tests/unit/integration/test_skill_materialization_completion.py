@@ -156,7 +156,7 @@ def test_required_identical_write_keeps_normal_hash_guard_and_actual_copy_callba
     shutil.copytree(source, destination)
     written = []
     diagnostics = DiagnosticCollector()
-    with patch("apm_cli.integration.base_integrator.shutil.copy2", wraps=shutil.copy2) as copy:
+    with patch("shutil.copy2", wraps=shutil.copy2) as copy:
         copied = BaseIntegrator().copy_directory_files(
             source,
             destination,
@@ -176,8 +176,12 @@ def test_required_identical_write_keeps_normal_hash_guard_and_actual_copy_callba
             unchanged=True,
             diagnostics=diagnostics,
         )
-    assert copy.call_count == (2 if baseline == "valid" else 0)
+    # "changed": the files already hold the package's bytes, so they are
+    # rewritten and recorded (adopted), never reported as kept edits.
+    assert copy.call_count == (0 if baseline == "missing" else 2)
     assert diagnostics.error_count == (2 if baseline == "missing" else 0)
+    if baseline != "missing":
+        assert not diagnostics.has_diagnostics
     assert written == copied
     assert len(written) == copy.call_count
     assert {path.name: path.read_bytes() for path in destination.iterdir()} == {
@@ -227,7 +231,7 @@ def test_post_discovery_failures_never_publish_success(tmp_path: Path, stage: st
     package, project, plan = _fixture(tmp_path)
     integrator = SkillIntegrator()
     target = {
-        "copy": "apm_cli.integration.base_integrator.shutil.copy2",
+        "copy": "shutil.copy2",
         "rewrite": "apm_cli.integration.skill_integrator.SkillIntegrator._resolve_markdown_links_in_skill_bundle",
         "hash": "apm_cli.utils.content_hash.compute_file_hash",
     }[stage]
@@ -263,7 +267,7 @@ def test_copy_failure_only_rolls_back_new_empty_destination(
             destination.write_bytes(b"partial write")
         raise OSError("injected first-copy failure")
 
-    with patch("apm_cli.integration.base_integrator.shutil.copy2", side_effect=fail_copy):
+    with patch("shutil.copy2", side_effect=fail_copy):
         with pytest.raises(OSError, match="injected first-copy failure"):
             integrator.integrate_package_skill(
                 package,

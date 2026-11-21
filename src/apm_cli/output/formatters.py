@@ -3,17 +3,19 @@
 from pathlib import Path
 
 try:
-    from rich import box
-    from rich.console import Console
     from rich.panel import Panel
-    from rich.table import Table
     from rich.text import Text
+
+    from apm_cli.utils.console import new_console, new_table
 
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
 
+from ..core.remediation import COMPILE_DRY_RUN
 from .models import CompilationResults, OptimizationDecision, PlacementStrategy
+
+_DRY_RUN_FOOTER = f"[DRY RUN] No files written. {COMPILE_DRY_RUN.sentence()}"
 
 
 class CompilationFormatter:
@@ -26,7 +28,7 @@ class CompilationFormatter:
             use_color: Whether to use colors and rich formatting.
         """
         self.use_color = use_color and RICH_AVAILABLE
-        self.console = Console() if self.use_color else None
+        self.console = new_console() if self.use_color else None
         self._target_name = "AGENTS.md"  # Default, updated per format call
 
     def format_default(self, results: CompilationResults) -> str:
@@ -276,7 +278,7 @@ class CompilationFormatter:
 
         if self.use_color and RICH_AVAILABLE:
             # Create a Rich table for professional display
-            table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE_HEAD)
+            table = new_table(show_header=True, header_style="bold cyan")
             table.add_column("Pattern", style="white", width=25)
             table.add_column("Source", style="yellow", width=20)
             table.add_column("Coverage", style="dim", width=10)
@@ -493,13 +495,9 @@ class CompilationFormatter:
 
         # Call to action
         if self.use_color:
-            lines.append(
-                self._styled(
-                    "[DRY RUN] No files written. Run 'apm compile' to apply changes.", "yellow"
-                )
-            )
+            lines.append(self._styled(_DRY_RUN_FOOTER, "yellow"))
         else:
-            lines.append("[DRY RUN] No files written. Run 'apm compile' to apply changes.")
+            lines.append(_DRY_RUN_FOOTER)
 
         return lines
 
@@ -516,11 +514,10 @@ class CompilationFormatter:
 
         if self.use_color and RICH_AVAILABLE:
             # Coverage-First Strategy Table
-            strategy_table = Table(
+            strategy_table = new_table(
                 title="Three-Tier Coverage-First Strategy",
                 show_header=True,
                 header_style="bold cyan",
-                box=box.SIMPLE_HEAD,
             )
             strategy_table.add_column("Pattern", style="white", width=25)
             strategy_table.add_column("Source", style="yellow", width=15)
@@ -573,11 +570,10 @@ class CompilationFormatter:
             lines.append("")
 
             # Hierarchical Coverage Analysis Table
-            coverage_table = Table(
+            coverage_table = new_table(
                 title="Hierarchical Coverage Analysis",
                 show_header=True,
                 header_style="bold cyan",
-                box=box.SIMPLE_HEAD,
             )
             coverage_table.add_column("Pattern", style="white", width=25)
             coverage_table.add_column("Matching Files", style="yellow", width=15)
@@ -675,7 +671,7 @@ hierarchical inheritance. Coverage takes priority over efficiency."""
 
         # Create metrics table
         if self.use_color and RICH_AVAILABLE:
-            table = Table(box=box.SIMPLE)
+            table = new_table()
             table.add_column("Metric", style="white", width=20)
             table.add_column("Value", style="white", width=12)
             table.add_column("Assessment", style="blue", width=35)

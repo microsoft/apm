@@ -85,6 +85,18 @@ extract_release_asset_digest() {
     ' RS=,
 }
 
+# Retry transient GitHub API failures (5xx, resets) so one blip cannot fail
+# setup. --retry-all-errors needs curl 7.71+; older curl keeps plain --retry.
+curl_retry_flags() {
+    local help
+    help="$(curl --help all 2>/dev/null || true)"
+    if [[ "$help" == *--retry-all-errors* ]]; then
+        echo "--retry 3 --retry-all-errors --retry-delay 2"
+    else
+        echo "--retry 3 --retry-delay 2"
+    fi
+}
+
 fetch_github_api() {
     local url="$1"
     local use_auth="$2"
@@ -103,11 +115,17 @@ fetch_github_api() {
     fi
 
     if command -v curl >/dev/null 2>&1; then
-        if [[ -n "$token" ]]; then
-            curl -fsSL -H "Authorization: Bearer $token" "$url"
-        else
-            curl -fsSL "$url"
-        fi
+        local -a retry auth=()
+        local body status=0
+        read -r -a retry <<< "$(curl_retry_flags)"
+        [[ -n "$token" ]] && auth=(-H "Authorization: Bearer $token")
+        # A file output (not stdout) lets curl discard a partial body before
+        # it retries; emit the body only once a whole response arrived.
+        body="$(mktemp "${TMPDIR:-/tmp}/apm-codex-metadata.XXXXXX")" || return 1
+        curl -fsSL "${retry[@]}" ${auth[@]+"${auth[@]}"} -o "$body" "$url" || status=$?
+        [[ "$status" -eq 0 ]] && cat "$body"
+        rm -f "$body"
+        return "$status"
     elif command -v wget >/dev/null 2>&1; then
         if [[ -n "$token" ]]; then
             wget -qO- --header="Authorization: Bearer $token" "$url"
@@ -335,6 +353,14 @@ setup_codex() {
             log_info "No GitHub token found - you'll need to set GITHUB_TOKEN (user-scoped PAT)"
         fi
         
+        # GitHub Models has no Responses API: Codex after v0.115 needs wire_api=chat
+        # (#605). Only a release known to be v0.115 or older keeps "responses".
+        wire_api="chat"
+        codex_minor=$(echo "$CODEX_VERSION" | sed -n 's/^rust-v0\.\([0-9]*\).*/\1/p')
+        if [ -n "$codex_minor" ] && [ "$codex_minor" -le "$LAST_COMPAT_VERSION_MINOR" ] 2>/dev/null; then
+            wire_api="responses"
+        fi
+
         cat > "$codex_config" << EOF
 model_provider = "github-models"
 model = "openai/gpt-4o"
@@ -343,23 +369,11 @@ model = "openai/gpt-4o"
 name = "GitHub Models"
 base_url = "https://models.github.ai/inference/"
 env_key = "$github_token_var"
-wire_api = "responses"
+wire_api = "$wire_api"
 EOF
-        
-        log_success "Codex configuration created at $codex_config"
-        log_info "Using Codex $CODEX_VERSION."
 
-        # Version compatibility check
-        codex_minor=$(echo "$CODEX_VERSION" | sed -n 's/^rust-v0\.\([0-9]*\).*/\1/p')
-        if [ -n "$codex_minor" ] && [ "$codex_minor" -gt "$LAST_COMPAT_VERSION_MINOR" ] 2>/dev/null; then
-            echo ""
-            log_warning "codex >= v0.116 requires wire_api=chat configuration for GitHub Models compatibility."
-            log_warning "The generated config uses wire_api=responses, which returns 404 with GitHub Models."
-            log_warning "To fix, update wire_api in $codex_config:"
-            log_warning "  wire_api = \"chat\""
-            log_warning "Or install an older compatible version: apm runtime setup codex --version rust-v0.115.0"
-            echo ""
-        fi
+        log_success "Codex configuration created at $codex_config"
+        log_info "Using Codex $CODEX_VERSION (wire_api = \"$wire_api\" for GitHub Models)."
 
         log_info "Override with: apm runtime setup codex --version <version> (e.g. 'latest')"
         log_info "APM configured Codex with GitHub Models as default provider"

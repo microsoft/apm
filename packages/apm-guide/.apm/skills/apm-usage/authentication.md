@@ -128,6 +128,30 @@ your Git configuration. Generic HTTP fetches suppress credential channels, HTTPS
 to-HTTP rewrites are rejected, and generic SSH stays token-free. See the
 [full transport policy](https://microsoft.github.io/apm/getting-started/authentication/#generic-marketplace-git-transport).
 
+## Private hosted marketplace catalogs
+
+A hosted `marketplace.json` URL registered with `--name` authenticates with
+its own variables. `{NAME}` is that name, uppercased, `-`/`.` -> `_`.
+
+| Env var(s) | Sent as |
+|------------|---------|
+| `APM_MARKETPLACE_TOKEN_{NAME}` | `Authorization: Bearer <token>` |
+| `APM_MARKETPLACE_USER_{NAME}` + `APM_MARKETPLACE_PASS_{NAME}` | `Authorization: Basic <base64(user:pass)>` |
+
+```bash
+export APM_MARKETPLACE_TOKEN_CORP=your_token
+apm marketplace add https://catalog.example.com/team/marketplace.json --name corp
+```
+
+- Only `--name` binds a name to the URL; re-adding it with another URL fails
+  until `apm marketplace remove NAME`. Names mapping to the same variables
+  are rejected.
+- Sent only within the registered origin, directory and query, checked on
+  every redirect; HTTPS-to-HTTP is refused. No Git, registry or `.netrc`
+  fallback, and never sent with package downloads.
+- 401, 403 or a sign-in redirect: `Access to marketplace 'NAME' was denied`
+  naming the variable, exit 1, never served from cache.
+
 ## GitLab hosts
 
 `gitlab.com` is detected automatically. For self-managed GitLab, set
@@ -301,7 +325,7 @@ and an executed effective HTTPS attempt matching the API's normalized
 scheme/host/port. HTTP is not upgraded; HTTPS rewritten to SSH/local does
 not qualify. Opt-in alternate protocol reuses the declared custom port and
 warns, without mapping SSH aliases to web hostnames. See the
-[GitLab fetch policy](https://microsoft.github.io/apm/consumer/authentication/#gitlab-saas-or-self-managed)
+[GitLab fetch policy](https://microsoft.github.io/apm/getting-started/authentication/#gitlab-saas-and-self-managed)
 and [GitLab hosts](#gitlab-hosts) for token trust.
 
 ## GHE Cloud data residency (*.ghe.com)
@@ -312,6 +336,17 @@ apm install myenterprise.ghe.com/platform/standards
 ```
 
 No public repos exist on `*.ghe.com` -- auth is always required.
+
+`GITHUB_APM_PAT` (and `GITHUB_TOKEN`, `GH_TOKEN`) is sent to `github.com`
+and to any `*.ghe.com` host a dependency names. There is no per-host token;
+`GITHUB_APM_PAT_{ORG}` scopes a token to one organization name on any of
+these hosts. GHES joins this chain only when `GITHUB_HOST` names it.
+
+`APM_STRICT_HOST_CREDENTIALS=1` (also `true`/`yes`/`on`; unrecognised values
+turn it on with a warning) keeps those env tokens on the configured host
+(`GITHUB_HOST`, else `github.com`). Other `github.com` / `*.ghe.com` hosts get
+`gh auth token` and `git credential fill` run without GitHub token variables;
+sign in with `gh auth login --hostname <host>` or a credential helper.
 
 ## Enterprise Managed Users (EMU)
 
@@ -334,8 +369,14 @@ export PROXY_REGISTRY_ONLY=1                   # optional: proxy-only mode
 proxy token. The deprecated `ARTIFACTORY_APM_TOKEN` is ignored (with one
 warning) when no proxy URL is configured.
 
-When `PROXY_REGISTRY_ONLY=1`, APM routes all traffic through the proxy and
-never contacts GitHub directly. APM fetches exact versions only and does not
+When `PROXY_REGISTRY_ONLY=1`, APM downloads every package through the proxy
+and sends no probe or listing to the source host. It also refuses marketplace
+catalogs the proxy cannot serve (Azure DevOps, generic git, URL, or no
+`PROXY_REGISTRY_URL`) and lookups in the default MCP registry (set
+`MCP_REGISTRY_URL` to a proxied registry). Two requests stay direct by design:
+the org policy fetch (the governance channel; APM prints one `[i]` line naming
+its origin) and an explicit `apm self-update`; the automatic update check is
+skipped. APM fetches exact versions only and does not
 list versions through the proxy, so semver ranges (`#^1.2.0`) and
 `apm view <pkg> versions` fail with an actionable error and `apm outdated`
 reports git deps as unknown. Pin the exact upstream tag (`#v1.2.3`) and commit

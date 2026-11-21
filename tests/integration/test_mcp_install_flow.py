@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -60,22 +59,17 @@ def test_uninstall_cleanup_preserves_same_named_server_in_other_runtime(
         mcp_servers=["shared-name"],
         mcp_target_servers={"hermes": ["shared-name"]},
     )
-    view = SimpleNamespace(dependencies=[], configs={}, provenance={})
-
-    with patch(
-        "apm_cli.integration.mcp_config_view.CurrentMcpConfigView.derive",
-        return_value=view,
-    ):
-        _cleanup_stale_mcp(
-            MagicMock(),
-            lockfile,
-            tmp_path / "apm.lock.yaml",
-            {"shared-name"},
-            modules_dir=tmp_path / "apm_modules",
-            user_scope=True,
-            scope=InstallScope.USER,
-            persist=False,
-        )
+    # The real view owner derives an empty current set (no package declares MCP).
+    _cleanup_stale_mcp(
+        MagicMock(),
+        lockfile,
+        tmp_path / "apm.lock.yaml",
+        {"shared-name"},
+        modules_dir=tmp_path / "apm_modules",
+        user_scope=True,
+        scope=InstallScope.USER,
+        persist=False,
+    )
 
     assert (
         "shared-name"
@@ -913,6 +907,7 @@ def test_legacy_lockfile_adopts_exact_mcp_baseline_before_target_contraction(
 
     manifest["targets"] = ["copilot"]
     (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    clear_apm_yml_cache()  # a real second command reads apm.yml in a fresh process
     contracted = CliRunner().invoke(
         cli,
         ["install", "--target", "copilot", "--no-policy"],

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from ..core.remediation import HIDDEN_CHARACTERS_FLAGGED
 from ..utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -229,15 +230,15 @@ class SecurityGate:
                 package=package,
                 detail=force_detail
                 or (
-                    f"{verdict.critical_count} critical finding(s) — "
-                    "run 'apm audit --strip' to clean up"
+                    f"{verdict.critical_count} critical finding(s) -- "
+                    f"{HIDDEN_CHARACTERS_FLAGGED.clause()}"
                 ),
                 severity="critical",
             )
         elif verdict.has_critical and verdict.should_block:
             diagnostics.security(
                 message=(
-                    "Blocked — critical hidden characters in source. Use --force to override."
+                    "Blocked -- critical hidden characters in source. Use --force to override."
                 ),
                 package=package,
                 detail=f"at least {verdict.critical_count} critical, "
@@ -251,7 +252,7 @@ class SecurityGate:
                 package=package,
                 detail=(
                     f"{verdict.critical_count} critical, "
-                    f"{verdict.warning_count} warning(s) — "
+                    f"{verdict.warning_count} warning(s) -- "
                     "run 'apm audit' to inspect"
                 ),
                 severity="critical",
@@ -261,7 +262,8 @@ class SecurityGate:
                 message="Hidden characters in source files",
                 package=package,
                 detail=(
-                    f"{verdict.warning_count} warning(s) — run 'apm audit --strip' after install"
+                    f"{verdict.warning_count} warning(s) -- after install, "
+                    f"{HIDDEN_CHARACTERS_FLAGGED.clause()}"
                 ),
                 severity="warning",
             )

@@ -13,6 +13,8 @@ For TLS-specific failures see [SSL / TLS issues](../ssl-issues/). For the full f
 
 Symptom: `403`, `401`, "authentication required", or "Repository not found" on a repo you can clone manually with `git`.
 
+The error names the host and the credential source APM tried (for example `credential tried: GITHUB_APM_PAT_ACME`, or the sources it checked when none held a token), never the token value. A host that answers "not found" is reported as `Repository <owner/repo> not found on <host>`, not as a network error: check the name, or that the credential can read a private repository. For a dependency declared in `apm.yml`, the error ends with `Run 'apm uninstall <owner/repo>'` to drop it.
+
 ### GitHub precedence chain
 
 APM resolves a token per host class. For `github.com`, GHE Cloud, and GHES the order is:
@@ -196,8 +198,8 @@ and lockfiles invalid for other reasons keep their existing behavior.
 
 `apm.lock.yaml` records the APM version that wrote it in `apm_version`. If your
 APM is older, `apm install` (including `--frozen` and `-g`), `apm update`,
-`apm uninstall`, `apm prune`, `apm lock`, `apm audit` and `apm pack` stop before
-changing anything and name both versions:
+`apm uninstall`, `apm prune`, `apm lock`, `apm compile`, `apm audit` and
+`apm pack` stop before changing anything and name both versions:
 
 ```text
 Refusing to run 'apm install' on apm.lock.yaml: it was written by APM 0.38.0,
@@ -215,6 +217,15 @@ restore it from version control.
 
 `apm install <bundle>` warns, but still installs, when the bundle's embedded
 `apm.lock.yaml` was written by a newer APM; the warning names both versions.
+
+APM 0.36 and earlier also refuse a lockfile that APM 0.37 promoted to
+`lockfile_version: "4"` (hash framing hardening):
+
+```text
+Unsupported lockfile version '4'; supported versions: ...
+```
+
+Upgrade APM to 0.37 or later everywhere that lockfile is installed, CI included.
 
 ### Drifted refs
 
@@ -420,7 +431,7 @@ downloads:**
    apm --version
    ```
 
-   Requires Python 3.11+. See [pip install](../../getting-started/installation/#pip-install).
+   Requires Python 3.11+. See [pip install](../../getting-started/installation/#install-the-cli).
 
 3. **Submit the binary to Microsoft** if your organisation needs the detection
    cleared for an older release: use the

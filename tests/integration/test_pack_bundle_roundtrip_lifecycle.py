@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ import pytest
 from tests.integration._marketplace_pack_kit import (
     MarketplacePackWorld,
     output,
+    remote_url,
     skill_md,
     tree_bytes,
     write,
@@ -99,6 +101,39 @@ def test_packed_bundle_installs_as_bundle_not_source(
     assert "error" not in output(second).lower()
 
 
+_CLAUDE_LSP = Path(".claude") / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+
+
+def test_packed_lsp_servers_deploy_from_the_bundle_like_the_source(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """RA-034: Claude plugin bundles carry LSP servers in .lsp.json (no silent loss, I8)."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    producer = world.isolated.work_root / "lsp-bundler"
+    write(
+        producer / "apm.yml",
+        "name: lsp-bundler\nversion: 1.0.0\ndescription: b\nlicense: MIT\ntargets: [claude]\n"
+        "dependencies:\n  apm: []\n  lsp:\n    - name: pyright\n"
+        "      command: pyright-langserver\n      args: [--stdio]\n"
+        "      extensionToLanguage: {'.py': python}\n",
+    )
+    write(producer / ".apm" / "skills" / "ls" / "SKILL.md", skill_md("ls"))
+    authored = {"command": "rust-analyzer", "extensionToLanguage": {".rs": "rust"}}
+    write(producer / ".lsp.json", json.dumps({"lspServers": {"rust-analyzer": authored}}))
+    world.apm(producer, "install", "--no-policy")
+    source = json.loads((producer / _CLAUDE_LSP).read_text())["lspServers"]
+    assert set(source) == {"pyright"}
+
+    world.apm(producer, "pack", "-o", str(tmp_path / "out"))
+    bundle = tmp_path / "out" / "lsp-bundler-1.0.0"
+    assert set(json.loads((bundle / ".lsp.json").read_text())) == {"pyright", "rust-analyzer"}
+
+    consumer = world.consumer("lsp-consumer", targets=("claude",))
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    deployed = json.loads((consumer / _CLAUDE_LSP).read_text())["lspServers"]
+    assert deployed == {**source, "rust-analyzer": authored}
+
+
 def test_source_package_with_plugin_json_installs_as_local_dependency(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -116,3 +151,78 @@ def test_source_package_with_plugin_json_installs_as_local_dependency(
     world.apm(consumer, "uninstall", str(producer))
     assert not (consumer / ".claude" / "skills" / "bs").exists()
     assert tree_bytes(producer).keys() >= {"apm.yml", "plugin.json"}
+
+
+def test_apm_format_pack_carries_skills_deployed_under_agents(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``--format apm`` bundles copilot skills deployed to ``.agents/skills/`` (#4202)."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    package = world.isolated.package_root / "skillpkg"
+    write(
+        package / "apm.yml", "name: skillpkg\nversion: 1.0.0\ndescription: s\ntargets: [copilot]\n"
+    )
+    write(package / ".apm" / "skills" / "ks" / "SKILL.md", skill_md("ks", "body\n"))
+    _, commit = world.publish("skillpkg", package)
+    producer = world.consumer(
+        "producer", targets=("copilot",), deps=({"git": remote_url("skillpkg"), "ref": commit.sha},)
+    )
+    world.apm(producer, "install")
+    deployed = ".agents/skills/ks/SKILL.md"
+    assert (producer / deployed).is_file()
+    recorded = {p for dep in world.lock(producer)["dependencies"] for p in dep["deployed_files"]}
+    assert ".agents/skills/ks" in recorded, recorded
+    sources_before = tree_bytes(producer)
+
+    out = tmp_path / "out"
+    packed = world.apm(producer, "pack", "--format", "apm", "--archive", "-o", str(out))
+    assert "No deployed files found" not in output(packed), output(packed)
+    # Pack only adds the generated Copilot plugin manifest to the project.
+    after = tree_bytes(producer)
+    assert {k: v for k, v in after.items() if k != ".github/plugin/plugin.json"} == sources_before
+    archive = out / "producer-0.1.0.zip"
+    with zipfile.ZipFile(archive) as bundle:
+        names = bundle.namelist()
+        assert f"producer-0.1.0/{deployed}" in names, names
+        assert bundle.read(f"producer-0.1.0/{deployed}") == (producer / deployed).read_bytes()
+
+    target = world.consumer("bundle-target", targets=("copilot",))
+    unpacked = world.apm(target, "unpack", str(archive))
+    assert "No files were unpacked" not in output(unpacked), output(unpacked)
+    assert (target / deployed).read_bytes() == (producer / deployed).read_bytes()
+
+
+def test_share_hint_in_a_bare_directory_leaves_an_auditable_project(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """RA-017: the printed share line, run with no apm.yml, converges to a clean audit."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    producer = _producer(world)
+    world.apm(producer, "install", "--no-policy")
+    packed = output(world.apm(producer, "pack", "--format", "claude-plugin"))
+    share = re.search(r"Share with: apm install (\S+)$", packed, re.MULTILINE)
+    assert share, packed
+
+    consumer = world.isolated.work_root / "bare-consumer"
+    (consumer / ".claude").mkdir(parents=True)
+    bundle = str(producer / share.group(1))
+    installed = world.apm(consumer, "install", bundle, "--no-policy")
+    assert "Created apm.yml" in output(installed), output(installed)
+    assert (consumer / ".claude" / "skills" / "bs" / "SKILL.md").is_file()
+    assert (consumer / "apm.lock.yaml").is_file()
+    world.apm(consumer, "audit", "--ci", "--no-policy")
+
+    # A converged repeat changes no bytes and never edits the manifest.
+    settled = tree_bytes(consumer)
+    again = world.apm(consumer, "install", bundle, "--no-policy")
+    assert "Created apm.yml" not in output(again), output(again)
+    assert tree_bytes(consumer) == settled
+
+    # A manifest deleted later: audit names the remedy, and running it converges.
+    (consumer / "apm.yml").unlink()
+    missing = world.apm(consumer, "audit", "--ci", "--no-policy", "-f", "json", expect=1)
+    (check,) = [c for c in json.loads(missing.stdout)["checks"] if c["name"] == "manifest-missing"]
+    remedy = re.search(r"Run '(apm init --yes)' to create apm\.yml\.", check["message"])
+    assert remedy, check
+    world.apm(consumer, *remedy.group(1).split()[1:])
+    world.apm(consumer, "audit", "--ci", "--no-policy")

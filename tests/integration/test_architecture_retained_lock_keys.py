@@ -17,8 +17,8 @@ RULE = "install-deployment-uninstall-reachability"
     [
         pytest.param(
             "src/apm_cli/commands/prune.py",
-            "expected_lock_keys |= retained_lock_keys(",
-            "expected_lock_keys |= private_retained_keys(",
+            "reachability=ReachabilityProbe(",
+            "reachability=private_retained_keys(",
             id="prune-bypasses-owner",
         ),
         pytest.param(

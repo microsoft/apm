@@ -32,7 +32,11 @@ from urllib.parse import urlsplit
 from git.exc import GitCommandError
 
 from ..core.auth_chain import AdoAuthChainExhaustedError
-from ..core.auth_outcome import classify_auth_outcome
+from ..core.auth_outcome import (
+    RepositoryNotFoundError,
+    classify_auth_outcome,
+    is_repository_not_found,
+)
 from ..models.apm_package import DependencyReference
 from ..models.dependency.host_virtual import repository_owner
 from ..utils.github_host import (
@@ -49,6 +53,15 @@ from .transport_selection import (
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
+
+
+def _retry_sleep(seconds: float) -> None:
+    """Wait before retrying a failed Git connection.
+
+    The single retry-wait seam: tests patch this instead of the process-wide
+    ``time.sleep``, which would also record sleeps from unrelated threads.
+    """
+    time.sleep(seconds)
 
 
 def _is_connect_failure(error: GitCommandError | subprocess.CalledProcessError, url: str) -> bool:
@@ -119,9 +132,7 @@ class _DownloaderContext(Protocol):
         repo_url_base: str,
         *,
         use_ssh: bool = ...,
-        dep_ref: DependencyReference | None = ...,
-        token: str | None = ...,
-        auth_scheme: str = ...,
+        dep_ref: DependencyReference,
     ) -> str: ...
     def _sanitize_git_error(self, error_message: str) -> str: ...
 
@@ -193,7 +204,7 @@ class CloneEngine:
                 _debug("HTTPS connection failed; retrying the same Git action once in 1s")
                 # Clone callbacks own partial-target cleanup; fetch callbacks
                 # retain the existing bare repository. Never delete here.
-                time.sleep(1)
+                _retry_sleep(1)
                 clone_action(url, env, target)
 
         dep_host = dep_ref.host if dep_ref else None
@@ -205,7 +216,6 @@ class CloneEngine:
                 repo_url_base,
                 use_ssh=candidate_uses_ssh,
                 dep_ref=dep_ref,
-                token="",
             )
             if dep_ref is not None
             else None
@@ -352,8 +362,6 @@ class CloneEngine:
                     repo_url_base,
                     use_ssh=False,
                     dep_ref=dep_ref,
-                    token="",
-                    auth_scheme="basic",
                 )
                 _clone(winning_url, git_env, target_path)
 
@@ -395,8 +403,6 @@ class CloneEngine:
                         repo_url_base,
                         use_ssh=use_ssh,
                         dep_ref=dep_ref,
-                        token="",
-                        auth_scheme=dep_auth_scheme if attempt.use_token else "basic",
                     )
                 except Exception as e:
                     last_error = e
@@ -462,6 +468,7 @@ class CloneEngine:
                 if plan.strict:
                     break
 
+        repository_not_found = last_error is not None and is_repository_not_found(last_error)
         error_msg = build_clone_failure_message(
             repo_url_base=repo_url_base,
             plan=plan,
@@ -485,6 +492,9 @@ class CloneEngine:
                     public_github_anonymous=True,
                 ).is_auth_failure
             ),
+            repository_not_found=repository_not_found,
         )
 
+        if repository_not_found:
+            raise RepositoryNotFoundError(error_msg) from last_error
         raise RuntimeError(error_msg)

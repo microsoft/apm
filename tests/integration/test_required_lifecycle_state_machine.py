@@ -9,6 +9,7 @@ import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from unittest.mock import patch
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -17,6 +18,8 @@ import tomlkit
 
 from apm_cli.agent_plugins import PLUGIN_SCHEMA_ID
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_state import DeploymentLedger
+from apm_cli.core.remediation import DEPENDENCY_ALIAS_INVALID
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash, compute_package_hash
@@ -26,7 +29,6 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import (
     ArtifactSnapshot,
     ArtifactSnapshotSet,
-    assert_only_snapshot_paths_changed,
     assert_snapshot_changes_within,
     assert_snapshot_set_unchanged,
     assert_unchanged,
@@ -66,8 +68,13 @@ _GLOBAL_AUDIT_RULES = frozenset(
         "deployed-files-present",
         "deployment-ledger-owners",
         "drift",
+        "exec-status-current",
+        "hook-approval-pins",
         "includes-consent",
+        "local-bundle-hooks",
         "lockfile-exists",
+        "lockfile-targets-current",
+        "native-mcp-ownership",
         "no-orphaned-packages",
         "ref-consistency",
         "skill-subset-consistency",
@@ -129,8 +136,13 @@ def _assert_skill_receipt(
     owner: str,
     expected: Mapping[str, Path],
     bound: bool,
+    user_env: Mapping[str, str] | None = None,
 ) -> Path:
-    """Check successful-write evidence and its expected committed-claim binding."""
+    """Check successful-write evidence and its expected committed-claim binding.
+
+    *user_env* is the command's target-root environment, under which
+    target-relative user-lockfile rows resolve.
+    """
     receipts = list((scenario.isolated.config_root / "deployment-receipts").glob("*.json"))
     assert len(receipts) == 1
     receipt = receipts[0]
@@ -146,14 +158,27 @@ def _assert_skill_receipt(
     assert data["root_identity"] == [root.stat().st_dev, root.stat().st_ino]
     assert data["scope"] == scope
     ledger = DeploymentLedgerCodec.from_rows(data["records"])
-    assert len(ledger.records) == len(expected)
     assert set(data["destinations"]) == set(data["bindings"]) == set(ledger.records)
+    # Other file primitives carry receipts too (#3701); check the skill members.
+    skill_roots = {path.resolve().parent.parent for path in expected.values()}
+    ledger = DeploymentLedger(
+        {
+            key: row
+            for key, row in ledger.records.items()
+            if Path(data["destinations"][key]).parent.parent in skill_roots
+        }
+    )
+    assert len(ledger.records) == len(expected)
     assert {
         row.locator.target: Path(data["destinations"][key]) for key, row in ledger.records.items()
     } == {target: path.resolve() for target, path in expected.items()}
     lock_root = scenario.isolated.config_root if scope == "user" else root
     lock = LockFile.read(lock_root / "apm.lock.yaml")
     assert lock is not None
+    if scope == "user":
+        # Read the user lockfile as the CLI does, under the command's target roots.
+        with patch.dict(os.environ, user_env or {}):
+            DeploymentLedgerCodec.adopt_user_lockfile_rows(lock)
     claims = DeploymentLedgerCodec.from_lockfile(lock).records
     for key, row in ledger.records.items():
         path = expected[row.locator.target]
@@ -377,6 +402,45 @@ def _run_success(
     return result
 
 
+def _run_refused(
+    scenario: _Scenario,
+    project: LocalPackage,
+    kept: Path,
+    scenario_id: str,
+    *,
+    environment: dict[str, str],
+    local: bool = False,
+) -> None:
+    """Plain install keeps an edited managed file and names it (#4360, RA-012).
+
+    For a dependency file the receipt proves the edit; with nothing new to
+    deploy the install keeps the file, warns with the true reason and exits 0
+    (parity with skills). The project's own local content (*local*, owner ".")
+    has no kept-file partial apply: the install refuses with exit 1 and the
+    move-aside remedy (#4360).
+    """
+    before = kept.read_bytes()
+    result = scenario.runner.run(
+        _INSTALL_ARGS, scenario_id=scenario_id, cwd=project.root, env=environment
+    )
+    text = " ".join(result.stdout.split())
+    entry = kept.relative_to(project.root).as_posix()
+    from apm_cli.integration.base_integrator import kept_edit_message
+
+    if local:
+        both = " ".join((result.stdout + result.stderr).split())
+        assert result.returncode == 1, both
+        # The receipt proves the edit, so the refusal names the true reason (RA-012).
+        assert kept_edit_message(entry, user_scope=False, proven_edit=True) in both, both
+        assert "no local deployment receipt" not in both, both
+        assert kept.read_bytes() == before
+        return
+    assert result.returncode == 0, text
+    assert kept_edit_message(entry, user_scope=False, proven_edit=True) in text, text
+    assert "[!] [" in text and "] Kept " in text, text
+    assert kept.read_bytes() == before
+
+
 def _codex_header_lifecycle(
     scenario: _Scenario,
     scope: str,
@@ -593,7 +657,7 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
             scenario_id="codex-legacy-header-unchanged-conflict",
         )
         assert result.returncode != 0, _result_evidence(result)
-        assert "conflicts with the existing codex" in result.stdout
+        assert "conflicts with the existing codex" in result.stdout + result.stderr
         assert _codex_header_snapshot(manifest_path, config_path) == before
     unchanged = _codex_header_snapshot(manifest_path, config_path)
     assert unchanged.files == before.files
@@ -612,7 +676,7 @@ def test_required_codex_legacy_header_noop_and_declaration_repair(
             scenario_id="codex-legacy-header-declaration-conflict",
         )
         assert result.returncode != 0, _result_evidence(result)
-        assert "conflicts with the existing codex" in result.stdout
+        assert "conflicts with the existing codex" in result.stdout + result.stderr
         assert _codex_header_snapshot(manifest_path, config_path) == changed
         assert opposite_path.read_bytes() == opposite_bytes
         assert unrelated_file.read_bytes() == unrelated_bytes
@@ -681,6 +745,23 @@ def _audit_at(
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
     return result, payload
+
+
+def _assert_replay_reported_once(payload: dict[str, object], remedy: str) -> None:
+    """RA-005: one replay finding, said once.
+
+    The drift check carries the materialization error in full; the other
+    replay-backed checks only point to it.
+    """
+    owner = _check(payload, "drift")
+    assert owner["message"] == "drift replay failed; see details", owner
+    details = " ".join(str(detail) for detail in owner["details"])
+    assert "installed package materialization is missing" in details, details
+    assert remedy in details, details
+    for name in ("config-consistency", "skill-subset-consistency"):
+        assert _check(payload, name)["message"] == (
+            "not verified: the install replay failed (reported under drift)"
+        )
 
 
 def _check(payload: dict[str, object], name: str) -> dict[str, object]:
@@ -2187,6 +2268,72 @@ def test_required_reinstall_is_byte_idempotent_across_durable_state(
         assert_unchanged(before_rejection, ArtifactSnapshot.capture(consumer.root))
 
 
+@pytest.mark.parametrize("carried_cache", ["intact", "edited"])
+def test_required_partial_install_promotes_carried_rows_only_from_verified_bytes(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    carried_cache: str,
+) -> None:
+    """Hash framing hardening: a partial install re-hashes untouched rows from verified bytes."""
+    scenario = _new_scenario(tmp_path / f"partial-promotion-{carried_cache}", apm_binary_path)
+    # A package named on the command line is validated before install. On
+    # github.com that is a REST probe, which never sees the fixture's Git URL
+    # rewrite; a generic Git host is probed with git ls-remote, which does.
+    published = {}
+    for name in ("framing-first", "framing-second"):
+        package = scenario.sources.create(name)
+        scenario.sources.add_skill(package, name, _skill(name))
+        repository = scenario.repositories.create(name, source_tree=package.root)
+        commit = scenario.repositories.commit(repository, message=f"seed {name}")
+        remote_url = f"https://git.fixture.invalid/{_OWNER}/{name}"
+        published[name] = (
+            repository,
+            remote_url,
+            {"git": remote_url, "ref": commit.sha, "alias": name},
+        )
+    environment = scenario.repositories.url_rewrite_subprocess_env_many(
+        tuple((repository, url) for repository, url, _ in published.values())
+    )
+    consumer = scenario.consumers.create(
+        "partial-promotion-consumer",
+        dependencies=tuple(dependency for _, _, dependency in published.values()),
+        targets=("claude",),
+    )
+    _run_success(
+        scenario, consumer, _INSTALL_ARGS, environment=environment, scenario_id="partial-seed"
+    )
+    lock_path = consumer.root / "apm.lock.yaml"
+    lock_document = load_yaml(lock_path)
+    assert lock_document["lockfile_version"] == "4"
+    caches = {
+        name: consumer.root / "apm_modules" / name for name in ("framing-first", "framing-second")
+    }
+    lock_document["lockfile_version"] = "1"
+    for row in lock_document["dependencies"]:
+        row["content_hash"] = compute_package_hash(caches[row["alias"]], framed=False)
+    dump_yaml(lock_document, lock_path)
+    carried_skill = next(caches["framing-second"].rglob("SKILL.md"))
+    if carried_cache == "edited":
+        carried_skill.write_text("edited after install\n", encoding="utf-8")
+    before = lock_path.read_bytes()
+
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, published["framing-first"][1]),
+        environment=environment,
+        scenario_id=f"partial-install-{carried_cache}",
+    )
+
+    if carried_cache == "edited":
+        assert lock_path.read_bytes() == before
+        return
+    rows = {row["alias"]: row for row in load_yaml(lock_path)["dependencies"]}
+    assert load_yaml(lock_path)["lockfile_version"] == "4"
+    assert rows["framing-second"]["content_hash"] == compute_package_hash(caches["framing-second"])
+    assert rows["framing-first"]["content_hash"] == compute_package_hash(caches["framing-first"])
+
+
 def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
     tmp_path: Path,
     apm_binary_path: Path,
@@ -2237,10 +2384,12 @@ def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
     receipt = cached_package / ".apm" / ".plugin-skill-sources.json"
     assert receipt.is_file()
     receipt.unlink()
-    # APM 0.28 used the same tree-hash algorithm but did not write the
+    # APM 0.28 wrote lockfile version 1 with the legacy tree stream and no
     # parser-owned receipt, so hashing this receipt-less cache is its exact hash.
-    legacy_content_hash = compute_package_hash(cached_package)
+    legacy_content_hash = compute_package_hash(cached_package, framed=False)
     assert legacy_content_hash != current_content_hash
+    assert lock_document["lockfile_version"] == "4"
+    lock_document["lockfile_version"] = "1"
     lock_document["apm_version"] = "0.28.0"
     locked_dependency["content_hash"] = legacy_content_hash
     locked_dependency["package_type"] = "marketplace_plugin"
@@ -2278,6 +2427,7 @@ def test_required_legacy_content_hash_upgrade_preserves_skills_and_converges(
         == installed.file(".agents/skills/legacy-hash/SKILL.md").content
     )
     assert upgraded_dependency.content_hash == current_content_hash
+    assert load_yaml(lock_path)["lockfile_version"] == "4"
     assert upgraded_dependency.package_type == "marketplace_plugin"
     assert upgraded_dependency.deployed_files == prior_deployed_files
     assert upgraded_dependency.deployed_file_hashes == prior_deployed_hashes
@@ -2517,7 +2667,7 @@ def test_required_invalid_receiptless_legacy_cache_fails_with_recovery(
     if invalid_cache == "package-root-symlink":
         assert "unsafe destination" in output
         assert "without removing its target" in output
-        assert "rerun apm install" in output
+        assert DEPENDENCY_ALIAS_INVALID.bind(fix="").option() in output
         assert "apm deps clean --yes" not in output
     elif invalid_cache == "plugin-path":
         assert "is invalid" in output
@@ -2766,7 +2916,9 @@ def test_required_diamond_uninstall_preserves_shared_instructions_until_last_par
                     deployed_instruction,
                 }
             },
-            tree_prefixes={"project": {"apm_modules"}},
+            # The survivor rebuild rewrites the shared instruction, so its local
+            # deployment receipt is updated in the existing store (#3701).
+            tree_prefixes={"project": {"apm_modules"}, "user": {".apm/deployment-receipts"}},
         )
         assert not installed_sources[f"_local/{parent_name}"].exists()
         manifest_dependencies = (
@@ -2861,6 +3013,16 @@ def test_required_tamper_is_detected_and_repair_restores_last_good_state(
         for detail in check.get("details", [])
     )
 
+    # The tampered file has no deployment evidence (#4360): install keeps it
+    # and exits 1; the printed remedy (move it aside, then install) restores it.
+    _run_refused(
+        scenario,
+        consumer,
+        deployed_instruction,
+        "tamper-repair-reinstall-refused",
+        environment=source.environment,
+    )
+    deployed_instruction.unlink()
     _run_success(
         scenario,
         consumer,
@@ -2996,7 +3158,8 @@ def _exercise_global_revision_commands(
         command_cwd=manifest_path.parent,
         expected_returncode=1,
     )
-    assert "is not tracked by any installed package" in " ".join(found.stdout.split()), (
+    # apm find keeps stdout for package names; errors go to stderr (#3994).
+    assert "is not tracked by any installed package" in " ".join(found.stderr.split()), (
         _result_evidence(found)
     )
     _assert_same_state(installed, capture())
@@ -3448,6 +3611,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
             owner=f"{_OWNER}/{source.package.name}",
             expected={target: external_roots[target] / skill_paths[target] for target in targets},
             bound=True,
+            user_env={_EXTERNAL_USER_ROOT_ENV[t]: str(root) for t, root in external_roots.items()},
         )
 
     manifest_path = physical_apm_home / "apm.yml"
@@ -3564,10 +3728,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
     assert _check(package_removed_audit, "no-orphaned-packages")["passed"] is True
     assert _check(package_removed_audit, "deployed-files-present")["passed"] is True
     assert _check(package_removed_audit, "content-integrity")["passed"] is True
-    for check_name in ("config-consistency", "drift", "skill-subset-consistency"):
-        message = str(_check(package_removed_audit, check_name)["message"])
-        assert "installed package materialization is missing" in message
-        assert "apm install --global" in message
+    _assert_replay_reported_once(package_removed_audit, "apm install --global")
     _assert_same_state(package_removed_before_audit, package_removed_after_audit)
     shutil.move(str(modules_backup), str(modules_dir))
     assert_clean("global-audit-after-package-restore")
@@ -3700,7 +3861,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
         assert not (external_roots[target] / skill_paths[target]).exists()
 
 
-def test_required_failed_lock_write_bounds_partial_state_and_recovers(
+def test_required_failed_lock_write_restores_state_and_recovers(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
@@ -3751,6 +3912,10 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
         env=failing_environment,
     )
     assert failed.returncode != 0, _result_evidence(failed)
+    # #4282: the failed attempt restores every deployed file and its receipt.
+    assert "Deployed files restored to their previous state." in (failed.stdout + failed.stderr), (
+        _result_evidence(failed)
+    )
     after_failure = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
     after_artifacts = ArtifactSnapshotSet.capture(
         {
@@ -3758,46 +3923,15 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
             "user": scenario.isolated.home,
         }
     )
-    assert after_failure.manifest_bytes == before_failure.manifest_bytes
-    assert after_failure.deployment_records == before_failure.deployment_records
-    assert after_failure.lockfile_bytes == before_failure.lockfile_bytes
-    assert after_failure.mcp_state_bytes == before_failure.mcp_state_bytes
-    assert after_failure.lsp_state_bytes == before_failure.lsp_state_bytes
-    assert after_failure.file(".agents/skills/lock-release/SKILL.md").kind == "missing"
+    assert after_failure == before_failure
     assert (
-        after_failure.file(".claude/skills/lock-release/SKILL.md").content
+        after_failure.file(".agents/skills/lock-release/SKILL.md").content
         == _skill("lock-release").encode()
     )
-    assert (
-        _assert_skill_receipt(
-            scenario,
-            consumer.root,
-            scope="project",
-            owner=f"{_OWNER}/{source.package.name}",
-            expected={"claude": consumer.root / ".claude/skills/lock-release/SKILL.md"},
-            bound=False,
-        )
-        == receipt
-    )
-    assert_only_snapshot_paths_changed(
-        before_artifacts,
-        after_artifacts,
-        {
-            "project": {
-                ".agents",
-                ".agents/skills",
-                ".agents/skills/lock-release",
-                ".agents/skills/lock-release/SKILL.md",
-                ".claude",
-                ".claude/skills",
-                ".claude/skills/lock-release",
-                ".claude/skills/lock-release/SKILL.md",
-            },
-            "user": {receipt.relative_to(scenario.isolated.home).as_posix()},
-        },
-    )
+    assert after_failure.file(".claude/skills/lock-release/SKILL.md").kind == "missing"
+    assert_snapshot_set_unchanged(before_artifacts, after_artifacts)
     assert list(consumer.root.glob("apm-atomic-*")) == []
-    failed_receipt_bytes = receipt.read_bytes()
+    restored_receipt_bytes = receipt.read_bytes()
 
     _run_success(
         scenario,
@@ -3812,9 +3946,9 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
         scope="project",
         owner=f"{_OWNER}/{source.package.name}",
         expected={"claude": consumer.root / ".claude/skills/lock-release/SKILL.md"},
-        bound=False,
+        bound=True,
     )
-    assert receipt.read_bytes() == failed_receipt_bytes
+    assert receipt.read_bytes() != restored_receipt_bytes
     before_audit = ArtifactSnapshotSet.capture(
         {"project": consumer.root, "user": scenario.isolated.home}
     )
@@ -4328,7 +4462,9 @@ def test_required_deleting_all_local_content_cleans_its_deployments(
         scenario_id="tree-deleted-install",
     )
 
-    assert "Cleaned 4 stale files" in result.stdout
+    # Each removed skill directory is named once; its SKILL.md is folded in (#4193).
+    assert "  - .agents/skills/only/\n  - .claude/skills/only/\n" in result.stdout
+    assert "Cleaned 2 stale files" in result.stdout
     assert _local_skill_rows(root, "only") == {}
     assert not _skill_on_disk(root, ".agents", "only")
     assert not _skill_on_disk(root, ".claude", "only")
@@ -4526,3 +4662,48 @@ def test_required_configured_hook_routing_lifecycle(
     assert _hook_commands(settings) == ["echo claude"]
     assert copilot_commands() == set()
     assert uninstall_audit["passed"] is True
+
+
+def test_required_update_failing_after_deploy_records_what_it_deployed(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """An update whose MCP write fails after deploy commits the lockfile for the deployed files."""
+    scenario = _new_scenario(tmp_path / "update-after-deploy", apm_binary_path)
+    source = _publish(scenario, "update-kit", skill="update-kit")
+    tracking = {key: value for key, value in source.dependency.items() if key != "ref"}
+    consumer = scenario.consumers.create(
+        "update-consumer", dependencies=(tracking,), targets=("claude",)
+    )
+    manifest = load_yaml(consumer.root / "apm.yml")
+    manifest["dependencies"]["mcp"] = [
+        {"name": "update-srv", "registry": False, "transport": "stdio", "command": "update-srv"}
+    ]
+    dump_yaml(manifest, consumer.root / "apm.yml")
+    _run_success(
+        scenario,
+        consumer,
+        (*_INSTALL_ARGS, "--target", "claude"),
+        environment=source.environment,
+        scenario_id="update-after-deploy-install",
+    )
+
+    revision_b = _publish_revision(scenario, source, "b")
+    mcp_config = consumer.root / ".mcp.json"
+    mcp_config.unlink()
+    mcp_config.mkdir()
+    failed = scenario.runner.run(
+        ("update", "--yes", "--parallel-downloads", "0"),
+        scenario_id="update-after-deploy-mcp-failure",
+        cwd=consumer.root,
+        env=source.environment,
+    )
+
+    assert failed.returncode != 0, _result_evidence(failed)
+    deployed = consumer.root / ".claude/skills/update-kit/SKILL.md"
+    assert "revision-b" in deployed.read_text(encoding="ascii"), _result_evidence(failed)
+    locked = LockFile.read(consumer.root / "apm.lock.yaml")
+    assert locked is not None
+    assert [dep.resolved_commit for dep in locked.get_package_dependencies()] == [revision_b.sha], (
+        _result_evidence(failed)
+    )

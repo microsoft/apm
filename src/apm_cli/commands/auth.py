@@ -53,6 +53,8 @@ from urllib.parse import quote
 
 import click
 
+from apm_cli.core.remediation import AUTH_TOKEN_UNEXPORTED
+
 from ..core.command_logger import CommandLogger
 
 # Scopes the token-creation page is prefilled with, per host class.
@@ -70,7 +72,7 @@ _EPILOG = (
     "  apm auth github.com              Check, and prompt if missing\n"
     "  apm auth gitlab.com --check      Also validate against the REST API\n"
     '  eval "$(apm auth gitlab.com --export)"   Set it in the current shell\n'
-    "\b\n"
+    "\n"
     "APM reads tokens from GITHUB_APM_PAT / GITHUB_TOKEN / GH_TOKEN / the gh\n"
     "CLI, or GITLAB_APM_PAT / GITLAB_TOKEN, falling back to your git\n"
     "credential helper. Environment variables win, so exporting one is enough."
@@ -427,7 +429,8 @@ def run_auth(
         logger.success("Token accepted. Add it to your environment:", symbol="check")
         logger.tree_item(f"  export {env_var}='<the token you just pasted>'")
         logger.progress(
-            'Or re-run as: eval "$(apm auth ' + host + ' --export)"',
+            f"Or {AUTH_TOKEN_UNEXPORTED.bind(host=host).clause()}: "
+            f'eval "$({AUTH_TOKEN_UNEXPORTED.bind(host=host).command})"',
             symbol="info",
         )
     return 0

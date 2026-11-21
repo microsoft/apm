@@ -136,8 +136,38 @@ jobs:
       # because it is a dev-only lint tool (`[dev]` extra): it is never
       # imported by apm_cli nor bundled into the wheel or binary, so its
       # license does not reach what we redistribute.
-      - name: License policy check (PR only)
+      # The dependency-review API intermittently answers "Dependency review is
+      # not supported on this repository" while the dependency graph is on.
+      # Retry up to 3 attempts with backoff. Only the last attempt can fail the
+      # job, and a real license or vulnerability finding fails every attempt, so
+      # the policy is never softened.
+      - name: License policy check (PR only) attempt 1
+        id: license_review_1
         if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
+          allow-dependencies-licenses: pkg:pypi/pylint
+          fail-on-severity: moderate
+      - name: Back off before license policy retry 2
+        if: github.event_name == 'pull_request' && steps.license_review_1.outcome == 'failure'
+        run: sleep 30
+      - name: License policy check (PR only) attempt 2
+        id: license_review_2
+        if: github.event_name == 'pull_request' && steps.license_review_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0
+          allow-dependencies-licenses: pkg:pypi/pylint
+          fail-on-severity: moderate
+      - name: Back off before license policy retry 3
+        if: github.event_name == 'pull_request' && steps.license_review_1.outcome == 'failure' && steps.license_review_2.outcome == 'failure'
+        run: sleep 90
+      - name: License policy check (PR only)
+        id: license_review_3
+        if: github.event_name == 'pull_request' && steps.license_review_1.outcome == 'failure' && steps.license_review_2.outcome == 'failure'
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0

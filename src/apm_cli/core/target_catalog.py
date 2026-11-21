@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
+
+from .deprecations import deprecation_message
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,19 @@ class TargetCapability:
 
 _TARGET_COMMANDS = frozenset({"compile", "install", "update"})
 
+# OpenAPM req-mf-005 / req-tg-004: the ``x-<vendor>-<name>`` target form.
+_VENDOR_TARGET_RE = re.compile(r"^x-[a-z][a-z0-9-]*-[a-z][a-z0-9-]*$")
+
+
+def is_vendor_target_id(token: object) -> bool:
+    """True for a vendor-extension target identifier (``x-<vendor>-<name>``).
+
+    Such an identifier parses; APM registers no vendor handler, so every
+    consumer reports it as unsupported instead of ignoring it (#4251).
+    """
+    return isinstance(token, str) and _VENDOR_TARGET_RE.fullmatch(token) is not None
+
+
 # Deprecated target aliases, mapped to the target they select. ``vscode``
 # (#3866) selects ``copilot`` exactly, including its project MCP destination
 # (workspace-root ``.mcp.json``); it has no destination of its own. Every
@@ -45,9 +61,11 @@ def deprecated_target_alias_message(
     *where* names the file (omitted for CLI flags); *key* the field holding it.
     """
     location = f" in {key}" if key else ""
-    message = (
-        f"replace `{token}` with `{DEPRECATED_TARGET_ALIASES[token]}`{location}; "
-        f"`{token}` is deprecated and will be removed in a future release."
+    message = deprecation_message(
+        "target-alias-vscode",
+        token=token,
+        replacement=DEPRECATED_TARGET_ALIASES[token],
+        location=location,
     )
     return f"{where}: {message}" if where else message
 
@@ -333,7 +351,7 @@ def advertised_manifest_target_names() -> frozenset[str]:
 
 def normalize_target_name(name_or_alias: str) -> str:
     """Normalize a target spelling to its native capability name."""
-    if name_or_alias == "all":
+    if name_or_alias == "all" or is_vendor_target_id(name_or_alias):
         return name_or_alias
     return get_target_capability(name_or_alias).name
 
@@ -382,5 +400,26 @@ def target_all_exclusion_help() -> str:
 
 
 def target_error_values(command: str) -> tuple[str, ...]:
-    """Return accepted target values in deterministic error-display order."""
-    return tuple(sorted(accepted_target_values(command)))
+    """Return the values ``--target`` accepts on *command*, in error-display order.
+
+    A command no capability names (``pack``, ``lock``, ``init``, ...) accepts
+    the whole vocabulary through the shared parser, so its error lists that
+    vocabulary rather than only ``all`` and the deprecated aliases (RA-039).
+    """
+    served = any(command in capability.commands for capability in TARGET_CAPABILITIES.values())
+    return tuple(sorted(accepted_target_values(command if served else None)))
+
+
+def target_value_label(value: str) -> str:
+    """Return *value* as an error lists it: an alias names the target it selects.
+
+    A deprecated alias is marked deprecated, so no listing presents it as a
+    target in its own right (RA-037).
+    """
+    replacement = DEPRECATED_TARGET_ALIASES.get(value)
+    if replacement is not None:
+        return f"{value} (deprecated alias of {replacement})"
+    for capability in TARGET_CAPABILITIES.values():
+        if value in capability.aliases:
+            return f"{value} (alias of {capability.name})"
+    return value

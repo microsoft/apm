@@ -121,7 +121,8 @@ def write_minimal_manifest(config, plugin=False, target_path=None):
         accepted_targets = ", ".join(sorted(advertised_manifest_target_names()))
         targets_comment = (
             "# Which agent platforms to deploy to.\n"
-            "# Resolution order: --target flag > this field > auto-detect from filesystem.\n"
+            "# Resolution order: --target flag > this field > 'apm config set target'\n"
+            "# > auto-detect from filesystem.\n"
             f"# Accepted values: {accepted_targets}\n"
         )
         content = content.replace("targets:", targets_comment + "targets:", 1)
@@ -134,6 +135,15 @@ def write_minimal_manifest(config, plugin=False, target_path=None):
             "#   - claude\n"
         )
         content = content.replace("dependencies:", skeleton + "\ndependencies:", 1)
+
+    if plugin:
+        # Scaffold the field without choosing a license for the author (#3799):
+        # 'apm pack' records NOASSERTION in the SBOM until it is set.
+        license_comment = (
+            "# SPDX license for this package (set before publishing), for example:\n"
+            "# license: MIT\n"
+        )
+        content = content.replace("dependencies:", license_comment + "\ndependencies:", 1)
 
     from .manifest_targets import verify_rewritten_manifest
 

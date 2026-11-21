@@ -1,6 +1,6 @@
 """Unit tests for apm_cli.drift -- pure drift-detection helpers.
 
-These tests cover detect_ref_change, detect_orphans, detect_config_drift,
+These tests cover detect_ref_change, the install orphan decision, detect_config_drift,
 and build_download_ref.  All four functions are stateless and side-effect-free
 so no I/O or network access is required.
 """
@@ -13,15 +13,39 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional  # noqa: F401, UP035
 from unittest.mock import MagicMock, call, patch  # noqa: F401
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.drift import (
     build_download_ref,
     detect_config_drift,
-    detect_orphans,
     detect_ref_change,
     revision_pin_mismatch,
 )
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.unit
+
+
+def _orphan_preview(lockfile, intended, *, only_packages):
+    """Return the deployed files the install orphan decision would remove."""
+    from apm_cli.install.orphans import DeploymentClaims, OrphanOperation, decide_orphan_removal
+
+    if only_packages or not lockfile:
+        return set()
+    decision = decide_orphan_removal(
+        operation=OrphanOperation.INSTALL,
+        roots=(),
+        candidate_universe=lockfile,
+        installed_paths=None,
+        resolved_keys=None,
+        intended=intended,
+        materialized=None,
+        reachability=None,
+        deployment_claims=DeploymentClaims(live_files=None, retained={}),
+    )
+    return {path for files in decision.removed_files.values() for path in files}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -234,29 +258,29 @@ class TestRevisionPinMismatch(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# detect_orphans
+# the install orphan decision
 # ---------------------------------------------------------------------------
 
 
 class TestDetectOrphans(unittest.TestCase):
-    """Tests for detect_orphans()."""
+    """Tests for the install orphan decision."""
 
     def test_partial_install_returns_empty(self):
         """Partial install must not clean up anything."""
         locked_dep = _LockedDep(repo_url="owner/orphan", deployed_files=["a.md"])
         lf = _LockFile(dependencies={"owner/orphan": locked_dep})
-        result = detect_orphans(lf, {"owner/kept"}, only_packages=["owner/kept"])
+        result = _orphan_preview(lf, {"owner/kept"}, only_packages=["owner/kept"])
         self.assertEqual(result, set())
 
     def test_no_lockfile_returns_empty(self):
         """First install has no previous lockfile."""
-        result = detect_orphans(None, {"owner/pkg"}, only_packages=[])
+        result = _orphan_preview(None, {"owner/pkg"}, only_packages=[])
         self.assertEqual(result, set())
 
     def test_all_packages_present_returns_empty(self):
         locked_dep = _LockedDep(repo_url="owner/pkg", deployed_files=["file.md"])
         lf = _LockFile(dependencies={"owner/pkg": locked_dep})
-        result = detect_orphans(lf, {"owner/pkg"}, only_packages=[])
+        result = _orphan_preview(lf, {"owner/pkg"}, only_packages=[])
         self.assertEqual(result, set())
 
     def test_orphan_files_returned(self):
@@ -264,28 +288,28 @@ class TestDetectOrphans(unittest.TestCase):
         orphan = _LockedDep(repo_url="owner/gone", deployed_files=["x.md", "y.md"])
         kept = _LockedDep(repo_url="owner/kept", deployed_files=["z.md"])
         lf = _LockFile(dependencies={"owner/gone": orphan, "owner/kept": kept})
-        result = detect_orphans(lf, {"owner/kept"}, only_packages=[])
+        result = _orphan_preview(lf, {"owner/kept"}, only_packages=[])
         self.assertEqual(result, {"x.md", "y.md"})
 
     def test_multiple_orphans_combined(self):
         a = _LockedDep(repo_url="a/a", deployed_files=["a.md"])
         b = _LockedDep(repo_url="b/b", deployed_files=["b.md"])
         lf = _LockFile(dependencies={"a/a": a, "b/b": b})
-        result = detect_orphans(lf, set(), only_packages=[])
+        result = _orphan_preview(lf, set(), only_packages=[])
         self.assertEqual(result, {"a.md", "b.md"})
 
     def test_empty_intended_deps(self):
         """Empty manifest means all current packages are orphans."""
         dep = _LockedDep(repo_url="owner/removed", deployed_files=["f.md"])
         lf = _LockFile(dependencies={"owner/removed": dep})
-        result = detect_orphans(lf, set(), only_packages=[])
+        result = _orphan_preview(lf, set(), only_packages=[])
         self.assertEqual(result, {"f.md"})
 
     def test_none_only_packages_treated_as_empty(self):
         """only_packages=None is treated the same as [] -- full install."""
         locked_dep = _LockedDep(repo_url="owner/orphan", deployed_files=["a.md"])
         lf = _LockFile(dependencies={"owner/orphan": locked_dep})
-        result = detect_orphans(lf, set(), only_packages=None)
+        result = _orphan_preview(lf, set(), only_packages=None)
         self.assertEqual(result, {"a.md"})
 
     def test_self_entry_never_orphaned(self):
@@ -307,7 +331,7 @@ class TestDetectOrphans(unittest.TestCase):
         )
         orphan = _LockedDep(repo_url="owner/gone", deployed_files=["gone.md"])
         lf = _LockFile(dependencies={_SELF_KEY: self_dep, "owner/gone": orphan})
-        result = detect_orphans(lf, set(), only_packages=[])
+        result = _orphan_preview(lf, set(), only_packages=[])
         # Only the genuinely dropped package is an orphan; self-includes are not.
         self.assertEqual(result, {"gone.md"})
 
@@ -334,7 +358,7 @@ class TestDetectOrphans(unittest.TestCase):
         )
         # Manifest now empty -> only the real dropped package is an orphan;
         # the synthesized self-entry's includes are never reported.
-        result = detect_orphans(lock, set(), only_packages=[])
+        result = _orphan_preview(lock, set(), only_packages=[])
         self.assertEqual(result, {".apm/x.md"})
 
 
@@ -519,107 +543,3 @@ class TestBuildDownloadRef(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # locked_copy_proof / locked_copy_is_stale (#3884)
 # ---------------------------------------------------------------------------
-
-import pytest  # noqa: E402
-
-from apm_cli.drift import (  # noqa: E402
-    LOCKED_COPY_CONTENT_HASH,
-    LOCKED_COPY_GIT_HEAD,
-    LOCKED_COPY_PIN,
-    locked_copy_is_stale,
-    locked_copy_proof,
-    should_force_ref_recheck,
-)
-
-_LOCKED = "a" * 40
-
-
-def _copy(tmp_path, body: str = "v2", marker: str | None = None):
-    from apm_cli.install.cache_pin import write_marker
-
-    path = tmp_path / "copy"
-    path.mkdir()
-    (path / "apm.yml").write_text(f"name: p\nversion: {body}\n", encoding="utf-8")
-    if marker is not None:
-        write_marker(path, marker)
-    return path
-
-
-def _hash_of(tmp_path, body: str) -> str:
-    from apm_cli.utils.content_hash import compute_package_hash
-
-    path = tmp_path / f"hash-{body}"
-    path.mkdir()
-    (path / "apm.yml").write_text(f"name: p\nversion: {body}\n", encoding="utf-8")
-    return compute_package_hash(path)
-
-
-@pytest.mark.parametrize(
-    ("commit", "hashed_as", "marker", "proof", "stale"),
-    [
-        (_LOCKED, "v1", _LOCKED, LOCKED_COPY_PIN, False),
-        (_LOCKED, "v2", "b" * 40, LOCKED_COPY_CONTENT_HASH, False),
-        (_LOCKED, "v1", "b" * 40, None, True),
-        (_LOCKED, None, None, None, False),
-        (_LOCKED, None, "b" * 40, None, True),
-        (None, None, None, None, False),
-        ("cached", "v2", _LOCKED, LOCKED_COPY_CONTENT_HASH, False),
-    ],
-    ids=[
-        "pin-match",
-        "pin-mismatch-hash-match",
-        "pin-and-hash-mismatch",
-        "legacy-unmarked-unhashed",
-        "unhashed-marker-mismatch",
-        "no-evidence",
-        "cached-sentinel",
-    ],
-)
-def test_locked_copy_proof_branches(tmp_path, commit, hashed_as, marker, proof, stale) -> None:
-    locked = _LockedDep(
-        resolved_commit=commit,
-        content_hash=_hash_of(tmp_path, hashed_as) if hashed_as else None,
-    )
-    path = _copy(tmp_path, marker=marker)
-
-    assert locked_copy_proof(locked, path, trust_marker=True) == proof
-    assert locked_copy_is_stale(locked, path) is stale
-    assert should_force_ref_recheck(_dep(), locked, update_refs=False, package_path=path) is stale
-
-
-def test_locked_copy_proof_lets_a_readable_git_head_decide(tmp_path) -> None:
-    import subprocess
-
-    path = _copy(tmp_path, marker=None)
-    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
-    for args in (
-        ("init", "-q"),
-        ("add", "-A"),
-        ("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x"),
-    ):
-        subprocess.run(("git", *args), cwd=path, env=env, check=True)
-    head = subprocess.run(
-        ("git", "rev-parse", "HEAD"), cwd=path, env=env, check=True, capture_output=True, text=True
-    ).stdout.strip()
-
-    assert locked_copy_proof(_LockedDep(resolved_commit=head), path) == LOCKED_COPY_GIT_HEAD
-    assert locked_copy_is_stale(_LockedDep(resolved_commit=head), path) is False
-    # An unmarked, unhashed checkout at another commit is refreshed first.
-    other = _LockedDep(resolved_commit=_LOCKED)
-    assert locked_copy_is_stale(other, path) is True
-    assert should_force_ref_recheck(_dep(), other, update_refs=False, package_path=path) is True
-    # A matching marker never outranks a readable HEAD naming another commit.
-    from apm_cli.install.cache_pin import write_marker
-
-    write_marker(path, _LOCKED)
-    assert locked_copy_proof(_LockedDep(resolved_commit=_LOCKED), path, trust_marker=True) is None
-
-
-def test_pin_never_proves_bytes_for_deployment(tmp_path) -> None:
-    path = _copy(tmp_path, marker=_LOCKED)
-    unhashed = _LockedDep(resolved_commit=_LOCKED)
-    hashed = _LockedDep(resolved_commit=_LOCKED, content_hash=_hash_of(tmp_path, "v2"))
-
-    assert locked_copy_proof(unhashed, path, trust_marker=True) == LOCKED_COPY_PIN
-    assert locked_copy_proof(unhashed, path) is None
-    assert locked_copy_proof(hashed, path) == LOCKED_COPY_CONTENT_HASH

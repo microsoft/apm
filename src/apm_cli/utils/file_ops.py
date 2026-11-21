@@ -41,6 +41,15 @@ _DEFAULT_MAX_DELAY: float = 2.0  # seconds
 _DEFAULT_BACKOFF_FACTOR: float = 2.0
 
 
+def _retry_sleep(seconds: float) -> None:
+    """Wait before retrying a transient file operation.
+
+    The single retry-wait seam: tests patch this instead of the process-wide
+    ``time.sleep``, which would also record sleeps from unrelated threads.
+    """
+    time.sleep(seconds)
+
+
 # ---------------------------------------------------------------------------
 # Error classification
 # ---------------------------------------------------------------------------
@@ -187,7 +196,7 @@ def _retry_on_lock(
                     before_retry()
                 except OSError:
                     pass
-            time.sleep(delay)
+            _retry_sleep(delay)
             delay = min(delay * backoff_factor, max_delay)
 
     # Unreachable: the loop always returns or raises on the last attempt.

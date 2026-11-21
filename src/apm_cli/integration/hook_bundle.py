@@ -2,13 +2,13 @@
 
 import json
 import logging
-import shutil
 from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
 from apm_cli.install.cache_pin import MARKER_FILENAME
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
@@ -204,6 +204,12 @@ def copy_deployed_hook_bundle(
         target_file = project_root / target_rel
         ensure_path_within(target_file, project_root)
         if integrator.try_adopt_identical(target_file, source_file, target_paths):
+            if integrator.receipted_unchanged(target_file):
+                continue  # unchanged since APM wrote it: not an adoption (RA-007)
+            # A managed script already holding the source bytes is APM's: record
+            # the receipt the skipped copy would have (#4184, #3701).
+            if managed_files and target_rel in managed_files:
+                integrator.note_rendered_write(target_file)
             if target_rel in command_target_rels:
                 result.files_adopted += 1
             continue
@@ -215,8 +221,9 @@ def copy_deployed_hook_bundle(
             diagnostics=diagnostics,
         ):
             continue
-        target_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_file, target_file)
+        write_seam.mkdir(target_file.parent, parents=True, exist_ok=True)
+        write_seam.copy2(source_file, target_file)
+        integrator.note_rendered_write(target_file)
         if target_rel in command_target_rels:
             result.scripts_copied += 1
         target_paths.append(target_file)
@@ -242,8 +249,9 @@ def copy_deployed_hook_bundle(
             diagnostics=diagnostics,
         ):
             continue
-        target_file.parent.mkdir(parents=True, exist_ok=True)
-        target_file.write_text(content, encoding="utf-8")
+        write_seam.mkdir(target_file.parent, parents=True, exist_ok=True)
+        write_seam.write_text(target_file, content)
+        integrator.note_rendered_write(target_file)
         target_paths.append(target_file)
 
     return result

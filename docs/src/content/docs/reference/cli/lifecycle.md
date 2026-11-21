@@ -14,7 +14,7 @@ Project-source scripts (`apm.yml` `lifecycle:`) are **skipped by default** until
 explicitly trusted, preventing arbitrary command execution on clone.
 
 For the full conceptual guide, schema reference, and security model, see
-[Lifecycle Scripts](../../../enterprise/lifecycle-scripts/).
+[Lifecycle Scripts](../../../enterprise/control-executables/#lifecycle-scripts).
 
 ## Synopsis
 
@@ -151,11 +151,13 @@ apm lifecycle untrust
 ## Security notes
 
 - Project scripts are skipped until explicitly trusted (`apm lifecycle trust`).
-- Org policy `executables.deny_all: true` suppresses all lifecycle scripts.
+- Org policy `executables.deny_all: true` suppresses all lifecycle scripts, as
+  does an org policy outcome that would stop `apm install` or a policy that
+  cannot be resolved.
 - Set `APM_NO_SCRIPTS=1` for a per-run disable without touching policy.
 - HTTP script URLs must use `https://`.
 - Credential-pattern environment variables (TOKEN, SECRET, PAT, KEY, etc.) are
   blocked from HTTP header expansion unless listed in `allowedEnvVars`.
 
-See [Lifecycle Scripts - Security](../../../enterprise/lifecycle-scripts/#security-considerations)
+See [Lifecycle Scripts - Security](../../../enterprise/control-executables/#lifecycle-scripts)
 and [Security model](../../../enterprise/security/) for the full security model.

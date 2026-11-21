@@ -890,6 +890,7 @@ class TestRunMcpInstall:
     def test_mcp_integrator_failure_raises_click_exception(self, tmp_path: Path) -> None:
         import click
 
+        from apm_cli.core.target_detection import EffectiveTargetDecision
         from apm_cli.install.mcp.command import run_mcp_install
 
         apm_yml = tmp_path / "apm.yml"
@@ -915,7 +916,9 @@ class TestRunMcpInstall:
             patch("apm_cli.install.mcp.command.warn_shell_metachars"),
             patch("apm_cli.install.mcp.command.APM_DEPS_AVAILABLE", True),
             patch("apm_cli.install.mcp.command.MCPIntegrator", mock_integrator),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator", mock_integrator),
             patch("apm_cli.install.mcp.command.LockFile", mock_lockfile_cls),
+            patch("apm_cli.install.mcp.entry_integration.LockFile", mock_lockfile_cls),
             patch(
                 "apm_cli.install.mcp.command.get_lockfile_path",
                 return_value=tmp_path / "apm.lock.yaml",
@@ -940,9 +943,11 @@ class TestRunMcpInstall:
                     logger=logger,
                     apm_dir=tmp_path,
                     scope=None,
+                    target_decision=EffectiveTargetDecision(["claude"], "test"),
                 )
 
     def test_mcp_integrator_success_updates_lockfile(self, tmp_path: Path) -> None:
+        from apm_cli.core.target_detection import EffectiveTargetDecision
         from apm_cli.install.mcp.command import run_mcp_install
 
         apm_yml = tmp_path / "apm.yml"
@@ -972,7 +977,9 @@ class TestRunMcpInstall:
             patch("apm_cli.install.mcp.command.warn_shell_metachars"),
             patch("apm_cli.install.mcp.command.APM_DEPS_AVAILABLE", True),
             patch("apm_cli.install.mcp.command.MCPIntegrator", mock_integrator),
+            patch("apm_cli.install.mcp.entry_integration.MCPIntegrator", mock_integrator),
             patch("apm_cli.install.mcp.command.LockFile", mock_lockfile_cls),
+            patch("apm_cli.install.mcp.entry_integration.LockFile", mock_lockfile_cls),
             patch(
                 "apm_cli.install.mcp.command.get_lockfile_path",
                 return_value=tmp_path / "apm.lock.yaml",
@@ -996,6 +1003,7 @@ class TestRunMcpInstall:
                 logger=logger,
                 apm_dir=tmp_path,
                 scope=None,
+                target_decision=EffectiveTargetDecision(["claude"], "test"),
             )
 
         mock_integrator.update_lockfile.assert_called_once()

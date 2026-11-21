@@ -1,0 +1,15 @@
+{
+  "issue": 3441,
+  "summary": "Traps behavior of a pre-existing empty skill directory, a specific filesystem edge case.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_empty_skill_dir_install_lifecycle.py::test_install_deploys_into_empty_nested_skill_directory",
+    "tests/integration/test_empty_skill_dir_install_lifecycle.py::test_install_still_refuses_skill_directory_with_unmanaged_file"
+  ]
+}

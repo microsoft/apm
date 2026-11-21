@@ -67,7 +67,7 @@ compilation:   <CompilationConfig>
 policy:        <PolicyConfig>
 marketplace:   <MarketplaceConfig>       # OPTIONAL; marketplace authoring
 replace:       <list<ReplacementRule>>    # candidate; explicit selector required
-marketplaces:  <list<MarketplaceEntry>>   # user manifest only; see 3.14
+marketplaces:  <list<MarketplaceEntry>>   # user manifest or root project; see 3.14
 executables:   <ExecutablesConfig>       # OPTIONAL; dependency executable trust, see apm approve
 lifecycle:     <LifecycleConfig>         # OPTIONAL; lifecycle scripts
 x-[a-z][a-z0-9-]*: <any>             # OPTIONAL vendor extensions
@@ -173,6 +173,8 @@ actionable nudge (the authoring path only).
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
+A vendor target id of the form `x-<vendor>-<name>` (for example `x-acme-foo`) parses ([req-tg-004](../../specs/openapm-v01/#req-tg-004)). APM registers no vendor handlers: your project `apm.yml` prints one warning naming each such id, and APM deploys only the other targets. `--target x-...` is refused with exit 2.
+
 :::caution[Deprecated: the singular `target:` key]
 `target:` is deprecated in favor of `targets:` (a YAML list) and will be removed in a future release.
 When your project `apm.yml` (or `~/.apm/apm.yml`) uses it, APM prints one warning per run
@@ -227,10 +229,10 @@ MCP-only and experimental `--target` values such as `intellij` and
 | `copilot` | Emits `AGENTS.md` at the project root (and per-directory files in distributed mode). |
 | `claude` | Emits `CLAUDE.md` at the project root. |
 | `grok-build` | Emits `AGENTS.md` and deploys to `.grok/rules/`, `.grok/agents/`, `.grok/commands/`, `.grok/skills/`. |
-| `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/`. |
+| `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, and `.agents/skills/`. |
 | `opencode` | Emits `AGENTS.md`, `.opencode/agents/`, `.opencode/commands/`, and `.agents/skills/`. |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/`. |
-| `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json`. |
+| `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.agents/skills/`, `.gemini/settings.json`. |
 | `antigravity` | Emits `AGENTS.md` and deploys rules, skills, hooks, and MCP config under `.agents/`. |
 | `windsurf` | Emits `AGENTS.md` and deploys to `.windsurf/rules/`, `.agents/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`. |
 | `kiro` | Emits `AGENTS.md` and deploys to `.kiro/steering/`, `.kiro/skills/`, `.kiro/hooks/`, `.kiro/settings/mcp.json`. |
@@ -330,13 +332,13 @@ includes: auto
 For plugin packing, `includes:` is allow-list only. There is no `exclude:`
 form. To keep maintainer-only primitives out of shipped artifacts, author them
 outside the selected source layout and reference them via a local-path
-devDependency. See [Dev-only Primitives](../../concepts/primitives-and-targets/#dev-only-primitives).
+devDependency. See [Dev-only Primitives](../../producer/test-packages/#keep-maintainer-dependencies-out-of-your-release).
 
 Compile discovery independently stops at nested Git repositories and linked
 worktrees. This active-checkout boundary applies whether `includes` is `auto`,
 an explicit list, or omitted.
 
-When `policy.manifest.require_explicit_includes` is `true` (see [Policy reference](../../enterprise/policy-reference/)), only form 3 passes; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` check (not at YAML parse time).
+When `policy.manifest.require_explicit_includes` is `true` (see [Policy reference](../policy-schema/)), only form 3 passes; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` check (not at YAML parse time).
 
 ### 3.10. `policy`
 
@@ -359,7 +361,9 @@ policy:
 | `hash` | `string` | unset | `<algo>:<hex-digest>` | Pin on the raw bytes of the fetched leaf org policy. Verified before YAML parsing; mismatch is always fail-closed regardless of `fetch_failure_default`. |
 | `hash_algorithm` | `string` | `sha256` | `sha256`, `sha384`, `sha512` | Digest algorithm for `policy.hash`. Inferred from the `<algo>:` prefix when present. MD5 and SHA-1 are rejected at parse time. |
 
-Full semantics (network failure matrix, hash pin verification, policy precedence) live in the [Policy reference](../../enterprise/policy-reference/).
+Under `apm install -g`, these keys are read from the user manifest (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`), never from `~/apm.yml`. User scope has no git remote, so it discovers no org policy (outcome `no_git_remote`).
+
+Full semantics (network failure matrix, hash pin verification, policy precedence) live in the [Policy reference](../policy-schema/).
 
 ### 3.11. `registries`
 
@@ -371,7 +375,7 @@ The `registries:` field and registry-routed APM dependency forms require `apm ex
 |---|---|
 | **Type** | `map<string, RegistryEntry>` with optional `default: <string>` key |
 | **Required** | OPTIONAL |
-| **Description** | Declares REST-based APM registries for the project. Strictly additive - absent or empty block leaves Git resolution unchanged unless a default registry is configured in `~/.apm/config.json`. URLs from all layers are merged at install time; see the [Registries guide](../../guides/registries/#precedence-chains). |
+| **Description** | Declares REST-based APM registries for the project. Strictly additive - absent or empty block leaves Git resolution unchanged unless a default registry is configured in `~/.apm/config.json`. URLs from all layers are merged at install time; see the [Registries guide](../registries/#precedence-chains). |
 
 ```yaml
 registries:
@@ -384,19 +388,22 @@ registries:
 |---|---|---|---|---|
 | `<name>` | `RegistryEntry` | at least one when block is non-empty | Non-empty string. Use letters, digits, `.`, `_` and `-` so `apm config set registry.<name>.*` can address it | Registered registry. |
 | `<name>.url` | `string` | REQUIRED per entry | MUST start with `https://` or `http://`; no trailing slash required | Base URL the client appends `/v1/...` paths to. |
+| `<name>.insecure` | `boolean` | OPTIONAL | `true` only | Allows an `http://` URL to a non-local host. Without it, `http://` is a parse error unless the host is loopback or an RFC 1918 private address. |
 | `default` | `string` | OPTIONAL | MUST name one of the configured entries | When set, plain string-shorthand APM deps and object-form deps without an explicit `registry:` key route through this registry. Project value wins over `registry.<name>.default` in `~/.apm/config.json`. |
 
-Unknown keys under a registry entry MUST be rejected at parse time (typo guard).
+Unknown keys under a registry entry MUST be rejected at parse time (typo guard); `x-` extension keys are ignored.
 
 **Effective default registry:** project `registries.default` if present; otherwise the registry marked `"default": true` in `~/.apm/config.json` (via `apm config set registry.<name>.default true`). Only one default is active at a time.
 
-For full client semantics - auth, lockfile fields, and routing rules - see the [Registries guide](../../guides/registries/). For the wire contract servers implement, see the [Registry HTTP API](../registry-http-api/).
+For full client semantics - auth, lockfile fields, and routing rules - see the [Registries guide](../registries/). For the wire contract servers implement, see the [Registry HTTP API](../registry-http-api/).
 
 ### 3.12. Extension keys
 
 Any top-level key matching `x-[a-z][a-z0-9-]*` is a vendor extension. The CLI keeps these keys, in declaration order, on the parsed package. It does not validate or interpret the values. Normative contract: [req-ext-001](../../specs/openapm-v01/#req-ext-001) and [req-ext-003](../../specs/openapm-v01/#req-ext-003).
 
 When a dependency's `apm.yml` declares keys matching `x-[a-z][a-z0-9-]*`, `apm lock` records them on that dependency's entry in `apm.lock.yaml` under `extensions`. The field is omitted when the dependency declares none, so existing lockfiles stay unchanged.
+
+An `x-` key inside an object-form `dependencies.apm[]` entry is also kept and ignored; any other unknown key in such an entry fails the parse.
 
 Any other unknown top-level key is ignored. The CLI prints one warning that names each ignored key and does not fail because of that key. An install dry-run reports the source manifest's warning once, not again for its prospective dependency edit. Warning paths use forward slashes on Windows too. Rename the key to match `x-[a-z][a-z0-9-]*` to keep it, or remove it.
 
@@ -441,18 +448,18 @@ The explicit selector is essential: older readers can silently ignore an
 additive `replace` key. Verified v0.25.0, v0.32.0 and v0.33.0 readers reject this
 selector and lock version `"3"`; v0.24.1 does not. Rejection is not feature support,
 and untested clients are not qualified. See the
-[usage and compatibility warning](../../consumer/manage-dependencies/#replace-a-source-candidate).
+[usage and compatibility warning](../../producer/test-packages/#swap-your-copy-in-across-the-graph).
 
 ---
 
-### 3.14. `marketplaces` (user manifest only)
+### 3.14. `marketplaces`
 
 | | |
 |---|---|
 | **Type** | `list<MarketplaceEntry>` |
 | **Required** | OPTIONAL |
-| **Scope** | Only the user manifest (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`). A project or package `apm.yml` that contains the key fails to parse with an error naming the user manifest. |
-| **Description** | Marketplaces that `apm install -g` registers for discovery. It registers missing entries, updates changed ones, and removes entries it registered earlier that are no longer listed. Registrations made with `apm marketplace add` are never overwritten or removed. |
+| **Scope** | The user manifest (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`) and the root project `apm.yml`. A dependency's `apm.yml` that contains the key is refused at install. |
+| **Description** | In the user manifest: marketplaces that `apm install -g` registers for discovery. It registers missing entries, updates changed ones, and removes entries it registered earlier that are no longer listed. Registrations made with `apm marketplace add` are never overwritten or removed. In the root project: the marketplaces that project's `marketplace: <name>` entries resolve through, with no registration; the map is never registered, wins over a same-named registration and over a lock row recorded from another catalog (`apm install --frozen` refuses that row), and is the only set of names a transitive `marketplace: <name>` may use. |
 
 ```yaml
 marketplaces:
@@ -469,9 +476,11 @@ marketplaces:
 | `source` | `string` | REQUIRED | Any SOURCE form accepted by [`apm marketplace add`](../cli/marketplace/#apm-marketplace-add). No `--host` equivalent; use a full URL for non-default hosts. Local paths must be absolute or start with `~/`. |
 | `ref` | `string` | OPTIONAL | Same as `--ref`. Cannot be combined with a `#ref` in `source`. |
 
-Unknown entry keys are rejected. Registering a marketplace does not install
-packages or grant trust. See
-[Declare marketplaces in your user manifest](../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest).
+Unknown entry keys are rejected. Declaring a marketplace does not install
+packages or grant trust; org policy `marketplace.allow` can restrict project
+declarations. See
+[Declare marketplaces in your user manifest](../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest)
+and [Declare marketplaces in a project](../../consumer/installing-from-marketplaces/#declare-marketplaces-in-a-project).
 
 ### 3.15. `default_host`
 
@@ -582,7 +591,7 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `git` | `string` | REQUIRED (remote) | HTTPS URL, SSH URL, or FQDN shorthand | Clone URL of the repository. Required for remote dependencies. |
 | `path` | `string` | OPTIONAL / REQUIRED (local) | Relative path within the repo, or local filesystem path | When `git` is present: subdirectory or file (virtual package). When `git` is absent: local filesystem path (must start with `./`, `../`, `/`, or `~/`). |
 | `ref` | `string` | OPTIONAL | Branch, tag, or commit SHA | Git reference to checkout. |
-| `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$`; excludes exactly `.` and `..` | Names the destination directory, not the source; local `../` paths remain supported. Valid: `.safe`, `safe.`, `foo..bar`, `my-skill.v2`. [Migration](../../troubleshooting/migration/#rejected-dependency-aliases). |
+| `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$`; excludes exactly `.` and `..` | Names the destination directory, not the source; local `../` paths remain supported. Valid: `.safe`, `safe.`, `foo..bar`, `my-skill.v2`. [Migration](../../getting-started/coming-from/). |
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
 | `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
@@ -660,7 +669,7 @@ Monorepo sibling reference (`git: parent`):
 The literal sentinel `git: parent` is valid only inside a transitively resolved package whose clone coordinates are known to the resolver. APM expands `parent` to the consumer's `host`, `repo_url`, and resolved `ref`, with `virtual_path` set from `path`. The lockfile records the **expanded** coordinates: `parent` MUST NOT appear as durable identity (`repo_url` / `source`). `path` is REQUIRED for `git: parent` and is normalised to a single relative path; absolute paths and `..` traversal are refused. Only `git`, `path`, `ref`, and `alias` are accepted on this form. When `ref` is omitted the parent's resolved ref is inherited.
 
 For before/after manifests and a feature-branch review workflow, see
-[Make sibling dependencies follow the review branch](../../producer/repo-shapes/#make-sibling-dependencies-follow-the-review-branch).
+[Make sibling dependencies follow the review branch](../../producer/publish-to-a-marketplace/#choose-a-repository-shape).
 
 Marketplace dependency (resolved at install time):
 
@@ -778,12 +787,13 @@ A plain registry reference: `io.github.github/github-mcp-server`.
 | `url` | `string` | Conditional | | Endpoint URL. REQUIRED when `registry: false` and `transport` is `http`, `sse`, or `streamable-http`. |
 | `command` | `string` | Conditional | Single binary path; no embedded whitespace unless `args` is also present | Binary path. REQUIRED when `registry: false` and `transport` is `stdio`. |
 | `enabled` | any JSON value | OPTIONAL | OpenCode only | Passed unchanged to OpenCode's `opencode.json` entry. When omitted, APM keeps its existing `true` default. APM does not validate the value; OpenCode interprets it. In the OpenCode 2 `mcp.servers` layout, `false` becomes `disabled: true`, `true` writes no field, and other values warn and leave the file unchanged; see [OpenCode 2 configuration](../../consumer/install-mcp-servers/#opencode-2-configuration). Other targets ignore this field. |
+| `targets` | `list<string>` | OPTIONAL | Non-empty; known target names | Targets that receive this server: effective reach is the install targets intersected with this list. Omitted = every install target. No overlap = skipped with a warning. Never written to native config. A `--target` install keeps the server in other targets it lists; an untargeted server follows `--target`. Dropping a target from this list, or from the manifest `targets:`, removes the server there on the next install. In project scope `claude` and `copilot` share `.mcp.json`, so naming either one makes the server visible to both. |
 
 Any additional keys not listed above are preserved as **extra passthrough fields** and round-tripped verbatim into the generated target manifests. This allows harness-specific configuration (e.g. Claude Code's `oauth` block for remote-MCP OAuth client config) to be declared in `apm.yml` and appear in the generated config without modification. A warning is emitted at parse time naming each non-standard key.
 
 Two guardrails apply:
 
-- **Reserved keys are rejected.** A passthrough key whose name collides with a modeled field above -- `name`, `transport`/`type`, `command`, `url`, `headers`, `env`, `args`, `tools`, `version`, `registry`, `package`, `enabled` -- or with an adapter-owned field (`http_headers`, `env_http_headers`, `bearer_token_env_var`, `environment`, `id`, `httpUrl`, `serverUrl`) is dropped with a warning. This prevents a passthrough value from shadowing or redirecting a modeled field. Extra keys also never overwrite a value the target adapter set itself. The top-level `enabled` field is the OpenCode-only exception: it is forwarded only to OpenCode, and an `extra.enabled` value remains reserved.
+- **Reserved keys are rejected.** A passthrough key whose name collides with a modeled field above -- `name`, `transport`/`type`, `command`, `url`, `headers`, `env`, `args`, `tools`, `version`, `registry`, `package`, `enabled`, `targets` -- or with an adapter-owned field (`http_headers`, `env_http_headers`, `bearer_token_env_var`, `environment`, `id`, `httpUrl`, `serverUrl`) is dropped with a warning. This prevents a passthrough value from shadowing or redirecting a modeled field. Extra keys also never overwrite a value the target adapter set itself. The top-level `enabled` field is the OpenCode-only exception: it is forwarded only to OpenCode, and an `extra.enabled` value remains reserved.
 - **Extra keys broadcast to every target.** Passthrough keys are written uniformly into the generated config for **all** installed harnesses, not just the one that understands them. A Claude Code `oauth` block (`clientId`/`callbackPort`), for example, is emitted into every target's server entry; harnesses that do not recognise the key ignore it. Per-harness scoping is tracked as a future enhancement (see issue #1806).
 
 > A future release may require passthrough keys to be nested under an explicit `extra:` block and stop auto-capturing bare top-level keys (fail-closed), via a deprecation path. See issue #1806.
@@ -951,8 +961,8 @@ project scope or `~/.copilot/lsp-config.json` at user scope. OpenCode uses the
 `lsp` key of `opencode.json` or `~/.config/opencode/opencode.json`; it skips
 `socket` servers and does not write `startupTimeout`, `shutdownTimeout`,
 `restartOnCrash`, `maxRestarts`, `workspaceFolder` or `settings` (see
-[OpenCode limitations](../../consumer/install-lsp-servers/#opencode-limitations)).
-See [Install LSP servers](../../consumer/install-lsp-servers/) for output formats
+[OpenCode limitations](../../consumer/install-mcp-servers/#lsp-servers)).
+See [Install LSP servers](../../consumer/install-mcp-servers/#lsp-servers) for output formats
 and lifecycle details.
 
 ---
@@ -992,7 +1002,7 @@ uses `.apm/` when present, otherwise supported plugin-native root directories;
 it does not consult the devDep marker. To keep maintainer-only primitives out
 of shipped artifacts, author them outside the selected source layout and
 reference them via a local-path devDependency. See [Dev-only
-Primitives](../../concepts/primitives-and-targets/#dev-only-primitives).
+Primitives](../../producer/test-packages/#keep-maintainer-dependencies-out-of-your-release).
 
 Local-path devDependency example:
 
@@ -1050,7 +1060,7 @@ Controls how `apm compile` writes `AGENTS.md` output files. All fields are OPTIO
 
 Both markers must appear **exactly once** in every existing managed target file; a missing or duplicate marker raises `ManagedSectionError` rather than silently overwriting content. Compile excludes primitives and distributed placements in a nested Git repository (a `.git` directory or gitfile), including descendants of that repository. Use `apm compile --dry-run` to preview the same eligible placement set before writing files.
 
-See [Managed-section mode](../../producer/compile/#managed-section-mode) in the compile guide for usage and marker setup instructions.
+See [`apm compile`](../cli/compile/#description) for how compilation treats existing context files.
 
 ```yaml
 compilation:
@@ -1090,9 +1100,9 @@ Overrides exist for the rare case where the published marketplace identity diffe
 | `owner` | `Owner` | REQUIRED | -- | Marketplace publisher identity. See Section 7.3. |
 | `sourceBase` | `string` | OPTIONAL | unset | HTTPS git base that relative `packages[].source` values compose onto. See Section 7.5. |
 | `output` | `string` | OPTIONAL | `.claude-plugin/marketplace.json` | Shorthand for `claude.output`; the `claude` block wins when both are set. |
-| `outputs` | `map` | OPTIONAL | `{claude: {}}` | Marketplace formats to emit: `claude`, `codex`, `copilot`. Each entry may set `path`. The list form (`[claude, codex]`) still parses with a deprecation warning. See [Publish to a marketplace](../../producer/publish-to-a-marketplace/). |
+| `outputs` | `map` | OPTIONAL | `{claude: {}}` | Marketplace formats to emit: `claude`, `codex`, `copilot`. Each entry may set `path`. The list form (`[claude, codex]`) still parses; `apm pack` and `apm marketplace check` print a deprecation warning. See [Publish to a marketplace](../../producer/publish-to-a-marketplace/). |
 | `claude` / `codex` / `copilot` | `{output: string}` | OPTIONAL | `.claude-plugin/marketplace.json` / `.agents/plugins/marketplace.json` / `.github/plugin/marketplace.json` | Per-format output path. Wins over `outputs.<name>.path`. |
-| `versioning` | `{strategy: enum}` | OPTIONAL | `lockstep` | `lockstep`, `tag_pattern`, or `per_package`. See [Versioning strategies](../../producer/versioning-strategies/). |
+| `versioning` | `{strategy: enum}` | OPTIONAL | `lockstep` | `lockstep`, `tag_pattern`, or `per_package`. See [Versioning strategies](../../producer/release-a-version/). |
 | `metadata` | `object` | OPTIONAL | `{}` | Free-form metadata forwarded verbatim to `marketplace.json` (e.g. `homepage`, `support`). |
 | `build` | `Build` | OPTIONAL | `tagPattern: "v{version}"` | Build configuration for resolving package refs. See Section 7.4. |
 | `packages` | `list<Package>` | OPTIONAL | `[]` | Packages exposed in the marketplace. See Section 7.5. |

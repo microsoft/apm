@@ -134,9 +134,9 @@ def test_local_bundle_content_approval_bypass_is_rejected() -> None:
     """The executable-trust rule must require content-bound bundle consent."""
     path = "src/apm_cli/install/local_bundle_handler.py"
     source = (ROOT / path).read_text(encoding="utf-8")
-    old = "bundle_approval_key = local_bundle_approval_key("
+    old = "    return local_bundle_approval_key("
     assert old in source
-    mutated = source.replace(old, "bundle_approval_key = build_approval_key(", 1)
+    mutated = source.replace(old, "    return build_approval_key(", 1)
 
     report = run_selected_rules(
         ROOT,
@@ -191,13 +191,9 @@ def test_approve_parallel_replacement_derivation_is_rejected() -> None:
 def test_local_bundle_canvas_approval_bypass_is_rejected() -> None:
     path = "src/apm_cli/install/services.py"
     source = (ROOT / path).read_text(encoding="utf-8")
-    old = "is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)"
+    old = "allow_executables, _bundle_keys, EXEC_TYPE_CANVAS"
     assert old in source
-    mutated = source.replace(
-        old,
-        "is_package_approved(allow_executables, slug, EXEC_TYPE_CANVAS)",
-        1,
-    )
+    mutated = source.replace(old, "allow_executables, (slug,), EXEC_TYPE_CANVAS", 1)
 
     report = run_selected_rules(
         ROOT,

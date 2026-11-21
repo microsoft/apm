@@ -1,0 +1,4 @@
+name = "editor"
+description = "Edits code"
+model = "gpt-5"
+developer_instructions = "You edit code.\nFollow [the style](../../apm_modules/_local/pkg/.apm/instructions/python.instructions.md)."

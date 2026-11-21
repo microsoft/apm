@@ -1,31 +1,35 @@
 from __future__ import annotations
 
+import ast
 import json
+import os
+import re
 import subprocess
+import sys
 import tomllib
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
-from tests.quality.taxonomy_ratchets import (
-    CATALOG,
-    UPDATE_COMMAND,
-    MergeBaseUnavailable,
-    RatchetBaseline,
-    TaxonomyInventory,
-    baseline_growth,
-    catalog_payload,
-    catalog_problems,
-    catalog_source_ids,
-    collect_inventory,
-    load_catalog_ids,
-    load_ratchet_baseline,
-    merge_base_text,
-    placement_violations,
-    promise_violations,
-    stale_entries,
-    unclassified_growth,
+from scripts.lifecycle_ledger import read_ledger
+from scripts.test_static_facts import module_markers
+from tests.quality.taxonomy import (
+    candidate_promises,
+    directory_conflict_message,
+    directory_marker,
+    load_promises,
+    missing_promise_message,
+    spawning_unit_message,
+    suggested_pytestmark,
+    unclassified_message,
+    unit_under_integration_message,
+    unknown_promise_message,
 )
+from tests.quality.taxonomy import (
+    main as taxonomy_main,
+)
+from tests.quality.taxonomy_inventory_plugin import spawns_processes
 
 RATCHET_TEST_SCOPE = "repository"
 
@@ -40,7 +44,24 @@ EXPECTED_MARKERS = {
     "e2e": "a real installed CLI crossing at least one command boundary",
 }
 BEHAVIORAL_MARKERS = frozenset(EXPECTED_MARKERS)
+INVENTORY_PLUGIN = "tests.quality.taxonomy_inventory_plugin"
+TAXONOMY_BASELINE = REPO_ROOT / "tests" / "quality" / "test_taxonomy_baseline.json"
+PROMISE_CATALOG = REPO_ROOT / "tests" / "quality" / "promise-catalog.json"
+SPEC_REQUIREMENT_ID = re.compile(r"^req-[a-z]{2,3}-[0-9]{3}$")
+SPEC_FAMILY = "req"
+P_FAMILY_ID = re.compile(r"^(P-[A-Z]+)-([A-Za-z0-9][A-Za-z0-9_.-]*)$")
+BASELINE_LISTS = ("misplaced_modules", "promise_exempt_modules", "unclassified_modules")
 AUTHORITY_PROSE = "Module-level `pytestmark` is the sole behavioral classification authority."
+
+
+@dataclass(frozen=True)
+class TaxonomyInventory:
+    """Collected module declarations and effective node marker sets."""
+
+    modules: dict[str, tuple[str, ...]]
+    nodes: dict[str, tuple[str, ...]]
+    promises: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    spawning: frozenset[str] = frozenset()
 
 
 def _declared_markers() -> dict[str, str]:
@@ -68,6 +89,61 @@ def _documented_marker_definitions(path: Path) -> dict[str, str]:
             definition = cells[2].rstrip(".")
             definitions[marker] = definition[:1].lower() + definition[1:]
     return definitions
+
+
+def _string_tuple_map(value: object, field: str) -> dict[str, tuple[str, ...]]:
+    """Validate one JSON mapping of strings to string arrays."""
+    assert isinstance(value, dict), f"taxonomy inventory {field} must be an object"
+    normalized: dict[str, tuple[str, ...]] = {}
+    for key, entries in value.items():
+        assert isinstance(key, str), f"taxonomy inventory {field} keys must be strings"
+        assert isinstance(entries, list), f"taxonomy inventory {field}[{key!r}] must be an array"
+        assert all(isinstance(entry, str) for entry in entries)
+        normalized[key] = tuple(entries)
+    return normalized
+
+
+def _collect_inventory(root: Path, output: Path) -> TaxonomyInventory:
+    """Collect the repository through the dedicated pytest inventory plugin."""
+    env = os.environ.copy()
+    env["APM_TAXONOMY_INVENTORY"] = str(output)
+    env["PYTHONPATH"] = os.pathsep.join(
+        entry for entry in (str(REPO_ROOT), env.get("PYTHONPATH", "")) if entry
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            INVENTORY_PLUGIN,
+            "-o",
+            "addopts=",
+            "--strict-markers",
+            "--collect-only",
+            "-q",
+            "tests",
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=300,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    data = json.loads(output.read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    assert set(data) == {"modules", "nodes", "promises", "spawning"}
+    assert isinstance(data["spawning"], list)
+    return TaxonomyInventory(
+        modules=_string_tuple_map(data["modules"], "modules"),
+        nodes=_string_tuple_map(data["nodes"], "nodes"),
+        promises=_string_tuple_map(data["promises"], "promises"),
+        spawning=frozenset(data["spawning"]),
+    )
 
 
 def _behavioral(markers: tuple[str, ...]) -> tuple[str, ...]:
@@ -127,7 +203,7 @@ def marker_inventory(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> TaxonomyInventory:
     output = tmp_path_factory.mktemp("taxonomy") / "inventory.json"
-    return collect_inventory(REPO_ROOT, output)
+    return _collect_inventory(REPO_ROOT, output)
 
 
 def _classified_module_with_nodes(
@@ -240,292 +316,655 @@ def test_tm005_behavioral_marker_prose_mirrors_canonical_definitions() -> None:
         assert "--allow-provisional" not in text
 
 
-NEW_MODULE = "tests/unit/test_brand_new_contract.py"
-NEW_INTEGRATION_MODULE = "tests/integration/test_brand_new_contract.py"
-KNOWN_PROMISE = "req-mf-001"
-EMPTY_BASELINE = RatchetBaseline(legacy_modules=frozenset(), unclassified_modules=frozenset())
+def _load_taxonomy_baseline(path: Path) -> dict[str, frozenset[str]]:
+    """Load the sorted, one-entry-per-line taxonomy ratchet baseline."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert set(data) == {"doc", "schema_version", *BASELINE_LISTS}, sorted(data)
+    assert data["schema_version"] == 1
+    assert isinstance(data["doc"], str) and data["doc"]
+    lists: dict[str, frozenset[str]] = {}
+    for key in BASELINE_LISTS:
+        entries = data[key]
+        assert isinstance(entries, list)
+        assert entries == sorted(set(entries)), f"{key} must be sorted and unique"
+        lists[key] = frozenset(entries)
+    return lists
 
 
-@pytest.fixture(scope="module")
-def ratchet_baseline() -> RatchetBaseline:
-    return load_ratchet_baseline(REPO_ROOT)
+def _promise_family(promise_id: str) -> str | None:
+    """Return the family of a promise id, or None when its prefix is unknown."""
+    if SPEC_REQUIREMENT_ID.match(promise_id):
+        return SPEC_FAMILY
+    match = P_FAMILY_ID.match(promise_id)
+    return match.group(1) if match else None
 
 
-@pytest.fixture(scope="module")
-def catalog_ids() -> frozenset[str]:
-    return load_catalog_ids(REPO_ROOT)
+def _catalog_violations(data: object) -> list[str]:
+    """Return every reason a promise catalog payload is invalid."""
+    catalog_name = PROMISE_CATALOG.relative_to(REPO_ROOT).as_posix()
+    if not isinstance(data, dict) or set(data) != {
+        "doc",
+        "families",
+        "promises",
+        "schema_version",
+    }:
+        return [f"{catalog_name}: keys must be doc, families, promises, schema_version"]
+    violations: list[str] = []
+    families = data["families"]
+    if data["schema_version"] != 1:
+        violations.append(f"{catalog_name}: schema_version must be 1")
+    if not isinstance(families, dict) or not all(
+        isinstance(name, str)
+        and (name == SPEC_FAMILY or re.fullmatch(r"P-[A-Z]+", name))
+        and isinstance(doc, str)
+        and doc
+        for name, doc in families.items()
+    ):
+        return [*violations, f"{catalog_name}: families must map P-<FAMILY> (or req) to a doc"]
+    promises = data["promises"]
+    if not isinstance(promises, dict) or not promises:
+        return [*violations, f"{catalog_name}: promises must be a non-empty object"]
+    for promise_id, source in sorted(promises.items()):
+        family = _promise_family(promise_id)
+        if family is None:
+            violations.append(
+                f"{catalog_name}: promise id {promise_id!r} has an unknown prefix. Fix: use "
+                "P-<FAMILY>-<id> with a declared family, or a spec requirement id "
+                "(req-xx-NNN) as written in CONFORMANCE.json."
+            )
+        elif family not in families:
+            violations.append(
+                f"{catalog_name}: promise id {promise_id!r} uses undeclared family "
+                f"{family!r}. Fix: declare {family!r} in the catalog's families, or use "
+                f"a declared family ({', '.join(sorted(families))})."
+            )
+        if not isinstance(source, str) or not source:
+            violations.append(f"{catalog_name}: promise id {promise_id!r} needs a description")
+    return violations
 
 
-def _single_module(
-    module: str, markers: tuple[str, ...], promises: tuple[str, ...] = ()
-) -> TaxonomyInventory:
-    return TaxonomyInventory(
-        modules={module: markers},
-        nodes={f"{module}::test_value": markers},
-        promises={module: promises} if promises else {},
-    )
+def _law_violations(catalog: frozenset[str], ledger: dict[str, object]) -> list[str]:
+    """Return drift between lifecycle ledger laws and P-LAW catalog ids."""
+    catalog_name = PROMISE_CATALOG.relative_to(REPO_ROOT).as_posix()
+    rows = ledger["property_catalog"]
+    assert isinstance(rows, list) and rows, "lifecycle property_catalog must be non-empty"
+    laws = {f"P-LAW-{row['id']}" for row in rows}
+    violations = [
+        f"{catalog_name}: lifecycle law {law[len('P-LAW-') :]!r} has no promise id. "
+        f"Fix: add {law!r} to the catalog."
+        for law in sorted(laws - catalog)
+    ]
+    violations += [
+        f"{catalog_name}: {promise_id!r} names no lifecycle law. Fix: remove it, or add "
+        "the law to tests/fixtures/lifecycle_bug_ledger/property_catalog/."
+        for promise_id in sorted(catalog)
+        if promise_id.startswith("P-LAW-") and promise_id not in laws
+    ]
+    return violations
 
 
-def _write_module(root: Path, module: str, source: str) -> None:
-    path = root / module
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(source, encoding="utf-8")
+def _load_promise_catalog(path: Path) -> frozenset[str]:
+    """Load promise ids from the catalog, failing on any invalid id or family."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    violations = _catalog_violations(data)
+    assert not violations, "\n".join(f"[x] {violation}" for violation in violations)
+    return frozenset(data["promises"])
 
 
-def test_tm006_unclassified_modules_do_not_grow(
+def _moves(entries: frozenset[str], collected: dict[str, tuple[str, ...]]) -> dict[str, str]:
+    """Map collected unlisted modules to missing entries with the same file name."""
+    missing: dict[str, list[str]] = {}
+    for entry in sorted(entries - set(collected)):
+        missing.setdefault(Path(entry).name, []).append(entry)
+    moves: dict[str, str] = {}
+    for module in sorted(set(collected) - entries):
+        candidates = missing.get(Path(module).name)
+        if candidates:
+            moves[module] = candidates.pop(0)
+    return moves
+
+
+def _taxonomy_ratchet_findings(
+    inventory: TaxonomyInventory,
+    baseline: dict[str, frozenset[str]],
+    catalog: frozenset[str],
+    root: Path = REPO_ROOT,
+    promises: dict[str, str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Return (new violations, stale baseline entries) for the no-growth ratchets.
+
+    A module moved to another directory under the same file name keeps the
+    allowances of its now-missing baseline entry. A missing marker or promise
+    names the exact ``pytestmark`` line to add (tests/quality/taxonomy.py).
+    """
+    described = promises if promises is not None else dict.fromkeys(catalog, "")
+    failures: list[str] = []
+    moves = {key: _moves(entries, inventory.modules) for key, entries in baseline.items()}
+    stale = [
+        f"{key} {old} moved to {new}; replace the entry"
+        for key in BASELINE_LISTS
+        for new, old in sorted(moves[key].items())
+    ]
+    original = baseline
+    baseline = {key: entries | set(moves[key]) for key, entries in baseline.items()}
+    unclassified: set[str] = set()
+    misplaced: set[str] = set()
+    for module, markers in sorted(inventory.modules.items()):
+        behavioral = _behavioral(markers)
+        implied = directory_marker(module)
+        if implied and behavioral and behavioral != (implied,):
+            failures.append(directory_conflict_message(module, behavioral, implied))
+        behavioral = behavioral or ((implied,) if implied else ())
+        if not behavioral:
+            unclassified.add(module)
+            if module not in baseline["unclassified_modules"]:
+                failures.append(unclassified_message(module, root, described))
+        if module.startswith("tests/integration/") and behavioral == ("unit",):
+            misplaced.add(module)
+            if module not in baseline["misplaced_modules"]:
+                failures.append(unit_under_integration_message(module))
+        if module.startswith("tests/unit/") and module in inventory.spawning:
+            misplaced.add(module)
+            if module not in baseline["misplaced_modules"]:
+                failures.append(spawning_unit_message(module))
+        promises = inventory.promises.get(module, ())
+        if not promises and module not in baseline["promise_exempt_modules"]:
+            failures.append(missing_promise_message(module, root, described))
+        unknown = sorted(set(promises) - catalog)
+        if unknown:
+            failures.append(unknown_promise_message(module, unknown))
+    observed = {
+        "misplaced_modules": misplaced,
+        "promise_exempt_modules": set(inventory.modules),
+        "unclassified_modules": unclassified,
+    }
+    stale += [
+        f"{key} {module}"
+        for key in BASELINE_LISTS
+        for module in sorted(original[key] - observed[key] - set(moves[key].values()))
+    ]
+    return failures, stale
+
+
+def _assert_taxonomy_ratchets(
+    inventory: TaxonomyInventory,
+    baseline: dict[str, frozenset[str]],
+    catalog: frozenset[str],
+    promises: dict[str, str] | None = None,
+) -> list[str]:
+    """Fail on new violations; return stale baseline entries for info output."""
+    failures, stale = _taxonomy_ratchet_findings(inventory, baseline, catalog, promises=promises)
+    assert not failures, "\n".join(f"[x] {failure}" for failure in failures)
+    return stale
+
+
+def test_tm006_taxonomy_ratchets_do_not_grow(
     marker_inventory: TaxonomyInventory,
-    ratchet_baseline: RatchetBaseline,
 ) -> None:
-    assert unclassified_growth(marker_inventory, ratchet_baseline) == []
-
-
-def test_tm006_new_unclassified_module_fails() -> None:
-    problems = unclassified_growth(_single_module(NEW_MODULE, ()), EMPTY_BASELINE)
-
-    assert len(problems) == 1
-    assert problems[0].startswith(f"{NEW_MODULE}: unclassified test module")
-    assert "add exactly one module-level behavioral marker" in problems[0]
-
-
-def test_tm006_baselined_unclassified_module_passes() -> None:
-    baseline = RatchetBaseline(
-        legacy_modules=frozenset({NEW_MODULE}),
-        unclassified_modules=frozenset({NEW_MODULE}),
+    stale = _assert_taxonomy_ratchets(
+        marker_inventory,
+        _load_taxonomy_baseline(TAXONOMY_BASELINE),
+        _load_promise_catalog(PROMISE_CATALOG),
+        load_promises(PROMISE_CATALOG),
     )
-
-    assert unclassified_growth(_single_module(NEW_MODULE, ()), baseline) == []
-
-
-def test_tm007_new_modules_are_placed_by_behavior(
-    marker_inventory: TaxonomyInventory,
-    ratchet_baseline: RatchetBaseline,
-) -> None:
-    assert placement_violations(marker_inventory, ratchet_baseline, REPO_ROOT) == []
+    for entry in stale:
+        print(f"[i] stale taxonomy baseline entry (may be pruned): {entry}")
 
 
-def test_tm007_new_unit_module_under_integration_fails(tmp_path: Path) -> None:
-    _write_module(tmp_path, NEW_INTEGRATION_MODULE, "def test_value():\n    pass\n")
-
-    problems = placement_violations(
-        _single_module(NEW_INTEGRATION_MODULE, ("unit",)), EMPTY_BASELINE, tmp_path
-    )
-
-    assert len(problems) == 1
-    assert problems[0].startswith(f"{NEW_INTEGRATION_MODULE}: new module under tests/integration")
-    assert "move it to tests/unit" in problems[0]
+def test_tm011_every_lifecycle_law_has_a_promise_id() -> None:
+    catalog = _load_promise_catalog(PROMISE_CATALOG)
+    ledger = read_ledger(REPO_ROOT)
+    violations = _law_violations(catalog, ledger)
+    assert not violations, "\n".join(f"[x] {violation}" for violation in violations)
 
 
-@pytest.mark.parametrize(
-    "source",
-    [
-        "import subprocess\n\ndef test_value():\n    subprocess.run(['git'])\n",
-        "from subprocess import check_output as co\n\ndef test_value():\n    co(['git'])\n",
-        "import os\n\ndef test_value():\n    os.execv('/bin/true', [])\n",
-    ],
-)
-def test_tm007_new_unit_module_spawning_a_process_fails(tmp_path: Path, source: str) -> None:
-    _write_module(tmp_path, NEW_MODULE, source)
-
-    problems = placement_violations(_single_module(NEW_MODULE, ("unit",)), EMPTY_BASELINE, tmp_path)
-
-    assert len(problems) == 1
-    assert problems[0].startswith(f"{NEW_MODULE}: new module under tests/unit spawns a process")
-    assert "line 4:" in problems[0]
-    assert "move the module to tests/integration" in problems[0]
-
-
-def test_tm007_mocked_process_and_legacy_modules_pass(tmp_path: Path) -> None:
-    _write_module(
-        tmp_path,
-        NEW_MODULE,
-        "import subprocess\n\n"
-        "def test_value(monkeypatch):\n"
-        "    monkeypatch.setattr(subprocess, 'run', lambda *a, **k: None)\n",
-    )
-    _write_module(tmp_path, NEW_INTEGRATION_MODULE, "import subprocess\nsubprocess.run(['git'])\n")
-    inventory = TaxonomyInventory(
-        modules={NEW_MODULE: ("unit",), NEW_INTEGRATION_MODULE: ("unit",)},
-        nodes={},
-    )
-    baseline = RatchetBaseline(
-        legacy_modules=frozenset({NEW_INTEGRATION_MODULE}), unclassified_modules=frozenset()
-    )
-
-    assert placement_violations(inventory, baseline, tmp_path) == []
-
-
-def test_tm008_new_modules_link_known_promises(
-    marker_inventory: TaxonomyInventory,
-    ratchet_baseline: RatchetBaseline,
-    catalog_ids: frozenset[str],
-) -> None:
-    assert promise_violations(marker_inventory, ratchet_baseline, catalog_ids) == []
-
-
-def test_tm008_new_module_without_promise_fails(catalog_ids: frozenset[str]) -> None:
-    problems = promise_violations(
-        _single_module(NEW_MODULE, ("unit",)), EMPTY_BASELINE, catalog_ids
-    )
-
-    assert len(problems) == 1
-    assert problems[0].startswith(f"{NEW_MODULE}: new test module declares no promise")
-    assert f"naming ids from {CATALOG.as_posix()}" in problems[0]
-
-
-def test_tm008_unknown_promise_id_fails(catalog_ids: frozenset[str]) -> None:
-    inventory = _single_module(NEW_MODULE, ("unit",), (KNOWN_PROMISE, "req-zz-999"))
-
-    problems = promise_violations(inventory, EMPTY_BASELINE, catalog_ids)
-
-    assert len(problems) == 1
-    assert problems[0].startswith(f"{NEW_MODULE}: pytest.mark.promise names unknown id(s)")
-    assert "'req-zz-999'" in problems[0]
-
-
-def test_tm008_new_module_with_known_promise_passes(catalog_ids: frozenset[str]) -> None:
-    inventory = _single_module(NEW_MODULE, ("unit",), (KNOWN_PROMISE,))
-
-    assert promise_violations(inventory, EMPTY_BASELINE, catalog_ids) == []
-
-
-def test_tm008_inventory_records_module_promises(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    catalog_ids: frozenset[str],
-) -> None:
-    (tmp_path / "pytest.ini").write_text(
-        "[pytest]\nmarkers =\n    unit: unit\n    promise: promise\n",
-        encoding="utf-8",
-    )
-    _write_module(
-        tmp_path,
-        "tests/test_linked.py",
-        "import pytest\n\n"
-        f"pytestmark = [pytest.mark.unit, pytest.mark.promise({KNOWN_PROMISE!r})]\n\n"
-        "def test_value():\n    pass\n",
-    )
-    _write_module(
-        tmp_path,
-        "tests/test_unlinked.py",
-        "import pytest\n\npytestmark = pytest.mark.unit\n\ndef test_value():\n    pass\n",
-    )
-    monkeypatch.setenv("PYTHONPATH", str(REPO_ROOT))
-
-    inventory = collect_inventory(tmp_path, tmp_path / "inventory.json")
-    problems = promise_violations(inventory, EMPTY_BASELINE, catalog_ids)
-
-    assert inventory.promises == {"tests/test_linked.py": (KNOWN_PROMISE,)}
-    assert [problem.split(":", 1)[0] for problem in problems] == ["tests/test_unlinked.py"]
-
-
-def test_tm009_taxonomy_baseline_has_no_stale_entries(
-    marker_inventory: TaxonomyInventory,
-    ratchet_baseline: RatchetBaseline,
-) -> None:
-    stale_legacy, stale_unclassified = stale_entries(marker_inventory, ratchet_baseline, REPO_ROOT)
-
-    assert (stale_legacy, stale_unclassified) == (set(), set()), (
-        f"taxonomy ratchet baseline is stale; run '{UPDATE_COMMAND}'"
-    )
-
-
-def test_tm009_stale_entries_are_detected(tmp_path: Path) -> None:
-    classified = "tests/unit/test_classified.py"
-    _write_module(tmp_path, classified, "def test_value():\n    pass\n")
-    baseline = RatchetBaseline(
-        legacy_modules=frozenset({classified, NEW_MODULE}),
-        unclassified_modules=frozenset({classified, NEW_MODULE}),
-    )
-
-    stale = stale_entries(_single_module(classified, ("unit",)), baseline, tmp_path)
-
-    assert stale == ({NEW_MODULE}, {classified, NEW_MODULE})
-
-
-def test_tm010_promise_catalog_resolves_to_sources() -> None:
-    payload = json.loads((REPO_ROOT / CATALOG).read_text(encoding="utf-8"))
-
-    assert catalog_problems(payload, catalog_source_ids(REPO_ROOT)) == []
-
-
-def test_tm010_dangling_catalog_id_fails() -> None:
-    payload = {
-        "description": "fixture",
-        "promises": [{"id": "req-zz-999", "source": "spec"}],
+def _seeded_catalog(*extra_ids: str) -> dict[str, object]:
+    return {
+        "doc": "seed",
+        "families": {"P-OWN": "owners", "req": "spec"},
+        "promises": {"P-OWN-seed": "seed", "req-mf-001": "seed", **dict.fromkeys(extra_ids, "x")},
         "schema_version": 1,
     }
 
-    problems = catalog_problems(payload, {"architecture-owner": frozenset(), "spec": frozenset()})
 
-    assert len(problems) == 1
-    assert "'req-zz-999' no longer exists in its spec source" in problems[0]
-
-
-def test_tm010_promise_marker_is_registered() -> None:
-    assert "promise" in _declared_markers()
-
-
-def test_tm010_promise_catalog_matches_its_builder() -> None:
-    payload = json.loads((REPO_ROOT / CATALOG).read_text(encoding="utf-8"))
-
-    assert payload == catalog_payload(catalog_source_ids(REPO_ROOT))
+def test_tm012_unknown_promise_prefix_fails() -> None:
+    assert _catalog_violations(_seeded_catalog()) == []
+    assert _catalog_violations(_seeded_catalog("owner:seed")) == [
+        "tests/quality/promise-catalog.json: promise id 'owner:seed' has an unknown prefix. "
+        "Fix: use P-<FAMILY>-<id> with a declared family, or a spec requirement id "
+        "(req-xx-NNN) as written in CONFORMANCE.json."
+    ]
 
 
-def test_tm011_hand_added_baseline_entries_fail() -> None:
-    base = RatchetBaseline(
-        legacy_modules=frozenset({NEW_MODULE}), unclassified_modules=frozenset({NEW_MODULE})
+def test_tm012_undeclared_promise_family_fails() -> None:
+    assert _catalog_violations(_seeded_catalog("P-DOC-001")) == [
+        "tests/quality/promise-catalog.json: promise id 'P-DOC-001' uses undeclared family "
+        "'P-DOC'. Fix: declare 'P-DOC' in the catalog's families, or use a declared family "
+        "(P-OWN, req)."
+    ]
+
+
+def test_tm012_missing_lifecycle_law_promise_fails() -> None:
+    ledger = {"property_catalog": [{"id": "outcome.status_matches_state"}, {"id": "new.law"}]}
+    assert _law_violations(
+        frozenset({"P-LAW-outcome.status_matches_state", "P-LAW-gone.law"}), ledger
+    ) == [
+        "tests/quality/promise-catalog.json: lifecycle law 'new.law' has no promise id. "
+        "Fix: add 'P-LAW-new.law' to the catalog.",
+        "tests/quality/promise-catalog.json: 'P-LAW-gone.law' names no lifecycle law. "
+        "Fix: remove it, or add the law to tests/fixtures/lifecycle_bug_ledger/"
+        "property_catalog/.",
+    ]
+
+
+def test_tm013_static_marker_reader_agrees_with_collection(
+    marker_inventory: TaxonomyInventory,
+) -> None:
+    disagreements = {
+        module: (sorted(static), sorted(collected))
+        for module, collected in marker_inventory.modules.items()
+        if (
+            static := set(
+                module_markers(ast.parse((REPO_ROOT / module).read_text(encoding="utf-8")))
+            )
+            & BEHAVIORAL_MARKERS
+        )
+        != set(_behavioral(collected))
+    }
+    assert disagreements == {}, (
+        "scripts/test_static_facts.py module_markers must read the same module-level "
+        f"pytestmark that pytest collects: {disagreements}"
     )
-    grown = RatchetBaseline(
-        legacy_modules=frozenset({NEW_MODULE, NEW_INTEGRATION_MODULE}),
-        unclassified_modules=frozenset({NEW_MODULE, NEW_INTEGRATION_MODULE}),
+
+
+def test_tm006_ratchet_files_are_canonical_json() -> None:
+    for path in (TAXONOMY_BASELINE, PROMISE_CATALOG):
+        text = path.read_text(encoding="utf-8")
+        assert text == json.dumps(json.loads(text), indent=2, sort_keys=True) + "\n", (
+            f"{path.name} must be sorted JSON with one entry per line"
+        )
+
+
+_SEEDED_PYTEST_INI = """[pytest]
+markers =
+    unit: unit
+    component: component
+    e2e: e2e
+    promise: promise
+"""
+_SEEDED_MODULES = {
+    "tests/unit/test_legacy.py": "def test_legacy():\n    assert True\n",
+    "tests/integration/test_moved.py": "def test_moved():\n    assert True\n",
+    "tests/unit/test_new_unclassified.py": (
+        'import pytest\n\npytestmark = pytest.mark.promise("P-OWN-seed")\n\n'
+        "def test_value():\n    assert True\n"
+    ),
+    "tests/integration/test_new_unit.py": (
+        'import pytest\n\npytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-seed")]\n\n'
+        "def test_value():\n    assert True\n"
+    ),
+    "tests/unit/test_new_spawn.py": (
+        "import subprocess\n\nimport pytest\n\n"
+        'pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-seed")]\n\n'
+        'def test_value():\n    subprocess.run(["true"], check=False)\n'
+    ),
+    "tests/unit/test_new_promiseless.py": (
+        "import pytest\n\npytestmark = pytest.mark.unit\n\ndef test_value():\n    assert True\n"
+    ),
+    "tests/unit/test_new_unknown_promise.py": (
+        'import pytest\n\npytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-nope")]\n\n'
+        "def test_value():\n    assert True\n"
+    ),
+    "tests/unit/test_new_compliant.py": (
+        'import pytest\n\npytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-seed")]\n\n'
+        "def test_value():\n    assert True\n"
+    ),
+}
+
+
+@pytest.fixture(scope="module")
+def seeded_findings(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[list[str], list[str]]:
+    """Collect a tmp tree that seeds one violation per ratchet."""
+    root = tmp_path_factory.mktemp("seeded")
+    (root / "pytest.ini").write_text(_SEEDED_PYTEST_INI, encoding="utf-8")
+    for relative, source in _SEEDED_MODULES.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    inventory = _collect_inventory(root, root / "inventory.json")
+    baseline = {
+        "misplaced_modules": frozenset({"tests/unit/test_removed_spawn.py"}),
+        "promise_exempt_modules": frozenset(
+            {"tests/unit/test_legacy.py", "tests/unit/test_moved.py"}
+        ),
+        "unclassified_modules": frozenset(
+            {"tests/unit/test_legacy.py", "tests/unit/test_moved.py", "tests/unit/test_removed.py"}
+        ),
+    }
+    return _taxonomy_ratchet_findings(
+        inventory, baseline, frozenset({"P-OWN-seed"}), root, {"P-OWN-seed": "new seed promise"}
     )
 
-    problems = baseline_growth(base, grown)
 
-    assert len(problems) == 2
-    assert (
-        f"legacy_modules grew relative to the merge-base: ['{NEW_INTEGRATION_MODULE}']"
-        in (problems[0])
-    )
-    assert baseline_growth(grown, base) == []
-    assert baseline_growth(None, grown) == []
+def _failures_for(findings: tuple[list[str], list[str]], module: str) -> list[str]:
+    return [failure for failure in findings[0] if failure.startswith(f"{module}: ")]
 
 
-def _git(root: Path, *args: str) -> str:
-    return subprocess.run(
+def test_tm007_new_unclassified_module_fails(
+    seeded_findings: tuple[list[str], list[str]],
+) -> None:
+    assert _failures_for(seeded_findings, "tests/unit/test_new_unclassified.py") == [
+        "tests/unit/test_new_unclassified.py: unclassified test module. Fix: add exactly one "
+        "module-level pytestmark behavioral marker (unit, component or e2e). Suggested: "
+        'pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-seed")]'
+    ]
+
+
+def test_tm008_unit_module_under_integration_fails(
+    seeded_findings: tuple[list[str], list[str]],
+) -> None:
+    failures = _failures_for(seeded_findings, "tests/integration/test_new_unit.py")
+    assert len(failures) == 1
+    assert "unit-marked module under tests/integration. Fix: move it to tests/unit" in (failures[0])
+
+
+def test_tm008_process_spawning_unit_module_fails(
+    seeded_findings: tuple[list[str], list[str]],
+) -> None:
+    failures = _failures_for(seeded_findings, "tests/unit/test_new_spawn.py")
+    assert len(failures) == 1
+    assert "tests/unit module spawns processes. Fix: move it to tests/integration" in (failures[0])
+
+
+def test_tm009_new_module_without_promise_fails(
+    seeded_findings: tuple[list[str], list[str]],
+) -> None:
+    failures = _failures_for(seeded_findings, "tests/unit/test_new_promiseless.py")
+    assert len(failures) == 1
+    assert "new test module carries no pytest.mark.promise. Fix: add" in failures[0]
+    assert "tests/quality/promise-catalog.json" in failures[0]
+
+
+def test_tm009_unknown_promise_id_fails(
+    seeded_findings: tuple[list[str], list[str]],
+) -> None:
+    failures = _failures_for(seeded_findings, "tests/unit/test_new_unknown_promise.py")
+    assert failures == [
+        "tests/unit/test_new_unknown_promise.py: unknown promise id(s) ['P-OWN-nope']. "
+        "Fix: use ids listed in tests/quality/promise-catalog.json, or add the promise "
+        "to the catalog."
+    ]
+
+
+def test_tm010_legacy_moved_compliant_and_removed_entries_do_not_fail(
+    seeded_findings: tuple[list[str], list[str]],
+) -> None:
+    failures, stale = seeded_findings
+    assert _failures_for(seeded_findings, "tests/unit/test_legacy.py") == []
+    assert _failures_for(seeded_findings, "tests/unit/test_new_compliant.py") == []
+    assert _failures_for(seeded_findings, "tests/integration/test_moved.py") == []
+    assert len(failures) == 5
+    assert stale == [
+        "promise_exempt_modules tests/unit/test_moved.py moved to "
+        "tests/integration/test_moved.py; replace the entry",
+        "unclassified_modules tests/unit/test_moved.py moved to "
+        "tests/integration/test_moved.py; replace the entry",
+        "misplaced_modules tests/unit/test_removed_spawn.py",
+        "unclassified_modules tests/unit/test_removed.py",
+    ]
+    with pytest.raises(AssertionError, match=r"\[x\] tests/unit/test_new_promiseless\.py"):
+        _assert_taxonomy_ratchets(
+            TaxonomyInventory(
+                modules={"tests/unit/test_new_promiseless.py": ("unit",)},
+                nodes={"tests/unit/test_new_promiseless.py::test_value": ("unit",)},
+            ),
+            {key: frozenset() for key in BASELINE_LISTS},
+            frozenset(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("source", "spawns"),
+    [
+        pytest.param(
+            "def test_a():\n    import subprocess as api\n    api.run(['x'])\n\n"
+            "def test_b():\n    import os as api\n    api.getcwd()\n",
+            True,
+            id="conflicting-aliases-in-separate-tests",
+        ),
+        pytest.param(
+            "def test_a():\n    from os import system\n\ndef test_b():\n    system('x')\n",
+            False,
+            id="alias-does-not-leak-across-functions",
+        ),
+        pytest.param(
+            "from asyncio.subprocess import create_subprocess_exec\n\n"
+            "async def test():\n    await create_subprocess_exec('x')\n",
+            True,
+            id="asyncio-subprocess-direct-import",
+        ),
+        pytest.param(
+            "import asyncio\n\nasync def test():\n"
+            "    await asyncio.subprocess.create_subprocess_shell('x')\n",
+            True,
+            id="asyncio-subprocess-attribute",
+        ),
+    ],
+)
+def test_tm014_spawn_detection_respects_scopes_and_asyncio(source: str, spawns: bool) -> None:
+    assert spawns_processes(source) is spawns
+
+
+def _allowance_repo(root: Path, lists: dict[str, list[str]]) -> Path:
+    baseline = root / "tests" / "quality" / "test_taxonomy_baseline.json"
+    baseline.parent.mkdir(parents=True)
+    payload = {"doc": "x", "schema_version": 1, **lists}
+    baseline.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    for command in (
+        ["init", "-q"],
+        ["add", "-A"],
         [
-            "git",
-            "-C",
-            str(root),
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
             "-c",
             "commit.gpgsign=false",
-            "-c",
-            "user.name=ratchet",
-            "-c",
-            "user.email=ratchet@example.invalid",
-            *args,
+            "commit",
+            "-q",
+            "-m",
+            "base",
+        ],
+    ):
+        subprocess.run(["git", "-C", str(root), *command], check=True, capture_output=True)
+    return baseline
+
+
+def _run_allowances(root: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "check_taxonomy_allowances.py"),
+            "--root",
+            str(root),
+            "--base-ref",
+            "HEAD",
         ],
         capture_output=True,
         text=True,
-        check=True,
-    ).stdout
+        check=False,
+    )
 
 
-def test_tm011_merge_base_copy_is_read_from_the_base_branch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_tm015_appending_an_allowance_fails_against_base(tmp_path: Path) -> None:
+    lists = {
+        "misplaced_modules": [],
+        "promise_exempt_modules": ["tests/unit/test_old.py"],
+        "unclassified_modules": ["tests/unit/test_old.py"],
+    }
+    (tmp_path / "tests" / "unit").mkdir(parents=True)
+    (tmp_path / "tests" / "unit" / "test_old.py").write_text("", encoding="utf-8")
+    baseline = _allowance_repo(tmp_path, lists)
+    grown = {**lists, "unclassified_modules": ["tests/unit/test_new.py", "tests/unit/test_old.py"]}
+    baseline.write_text(json.dumps({"doc": "x", "schema_version": 1, **grown}), encoding="utf-8")
+
+    result = _run_allowances(tmp_path)
+
+    assert result.returncode == 1
+    assert (
+        "[x] tests/unit/test_new.py: added to unclassified_modules in "
+        "tests/quality/test_taxonomy_baseline.json. Fix:"
+    ) in result.stderr
+
+
+def test_tm015_validated_move_rekey_passes(tmp_path: Path) -> None:
+    lists = {
+        "misplaced_modules": [],
+        "promise_exempt_modules": ["tests/unit/test_moved.py"],
+        "unclassified_modules": ["tests/unit/test_moved.py"],
+    }
+    baseline = _allowance_repo(tmp_path, lists)
+    (tmp_path / "tests" / "integration").mkdir(parents=True)
+    (tmp_path / "tests" / "integration" / "test_moved.py").write_text("", encoding="utf-8")
+    moved = {
+        key: [entry.replace("unit", "integration") for entry in value]
+        for key, value in lists.items()
+    }
+    baseline.write_text(json.dumps({"doc": "x", "schema_version": 1, **moved}), encoding="utf-8")
+
+    result = _run_allowances(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "[+] taxonomy allowances did not grow" in result.stdout
+
+
+_SUGGESTION_CATALOG = {
+    "P-OWN-lockfile-write": "who writes apm.lock.yaml",
+    "P-OWN-marketplace-fetch": "how a marketplace catalog is fetched",
+    "P-DOC-cli-surface": "the docs describe the shipped CLI",
+    "req-lk-002": "the lockfile records the resolved source",
+}
+
+
+def test_tm016_suggestion_ranks_mentioned_requirements_then_name_tokens() -> None:
+    source = '"""Covers req-lk-002."""\n\ndef test_value():\n    assert True\n'
+    assert candidate_promises("tests/unit/test_lockfile_write.py", source, _SUGGESTION_CATALOG) == [
+        "req-lk-002",
+        "P-OWN-lockfile-write",
+    ]
+    assert candidate_promises("tests/unit/test_unrelated.py", "", _SUGGESTION_CATALOG) == []
+
+
+@pytest.mark.parametrize(
+    ("module", "source", "behavioral"),
+    [
+        ("tests/unit/test_marketplace_fetch.py", "", "unit"),
+        ("tests/lifecycle/test_marketplace_fetch.py", "", "e2e"),
+        ("tests/integration/test_marketplace_fetch.py", "", "component"),
+        ("tests/integration/test_marketplace_fetch.py", "def test(apm_binary_path): pass\n", "e2e"),
+    ],
+)
+def test_tm016_suggested_line_infers_the_behavioral_marker(
+    module: str, source: str, behavioral: str
 ) -> None:
-    relative = Path("tests") / "quality" / "baseline.json"
-    _write_module(tmp_path, relative.as_posix(), "base\n")
-    _git(tmp_path, "init", "-q", "-b", "main")
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "-q", "-m", "base")
-    _git(tmp_path, "checkout", "-q", "-b", "feature")
-    _write_module(tmp_path, relative.as_posix(), "feature\n")
-    _git(tmp_path, "commit", "-q", "-am", "feature")
-    monkeypatch.setenv("APM_RATCHET_BASE_REF", "main")
+    line, ids = suggested_pytestmark(module, source, _SUGGESTION_CATALOG)
+    assert ids == ["P-OWN-marketplace-fetch"]
+    assert line == (
+        f'pytestmark = [pytest.mark.{behavioral}, pytest.mark.promise("P-OWN-marketplace-fetch")]'
+    )
 
-    assert merge_base_text(tmp_path, relative) == "base\n"
-    assert merge_base_text(tmp_path, Path("missing.json")) is None
-    monkeypatch.setenv("APM_RATCHET_BASE_REF", "no-such-ref")
-    with pytest.raises(MergeBaseUnavailable, match="cannot find the merge-base"):
-        merge_base_text(tmp_path, relative)
+
+def _changed_repo(root: Path) -> Path:
+    """A git repo with the real catalog and baseline, one commit on 'main'."""
+    quality = root / "tests" / "quality"
+    quality.mkdir(parents=True)
+    for name in ("promise-catalog.json", "test_taxonomy_baseline.json"):
+        (quality / name).write_text((REPO_ROOT / "tests" / "quality" / name).read_text())
+    git = ["git", "-C", str(root), "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "-c", "commit.gpgsign=false", "commit", "-qm", "base"], check=True)
+    return root
+
+
+def test_tm017_changed_reports_only_changed_modules_with_the_gate_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _changed_repo(tmp_path)
+    (root / "tests" / "unit").mkdir()
+    (root / "tests" / "unit" / "test_new_promiseless.py").write_text(
+        "import pytest\n\npytestmark = pytest.mark.unit\n\ndef test_value():\n    assert True\n"
+    )
+    assert taxonomy_main(["--changed", "--base-ref", "main", "--root", str(root)]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith(
+        "[x] tests/unit/test_new_promiseless.py: new test module carries no pytest.mark.promise."
+    )
+    assert "Suggested: pytestmark = [pytest.mark.unit, pytest.mark.promise(" in err
+    (root / "tests" / "unit" / "test_new_promiseless.py").write_text(
+        'import pytest\n\npytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I6")]\n'
+    )
+    assert taxonomy_main(["--changed", "--base-ref", "main", "--root", str(root)]) == 0
+    assert "[+] tm006: 1 changed test module(s)" in capsys.readouterr().out
+
+
+def test_tm018_lifecycle_family_directory_supplies_the_marker() -> None:
+    module = "tests/lifecycle/machines/test_m_new.py"
+    inventory = TaxonomyInventory(modules={module: ()}, nodes={}, promises={module: ("P-INV-I6",)})
+    empty = {key: frozenset() for key in BASELINE_LISTS}
+    assert _taxonomy_ratchet_findings(inventory, empty, frozenset({"P-INV-I6"}))[0] == []
+    contradicting = TaxonomyInventory(
+        modules={module: ("unit",)}, nodes={}, promises={module: ("P-INV-I6",)}
+    )
+    assert _taxonomy_ratchet_findings(contradicting, empty, frozenset({"P-INV-I6"}))[0] == [
+        f"{module}: declares ['unit'] but its directory determines 'e2e'. Fix: drop the "
+        "behavioral marker (the directory applies 'e2e'), or move the module out of the "
+        "directory."
+    ]
+    assert directory_marker("tests/lifecycle/generator/test_generator_rules.py") is None
+    line, _ids = suggested_pytestmark(module, "", _SUGGESTION_CATALOG)
+    assert line == 'pytestmark = [pytest.mark.promise("<catalog id>")]'
+
+
+def test_tm018_changed_accepts_a_promise_only_module_in_a_family_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _changed_repo(tmp_path)
+    machines = root / "tests" / "lifecycle" / "machines"
+    machines.mkdir(parents=True)
+    (machines / "test_m_new.py").write_text(
+        'import pytest\n\npytestmark = [pytest.mark.promise("P-INV-I6")]\n'
+    )
+    assert taxonomy_main(["--changed", "--base-ref", "main", "--root", str(root)]) == 0
+    assert "[+] tm006: 1 changed test module(s)" in capsys.readouterr().out
+
+
+class _FakeItem:
+    def __init__(self, relative: str, markers: tuple[str, ...] = ()) -> None:
+        self.fspath = REPO_ROOT / relative
+        self.markers = list(markers)
+
+    def get_closest_marker(self, name: str) -> object | None:
+        return name if name in self.markers else None
+
+    def iter_markers(self, name: str):  # a generator, as in pytest
+        return (marker for marker in self.markers if marker == name)
+
+    def add_marker(self, name: str) -> None:
+        self.markers.append(name)
+
+
+def test_tm018_collection_applies_the_directory_marker_only_when_missing() -> None:
+    from tests.lifecycle.conftest import pytest_collection_modifyitems
+
+    bare = _FakeItem("tests/lifecycle/scenarios/test_new.py", ("promise",))
+    declared = _FakeItem("tests/lifecycle/scenarios/test_old.py", ("e2e",))
+    elsewhere = _FakeItem("tests/lifecycle/generator/test_new.py", ("promise",))
+    pytest_collection_modifyitems([bare, declared, elsewhere])
+    assert (bare.markers, declared.markers, elsewhere.markers) == (
+        ["promise", "e2e"],
+        ["e2e"],
+        ["promise"],
+    )

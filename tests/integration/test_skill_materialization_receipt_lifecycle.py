@@ -39,17 +39,17 @@ def test_user_edit_equal_to_old_version_remains_protected(
     proof = receipt.read_bytes()
     scenario.deployed_skill.write_bytes(old)
     result = scenario.install(*(["--frozen"] if frozen else []))
-    output = " ".join(result.stdout.split())
+    output = " ".join((result.stdout + result.stderr).split())
     if frozen:
-        # --frozen fails closed on any deployed-hash mismatch (#3654) but
-        # still keeps the user's edit in place.
+        # --frozen fails closed on any deployed-hash mismatch (#3654) before
+        # deploying, so the user's edit stays in place (#3994).
         assert result.returncode == 1, result.stdout + result.stderr
-        assert "Kept user-edited file .claude/skills/demo/SKILL.md" in output
+        assert "nothing was deployed" in output
         assert "deployed files do not match the hashes recorded in apm.lock.yaml" in output
         assert "- .claude/skills/demo/SKILL.md: expected sha256:" in output
     else:
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "modified since deployment" in result.stdout
+        assert "it was modified since APM deployed it" in output
     assert scenario.deployed_skill.read_bytes() == old
     assert receipt.read_bytes() == proof
 
@@ -81,7 +81,9 @@ def test_untrusted_receipt_does_not_replace_legacy_deployment(
         assert result.returncode != 0
         assert "materialization evidence" in result.stdout + result.stderr
     else:
-        assert "no trustworthy local deployment baseline" in " ".join(result.stdout.split())
+        assert "no trustworthy local deployment baseline" in " ".join(
+            (result.stdout + result.stderr).split()
+        )
     assert (receipt.read_bytes() if receipt.exists() else None) == proof
 
 
@@ -129,7 +131,9 @@ def test_recreated_checkout_with_retained_outputs_has_no_old_authority(
     shutil.copytree(previous, scenario.root, ignore=shutil.ignore_patterns(".apm-local"))
     result = scenario.install()
     assert scenario.deployed_skill.read_bytes() == old
-    assert "no trustworthy local deployment baseline" in " ".join(result.stdout.split())
+    assert "no trustworthy local deployment baseline" in " ".join(
+        (result.stdout + result.stderr).split()
+    )
     assert not (scenario.root / ".apm-local/installation").exists()
 
 

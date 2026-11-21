@@ -49,6 +49,8 @@ from tests.spec_conformance._helpers import (
     waive,
 )
 
+pytestmark = pytest.mark.component
+
 # --- req-mf-001..005: manifest shape, producer side ---------------------
 
 
@@ -604,10 +606,13 @@ def test_consumer_resolves_credentials_per_host_class():
 @pytest.mark.req("req-sc-004")
 def test_archive_container_size_and_entry_count_capped():
     assert_spec_contains(
-        "`application/gzip` over a tar payload",
-        "MUST reject `application/zip`",
+        "`application/gzip` over a tar payload (`tar.gz`) or\n`application/zip` (`zip`)",
+        "MUST reject any other\narchive container in v0.1",
         "100 MB",
         "10,000",
+        "counted as\nentries are read",
+        "any symbolic or hard\nlink, and any duplicate entry path",
+        "The same limit set, (b) through (d),\napplies identically to `tar.gz` and `zip`.",
     )
 
 
@@ -616,6 +621,9 @@ def test_host_class_collapse_constrained_to_psl_or_aliases():
     assert_spec_contains(
         "Public Suffix List",
         "explicit `aliases:` entry",
+        "the built-in **GitHub-operated host class**: `github.com` and every\n`*.ghe.com` host",
+        "operator names it through the `GITHUB_HOST` setting, never through a\nmanifest.",
+        "Basis (c) covers only those hosts; it does\nnot widen (a) or (b) for any other host.",
         "MUST NOT collapse two",
         "configuration signal exercised",
         "under [req-sc-013](#req-sc-013) is not subject to this prohibition",
@@ -1220,7 +1228,7 @@ def test_user_scoped_mcp_target_selection_ignores_project_signals(
         EffectiveTargetDecision,
         resolve_manifest_target_decision,
     )
-    from apm_cli.integration.mcp_integrator_install import partition_user_scope_runtimes
+    from apm_cli.integration.mcp_user_scope_runtimes import partition_user_scope_runtimes
 
     project = tmp_path / "project"
     project.mkdir()
@@ -1294,7 +1302,7 @@ def test_declared_user_mcp_targets_install_without_project_signals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Bind declared user capabilities to real global CLI configuration writes."""
-    from apm_cli.integration.mcp_integrator_install import partition_user_scope_runtimes
+    from apm_cli.integration.mcp_user_scope_runtimes import partition_user_scope_runtimes
     from tests.integration.test_global_cursor_opencode_mcp import (
         test_global_package_install_and_uninstall_preserve_foreign_servers as _run_user_scope_contract,
     )

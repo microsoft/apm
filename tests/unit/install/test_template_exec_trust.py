@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 import apm_cli.security.executables as ex
 from apm_cli.install.template import effective_allow_map
+
+pytestmark = pytest.mark.component
 
 
 def test_effective_allow_reads_source_manifest_under_root_redirect(tmp_path, monkeypatch):

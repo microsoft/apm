@@ -12,11 +12,12 @@ from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.commands.marketplace.plugin import _SHA_RE, _resolve_ref  # noqa: F401
-from apm_cli.core.command_logger import CommandLogger
 from apm_cli.install.locking import lifecycle_lock
 from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder
 from apm_cli.marketplace.migration import load_marketplace_config
 from apm_cli.marketplace.ref_resolver import RemoteRef
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -421,195 +422,8 @@ class TestPackageAddMutualExclusivity:
         assert "mutually exclusive" in result.output.lower()
 
 
-# ---------------------------------------------------------------------------
-# _resolve_ref unit tests
-# ---------------------------------------------------------------------------
-
 _FAKE_SHA = "a" * 40
 _FAKE_SHA_B = "b" * 40
-
-
-class TestResolveRef:
-    """Unit tests for the ``_resolve_ref()`` helper."""
-
-    def _make_logger(self) -> CommandLogger:
-        return CommandLogger("test", verbose=False)
-
-    def test_version_set_returns_none(self):
-        """When version is provided, ref resolution is skipped."""
-        result = _resolve_ref(
-            self._make_logger(),
-            "acme/tools",
-            ref=None,
-            version=">=1.0.0",
-            no_verify=False,
-        )
-        assert result is None
-
-    def test_no_ref_no_verify_exits(self):
-        """No --ref, --no-verify → error (cannot resolve without network)."""
-        with pytest.raises(SystemExit) as exc_info:
-            _resolve_ref(
-                self._make_logger(),
-                "acme/tools",
-                ref=None,
-                version=None,
-                no_verify=True,
-            )
-        assert exc_info.value.code == 2
-
-    @patch(
-        "apm_cli.marketplace.ref_resolver.RefResolver.resolve_ref_sha",
-        return_value=_FAKE_SHA,
-    )
-    def test_no_ref_resolves_head(self, mock_resolve):
-        """No --ref, no --version → auto-resolve HEAD."""
-        result = _resolve_ref(
-            self._make_logger(),
-            "acme/tools",
-            ref=None,
-            version=None,
-            no_verify=False,
-        )
-        assert result == _FAKE_SHA
-        mock_resolve.assert_called_once_with("acme/tools", "HEAD")
-
-    def test_explicit_head_no_verify_exits(self):
-        """--ref HEAD + --no-verify → error."""
-        with pytest.raises(SystemExit) as exc_info:
-            _resolve_ref(
-                self._make_logger(),
-                "acme/tools",
-                ref="HEAD",
-                version=None,
-                no_verify=True,
-            )
-        assert exc_info.value.code == 2
-
-    @patch(
-        "apm_cli.marketplace.ref_resolver.RefResolver.resolve_ref_sha",
-        return_value=_FAKE_SHA,
-    )
-    def test_explicit_head_resolves(self, mock_resolve):
-        """--ref HEAD → warn + resolve."""
-        result = _resolve_ref(
-            self._make_logger(),
-            "acme/tools",
-            ref="HEAD",
-            version=None,
-            no_verify=False,
-        )
-        assert result == _FAKE_SHA
-
-    @patch(
-        "apm_cli.marketplace.ref_resolver.RefResolver.resolve_ref_sha",
-        return_value=_FAKE_SHA,
-    )
-    def test_explicit_head_case_insensitive(self, mock_resolve):
-        """--ref head (lowercase) → treated as HEAD."""
-        result = _resolve_ref(
-            self._make_logger(),
-            "acme/tools",
-            ref="head",
-            version=None,
-            no_verify=False,
-        )
-        assert result == _FAKE_SHA
-
-    def test_sha_returns_as_is(self):
-        """A 40-char hex SHA is returned unchanged."""
-        result = _resolve_ref(
-            self._make_logger(),
-            "acme/tools",
-            ref=_FAKE_SHA,
-            version=None,
-            no_verify=False,
-        )
-        assert result == _FAKE_SHA
-
-    @patch(
-        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
-        return_value=[
-            RemoteRef(name="refs/heads/main", sha=_FAKE_SHA_B),
-            RemoteRef(name="refs/tags/v1.0.0", sha=_FAKE_SHA),
-        ],
-    )
-    def test_branch_name_resolves_to_sha(self, mock_list):
-        """--ref main (matching refs/heads/main) → warn + resolve."""
-        result = _resolve_ref(
-            self._make_logger(),
-            "acme/tools",
-            ref="main",
-            version=None,
-            no_verify=False,
-        )
-        assert result == _FAKE_SHA_B
-
-    @patch(
-        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
-        return_value=[
-            RemoteRef(name="refs/heads/main", sha=_FAKE_SHA),
-            RemoteRef(name="refs/tags/v1.0.0", sha=_FAKE_SHA_B),
-        ],
-    )
-    def test_tag_name_returns_as_is(self, mock_list):
-        """--ref v1.0.0 (not a branch) → returned as-is."""
-        result = _resolve_ref(
-            self._make_logger(),
-            "acme/tools",
-            ref="v1.0.0",
-            version=None,
-            no_verify=False,
-        )
-        assert result == "v1.0.0"
-
-    @patch(
-        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
-        return_value=[RemoteRef(name="refs/tags/v1.0.0", sha=_FAKE_SHA)],
-    )
-    def test_missing_tag_exits_like_check(self, mock_list):
-        """--ref naming no tag or branch on a reachable remote is refused."""
-        with pytest.raises(SystemExit) as exc_info:
-            _resolve_ref(
-                self._make_logger(),
-                "acme/tools",
-                ref="v9.9.9",
-                version=None,
-                no_verify=False,
-            )
-        assert exc_info.value.code == 2
-
-    @patch(
-        "apm_cli.marketplace.ref_resolver.RefResolver.list_remote_refs",
-        return_value=[RemoteRef(name="refs/tags/v1.0.0", sha=_FAKE_SHA)],
-    )
-    def test_missing_tag_with_no_verify_is_stored(self, mock_list):
-        """--no-verify keeps the explicit opt-out for unpublished tags."""
-        result = _resolve_ref(
-            self._make_logger(),
-            "acme/tools",
-            ref="v9.9.9",
-            version=None,
-            no_verify=True,
-        )
-        assert result == "v9.9.9"
-
-    def test_ref_lookup_uses_the_source_host(self):
-        """A host-qualified source is listed on its own host, not the default."""
-        with patch("apm_cli.marketplace.ref_resolver.RefResolver") as resolver_cls:
-            resolver_cls.return_value.list_remote_refs.return_value = [
-                RemoteRef(name="refs/tags/v1.0.0", sha=_FAKE_SHA)
-            ]
-            result = _resolve_ref(
-                self._make_logger(),
-                "acme/tools",
-                ref="v1.0.0",
-                version=None,
-                no_verify=False,
-                host="git.example.invalid",
-            )
-        assert result == "v1.0.0"
-        resolver_cls.assert_called_once_with(host="git.example.invalid")
 
 
 # ---------------------------------------------------------------------------

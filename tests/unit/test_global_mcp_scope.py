@@ -161,7 +161,7 @@ class TestAdapterUserScopeSupport(unittest.TestCase):
                     for case, raw in unsafe_contents.items():
                         with self.subTest(adapter=adapter_cls.__name__, case=case):
                             config_path.write_bytes(raw)
-                            with patch("apm_cli.adapters.client.base._rich_warning") as warn:
+                            with patch("apm_cli.core.null_logger._rich_warning") as warn:
                                 self.assertIsNone(adapter._read_json_config_for_update(config_path))
                             warn.assert_called_once()
                             message = warn.call_args.args[0]
@@ -198,7 +198,7 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._is_vscode_available", return_value=False)
-    @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None)
+    @patch("shutil.which", return_value=None)
     def test_user_scope_skips_workspace_only_runtimes(
         self, mock_which, mock_vscode, mock_install_rt, mock_ops_cls
     ):
@@ -241,7 +241,7 @@ class TestMCPIntegratorScopeFiltering(unittest.TestCase):
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.integration.mcp_integrator._is_vscode_available", return_value=True)
-    @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value="/usr/bin/copilot")
+    @patch("shutil.which", return_value="/usr/bin/copilot")
     def test_project_scope_includes_all_runtimes(
         self, mock_which, mock_vscode, mock_install_rt, mock_ops_cls
     ):
@@ -598,3 +598,14 @@ class TestUpdateLockfileGlobalScope(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_user_scope_runtime_list_comes_from_the_adapters() -> None:
+    """The supported list is derived from adapters, so intellij appears via its label (S11)."""
+    from apm_cli.factory import ClientFactory
+    from apm_cli.integration.mcp_user_scope_runtimes import user_scope_runtime_labels
+
+    labels = user_scope_runtime_labels()
+    assert "JetBrains Copilot" in labels
+    assert ClientFactory.create_client("intellij").supports_user_scope
+    assert "VS Code" not in labels

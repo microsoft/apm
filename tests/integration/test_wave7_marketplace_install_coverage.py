@@ -419,7 +419,7 @@ class TestMarketplaceUpdate:
         assert "No marketplaces" in result.output or "registered" in result.output
 
     def test_update_partial_failure(self, runner: CliRunner, tmp_path: Path) -> None:
-        """One marketplace failing during update doesn't abort the whole run."""
+        """One failing marketplace does not stop the others, but the run exits 1."""
         sources = [_fake_source("good"), _fake_source("bad")]
         good_manifest = _fake_manifest("good")
 
@@ -443,9 +443,11 @@ class TestMarketplaceUpdate:
                 ),
             ):
                 result = runner.invoke(cli, ["marketplace", "update"])
-        # Should complete (exit 0) but warn about the bad marketplace
-        assert result.exit_code == 0
-        assert "bad" in result.output or "network" in result.output
+        # The good catalog still refreshes; the failure is named and fails closed (#3910).
+        assert result.exit_code == 1
+        assert "good (" in result.output
+        assert "bad: network error" in result.output
+        assert "Refreshed 1 of 2 marketplace(s); failed: bad" in result.output
 
 
 # ===========================================================================

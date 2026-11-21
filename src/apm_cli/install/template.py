@@ -14,6 +14,7 @@ This is the Template Method companion to the Strategy pattern in
 from __future__ import annotations
 
 import shlex
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -21,7 +22,8 @@ from apm_cli.agent_plugins.errors import (
     AgentPluginDeploymentBoundaryError,
     AgentPluginTargetExcludedError,
 )
-from apm_cli.install.package_resolution import effective_dependency_selection
+from apm_cli.install.outcome import package_install_count
+from apm_cli.install.package_resolution import effective_dependency_selection, is_implicit_local
 from apm_cli.install.services import (
     IntegratorBundle,
     PackageDeploymentPlan,
@@ -52,8 +54,8 @@ def effective_allow_map(ctx) -> dict | None:
       ``allowExecutables`` alias) read from disk;
     * user consent -- ``~/.apm/config.json`` (lowest authority).
 
-    Returns ``None`` when the gate is disabled (backward-compatible: every
-    executable deploys).
+    Returns an explicit gate-disabled map when no layer opts into the gate
+    (backward-compatible: every executable deploys).
     """
     from apm_cli.security.executables import (
         exec_trust_context_for_project,
@@ -63,15 +65,14 @@ def effective_allow_map(ctx) -> dict | None:
     if getattr(ctx, "exec_trust_ctx", None) is not None:
         return getattr(ctx, "exec_allow_map", None)
 
-    from apm_cli.core.scope import is_user_scope, manifest_root
-    from apm_cli.security.executables import project_manifest_path
+    from apm_cli.core.scope import is_user_scope, scope_manifest_path
 
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
     project_root = getattr(ctx, "source_root", None) or getattr(ctx, "project_root", None)
-    # The scope owner names the manifest directory (APM_HOME under -g, #3954);
-    # the trust owner reads that apm.yml file.
-    manifest_path = project_manifest_path(
-        manifest_root(project_root, user_scope=is_user_scope(getattr(ctx, "scope", None)))
+    # The scope owner names the manifest (APM_HOME/apm.yml under -g, #3954);
+    # the trust owner reads that file.
+    manifest_path = scope_manifest_path(
+        project_root, user_scope=is_user_scope(getattr(ctx, "scope", None))
     )
     project_allow = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
     trust_ctx = exec_trust_context_for_project(
@@ -106,6 +107,7 @@ def run_integration_template(
         materialization, terminal_deltas = prepare_integration_materialization(source)
         if terminal_deltas is not None:
             return terminal_deltas
+    announce_package(source)
     if materialization is None:
         return None
 
@@ -117,14 +119,28 @@ def run_integration_template(
 def prepare_integration_materialization(
     source: DependencySource,
 ) -> tuple[Materialization | None, dict[str, int] | None]:
-    """Acquire one package without deploying it."""
+    """Acquire one package without deploying it.
+
+    Its ``[+]`` header is held for :func:`announce_package`, so each header
+    prints above its own integration tree even when every package is
+    acquired first (#3994).
+    """
     from apm_cli.deps.plugin_parser import DeclaredPluginComponentError
 
-    try:
-        return source.acquire(), None
-    except DeclaredPluginComponentError as exc:
-        source.ctx.diagnostics.error(str(exc), package=source.dep_key)
-        return None, {}
+    hold = getattr(getattr(source.ctx, "logger", None), "held_package_header", None)
+    with hold() if callable(hold) else nullcontext([]) as held:
+        source._held_header_lines = held
+        try:
+            return source.acquire(), None
+        except DeclaredPluginComponentError as exc:
+            source.ctx.diagnostics.error(str(exc), package=source.dep_key)
+            return None, {}
+
+
+def announce_package(source: DependencySource) -> None:
+    """Emit the header lines held while *source* was acquired."""
+    for emit in list(vars(source).pop("_held_header_lines", None) or ()):
+        emit()
 
 
 def preflight_agent_plugin_materializations(
@@ -209,6 +225,8 @@ def preflight_skill_materializations(
 
     local_plan = None
     if ctx.root_has_local_primitives and ctx.targets:
+        from apm_cli.security.executables import AUTHORIZED_FIRST_PARTY, authorized_exec_map
+
         local = build_project_local_package_info(ctx.source_root or ctx.project_root)
         local_plan = prepare_package_deployment(
             local,
@@ -221,6 +239,7 @@ def preflight_skill_materializations(
             skill_subset=effective_dependency_selection(None, ctx).skill_subset,
             ctx=ctx,
             is_first_party=True,
+            allow_executables=authorized_exec_map(AUTHORIZED_FIRST_PARTY),
         )
         check(local, local_plan)
     unmanaged = [conflict for conflict in conflicts if not conflict.untrusted]
@@ -377,6 +396,25 @@ def _dependency_parts_for_skill_subpath(dep_ref) -> tuple[str, str]:
     return base.rstrip("/"), f"{separator}{reference}" if separator else ""
 
 
+def _reinstall_spec(dep_ref) -> str:
+    """Return the ``apm install`` argument that reinstalls *dep_ref*."""
+    dep_base, ref_suffix = _dependency_parts_for_skill_subpath(dep_ref)
+    return f"{dep_base}{ref_suffix}"
+
+
+def _retry_scope_args(ctx) -> tuple[str, ...]:
+    """Return the scope and explicit --target flags a retry hint must repeat."""
+    from apm_cli.core.scope import is_user_scope
+
+    args: list[str] = []
+    target = getattr(ctx, "target_override", None)
+    if target and getattr(ctx, "target_override_source", None) is None:
+        args.extend(("--target", target if isinstance(target, str) else ",".join(target)))
+    if is_user_scope(getattr(ctx, "scope", None)):
+        args.append("--global")
+    return tuple(args)
+
+
 def _agent_plugin_skill_name_for_hint(
     source: DependencySource,
     materialization: Materialization,
@@ -472,7 +510,7 @@ def _integrate_materialization(
     except AgentPluginDeploymentBoundaryError as exc:
         return _record_agent_plugin_boundary_failure(source, m, exc)
 
-    if ctx.skill_subset_from_cli and ctx.skill_subset:
+    if ctx.skill_subset_from_cli and ctx.skill_subset and not is_implicit_local(dep_ref, ctx):
         from apm_cli.install.outcome import require_requested_components
         from apm_cli.integration.skill_integrator import SkillIntegrator
 
@@ -484,6 +522,8 @@ def _integrate_materialization(
             requested=ctx.skill_subset,
             available=available_skills,
             package=dep_key,
+            install_spec=_reinstall_spec(dep_ref),
+            retry_args=_retry_scope_args(ctx),
         ):
             ctx.package_deployed_files[dep_key] = []
             return deltas
@@ -549,13 +589,14 @@ def _integrate_materialization(
         )
         for k in (*mutation_keys, "links_resolved"):
             deltas[k] = int_result[k]
-        # Source-level install deltas are promoted only when primitives changed.
-        if any(int_result[k] > 0 for k in mutation_keys):
-            deltas["installed"] = 1
-        # A natively registered Agent Plugin deploys no primitives by design --
-        # Copilot loads the whole unit live -- but it is still an install.
-        if int_result.get("native_plugin"):
-            deltas["installed"] = 1
+        # Fetched bytes or changed deployed files make an install (#4184); a
+        # natively registered Agent Plugin deploys no primitives by design.
+        deltas["installed"] = package_install_count(
+            int_result, fetched=bool(deltas.get("installed"))
+        )
+        # A parked native bundle deployed nothing: it is not an install (#4154).
+        if int_result.get("parked_native"):
+            deltas["installed"] = 0
         ctx.package_deployed_files[dep_key] = int_result["deployed_files"]
         from apm_cli.core.deployment_state import CompletedReintegration
 

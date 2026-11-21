@@ -1,6 +1,10 @@
 """Tests for integration utility functions."""
 
+import pytest
+
 from apm_cli.integration.utils import normalize_repo_url
+
+pytestmark = pytest.mark.unit
 
 
 class TestNormalizeRepoUrl:

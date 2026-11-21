@@ -15,6 +15,14 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import yaml
 
+from apm_cli.core.remediation import (
+    MCP_ADMITTED_DENIED,
+    MCP_ADMITTED_UNAPPROVED,
+    MCP_LOCAL_PACKAGE_UNRESOLVED,
+    MCP_PACKAGE_MANIFEST_MISSING,
+)
+from apm_cli.core.scope import is_user_scope_root, manifest_file
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.deps.path_anchoring import (
     LocalResolutionError,
     build_local_parent_index,
@@ -84,6 +92,9 @@ class CurrentMcpConfigView:
     # only lets ``diff`` accept a lock recorded before that, already expanded.
     plugin_roots: Mapping[str, str] = field(default_factory=dict)
     project_root: Path | None = None
+    # Recorded local-bundle servers (``bundle:<owner>`` provenance) kept in
+    # ``configs``: ``apm install <bundle>`` owns them, never the dependency graph.
+    bundle_owned: frozenset[str] = frozenset()
     # Dependency servers the executables gate decides (self-defined).
     gated_names: frozenset[str] = frozenset()
     # Server name -> lock identity of the package to ``apm approve``.
@@ -110,6 +121,7 @@ class CurrentMcpConfigView:
         include_dependency_mcp: bool = True,
         allow_pending: bool | None = None,
         active_package_keys: frozenset[str] | None = None,
+        claude_native_keys: frozenset[str] = frozenset(),
     ) -> CurrentMcpConfigView:
         """Derive the view install, ``--frozen`` and audit compare with the lockfile.
 
@@ -131,6 +143,7 @@ class CurrentMcpConfigView:
             include_dependency_mcp=include_dependency_mcp,
             allow_pending=allow_pending,
             active_package_keys=active_package_keys,
+            claude_native_keys=claude_native_keys,
         )
         if exact:
             view = replace(view, selection_replayed=True)
@@ -151,6 +164,7 @@ class CurrentMcpConfigView:
         include_dependency_mcp: bool = True,
         allow_pending: bool | None = None,
         active_package_keys: frozenset[str] | None = None,
+        claude_native_keys: frozenset[str] = frozenset(),
     ) -> CurrentMcpConfigView:
         """Derive MCP truth for the resolver's complete active graph, when supplied.
 
@@ -175,6 +189,7 @@ class CurrentMcpConfigView:
                 include_dependency_mcp=include_dependency_mcp,
                 allow_pending=allow_pending,
                 active_package_keys=active_package_keys,
+                claude_native_keys=claude_native_keys,
             )
         # Root is the authoring project: both prod and dev MCP are intentionally
         # included here (behaviour introduced in #1780). Transitive package deps
@@ -184,10 +199,15 @@ class CurrentMcpConfigView:
         root_names = set(_get_server_configs(root_deps))
         dependencies = tuple(_deduplicate(root_deps + collected.dependencies))
         configs = _get_server_configs(dependencies)
+        bundle_owned = _granted_bundle_servers(
+            _bundle_owned_baseline(lockfile, declared=configs), admission, modules_root
+        )
+        configs.update({name: lockfile.mcp_configs[name] for name in bundle_owned})
         return cls(
             dependencies=dependencies,
             configs=configs,
-            provenance=_get_server_provenance(dependencies),
+            provenance={**_get_server_provenance(dependencies), **bundle_owned},
+            bundle_owned=frozenset(bundle_owned),
             problems=tuple(collected.problems),
             pending_packages=frozenset(collected.pending_packages),
             declaration_fingerprints={
@@ -323,13 +343,12 @@ class CurrentMcpConfigView:
                 # A deny is not a missing approval: name the gate and the deny (#3957).
                 problems[name] = (
                     "admitted in apm.lock.yaml but the executables gate now parks it "
-                    f"(denied); see 'apm policy explain {target}' for the deny to lift, "
-                    "then re-run 'apm install'"
+                    f"(denied); {MCP_ADMITTED_DENIED.bind(target=target).clause()}"
                 )
                 continue
             problems[name] = (
                 f"admitted in apm.lock.yaml but not approved in apm.yml ({reason}); "
-                f"run 'apm approve {target}' and re-run 'apm install'"
+                f"{MCP_ADMITTED_UNAPPROVED.bind(target=target).clause()}"
             )
         return problems
 
@@ -361,6 +380,28 @@ class CurrentMcpConfigView:
             plugin_root=self.plugin_roots.get(name),
             project_root=self.project_root,
         )
+
+    def kept_dependencies(self) -> tuple[Any, ...]:
+        """Every server this view keeps as baseline, for org MCP policy.
+
+        Root, transitive, and recorded local-bundle servers all deploy, so
+        policy judges each. A kept config with no current declaration (a
+        bundle-owned or consent-retained lock entry) is parsed from its
+        recorded config; one that no longer parses is judged by name.
+        """
+        kept: list[Any] = []
+        seen: set[str] = set()
+        for dependency in self.dependencies:
+            name = getattr(dependency, "name", dependency)
+            if name in self.configs and name not in seen:
+                kept.append(dependency)
+                seen.add(name)
+        for name in sorted(set(self.configs) - seen):
+            try:
+                kept.append(MCPDependency.from_dict(dict(self.configs[name])))
+            except (ValueError, TypeError):
+                kept.append(MCPDependency(name=name, registry=False))
+        return tuple(kept)
 
     def diff(self, stored_configs: Mapping[str, Mapping[str, Any]]) -> McpConfigDiff:
         """Compare this current view with a stored lockfile baseline."""
@@ -441,6 +482,18 @@ class McpConfigDiff:
     def is_empty(self) -> bool:
         """Return whether current and stored configurations are identical."""
         return not (self.changed or self.source_only or self.lock_only)
+
+
+# Trust notices already shown in this process (#4256): one install collects
+# the locked MCP view in several passes, but the user needs one notice per server.
+_TRUST_NOTICES_SHOWN: set[str] = set()
+
+
+def _progress_trust_once(logger: Any, message: str) -> None:
+    if message in _TRUST_NOTICES_SHOWN:
+        return
+    _TRUST_NOTICES_SHOWN.add(message)
+    logger.progress(message)
 
 
 def _deduplicate(dependencies: list[Any] | tuple[Any, ...]) -> list[Any]:
@@ -556,13 +609,82 @@ def _get_server_configs(dependencies: list[Any] | tuple[Any, ...]) -> dict[str, 
     return configs
 
 
+BUNDLE_MCP_OWNER_PREFIX = "bundle:"
+
+
+def bundle_mcp_owner_token(owner: str) -> str:
+    """Return the ``mcp_config_provenance`` token for a local bundle's MCP servers."""
+    return f"{BUNDLE_MCP_OWNER_PREFIX}{owner}"
+
+
+def _granted_bundle_servers(
+    owned: dict[str, str], admission: McpAdmission, modules_root: Path
+) -> dict[str, str]:
+    """Keep the bundle servers whose recorded bundle approval still grants MCP (RA-025).
+
+    A local bundle is not in apm.yml, so its servers stay on the lock's
+    baseline; a deny or a revoked approval of the exact bundle key the install
+    recorded (``install/local_bundle_pending.py``) drops them here, so install
+    retires them as it retires the bundle's hooks. A bundle without a record
+    keeps its baseline.
+    """
+    if not owned:
+        return owned
+    context = admission.context
+    if context is None:
+        return owned
+    from apm_cli.install.local_bundle_pending import bundle_grant_withdrawn
+    from apm_cli.security.executables import EXEC_TYPE_MCP
+
+    return {
+        name: token
+        for name, token in owned.items()
+        if not bundle_grant_withdrawn(
+            modules_root.parent, token[len(BUNDLE_MCP_OWNER_PREFIX) :], context, EXEC_TYPE_MCP
+        )
+    }
+
+
+def _bundle_owned_baseline(
+    lockfile: LockFile | None, *, declared: Mapping[str, Any]
+) -> dict[str, str]:
+    """Recorded local-bundle servers that no current declaration supersedes.
+
+    Their only source is ``apm install <bundle>``, so the lock is their
+    baseline until that bundle is reinstalled without them. A ``bundle:``
+    provenance alone is a claim, not a deployment: the server is baseline
+    only when the lock also holds the native-entry receipt (an MCP URI
+    deployment row with a content hash) that a bundle install records.
+    """
+    if lockfile is None:
+        return {}
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    deployed = {
+        name
+        for hashes in DeploymentLedgerCodec.mcp_native_hashes(lockfile).values()
+        for name in hashes
+    }
+    return {
+        name: owner
+        for name, owner in lockfile.mcp_config_provenance.items()
+        if isinstance(owner, str)
+        and owner.startswith(BUNDLE_MCP_OWNER_PREFIX)
+        and name not in declared
+        and name in lockfile.mcp_configs
+        and name in deployed
+    }
+
+
 def mcp_package_owner(*names: str | None, package_dir: Path) -> str:
     """Return the ``mcp_config_provenance`` token for a package's MCP servers.
 
     The declaring package is named by the first non-empty manifest or lock
-    name, falling back to its materialized directory name.
+    name, falling back to its materialized directory name. A package can
+    never claim the local-bundle owner namespace.
     """
-    return next((name for name in names if name), package_dir.name)
+    owner = next((name for name in names if name), package_dir.name)
+    return f"package:{owner}" if owner.startswith(BUNDLE_MCP_OWNER_PREFIX) else owner
 
 
 def _get_server_provenance(dependencies: list[Any] | tuple[Any, ...]) -> dict[str, str]:
@@ -598,8 +720,8 @@ def _fallback_manifest_path(
     if dependency.source == "local" and dependency.local_path:
         raw = Path(dependency.local_path).expanduser()
         package_dir = raw if raw.is_absolute() else project_root / raw
-        return (package_dir / "apm.yml").resolve()
-    return (modules_root / dependency.repo_url / "apm.yml").resolve()
+        return manifest_file(package_dir).resolve()
+    return manifest_file(modules_root / dependency.repo_url).resolve()
 
 
 def _is_local_claude_plugin_source(dependency: LockedDependency, package_dir: Path) -> bool:
@@ -608,7 +730,7 @@ def _is_local_claude_plugin_source(dependency: LockedDependency, package_dir: Pa
 
     if dependency.package_type != PackageType.MARKETPLACE_PLUGIN.value:
         return False
-    if not package_dir.is_dir() or (package_dir / "apm.yml").exists():
+    if not package_dir.is_dir() or manifest_file(package_dir).exists():
         return False
     package_type, selected_manifest = detect_package_type(package_dir)
     return package_type is PackageType.MARKETPLACE_PLUGIN and not (
@@ -665,7 +787,7 @@ def _package_manifest_path(
             package_dir = dependency.to_dependency_ref().get_install_path(modules_root)
     else:
         package_dir = dependency.to_dependency_ref().get_install_path(modules_root)
-    return (package_dir / "apm.yml").resolve()
+    return manifest_file(package_dir).resolve()
 
 
 def _allows_missing_manifest(
@@ -754,6 +876,25 @@ class _CollectedDependencies:
     one_off: list[tuple[str, str]] = field(default_factory=list)
 
 
+def _copy_contradicts_lock(
+    package_key: str, dependency: LockedDependency, modules_root: Path, lockfile: LockFile
+) -> bool:
+    """Whether the apm_modules copy differs from its locked ``content_hash`` (#4389).
+
+    A frozen install then judges this package's declarations from the verified
+    copy it restores (the strict post-restoration check), never from these bytes.
+    """
+    from apm_cli.install.source_helpers import locked_content_mismatch
+
+    try:
+        package_root = dependency.to_dependency_ref().get_install_path(modules_root)
+    except (OSError, ValueError):
+        return False
+    return package_root.is_dir() and locked_content_mismatch(
+        package_key, dependency, package_root, lockfile=lockfile
+    )
+
+
 def _collect_locked_dependencies(
     lockfile: LockFile | None,
     modules_root: Path,
@@ -766,8 +907,15 @@ def _collect_locked_dependencies(
     include_dependency_mcp: bool = True,
     allow_pending: bool | None = None,
     active_package_keys: frozenset[str] | None = None,
+    claude_native_keys: frozenset[str] = frozenset(),
 ) -> _CollectedDependencies:
-    """Collect MCP declarations from only package manifests named by the lockfile."""
+    """Collect MCP declarations from only package manifests named by the lockfile.
+
+    Each server carries the runtimes that load it natively from its plugin
+    (``claude_plugins.admission.native_service_runtimes``); writers skip them.
+    """
+    from apm_cli.claude_plugins.admission import native_service_runtimes
+
     result = _CollectedDependencies()
     if lockfile is None:
         return result
@@ -806,7 +954,7 @@ def _collect_locked_dependencies(
                     manifest_path=fallback_path,
                     message=(
                         f"cannot resolve local package: {exc}; "
-                        "re-run 'apm install' to rebuild the lockfile"
+                        f"{MCP_LOCAL_PACKAGE_UNRESOLVED.clause()}"
                     ),
                 )
             )
@@ -838,7 +986,14 @@ def _collect_locked_dependencies(
                 )
             continue
 
-        if allow_pending and not manifest_path.parent.exists() and dependency.source != "local":
+        if (
+            allow_pending
+            and dependency.source != "local"
+            and (
+                not manifest_path.parent.exists()
+                or _copy_contradicts_lock(package_key, dependency, modules_root, lockfile)
+            )
+        ):
             from apm_cli.drift import build_download_ref
 
             try:
@@ -880,7 +1035,8 @@ def _collect_locked_dependencies(
             ):
                 continue
             message = (
-                f"package manifest not found at {manifest_path}; re-run 'apm install' to restore it"
+                f"package manifest not found at {manifest_path}; "
+                f"{MCP_PACKAGE_MANIFEST_MISSING.clause()}"
             )
             if (
                 dependency.source == "local"
@@ -909,11 +1065,13 @@ def _collect_locked_dependencies(
             manifest = load_yaml(manifest_path)
             if not isinstance(manifest, dict):
                 raise ValueError("package manifest must be a mapping")
+            # Collecting declarations only reads: never create user config.
             package = APMPackage.from_mapping(
                 manifest,
                 package_path=manifest_path.parent,
                 source_path=manifest_path.parent,
                 manifest_path=manifest_path,
+                create_config=False,
             )
             authored_declarations = _authored_mcp_declarations(manifest)
         except (OSError, ValueError, UnicodeError, yaml.YAMLError) as exc:
@@ -957,17 +1115,23 @@ def _collect_locked_dependencies(
                 approval_keys,
             )
             verdict = admission.admit(subject)
+            native_runtimes = native_service_runtimes(package_key, dependency, claude_native_keys)
             if not verdict.allowed:
                 omissions.setdefault(
                     mcp_dependency.name,
                     {"declaration": fingerprint, "reason": str(verdict.reason)},
                 )
+                if native_runtimes and verdict.reason == REASON_UNTRUSTED_TRANSITIVE:
+                    # The native plugin verdict applies the same refusal to
+                    # the plugin Claude loads; its diagnostic is the one shown.
+                    continue
                 message = parked_mcp_message(
                     mcp_dependency,
                     target,
                     str(verdict.reason),
                     layer=verdict.layer,
                     unverifiable=subject.fingerprint is None,
+                    user_scope=is_user_scope_root(project_root),
                 )
                 if diagnostics is not None:
                     diagnostics.warn(message)
@@ -982,14 +1146,16 @@ def _collect_locked_dependencies(
                 and dependency.depth == 1
                 and verdict.layer not in ("project-allow", "user-allow")
             ):
-                logger.progress(
-                    f"Trusting direct dependency MCP '{mcp_dependency.name}' from '{declarer}'"
+                _progress_trust_once(
+                    logger,
+                    f"Trusting direct dependency MCP '{mcp_dependency.name}' from '{declarer}'",
                 )
             collected.append(
                 replace(
                     mcp_dependency,
                     resolved_by=declarer,
                     approval_keys=approval_keys,
+                    native_runtimes=native_runtimes,
                 )
             )
             roots = direct_index.roots(package_key)
@@ -1005,6 +1171,30 @@ def _collect_locked_dependencies(
     return result
 
 
+class _ParkedNoticeSilenced:
+    """A logger view that drops parked-server notices and keeps every other line.
+
+    ``apm install --frozen`` checks MCP drift before and after hydration; the
+    MCP phase is the one printer of each parked server (#4422).
+    """
+
+    def __init__(self, logger: Any) -> None:
+        self._logger = logger
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        if str(message).startswith("Parked MCP server"):
+            return
+        self._logger.warning(message, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._logger, name)
+
+
+def without_parked_notices(logger: Any) -> Any:
+    """Return *logger* without parked-server notices (None stays None)."""
+    return None if logger is None else _ParkedNoticeSilenced(logger)
+
+
 def parked_mcp_message(
     dependency: MCPDependency,
     package: str,
@@ -1012,9 +1202,14 @@ def parked_mcp_message(
     *,
     layer: str = "",
     unverifiable: bool = False,
+    user_scope: bool = False,
 ) -> str:
     """Return the warning for one dependency MCP server the trust owner parked."""
+    from apm_cli.security.trust import approve_command, explain_command
+
     name = dependency.name
+    approve = approve_command(package, user_scope=user_scope)
+    explain = explain_command(package, user_scope=user_scope)
     if reason == REASON_UNTRUSTED_TRANSITIVE:
         detail = (
             "self-defined"
@@ -1024,7 +1219,7 @@ def parked_mcp_message(
         return (
             f"Parked MCP server '{name}' from transitive package {package} "
             f"({detail}, not approved)\n"
-            f"    Approve for everyone: apm approve {package}  |  "
+            f"    Approve for everyone: {approve}  |  "
             "This run only: --trust-transitive-mcp"
         )
     if reason == REASON_DEFINITION_CHANGED:
@@ -1035,16 +1230,14 @@ def parked_mcp_message(
         )
         return (
             f"Parked MCP server '{name}' ({package}): {why}\n"
-            f"    Review: apm approve --pending  |  Re-approve: apm approve {package}"
+            f"    Review: {approve_command('--pending', user_scope=user_scope)}  |  "
+            f"Re-approve: {approve}"
         )
     if reason == REASON_DENIED:
-        return (
-            f"Parked MCP server '{name}' ({package}): denied ({layer})\n"
-            f"    Explain: apm policy explain {package}"
-        )
+        return f"Parked MCP server '{name}' ({package}): denied ({layer})\n    Explain: {explain}"
     return (
         f"Parked MCP server '{name}' ({package}): executables not approved\n"
-        f"    Explain: apm policy explain {package}  |  Approve: apm approve {package}"
+        f"    Explain: {explain}  |  Approve: {approve}"
     )
 
 
@@ -1091,7 +1284,9 @@ def _collect_transitive_compat(
 
     if not modules_root.exists():
         return []
-    lockfile = LockFile.read(lock_path) if lock_path is not None and lock_path.exists() else None
+    lockfile = (
+        LockFile.read(lock_path) if lock_path is not None and lockfile_exists(lock_path) else None
+    )
     if lockfile is None:
         return _collect_unlocked_compat(
             modules_root,

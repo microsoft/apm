@@ -1,0 +1,16 @@
+{
+  "issue": 3382,
+  "summary": "Traps semver-range replay of monorepo subdirectory tags with origin removed; needs git semver tags and provenance lock fields.",
+  "failure_modes": [
+    "cache",
+    "reference"
+  ],
+  "properties": [
+    "cache.successful_reads_refresh_recency",
+    "lockfile.frozen_preserves_bytes",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_git_semver_subdirectory_frozen_replay_lifecycle.py::test_git_semver_subdirectory_replays_locked_release_across_lifecycle"
+  ]
+}

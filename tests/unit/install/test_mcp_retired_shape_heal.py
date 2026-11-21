@@ -21,7 +21,7 @@ from apm_cli.install.mcp.ownership import (
     mcp_native_hash,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 _URL = "https://heal.example.invalid/sse"
 _REGISTRY = {"name": "io.example/heal"}
@@ -251,11 +251,12 @@ def test_unsupported_skip_keeps_the_claim_when_removal_fails(tmp_path: Path) -> 
 
     path = _antigravity_with(tmp_path, {"heal": {"httpUrl": _URL}})
     claims = {"antigravity": {"io.example/heal"}}
-    # Fail the exact write the cleanup owner performs; permission bits are not
-    # enforced the same way on every platform (Windows ignores POSIX modes).
+    # Fail the exact write the cleanup owner performs (through the JSON style
+    # owner, #4526 G6); permission bits are not enforced the same way on every
+    # platform (Windows ignores POSIX modes).
     with (
         patch(
-            "apm_cli.integration.mcp_integrator.atomic_write_text",
+            "apm_cli.utils.json_config.atomic_write_text",
             side_effect=OSError("simulated write failure"),
         ) as write,
         pytest.raises(RequiredIntegrationError),

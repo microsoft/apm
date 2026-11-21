@@ -27,8 +27,8 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import ClassVar
 
-from ...utils.atomic_io import atomic_write_text
-from ...utils.console import _rich_error, _rich_success, _rich_warning
+from ...core.command_logger import library_logger
+from ...utils.json_config import write_json_config
 from ...utils.path_security import PathTraversalError, validate_path_segments
 from ._remote_shapes import remote_shape_row
 from .base import _ENV_VAR_RE, _translate_env_placeholder
@@ -573,7 +573,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         if self._is_user_scope():
             return self._merge_user_mcp(config_updates, managed_fields=managed_fields)
         if not self._should_write_project():
-            _rich_warning(
+            library_logger().warning(
                 f"Skipped Claude Code project MCP -- .claude/ not found in {self.project_root}"
             )
             return False
@@ -595,9 +595,8 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             if data is None:
                 return False
             self._merge_and_normalize_updates(data, config_updates, managed_fields)
-            payload = json.dumps(data, indent=2) + "\n"
             path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(path, payload, new_file_mode=0o600)
+            write_json_config(path, data, default_trailing_newline=True, new_file_mode=0o600)
             _log.debug("Claude user-scope MCP config written to %s", path)
             return True
         except OSError:
@@ -614,11 +613,11 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         managed_fields: set[str] | None = None,
     ):
         if not server_url:
-            _rich_error("server_url cannot be empty")
+            library_logger().error("server_url cannot be empty")
             return False
 
         if not self._is_user_scope() and not self._should_write_project():
-            _rich_warning(
+            library_logger().warning(
                 f"Skipped Claude Code project MCP -- .claude/ not found in {self.project_root}"
             )
             return False
@@ -630,7 +629,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                 server_info = self.registry_client.find_server_by_reference(server_url)
 
             if not server_info:
-                _rich_error(f"MCP server '{server_url}' not found in registry")
+                library_logger().error(f"MCP server '{server_url}' not found in registry")
                 return False
 
             config_key = self.determine_config_key(server_url, server_name, server_info)
@@ -644,20 +643,18 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             )
             ok = self.update_config({config_key: server_config}, managed_fields=managed_fields)
             if not ok:
-                _rich_error(
+                library_logger().error(
                     f"Failed to write MCP config for '{config_key}' to {self._client_label}"
                 )
                 return False
             self.written_mcp_hashes[server_url] = fingerprint
             self._record_env_diagnostics(config_key, server_config, previously_baked)
 
-            _rich_success(
-                f"Successfully configured MCP server '{config_key}' for {self._client_label}"
-            )
+            # The integrator's install tree reports success once (#3994).
             return True
 
         except Exception:
             # Do not interpolate the exception message: registry URLs and
             # other inputs may carry embedded credentials.
-            _rich_error("Error configuring MCP server")
+            library_logger().error("Error configuring MCP server")
             return False

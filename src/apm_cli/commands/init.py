@@ -1,12 +1,18 @@
 """APM init command."""
 
 import os
+import shlex
 import shutil
 import sys
 from functools import wraps
 from pathlib import Path
 
 import click
+
+from apm_cli.core.remediation import (
+    INIT_TARGETS_UNDETECTED,
+)
+from apm_cli.core.scope import manifest_file
 
 from ..bundle.formats import PREFERRED_PLUGIN_FORMAT, BundleFormat
 from ..bundle.plugin_layout import find_plugin_root_sources
@@ -125,17 +131,9 @@ def _option_targets_or_exit(target_flag, logger):
 @click.option(
     "--yes", "-y", is_flag=True, help="Skip interactive prompts and use auto-detected defaults"
 )
-@click.option(
-    "--plugin",
-    is_flag=True,
-    help="(deprecated) Use 'apm plugin init' instead. Scaffolds plugin.json + apm.yml.",
-)
-@click.option(
-    "--marketplace",
-    "marketplace_flag",
-    is_flag=True,
-    help="(deprecated) Use 'apm marketplace init' instead. Seeds a marketplace block.",
-)
+# Removed in 0.37 (#4073): hidden stubs that name the replacement and exit 2.
+@click.option("--plugin", is_flag=True, hidden=True)
+@click.option("--marketplace", "marketplace_flag", is_flag=True, hidden=True)
 @click.option(
     "--target",
     "target_flag",
@@ -152,13 +150,14 @@ def _option_targets_or_exit(target_flag, logger):
 @click.option(
     "--version",
     default=None,
-    help="Project version (default: 1.0.0, or 0.1.0 with --plugin --yes)",
+    help="Project version (default: 1.0.0)",
 )
 @click.option("--author", default=None, help="Project author (default: git config user.name)")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.pass_context
 @_refuse_ide_target_first("init")
-@serialized_lifecycle_unless("discover_flag")
+# --apply implies --discover; discovery takes its own lock only when it writes.
+@serialized_lifecycle_unless("discover_flag", "write")
 def init(
     ctx: click.Context,
     project_name: str | None,
@@ -185,36 +184,37 @@ def init(
     can produce a finished manifest. Outside --yes they seed the prompt
     defaults rather than being discarded.
 
-    Producers: prefer 'apm plugin init' (plugin scaffold) or
-    'apm marketplace init' (marketplace block). The --plugin and
-    --marketplace flags on 'apm init' are kept for backward
-    compatibility and will be removed in v0.16.
+    Producers: use 'apm plugin init' (plugin scaffold) or
+    'apm marketplace init' (marketplace block).
     """
+    _refuse_removed_init_flags(
+        plugin=plugin,
+        marketplace=marketplace_flag,
+        project_name=project_name,
+        yes=yes,
+        target_flag=target_flag,
+        description=description,
+        version=version,
+        author=author,
+    )
+    if write:
+        discover_flag = True
     if discover_flag:
         metadata_flags = (name, description, version, author)
-        if (
-            project_name
-            or plugin
-            or marketplace_flag
-            or target_flag
-            or any(flag is not None for flag in metadata_flags)
-        ):
+        if project_name or target_flag or any(flag is not None for flag in metadata_flags):
             raise click.UsageError(
-                "--discover cannot scaffold a name/plugin/marketplace, set project "
-                "metadata, or select targets."
+                "--discover cannot scaffold a name, set project metadata, or select targets."
             )
         run_discover(
             write=write, output_format=output_format, global_=global_, yes=yes, verbose=verbose
         )
         return
     if write or global_ or output_format != "text":
-        raise click.UsageError("--apply, --write, --global and --format require --discover.")
+        raise click.UsageError("--global and --format require --discover.")
     _init_scaffold(
         ctx,
         project_name,
         yes,
-        plugin,
-        marketplace_flag,
         target_flag,
         verbose,
         name=name,
@@ -224,12 +224,60 @@ def init(
     )
 
 
+def _refuse_removed_init_flags(
+    *,
+    plugin: bool,
+    marketplace: bool,
+    project_name: str | None = None,
+    yes: bool = False,
+    target_flag: str | list[str] | None = None,
+    description: str | None = None,
+    version: str | None = None,
+    author: str | None = None,
+) -> None:
+    """Refuse the flags removed in 0.37 with the full replacement command (#4073).
+
+    The ``apm plugin init`` command keeps the arguments the user passed so
+    recovery is one paste. ``apm marketplace init`` runs in the project
+    directory and takes none of them.
+    """
+    if not (plugin or marketplace):
+        return
+    removed = " and ".join(
+        f"'apm init {flag}'"
+        for flag, used in (("--plugin", plugin), ("--marketplace", marketplace))
+        if used
+    )
+    verb = "were" if plugin and marketplace else "was"
+    click.echo(f"[x] {removed} {verb} removed in 0.37.", err=True)
+    if plugin:
+        args = ["apm", "plugin", "init"]
+        if project_name:
+            args.append(project_name)
+        if yes:
+            args.append("--yes")
+        if target_flag:
+            targets = target_flag if isinstance(target_flag, str) else ",".join(target_flag)
+            args += ["--target", targets]
+        for option, value in (
+            ("--version", version),
+            ("--author", author),
+            ("--description", description),
+        ):
+            if value is not None:
+                args += [option, value]
+        click.echo(f"    Run: {shlex.join(args)}", err=True)
+    if marketplace:
+        where = f" (inside {project_name}/)" if plugin and project_name else ""
+        prefix = "Then run" if plugin else "Run"
+        click.echo(f"    {prefix}{where}: apm marketplace init", err=True)
+    raise SystemExit(2)
+
+
 def _init_scaffold(
     ctx,
     project_name,
     yes,
-    plugin,
-    marketplace_flag,
     target_flag,
     verbose,
     *,
@@ -239,25 +287,10 @@ def _init_scaffold(
     author: str | None = None,
 ):
     """Keep the pre-existing init flow serialized, outside read-only discovery."""
-    # Soft deprecation warnings -- legacy flags still work.
-    if plugin:
-        click.echo(
-            "[!] 'apm init --plugin' is deprecated. Run: apm plugin init",
-            err=True,
-        )
-        click.echo("    Legacy flag will be removed in v0.16.", err=True)
-    if marketplace_flag:
-        click.echo(
-            "[!] 'apm init --marketplace' is deprecated. Run: apm marketplace init",
-            err=True,
-        )
-        click.echo("    Legacy flag will be removed in v0.16.", err=True)
-
     _perform_init(
         project_name=project_name,
         yes=yes,
-        plugin=plugin,
-        marketplace_flag=marketplace_flag,
+        plugin=False,
         target_flag=target_flag,
         name=name,
         description=description,
@@ -273,7 +306,6 @@ def _perform_init(
     project_name,
     yes,
     plugin,
-    marketplace_flag,
     target_flag,
     verbose,
     name: str | None = None,
@@ -287,7 +319,7 @@ def _perform_init(
 
     ``source`` controls the "Next steps" hint shape:
       - "init"   -> consumer-focused, teaches the noun-verb namespace
-      - "plugin" -> plugin-author next steps (same as legacy --plugin)
+      - "plugin" -> plugin-author next steps
 
     ``name``/``description``/``version``/``author`` are the optional
     metadata overrides (#2146). They default to ``None`` so callers that
@@ -374,8 +406,8 @@ def _perform_init(
             sys.exit(1)
 
         # Check for existing generated files
-        apm_yml_exists = Path(APM_YML_FILENAME).exists()
-        generated_paths = [Path(APM_YML_FILENAME)]
+        apm_yml_exists = manifest_file(Path(".")).exists()
+        generated_paths = [manifest_file(Path("."))]
         if plugin:
             generated_paths.append(Path("plugin.json"))
             if effective_plugin_mode == "agent":
@@ -385,13 +417,21 @@ def _perform_init(
         # Handle existing generated files in brownfield projects
         if existing_generated_paths:
             rendered_paths = ", ".join(path.as_posix() for path in existing_generated_paths)
-            if existing_generated_paths == [Path(APM_YML_FILENAME)]:
+            if existing_generated_paths == [manifest_file(Path("."))]:
                 logger.warning("apm.yml already exists")
             else:
                 logger.warning(f"Generated files already exist: {rendered_paths}")
 
             if not yes:
-                confirm = click.confirm("Continue and overwrite?")
+                try:
+                    confirm = click.confirm("Continue and overwrite?")
+                except click.exceptions.Abort:
+                    # No answer (closed stdin): refuse with the way forward.
+                    logger.error(
+                        f"{rendered_paths} not overwritten; rerun with --yes to overwrite, "
+                        "or pass a new project name to scaffold into its own directory."
+                    )
+                    sys.exit(1)
 
                 if not confirm:
                     logger.progress("Initialization cancelled.")
@@ -461,27 +501,6 @@ def _perform_init(
             if plugin:
                 _create_plugin_json(config, mode=effective_plugin_mode)
 
-        # Append marketplace authoring block when requested.
-        if marketplace_flag:
-            from ..marketplace.init_template import render_marketplace_block
-
-            apm_yml_path = Path.cwd() / APM_YML_FILENAME
-            try:
-                existing = apm_yml_path.read_text(encoding="utf-8")
-                if not existing.endswith("\n"):
-                    existing += "\n"
-                # Owner is intentionally left to the template default
-                # (acme-org placeholder). Deriving it from the project
-                # name produced misleading https://github.com/<project>
-                # URLs; the user is expected to edit the placeholder.
-                block = render_marketplace_block()
-                apm_yml_path.write_text(existing + "\n" + block, encoding="utf-8")
-            except OSError as exc:
-                logger.warning(
-                    f"Failed to append marketplace block to apm.yml: {exc}",
-                    symbol="warning",
-                )
-
         logger.success("APM project initialized successfully!")
 
         # Display created file info
@@ -489,12 +508,12 @@ def _perform_init(
             console = _get_console()
             if console:
                 files_data = [
-                    ("*", APM_YML_FILENAME, "Project configuration"),
+                    (APM_YML_FILENAME, "Project configuration"),
                 ]
                 if plugin:
-                    files_data.append(("*", "plugin.json", "Plugin metadata"))
+                    files_data.append(("plugin.json", "Plugin metadata"))
                     if effective_plugin_mode == "agent":
-                        files_data.append(("*", "mcp.json", "MCP server configuration"))
+                        files_data.append(("mcp.json", "MCP server configuration"))
                 table = _create_files_table(files_data, title="Created Files")
                 console.print(table)
         except (ImportError, NameError):
@@ -512,19 +531,25 @@ def _perform_init(
         #   * ``apm init`` (consumer)  teaches the noun-verb namespace
         #     (apm plugin init / apm marketplace init).
         #   * ``apm plugin init``      shows plugin-author next steps.
-        #   * ``apm init --marketplace`` (deprecated) reuses plugin guidance
-        #     when --plugin was also supplied; otherwise consumer guidance.
         if plugin:
             next_steps = [
                 "Add dev dependencies:    apm install --dev <owner>/<repo>",
                 "Pack as Agent Plugins v1:             apm pack --format agent-plugin",
                 "Pack as Claude plugin:                apm pack --format claude-plugin",
             ]
+            # A Claude-only scaffold has nothing for an Agent Plugin to carry;
+            # pack refuses that format, so do not advertise it (#3994).
+            if resolved_targets and set(resolved_targets) <= {"claude"}:
+                del next_steps[1]
         elif source == "init":
+            install_step = "apm install <owner>/<repo>"
+            # No targets written and none detectable: install would stop at
+            # "No harness detected" unless it names one (#3994).
+            if not resolved_targets and not _has_install_target(project_root):
+                install_step += " -t <harness>"
             next_steps = [
-                "Install a package:               apm install <owner>/<repo>",
-                "Run a script:                    apm run <script>",
-                "Build a plugin? Scaffold one:    apm plugin init",
+                f"Install a package:               {install_step}",
+                "Build a plugin? Scaffold one:    apm plugin init <name>",
                 "Publishing a marketplace?:       apm marketplace init",
             ]
         else:
@@ -535,22 +560,16 @@ def _perform_init(
                 "Author your own plugin:         apm pack --format agent-plugin",
             ]
 
-        # Agentrc integration (#518): suggest agentrc when no instructions exist.
-        # Only applies to consumer init (not plugin mode).
-        agentrc_tip: str | None = None
+        # Agentrc integration (#518): when agentrc is already installed and no
+        # instructions exist, name its step. Consumer init only (not plugin
+        # mode); the default path names APM steps only (#4089).
         if not plugin and source == "init":
             agentrc_installed, has_instructions = _detect_agentrc(project_root)
-            if not has_instructions:
-                if agentrc_installed:
-                    next_steps.insert(
-                        1,
-                        "Generate agent instructions:     agentrc init",
-                    )
-                else:
-                    agentrc_tip = (
-                        "Tip: Use agentrc to generate tailored agent instructions "
-                        "from your codebase. https://github.com/microsoft/agentrc"
-                    )
+            if agentrc_installed and not has_instructions:
+                next_steps.insert(
+                    1,
+                    "Generate agent instructions:     agentrc init",
+                )
 
         try:
             _rich_panel(
@@ -562,9 +581,6 @@ def _perform_init(
             logger.progress("Next steps:")
             for step in next_steps:
                 click.echo(f"  * {step}")
-
-        if agentrc_tip:
-            logger.progress(agentrc_tip, symbol="info")
 
         # Codex tip: suggest agent-skills target when .codex/ exists
         if Path(".codex").is_dir():
@@ -582,6 +598,7 @@ def _perform_init(
                     "  Docs: https://microsoft.github.io/apm  |  "
                     "Star: https://github.com/microsoft/apm",
                     style="dim",
+                    soft_wrap=True,
                 )
             else:
                 click.echo(
@@ -612,7 +629,7 @@ def _write_and_validate_agent_plugin_scaffold(project_root: Path, config: dict) 
     mcp_document = {"$schema": MCP_SCHEMA_ID, "mcpServers": {}}
     with tempfile.TemporaryDirectory(prefix=".apm-plugin-init-", dir=project_root) as stage:
         staged_root = Path(stage)
-        staged_manifest = staged_root / APM_YML_FILENAME
+        staged_manifest = manifest_file(staged_root)
         _create_minimal_apm_yml(config, plugin=True, target_path=staged_manifest)
         _create_plugin_json(config, mode="agent", target_path=staged_root / "plugin.json")
         (staged_root / "mcp.json").write_text(
@@ -685,10 +702,11 @@ def _interactive_project_setup(
     auto_version = version if version is not None else "1.0.0"
 
     try:
-        from rich.console import Console  # type: ignore
         from rich.prompt import Prompt  # type: ignore
 
-        console = _get_console() or Console()
+        from apm_cli.utils.console import new_console
+
+        console = _get_console() or new_console()
         console.print("\n[info]Setting up your APM project...[/info]")
         console.print("[muted]Press ^C at any time to quit.[/muted]\n")
 
@@ -733,11 +751,12 @@ def _confirm_setup_summary(config: dict, logger) -> None:
     targets_line = ", ".join(targets) if targets else "(none -- auto-detect at compile time)"
 
     try:
-        from rich.console import Console  # type: ignore
         from rich.panel import Panel  # type: ignore
         from rich.prompt import Confirm  # type: ignore
 
-        console = _get_console() or Console()
+        from apm_cli.utils.console import new_console
+
+        console = _get_console() or new_console()
         summary_content = (
             f"name: {config['name']}\n"
             f"version: {config['version']}\n"
@@ -775,6 +794,18 @@ def _stdin_is_tty() -> bool:
         return bool(sys.stdin.isatty())
     except (AttributeError, ValueError):
         return False
+
+
+def _has_install_target(project_root: Path) -> bool:
+    """Whether a plain ``apm install`` here resolves a target without a flag."""
+    from ..config import get_install_target
+
+    try:
+        if get_install_target(create_config=False):
+            return True
+    except Exception:
+        return False
+    return any(sig.target not in EXPLICIT_ONLY_TARGETS for sig in detect_signals(project_root))
 
 
 def _resolve_init_targets(
@@ -815,7 +846,7 @@ def _resolve_init_targets(
             if yes or not is_tty:
                 logger.error(message)
                 logger.progress(
-                    "Re-run 'apm init --target <target,...>' to choose the targets explicitly.",
+                    INIT_TARGETS_UNDETECTED.sentence(),
                     symbol="info",
                 )
                 sys.exit(1)
@@ -877,7 +908,7 @@ def _read_existing_targets(project_root: Path) -> list[str]:
     from ..models.manifest_io import load_manifest
     from ..models.manifest_targets import ManifestTargetDeclaration
 
-    apm_yml_path = project_root / APM_YML_FILENAME
+    apm_yml_path = manifest_file(project_root)
     try:
         data = load_manifest(apm_yml_path) if apm_yml_path.is_file() else None
     except InvalidManifestError:
@@ -957,7 +988,7 @@ def _prompt_target_selection(
 
     click.echo(
         f"\n{INFO}[i] Tip: select the tools your team uses. You can change this later"
-        f"\n    with 'apm targets set <target,...>' or edit apm.yml directly.{RESET}"
+        f"\n    by editing 'targets:' in apm.yml.{RESET}"
     )
     click.echo(
         f"{INFO}[i] Type a number to toggle, ranges like '1-3' or '1,3,5' for multiple,"
@@ -989,7 +1020,7 @@ def _prompt_target_selection(
         click.echo(
             f"\n{INFO}[!] No targets selected. APM will auto-detect targets from your"
             "\n    filesystem on every compile (e.g. .github/ -> copilot)."
-            f"\n    To pin targets later: apm targets set <target,...>{RESET}"
+            f"\n    To pin targets later, list them under 'targets:' in apm.yml.{RESET}"
         )
         if click.confirm("\nContinue without pinning targets?", default=True):
             return None

@@ -26,9 +26,13 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from apm_cli.core.lifecycle_scripts import LifecycleScriptRunner
 
 from .conftest import make_event, make_http_script
+
+pytestmark = pytest.mark.component
 
 # Secure upper bound on simultaneous dispatch threads from one event.
 # Head applies no cap; with N entries it starts N threads.

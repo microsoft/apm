@@ -6,7 +6,7 @@ sidebar:
 ---
 
 :::caution[Deprecated]
-`apm unpack` is deprecated and will be removed in a future release. For plugin-format bundles, prefer [`apm install <bundle-path>`](../install/) -- it shares the same air-gapped path, integrates with target resolution, and records deployed files in the project lockfile. `apm unpack` remains the only deploy path for legacy `--format apm` tarballs (see [Behavior](#behavior)).
+`apm unpack` is deprecated and will be removed in a future release. For plugin-format bundles, prefer [`apm install <bundle-path>`](../install/) -- it shares the same air-gapped path, integrates with target resolution, and records deployed files in the project lockfile. `apm unpack` remains the deploy path for legacy `--format apm` bundles without executable content, under the same org policy (see [Behavior](#behavior)).
 :::
 
 ## Synopsis
@@ -23,15 +23,13 @@ Extraction is **additive-only**: only files listed in the bundle's lockfile are 
 
 `BUNDLE_PATH` accepts a `.zip` archive (the default), a legacy `.tar.gz` archive, or the directory form of an unpacked bundle.
 
-:::caution[Bundles are self-contained and deploy executable surfaces directly]
-`apm unpack` materializes a complete, self-contained bundle into your
-project. Unlike `apm install`, there is no upstream executable-trust
-approval prompt at unpack time -- a bundle that contains a canvas
-`extension.mjs` (executable Node.js code) deploys that file when the
-`canvas` experimental flag is enabled. Only unpack bundles from sources
-you trust, and use `--dry-run` to inspect the file list first. See
-[Executable approval](../approve/) for the gate that
-governs dependency installs.
+:::caution[Executable content is refused]
+`apm unpack` cannot apply the [executables gate](../approve/). It refuses, before writing or
+previewing anything, a bundle that carries hooks or hook scripts, MCP or LSP
+configuration, `bin/` executables, or canvas extensions (with the `canvas`
+flag off, canvas files are dropped instead). Install such bundles with
+`apm install <bundle>`; repack a legacy `--format apm` bundle with
+`apm pack --archive` first.
 :::
 
 ## Options
@@ -46,9 +44,10 @@ governs dependency installs.
 
 ## Examples
 
-Unpack an archive into the current directory:
+Unpack a legacy archive into the current directory:
 
 ```bash
+apm pack --format apm --archive
 apm unpack ./build/my-pkg-1.0.0.zip
 ```
 
@@ -78,19 +77,22 @@ apm unpack bundle.zip --force
 
 ## Behavior
 
-- **Bundle formats.** `apm install` deploys only plugin-format bundles. Legacy `--format apm` tarballs (whole-project bundles produced by older `apm pack` invocations) are deployed via `apm unpack` and have no equivalent `install` path.
+- **Bundle formats.** `apm install` deploys only plugin-format bundles. Legacy `--format apm` tarballs (whole-project bundles produced by older `apm pack` invocations) are deployed via `apm unpack`, except executable content (see the caution above), and have no equivalent `install` path. `apm unpack` refuses a plugin-format bundle (root `plugin.json`) and points to `apm install`.
 - **Additive writes only.** Files not listed in the bundle's lockfile are left alone; the bundle never deletes project files.
 - **Overwrite on collision.** When a bundle file shares a path with a local file, the bundle file wins.
 - **Managed destinations only.** Every `deployed_files` entry must land under a known integration directory (`.github/`, `.claude/`, `.agents/`, ...) of the output directory, with no symlinked path component. Any other entry fails the unpack before a file is written. Bundle paths that run through a symlink are skipped.
 - **Security scan.** Bundle contents are scanned before deployment. Critical hidden-character findings block extraction unless `--force` is passed (exit code `1`). Non-critical warnings are surfaced with a hint to run [`apm audit`](../audit/).
 - **Verification.** By default, every entry in the bundle's `deployed_files` must exist inside the archive. `--skip-verify` disables this check; missing files are then reported as skipped.
 - **Target mismatch warning.** If the bundle was packed for a different harness target than the output project's detected target, `apm unpack` warns and -- with `--verbose` -- suggests the `apm pack --target` command the publisher should run.
-- **Lockfile is metadata.** The bundle's `apm.lock.yaml` is read for verification and target metadata but is never written to the output directory.
-- **Exit codes.** `0` on success (including `--dry-run`); `1` on missing bundle, invalid bundle, or critical security findings without `--force`.
+- **Org policy and integrity.** Before a preview or a write, `apm unpack` applies the same org policy checks as `apm install <bundle>`, resolved from the output directory: the bundle's locked dependencies and pack target are checked (a bundle with no pack target is checked as targeting every harness; an unknown pack target, or a file outside the pack target's paths, is refused), and an unavailable policy under `fetch_failure_default: block` fails closed. Each file is checked against its locked hash; a mismatch is refused when policy sets `security.integrity.require_hashes`, otherwise it warns.
+- **Tracked output.** When the output directory is an APM project (it has `apm.yml`), the deployed files are recorded in its `apm.lock.yaml`, as `apm install <bundle>` does, so `apm audit` checks them. Files the lockfile already records with the same content stay with their recorded owner, so restoring a bundle into a checkout with a committed lockfile leaves tracked files unchanged. A lockfile that cannot be updated (malformed, a symbolic link, or written by a newer APM) is refused before any file is written. Any other directory stays untracked and `apm unpack` says so.
+- **Lockfile is metadata.** The bundle's own `apm.lock.yaml` is read for verification and target metadata but is never copied to the output directory.
+- **One operation at a time.** `apm unpack` waits for any other running APM operation, like `apm install` (not with `--dry-run`).
+- **Exit codes.** `0` on success (including `--dry-run`); `1` on missing bundle, invalid bundle, executable content (`--force` does not override this), an org policy or integrity refusal, or critical security findings without `--force`.
 
 ## Related
 
 - [`apm pack`](../pack/) -- produce the bundles that `apm unpack` extracts.
 - [`apm install`](../install/) -- the preferred deploy path for plugin-format bundles.
 - [`apm audit`](../audit/) -- inspect hidden-character findings flagged during extraction.
-- [Pack a bundle](../../../producer/pack-a-bundle/) -- producer guide covering bundle formats and distribution.
+- [Pack a bundle](../../../producer/build-a-plugin/) -- producer guide covering bundle formats and distribution.

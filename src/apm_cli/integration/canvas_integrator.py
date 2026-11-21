@@ -31,12 +31,13 @@ custom ``$COPILOT_HOME`` is refused).
 from __future__ import annotations
 
 import re
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.experimental import is_enabled
+from apm_cli.core.remediation import CANVAS_EXTENSIONS_BLOCKED, LOCAL_FILE_UNMANAGED
 from apm_cli.install.cache_pin import MARKER_FILENAME
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -46,6 +47,7 @@ from apm_cli.utils.path_security import (
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
 
 #: Entry file that marks a directory under ``.apm/extensions/`` as a canvas.
@@ -274,6 +276,7 @@ class CanvasIntegrator(BaseIntegrator):
         apm_package,
         project_root: Path,
         managed_files: set[str] | None = None,
+        evidence: DeploymentEvidence | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed canvas files for a single *target*.
 
@@ -291,6 +294,7 @@ class CanvasIntegrator(BaseIntegrator):
             managed_files,
             prefix=prefix,
             targets=[target],
+            evidence=evidence,
         )
         # Remove the now-empty .github/extensions/<name>/ directories left
         # behind once their files are gone.
@@ -394,7 +398,7 @@ class CanvasIntegrator(BaseIntegrator):
             self._warn(
                 diagnostics,
                 f"Skipping canvas '{name}' -- local file exists at {collision} "
-                "(not managed by APM). Use 'apm install --force' to overwrite.",
+                f"(not managed by APM). {LOCAL_FILE_UNMANAGED.sentence()}",
                 package_name,
             )
             return "skipped"
@@ -407,7 +411,7 @@ class CanvasIntegrator(BaseIntegrator):
             return "adopted"
 
         for src, dest, _rel in planned:
-            dest.parent.mkdir(parents=True, exist_ok=True)
+            write_seam.mkdir(dest.parent, parents=True, exist_ok=True)
             # Guard: reject dest if it is a symlink (TOCTOU defence --
             # a symlink could redirect shutil.copyfile to an arbitrary
             # location outside the project root).
@@ -418,7 +422,8 @@ class CanvasIntegrator(BaseIntegrator):
                     package_name,
                 )
                 return "skipped"
-            shutil.copyfile(src, dest)
+            write_seam.copyfile(src, dest)
+            self.note_rendered_write(dest)
             target_paths.append(dest)
         return "integrated"
 
@@ -486,8 +491,8 @@ class CanvasIntegrator(BaseIntegrator):
             message=(
                 f"Blocked {len(bundles)} canvas extension(s) ({names}) from '{pkg}': "
                 f"canvas extensions are executable {CANVAS_MARKER} code and are not "
-                f"trusted by default. Run 'apm approve {pkg}' to trust '{pkg}' and "
-                f"deploy them to {deploy_dir}."
+                "trusted by default. "
+                f"{CANVAS_EXTENSIONS_BLOCKED.bind(package=pkg, deploy_dir=deploy_dir).sentence()}"
             ),
             package=package_name or "",
         )

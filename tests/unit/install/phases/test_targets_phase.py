@@ -13,6 +13,8 @@ from apm_cli.core.scope import InstallScope
 from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
 from apm_cli.integration.targets import KNOWN_TARGETS, TargetProfile
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -92,9 +94,11 @@ def test_grok_cloud_disabled_flag_emits_enable_hint(
 
     _check_grok_cloud_flag_gate("grok-cloud", [], ctx)
 
+    from apm_cli.core.remediation import EXPERIMENTAL_FLAG_DISABLED
+
     ctx.logger.progress.assert_called_once_with(
         "The 'grok-cloud' target requires an experimental flag. "
-        "Run: apm experimental enable grok-cloud",
+        f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='grok-cloud').sentence()}",
         symbol="info",
     )
 
@@ -229,9 +233,13 @@ def test_config_default_target_provenance_names_config_source(tmp_path: Path, ca
     project = tmp_path / "project"
     project.mkdir()
     (project / "apm.yml").write_text("name: demo\nversion: 0.1.0\n", encoding="utf-8")
+    from apm_cli.core.command_logger import InstallLogger
+
     ctx = _make_ctx(tmp_path)
     ctx.project_root = project
     ctx.apm_package = APMPackage.from_apm_yml(project / "apm.yml")
+    # The command logger owns the Targets line, so a real one prints it.
+    ctx.logger = InstallLogger()
 
     with patch("apm_cli.config.get_install_target", return_value="claude"):
         run(ctx)
@@ -337,7 +345,37 @@ class TestProjectScopeGateForCowork:
         ):
             from apm_cli.install.phases.targets import run
 
-            run(ctx)  # Should not raise
+            run(ctx)
+
+        assert ctx.targets == [cowork_target]
+        assert not (tmp_path / "cowork").exists()
+
+    @pytest.mark.parametrize(
+        ("selected", "expected"),
+        [(("claude", "opencode"), "opencode (hooks)"), (("claude",), None)],
+    )
+    def test_user_scope_warns_only_for_selected_targets(
+        self, tmp_path: Path, inject_config: Any, selected, expected
+    ) -> None:
+        """'install -g' names primitives only its selected targets skip (#3994)."""
+        inject_config({})
+        ctx = _make_ctx(tmp_path, scope=InstallScope.USER)
+        with (
+            patch(
+                "apm_cli.integration.targets.resolve_targets",
+                return_value=[KNOWN_TARGETS[name] for name in selected],
+            ),
+            patch("apm_cli.core.target_detection.detect_target"),
+        ):
+            from apm_cli.install.phases.targets import run
+
+            run(ctx)
+        warnings = [c.args[0] for c in ctx.logger.warning.call_args_list]
+        scoped = [w for w in warnings if w.startswith("User scope does not deploy")]
+        if expected is None:
+            assert scoped == []
+        else:
+            assert len(scoped) == 1 and expected in scoped[0] and "claude" not in scoped[0]
 
     def test_project_scope_non_cowork_target_unaffected(
         self, tmp_path: Path, inject_config: Any
@@ -369,7 +407,10 @@ class TestProjectScopeGateForCowork:
         ):
             from apm_cli.install.phases.targets import run
 
-            run(ctx)  # Should not raise
+            run(ctx)
+
+        assert ctx.targets == [copilot]
+        assert (ctx.project_root / ".github").is_dir()
 
 
 # ---------------------------------------------------------------------------

@@ -156,6 +156,7 @@ def _run(
     registry_only: bool,
     dependency_ref: str | None = None,
     locked_git_dependency: bool = False,
+    mcp_dependency: str | None = None,
 ) -> _Scenario:
     isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
     project = isolated.work_root / "consumer"
@@ -164,6 +165,12 @@ def _run(
         (project / "apm.yml").write_text(
             "name: consumer\nversion: 0.0.1\n"
             f"dependencies:\n  apm:\n    - {_PACKAGE}#{dependency_ref}\n",
+            encoding="utf-8",
+        )
+    if mcp_dependency is not None:
+        (project / "apm.yml").write_text(
+            "name: consumer\nversion: 0.0.1\ntargets: [copilot]\n"
+            f"dependencies:\n  apm: []\n  mcp:\n    - {mcp_dependency}\n",
             encoding="utf-8",
         )
     if locked_git_dependency:
@@ -211,7 +218,11 @@ def test_view_versions_aborts_without_contacting_source_host(
 
     assert scenario.result.returncode == 1, scenario.output
     assert "registry-only mode" in scenario.output
-    assert "unset PROXY_REGISTRY_ONLY" in scenario.output
+    assert (
+        "version listing from the source host is disabled because PROXY_REGISTRY_ONLY "
+        "is set (enterprise proxy policy)"
+    ) in " ".join(scenario.result.stderr.split()), scenario.output
+    assert "unset" not in scenario.output.lower(), scenario.output
     assert scenario.git_network_calls == []
     assert scenario.upstream_requests == []
 
@@ -238,7 +249,8 @@ def test_install_range_fails_with_remedy_without_contacting_source_host(
 
     assert scenario.result.returncode != 0, scenario.output
     assert "Cannot resolve the range '^1.0.0'" in scenario.output
-    assert "unset PROXY_REGISTRY_ONLY" in scenario.output
+    assert "Pin one exact version" in " ".join(scenario.output.split()), scenario.output
+    assert "unset" not in scenario.output.lower(), scenario.output
     assert scenario.git_network_calls == []
     assert scenario.upstream_requests == []
     assert not (scenario.project / "apm.lock.yaml").exists()
@@ -284,7 +296,7 @@ def test_install_exact_pin_lists_source_tags_when_mode_is_off(
     assert any("ls-remote" in call for call in scenario.git_network_calls), scenario.output
 
 
-def test_outdated_names_remedy_without_contacting_source_host(
+def test_outdated_states_the_policy_without_contacting_source_host(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     scenario = _run(
@@ -298,7 +310,12 @@ def test_outdated_names_remedy_without_contacting_source_host(
 
     assert scenario.result.returncode == 0, scenario.output
     assert "unknown" in scenario.output
-    assert "PROXY_REGISTRY_ONLY is set" in scenario.output
+    # RA-014: state the enterprise policy only; never advise lifting it.
+    assert (
+        "[i] Source-host checks are disabled because PROXY_REGISTRY_ONLY is set "
+        "(enterprise proxy policy)."
+    ) in scenario.result.stdout.splitlines(), scenario.output
+    assert "unset" not in scenario.output.lower(), scenario.output
     assert scenario.git_network_calls == []
     assert scenario.upstream_requests == []
 
@@ -316,3 +333,26 @@ def test_outdated_lists_source_refs_when_mode_is_off(tmp_path: Path, apm_binary_
 
     assert any("ls-remote" in call for call in scenario.git_network_calls), scenario.output
     assert "PROXY_REGISTRY_ONLY is set" not in scenario.output
+
+
+@pytest.mark.parametrize("flow", ["install-mcp", "manifest-mcp"])
+def test_mcp_registry_lookup_refused_without_contacting_registry(
+    tmp_path: Path, apm_binary_path: Path, flow: str
+) -> None:
+    """PROXY_REGISTRY_ONLY refuses the default MCP registry and writes nothing (#3994)."""
+    server = "io.github.acme/registry-only-probe"
+    if flow == "install-mcp":
+        args: tuple[str, ...] = ("install", "--mcp", server, "--target", "copilot", "--no-policy")
+        scenario = _run(tmp_path, apm_binary_path, args, registry_only=True)
+    else:
+        args = ("install", "--no-policy")
+        scenario = _run(tmp_path, apm_binary_path, args, registry_only=True, mcp_dependency=server)
+    manifest = scenario.project / "apm.yml"
+
+    assert scenario.result.returncode != 0, scenario.output
+    assert "refusing direct MCP registry lookup" in scenario.output
+    assert "MCP_REGISTRY_URL" in scenario.output
+    assert scenario.upstream_requests == []
+    if flow == "install-mcp":
+        assert not manifest.exists() or server not in manifest.read_text(encoding="utf-8")
+    assert not (scenario.project / ".mcp.json").exists()

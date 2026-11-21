@@ -1,10 +1,11 @@
 """Report native target files a failed install leaves on disk.
 
-``InstallTransaction`` restores ``apm.yml`` and ``apm_modules`` staging only.
-Native target integrations run outside it, so a failure after integration
-leaves those files in place. This module names them truthfully instead of
-letting the failure read as a full rollback (#3525). It never deletes,
-restores, or records ownership of any file.
+``InstallTransaction`` restores ``apm.yml``, ``apm_modules`` staging and,
+until the staged lockfile commits, every native target file the integrators
+wrote (``install/deploy_snapshot.py``). Output the lockfile does not record
+can still remain (for example when no journal was open), so this module
+names it truthfully instead of letting the failure read as a full rollback
+(#3525). It never deletes, restores, or records ownership of any file.
 """
 
 from __future__ import annotations
@@ -126,6 +127,9 @@ def report_failed_install_residue(ctx: InstallContext) -> None:
     rendering error must not replace the install error.
     """
     if ctx.install_finished or ctx.logger is None or ctx.dry_run or ctx.lockfile_only:
+        return
+    if getattr(getattr(ctx, "transaction", None), "restores_deploy_targets", False) is True:
+        # The transaction puts these files back once the pipeline exits.
         return
     with contextlib.suppress(Exception):
         residue = failed_install_residue(ctx)

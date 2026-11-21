@@ -1,0 +1,24 @@
+{
+  "issue": 3884,
+  "summary": "Traps machine-local state overriding the lock: stale apm_modules, ref bumps, plugin-root paths (#3884, #3883, #3825); needs git, clones, MCP/LSP.",
+  "failure_modes": [
+    "ownership",
+    "portability",
+    "reference",
+    "transaction"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "portability.byte_deterministic",
+    "source.ref_cache_coherent",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_lock_derived_expected_state_lifecycle.py::test_frozen_replay_of_a_pre_3825_lock_keeps_native_state_removable",
+    "tests/integration/test_lock_derived_expected_state_lifecycle.py::test_install_migrates_an_unfingerprinted_pre_3825_entry_per_target",
+    "tests/integration/test_lock_derived_expected_state_lifecycle.py::test_plugin_root_conflict_hint_restores_the_value_apm_writes",
+    "tests/integration/test_lock_derived_expected_state_lifecycle.py::test_plugin_root_mcp_and_lsp_replay_frozen_in_a_moved_clone",
+    "tests/integration/test_lock_derived_expected_state_lifecycle.py::test_ref_bump_on_fresh_clone_adopts_locked_output_and_fails_closed_on_edits",
+    "tests/integration/test_lock_derived_expected_state_lifecycle.py::test_stale_module_copy_keeps_locked_skill_subset_on_first_frozen_install"
+  ]
+}

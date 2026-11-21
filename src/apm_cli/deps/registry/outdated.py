@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.scope import manifest_file
+
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME
 from ...deps.outdated_row import OutdatedRow
 from ...marketplace.semver import SemVer, parse_semver
@@ -82,7 +84,7 @@ def _index_installed_manifest_deps(
             if locked.source != "local" or not locked.local_path:
                 continue
             _add_registry_manifest_deps(
-                project_root / locked.local_path / APM_YML_FILENAME,
+                manifest_file(project_root / locked.local_path),
                 manifest_index,
                 default_registry,
             )
@@ -103,7 +105,7 @@ def load_registry_outdated_context(
     """Build manifest index and merged registry map from *project_root*."""
     from ...models.apm_package import APMPackage, _route_unscoped_to_default_registry
 
-    apm_yml = project_root / "apm.yml"
+    apm_yml = manifest_file(project_root)
     manifest_index: dict[str, DependencyReference] = {}
     project_registries: dict[str, str] | None = None
     project_default: str | None = None

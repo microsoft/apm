@@ -20,6 +20,8 @@ from apm_cli.install.mcp.registry import (
     validate_registry_url,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestResolveRegistryUrl:
     """Precedence chain and diagnostic emission."""
@@ -298,15 +300,15 @@ class TestValidateRegistryUrl:
         validate_registry_url("http://intranet.example.com")
 
     def test_schemeless_rejected(self):
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(click.UsageError, match="expected scheme://host"):
             validate_registry_url("example.com")
 
     def test_ws_scheme_rejected(self):
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(click.UsageError, match="scheme 'ws' is not supported"):
             validate_registry_url("ws://example.com")
 
     def test_file_scheme_rejected(self):
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(click.UsageError, match="expected scheme://host"):
             validate_registry_url("file:///etc/passwd")
 
     @pytest.mark.parametrize(
@@ -326,16 +328,16 @@ class TestValidateRegistryUrl:
         assert "fragment-value" not in message
 
     def test_javascript_scheme_rejected(self):
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(click.UsageError, match="expected scheme://host"):
             validate_registry_url("javascript:alert(1)")
 
     def test_overlong_url_rejected(self):
         url = "https://example.com/" + ("a" * 2050)
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(click.UsageError, match="URL is too long"):
             validate_registry_url(url)
 
     def test_empty_rejected(self):
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(click.UsageError, match="URL cannot be empty"):
             validate_registry_url("")
 
     def test_credentials_redacted_in_invalid_url_message(self):

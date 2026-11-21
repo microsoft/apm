@@ -24,6 +24,8 @@ from apm_cli.policy.schema import (
     RegistrySourcePolicy,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _lock_dependency(
     repo_url: str,
@@ -153,16 +155,21 @@ def test_host_qualified_pattern_matches_effective_host_case_insensitively(
 
 
 @pytest.mark.parametrize(
-    "options",
+    ("options", "require"),
     [
-        {"host": "ghe.enterprise.test"},
-        {"host": "contoso.ghe.com"},
-        {"host": "artifacts.example.test", "source": "registry", "artifactory_prefix": "apm"},
+        ({"host": "ghe.enterprise.test"}, "CONTOSO/WIDGET"),
+        ({"host": "contoso.ghe.com"}, "contoso.ghe.com/CONTOSO/WIDGET"),
+        (
+            {"host": "artifacts.example.test", "source": "registry", "artifactory_prefix": "apm"},
+            "artifacts.example.test/CONTOSO/WIDGET",
+        ),
     ],
 )
 def test_enterprise_and_registry_policy_subjects_are_host_blind(
-    options: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    options: dict[str, str], require: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Allow/deny hostless patterns match any host; an exact require entry
+    names the dependency's written host, else the default host (#3993)."""
     monkeypatch.setenv("GITHUB_HOST", "ghe.enterprise.test")
     dependency = DependencyReference(repo_url="Contoso/Widget", **options)
     assert dependency.get_canonical_dependency_string() == "contoso/widget"
@@ -173,9 +180,7 @@ def test_enterprise_and_registry_policy_subjects_are_host_blind(
     assert not _check_dependency_denylist(
         [dependency], DependencyPolicy(deny=("CONTOSO/WIDGET",))
     ).passed
-    assert _check_required_packages(
-        [dependency], DependencyPolicy(require=("CONTOSO/WIDGET",))
-    ).passed
+    assert _check_required_packages([dependency], DependencyPolicy(require=(require,))).passed
 
 
 @pytest.mark.parametrize(

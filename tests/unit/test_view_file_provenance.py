@@ -16,6 +16,8 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.utils.content_hash import compute_file_hash
 
+pytestmark = pytest.mark.component
+
 SKILL = ".github/skills/alpha/SKILL.md"
 RESOURCE = ".github/skills/alpha/scripts/run.sh"
 COMMIT = "0123456789abcdef0123456789abcdef01234567"

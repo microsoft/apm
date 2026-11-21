@@ -14,6 +14,8 @@ from apm_cli.marketplace.models import (
     MarketplaceSource,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _quoted_hosts(text: str) -> set[str]:
     """Extract host tokens from `Host '<host>'` patterns in error text.
@@ -77,6 +79,21 @@ class TestMarketplaceAdd:
         assert registered_source.repo == "agent-skills"
         # Install hint surfaces the alias the user must use next.
         assert "apm install <plugin>@addy-agent-skills" in result.output
+
+    @patch("apm_cli.marketplace.registry.add_marketplace")
+    @patch("apm_cli.marketplace.registration.probe_registration")
+    def test_failed_first_add_never_suggests_update(self, mock_probe, mock_add, runner):
+        """Nothing is registered, so the retry is the add itself (#3994)."""
+        from apm_cli.commands.marketplace import marketplace
+        from apm_cli.marketplace.errors import MarketplaceFetchError
+
+        mock_probe.side_effect = MarketplaceFetchError("catalog", "HTTP 503")
+        result = runner.invoke(marketplace, ["add", "acme/catalog", "--name", "team"])
+        assert result.exit_code == 1
+        flat = " ".join(result.output.split())
+        assert "then run 'apm marketplace add <source>' to register the marketplace" in flat
+        assert "marketplace update" not in flat
+        mock_add.assert_not_called()
 
     @patch("apm_cli.marketplace.registry.add_marketplace")
     @patch("apm_cli.marketplace.client.fetch_marketplace")
@@ -871,7 +888,7 @@ class TestSearch:
 
         result = runner.invoke(search, ["security"])
         assert result.exit_code != 0
-        assert "QUERY@MARKETPLACE" in result.output
+        assert "<query>@<marketplace>" in result.output
 
     @pytest.mark.parametrize("expression", ["security", "@skills"])
     def test_search_format_hint_names_real_command(self, runner, expression):

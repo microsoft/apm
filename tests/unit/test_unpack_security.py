@@ -7,8 +7,9 @@ from typing import Union  # noqa: F401
 
 import pytest
 
-from apm_cli.bundle.unpacker import UnpackResult, unpack_bundle  # noqa: F401
+from apm_cli.bundle.unpacker import UnpackResult  # noqa: F401
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from tests.utils.unpack_admission import unpack_bundle
 
 
 def _build_bundle_dir(tmp_path: Path, deployed_files: dict[str, str | bytes]) -> Path:

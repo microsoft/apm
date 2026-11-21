@@ -20,9 +20,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.codex_plugins.client import CodexNativeError
-from apm_cli.install.errors import AuthenticationError
+from apm_cli.install.errors import AuthenticationError, FrozenInstallError
 from apm_cli.install.pipeline import _preflight_auth_check, _run_phase
 from apm_cli.models.dependency.materialization import MaterializationPathCollisionError
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers shared across tests
@@ -482,24 +484,39 @@ class TestRunInstallPipelineExceptionContracts:
                 run_install_pipeline(pkg, target="claude")
         assert raised.value is collision
 
+    @pytest.mark.parametrize("error_type", [AuthenticationError, FrozenInstallError])
+    def test_typed_install_error_re_raised(self, error_type: type[Exception]) -> None:
+        """Typed install refusals propagate instead of becoming generic RuntimeError."""
+        from apm_cli.install.pipeline import run_install_pipeline
 
-@pytest.mark.parametrize("token", ["intellij", "copilot-app"])
-def test_pipeline_rejects_undeployable_manifest_target_before_any_write(
-    token: str, tmp_path, monkeypatch
-) -> None:
-    """Direct pipeline callers get the CLI promise: exit 2 before writing anything."""
-    from apm_cli.install.pipeline import run_install_pipeline
-    from apm_cli.models.apm_package import APMPackage
-    from apm_cli.utils.yaml_io import dump_yaml
+        pkg = self._make_pkg_with_deps()
 
-    manifest = tmp_path / "apm.yml"
-    dump_yaml({"name": "p", "version": "1.0.0", "target": token}, manifest)
-    pkg = APMPackage.from_apm_yml(manifest)
-    monkeypatch.chdir(tmp_path)
-    before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
+        # Patch at the source import locations so they're found at call-time
+        with (
+            patch("apm_cli.deps.lockfile.LockFile") as mock_lf_cls,
+            patch("apm_cli.deps.lockfile.get_lockfile_path", return_value=None),
+            patch("apm_cli.core.scope.get_deploy_root", return_value=MagicMock()),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=None),
+            patch(
+                "apm_cli.install.phases.local_content._project_has_root_primitives",
+                return_value=False,
+            ),
+            patch("apm_cli.install.pipeline._run_phase") as mock_phase,
+            patch("apm_cli.utils.install_tui.InstallTui"),
+        ):
+            mock_lf_cls.read.return_value = None
+            # Resolve phase sets deps -- return a ctx-like object with deps
+            # Make first _run_phase (resolve) inject deps into ctx, second raises
+            resolve_called = [False]
 
-    with pytest.raises(SystemExit) as excinfo:
-        run_install_pipeline(pkg)
+            def _phase_side(name, phase, ctx):
+                if name == "resolve":
+                    resolve_called[0] = True
+                    ctx.deps_to_install = [MagicMock()]
+                    return None
+                raise error_type("install refused")
 
-    assert excinfo.value.code == 2
-    assert sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*")) == before
+            mock_phase.side_effect = _phase_side
+
+            with pytest.raises(error_type, match="install refused"):
+                run_install_pipeline(pkg, target="claude")

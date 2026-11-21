@@ -127,7 +127,7 @@ def test_cursor_universal_apply_to_installs_always_apply(
     assert snapshot() == before
 
     # Simulate a rule an earlier APM release generated as ``globs: **``: the
-    # file and its recorded hash agree, so it is APM-owned and unmodified.
+    # file and its recorded hash agree, but no receipt or locked render proves it.
     legacy = rules / "scalar.mdc"
     legacy.write_text(
         "---\ndescription: Rule scalar\nglobs: **\n---\n\nBODY_scalar\n", encoding="utf-8"
@@ -138,6 +138,16 @@ def test_cursor_universal_apply_to_installs_always_apply(
             record["content_hash"] = _sha(legacy)
     dump_yaml(lock, lock_path())
 
+    # A lockfile hash is not deployment evidence (#4360): install keeps the
+    # legacy rule, names it with the remedy, and exits 1.
+    legacy_bytes = legacy.read_bytes()
+    refused = runner.run(install, scenario_id="cursor-always-apply", cwd=project, env=environment)
+    text = " ".join((refused.stdout + refused.stderr).split())
+    assert refused.returncode == 1, text
+    assert "Kept .cursor/rules/scalar.mdc:" in text and "Move it aside, then run" in text, text
+    assert legacy.read_bytes() == legacy_bytes
+    # The printed remedy converges: move it aside, then install.
+    legacy.unlink()
     run(*install)
     assert legacy.read_text(encoding="utf-8") == _expected("scalar")
     assert cursor_records()[".cursor/rules/scalar.mdc"]["content_hash"] == _sha(legacy)

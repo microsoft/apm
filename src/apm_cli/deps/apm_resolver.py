@@ -13,6 +13,8 @@ from dataclasses import fields, is_dataclass, replace
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.local_bundle import route_agent_plugin_package
 from ..core.errors import TargetResolutionError
 from ..models.apm_package import APMPackage, DependencyReference
@@ -166,6 +168,8 @@ class APMDependencyResolver:
         frozen: bool = False,
         update_keys: set[str] | None = None,
         read_only: bool = False,
+        create_config: bool | None = None,
+        preview: bool = False,
     ):
         """Initialize the resolver with maximum recursion depth.
 
@@ -202,6 +206,10 @@ class APMDependencyResolver:
             read_only: Preview using local sources and unchanged installed packages.
                 Never fetch, activate, or materialize metadata; unknown subtrees
                 are reported as resolution errors rather than treated as leaves.
+            create_config: Whether manifest loads may create a missing user
+                config file; defaults to False for read-only and preview runs.
+            preview: ``--dry-run`` through the install pipeline: fetch like an
+                install, create no user config, and record unavailable subtrees.
         """
         if read_only and any(
             callback is not None
@@ -216,6 +224,8 @@ class APMDependencyResolver:
                 "Read-only resolution cannot use fetching or materialization callbacks"
             )
         self._read_only = read_only
+        self._create_config = not (read_only or preview) if create_config is None else create_config
+        self._preview = preview
         self.max_depth = max_depth
         self._apm_modules_dir: Path | None = apm_modules_dir
         self._project_root: Path | None = None
@@ -347,7 +357,7 @@ class APMDependencyResolver:
             self._apm_modules_dir = project_root / "apm_modules"
 
         # Load the root package
-        apm_yml_path = project_root / "apm.yml"
+        apm_yml_path = manifest_file(project_root)
         if not apm_yml_path.exists() and root_package is None:
             # Create empty dependency graph for projects without apm.yml
             empty_package = APMPackage(name="unknown", version="0.0.0", package_path=project_root)
@@ -364,7 +374,7 @@ class APMDependencyResolver:
                 root_package = APMPackage.from_apm_yml(
                     apm_yml_path,
                     source_path=project_root.resolve(),
-                    create_config=not self._read_only,
+                    create_config=self._create_config,
                 )
             except (ValueError, FileNotFoundError) as e:
                 # Create error graph
@@ -403,6 +413,7 @@ class APMDependencyResolver:
 
         for error in dependency_tree.resolution_errors:
             graph.add_error(error)
+        graph.declaration_errors.extend(dependency_tree.declaration_errors)
 
         return graph
 
@@ -644,14 +655,16 @@ class APMDependencyResolver:
             self._reject_remote_parent_local_path(child_dep, parent_pkg, str(exc))
             return None
 
-    def _resolve_marketplace_dep(self, dep_ref: DependencyReference) -> DependencyReference:
+    def _resolve_marketplace_dep(
+        self, dep_ref: DependencyReference, *, required_by: str | None = None
+    ) -> DependencyReference:
         """Resolve a marketplace dependency to a concrete DependencyReference.
 
         A declaration that still matches its lock row is replayed from the
         lock before any catalog, alias or registration I/O
         (:func:`~apm_cli.drift.locked_marketplace_replay`); ``--frozen``
         refuses a declaration with no matching lock row instead of asking the
-        marketplace. Otherwise uses
+        marketplace, and a local catalog that no longer selects its lock row. Otherwise uses
         :func:`resolve_marketplace_plugin` to look up the plugin in the
         registered marketplace and returns a resolved git-backed reference.
         Prefers the structured ``dependency_reference`` from the resolution
@@ -660,6 +673,9 @@ class APMDependencyResolver:
 
         Args:
             dep_ref: An unresolved marketplace DependencyReference.
+            required_by: The declaring package for a transitive declaration,
+                which must name a marketplace the root ``marketplaces:`` map
+                declares (#2903).
 
         Returns:
             A concrete (non-marketplace) DependencyReference.
@@ -671,8 +687,23 @@ class APMDependencyResolver:
             ValueError: Invalid marketplace or plugin configuration, or a
                 frozen or offline run without a matching lock row.
         """
-        from apm_cli.drift import frozen_marketplace_refusal, locked_marketplace_replay
+        from apm_cli.drift import (
+            MARKETPLACE_CATALOG_METADATA,
+            MARKETPLACE_LOCAL_CATALOG,
+            catalog_metadata_refusal,
+            frozen_marketplace_refusal,
+            local_catalog_refusal,
+            locked_marketplace_replay,
+        )
 
+        if required_by is not None:
+            from apm_cli.marketplace.project_marketplaces import (
+                require_root_declared_marketplace,
+            )
+
+            require_root_declared_marketplace(
+                dep_ref.marketplace_name, dep_ref.marketplace_plugin_name, required_by=required_by
+            )
         decision = locked_marketplace_replay(
             dep_ref,
             self._existing_lockfile,
@@ -694,12 +725,20 @@ class APMDependencyResolver:
         require_locked_catalog_origin(
             dep_ref.marketplace_name, dep_ref.marketplace_plugin_name, self._existing_lockfile
         )
+        update_selected = self._update_keys is None or dep_ref.get_unique_key() in self._update_keys
         resolution = resolve_marketplace_plugin(
             dep_ref.marketplace_plugin_name,
             dep_ref.marketplace_name,
             version_spec=dep_ref.marketplace_version_spec,
             auth_resolver=self._auth_resolver,
             warning_handler=_logger.warning,
+            # An update accepts a changed ref for the plugins it selects; an
+            # unselected plugin keeps its locked ref, and a catalog read for
+            # locked server metadata does not choose the download, so neither
+            # touches the pin.
+            enforce_ref_pins=not (self._update_refs and not update_selected)
+            and decision.reason != MARKETPLACE_CATALOG_METADATA,
+            accept_ref_change=bool(self._update_refs) and update_selected,
         )
         admit_marketplace_resolution(resolution)
         resolved = (
@@ -707,6 +746,15 @@ class APMDependencyResolver:
             if resolution.dependency_reference is not None
             else DependencyReference.parse(resolution.canonical)
         )
+        # A cold server-owning row reads the catalog for server metadata only;
+        # the lock row still pins the download (#3989). A frozen local catalog
+        # must still select its lock row (#4639).
+        if decision.reason == MARKETPLACE_CATALOG_METADATA:
+            refusal = catalog_metadata_refusal(dep_ref, resolved, self._existing_lockfile)
+        elif decision.reason == MARKETPLACE_LOCAL_CATALOG and self._frozen:
+            refusal = local_catalog_refusal(dep_ref, resolved, self._existing_lockfile)
+        if refusal is not None:
+            raise refusal
         manifest = getattr(resolution.plugin, "manifest", None)
         if isinstance(manifest, dict) and manifest:
             resolved.marketplace_manifest = dict(manifest)
@@ -730,6 +778,8 @@ class APMDependencyResolver:
         dep_ref: DependencyReference,
         tree: DependencyTree,
         context: str,
+        *,
+        required_by: str | None = None,
     ) -> DependencyReference | None:
         """Try to resolve a marketplace dep; record an error on the tree on failure.
 
@@ -742,6 +792,7 @@ class APMDependencyResolver:
             tree: The dependency tree to record errors on.
             context: Human-readable context for error messages
                      (e.g. ``"required by owner/repo"``).
+            required_by: Declaring package of a transitive declaration.
 
         Returns:
             Resolved DependencyReference on success, ``None`` on known failure.
@@ -753,15 +804,17 @@ class APMDependencyResolver:
             MarketplaceNotFoundError,
             MarketplaceOriginConflictError,
             PluginNotFoundError,
+            UndeclaredMarketplaceError,
         )
 
         try:
-            return self._resolve_marketplace_dep(dep_ref)
+            return self._resolve_marketplace_dep(dep_ref, required_by=required_by)
         except (
             DependencyConfusionError,
             MarketplaceNotFoundError,
             MarketplaceOriginConflictError,
             PluginNotFoundError,
+            UndeclaredMarketplaceError,
             MarketplaceFetchError,
             BuildError,
             ValueError,
@@ -779,6 +832,19 @@ class APMDependencyResolver:
                 f"{f' ({context})' if context else ''}: {exc}"
             )
             return None
+
+    def _depth_limit_error(
+        self, dep_ref: DependencyReference, parent_node: DependencyNode | None
+    ) -> str:
+        """Name the chain that reached ``max_depth`` (req-rs-006)."""
+        chain = [dep_ref.to_display_reference()]
+        ancestor = parent_node
+        while ancestor is not None:
+            chain.append(ancestor.dependency_ref.to_display_reference())
+            ancestor = ancestor.parent
+        return f"Dependency depth limit ({self.max_depth}) exceeded: " + " -> ".join(
+            reversed(chain)
+        )
 
     def build_dependency_tree(
         self,
@@ -809,7 +875,7 @@ class APMDependencyResolver:
                     source_path=self._project_root.resolve()
                     if self._project_root is not None
                     else root_apm_yml.parent.resolve(),
-                    create_config=not self._read_only,
+                    create_config=self._create_config,
                 )
             except (ValueError, FileNotFoundError) as e:
                 _logger.warning("Failed to parse root apm.yml: %s", e)
@@ -947,12 +1013,10 @@ class APMDependencyResolver:
                 # Remove from queued set since we're now processing this dependency
                 queued_keys.discard(dep_ref.get_resolution_key())
 
-                # Check maximum depth to prevent infinite recursion
+                # Check maximum depth to prevent infinite recursion. Exceeding
+                # the cap fails resolution naming the chain (req-rs-006, #4277).
                 if depth > self.max_depth:
-                    if self._read_only:
-                        tree.resolution_errors.append(
-                            f"Dependency preview depth limit reached: {dep_ref.to_display_reference()}"
-                        )
+                    tree.resolution_errors.append(self._depth_limit_error(dep_ref, parent_node))
                     continue
 
                 # Check if we already processed this dependency at this level or higher
@@ -1046,9 +1110,9 @@ class APMDependencyResolver:
             for (node, dep_ref, _parent_node, is_dev), loaded_package, exc in results:
                 if dep_ref.replacement is not None and loaded_package is None:
                     detail = str(exc) if exc is not None else "selected source could not be loaded"
-                    tree.resolution_errors.append(
-                        f"Cannot load replacement for {dep_ref.get_unique_key()}: {detail}"
-                    )
+                    message = f"Cannot load replacement for {dep_ref.get_unique_key()}: {detail}"
+                    tree.resolution_errors.append(message)
+                    tree.replacement_load_errors[dep_ref.get_unique_key()] = message
                     continue
                 if self._read_only and (exc is not None or loaded_package is None):
                     tree.resolution_errors.append(
@@ -1056,6 +1120,11 @@ class APMDependencyResolver:
                         f"{exc or 'package metadata is not available locally'}"
                     )
                     continue
+                if self._preview and (exc is not None or loaded_package is None):
+                    tree.unavailable_subtrees.append(
+                        f"{dep_ref.to_display_reference()}: "
+                        f"{exc or 'package metadata is not available'}"
+                    )
                 if exc is not None:
                     if isinstance(exc, MarketplaceManifestMaterializationError):
                         message = f"Marketplace package materialization failed: {exc}"
@@ -1132,7 +1201,10 @@ class APMDependencyResolver:
                                 continue
                         if sub_dep.is_marketplace:
                             resolved = self._resolve_marketplace_or_record_error(
-                                sub_dep, tree, f"required by {node.dependency_ref.repo_url}"
+                                sub_dep,
+                                tree,
+                                f"required by {node.dependency_ref.repo_url}",
+                                required_by=node.dependency_ref.repo_url,
                             )
                             if resolved is not None:
                                 sub_dep = resolved
@@ -1171,7 +1243,7 @@ class APMDependencyResolver:
         """Record root declarations whose package directories nest (#3699)."""
         nested = nested_materialization_pairs(root_refs, modules_dir)
         for outer, inner in nested:
-            tree.resolution_errors.append(
+            tree.add_declaration_error(
                 f"{outer.get_identity()} and its subdirectory package {inner.get_identity()} "
                 "cannot both be declared in apm.yml: the subdirectory package would be "
                 "installed inside the repository package. Keep only one of them."
@@ -1189,7 +1261,7 @@ class APMDependencyResolver:
             parent = parent_node.dependency_ref if parent_node is not None else None
             collision = slots.claim(dep_ref, parent)
             if collision is not None:
-                tree.resolution_errors.append(collision)
+                tree.add_declaration_error(collision)
                 return True
         return False
 
@@ -1609,6 +1681,7 @@ class APMDependencyResolver:
                 source_path=dep_source_path,
                 agent_plugin_detection=native_detection,
                 read_only=self._read_only,
+                create_config=self._create_config,
             )
             if not validation.is_valid:
                 self._raise_downloaded_package_error(
@@ -1642,6 +1715,7 @@ class APMDependencyResolver:
                 install_path,
                 source_path=dep_source_path,
                 read_only=self._read_only,
+                create_config=self._create_config,
             )
             if not validation.is_valid:
                 self._raise_downloaded_package_error(
@@ -1666,7 +1740,7 @@ class APMDependencyResolver:
             )
 
         # Look for apm.yml in the install path
-        apm_yml_path = install_path / "apm.yml"
+        apm_yml_path = manifest_file(install_path)
         if not apm_yml_path.exists():
             # Package exists but has no apm.yml (e.g., Claude Skill)
             # Check for SKILL.md and create minimal package
@@ -1701,7 +1775,7 @@ class APMDependencyResolver:
             package = APMPackage.from_apm_yml(
                 apm_yml_path,
                 source_path=dep_source_path,
-                create_config=not self._read_only,
+                create_config=self._create_config,
             )
         except FileNotFoundError:
             self._raise_downloaded_package_error(
@@ -1747,6 +1821,12 @@ class APMDependencyResolver:
         had_existing_install: bool,
     ) -> APMPackage:
         """Publish one validated candidate and remap its package paths."""
+        if package.marketplaces is not None:
+            # Only the root project's map counts; a package can never add a
+            # marketplace (#3006, #2903). Refused before activation.
+            from apm_cli.marketplace.user_manifest import dependency_marketplaces_error
+
+            raise DownloadedPackageError(dependency_marketplaces_error(package.name))
         if downloaded_candidate is None or self._activation_callback is None:
             return package
         try:

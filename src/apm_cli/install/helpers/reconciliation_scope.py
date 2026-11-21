@@ -43,8 +43,11 @@ def _record_inactive_resolver_skip(
     profile: TargetProfile,
     diagnostics: DiagnosticCollector | None,
 ) -> None:
-    """Record the intentional skip of an inactive experimental resolver."""
-    if diagnostics is None:
+    """Record the intentional skip of an inactive experimental resolver.
+
+    Verbose only: the skip is expected for every user who has not opted in.
+    """
+    if diagnostics is None or not diagnostics.verbose:
         return
     from apm_cli.utils.diagnostics import CATEGORY_INFO
 

@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import TYPE_CHECKING
+
+from ..core.remediation import (
+    MARKETPLACE_CREDENTIAL_REBIND,
+    MARKETPLACE_FETCH_FAILED,
+    MARKETPLACE_ORIGIN_RESTORE,
+    MARKETPLACE_ORIGIN_SWITCH,
+    MARKETPLACE_ORIGIN_SWITCH_GLOBAL,
+    MARKETPLACE_UNREGISTERED_SHORTHAND,
+    MARKETPLACE_UNREGISTERED_URL,
+    either_sentence,
+)
 
 if TYPE_CHECKING:
     from .resolver import CrossRepoMisconfigRisk
@@ -24,11 +36,12 @@ class MarketplaceNotFoundError(MarketplaceError):
         # URL that works for them. Callers should pass the current host
         # (e.g. default_host()); fall back to github.com to preserve the
         # public-cloud default.
+        register = either_sentence(
+            MARKETPLACE_UNREGISTERED_URL.bind(host=host), MARKETPLACE_UNREGISTERED_SHORTHAND
+        )
         super().__init__(
-            f"Marketplace '{name}' is not registered. "
-            f"Run 'apm marketplace add https://{host}/OWNER/REPO' "
-            f"or 'apm marketplace add OWNER/REPO' to register it, "
-            f"or 'apm marketplace list' to see registered marketplaces."
+            f"Marketplace '{name}' is not registered. {register} "
+            "Run 'apm marketplace list' to see registered marketplaces."
         )
 
 
@@ -80,37 +93,95 @@ class DependencyConfusionError(MarketplaceError, ValueError):
         )
 
 
-class MarketplaceOriginConflictError(MarketplaceError):
-    """Raised when an alias now names a different marketplace than the lock recorded."""
+def _manifest_entry_label(entry: str | dict | None, plugin_name: str) -> str:
+    """Name a dependency the way ``apm.yml`` writes it (RA-042).
 
-    def __init__(self, marketplace_name: str, plugin_name: str, locked: str, current: str):
+    A marketplace install records the resolved source (a string or a
+    ``git`` + ``path`` mapping), never the plugin name, so the remedy quotes
+    that entry. Without it, fall back to the plugin name.
+    """
+    if isinstance(entry, str) and entry:
+        return repr(entry)
+    if isinstance(entry, dict) and entry:
+        fields = ", ".join(f"{key}: {value}" for key, value in entry.items())
+        return f"the entry '{fields}'"
+    return repr(plugin_name)
+
+
+class MarketplaceOriginConflictError(MarketplaceError):
+    """Raised when an alias now names a different marketplace than the lock recorded.
+
+    *user_scope* renders the switch remedy against the user manifest
+    (``~/.apm/apm.yml``, ``apm install -g``) and offers it for a mistaken lock
+    change instead of a version-control restore (#4554). The re-register remedy
+    is the same at both scopes: the marketplace registry is user-global.
+    """
+
+    def __init__(
+        self,
+        marketplace_name: str,
+        plugin_name: str,
+        locked: str,
+        current: str,
+        *,
+        user_scope: bool = False,
+        manifest_entry: str | dict | None = None,
+    ):
         import shlex
 
+        from ..utils.diagnostics import printable_ascii_text
         from .source_identity import parse_marketplace_source
 
         self.marketplace_name = marketplace_name
         self.plugin_name = plugin_name
         self.locked_origin = locked
         self.current_origin = current
+        self.user_scope = user_scope
+        self.manifest_entry = manifest_entry
+        # The locked origin is lock-file data: render it as printable ASCII and
+        # advise restoring the lock before re-registering what it names.
+        shown_locked = printable_ascii_text(locked)
+        shown_current = printable_ascii_text(current)
         try:
+            if shown_locked != locked:
+                raise ValueError(locked)
             parse_marketplace_source(locked)
         except ValueError:
-            restore = (
-                "To keep the locked marketplace, register its origin again with "
+            keep = (
+                "Otherwise, verify the locked source, then register it again with "
                 f"'apm marketplace add' under the name {marketplace_name!r}."
             )
         else:
-            restore = (
-                "To keep the locked marketplace, run: apm marketplace add "
-                f"{shlex.quote(locked)} --name {shlex.quote(marketplace_name)} "
-                "(add --ref or --path if the original registration used them)."
+            remedy = MARKETPLACE_ORIGIN_RESTORE.bind(
+                source=shlex.quote(locked), name=shlex.quote(marketplace_name)
             )
-        super().__init__(
-            f"marketplace {marketplace_name!r} now points at {current}, but apm.lock.yaml "
-            f"recorded {plugin_name!r} from {locked}. Nothing was changed. {restore} "
-            f"To switch marketplaces on purpose, remove {plugin_name!r} from apm.yml, run "
-            "'apm install', then add it back and run 'apm install' again."
+            keep = f"Otherwise, {remedy.clause()}."
+        switch_entry = MARKETPLACE_ORIGIN_SWITCH_GLOBAL if user_scope else MARKETPLACE_ORIGIN_SWITCH
+        switch = switch_entry.bind(
+            plugin=_manifest_entry_label(manifest_entry, plugin_name)
+        ).clause()
+        lockfile = "~/.apm/apm.lock.yaml" if user_scope else "apm.lock.yaml"
+        head = (
+            f"marketplace {marketplace_name!r} now points at {shown_current}, but {lockfile} "
+            f"recorded {plugin_name!r} from {shown_locked}. Nothing was changed."
         )
+        if user_scope:
+            # The user lock is rarely under version control (#4554): a mistaken
+            # change converges by re-recording the plugin, never by a lock edit.
+            message = (
+                f"{head} If {lockfile} changed by mistake, or to switch marketplaces "
+                f"on purpose, {switch}. {keep}"
+            )
+        else:
+            message = (
+                f"{head} If {lockfile} was not changed on purpose, restore it from version "
+                f"control. {keep} To switch marketplaces on purpose, {switch}."
+            )
+        super().__init__(message)
+
+
+class MarketplaceProvenanceError(MarketplaceError):
+    """Raised when a locked marketplace row cannot be re-verified against its catalog (#4228)."""
 
 
 class MarketplaceYmlError(MarketplaceError):
@@ -131,9 +202,17 @@ class MarketplaceFetchError(MarketplaceError):
         retry = (
             retry_hint
             if retry_hint is not None
-            else f"Run 'apm marketplace update {name}' to retry."
+            else MARKETPLACE_FETCH_FAILED.bind(name=name).sentence()
         )
         super().__init__(f"Failed to fetch marketplace '{name}'{detail}. {retry}")
+
+
+class MarketplaceEgressRefusedError(MarketplaceFetchError):
+    """Raised when ``PROXY_REGISTRY_ONLY`` refuses a direct catalog fetch.
+
+    A policy refusal, not a network failure: callers must not fall back to a
+    cached catalog or report it as unreachable.
+    """
 
 
 class MarketplaceFreshnessError(MarketplaceFetchError):
@@ -155,6 +234,44 @@ class MarketplaceFreshnessError(MarketplaceFetchError):
         detail = f": {reason}" if reason else ""
         self.args = (
             f"Could not verify that marketplace '{name}' is current{detail}. {self.RETRY_HINT}",
+        )
+
+
+class MarketplaceAuthError(MarketplaceFetchError):
+    """A hosted catalog denied access, or its credential setup is unusable.
+
+    Never answered from a stale cache or another source: the caller reports
+    it and exits nonzero. The message names variables, never their values.
+    """
+
+    def __init__(self, name: str, message: str):
+        super().__init__(name, message, retry_hint="")
+        self.args = (message,)
+
+
+class MarketplaceAccessDeniedError(MarketplaceAuthError):
+    """The catalog answered HTTP 401/403 or redirected to a sign-in page."""
+
+    def __init__(self, name: str, message: str, *, status: int | None = None):
+        super().__init__(name, message)
+        self.status = status
+
+
+class MarketplaceCredentialError(MarketplaceAuthError):
+    """The ``APM_MARKETPLACE_*`` credential configuration cannot be used."""
+
+
+class MarketplaceBindingConflictError(MarketplaceError):
+    """``marketplace add`` would rebind a name whose credential is bound elsewhere."""
+
+    def __init__(self, name: str, bound_url: str):
+        self.name = name
+        self.bound_url = bound_url
+        super().__init__(
+            f"Marketplace '{name}' is already bound to {bound_url}, and its "
+            "APM_MARKETPLACE_* credential is sent only there. Nothing was changed. "
+            f"{MARKETPLACE_CREDENTIAL_REBIND.bind(name=shlex.quote(name)).sentence()} "
+            "Or choose a different --name."
         )
 
 
@@ -241,4 +358,47 @@ class GitLsRemoteError(BuildError):
         super().__init__(
             f"{summary} {hint}",
             package=package,
+        )
+
+
+class UndeclaredMarketplaceError(MarketplaceError):
+    """A transitive dependency names a marketplace the root project does not declare.
+
+    Raised only when the root ``apm.yml`` declares ``marketplaces:``
+    (#2903 D3): every ``marketplace: <name>`` in the graph must then resolve
+    through that map, so a name cannot mean different things on different
+    machines.
+    """
+
+    def __init__(self, name: str, plugin_name: str, required_by: str):
+        self.name = name
+        self.plugin_name = plugin_name
+        self.required_by = required_by
+        super().__init__(
+            f"marketplace '{name}' is not declared in the root apm.yml, and a "
+            "transitive dependency may only use marketplaces the root declares. "
+            f"Add it to apm.yml:\n  marketplaces:\n    - name: {name}\n"
+            "      source: <catalog repository URL>"
+        )
+
+
+class ProjectMarketplaceOriginConflictError(MarketplaceOriginConflictError):
+    """``--frozen`` met a lock row from an origin the root ``apm.yml`` no longer declares.
+
+    The file wins (#2903 D3), so a plain install re-resolves through the map;
+    ``--frozen`` only replays the lock and refuses instead.
+    """
+
+    def __init__(self, marketplace_name: str, plugin_name: str, locked: str, current: str):
+        self.marketplace_name = marketplace_name
+        self.plugin_name = plugin_name
+        self.locked_origin = locked
+        self.current_origin = current
+        from ..core.remediation import MARKETPLACE_PROJECT_ORIGIN_RELOCK
+
+        MarketplaceError.__init__(
+            self,
+            f"marketplace {marketplace_name!r} in apm.yml now points at {current}, but "
+            f"apm.lock.yaml recorded {plugin_name!r} from {locked}. Nothing was changed. "
+            + MARKETPLACE_PROJECT_ORIGIN_RELOCK.sentence(),
         )

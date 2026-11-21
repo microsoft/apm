@@ -57,8 +57,9 @@ otherwise the concrete target identities recorded by install. An unrelated
 Grok Cloud installation, and `.grok/` alone does not relabel it as Grok Build.
 Older lockfiles without a recorded `deployments` section retain directory
 discovery; identities inferred from legacy file paths do not narrow it.
-The saved `apm config target` is an install/update default, not a request to
-retarget an existing installation during audit.
+The saved `target` config value (`apm config set target`) is an
+install/update default, not a request to retarget an existing installation
+during audit.
 
 Experimental targets remain opt-in. If a selected target's experiment is
 disabled, audit exits with code `3` and an enable instruction on stderr, such
@@ -87,7 +88,7 @@ CI; a missing hash requires reinstalling to establish that baseline. These
 checks do not turn cache files into deployed-file claims. Native registration
 files are not covered by this content comparison.
 
-This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow. For marketplace plugin transitive-dependency pinning, see [`apm marketplace audit`](../marketplace/#apm-marketplace-audit-name).
+This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../enterprise/drift-detection/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow. For marketplace plugin transitive-dependency pinning, see [`apm marketplace audit`](../marketplace/#apm-marketplace-audit-name).
 
 `PACKAGE`, when supplied, scans one installed dependency, so only files recorded for that package are included. Pass the dependency key from `apm.lock.yaml` (`owner/repo` for GitHub, `host/owner/repo` for other hosts) or any form `apm uninstall` accepts, such as `https://github.com/owner/repo`, `github.com/owner/repo`, `owner/repo#ref`, `plugin@marketplace` or the `_local/<name>` key `apm deps list` prints; APM selects it offline, exactly as uninstall does, and normalizes it to the lockfile key. A package that matches no installed dependency fails with exit `1`, so a typo in a CI gate cannot pass silently:
 
@@ -156,7 +157,7 @@ single-file `--file` operation is unchanged.
 | Flag | Default | Description |
 |---|---|---|
 | `--ci` | off | Run lockfile consistency checks and drift as a CI gate. Run it from the project root: without an `apm.yml` in the current directory it fails `manifest-missing` (exit 1) instead of passing an empty audit. Cannot be combined with `--strip`, `--dry-run`, `--file`, or `PACKAGE`. |
-| `--policy SOURCE` | auto | Policy source for `--ci`. Accepts `org` (auto-discover from the project's git remote), `owner/repo`, an `https://` URL, or a local file path. A path, URL, or `owner/repo` that cannot be loaded (missing, unreachable, malformed) fails the gate with exit 1; `org` keeps the discovery default (warn unless `policy.fetch_failure_default: block`). Experimental. Without `--ci` it is ignored with a warning. |
+| `--policy SOURCE` | auto | Policy source for `--ci`. Accepts `org` (auto-discover from the project's git remote), `owner/repo`, an `https://` URL, or a local file path. A path, URL, or `owner/repo` that cannot be loaded (missing, unreachable, malformed) fails the gate with exit 1; `org` keeps the discovery default (warn unless `policy.fetch_failure_default: block`). Without `--ci` it is ignored with a warning. Under `enforcement: warn`, violating checks pass (exit 0) but show `[!]` with the dependencies or servers they name. |
 | `--no-policy` | off | Skip policy discovery and enforcement. Overridden when `--policy` is passed explicitly. `APM_POLICY_DISABLE=1` also disables enforcement, but it is not overridden by `--policy`: audit prints a `[!]` warning that the explicit policy was not enforced and reports `policy.enforced: false`. |
 | `--no-cache` | off | Force a fresh policy fetch (skip the policy cache). Only relevant with policy discovery active. |
 | `--no-fail-fast` | off | Run every check even after the first failure, for a full diagnostic report. |
@@ -257,8 +258,10 @@ For the full workflow, see [Enforce in CI](../../../enterprise/enforce-in-ci/).
 Whole-project audit discovers recognized primitives even without a lockfile.
 Discovery is not a safety verdict: command-only hooks are listed as
 discovered/untracked when appropriate, without failing the prompt check.
-`tracked` means a file claim exists, not that every entry in a shared file
-is APM-owned or hash-verified. Hash and ownership checks remain independent.
+Each line names its ownership evidence: `recorded-file` (the lockfile claims
+the file), `apm-owned-entry` (APM merged that entry into a shared hook config
+such as `.claude/settings.json`), or `untracked`. A JSON field renders as
+`<file> at <pointer>`. Hash and ownership checks remain independent.
 
 User-scope replay preserves the `~/.apm/apm_modules/` layout in relative
 asset links, so intact global prompts do not report drift from a scratch-path difference.
@@ -331,9 +334,9 @@ do malformed JSON, duplicate keys, and non-JSON constants (`NaN`, `Infinity`,
 
 Drift is whole-project only; `--file` and explicit `PACKAGE` runs skip it.
 Use `--no-drift` to opt out with reduced coverage. In bare `apm audit`, drift
-findings are advisory by default. With `security.audit.fail_on_drift: true`,
-a failed drift check (including one that could not run) promotes an otherwise
-clean audit to exit `1`. An advisory cache-miss skip remains non-failing
+findings are advisory by default and render as `[!] Drift detected`. With
+`security.audit.fail_on_drift: true`, a failed drift check (including one that
+could not run) promotes the audit to exit `1` and drift renders as `[x]`. An advisory cache-miss skip remains non-failing
 (see [Exit codes](#exit-codes)).
 
 Bare `apm audit` keeps replay cache-only, so a cache miss produces an
@@ -342,7 +345,13 @@ scratch replay through `install/audit_replay.py`; materialization failures
 fail closed without mutating the checkout. Replay fetches each Git dependency
 over the transport its declaring `apm.yml` states, as install does: a
 `git@host:...` or `ssh://` dependency replays over SSH, and shorthand follows
-the usual [transport selection](../../../consumer/manage-dependencies/#transport-selection).
+the usual [transport selection](../../../consumer/install-packages/#transport-selection).
+
+### Missing apm_modules link targets
+
+In text output, a deployed file that links into `apm_modules/` at a missing target
+(for example after a fresh clone) gets one warning naming the file, the target and
+the remedy, `apm install`. It does not change the exit code.
 
 ### Deployment-owner integrity
 
@@ -354,7 +363,8 @@ dependency was removed without running `apm prune` -- is a hard failure,
 not drift: it always exits `1`, in bare `apm audit` and `--ci` alike, and
 is reported under the `deployment-ledger-owners` check ID in `--ci` output.
 The finding names the owning locator and its invalid owner(s) with one
-remediation: `Run 'apm prune', then rerun 'apm audit'.` `--strip` refuses to
+remediation: `Run 'apm prune' to repair the invalid deployment ownership
+records, then rerun 'apm audit'.` `--strip` refuses to
 modify content while any owner reference is invalid. Stale owner rows never
 authorize deleting files -- only `apm prune` reconciles them, and only ever
 as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
@@ -391,10 +401,16 @@ as metadata repair; see [`apm prune`](../prune/#canonical-deployment-ownership).
 
 CI JSON includes a top-level `policy` object (`enforced`, `source`, `enforcement`); SARIF has it under `runs[0].invocations[0].properties.policy`. `enforced: false` means no policy checks ran.
 
+A failing CI JSON check can carry `remediation`: the structured advice that clears it, with `id`, `command` (the exact `apm` command line), `fixes` (the state it clears) and optional `before` (a manual step first, such as deleting edited files) and `then` (a step after it succeeds). `remediations` lists every applicable remediation; `remediation` is the first. The text message renders the same advice.
+
+```json
+{"name": "lockfile-exists", "passed": false, "remediation": {"id": "lockfile-missing", "command": "apm install", "fixes": "generate apm.lock.yaml"}}
+```
+
 ## Related
 
 - [`apm install`](../install/) -- the built-in scan that blocks critical findings before deployment.
 - [`apm export-patch`](../export-patch/) -- turn the `modified` drift this reports into upstream patches.
 - [`apm prune`](../prune/) -- reconciles the canonical deployment-owner references this check validates.
-- [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) -- consumer-side overview of the two-layer security model.
+- [Drift and secure by default](../../../enterprise/drift-detection/) -- consumer-side overview of the two-layer security model.
 - [Enforce in CI](../../../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.

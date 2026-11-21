@@ -767,7 +767,8 @@ class TestPluginBinDeployPermissionsE2E:
     Regression guard for issue #1620 item 3: ``shutil.copy2`` preserves the
     source mode, so a shipped 0o4755 tool would otherwise land group/other
     readable with a special bit. The real ``apm install -g`` path must tighten
-    it to 0o700.
+    it to 0o700. A Claude plugin installs intact at user scope (#3290), so its
+    bin/ lands inside the native plugin root, not under ~/.claude/skills.
     """
 
     def test_install_global_deploys_plugin_bin_as_0700(self, tmp_path, apm_binary_path: Path):
@@ -795,7 +796,8 @@ class TestPluginBinDeployPermissionsE2E:
         )
         assert result.returncode == 0, f"Global install failed:\n{result.stdout}\n{result.stderr}"
 
-        deployed = list((fake_home / ".claude" / "skills").glob("*/bin/mytool"))
+        assert not list((fake_home / ".claude" / "skills").glob("*/bin/mytool"))
+        deployed = list((fake_home / ".agents" / "plugins").glob("*/bin/mytool"))
         assert len(deployed) == 1, (
             f"Expected exactly one deployed bin executable, found {deployed}.\n"
             f"stdout:\n{result.stdout}"
@@ -1241,10 +1243,10 @@ class TestPluginNetworkE2E:
         assert plugin_entry is not None, (
             f"Plugin not found in lockfile. Deps: {lockfile['dependencies']}"
         )
-        # The normalized apm.yml/.apm package outranks its plugin publishing
-        # surface and retains the root skills/ bundle classification.
-        assert plugin_entry.get("package_type") == "skill_bundle", (
-            f"Expected package_type 'skill_bundle', got: {plugin_entry.get('package_type')}"
+        # reference/package-types.md (layout table; "Plugin collection"): a
+        # plugin.json without $schema is a Claude plugin collection (#4270).
+        assert plugin_entry.get("package_type") == "marketplace_plugin", (
+            f"Expected package_type 'marketplace_plugin', got: {plugin_entry.get('package_type')}"
         )
 
     # ---- Test 11: idempotent reinstall ----------------------------------

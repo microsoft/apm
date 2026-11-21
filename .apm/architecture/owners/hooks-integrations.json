@@ -33,8 +33,12 @@
     {
       "id": "mcp-target-selection-precedence",
       "decision": "MCP target-selection precedence",
-      "owner": "integration/mcp_integrator_install.py (_resolve_target_runtimes)",
-      "selectors": ["src/apm_cli/integration/mcp_integrator_install.py"],
+      "owner": "integration/mcp_integrator_install.py (_resolve_target_runtimes; mcp_dependency_runtimes narrows each dependency by its targets: for writes, claim pruning and --frozen claims)",
+      "selectors": [
+        "src/apm_cli/integration/mcp_integrator_install.py",
+        "src/apm_cli/integration/mcp_registry_hints.py",
+        "src/apm_cli/install/mcp/entry_integration.py"
+      ],
       "guards": ["hooks-integrations-mcp-target-selection"]
     },
     {
@@ -65,7 +69,7 @@
     },
     {
       "id": "mcp-declaration-scope",
-      "decision": "Root vs dependency MCP declaration scope and dependency-bound intentional omission evidence",
+      "decision": "Root vs dependency MCP declaration scope, receipt-bound local-bundle baseline (the set audit MCP policy judges), and dependency-bound intentional omission evidence",
       "owner": "integration/mcp_config_view.py (CurrentMcpConfigView)",
       "selectors": ["src/apm_cli/integration/mcp_config_view.py"],
       "guards": ["hooks-integrations-mcp-declaration-scope", "hooks-integrations-mcp-omission-evidence"]
@@ -104,6 +108,13 @@
       "owner": "mcp_transport.py (canonical_remote_transport, TRANSPORT_STREAMABLE_HTTP, TRANSPORT_SSE, CANONICAL_REMOTE_TRANSPORTS; policy projection canonical_transport_name(s), POLICY_TRANSPORTS, TRANSPORT_STDIO, server_write_transports)",
       "selectors": ["src/apm_cli/mcp_transport.py"],
       "guards": ["hooks-integrations-mcp-remote-transport-normalization"]
+    },
+    {
+      "id": "mcp-json-config-writer",
+      "decision": "Writing a user-editable MCP JSON config file (.github/mcp.json, .mcp.json, ~/.claude.json, the IntelliJ MCP config) in the file's own style: indentation, final newline, line endings and literal non-ASCII kept; only APM's entries change; new or minified files use the caller's default",
+      "owner": "utils/json_config.py (write_json_config, detect_json_config_style, render_json_config)",
+      "selectors": ["src/apm_cli/utils/json_config.py"],
+      "guards": ["hooks-integrations-mcp-json-config-writer"]
     },
     {
       "id": "mcp-remote-shape-table",

@@ -112,7 +112,6 @@ def _prepare_user_scope_for_install(
     dry_run: bool,
     logger: InstallLogger,
     ensure_user_dirs: Callable[[], None],
-    warn_unsupported_user_scope: Callable[[], str | None],
 ) -> None:
     """Prepare user-scope install paths unless the invocation is read-only."""
     from apm_cli.core.scope import get_apm_home
@@ -123,8 +122,6 @@ def _prepare_user_scope_for_install(
         logger.progress(f"Installing to user scope ({scope_label})")
     else:
         logger.progress(f"Previewing user-scope install ({scope_label})")
-    if scope_warning := warn_unsupported_user_scope():
-        logger.warning(scope_warning)
 
 
 def _report_bootstrap_manifest(

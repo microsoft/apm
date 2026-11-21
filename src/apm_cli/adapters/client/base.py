@@ -9,9 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
+from ...core.command_logger import library_logger
+from ...core.remediation import MCP_ENV_VARS_UNRESOLVED
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
-from ...utils.atomic_io import atomic_write_text, umask_file_mode
-from ...utils.console import _rich_error, _rich_warning
+from ...utils.atomic_io import umask_file_mode
+from ...utils.json_config import write_json_config
 from ...utils.path_security import has_symlink_component
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
@@ -271,8 +273,23 @@ _SYMLINKED_MCP_CONFIG = (
 )
 
 
+# Config paths already reported unreadable in this process (#4332): one install
+# reads a client config more than once, but the user needs one warning per file.
+_UNREADABLE_CONFIGS_WARNED: set[str] = set()
+
+
+def warn_unreadable_config_once(logger, config_path: Path, exc: Exception) -> None:
+    """Log ``Could not read <path>: <exc>`` once per config path per process."""
+    key = str(config_path)
+    if key in _UNREADABLE_CONFIGS_WARNED:
+        logger.debug("Could not read %s: %s", config_path, exc)
+        return
+    _UNREADABLE_CONFIGS_WARNED.add(key)
+    logger.warning("Could not read %s: %s", config_path, exc)
+
+
 def _warn_symlinked_mcp_config(config_path: Path) -> None:
-    _rich_warning(_SYMLINKED_MCP_CONFIG.format(path=config_path), symbol="warning")
+    library_logger().warning(_SYMLINKED_MCP_CONFIG.format(path=config_path), symbol="warning")
 
 
 class MCPClientAdapter(ABC):
@@ -346,6 +363,11 @@ class MCPClientAdapter(ABC):
     # Adapters that target a global path should override this to ``True``
     # so that ``apm install --global`` can install MCP servers to them.
     supports_user_scope: bool = False
+
+    # Display path of a user-wide config that even a project install writes,
+    # because the runtime has no workspace MCP config (Windsurf). Install
+    # output names it so the account-wide effect is never silent (#3994).
+    user_wide_config_display: str | None = None
 
     # Whether the target runtime resolves ``${VAR}`` placeholders from the
     # host environment at server-start time. Adapters that opt in (Copilot
@@ -607,11 +629,13 @@ class MCPClientAdapter(ABC):
         except FileNotFoundError:
             return {}
         except (OSError, UnicodeError) as exc:
-            _rich_warning(
-                f"Could not read {config_path}: {exc} -- skipping config write; "
-                "fix the file's permissions or encoding, or add this server manually",
-                symbol="warning",
-            )
+            if str(config_path) not in _UNREADABLE_CONFIGS_WARNED:
+                _UNREADABLE_CONFIGS_WARNED.add(str(config_path))
+                library_logger().warning(
+                    f"Could not read {config_path}: {exc} -- skipping config write; "
+                    "fix the file's permissions or encoding, or add this server manually",
+                    symbol="warning",
+                )
             return None
         if not raw.strip():
             return {}
@@ -620,7 +644,7 @@ class MCPClientAdapter(ABC):
         except json.JSONDecodeError:
             config = None
         if not isinstance(config, dict):
-            _rich_warning(
+            library_logger().warning(
                 f"Could not parse {config_path} as a JSON object -- skipping config "
                 "write to avoid data loss (comments and trailing commas are not "
                 "preserved); fix the file or add this server manually",
@@ -628,7 +652,7 @@ class MCPClientAdapter(ABC):
             )
             return None
         if self.mcp_servers_key in config and not isinstance(config[self.mcp_servers_key], dict):
-            _rich_warning(
+            library_logger().warning(
                 f"Could not parse {config_path}: {self.mcp_servers_key} must be "
                 "a JSON object -- skipping config write to avoid data loss; "
                 "fix the file or add this server manually",
@@ -670,14 +694,21 @@ class MCPClientAdapter(ABC):
         if self._is_linked_project_config(config_path):
             raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(config, indent=2) + ("\n" if self.json_config_trailing_newline else "")
+        trailing_newline = self.json_config_trailing_newline
         if shared and self._is_project_config_path(config_path):
-            atomic_write_text(config_path, payload, new_file_mode=umask_file_mode(config_path))
+            write_json_config(
+                config_path,
+                config,
+                default_trailing_newline=trailing_newline,
+                new_file_mode=umask_file_mode(config_path),
+            )
             return
         if config_path.is_file():
             # Tighten first: the atomic write keeps an existing file's mode.
             os.chmod(config_path, 0o600)
-        atomic_write_text(config_path, payload, new_file_mode=0o600)
+        write_json_config(
+            config_path, config, default_trailing_newline=trailing_newline, new_file_mode=0o600
+        )
         os.chmod(config_path, 0o600)
 
     @abstractmethod
@@ -1415,7 +1446,7 @@ class MCPClientAdapter(ABC):
                 if var_id in seen:
                     continue
                 seen.add(var_id)
-                _rich_warning(
+                library_logger().warning(
                     f"${{input:{var_id}}} in server "
                     f"'{server_name}' will not be resolved -- "
                     f"{runtime_label} does not support input variable prompts"
@@ -1740,7 +1771,7 @@ class MCPClientAdapter(ABC):
             return server_info_cache[server_url]
         server_info = self.registry_client.find_server_by_reference(server_url)
         if not server_info:
-            _rich_error(f"Error: MCP server '{server_url}' not found in registry")
+            library_logger().error(f"MCP server '{server_url}' not found in registry")
             return None
         return server_info
 
@@ -1978,10 +2009,10 @@ class MCPClientAdapter(ABC):
         ]
         if empty_value_vars and skip_prompting:
             var_names = [ev.get("name") for ev in empty_value_vars]
-            _rich_warning(
+            library_logger().warning(
                 f"Required environment variables have no default value and cannot be "
-                f"prompted in non-interactive mode: {var_names}. Set them in your "
-                "environment and rerun `apm install`."
+                f"prompted in non-interactive mode: {var_names}. "
+                + MCP_ENV_VARS_UNRESOLVED.bind(names="them").sentence()
             )
 
         for env_var in env_vars:
@@ -2037,10 +2068,10 @@ class MCPClientAdapter(ABC):
             elif default_value:
                 resolved[name] = default_value
             elif required:
-                _rich_warning(
+                library_logger().warning(
                     f"Required environment variable '{name}' could not be resolved. "
-                    f"The MCP server may not function correctly. Set {name} in your "
-                    "environment and rerun `apm install`."
+                    "The MCP server may not function correctly. "
+                    + MCP_ENV_VARS_UNRESOLVED.bind(names=name).sentence()
                 )
                 resolved[name] = ""
 

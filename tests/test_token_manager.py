@@ -9,6 +9,8 @@ import pytest
 
 from apm_cli.core.token_manager import GitHubTokenManager, _sanitize_credential_path
 
+pytestmark = pytest.mark.unit
+
 
 class TestSanitizeCredentialPath:
     """Direct coverage of the security-critical credential-path sanitizer.
@@ -317,10 +319,10 @@ class TestResolveCredentialFromGit:
             assert GitHubTokenManager.resolve_credential_from_git("github.com") is None
 
     def test_rejects_excessively_long_token(self):
-        """Rejects tokens longer than 1024 characters."""
+        """Rejects tokens longer than the credential token cap."""
         mock_result = MagicMock(
             returncode=0,
-            stdout=f"password={'x' * 1025}\n",
+            stdout=f"password={'x' * 16385}\n",
         )
         with patch("subprocess.run", return_value=mock_result):
             assert GitHubTokenManager.resolve_credential_from_git("github.com") is None
@@ -465,8 +467,8 @@ class TestIsValidCredentialToken:
         assert not GitHubTokenManager._is_valid_credential_token("")
 
     def test_none_coerced_invalid(self):
-        """None would fail the truthiness check (caller already guards this)."""
-        assert not GitHubTokenManager._is_valid_credential_token("")
+        """None fails the truthiness check and is reported invalid instead of raising."""
+        assert GitHubTokenManager._is_valid_credential_token(None) is False
 
     def test_whitespace_only_invalid(self):
         assert not GitHubTokenManager._is_valid_credential_token("  ")
@@ -474,11 +476,11 @@ class TestIsValidCredentialToken:
     def test_normal_pat_valid(self):
         assert GitHubTokenManager._is_valid_credential_token("ghp_abc123")
 
-    def test_over_1024_chars_invalid(self):
-        assert not GitHubTokenManager._is_valid_credential_token("a" * 1025)
+    def test_over_cap_invalid(self):
+        assert not GitHubTokenManager._is_valid_credential_token("a" * 16385)
 
-    def test_exactly_1024_chars_valid(self):
-        assert GitHubTokenManager._is_valid_credential_token("a" * 1024)
+    def test_exactly_cap_valid(self):
+        assert GitHubTokenManager._is_valid_credential_token("a" * 16384)
 
     def test_password_for_prompt_invalid(self):
         assert not GitHubTokenManager._is_valid_credential_token(

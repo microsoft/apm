@@ -171,6 +171,7 @@ def test_audit_judges_the_canonical_declared_targets(
     assert not (project / "apm.lock.yaml").exists()
 
 
+@pytest.mark.req("req-pl-002")
 def test_install_blocks_a_noncompliant_plural_declaration_before_writing(harness, apm_binary_path):
     isolated, env = harness
     runner = _runner(apm_binary_path)

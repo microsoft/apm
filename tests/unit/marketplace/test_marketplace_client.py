@@ -21,6 +21,14 @@ from apm_cli.marketplace.errors import (
 )
 from apm_cli.marketplace.models import MarketplaceSource
 
+pytestmark = pytest.mark.component
+
+
+def _anonymous(url: str):
+    from apm_cli.core.catalog_credentials import anonymous_catalog_credential
+
+    return anonymous_catalog_credential("catalog", url, bound=False)
+
 
 def _quoted_hosts(text: str) -> set[str]:
     """Extract host tokens from `Host '<host>'` patterns in error text.
@@ -417,7 +425,7 @@ class TestExplicitFreshness:
         monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
 
         with pytest.raises(MarketplaceFetchError, match="downgrades HTTPS to HTTP"):
-            client_mod._fetch_url_direct(source_url)
+            client_mod._fetch_url_direct(source_url, credential=_anonymous(source_url))
         assert calls == [source_url]
 
     def test_http_get_clears_session_cookies_between_hosts(self, monkeypatch):
@@ -512,7 +520,7 @@ class TestExplicitFreshness:
 
         monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
 
-        result = client_mod._fetch_url_direct(source_url)
+        result = client_mod._fetch_url_direct(source_url, credential=_anonymous(source_url))
 
         assert result is not None
         assert result.data == {"name": "catalog", "plugins": []}
@@ -554,7 +562,7 @@ class TestExplicitFreshness:
         monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
 
         with pytest.raises(MarketplaceFetchError, match=r"marketplace\.json exceeds"):
-            client_mod._fetch_url_direct(source_url)
+            client_mod._fetch_url_direct(source_url, credential=_anonymous(source_url))
 
 
 class TestAutoDetectPath:
@@ -666,8 +674,9 @@ class TestProxyAwareFetch:
         assert result == self._MARKETPLACE_JSON
         mock_resolver.try_with_fallback.assert_called_once()
 
-    def test_proxy_only_blocks_github_fallback(self):
+    def test_proxy_only_blocks_github_fallback(self, monkeypatch):
         """Proxy returns None + enforce_only -- returns None, no GitHub call."""
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
         source = _make_source()
         cfg = self._make_cfg(enforce_only=True)
         with (
@@ -1040,7 +1049,7 @@ class TestDirectFetchHostRouting:
         assert result == self._JSON
         mock_get.assert_not_called()
 
-    def test_proxy_only_blocks_gitlab_v4_fallback(self):
+    def test_proxy_only_blocks_gitlab_v4_fallback(self, monkeypatch):
         """PROXY_REGISTRY_ONLY=1 + proxy miss MUST NOT fall through to the GitLab v4 raw API.
 
         Policy-enforcement promise: when the org pins all marketplace fetches to
@@ -1049,6 +1058,7 @@ class TestDirectFetchHostRouting:
         -- to the GitLab host as a fallback. Mirrors the equivalent guarantee
         for the GitHub Contents API.
         """
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
         source = MarketplaceSource(
             name="gl",
             owner="acme",
@@ -1077,8 +1087,9 @@ class TestDirectFetchHostRouting:
         assert result is None
         mock_get.assert_not_called()
 
-    def test_proxy_only_blocks_github_contents_fallback(self):
+    def test_proxy_only_blocks_github_contents_fallback(self, monkeypatch):
         """Companion guarantee: PROXY_REGISTRY_ONLY=1 also blocks GitHub Contents fallback."""
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
         source = _make_source()
         cfg = MagicMock()
         cfg.host = "art.example.com"
@@ -1100,6 +1111,62 @@ class TestDirectFetchHostRouting:
 
         assert result is None
         mock_get.assert_not_called()
+
+
+class TestProxyOnlyRefusesDirectCatalogEgress:
+    """PROXY_REGISTRY_ONLY refuses every catalog fetch without a proxy route (#3994)."""
+
+    @pytest.mark.parametrize(
+        ("url", "path", "kind"),
+        [
+            ("https://catalog.example.com/marketplace.json", "", "url"),
+            ("https://git.example.com/acme/plugins.git", "marketplace.json", "git"),
+            ("https://dev.azure.com/org/proj/_git/plugins", "marketplace.json", "ado"),
+            ("https://github.com/acme/plugins", "marketplace.json", "github"),
+        ],
+    )
+    def test_refuses_without_network(self, monkeypatch, url, path, kind):
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+        monkeypatch.delenv("PROXY_REGISTRY_URL", raising=False)
+        monkeypatch.delenv("ARTIFACTORY_BASE_URL", raising=False)
+        source = MarketplaceSource(name="mkt", url=url, path=path)
+        assert source.kind == kind
+        network = MagicMock(side_effect=AssertionError("direct egress"))
+        with (
+            patch("apm_cli.marketplace.client._http_get", network),
+            patch("apm_cli.marketplace.client._fetch_git", network),
+            patch("apm_cli.marketplace.client._read_cache", return_value=None),
+            patch("apm_cli.marketplace.client._read_stale_cache", return_value=None),
+        ):
+            with pytest.raises(MarketplaceFetchError, match="PROXY_REGISTRY_ONLY"):
+                client_mod.fetch_marketplace(source, force_refresh=True)
+        network.assert_not_called()
+
+    def test_refusal_skips_stale_cache_and_hides_query(self, monkeypatch):
+        """A policy refusal is not a network error: no stale catalog, no URL token."""
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+        monkeypatch.delenv("PROXY_REGISTRY_URL", raising=False)
+        source = MarketplaceSource(
+            name="mkt", url="https://catalog.example.com/m.json?sig=SECRET", path=""
+        )
+        stale = MagicMock(side_effect=AssertionError("stale cache served"))
+        with patch("apm_cli.marketplace.client._manifest_from_cache", stale):
+            with pytest.raises(MarketplaceFetchError) as excinfo:
+                client_mod.fetch_marketplace(source, force_refresh=True)
+        assert "SECRET" not in str(excinfo.value)
+        stale.assert_not_called()
+
+    def test_fetch_raw_without_proxy_is_refused(self, monkeypatch):
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
+        network = MagicMock(side_effect=AssertionError("direct egress"))
+        with (
+            patch("apm_cli.marketplace.client._try_proxy_fetch_raw", return_value=None),
+            patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
+            patch("apm_cli.marketplace.client._http_get", network),
+        ):
+            with pytest.raises(MarketplaceError, match="set PROXY_REGISTRY_URL"):
+                client_mod.fetch_raw(host="github.com", owner="o", repo="r", file_path="f", ref="m")
+        network.assert_not_called()
 
 
 class TestCacheKey:
@@ -1262,13 +1329,14 @@ class TestFetchRaw:
             )
         assert result == b"hello"
 
-    def test_raises_when_proxy_only_blocks_github(self):
+    def test_raises_when_proxy_only_blocks_github(self, monkeypatch):
         # PROXY_REGISTRY_ONLY=1 must keep us off GitHub even when the
         # proxy has no entry.  Because that path cannot verify whether
         # the file exists, fetch_raw must raise MarketplaceError instead
         # of returning None -- otherwise audit would silently report the
         # plugin as NO_MANIFEST in proxy-only environments rather than
         # surfacing it as unverifiable.
+        monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
         cfg = MagicMock(enforce_only=True)
         with (
             patch(

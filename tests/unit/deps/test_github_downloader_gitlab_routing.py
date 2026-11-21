@@ -13,7 +13,7 @@ from apm_cli.models.apm_package import DependencyReference
 
 # The GitLab REST fallback reads git config, so the cleared environment must
 # still let git be found (Windows has no trusted-directory fallback).
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.unit, pytest.mark.windows_compat]
 
 _GIT_LOOKUP_ENV_KEYS = ("PATH", "SYSTEMROOT", "PATHEXT")
 

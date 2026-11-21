@@ -186,7 +186,7 @@ class TestAPMDependenciesIntegration:
 
         # Verify package info
         assert result.package.name == "apm-sample-package"
-        assert result.package.version == "1.0.0"
+        assert result.package.version == "1.0.1"
         assert result.install_path == package_dir
 
     @pytest.mark.integration
@@ -411,7 +411,7 @@ This local instruction should override any dependency instruction.
         # Test package display info
         package_info = _get_package_display_info(package_dir)
         assert package_info["name"] == "apm-sample-package"
-        assert package_info["version"] == "1.0.0"
+        assert package_info["version"] == "1.0.1"
 
     @pytest.mark.integration
     def test_dependency_update_workflow(self):

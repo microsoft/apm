@@ -3,15 +3,19 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from apm_cli.core.remediation import HIDDEN_CHARACTERS_FLAGGED
 from apm_cli.security.audit_report import (
     detect_format_from_extension,
     findings_to_json,
     findings_to_markdown,
     findings_to_sarif,
     serialize_report,
-    write_report,
 )
 from apm_cli.security.content_scanner import ScanFinding
+
+pytestmark = pytest.mark.unit
 
 
 def _make_finding(
@@ -152,22 +156,6 @@ class TestFormatDetection:
         assert detect_format_from_extension(Path("report.md")) == "markdown"
 
 
-class TestWriteReport:
-    def test_write_creates_file(self, tmp_path):
-        report = findings_to_json({}, files_scanned=0, exit_code=0)
-        out = tmp_path / "sub" / "report.json"
-        write_report(report, out)
-        assert out.exists()
-        data = json.loads(out.read_text(encoding="utf-8"))
-        assert data["version"] == "1"
-
-    def test_write_trailing_newline(self, tmp_path):
-        report = findings_to_json({}, files_scanned=0, exit_code=0)
-        out = tmp_path / "report.json"
-        write_report(report, out)
-        assert out.read_text(encoding="utf-8").endswith("\n")
-
-
 class TestMarkdownReport:
     def test_clean_report(self):
         md = findings_to_markdown({}, files_scanned=15)
@@ -215,4 +203,4 @@ class TestMarkdownReport:
     def test_strip_hint_present(self):
         findings = {"test.md": [_make_finding(file="test.md")]}
         md = findings_to_markdown(findings, files_scanned=1)
-        assert "`apm audit --strip`" in md
+        assert HIDDEN_CHARACTERS_FLAGGED.sentence() in md

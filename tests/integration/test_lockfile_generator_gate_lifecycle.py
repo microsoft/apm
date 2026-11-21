@@ -118,6 +118,9 @@ def test_older_cli_refuses_every_lockfile_command_without_mutation(
         assert "apm self-update" in output
         assert "pip install --upgrade apm-cli" in output
         assert "Error installing dependencies" not in output
+        # One renderer, on stderr, for every command (#3967).
+        assert "Refusing" not in result.stdout, _evidence(result)
+        assert "[x] Refusing" in result.stderr, _evidence(result)
         assert project.state() == before, args
 
     for args in _WARNING:
@@ -265,6 +268,11 @@ def test_user_scope_lockfile_is_guarded(tmp_path: Path, apm_binary_path: Path) -
         result = project.run(*args)
         assert result.returncode == 1, _evidence(result)
         assert f"written by APM {major + 1}.0.0" in _output(result)
+        # One refusal renderer, naming the user-scope lockfile by path (#3967).
+        assert "[x] Refusing" in _output(result), _evidence(result)
+        assert "Error: Refusing" not in _output(result)
+        unwrapped = "".join(_output(result).split())
+        assert "".join(str(user_lock).split()) in unwrapped, _evidence(result)
     assert user_lock.read_bytes() == before
 
 

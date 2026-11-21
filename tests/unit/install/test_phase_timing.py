@@ -8,7 +8,11 @@ stay byte-identical to the legacy direct-call path.
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from apm_cli.install.pipeline import _run_phase
+
+pytestmark = pytest.mark.unit
 
 
 def _make_phase(return_value=None, raise_exc=None):

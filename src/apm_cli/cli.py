@@ -31,37 +31,8 @@ except TLSConfigurationError as exc:
     # error before any command callback can make a request.
     _TLS_BOOTSTRAP_ERROR = exc
 
-from apm_cli.commands._helpers import (
-    ERROR,
-    RESET,
-    WARNING,
-    _check_and_notify_updates,
-    print_version,
-)
-from apm_cli.commands.approve import approve_cmd, deny_cmd
-from apm_cli.commands.auth import auth
-from apm_cli.commands.cache import cache
-from apm_cli.commands.compile import compile as compile_cmd
-from apm_cli.commands.config import config
-from apm_cli.commands.deps import deps
-from apm_cli.commands.discover import discover
-from apm_cli.commands.doctor import doctor
-from apm_cli.commands.experimental import experimental
-from apm_cli.commands.find import find as find_cmd
-from apm_cli.commands.init import init
-from apm_cli.commands.lifecycle import lifecycle
-from apm_cli.commands.list_cmd import list as list_cmd
-from apm_cli.commands.lock import lock
-from apm_cli.commands.mcp import mcp
-from apm_cli.commands.outdated import outdated as outdated_cmd
-from apm_cli.commands.plugin import plugin as plugin_cmd
-from apm_cli.commands.policy import policy
-from apm_cli.commands.publish import publish_cmd
-from apm_cli.commands.run import preview, run
-from apm_cli.commands.runtime import runtime
-from apm_cli.commands.self_update import self_update
-from apm_cli.commands.targets import targets
-from apm_cli.commands.view import view as view_cmd
+from apm_cli.update_notice import check_and_notify_updates as _check_and_notify_updates
+from apm_cli.version_output import print_version
 
 _CLI_EPILOG = (
     "\b\n"
@@ -74,22 +45,44 @@ _CLI_EPILOG = (
     "  apm outdated                   See what's drifted from upstream\n"
     "  apm update                     Refresh refs and rewrite the lockfile\n"
     "  apm audit --ci                 Validate lockfile integrity for CI gates\n"
-    "  apm doctor                     Diagnose environment problems\n"
-    "  apm run <script>               Execute a script from apm.yml"
+    "  apm doctor                     Diagnose environment problems"
 )
 
 
 class _LazyCommand(click.Command):
     """Stub whose real Click object is imported on first dispatch.
 
-    Root ``apm --help`` only needs name/help/hidden, so heavyweight modules
-    stay unloaded until the matching verb is invoked or its own ``--help``.
+    Root ``apm --help`` and shell completion only need name, summary and
+    visibility, so every command module (and GitPython behind them) stays
+    unloaded until the matching verb is invoked or its own ``--help``.
+    ``help``/``short_help`` mirror the real command's summary source so the
+    rendered summary is identical at every terminal width.
     """
 
-    def __init__(self, name: str, module: str, attr: str, help: str) -> None:
-        super().__init__(name=name, help=help)
+    def __init__(
+        self,
+        name: str,
+        module: str,
+        attr: str,
+        help: str | None = None,
+        *,
+        short_help: str | None = None,
+        hidden: bool = False,
+    ) -> None:
+        super().__init__(name=name, help=help, short_help=short_help, hidden=hidden)
         self._module = module
         self._attr = attr
+        self._resolved: click.Command | None = None
+
+    def resolved(self) -> click.Command:
+        """Return the real command, importing it once.
+
+        The stub stays in the group's registry, so the root command table never
+        depends on which verbs earlier in-process invocations dispatched.
+        """
+        if self._resolved is None:
+            self._resolved = self.resolve()
+        return self._resolved
 
     def resolve(self) -> click.Command:
         """Import and return the real command object."""
@@ -99,68 +92,317 @@ class _LazyCommand(click.Command):
         return loaded
 
 
-# Heavyweight verbs: imported only when the named subcommand is dispatched.
-_LAZY_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
+class _LazyAliasCommand(_LazyCommand):
+    """Hidden alias that copies the target's callback, params and help."""
+
+    def resolve(self) -> click.Command:
+        target = super().resolve()
+        return click.Command(
+            name=self.name,
+            callback=target.callback,
+            params=list(target.params),
+            help=target.help,
+            hidden=True,
+        )
+
+
+# Every verb is a stub: (name, module, attr, help, short_help, hidden).
+# ``help`` is the real command's first help paragraph, used only when the
+# real command has no explicit ``short_help``.
+_LAZY_COMMANDS: tuple[tuple[str, str, str, str | None, str | None, bool], ...] = (
+    (
+        "approve",
+        "apm_cli.commands.approve",
+        "approve_cmd",
+        None,
+        "Approve executable primitives for packages",
+        False,
+    ),
     (
         "audit",
         "apm_cli.commands.audit",
         "audit",
+        None,
         "Scan for hidden Unicode, drift, and policy violations",
+        False,
+    ),
+    (
+        "auth",
+        "apm_cli.commands.auth",
+        "auth",
+        "Get a working credential for a git host. Reports what APM resolves, and walks you through creating a token if there is none.",
+        None,
+        False,
+    ),
+    (
+        "cache",
+        "apm_cli.commands.cache",
+        "cache",
+        "Manage the local package cache",
+        None,
+        False,
+    ),
+    (
+        "compile",
+        "apm_cli.commands.compile",
+        "compile",
+        "Compile APM context into distributed AGENTS.md files",
+        None,
+        False,
+    ),
+    (
+        "config",
+        "apm_cli.commands.config",
+        "config",
+        "Configure APM CLI. Run with no subcommand to show the merged project and global configuration.",
+        None,
+        False,
+    ),
+    (
+        "deny",
+        "apm_cli.commands.approve",
+        "deny_cmd",
+        None,
+        "Deny executable primitives for packages",
+        False,
+    ),
+    (
+        "deps",
+        "apm_cli.commands",
+        "deps",
+        "Manage APM package dependencies",
+        None,
+        False,
+    ),
+    (
+        "discover",
+        "apm_cli.commands.discover",
+        "discover",
+        "Alias for 'apm init --discover'.",
+        None,
+        True,
+    ),
+    (
+        "doctor",
+        "apm_cli.commands.doctor",
+        "doctor",
+        None,
+        "Run environment diagnostics",
+        False,
+    ),
+    (
+        "experimental",
+        "apm_cli.commands.experimental",
+        "experimental",
+        "Manage experimental feature flags",
+        None,
+        False,
     ),
     (
         "export-patch",
         "apm_cli.commands.export_patch",
         "export_patch",
+        None,
         "Export local edits as patches to source packages",
+        False,
+    ),
+    (
+        "find",
+        "apm_cli.commands.find",
+        "find",
+        None,
+        "Trace a materialized file to its package(s)",
+        False,
+    ),
+    (
+        "init",
+        "apm_cli.commands.init",
+        "init",
+        "Initialize a new APM project",
+        None,
+        False,
     ),
     (
         "install",
         "apm_cli.commands.install",
         "install",
+        None,
         "Install APM, MCP, and LSP dependencies",
+        False,
+    ),
+    (
+        "lifecycle",
+        "apm_cli.commands.lifecycle",
+        "lifecycle",
+        "Inspect, test, and scaffold lifecycle scripts.",
+        None,
+        False,
+    ),
+    (
+        "list",
+        "apm_cli.commands.list_cmd",
+        "list",
+        "List available scripts in the current project",
+        None,
+        False,
+    ),
+    (
+        "lock",
+        "apm_cli.commands.lock",
+        "lock",
+        None,
+        "Resolve dependencies and write apm.lock.yaml",
+        False,
     ),
     (
         "marketplace",
         "apm_cli.commands.marketplace",
         "marketplace",
         "Manage marketplaces for discovery and governance",
+        None,
+        False,
+    ),
+    (
+        "mcp",
+        "apm_cli.commands.mcp",
+        "mcp",
+        "Discover, inspect, and install MCP servers",
+        None,
+        False,
+    ),
+    (
+        "outdated",
+        "apm_cli.commands.outdated",
+        "outdated",
+        "Show outdated locked dependencies",
+        None,
+        False,
     ),
     (
         "pack",
         "apm_cli.commands.pack",
         "pack_cmd",
         "Pack distributable artifacts from your APM project.",
+        None,
+        False,
+    ),
+    (
+        "plugin",
+        "apm_cli.commands.plugin",
+        "plugin",
+        "Scaffold and manage plugins (plugin-author workflows)",
+        None,
+        False,
+    ),
+    (
+        "policy",
+        "apm_cli.commands.policy",
+        "policy",
+        "Inspect and diagnose APM policy",
+        None,
+        False,
+    ),
+    (
+        "preview",
+        "apm_cli.commands.run",
+        "preview",
+        "Preview a script's compiled prompt files",
+        None,
+        False,
     ),
     (
         "prune",
         "apm_cli.commands.prune",
         "prune",
+        None,
         "Remove packages absent from the dependency graph",
+        False,
+    ),
+    (
+        "publish",
+        "apm_cli.commands.publish",
+        "publish_cmd",
+        "Publish a package to a registry.",
+        None,
+        False,
+    ),
+    (
+        "run",
+        "apm_cli.commands.run",
+        "run",
+        "Run a script with parameters (experimental)",
+        None,
+        False,
+    ),
+    (
+        "runtime",
+        "apm_cli.commands.runtime",
+        "runtime",
+        "Manage AI runtimes (experimental)",
+        None,
+        False,
     ),
     (
         "search",
         "apm_cli.commands.marketplace",
         "search",
         "Search plugins in a marketplace (QUERY@MARKETPLACE)",
+        None,
+        False,
+    ),
+    (
+        "self-update",
+        "apm_cli.commands.self_update",
+        "self_update",
+        "Update the APM CLI binary itself to the latest version.",
+        None,
+        False,
+    ),
+    (
+        "targets",
+        "apm_cli.commands.targets",
+        "targets",
+        "Show resolved targets for the current project. If APM detects a target you don't intend (e.g. CLAUDE.md is documentation, not a Claude Code config), pin your targets explicitly in apm.yml.",
+        None,
+        False,
     ),
     (
         "uninstall",
         "apm_cli.commands.uninstall",
         "uninstall",
+        None,
         "Remove packages by manifest entry or locked key",
+        False,
     ),
     (
         "unpack",
         "apm_cli.commands.pack",
         "unpack_cmd",
-        "[Deprecated] Extract an APM bundle into the current project. Use 'apm install <bundle-path>' instead -- this command will be removed in a future release.",
+        "[Deprecated] Extract an APM bundle into the current project. Reads only '--format apm' bundles; install plugin bundles (the default) with 'apm install <bundle-path>'. This command will be removed in a future release.",
+        None,
+        False,
     ),
     (
         "update",
         "apm_cli.commands.update",
         "update",
         "Refresh APM dependencies to the latest matching refs",
+        None,
+        False,
     ),
+    (
+        "view",
+        "apm_cli.commands.view",
+        "view",
+        None,
+        "View package metadata, versions, or file owner",
+        False,
+    ),
+)
+
+# Hidden backward-compatible alias: ``apm info`` -> ``apm view``.
+_LAZY_ALIASES: tuple[tuple[str, str, str, str], ...] = (
+    ("info", "apm_cli.commands.view", "view", "View package metadata or list remote versions."),
 )
 
 
@@ -174,9 +416,7 @@ class _OutputModeGroup(click.Group):
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         cmd = super().get_command(ctx, cmd_name)
         if isinstance(cmd, _LazyCommand):
-            resolved = cmd.resolve()
-            self.commands[cmd_name] = resolved
-            return resolved
+            return cmd.resolved()
         return cmd
 
     def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
@@ -220,7 +460,7 @@ def _configure_logging(verbose: bool = False) -> None:
       level name: DEBUG, INFO, WARNING, ERROR, CRITICAL).
 
     When neither is set the ``apm_cli`` logger defaults to WARNING so
-    routine runs stay silent.  A :class:`~apm_cli.core.auth.SecretRedactionFilter`
+    routine runs stay silent.  A :class:`~apm_cli.core.auth_outcome.SecretRedactionFilter`
     is always installed on the ``apm_cli`` logger to strip token-bearing
     exception strings from debug records regardless of which mechanism
     activated debug mode.
@@ -246,7 +486,7 @@ def _configure_logging(verbose: bool = False) -> None:
     apm_logger.setLevel(level)
 
     # Install secret-redaction filter (idempotent: skip if already present).
-    from apm_cli.core.auth import SecretRedactionFilter
+    from apm_cli.core.auth_outcome import SecretRedactionFilter
 
     handlers = {
         *logging.getLogger().handlers,
@@ -328,48 +568,14 @@ def cli(ctx, verbose: bool) -> None:
         _check_and_notify_updates()
 
 
-# Register command groups
-cli.add_command(approve_cmd, name="approve")
-cli.add_command(auth)
-cli.add_command(cache)
-cli.add_command(deny_cmd, name="deny")
-cli.add_command(deps)
-cli.add_command(view_cmd)
-# Hidden backward-compatible alias: ``apm info`` → ``apm view``
-cli.add_command(
-    click.Command(
-        name="info",
-        callback=view_cmd.callback,
-        params=list(view_cmd.params),
-        help=view_cmd.help,
-        hidden=True,
-    )
-)
-cli.add_command(publish_cmd, name="publish")
-cli.add_command(init)
-cli.add_command(discover)
-cli.add_command(lock)
-cli.add_command(self_update)
-cli.add_command(plugin_cmd, name="plugin")
-cli.add_command(compile_cmd, name="compile")
-cli.add_command(run)
-cli.add_command(preview)
-cli.add_command(list_cmd, name="list")
-cli.add_command(config)
-cli.add_command(experimental)
-cli.add_command(runtime)
-cli.add_command(targets)
-cli.add_command(mcp)
-cli.add_command(policy)
-cli.add_command(outdated_cmd, name="outdated")
-cli.add_command(doctor)
-cli.add_command(lifecycle)
-cli.add_command(find_cmd)
-for _lazy_name, _lazy_module, _lazy_attr, _lazy_help in _LAZY_COMMANDS:
+# Register command stubs; real modules load on dispatch (see _LazyCommand).
+for _name, _module, _attr, _help, _short_help, _hidden in _LAZY_COMMANDS:
     cli.add_command(
-        _LazyCommand(name=_lazy_name, module=_lazy_module, attr=_lazy_attr, help=_lazy_help),
-        name=_lazy_name,
+        _LazyCommand(_name, _module, _attr, _help, short_help=_short_help, hidden=_hidden),
+        name=_name,
     )
+for _name, _module, _attr, _help in _LAZY_ALIASES:
+    cli.add_command(_LazyAliasCommand(_name, _module, _attr, _help, hidden=True), name=_name)
 
 
 def _get_current_code_page() -> "Optional[int]":
@@ -448,6 +654,8 @@ def _warn_encoding_issue(failed_cp: int) -> None:
     Args:
         failed_cp: The code page that failed to switch from.
     """
+    from apm_cli.commands._helpers import RESET, WARNING
+
     encoding_name = _code_page_to_encoding_name(failed_cp)
     click.echo(
         f"\n{WARNING}Warning: Console is {encoding_name}, UTF-8 switch failed.{RESET}\n",
@@ -524,8 +732,12 @@ def main():
     _configure_encoding()
     _route_sigterm_to_interrupt()
     try:
-        cli(obj={})
+        # Click glob-expands argv on Windows by default, so `--skill '*'` became
+        # the current directory's file names (#4407). APM never wants that.
+        cli(obj={}, windows_expand_args=False)
     except Exception as e:
+        from apm_cli.commands._helpers import ERROR, RESET
+
         click.echo(f"{ERROR}Error: {e}{RESET}", err=True)
         sys.exit(1)
 

@@ -18,6 +18,10 @@ import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -273,6 +277,7 @@ class TestSkippedNoInstructions:
             result = compile_user_root_contexts([target], source_root)
 
         assert result[0].status == "skipped-no-instructions"
+        assert not (tmp_path / ".claude" / "CLAUDE.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +475,7 @@ class TestUnchanged:
         assert len(result2) == 1
         assert result2[0].target == "claude"
         assert result2[0].status == "unchanged"
+        assert "Use type hints" in (deploy_root / "CLAUDE.md").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -678,6 +684,7 @@ class TestErrorOnRead:
         assert result[0].target == "claude"
         assert result[0].status.startswith("error:")
         assert "permission denied" in result[0].status
+        assert output_path.read_text() == "existing content"
 
 
 # ---------------------------------------------------------------------------
@@ -721,6 +728,7 @@ class TestErrorOnWrite:
         assert result[0].target == "claude"
         assert result[0].status.startswith("error:")
         assert "disk full" in result[0].status
+        assert not (deploy_root / "CLAUDE.md").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -798,6 +806,7 @@ class TestLoggerUsage:
 
         # Logger should have received debug/info calls
         assert mock_logger.debug.called or mock_logger.info.called
+        assert "Use type hints" in (deploy_root / "CLAUDE.md").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

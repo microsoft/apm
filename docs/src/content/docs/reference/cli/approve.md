@@ -9,7 +9,7 @@ sidebar:
 
 ```bash
 apm approve [PACKAGE_REF...] [OPTIONS]
-apm policy explain <PACKAGE_REF>
+apm policy explain [-g] <PACKAGE_REF>
 ```
 
 ## Description
@@ -39,7 +39,7 @@ content (the root `.apm/` directory) is always trusted.
 | Type | Gated | Notes |
 |------|-------|-------|
 | Hooks (`.apm/hooks/`, `hooks/`) | Yes | Auto-fire in IDE on lifecycle events |
-| Bin executables (`bin/`) | Yes | Deployed to agent PATH via symlinks |
+| Bin executables (`bin/`) | Yes | Deployed only for a marketplace plugin installed at user scope (`-g`) with the Claude target; copied into the plugin folder on Claude Code's PATH |
 | MCP servers (self-defined) | Yes | `registry: false` servers write to IDE MCP config |
 | LSP servers | Yes | Supported runtimes may start generated server commands automatically |
 | Canvas extensions (`.apm/extensions/`) | Yes | Deploys executable Node.js to IDE extensions |
@@ -60,6 +60,9 @@ first matching rung decides:
 7. (no match)                -> gated pending approval (denied but approvable)
 ```
 
+The ladder applies once the gate is on (see [The gate opt-in](#the-gate-opt-in)).
+Without an opt-in, rung 7 items deploy.
+
 Deny always wins. The org layer is the ceiling on deny -- personal consent
 cannot widen past an org or project deny. The default (rung 7) is **gated
 pending approval**, not a hard deny: a package with executables and no opinion
@@ -71,7 +74,7 @@ An org `executables.enforce` rung degrades to `recommend` (allowed but still
 overridable by a deny). Local bundle hook, MCP, LSP, and canvas approvals are bound to
 the exact SHA-256 content key printed by `apm install`.
 
-A dependency redirected by a [`replace:` rule](../../../consumer/manage-dependencies/#replace-a-source-candidate)
+A dependency redirected by a [`replace:` rule](../../../producer/test-packages/#swap-your-copy-in-across-the-graph)
 is trusted by its selected source, never by the original. `apm approve` and
 `apm deny` accept either name and write the selected source key, for example
 `../local-hooky` or `my-org/hooky-fork#patched`. `apm deny` also denies the
@@ -110,17 +113,26 @@ Each item is then admitted in this order (first match wins):
 When an approved definition changes upstream, install parks the item and
 warns `Parked MCP server 'kit-docs' (acme/agent-kit): definition changed since
 approval` (or `Parked hook file '<path>' ...`), naming the review and
-re-approve commands.
+re-approve commands. A package none of whose hook files matches its pin
+retires the hooks it deployed earlier. `apm install --frozen` and
+`apm audit --ci` both fail while the lockfile still records such a hook as
+deployed.
 
 A type-level `hooks: true` or `mcp: true` grant still deploys any content, and
 every install warns once that it is `not pinned to content`. Run
 `apm approve <package>` to pin it. `mcp: true` never admits a transitive MCP
 server. A Copilot or Codex native plugin is loaded intact by the harness, so
-`apm approve` records ONE item for it, `plugin: sha256:<64 hex>`, over every
-file and executable bit in the plugin root (as installed in `apm_modules/`).
-Any byte or mode change parks the whole plugin: it is not registered, and
+`apm approve` records ONE item for it, `plugin: sha256:<64 hex>`, over the path
+and bytes of every file in the plugin root (as installed in `apm_modules/`).
+Executable bits are left out so an approval committed on macOS or Linux also
+holds on Windows; the installed copy is still integrity-checked including file
+modes. Any byte change parks the whole plugin: it is not registered, and
 install warns `Parked native plugin <pkg>: content changed since approval`
 with the re-approve command. Per-file hook pins never admit a native plugin.
+An Agent Plugin's root `mcp.json` counts: `mcp`, plus `bin` when a server
+runs a command. `apm approve --pending`, `--list` and `apm policy explain`
+list those types, and a type-level grant must cover both; one that misses a
+type parks the plugin with `not approved (missing grant: bin)`.
 A plugin that runs files under its root `.apm/` or `apm.yml` that are not
 copies of pinned files cannot be pinned: `apm approve` refuses it (exit 1)
 with `APM cannot pin files under .apm/ or apm.yml`, and install parks it.
@@ -152,9 +164,10 @@ and exits 1. `--user` never turns the gate on.
 Naming a package lifts its deny in the store you write (`apm.yml`, or
 `$APM_HOME/config.json` with `--user`), the mirror of `apm deny` dropping the
 matching allow: approve prints `Cleared deny for <pkg>`. `--all` and
-`--recommended` skip denied packages instead. When a deny in another layer
-still blocks the package (a `--user` deny, or org policy), approve exits 1 and
-names that layer and how to lift it.
+`--recommended` skip a package that any layer denies (project, `--user` or org
+policy), say why, write no approval for it, and approve the rest. When a named
+package is still blocked by a deny in another layer, approve exits 1 and names
+that layer and how to lift it.
 
 ## Options
 
@@ -168,6 +181,7 @@ names that layer and how to lift it.
 | `--recommended` | Pin and approve the org `executables.recommend` set. |
 | `--list` | Show the fleet-level effective trust decision and deciding layer per installed package. |
 | `--user` | Write the grant, in the same pinned shape, to `$APM_HOME/config.json` instead of `apm.yml`. Works outside a project, for packages `apm install -g` installed. |
+| `-g`, `--global` | Approve packages `apm install -g` installed, from any directory. Writes the user-scope `apm.yml` (`$APM_HOME/apm.yml`); run `apm install -g` to deploy. Parked notices at user scope print this form. |
 
 #### Output
 
@@ -197,13 +211,20 @@ Re-approving replaces the package's pins with the current definitions.
 - an item cannot be pinned, for example a transitive registry server while the
   MCP registry is unreachable (`needs registry access to pin`).
 
-It exits 1 when any requested package was refused, or when you decline the
+It exits 1 when a requested package is not installed, when any requested
+package was refused, or when you decline the
 first-approval prompt (`Nothing written.`), so a script never commits an
-approval that was not recorded. The first pinned approval in a project also
+approval that was not recorded. It also exits 1, writing nothing, when the
+org policy outcome blocks, exactly as `apm install` would (for example an
+unreachable policy under `policy.fetch_failure_default: block`); run
+`apm policy status --no-cache` to diagnose. The first pinned approval in a project also
 prints `Teammates need APM 0.37 or later to read pinned approvals.`
 
 `--pending` marks each item `[approved]`, `[approved, any content]`,
-`[changed since approval]`, `[denied]`, or `[not approved]`. `--list` labels
+`[changed since approval]`, `[denied]`, or `[not approved]`. Before any layer
+turns the gate on, an item that would need approval is marked
+`[deployed: no executables policy]`: it deploys today and is listed so you can
+review it before opting in. `--list` labels
 `hooks` and `mcp` grants `pinned` or `any content`, for example
 `hooks[+:project-allow, pinned]`.
 
@@ -217,6 +238,7 @@ to `apm policy status` (the policy-chain view).
 
 ```bash
 apm policy explain owner/repo
+apm policy explain -g owner/repo   # a package apm install -g installed
 ```
 
 For a fleet-level view, `apm doctor` runs an executable-trust drift check that
@@ -276,9 +298,26 @@ ignores the personal store when it checks MCP consent, so CI and laptops agree.
 
 Existing `owner/repo#1.2.0` keys still match the package regardless of the
 installed version; `apm approve` folds them into the version-blind key. Local
-bundle grants are different: copy the full `name#version@sha256:<digest>` key
-from the install diagnostic. A changed local bundle does not inherit the prior
-grant.
+bundle grants are different: they bind the full `name#version@sha256:<digest>`
+key the install diagnostic prints. A changed local bundle does not inherit the
+prior grant.
+
+### Local bundles
+
+`apm install <bundle>` parks a local bundle's hooks, MCP, and LSP servers until
+its exact content key is approved, and prints that key. Approve it with:
+
+```bash
+apm approve "hookpkg#1.0.0@sha256:<digest>"   # the key the install printed
+apm install ./hookpkg-1.0.0                  # rerun the install to deploy
+```
+
+This writes the same grant as adding the key under `executables.allow` in
+`apm.yml` (or `$APM_HOME/config.json` with `--user`; use `-g` for a bundle
+installed with `apm install -g`). Either path works. `apm approve --pending`
+lists parked bundles with their keys. A key with a wrong digest, or a key
+printed before the bundle's bytes changed, is refused: `apm approve` exits 1
+with an `[x]` line and writes nothing.
 
 ## Examples
 

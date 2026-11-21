@@ -16,6 +16,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import (
+    AGENT_PLUGIN_EXECUTABLES_UNAPPROVED,
+    NATIVE_PLUGIN_CACHE_DIFFERS,
+    NATIVE_PLUGIN_HASH_MISSING,
+)
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -23,22 +29,6 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
     from apm_cli.install.logger import InstallLogger
     from apm_cli.utils.diagnostics import DiagnosticCollector
-
-
-def agent_plugin_exec_types(package_info: Any) -> tuple[str, ...]:
-    """Return the executable trust types an Agent Plugin's IR declares."""
-    from apm_cli.security.executables import EXEC_TYPE_BIN, EXEC_TYPE_MCP
-
-    package = getattr(package_info, "package", None)
-    plugin = getattr(package, "agent_plugin", None) if package is not None else None
-    components = getattr(plugin, "components", None)
-    servers = getattr(components, "mcp_servers", ()) if components is not None else ()
-    types: list[str] = []
-    if servers:
-        types.append(EXEC_TYPE_MCP)
-    if any(getattr(server, "executables", ()) for server in servers):
-        types.append(EXEC_TYPE_BIN)
-    return tuple(types)
 
 
 def plugin_root_exec_types(install_path: Any) -> tuple[str, ...]:
@@ -112,8 +102,8 @@ def finalize_native_plugin(
         EXEC_TYPE_HOOKS,
         EXEC_TYPE_LSP,
         EXEC_TYPE_MCP,
-        scan_package_executables,
     )
+    from apm_cli.security.trust import agent_plugin_exec_types, native_plugin_exec_types
 
     # SECURITY: a per-dependency or package target subset that excludes copilot
     # drops native registration; the plugin is not deployable to any other
@@ -121,25 +111,16 @@ def finalize_native_plugin(
     if COPILOT_TARGET_NAME not in {getattr(t, "name", t) for t in targets}:
         return result
 
-    ir_exec_types = agent_plugin_exec_types(package_info)
-    record_native_exec_status(ctx, package_name, package_info, ir_exec_types)
+    install_path = getattr(package_info, "install_path", None)
+    record_native_exec_status(
+        ctx, package_name, package_info, agent_plugin_exec_types(install_path)
+    )
 
     # For a natively registered plugin, PRESENCE IS DEPLOYMENT: Copilot loads the
-    # WHOLE directory live from apm_modules, so an unapproved hooks/agents/canvas/
-    # lsp component the IR does not model still executes. Gate on the UNION of the
-    # IR exec types (mcp/bin), every exec type scan_package_executables finds in
-    # APM's own .apm/ layout, and every NATIVE root-layout component the scanner
-    # is blind to (see plugin_root_exec_types).
-    on_disk_types: tuple[str, ...] = ()
-    install_path = getattr(package_info, "install_path", None)
-    if install_path is not None:
-        package = getattr(package_info, "package", None)
-        version = getattr(package, "version", "") or "" if package is not None else ""
-        on_disk_types = scan_package_executables(
-            Path(install_path), package_name, version
-        ).exec_types
+    # WHOLE directory live from apm_modules, so every component the trust owner
+    # finds (root mcp.json, .apm/ layout, native root layout) gates registration.
     present_types = (
-        set(ir_exec_types) | set(on_disk_types) | set(plugin_root_exec_types(install_path))
+        set(native_plugin_exec_types(Path(install_path))) if install_path is not None else set()
     )
 
     approvals = {
@@ -153,13 +134,18 @@ def finalize_native_plugin(
     # is treated as unapproved.
     denied = any(not approvals.get(exec_type, False) for exec_type in present_types)
     if denied:
+        from apm_cli.core.scope import is_user_scope
+        from apm_cli.security.trust import approve_command
+
         label = package_name or "the plugin"
+        command = approve_command(label, user_scope=is_user_scope(getattr(ctx, "scope", None)))
+        approve = AGENT_PLUGIN_EXECUTABLES_UNAPPROVED.bind(package=label).with_command(command)
         # ONE authoritative refusal owned by the DiagnosticCollector, with the
         # actionable fix folded into the message itself (the summary line is not
         # verbose-gated, so the fix must live there, not in a dim detail line).
         diagnostics.warn(
             "Agent Plugin not registered with GitHub Copilot: its executables "
-            f"are not approved. Run 'apm approve {label}' to trust and register it.",
+            f"are not approved. {approve.sentence()}",
             package=package_name,
         )
         return result
@@ -192,7 +178,7 @@ def verify_native_plugin_cache(
     ensure_path_within(candidate, live_modules)
     if lock_dep.is_local_source:
         ensure_path_within(replay_path, scratch_root)
-        expected_hash = compute_package_hash(replay_path)
+        expected_hash = compute_package_hash(replay_path, framed=lock_dep.content_hash_framed)
     else:
         expected_hash = lock_dep.content_hash
         # Cold-cache CI has already materialized the pinned unit in scratch.
@@ -201,11 +187,16 @@ def verify_native_plugin_cache(
         if not expected_hash:
             raise AgentPluginDeploymentBoundaryError(
                 f"Native Agent Plugin {lock_dep.get_unique_key()} has no content hash; "
-                "run 'apm install' to regenerate its integrity baseline"
+                f"{NATIVE_PLUGIN_HASH_MISSING.clause()}"
             )
     carried = () if lock_dep.is_local_source else lock_dep.carried_licenses
-    if not candidate.is_dir() or not verify_locked_package(candidate, expected_hash, carried):
+    if not candidate.is_dir() or not verify_locked_package(
+        candidate, expected_hash, carried, framed=lock_dep.content_hash_framed
+    ):
+        from apm_cli.core.cache_drift import package_cache_drift
+
         raise AgentPluginDeploymentBoundaryError(
-            f"Native Agent Plugin cache differs from its replay baseline: {candidate}; "
-            "run 'apm install' to restore the package"
+            package_cache_drift(
+                f"Native Agent Plugin {candidate}", NATIVE_PLUGIN_CACHE_DIFFERS.clause()
+            )
         )

@@ -39,6 +39,7 @@ def run(ctx: InstallContext) -> None:
         detect_ref_change,
         locked_copy_proof,
     )
+    from apm_cli.install.transaction import stage_existing_copy
 
     deps_to_install = ctx.deps_to_install
     existing_lockfile = ctx.existing_lockfile
@@ -107,11 +108,14 @@ def run(ctx: InstallContext) -> None:
                 ctx.content_hash_verified_deps.add(_pd_key)
             if _pd_proof is not None:
                 continue
+            _report_cache_mismatch(ctx, _pd_key, _pd_locked_chk, _pd_path)
         # Build download ref (use locked commit for reproducibility).
         # build_download_ref() uses the manifest ref when ref_changed is True.
         _pd_dlref = build_download_ref(
             _pd_ref, existing_lockfile, update_refs=update_refs, ref_changed=_pd_ref_changed
         )
+        if parallel_downloads > 0:
+            stage_existing_copy(ctx, _pd_path, _pd_locked_chk)
         _need_download.append((_pd_ref, _pd_path, _pd_dlref))
 
     if _need_download and parallel_downloads > 0:
@@ -146,3 +150,33 @@ def run(ctx: InstallContext) -> None:
 
     ctx.pre_download_results = _pre_download_results
     ctx.pre_downloaded_keys = builtins.set(_pre_download_results.keys())
+
+
+def _report_cache_mismatch(ctx: InstallContext, dep_key: str, locked_dep, path) -> None:
+    """Name an apm_modules copy whose bytes contradict the lock before re-downloading."""
+    from apm_cli.install.source_helpers import (
+        locked_content_mismatch,
+        locked_content_mismatch_line,
+        observed_package_hash,
+    )
+
+    if not (locked_dep and locked_dep.content_hash and path.is_dir()):
+        return
+    if not locked_content_mismatch(dep_key, locked_dep, path, lockfile=ctx.existing_lockfile):
+        return
+    message = (
+        locked_content_mismatch_line(
+            dep_key, locked_dep.content_hash, observed_package_hash(locked_dep, path)
+        )
+        + " Re-downloading from the locked source."
+    )
+    logger = getattr(ctx, "logger", None)
+    if ctx.diagnostics is not None:
+        ctx.diagnostics.warn(message, package=dep_key)
+    if logger is not None:
+        logger.progress(message)
+    # Only a notice that reached a sink counts as reported; otherwise the
+    # integrate phase keeps its fallback report (#4351).
+    reported = getattr(ctx, "cache_mismatch_reported", None)
+    if isinstance(reported, set) and (ctx.diagnostics is not None or logger is not None):
+        reported.add(dep_key)

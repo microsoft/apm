@@ -11,6 +11,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.core.remediation import Remediation
     from apm_cli.security.content_scanner import ScanFinding
     from apm_cli.security.file_scanner import CoverageEntry
 
@@ -21,6 +22,7 @@ _CHECK_ARTIFACT_MAP: dict[str, str] = {
     "deployment-ledger-owners": "apm.lock.yaml",
     "deployed-files-present": "apm.lock.yaml",
     "no-orphaned-packages": "apm.lock.yaml",
+    "lockfile-targets-current": "apm.lock.yaml",
     "config-consistency": "apm.lock.yaml",
     "content-integrity": "apm.lock.yaml",
     "dependency-allowlist": "apm.yml",
@@ -95,6 +97,12 @@ class CheckResult:
     # Structured per-dependency / per-MCP-server violations. Not serialized:
     # ``details`` stays the report contract for ``apm audit``.
     subjects: tuple[PolicySubject, ...] = ()
+    # A violation downgraded to pass by ``enforcement: warn``; text output
+    # still names its subjects (#3994). Not serialized: ``passed`` is the contract.
+    warned: bool = False
+    # Structured advice that clears this failure, first one primary; serialized
+    # by ``apm audit --format json`` as ``remediation`` and ``remediations``.
+    remediations: tuple[Remediation, ...] = ()
 
     def violation_subjects(self) -> tuple[PolicySubject, ...]:
         """Return one :class:`PolicySubject` per violation to report.
@@ -149,6 +157,14 @@ class CIAuditResult:
                         if c.coverage
                         else {}
                     ),
+                    **(
+                        {
+                            "remediation": c.remediations[0].to_json(),
+                            "remediations": [item.to_json() for item in c.remediations],
+                        }
+                        if c.remediations
+                        else {}
+                    ),
                 }
                 for c in self.checks
             ],
@@ -175,8 +191,7 @@ class CIAuditResult:
             if not check.passed:
                 artifact = _CHECK_ARTIFACT_MAP.get(check.name, "apm.lock.yaml")
                 content_details = {
-                    f"unicode: {finding.file}{finding.pointer or ''}"
-                    for finding in check.content_findings
+                    f"unicode: {finding.location}" for finding in check.content_findings
                 }
                 results.extend(
                     {**finding_to_sarif(finding), "ruleId": check.name}

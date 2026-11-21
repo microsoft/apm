@@ -10,7 +10,7 @@ import pytest
 # ASCII-safe under Windows text-mode newline translation
 # (microsoft/apm#2233). Selected by the PR-time Windows Compatibility
 # Gate via `pytest -m windows_compat`; also runs on every other OS.
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "ratchet_baseline.py"

@@ -9,6 +9,8 @@ import pytest
 
 from apm_cli.integration.skill_support import skill_dir_has_content
 
+pytestmark = pytest.mark.component
+
 
 def test_missing_path_has_no_content(tmp_path: Path) -> None:
     assert skill_dir_has_content(tmp_path / "absent") is False

@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.component
+
 
 def _repo_root() -> Path:
     current = Path(__file__).resolve().parent
@@ -125,7 +129,7 @@ def test_enterprise_security_docs_do_not_claim_transport_aware_policy():
 
     assert "no dedicated `allow_insecure` field" in normalized
     assert "match scheme-blind, so they cannot distinguish `http://` from `https://`" in normalized
-    assert "(../policy-reference/#host-qualified-patterns)" in normalized
+    assert "(../../reference/policy-schema/#dependencies)" in normalized
     assert "non-default hosts are retained" not in normalized
     assert "cannot restrict host identity" not in normalized
     assert "does not enforce HTTPS" in normalized

@@ -57,6 +57,19 @@ VERDICTS = {
     "plural-all": True,
 }
 _UNSTABLE_KEYS = frozenset({"apm_version", "generated_at", "content_hash", "deployed_file_hashes"})
+# Each case's declared targets, hand-written from the fixture manifests:
+# 'vscode' is the copilot alias, and 'all' is treated as omitted (auto-detect).
+_DECLARED_TARGETS = {
+    "singular": ["claude"],
+    "singular-csv": ["claude", "copilot"],
+    "singular-alias": ["copilot"],
+    "singular-all": [],
+    "plural": ["claude", "copilot"],
+    "plural-alias": ["copilot"],
+    "plural-all": [],
+}
+# Cases whose apm.yml names copilot explicitly.
+_DECLARES_COPILOT = frozenset({"singular-csv", "plural"})
 
 
 def _normalized_lock(path: Path) -> object:
@@ -85,17 +98,24 @@ def _project_files(project: Path) -> dict[str, str]:
 
 
 _RETIRED_MCP_FILES = frozenset({".github/mcp.json", ".vscode/mcp.json"})
-# .github/mcp.json is a copilot detection signal, so the heal empties it but keeps it.
+# Every fixture's retired file holds only APM's own server, so the move empties
+# it. An emptied file APM wrote is deleted; .github/mcp.json is a copilot
+# detection signal, so only while the manifest keeps copilot selected (#4524).
 _DELETABLE_RETIRED_MCP_FILES = frozenset({".vscode/mcp.json"})
+_COPILOT_RETIRED_MCP_FILE = ".github/mcp.json"
 
 
-def _after_mcp_move(rows: set[tuple], files: set[str]) -> tuple[set[tuple], set[str]]:
+def _after_mcp_move(
+    rows: set[tuple], files: set[str], *, declares_copilot: bool
+) -> tuple[set[tuple], set[str]]:
     """The deployment rows and files #3866's one-time MCP destination move yields."""
     moved_rows = {
         (kind, target, value, "copilot" if runtime == "vscode" else runtime)
         for kind, target, value, runtime in rows
     }
     moved_files = set(files) - _DELETABLE_RETIRED_MCP_FILES
+    if declares_copilot:
+        moved_files.discard(_COPILOT_RETIRED_MCP_FILE)
     if files & _RETIRED_MCP_FILES:
         moved_files.add(".mcp.json")
     return moved_rows, moved_files
@@ -115,7 +135,9 @@ def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
         manifest = (project / "apm.yml").read_bytes()
         lock_path = project / "apm.lock.yaml"
         original_rows, original_paths = _after_mcp_move(
-            _deployment_rows(lock_path), set(_project_files(project))
+            _deployment_rows(lock_path),
+            set(_project_files(project)),
+            declares_copilot=case in _DECLARES_COPILOT,
         )
         settled_files: dict[str, str] | None = None
         settled_lock_bytes: bytes | None = None
@@ -144,6 +166,14 @@ def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
         settled_lock = lock_path.read_bytes()
         fixture_lock = _normalized_lock(source / case / "apm.lock.yaml")
         settled = _normalized_lock(lock_path)
+        # The first writable install promotes the old lock to version 4 once
+        # (hash framing hardening, #4000); every later step kept these bytes.
+        assert fixture_lock.pop("lockfile_version") in {"1", "2", "3"}
+        assert settled.pop("lockfile_version") == "4"
+        # The first writable install records exactly the targets apm.yml
+        # declares (#4517); a pre-0.37 lock has none.
+        assert "manifest_targets" not in fixture_lock
+        assert settled.pop("manifest_targets") == _DECLARED_TARGETS[case]
         for lock in (fixture_lock, settled):
             lock.pop("deployments", None)
             servers = lock.get("mcp_target_servers") or {}

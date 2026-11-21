@@ -72,6 +72,7 @@ _RATCHET_AUTHORITY_CONSUMERS: dict[str, tuple[str, ...]] = {
         "from test_file_inventory import tracked_python_paths",
         "from ratchet_baseline import",
     ),
+    "scripts/check_complexity_ratchet.py": ("from ratchet_baseline import",),
     "tests/quality/repository_python_inventory.py": (
         "from scripts.test_file_inventory import tracked_python_paths",
     ),

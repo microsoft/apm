@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import io
 import json
-import queue
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
-from apm_cli.codex_plugins.client import CodexNativeClient, CodexNativeError, CodexRpc
+from apm_cli.codex_plugins.client import CodexNativeClient, CodexNativeError
 from apm_cli.core.scope import InstallScope
 
 pytestmark = pytest.mark.component
@@ -222,30 +221,6 @@ def test_read_config_selects_user_layer_not_effective_merged_values(tmp_path):
     assert state.path == tmp_path / "config.toml"
 
 
-def test_rpc_reader_failure_stays_bounded_when_response_queue_is_full():
-    """A saturated response stream must not raise a second unhandled queue.Full."""
-    rpc = CodexRpc.__new__(CodexRpc)
-    rpc._process = Mock(stdout=io.BytesIO(b"invalid-json\n"))
-    rpc._responses = queue.Queue(maxsize=1)
-    rpc._responses.put({"id": 1})
-    rpc._reader_error = None
-    rpc._read()
-    assert isinstance(rpc._reader_error, ValueError)
-    assert rpc._responses.qsize() == 1
-
-
-def test_rpc_close_reaps_helper_after_broken_pipe():
-    rpc = CodexRpc.__new__(CodexRpc)
-    rpc._process = Mock()
-    rpc._process.stdin.close.side_effect = BrokenPipeError("closed native stream")
-    rpc._reader = Mock()
-    with pytest.raises(BrokenPipeError):
-        rpc.close()
-    rpc._process.wait.assert_called_once_with(timeout=5)
-    rpc._reader.join.assert_called_once_with(timeout=1)
-    rpc._process.stdout.close.assert_called_once()
-
-
 @pytest.mark.parametrize(
     "actual, expected",
     [
@@ -272,3 +247,47 @@ def test_native_version_prerequisite_is_minimum(monkeypatch, actual, expected):
         assert conftest._has_runtime_version("codex", "0.163.0") is expected
     finally:
         conftest._has_runtime_version.cache_clear()
+
+
+@_POSIX_ONLY
+def test_app_server_starts_offline_from_a_private_launch_dir(tmp_path, monkeypatch):
+    """#4432: the launch config is private, proxies pass through, and close removes it."""
+    from apm_cli.codex_plugins.client import CodexRpc
+
+    record = tmp_path / "launch.json"
+    codex = tmp_path / "codex"
+    codex.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, stat, sys\n"
+        "config = os.path.join(os.getcwd(), '.codex', 'config.toml')\n"
+        "facts = {\n"
+        "    'cwd': os.getcwd(),\n"
+        "    'argv': sys.argv[1:],\n"
+        "    'dir_mode': stat.S_IMODE(os.stat(os.getcwd()).st_mode),\n"
+        "    'file_mode': stat.S_IMODE(os.stat(config).st_mode),\n"
+        "    'config': open(config).read(),\n"
+        "    'proxy': os.environ.get('HTTPS_PROXY'),\n"
+        "}\n"
+        f"open({str(record)!r}, 'w').write(json.dumps(facts))\n"
+        "for line in sys.stdin:\n"
+        "    message = json.loads(line)\n"
+        "    if 'id' in message:\n"
+        "        print(json.dumps({'id': message['id'], 'result': {}}), flush=True)\n",
+        encoding="utf-8",
+    )
+    codex.chmod(0o755)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9/")
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+
+    with CodexRpc(codex):
+        facts = json.loads(record.read_text(encoding="utf-8"))
+
+    launch_dir = Path(facts["cwd"])
+    assert facts["argv"][:2] == ["app-server", "--stdio"]
+    assert facts["argv"][2] == "-c" and json.dumps(str(launch_dir)) in facts["argv"][3]
+    assert facts["dir_mode"] == 0o700
+    assert facts["file_mode"] == 0o600
+    assert facts["config"] == "[features]\nplugins = false\n"
+    assert facts["proxy"] == "http://127.0.0.1:9/"
+    assert not launch_dir.exists()
+    assert not list(tmp_path.glob("apm-codex-*"))

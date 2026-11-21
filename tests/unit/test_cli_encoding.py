@@ -2,7 +2,11 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.cli import _configure_encoding
+
+pytestmark = pytest.mark.unit
 
 
 class TestConfigureEncoding:

@@ -1,0 +1,16 @@
+# apm journey golden v1: J02 step 2
+$ apm install --frozen
+[exit 0]
+--- stdout
+[>] Installing dependencies from apm.yml...
+[>] Resolving microsoft/apm-sample-package...
+[>] Resolving awesome-copilot-review-and-refactor...
+[i] Targets: claude, copilot  (source: apm.yml)
+  [+] github.com/github/awesome-copilot/skills/review-and-refactor @<SHA8>
+  |-- (files unchanged)
+  [+] microsoft/apm-sample-package #v1.0.0 @<SHA8>
+  |-- (files unchanged)
+
+[*] Installed 2 APM dependencies in <DUR>.
+[i] Deployed files verified against apm.lock.yaml.
+--- stderr

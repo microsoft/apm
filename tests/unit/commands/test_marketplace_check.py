@@ -24,6 +24,8 @@ from apm_cli.marketplace.yml_schema import (
     PackageEntry,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
@@ -488,7 +490,8 @@ class TestCheckResolverCleanup:
         mock_inst.list_remote_refs.side_effect = [_REFS_GOOD, _REFS_BETA_GOOD]
         mock_inst.close = MagicMock()
 
-        runner.invoke(marketplace, ["check"])
+        result = runner.invoke(marketplace, ["check"])
+        assert result.exit_code == 0, result.output
         mock_inst.close.assert_called_once()
 
     @patch("apm_cli.commands.marketplace.check.RefResolver")
@@ -499,7 +502,8 @@ class TestCheckResolverCleanup:
         )
         mock_inst.close = MagicMock()
 
-        runner.invoke(marketplace, ["check"])
+        result = runner.invoke(marketplace, ["check"])
+        assert result.exit_code == 1, result.output
         mock_inst.close.assert_called_once()
 
 
@@ -1047,3 +1051,71 @@ class TestCheckPerHostResolution:
         # local sources never touch the network or the token resolver
         MockResolver.assert_not_called()
         mock_token.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Narrow terminal -- no crushed columns (RA-032)
+# ---------------------------------------------------------------------------
+
+_LONG_NAME = "a-really-long-package-name-for-truncation-checks"
+
+
+class TestCheckNarrowTerminal:
+    """At 80 columns a long package name must not crush the other columns to ``..``."""
+
+    @pytest.mark.parametrize("columns", [80, 50])
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_long_name_renders_every_column_as_a_list(
+        self, MockResolver, runner, tmp_path, monkeypatch, columns
+    ):
+        from rich.console import Console
+
+        from apm_cli.utils.console import _ascii_console
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "marketplace.yml").write_text(
+            _YML_SINGLE.replace("name: solo", f"name: {_LONG_NAME}"), encoding="utf-8"
+        )
+        MockResolver.return_value.list_remote_refs.return_value = _REFS_GOOD
+        narrow = _ascii_console(Console, width=columns, color_system=None)
+
+        with patch("apm_cli.commands.marketplace._get_console", return_value=narrow):
+            result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 0, result.output
+        assert (
+            "\n".join(
+                [
+                    "Entry Health Check:",
+                    f"  [+] {_LONG_NAME}",
+                    "      Reachable: [+]  Version Found: [+]  Ref OK: [+]",
+                    "      Detail: OK",
+                ]
+            )
+            in result.output
+        )
+        assert ".." not in result.output
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_short_names_keep_the_table_at_80_columns(self, MockResolver, runner, yml_cwd):
+        from rich.console import Console
+
+        from apm_cli.utils.console import _ascii_console
+
+        MockResolver.return_value.list_remote_refs.side_effect = [_REFS_GOOD, _REFS_BETA_GOOD]
+        narrow = _ascii_console(Console, width=80, color_system=None)
+
+        with patch("apm_cli.commands.marketplace._get_console", return_value=narrow):
+            result = runner.invoke(marketplace, ["check"])
+
+        assert result.exit_code == 0, result.output
+        header = next(line for line in result.output.splitlines() if "Status" in line)
+        assert header.split("|")[1:-1] == [
+            " Status ",
+            " Package   ",
+            " Reachable ",
+            " Version Found ",
+            " Ref OK ",
+            " Detail ",
+        ], header
+        assert ".." not in result.output

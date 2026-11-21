@@ -30,6 +30,8 @@ import pytest
 from apm_cli.install.artifactory_resolver import _resolve_artifactory_boundary
 from apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

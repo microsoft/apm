@@ -31,6 +31,7 @@ timeout.  Use APM_NO_SCRIPTS=1 to disable all scripts for one run.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -40,6 +41,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING
+
+from apm_cli.core.remediation import LIFECYCLE_SCRIPTS_UNTRUSTED
+from apm_cli.core.scope import manifest_file
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -433,15 +437,26 @@ def _get_policy_scripts_dir() -> Path:
 
 def _get_user_apm_yml() -> Path:
     """Return the user-level apm.yml path (~/.apm/apm.yml or $APM_HOME/apm.yml)."""
-    from apm_cli.core.scope import get_apm_home
+    from apm_cli.core.scope import InstallScope, get_manifest_path
 
-    return get_apm_home() / "apm.yml"
+    return get_manifest_path(InstallScope.USER)
 
 
 def _get_project_apm_yml(project_root: str | None = None) -> Path:
     """Return the project-level apm.yml path at the repo root."""
     root = Path(project_root) if project_root else Path.cwd()
-    return root / "apm.yml"
+    return manifest_file(root)
+
+
+def _is_project_tier(project_yml: Path) -> bool:
+    """Whether *project_yml* is a project manifest rather than the user-scope one.
+
+    At user scope the command's manifest is ``$APM_HOME/apm.yml``, which the
+    user tier already loads; it is not a second, project tier.
+    """
+    from apm_cli.core.scope import is_user_scope_root
+
+    return not is_user_scope_root(project_yml.parent)
 
 
 def _load_scripts_from_dir(
@@ -470,7 +485,7 @@ def discover_scripts(
     """
     scripts = _discover_non_project_scripts(project_root)
     project_yml = _get_project_apm_yml(project_root)
-    if project_yml.is_file():
+    if project_yml.is_file() and _is_project_tier(project_yml):
         scripts.extend(parse_apm_yml_lifecycle(project_yml, "project"))
     return scripts
 
@@ -529,8 +544,7 @@ class LifecycleScriptRunner:
         self._skip_notice_emitted = True
         count = self._skipped_project_scripts
         msg = (
-            f"Skipped {count} untrusted project script(s). "
-            "Run 'apm lifecycle trust' to enable them."
+            f"Skipped {count} untrusted project script(s). {LIFECYCLE_SCRIPTS_UNTRUSTED.sentence()}"
         )
         if self._logger is not None:
             emit = getattr(self._logger, "warning", None) or getattr(
@@ -557,6 +571,10 @@ class LifecycleScriptRunner:
         matching = [s for s in self._scripts if s.event == event_name]
         if not matching:
             return []
+        # Scripts run outside APM, so they must observe the committed lockfile.
+        from apm_cli.deps.lockfile_write_authority import flush_lockfile_writes
+
+        flush_lockfile_writes()
 
         # command scripts run synchronously (in declared order); http
         # scripts dispatch through a bounded worker pool so a file with
@@ -599,6 +617,10 @@ class LifecycleScriptRunner:
 
 
 # -- Convenience: build runner from file-based discovery -------------------
+
+
+# Attribute a command logger carries once it printed the suppression notice.
+_SUPPRESSION_NOTED = "_apm_lifecycle_suppression_noted"
 
 
 def build_runner_from_context(
@@ -647,7 +669,7 @@ def build_runner_from_context(
     project_entries: list[ScriptEntry] = []
     project_fp: str | None = None
     try:
-        if project_yml.is_file():
+        if project_yml.is_file() and _is_project_tier(project_yml):
             project_entries, project_fp = parse_apm_yml_lifecycle_with_fingerprint(
                 project_yml, "project"
             )
@@ -670,7 +692,9 @@ def build_runner_from_context(
     # Org deny_all ceiling, resolved through the install gate's outcome
     # routing: a policy outcome that blocks install (hash mismatch,
     # fetch_failure_default=block, cached fetch_failure=block) also
-    # suppresses scripts. Unexpected errors never raise into the command.
+    # suppresses scripts, as does a policy that cannot be resolved at all
+    # (for example an inheritance chain error). Errors never raise into the
+    # command.
     suppressed_reason = None
     try:
         from apm_cli.install.errors import PolicyViolationError
@@ -679,7 +703,7 @@ def build_runner_from_context(
         from apm_cli.policy.project_config import read_project_fetch_failure_default
 
         # Discovery joins paths onto the root, so a str root would raise
-        # TypeError here and the except below would silently skip deny_all.
+        # TypeError here and the except below would suppress every script.
         root = Path(project_root) if project_root else Path.cwd()
         fetch_result = discover_policy_with_chain(root)
         resolved = getattr(fetch_result, "policy", None)
@@ -696,12 +720,17 @@ def build_runner_from_context(
                 suppressed_reason = "org policy could not be enforced"
     except Exception:
         _logger.debug("Lifecycle org-policy check failed", exc_info=True)
+        suppressed_reason = "org policy could not be enforced"
 
     if suppressed_reason is not None:
-        if logger is not None:
+        # One command may build several runners (update, then its install
+        # pipeline); the notice is printed once per command logger (#4333).
+        if logger is not None and getattr(logger, _SUPPRESSION_NOTED, None) != suppressed_reason:
             emit = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
             if emit is not None:
                 emit(f"Lifecycle scripts suppressed by {suppressed_reason}.")
+            with contextlib.suppress(AttributeError):
+                setattr(logger, _SUPPRESSION_NOTED, suppressed_reason)
         return LifecycleScriptRunner(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )

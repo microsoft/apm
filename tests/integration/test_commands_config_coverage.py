@@ -118,11 +118,14 @@ class TestConfigHelpers:
         _conf._invalidate_config_cache()
 
     def test_get_config_returns_dict(self, isolated_config: Path) -> None:
-        """get_config() should return a dict and cache it."""
+        """get_config() is a pure read: {} without writing, then cached once the file exists."""
         import apm_cli.config as _conf
 
+        assert _conf.get_config() == {}
+        assert not isolated_config.exists()
+        _conf.update_config({"default_client": "vscode"})
         cfg = _conf.get_config()
-        assert isinstance(cfg, dict)
+        assert cfg["default_client"] == "vscode"
         # Second call should return same cached object
         assert _conf.get_config() is cfg
 
@@ -1094,11 +1097,11 @@ class TestPublishCommand:
 class TestConfigModuleHelpers:
     """Additional unit tests for uncovered paths in ``apm_cli.config``."""
 
-    def test_get_default_client_returns_vscode(self, isolated_config: Path) -> None:
-        """get_default_client() returns 'vscode' from default config."""
+    def test_get_default_client_returns_copilot(self, isolated_config: Path) -> None:
+        """get_default_client() returns 'copilot' (vscode is its deprecated alias)."""
         import apm_cli.config as _conf
 
-        assert _conf.get_default_client() == "vscode"
+        assert _conf.get_default_client() == "copilot"
 
     def test_set_default_client(self, isolated_config: Path) -> None:
         """set_default_client() persists to disk."""

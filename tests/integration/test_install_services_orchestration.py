@@ -10,6 +10,7 @@ from apm_cli.install import services
 from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.skill_support import SkillIntegrationResult
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
 
 def make_package_info(install_path: Path) -> MagicMock:
@@ -109,7 +110,8 @@ def make_skill_result(
         skill_created=skill_created,
         skill_updated=False,
         skill_skipped=False,
-        skill_path=None,
+        # A created skill without promoted sub-skills is a root skill.
+        skill_path=Path("SKILL.md") if skill_created and not sub_skills_promoted else None,
         references_copied=0,
         sub_skills_promoted=sub_skills_promoted,
         bin_deployed=bin_deployed,
@@ -201,6 +203,7 @@ def invoke_integrate(
                 command=integrators["command_integrator"],
                 hook=integrators["hook_integrator"],
             ),
+            allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
         )
     return result, integrators, diagnostics, logger
 
@@ -377,6 +380,7 @@ class TestIntegratePackagePrimitives:
                 package_name="warning-pkg",
                 logger=logger,
                 ctx=ctx,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert ctx.cowork_nonsupported_warned is True
@@ -516,7 +520,7 @@ class TestIntegratePackagePrimitives:
         )
 
         assert result["commands"] == 1
-        assert tree_messages(logger) == ["  |-- 1 commands integrated -> .github/commands/"]
+        assert tree_messages(logger) == ["  |-- 1 command integrated -> .github/commands/"]
 
     def test_multi_target_dispatch_entries_are_skipped(self, tmp_path: Path) -> None:
         target = make_target(primitives={"prompts": make_mapping(subdir="prompts")})
@@ -561,10 +565,8 @@ class TestIntegratePackagePrimitives:
         )
 
         assert result["prompts"] == 0
-        assert tree_messages(logger) == [
-            "  |-- 2 prompts adopted -> .claude/prompts/",
-            "  |-- (files unchanged)",
-        ]
+        # Adoption changes nothing: silent unless --verbose (#4382/#4360, I2).
+        assert tree_messages(logger) == ["  |-- (files unchanged)"]
 
     def test_non_int_adopted_value_is_treated_as_zero(self, tmp_path: Path) -> None:
         target = make_target(primitives={"prompts": make_mapping(subdir="prompts")})
@@ -658,7 +660,7 @@ class TestIntegratePackagePrimitives:
         assert result["prompts"] == 2
         assert tree_messages(logger) == ["  |-- 2 prompts integrated -> .claude/, .cursor/"]
 
-    def test_three_target_paths_collapse_to_count(self, tmp_path: Path) -> None:
+    def test_three_target_paths_are_all_named(self, tmp_path: Path) -> None:
         targets = [
             make_target(name="claude", root_dir=".claude", primitives={"prompts": make_mapping()}),
             make_target(name="cursor", root_dir=".cursor", primitives={"prompts": make_mapping()}),
@@ -674,7 +676,9 @@ class TestIntegratePackagePrimitives:
             logger=MagicMock(),
         )
 
-        assert tree_messages(logger) == ["  |-- 3 prompts integrated -> 3 targets"]
+        assert tree_messages(logger) == [
+            "  |-- 3 prompts integrated -> .claude/, .cursor/, .codex/"
+        ]
 
     def test_verbose_mode_expands_multiple_paths(self, tmp_path: Path) -> None:
         targets = [
@@ -834,7 +838,7 @@ class TestIntegratePackagePrimitives:
         )
 
         assert tree_messages(logger) == [
-            "  |-- 1 commands integrated -> copilot-app/workflows/",
+            "  |-- 1 command integrated -> copilot-app/workflows/",
             "  |-- workflows arrive disabled; enable from the Copilot App's Workflows tab",
         ]
 
@@ -857,10 +861,8 @@ class TestIntegratePackagePrimitives:
             logger=MagicMock(),
         )
 
-        assert tree_messages(logger) == [
-            "  |-- 1 commands adopted -> copilot-app/workflows/",
-            "  |-- (files unchanged)",
-        ]
+        # Adoption changes nothing: silent unless --verbose (#4382/#4360, I2).
+        assert tree_messages(logger) == ["  |-- (files unchanged)"]
 
     def test_skill_integrator_receives_targets_and_subset(self, tmp_path: Path) -> None:
         targets = [make_target(primitives={})]
@@ -907,6 +909,7 @@ class TestIntegratePackagePrimitives:
                 package_name="override-name",
                 logger=logger,
                 ctx=ctx,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert "override-name" in diagnostics.warn.call_args.args[0]
@@ -943,6 +946,7 @@ class TestIntegratePackagePrimitives:
                 package_name="",
                 logger=MagicMock(),
                 ctx=ctx,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
 
         assert "pkg-info-name" in diagnostics.warn.call_args.args[0]
@@ -961,7 +965,7 @@ class TestIntegratePackagePrimitives:
             logger=MagicMock(),
         )
 
-        assert tree_messages(logger) == ["  |-- 1 prompts integrated -> .github/prompts/"]
+        assert tree_messages(logger) == ["  |-- 1 prompt integrated -> .github/prompts/"]
 
     def test_deployed_path_entry_called_for_each_target_path(self, tmp_path: Path) -> None:
         target_paths = [tmp_path / "a", tmp_path / "b"]

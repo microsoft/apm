@@ -140,27 +140,27 @@ class TestInitCommand:
             project_dir = isolated_path / "multi-target"
             assert project_dir.exists()
 
-    def test_init_deprecated_plugin_flag(self, runner: CliRunner, tmp_path: Path) -> None:
-        """Test deprecated --plugin flag still works with warning."""
+    def test_init_removed_plugin_flag(self, runner: CliRunner, tmp_path: Path) -> None:
+        """--plugin was removed in 0.37 (#4073): exit 2 naming the replacement."""
         with runner.isolated_filesystem(temp_dir=str(tmp_path)):
             result = runner.invoke(
                 cli,
                 ["init", "legacy-plugin", "-y", "--plugin"],
                 catch_exceptions=False,
             )
-            assert result.exit_code == 0, result.output
-            assert "deprecated" in result.output.lower()
+            assert result.exit_code == 2, result.output
+            assert "Run: apm plugin init" in result.output
 
-    def test_init_deprecated_marketplace_flag(self, runner: CliRunner, tmp_path: Path) -> None:
-        """Test deprecated --marketplace flag still works with warning."""
+    def test_init_removed_marketplace_flag(self, runner: CliRunner, tmp_path: Path) -> None:
+        """--marketplace was removed in 0.37 (#4073): exit 2 naming the replacement."""
         with runner.isolated_filesystem(temp_dir=str(tmp_path)):
             result = runner.invoke(
                 cli,
                 ["init", "legacy-marketplace", "-y", "--marketplace"],
                 catch_exceptions=False,
             )
-            assert result.exit_code == 0, result.output
-            assert "deprecated" in result.output.lower()
+            assert result.exit_code == 2, result.output
+            assert "Run: apm marketplace init" in result.output
 
     def test_init_verbose_output(self, runner: CliRunner, tmp_path: Path) -> None:
         """Test init with --verbose flag shows detailed output."""

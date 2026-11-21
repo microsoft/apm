@@ -26,6 +26,8 @@ import pytest
 
 from apm_cli.core.scope import InstallScope
 
+pytestmark = pytest.mark.component
+
 
 def _make_ctx(
     project_root: Path,

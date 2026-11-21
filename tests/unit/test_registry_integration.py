@@ -3,10 +3,13 @@
 import unittest
 from unittest import mock
 
+import pytest
 import requests
 
 from apm_cli.registry.integration import RegistryIntegration
 from apm_cli.utils import github_host
+
+pytestmark = pytest.mark.unit
 
 
 class TestRegistryIntegration(unittest.TestCase):

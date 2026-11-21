@@ -18,7 +18,7 @@ apm lock export [OPTIONS]
 
 `apm lock` runs the full resolver and downloader so every dependency SHA is pinned, then writes `apm.lock.yaml`. It skips the targets, cleanup, post-deps-local, and audit phases. The integrate phase still runs but deploys nothing because the target set is empty in lockfile-only mode -- no files are copied to or deleted from `.github/`, `.agents/`, or any other harness directory.
 
-If a prior install already deployed files and you later narrow `targets:`, `apm lock` keeps the existing `deployed_files`, `deployed_file_hashes`, and deployment-ledger rows for any bytes still on disk. The next normal `apm install` performs the physical prune through the usual safety gates.
+If a prior install already deployed files and you later narrow `targets:`, `apm lock` keeps the existing `deployed_files`, `deployed_file_hashes`, and deployment-ledger rows for any bytes still on disk. It also keeps each row's recorded `exec_status`, since it runs no approval gate. The next normal `apm install` performs the physical prune through the usual safety gates.
 
 Use `apm lock` to:
 
@@ -90,7 +90,7 @@ apm lock export [OPTIONS]
 | `--global`, `-g` | off | Read `$APM_HOME/apm.lock.yaml` (default `~/.apm/apm.lock.yaml`) instead of the current project lockfile. |
 | `--timestamp TS` | auto | Pin the SBOM timestamp for reproducible output. The value must be ISO 8601 with a timezone (e.g. `2024-06-01T00:00:00+00:00`); malformed or timezone-naive values fail. Defaults to `SOURCE_DATE_EPOCH`, then the lockfile's legacy `generated_at`, then the Unix epoch. |
 
-Component identity is a Package URL (`pkg:github/<owner>/<repo>@<commit>` for git deps, `pkg:oci/<name>@<digest>` for registry deps, `pkg:generic/<name>@<content_hash>` for local primitives), and the declared license is passed through verbatim (or `NOASSERTION` when undeclared). Output is deterministic -- components sorted by purl with a pinned timestamp -- so two runs are byte-identical. Credentials in recorded URLs are scrubbed. Diagnostics and update notifications route to stderr from process startup, so `apm lock export | jq` stays clean. See [Inventory export (SBOM)](../../../enterprise/security/#inventory-export-sbom) for the full model.
+Component identity is a Package URL: `pkg:github/<owner>/<repo>@<commit>` for GitHub deps (also `pkg:gitlab` and `pkg:bitbucket`; other hosts use `pkg:generic/<name>@<commit>`), with a `#<subpath>` for a package inside a repository, `pkg:oci/<name>@<digest>` for registry deps, and `pkg:generic/<name>@<content_hash>` for local primitives. Each component carries the lockfile's SHA-256 `content_hash` (CycloneDX `hashes`, SPDX `checksums`). That value is APM's package tree hash, labelled `apm-package-tree-sha256`, not an archive digest: verify it with `apm audit`, and the declared license is passed through verbatim (or `NOASSERTION` when undeclared). Output is deterministic -- components sorted by purl with a pinned timestamp -- so two runs are byte-identical. Credentials in recorded URLs are scrubbed. Diagnostics and update notifications route to stderr from process startup, so `apm lock export | jq` stays clean. See [Inventory export (SBOM)](../../../enterprise/security/#inventory-export-sbom) for the full model.
 
 Export a CycloneDX SBOM to a file:
 

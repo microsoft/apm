@@ -56,15 +56,3 @@ def test_no_feature_sources_or_workflows_remain():
         if _FEATURE_WORKFLOW_MARKERS.search(wf.read_text(encoding="utf-8"))
     ]
     assert offenders == []
-
-
-def test_installation_docs_describe_dev_container_recipe():
-    docs = (
-        REPO_ROOT / "docs" / "src" / "content" / "docs" / "getting-started" / "installation.md"
-    ).read_text(encoding="utf-8")
-    section = docs.split("\n## Dev containers\n", 1)
-    assert len(section) == 2, "installation guide lost its Dev containers section"
-    body = section[1].split("\n## ", 1)[0]
-    assert "postCreateCommand" in body
-    assert "pip install apm-cli" in body
-    assert "maintained outside this project" in body

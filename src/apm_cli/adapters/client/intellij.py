@@ -25,8 +25,9 @@ import posixpath
 import sys
 from pathlib import Path
 
-from apm_cli.utils.atomic_io import atomic_write_text
+from apm_cli.utils.json_config import write_json_config
 
+from ...core.remediation import JETBRAINS_MCP_CONFIG_UNUSABLE
 from ...utils.path_security import PathTraversalError, ensure_path_within
 from ._remote_shapes import remote_shape_row
 from .copilot import CopilotClientAdapter
@@ -36,6 +37,10 @@ _CONFIG_SUFFIX = ("github-copilot", "intellij")
 
 class IntelliJConfigError(RuntimeError):
     """Raised when JetBrains Copilot config cannot be read or written safely."""
+
+
+def _rerun_after(fix: str) -> str:
+    return JETBRAINS_MCP_CONFIG_UNUSABLE.bind(fix=fix).sentence()
 
 
 def _absolute_environment_root(name: str) -> Path:
@@ -223,25 +228,25 @@ class IntelliJClientAdapter(CopilotClientAdapter):
         except (OSError, UnicodeError) as exc:
             raise IntelliJConfigError(
                 f"Cannot read JetBrains Copilot MCP config at '{path}'. "
-                "Check its permissions and UTF-8 encoding, then rerun apm install."
+                + _rerun_after("check its permissions and UTF-8 encoding")
             ) from exc
         try:
             config = json.loads(_strip_jsonc_trailing_commas(_strip_jsonc_comments(raw)))
         except json.JSONDecodeError as exc:
             raise IntelliJConfigError(
                 f"JetBrains Copilot MCP config at '{path}' is malformed JSON ({exc}). "
-                "Fix the file, then rerun apm install."
+                + _rerun_after("fix the file")
             ) from exc
         if not isinstance(config, dict):
             raise IntelliJConfigError(
                 f"JetBrains Copilot MCP config at '{path}' must contain a JSON object. "
-                "Fix the file, then rerun apm install."
+                + _rerun_after("fix the file")
             )
         servers = config.get(self.mcp_servers_key)
         if self.mcp_servers_key in config and not isinstance(servers, dict):
             raise IntelliJConfigError(
                 f"JetBrains Copilot MCP config at '{path}' has a non-object "
-                "'servers' value. Fix the file, then rerun apm install."
+                "'servers' value. " + _rerun_after("fix the file")
             )
         return config
 
@@ -262,11 +267,11 @@ class IntelliJClientAdapter(CopilotClientAdapter):
         try:
             self._validate_owned_config_path(path)
             path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(path, json.dumps(config, indent=2) + "\n")
+            write_json_config(path, config, default_trailing_newline=True)
         except OSError as exc:
             raise IntelliJConfigError(
                 f"Cannot write JetBrains Copilot MCP config at '{path}'. "
-                "Check permissions and free space, then rerun apm install."
+                + _rerun_after("check permissions and free space")
             ) from exc
 
     def get_current_config(self) -> dict:

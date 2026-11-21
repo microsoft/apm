@@ -1033,7 +1033,7 @@ def test_claude_lsp_collision_requires_force_and_force_reconciles(
         cwd=project.root,
         env=environment,
     )
-    assert "--force" in refused.stdout
+    assert "--force" in refused.stdout + refused.stderr
     assert plugin_path.read_bytes() == original
 
     runner.run_sequence(
@@ -1056,7 +1056,7 @@ def test_claude_lsp_collision_requires_force_and_force_reconciles(
         cwd=project.root,
         env=environment,
     )
-    assert "--force" in update_refused.stdout
+    assert "--force" in update_refused.stdout + update_refused.stderr
     assert plugin_path.read_bytes() == foreign
 
     runner.run_sequence(
@@ -1292,7 +1292,7 @@ def test_lsp_uninstall_cleanup_failure_is_nonzero_and_actionable(
     )
 
     assert plugin_path.read_bytes() == foreign
-    normalized_output = " ".join(result.stdout.split())
+    normalized_output = " ".join((result.stdout + result.stderr).split())
     assert "Uninstall incomplete" in normalized_output
     assert "'apm install'" in normalized_output
 
@@ -2570,7 +2570,12 @@ def test_manifest_and_explicit_target_precedence_for_mcp_and_lsp(
     assert (project.root / _CLAUDE_LSP_PLUGIN).is_file()
     explicit_lock = LockFile.read(project.root / "apm.lock.yaml")
     assert explicit_lock is not None
-    assert explicit_lock.mcp_target_servers == {"claude": ["precedence-mcp"]}
+    # The flag decides what this run writes; copilot, still selected by the
+    # manifest, keeps its claim (#4562).
+    assert explicit_lock.mcp_target_servers == {
+        "claude": ["precedence-mcp"],
+        "copilot": ["precedence-mcp"],
+    }
 
 
 def test_multi_target_exclusion_applies_to_mcp_and_lsp(
@@ -2863,3 +2868,48 @@ def test_uninstalling_one_shared_root_retains_shared_dependency_ownership(
         cwd=project.root,
         env=environment,
     )
+
+
+def test_ambiguous_harness_hints_name_every_detected_target_and_converge(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Both printed remedies for 'Multiple harnesses detected' run and converge."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "ambiguous", base_env=dict(os.environ))
+    package_factory = LocalPackageFactory(isolated.package_root)
+    package = package_factory.create("two-harness-kit")
+    package_factory.add_instruction(
+        package, "two-harness-kit-instruction", _instruction("two-harness-kit-instruction")
+    )
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    manifest = project / "apm.yml"
+    manifest.write_text(
+        f"name: consumer\nversion: 0.1.0\ndependencies:\n  apm:\n    - {package.root.as_posix()}\n",
+        encoding="utf-8",
+    )
+    (project / ".cursor").mkdir()
+    (project / ".codex").mkdir()
+    runner = _runner(apm_binary_path)
+    env = isolated.subprocess_env()
+
+    refused = runner.run(("install",), scenario_id="ambiguous", cwd=project, env=env)
+    assert refused.returncode == 2, refused.stdout + refused.stderr
+    hint = refused.stderr
+    assert "Multiple harnesses detected: codex, cursor" in hint
+    assert "Multiple harnesses detected" not in refused.stdout, refused.stdout
+    assert "  apm install --target codex,cursor\n" in hint
+    assert "  targets:\n    - codex\n    - cursor" in hint
+
+    flagged = runner.run(
+        ("install", "--target", "codex,cursor"), scenario_id="hint-flag", cwd=project, env=env
+    )
+    assert flagged.returncode == 0, flagged.stdout + flagged.stderr
+
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "targets:\n  - codex\n  - cursor\n",
+        encoding="utf-8",
+    )
+    declared = runner.run(("install",), scenario_id="hint-yaml", cwd=project, env=env)
+    assert declared.returncode == 0, declared.stdout + declared.stderr
+    assert "Targets: codex, cursor" in declared.stdout, declared.stdout

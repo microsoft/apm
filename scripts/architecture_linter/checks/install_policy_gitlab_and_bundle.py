@@ -240,18 +240,23 @@ def check_gitlab_facade_orchestration(provider: FactsProvider) -> tuple[Violatio
 
 
 _LOCAL_BUNDLE_HANDLER = "src/apm_cli/install/local_bundle_handler.py"
+# Bundle installs reach the preflight through the shared bundle admission owner.
+_BUNDLE_ADMISSION = "src/apm_cli/install/bundle_admission.py"
 
 
 _LOCAL_BUNDLE_PREFLIGHT_NEEDLES = (
     "from ..policy.install_preflight import run_policy_preflight",
     "policy_fetch, _enforcement_active = run_policy_preflight(",
-    "mcp_deps=bundle_mcp_deps",
 )
 
 
-def _has_cache_only_preflight(provider: FactsProvider) -> bool:
-    """Return whether the sole canonical preflight call explicitly runs cache-only."""
-    index = provider.tree_index(_LOCAL_BUNDLE_HANDLER)
+def _has_online_preflight(provider: FactsProvider) -> bool:
+    """Return whether the sole canonical preflight call resolves policy online.
+
+    A local bundle install resolves org policy as a package install does; a
+    cache-only lookup reads a cold cache as "no policy" (#4027).
+    """
+    index = provider.tree_index(_BUNDLE_ADMISSION)
     if index is None:
         return False
     calls = tuple(
@@ -263,35 +268,43 @@ def _has_cache_only_preflight(provider: FactsProvider) -> bool:
             and node.func.id == "run_policy_preflight"
         )
     )
-    return len(calls) == 1 and any(
-        keyword.arg == "cache_only"
-        and isinstance(keyword.value, ast.Constant)
-        and keyword.value.value is True
-        for keyword in calls[0].keywords
+    return len(calls) == 1 and not any(
+        keyword.arg in ("cache_only", None) for keyword in calls[0].keywords
     )
 
 
 def check_local_bundle_preflight(provider: FactsProvider) -> tuple[Violation, ...]:
     """Local bundle installs must route policy through install_preflight.py."""
     rule_id = RULE_LOCAL_BUNDLE_PREFLIGHT
-    lines, failures = _configured(provider, _LOCAL_BUNDLE_HANDLER, rule_id)
-    if failures:
-        return failures
+    lines, failures = _configured(provider, _BUNDLE_ADMISSION, rule_id)
+    handler_lines, handler_failures = _configured(provider, _LOCAL_BUNDLE_HANDLER, rule_id)
+    if failures or handler_failures:
+        return (*failures, *handler_failures)
     findings = list(
         _require_all(
             rule_id,
-            _LOCAL_BUNDLE_HANDLER,
+            _BUNDLE_ADMISSION,
             lines,
             _LOCAL_BUNDLE_PREFLIGHT_NEEDLES,
             "Local bundle installs must route policy through install_preflight.py",
         )
     )
-    if not _has_cache_only_preflight(provider):
+    findings.extend(
+        _require_all(
+            rule_id,
+            _LOCAL_BUNDLE_HANDLER,
+            handler_lines,
+            ("mcp_deps=bundle_mcp_deps",),
+            "Local bundle installs must hand their MCP servers to the policy preflight",
+        )
+    )
+    if not _has_online_preflight(provider):
         findings.append(
             _report(
                 rule_id,
-                _LOCAL_BUNDLE_HANDLER,
-                "Local bundle policy preflight must explicitly run cache-only",
+                _BUNDLE_ADMISSION,
+                "Local bundle policy preflight must resolve org policy as package "
+                "installs do, never cache-only",
             )
         )
     return tuple(findings)
@@ -312,7 +325,7 @@ def check_require_hashes_enforcement(provider: FactsProvider) -> tuple[Violation
         _banned(
             provider,
             rule_id=RULE_REQUIRE_HASHES,
-            paths=(_INSTALL_PIPELINE, _LOCAL_BUNDLE_HANDLER, _POLICY_CHECKS),
+            paths=(_INSTALL_PIPELINE, _LOCAL_BUNDLE_HANDLER, _BUNDLE_ADMISSION, _POLICY_CHECKS),
             pattern=_REQUIRE_HASHES,
             message=(
                 "require_hashes enforcement must route through install/integrity.py, "

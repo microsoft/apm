@@ -14,44 +14,51 @@ same way.
 
 from __future__ import annotations
 
+import logging
 import re
+import traceback
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 from urllib.parse import urlsplit
 
-# ---------------------------------------------------------------------------
-# Secret redaction (gate for every external diagnostic string)
-# ---------------------------------------------------------------------------
+from ..utils.credential_rendering import redact_secrets
 
-# Keyword + ``:``/``=`` separator redacts any value (optionally after an auth
-# scheme word). Keyword + whitespace only redacts token-shaped values (>= 16
-# chars) so prose such as "bearer token acquisition failed" stays readable.
-SECRET_RE = re.compile(
-    r"(?:"
-    r"(?:token|password|secret|authorization)\s*[:=]\s*"
-    r"(?:(?:bearer|basic|token)\s+)?"
-    r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{4,}"
-    r"|"
-    r"(?:token|password|secret|bearer|basic)\s+"
-    r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{16,}"
-    r"|"
-    r"://[^:@/\s]+:[^:@/\s]+@"
-    r"|"
-    r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[psour]_[A-Za-z0-9_]{20,})\b"
-    r"|"
-    r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}"
-    r")",
-    re.IGNORECASE,
-)
+# Secret redaction (gate for every external diagnostic string) is owned by
+# utils/credential_rendering.py.
 
 _MAX_DETAIL_CHARS = 300
 
 
-def redact_secrets(text: str) -> str:
-    """Replace credential-shaped substrings in *text* with ``[REDACTED]``."""
-    return SECRET_RE.sub("[REDACTED]", text)
+class SecretRedactionFilter(logging.Filter):
+    """Logging filter that redacts secret patterns from all emitted log records.
+
+    Lives beside :func:`redact_secrets` so the root CLI can install it on every
+    run without importing the auth resolver. Install on logging handlers when
+    debug logging is enabled so that exception messages carrying HTTP client error strings --
+    which some libraries embed auth headers or token values in -- do not leak
+    credentials into the debug stream.
+
+    Usage::
+
+        logging.getLogger("apm_cli").addFilter(SecretRedactionFilter())
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+            redacted = redact_secrets(msg)
+            if redacted != msg:
+                record.msg = redacted
+                record.args = ()
+            if record.exc_info is not None:
+                formatted = "".join(traceback.format_exception(*record.exc_info))
+                record.exc_text = redact_secrets(formatted)
+                record.exc_info = None
+        except Exception:
+            pass
+        return True
 
 
 def sanitize_diagnostic_detail(text: str | None) -> str:
@@ -129,6 +136,14 @@ class AuthOutcome:
         return self.kind is AuthOutcomeKind.CREDENTIAL_REJECTED and self.rejection_verified
 
 
+class RepositoryNotFoundError(RuntimeError):
+    """The host answered that the repository does not exist or is not visible.
+
+    Raised with a rendered message once every credential the chain may try was
+    tried, so callers can name a next step without re-reading Git stderr.
+    """
+
+
 class AuthAttemptFailed(RuntimeError):
     """Report a non-success attempt outcome to the auth chain.
 
@@ -169,6 +184,10 @@ ADO_SIGNIN_HOSTS: frozenset[str] = frozenset(
     }
 )
 _ADO_SIGNIN_HOST_SUFFIX = ".vssps.visualstudio.com"
+
+# Host kind for hosted ``marketplace.json`` catalogs. A catalog is a JSON
+# document, so an HTML page reached through a redirect is a sign-in page.
+CATALOG_HOST_KIND = "marketplace-catalog"
 
 
 def is_ado_signin_location(location: str | None) -> bool:
@@ -266,7 +285,13 @@ def _names_other_host(text: str, host: str | None, port: int | None) -> bool:
 _PUBLIC_GITHUB_STATUS_RE = re.compile(
     r"(?:http(?: error)?|returned error:|status(?: code)?[=: ]+)\s*(?:401|403|404)\b",
 )
-_NOT_FOUND_RE = re.compile(r"\bTF401019\b|repository not found|\b404\b", re.IGNORECASE)
+# Git's own wording for an HTTP 404 on a repository URL: "fatal: repository
+# '<url>' not found". GitHub adds "remote: Repository not found." before it.
+_GIT_REPOSITORY_NOT_FOUND_RE = re.compile(r"\brepository '[^'\n]*' not found", re.IGNORECASE)
+_NOT_FOUND_RE = re.compile(
+    r"\bTF401019\b|repository not found|\b404\b|" + _GIT_REPOSITORY_NOT_FOUND_RE.pattern,
+    re.IGNORECASE,
+)
 
 
 def _cause_chain(error: object) -> Iterator[BaseException]:
@@ -366,6 +391,26 @@ def _failure(kind_presented: bool) -> AuthOutcomeKind:
     return AuthOutcomeKind.CREDENTIAL_REJECTED if kind_presented else AuthOutcomeKind.AUTH_REQUIRED
 
 
+def _signin_page_outcome(
+    response: Any, status: int, *, host_kind: str, credential_presented: bool
+) -> AuthOutcome | None:
+    """Return the auth failure for a 2xx sign-in page, else ``None``."""
+    content_type = _header(getattr(response, "headers", None), "Content-Type").lower()
+    if host_kind == "ado" and (status == 203 or "text/html" in content_type):
+        return AuthOutcome(
+            _failure(credential_presented),
+            "Azure DevOps answered with a sign-in page",
+            status,
+        )
+    if (
+        host_kind == CATALOG_HOST_KIND
+        and "text/html" in content_type
+        and getattr(response, "history", None)
+    ):
+        return AuthOutcome(_failure(credential_presented), "redirected to a sign-in page", status)
+    return None
+
+
 def _classify_response(
     response: Any,
     *,
@@ -393,14 +438,10 @@ def _classify_response(
                     status,
                 )
     if 200 <= status < 300:
-        content_type = _header(headers, "Content-Type").lower()
-        if is_ado and (status == 203 or "text/html" in content_type):
-            return AuthOutcome(
-                _failure(credential_presented),
-                "Azure DevOps answered with a sign-in page",
-                status,
-            )
-        return AuthOutcome(AuthOutcomeKind.OK, "", status)
+        page = _signin_page_outcome(
+            response, status, host_kind=host_kind, credential_presented=credential_presented
+        )
+        return page or AuthOutcome(AuthOutcomeKind.OK, "", status)
     if status in (401, 403):
         return AuthOutcome(
             _failure(credential_presented),
@@ -445,6 +486,8 @@ def _classify_text(
         return AuthOutcome(AuthOutcomeKind.NETWORK, detail)
     if public_github_anonymous:
         if any(phrase in lowered for phrase in (*_AUTH_PHRASES, "repository not found")):
+            return AuthOutcome(AuthOutcomeKind.AUTH_REQUIRED, detail)
+        if _GIT_REPOSITORY_NOT_FOUND_RE.search(text):
             return AuthOutcome(AuthOutcomeKind.AUTH_REQUIRED, detail)
         if any(status in {401, 403, 404} for status in statuses):
             return AuthOutcome(AuthOutcomeKind.AUTH_REQUIRED, detail)
@@ -532,6 +575,23 @@ def classify_auth_outcome(
         host=getattr(host_info, "host", None),
         port=getattr(host_info, "port", None),
     )
+
+
+def is_repository_not_found(error: object) -> bool:
+    """Return whether *error* reports a missing (or invisible) repository.
+
+    True for an HTTP 404, Git's "repository '<url>' not found", or Azure
+    DevOps TF401019, with no network, TLS, throttle, or auth signal. The
+    public github.com anonymous leg reads the same 404 as "credentials may be
+    required"; this answers the question after the chain has run.
+    """
+    outcome = classify_auth_outcome(error=error, credential_presented=True)
+    return outcome.kind is AuthOutcomeKind.NOT_FOUND
+
+
+def reports_repository_not_found(error: BaseException) -> bool:
+    """Return whether *error* or one of its causes is a :class:`RepositoryNotFoundError`."""
+    return any(isinstance(current, RepositoryNotFoundError) for current in _cause_chain(error))
 
 
 def raise_for_auth_outcome(

@@ -1,0 +1,113 @@
+"""Declare admitted native Claude plugins only after lock and security gates."""
+
+from __future__ import annotations
+
+import copy
+from typing import TYPE_CHECKING
+
+from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+from apm_cli.claude_plugins.registrar import native_ownership, reconcile_claude_plugins
+from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+from apm_cli.deps.lockfile_write_authority import flush_lockfile_writes, remove_lockfile
+
+if TYPE_CHECKING:
+    from apm_cli.install.context import InstallContext
+
+
+def _refuse_retained_loose_claude_files(ctx: InstallContext) -> None:
+    """Refuse native activation beside package-owned loose Claude files.
+
+    Stale cleanup keeps edited or undeletable package-owned files. Registering
+    the intact plugin next to them would load the same content twice. Only
+    paths attributed to the Claude target block; other targets' projections
+    and unmanaged user files are not package-owned Claude state.
+    """
+    from apm_cli.install.target_governance import install_governance, is_governed_by_install
+
+    plugins = getattr(ctx, "claude_native_plugins", None) or {}
+    retained = getattr(ctx, "package_cleanup_retained", None) or {}
+    claude = [target for target in ctx.targets or () if target.name == "claude"]
+    if not plugins or not retained or not claude:
+        return
+    prefixes, schemes = install_governance(claude)
+    for key in sorted(plugins):
+        paths = sorted(
+            path
+            for path in retained.get(key, {})
+            if is_governed_by_install(path, prefixes, schemes)
+        )
+        if paths:
+            raise ClaudeNativePluginError(
+                f"Cannot switch {key} to native Claude: package-owned loose Claude files "
+                f"were kept because they changed or could not be removed: {', '.join(paths)}. "
+                "Move or delete them, then run the install again."
+            )
+
+
+def run(ctx: InstallContext) -> None:
+    """Converge Claude onto the saved lock, using the same owner as removal.
+
+    The lock and Claude's declarations are one rollback unit (req-na-004): when
+    declaration fails, the previous lock is restored so a retry still owns
+    everything it must retire. MCP/LSP reconciliation already ran (#4329), so
+    the restored lock keeps the service records that reached disk.
+    """
+    if ctx.apm_modules_dir is None:
+        return
+    _refuse_retained_loose_claude_files(ctx)
+    lock_path = get_lockfile_path(ctx.apm_dir)
+    previous_owned = (
+        None if ctx.existing_lockfile is None else native_ownership(ctx.existing_lockfile)
+    )
+    if ctx.claude_native_plugins or previous_owned:
+        # Claude's declarations never run ahead of the lock they follow.
+        flush_lockfile_writes()
+    committed = LockFile.read(lock_path)
+    try:
+        reconcile_claude_plugins(
+            modules_dir=ctx.apm_modules_dir,
+            scope=ctx.scope,
+            previous=previous_owned,
+            lockfile=committed,
+            prepared=ctx.claude_native_plugins,
+            deploy_root=ctx.project_root,
+            logger=ctx.logger,
+            dry_run=ctx.dry_run,
+        )
+    except ClaudeNativePluginError:
+        previous = _with_reconciled_services(ctx.existing_lockfile, committed)
+        if previous is not None:
+            # The rollback is durable even though this install fails.
+            previous.write(lock_path)
+            flush_lockfile_writes()
+        else:
+            remove_lockfile(lock_path)
+        raise
+
+
+def _with_reconciled_services(previous: LockFile | None, committed: LockFile | None):
+    """*previous* carrying the MCP/LSP records *committed* holds for what reached disk."""
+    if committed is None or (
+        previous is None
+        and not committed.mcp_servers
+        and not committed.lsp_servers
+        and not (committed.mcp_target_servers or committed.lsp_target_servers)
+    ):
+        return previous
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    rollback = copy.deepcopy(previous) if previous is not None else LockFile()
+    rollback.mcp_servers = list(committed.mcp_servers)
+    rollback.mcp_configs = copy.deepcopy(committed.mcp_configs)
+    rollback.mcp_omissions = copy.deepcopy(committed.mcp_omissions)
+    rollback.mcp_config_provenance = copy.deepcopy(committed.mcp_config_provenance)
+    rollback.lsp_servers = list(committed.lsp_servers)
+    rollback.lsp_configs = copy.deepcopy(committed.lsp_configs)
+    rollback.lsp_config_provenance = copy.deepcopy(committed.lsp_config_provenance)
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        rollback,
+        committed.mcp_target_servers,
+        native_hashes=DeploymentLedgerCodec.mcp_native_hashes(committed),
+    )
+    DeploymentLedgerCodec.replace_lsp_target_servers(rollback, committed.lsp_target_servers)
+    return rollback

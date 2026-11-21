@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.mcp_config_view import (
     CurrentMcpConfigView,
-    McpConfigDiff,
     _collect_transitive_compat,
 )
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
@@ -679,40 +679,42 @@ def test_brought_in_by_traces_transitive_servers_to_direct_apm_yml_entry(
     }
 
 
-def test_symmetric_diff_reports_changed_source_only_and_lock_only() -> None:
-    """Diff partitions changed and one-sided server names."""
-    diff = McpConfigDiff.between(
-        {
-            "changed": {"name": "changed", "command": "new"},
-            "source-only": {"name": "source-only"},
-            "same": {"name": "same"},
-        },
-        {
-            "changed": {"name": "changed", "command": "old"},
-            "lock-only": {"name": "lock-only"},
-            "same": {"name": "same"},
-        },
+def test_local_bundle_servers_are_recorded_baseline(tmp_path: Path) -> None:
+    """#3955: only bundle-owned lock servers are baseline; a declaration supersedes them."""
+    root = _write_manifest(tmp_path, name="consumer", mcp=[_self_defined("shared", "root")])
+    package_dir = tmp_path / "packages" / "forger"
+    _write_manifest(package_dir, name="bundle:evil", mcp=[_self_defined("forged", "x")])
+    locked = LockedDependency(
+        repo_url="_local/forger", source="local", local_path="./packages/forger", depth=1
+    )
+    lock = _lock(locked)
+    lock.mcp_configs = {
+        "bundled": {"name": "bundled", "command": "b"},
+        "shared": {"name": "shared", "command": "b"},
+        "removed": {"name": "removed"},
+        "claimed": {"name": "claimed", "command": "c"},
+    }
+    lock.mcp_config_provenance = {
+        "bundled": "bundle:mcppkg",
+        "shared": "bundle:mcppkg",
+        "removed": "old-package",
+        "claimed": "bundle:mcppkg",
+    }
+    # A bundle install records a native-entry receipt; a bare claim has none.
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lock,
+        {"claude": ["bundled", "shared", "claimed"]},
+        native_hashes={"claude": {"bundled": "sha256:" + "b" * 64, "shared": "sha256:" + "c" * 64}},
     )
 
-    assert diff.changed == frozenset({"changed"})
-    assert diff.source_only == frozenset({"source-only"})
-    assert diff.lock_only == frozenset({"lock-only"})
-    assert not diff.is_empty
-    assert McpConfigDiff.between({}, {}).is_empty
+    view = _derive(root, lock, tmp_path / "apm_modules")
 
-
-def test_provenance_never_exempts_lock_only_name() -> None:
-    """Historical provenance cannot prove a current declaration exists."""
-    view = CurrentMcpConfigView(
-        dependencies=(),
-        configs={},
-        provenance={"removed": "old-package"},
-        problems=(),
-    )
-
-    diff = view.diff({"removed": {"name": "removed"}})
-
-    assert diff.lock_only == frozenset({"removed"})
+    assert view.bundle_owned == frozenset({"bundled"})
+    assert view.configs["bundled"] == {"name": "bundled", "command": "b"}
+    assert view.configs["shared"]["command"] == "root"
+    assert view.provenance == {"bundled": "bundle:mcppkg", "forged": "package:bundle:evil"}
+    assert view.diff(lock.mcp_configs).lock_only == frozenset({"removed", "claimed"})
+    assert {dep.name for dep in view.kept_dependencies()} == {"bundled", "shared", "forged"}
 
 
 def test_local_package_config_change_is_detected(tmp_path: Path) -> None:
@@ -773,6 +775,44 @@ def test_removed_local_and_remote_declarations_are_lock_only(tmp_path: Path) -> 
     )
 
     assert diff.lock_only == frozenset({"local-removed", "remote-removed"})
+
+
+@pytest.mark.parametrize("strict", [None, False])
+@pytest.mark.parametrize("shape", ["hooks", "mcp", "invalid", "wrong-lock-type"])
+def test_local_claude_source_is_never_mutated_or_waived_during_mcp_inspection(
+    tmp_path: Path, strict: bool | None, shape: str
+) -> None:
+    """Without the install-synthesized manifest, MCP stays uncollected and the source untouched."""
+    root = _write_manifest(tmp_path, name="consumer")
+    source = tmp_path / "publisher"
+    manifest = source / ".claude-plugin/plugin.json"
+    manifest.parent.mkdir(parents=True)
+    data = {"name": "owned-plugin", "version": "1.0.0"}
+    if shape == "mcp":
+        data["mcpServers"] = {"owned-server": {"command": "DO_NOT_EXECUTE"}}
+    manifest.write_text("[" if shape == "invalid" else json.dumps(data), encoding="ascii")
+    hooks = source / "hooks/hooks.json"
+    hooks.parent.mkdir()
+    hooks.write_text('{"hooks": {}}', encoding="ascii")
+    before = ArtifactSnapshot.capture(source)
+    dependency = LockedDependency(
+        repo_url="_local/publisher",
+        source="local",
+        local_path=str(source),
+        package_type="apm_package" if shape == "wrong-lock-type" else "marketplace_plugin",
+    )
+    view = CurrentMcpConfigView.derive(
+        root,
+        _lock(dependency),
+        tmp_path / "apm_modules",
+        admission=McpAdmission(None, one_off=True),
+        allow_pending=strict,
+    )
+    assert view.problems
+    assert view.configs == {}
+    assert_unchanged(before, ArtifactSnapshot.capture(source))
+    assert not (source / "apm.yml").exists()
+    assert not (source / ".apm").exists()
 
 
 def test_missing_package_manifest_records_problem(tmp_path: Path) -> None:

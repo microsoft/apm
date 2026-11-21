@@ -23,13 +23,14 @@ family for Copilot is still spelled "vscode".
 """
 
 import warnings
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from functools import cached_property
 from pathlib import Path
 from typing import Literal, Union
 
 import click
 
+from apm_cli.core.deprecations import deprecation_message
 from apm_cli.core.target_catalog import (
     TARGET_CAPABILITIES,
     TargetCapability,
@@ -39,6 +40,7 @@ from apm_cli.core.target_catalog import (
     expand_all,
     first_deprecated_target_alias,
     get_target_capability,
+    is_vendor_target_id,
     normalize_target_name,
     target_error_values,
 )
@@ -410,14 +412,14 @@ def get_target_description(target: UserTargetType) -> str:
         "antigravity": "AGENTS.md + .agents/rules/ + .agents/skills/ + .agents/hooks.json + .agents/mcp_config.json (explicit --target only)",
         "claude": "CLAUDE.md + .claude/commands/ + .claude/agents/ + .claude/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
-        "cursor": ".cursor/agents/ + .cursor/skills/ + .cursor/rules/",
-        "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
+        "cursor": ".cursor/agents/ + .agents/skills/ + .cursor/rules/",
+        "gemini": "GEMINI.md + .gemini/commands/ + .agents/skills/ + .gemini/settings.json (MCP/hooks)",
         "grok-bot": "agent-data/workflows/ (project) or ~/agent-data/workflows/ (--global) -- skills only, explicit --target only",
         "grok-build": "AGENTS.md + .grok/rules/ + .grok/agents/ + .grok/commands/ + .grok/skills/",
         "hermes": "AGENTS.md + .agents/skills/ (project) or $HERMES_HOME/skills/ + $HERMES_HOME/config.yaml MCP (explicit --target only)",
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
-        "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
+        "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .agents/skills/",
         "vscode": "AGENTS.md + .github/copilot-instructions.md + .github/prompts/ + .github/agents/",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .agents/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
@@ -533,6 +535,18 @@ VALID_TARGET_VALUES: frozenset[str] = accepted_target_values()
 TARGET_VALUES_HELP = ", ".join(sorted(accepted_target_values()))
 
 
+class UnknownTargetValueError(ValueError):
+    """A target value holds a token outside the accepted vocabulary.
+
+    ``token`` is that one token, so a multi-target error names it rather
+    than the whole list (RA-040).
+    """
+
+    def __init__(self, token: str, message: str) -> None:
+        super().__init__(message)
+        self.token = token
+
+
 def parse_target_field(
     value: str | list[str] | None,
     *,
@@ -622,22 +636,23 @@ def parse_target_field(
 
     # ---- validate every token ----
     for p in raw_parts:
-        if p not in accepted_target_values():
-            raise ValueError(
+        if p not in accepted_target_values() and not is_vendor_target_id(p):
+            raise UnknownTargetValueError(
+                p,
                 _target_error(
                     f"'{p}' is not a valid target. "
                     f"Choose from: {', '.join(sorted(accepted_target_values()))}",
                     source_path,
-                )
+                ),
             )
 
     # ---- deprecation warning for legacy "agents" alias (once per call) ----
-    if "agents" in raw_parts:
+    # Only a CLI token is a flag; a manifest value (``source_path`` set) is
+    # warned once by the manifest owner with manifest wording (C5a, #3967).
+    if "agents" in raw_parts and source_path is None:
         _agents_alias_detected = True
         warnings.warn(
-            "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
-            "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
-            "(.agents/skills/). Removal in v1.0.",
+            deprecation_message("target-agents"),
             AgentsTargetDeprecationWarning,
             stacklevel=2,
         )
@@ -761,7 +776,6 @@ class TargetParamType(click.ParamType):
         try:
             parsed = parse_target_field(value)
             warn_deprecated_target_alias_flag(value)
-            return parsed
         except ValueError as e:
             # Use the v2 three-section error renderer for unknown targets
             # so that CLI, apm.yml, and auto-detect all share the same
@@ -769,11 +783,10 @@ class TargetParamType(click.ParamType):
             from apm_cli.core.errors import UnknownTargetError, render_unknown_target_error
 
             err_msg = str(e)
-            if "is not a valid target" in err_msg:
-                target_name = value if isinstance(value, str) else ",".join(value or [])
+            if isinstance(e, UnknownTargetValueError):
                 command = ctx.command.name if ctx is not None and ctx.command.name else "install"
                 rendered = render_unknown_target_error(
-                    target_name,
+                    e.token,
                     list(target_error_values(command)),
                     command=command,
                 )
@@ -782,6 +795,16 @@ class TargetParamType(click.ParamType):
             # user sees a clean "Invalid value for '--target': ..." message
             # rather than a Python traceback.
             self.fail(err_msg, param, ctx)
+        tokens = parsed if isinstance(parsed, list) else [parsed] if parsed else []
+        vendor = [token for token in tokens if is_vendor_target_id(token)]
+        if vendor:
+            # A vendor target parses, but no vendor handler is registered (#4251).
+            self.fail(
+                f"vendor target '{vendor[0]}' has no registered handler in this APM version",
+                param,
+                ctx,
+            )
+        return parsed
 
 
 # ---------------------------------------------------------------------------
@@ -873,12 +896,28 @@ def canonical_policy_target_name(value: str | None) -> str | None:
     return names[0] if names else None
 
 
+# Provenance label of a decision taken from the manifest's ``targets:``.
+MANIFEST_TARGET_SOURCE = "apm.yml"
+# Provenance label of a decision the user passed on the command line.
+FLAG_TARGET_SOURCE = "--target flag"
+
+
 @dataclass(frozen=True)
 class EffectiveTargetDecision:
     """One install-time target decision shared by package, MCP, and LSP phases."""
 
     value: str | list[str] | None
     source: str
+
+    @property
+    def from_manifest(self) -> bool:
+        """True when the manifest's own ``targets:`` made this decision."""
+        return self.source == MANIFEST_TARGET_SOURCE
+
+    @property
+    def from_flag(self) -> bool:
+        """True when ``--target`` narrowed this run, whatever the manifest selects."""
+        return self.source == FLAG_TARGET_SOURCE
 
     @cached_property
     def canonical_targets(self) -> tuple[str, ...] | None:
@@ -981,10 +1020,10 @@ def resolve_effective_target_decision(
     runtimes rather than project harness markers.
     """
     if explicit_target is not None:
-        return EffectiveTargetDecision(explicit_target, "--target flag")
+        return EffectiveTargetDecision(explicit_target, FLAG_TARGET_SOURCE)
 
     if manifest_target:
-        return EffectiveTargetDecision(manifest_target, "apm.yml")
+        return EffectiveTargetDecision(manifest_target, MANIFEST_TARGET_SOURCE)
 
     from apm_cli.config import get_install_target
 
@@ -1021,6 +1060,30 @@ def resolve_package_target_decision(
     )
 
 
+def resolve_deployment_target_decision(
+    *,
+    manifest_target: str | list[str] | None,
+    recorded_targets: tuple[str, ...],
+    fallback: Callable[[], EffectiveTargetDecision] | None = None,
+) -> EffectiveTargetDecision:
+    """Reconcile current manifest intent with an existing deployment's recorded targets.
+
+    Shared by commands that act on what APM already deployed (``apm audit``,
+    uninstall-time LSP reconciliation): the manifest's ``targets:`` wins, as
+    it does for install, then the targets the lockfile records. A saved
+    install default and harness autodetection never retarget an existing
+    deployment; *fallback* (default: unrestricted ``auto-detect``) runs only
+    when nothing is declared or recorded.
+    """
+    if manifest_target:
+        return EffectiveTargetDecision(manifest_target, MANIFEST_TARGET_SOURCE)
+    if recorded_targets:
+        return EffectiveTargetDecision(list(recorded_targets), "deployment ledger")
+    if fallback is not None:
+        return fallback()
+    return EffectiveTargetDecision(None, "auto-detect")
+
+
 def resolve_audit_target_decision(
     *,
     manifest_target: str | list[str] | None,
@@ -1031,18 +1094,17 @@ def resolve_audit_target_decision(
     A saved install default is not a request to retarget an existing deployment.
     Without declared or recorded intent, preserve audit's discovery fallback.
     """
-    if manifest_target:
-        return EffectiveTargetDecision(manifest_target, "apm.yml")
-    if recorded_targets:
-        return EffectiveTargetDecision(list(recorded_targets), "deployment ledger")
-    return EffectiveTargetDecision(None, "auto-detect")
+    return resolve_deployment_target_decision(
+        manifest_target=manifest_target, recorded_targets=recorded_targets
+    )
 
 
 def read_manifest_target(project_root: Path) -> list[str] | None:
     """Read audit's manifest target hint; manifest checks own parse failures."""
+    from apm_cli.core.scope import manifest_file
     from apm_cli.models.manifest_targets import read_manifest_target_declaration
 
-    declaration = read_manifest_target_declaration(project_root / "apm.yml", lenient=True)
+    declaration = read_manifest_target_declaration(manifest_file(project_root), lenient=True)
     if declaration is None:
         return None
     try:
@@ -1263,5 +1325,9 @@ def format_provenance(resolved: ResolvedTargets) -> str:
     # Double-space between target list and metadata is intentional and
     # canonical. Test assertions match this exact spacing. Do not collapse.
     """
-    targets_csv = ", ".join(resolved.targets)
-    return f"Targets: {targets_csv}  (source: {resolved.source})"
+    return provenance_line(resolved.targets, resolved.source)
+
+
+def provenance_line(targets: Iterable[str], source: str) -> str:
+    """Render the canonical ``Targets: X  (source: Y)`` line for any caller."""
+    return f"Targets: {', '.join(targets)}  (source: {source})"

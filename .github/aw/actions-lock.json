@@ -35,10 +35,10 @@
       "version": "v0.89.15",
       "sha": "045beb2d14bda8d0c1f2e83b41527f63770d2855"
     },
-    "microsoft/apm-action@v1.10.0": {
+    "microsoft/apm-action@v1.12.0": {
       "repo": "microsoft/apm-action",
-      "version": "v1.10.0",
-      "sha": "d723bb64ed70c135bbaf87d126b721dd2dae0439"
+      "version": "v1.12.0",
+      "sha": "64544310be26812256300543071bfbaa8bc93aad"
     },
     "ruby/setup-ruby@v1.323.0": {
       "repo": "ruby/setup-ruby",

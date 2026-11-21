@@ -24,13 +24,38 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from apm_cli.core.scope import manifest_file
+
 from ..utils.atomic_io import write_text_lf
 from ..utils.console import _rich_info, _rich_success, _rich_warning
 from ..utils.path_security import ensure_path_within
+from .remediation import PLUGIN_MCP_OWNERSHIP_UNKNOWN
+
+# Messages already shown inside one ``plugin_manifest_notes_once`` scope.
+_EMITTED_NOTES: ContextVar[set[tuple[str, str]] | None] = ContextVar(
+    "apm_plugin_manifest_emitted_notes", default=None
+)
+
+
+@contextmanager
+def plugin_manifest_notes_once() -> Iterator[None]:
+    """Show each plugin-manifest note once while the block runs.
+
+    One ``apm pack`` builds a manifest per ecosystem and for the bundle; each
+    build reads the same ``.mcp.json`` and would repeat the same note (#4291).
+    """
+    token = _EMITTED_NOTES.set(set())
+    try:
+        yield
+    finally:
+        _EMITTED_NOTES.reset(token)
 
 
 def _emit(level: str, message: str, logger: Any, symbol: str) -> None:
@@ -44,7 +69,13 @@ def _emit(level: str, message: str, logger: Any, symbol: str) -> None:
     ``_rich_*`` console helper. *symbol* is a key into
     :data:`apm_cli.utils.console.STATUS_SYMBOLS` and is forwarded on both paths
     so a success line renders as ``[+]`` (not ``[i]``) regardless of caller.
+    Inside :func:`plugin_manifest_notes_once` a repeated message is dropped.
     """
+    emitted = _EMITTED_NOTES.get()
+    if emitted is not None:
+        if (level, message) in emitted:
+            return
+        emitted.add((level, message))
     if logger is not None:
         getattr(logger, level)(message, symbol=symbol)
         return
@@ -298,22 +329,25 @@ def _authored_manifest_mcp_servers(project_root: Path) -> dict[str, dict]:
     Values come from ``apm.yml`` itself, never from the copy ``apm install``
     renders into ``.mcp.json``, so pack output is identical before and after
     install. Registry-resolved declarations need network resolution and are
-    not projected. Credential-bearing keys are removed later by
+    not projected, nor are servers whose ``targets:`` exclude Claude, the
+    only ecosystem that embeds them. Credential-bearing keys are removed later by
     :func:`_sanitize_mcp_servers`.
     """
-    from ..constants import APM_YML_FILENAME
     from ..models.apm_package import APMPackage
 
-    manifest = project_root / APM_YML_FILENAME
+    manifest = manifest_file(project_root)
     if not manifest.is_file():
         return {}
     try:
         dependencies = APMPackage.from_apm_yml(manifest).get_mcp_dependencies()
     except (OSError, ValueError):
         return {}
+    from ..integration.mcp_integrator_install import mcp_dependency_runtimes
+
     servers: dict[str, dict] = {}
     for dep in dependencies:
-        if not dep.is_self_defined:
+        # A server whose `targets:` leave out Claude is not Claude's to ship (#2606).
+        if not dep.is_self_defined or not mcp_dependency_runtimes(dep, ["claude"]):
             continue
         transport = (dep.transport or "stdio").lower()
         entry: dict[str, Any] = {"type": "http" if transport == "streamable-http" else transport}
@@ -340,7 +374,7 @@ def _warn_unknown_mcp_ownership(logger: Any) -> None:
         "warning",
         "Root .mcp.json left out of the plugin: apm.lock.yaml cannot be read, so the "
         "MCP servers APM installed there cannot be told apart from authored ones. "
-        "Fix or regenerate apm.lock.yaml with 'apm install', then run 'apm pack' again.",
+        f"{PLUGIN_MCP_OWNERSHIP_UNKNOWN.sentence()}",
         logger,
         "warning",
     )

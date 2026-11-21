@@ -9,7 +9,11 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+import pytest
+
 from apm_cli.policy.parser import load_policy
+
+pytestmark = pytest.mark.component
 
 FIXTURES_DIR = Path(__file__).parent.parent.parent / "fixtures" / "policy"
 

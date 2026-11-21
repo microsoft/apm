@@ -22,7 +22,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from apm_cli.core.scope import manifest_file
+
 from .executables import (
+    EXEC_TYPE_BIN,
     EXEC_TYPE_HOOKS,
     EXEC_TYPE_MCP,
     ITEM_EXEC_TYPES,
@@ -95,6 +98,8 @@ class Admission:
     one_off: bool = False
     # Human-readable cause when the reason alone does not name it.
     detail: str | None = None
+    # The whole-plugin pin that admitted a native plugin; deploy re-checks it.
+    pin: str | None = None
 
 
 def _names(package_keys: tuple[str, ...]) -> set[str]:
@@ -284,23 +289,20 @@ class McpAdmission:
         one_off: bool = False,
         no_policy: bool = False,
         include_user: bool = True,
-        cache_only_policy: bool = False,
         logger: Any = None,
         trust_context: ExecTrustContext | None = None,
     ) -> McpAdmission:
         """Resolve org, project and (optionally) user layers for *project_root*.
 
-        Org policy is discovered from *project_root*; the grants are read from
-        the scope's manifest (``$APM_HOME/apm.yml`` at user scope).
+        Org policy and the grants both come from the scope's manifest root
+        (``$APM_HOME`` at user scope).
         """
         if trust_context is not None:
             return cls(trust_context, one_off=one_off)
-        from apm_cli.core.scope import manifest_root
+        from apm_cli.core.scope import manifest_root, scope_manifest_path
 
-        from .executables import project_manifest_path
-
-        # Grants come from the scope's manifest file; policy stays at project_root.
-        grants_manifest = project_manifest_path(manifest_root(project_root, user_scope=user_scope))
+        grants_manifest = scope_manifest_path(project_root, user_scope=user_scope)
+        policy_root = manifest_root(project_root, user_scope=user_scope)
         admission: McpAdmission
 
         def resolve() -> ExecTrustContext:
@@ -308,19 +310,12 @@ class McpAdmission:
 
             policy = None
             if not no_policy:
-                from apm_cli.policy.discovery import discover_policy_with_chain
-                from apm_cli.policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES
+                from apm_cli.policy.outcome_routing import classify_project_policy
 
-                kwargs = {"cache_only": True} if cache_only_policy else {}
-                try:
-                    result = discover_policy_with_chain(project_root, **kwargs)
-                except (OSError, ValueError, RuntimeError) as exc:
-                    admission.policy_unavailable = type(exc).__name__
-                else:
-                    policy = getattr(result, "policy", None)
-                    outcome = getattr(result, "outcome", None)
-                    if policy is None and outcome in POLICY_RESOLUTION_FAILURE_OUTCOMES:
-                        admission.policy_unavailable = str(outcome)
+                route = classify_project_policy(policy_root)
+                policy = route.policy
+                if policy is None and (route.blocks or route.unresolved):
+                    admission.policy_unavailable = route.outcome
             return exec_trust_context_for_project(
                 grants_manifest, policy=policy, logger=logger, include_user=include_user
             )
@@ -430,12 +425,23 @@ class HookFileAdmission:
         self._keys = package_keys
         self._path = package_path
         self.parked: list[tuple[str, str]] = []
+        self._verdicts: dict[str, bool] = {}
 
     def __call__(self, hook_file: Path) -> bool:
-        verdict = admit(self._ctx, hook_subject(self._keys, self._path, hook_file))
-        if not verdict.allowed:
-            self.parked.append((hook_item_key(self._path, hook_file), str(verdict.reason)))
-        return verdict.allowed
+        item = hook_item_key(self._path, hook_file)
+        if item not in self._verdicts:
+            verdict = admit(self._ctx, hook_subject(self._keys, self._path, hook_file))
+            if not verdict.allowed:
+                self.parked.append((item, str(verdict.reason)))
+            self._verdicts[item] = verdict.allowed
+        return self._verdicts[item]
+
+    def admits_any(self) -> bool:
+        """Return whether some hook file of the package is admitted on its pin."""
+        from apm_cli.integration.hook_integrator import HookIntegrator
+
+        verdicts = [self(hook_file) for hook_file in HookIntegrator().find_hook_files(self._path)]
+        return any(verdicts)
 
 
 def hook_file_filter(
@@ -454,13 +460,38 @@ def hook_file_filter(
     return HookFileAdmission(ctx, package_keys, package_path)
 
 
-def parked_hook_message(package: str, item: str, reason: str) -> str:
+def _shell_argument(argument: str) -> str:
+    """One shell word for a package identity; options such as ``--pending`` pass through."""
+    import shlex
+
+    return argument if argument.startswith("-") else shlex.quote(argument)
+
+
+def approve_command(argument: str, *, user_scope: bool = False, user_store: bool = False) -> str:
+    """Return the ``apm approve`` command that clears a parked executable.
+
+    Remediation catalog ids ``executables-unapproved`` (project) and
+    ``executables-unapproved-user-scope`` (``-g``): a package installed with
+    ``apm install -g`` is approved with ``apm approve -g`` (#4154). ``-g``
+    selects the installation; ``--user`` (*user_store*) only the store.
+    """
+    flags = ("-g " if user_scope else "") + ("--user " if user_store else "")
+    return f"apm approve {flags}{_shell_argument(argument)}"
+
+
+def explain_command(package: str, *, user_scope: bool = False) -> str:
+    """Return the ``apm policy explain`` command for a parked package's scope."""
+    flag = "-g " if user_scope else ""
+    return f"apm policy explain {flag}{_shell_argument(package)}"
+
+
+def parked_hook_message(package: str, item: str, reason: str, *, user_scope: bool = False) -> str:
     """Return the warning for one pinned hook file the trust owner parked."""
     if reason == REASON_DENIED:
         # apm approve cannot clear a deny; point at the deciding layer instead.
         return (
             f"Parked hook file '{item}' ({package}): denied\n"
-            f"    Explain: apm policy explain {package}"
+            f"    Explain: {explain_command(package, user_scope=user_scope)}"
         )
     why = (
         "definition changed since approval"
@@ -469,7 +500,8 @@ def parked_hook_message(package: str, item: str, reason: str) -> str:
     )
     return (
         f"Parked hook file '{item}' ({package}): {why}\n"
-        f"    Review: apm approve --pending  |  Re-approve: apm approve {package}"
+        f"    Review: {approve_command('--pending', user_scope=user_scope)}  |  "
+        f"Re-approve: {approve_command(package, user_scope=user_scope)}"
     )
 
 
@@ -478,6 +510,8 @@ def parked_hook_message(package: str, item: str, reason: str) -> str:
 # -------------------------------------------------------------------
 
 _PLUGIN_MANIFESTS = ("plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json")
+# Plugin-root directories a harness auto-loads to run commands (Claude Code).
+_COMMAND_RUNNING_ROOTS = ("monitors", "workflows")
 _MANIFEST_EXEC_KEYS = {"hooks": EXEC_TYPE_HOOKS, "mcpServers": EXEC_TYPE_MCP, "lspServers": "lsp"}
 
 
@@ -489,7 +523,9 @@ def native_root_exec_types(plugin_root: Path | None) -> tuple[str, ...]:
     ROOT, and the harness loads them live. The mapping follows the Agent
     Plugins loader's own constant, so an unmapped component fails closed as
     hooks. Prompt payloads (agents/commands/instructions) map to the hooks
-    gate rather than silently to nothing.
+    gate rather than silently to nothing. Claude Code also auto-runs the
+    commands in ``monitors/`` and ``workflows/``; they gate as hooks for every
+    harness, so an unvetted command surface is never ``not-gated``.
     """
     from apm_cli.agent_plugins.loader import _IGNORED_PORTABLE_COMPONENT_PATHS
 
@@ -507,7 +543,7 @@ def native_root_exec_types(plugin_root: Path | None) -> tuple[str, ...]:
         "instructions": EXEC_TYPE_HOOKS,
     }
     seen: dict[str, None] = {}
-    for name in _IGNORED_PORTABLE_COMPONENT_PATHS:
+    for name in (*_IGNORED_PORTABLE_COMPONENT_PATHS, *_COMMAND_RUNNING_ROOTS):
         try:
             if not (root / name).exists():
                 continue
@@ -517,13 +553,40 @@ def native_root_exec_types(plugin_root: Path | None) -> tuple[str, ...]:
     return tuple(seen)
 
 
-def native_plugin_exec_types(
-    plugin_root: Path, extra: tuple[str, ...] | list[str] = ()
-) -> tuple[str, ...]:
+def agent_plugin_exec_types(plugin_root: Path | None) -> tuple[str, ...]:
+    """Exec types an Agent Plugin's root ``mcp.json`` declares, per the loader's IR.
+
+    ``mcp`` for any server, plus ``bin`` when a server runs a command. A root
+    ``mcp.json`` the loader cannot read still counts as ``mcp`` (fail closed):
+    the harness loads the plugin directory live.
+    """
+    if plugin_root is None:
+        return ()
+    from apm_cli.agent_plugins.errors import AgentPluginError
+    from apm_cli.agent_plugins.loader import detect_agent_plugin
+
+    root = Path(plugin_root)
+    try:
+        detection = detect_agent_plugin(root)
+    except (AgentPluginError, OSError):
+        detection = None
+    if detection is None:
+        return ()
+    components = getattr(detection.plugin, "components", None)
+    servers = getattr(components, "mcp_servers", ()) if components is not None else ()
+    types: list[str] = []
+    if servers or (root / "mcp.json").is_file():
+        types.append(EXEC_TYPE_MCP)
+    if any(getattr(server, "executables", ()) for server in servers):
+        types.append(EXEC_TYPE_BIN)
+    return tuple(types)
+
+
+def native_plugin_exec_types(plugin_root: Path) -> tuple[str, ...]:
     """Executable types a natively loaded plugin declares (the native gate's union).
 
-    *extra* adds types a caller derives from the plugin IR or manifest, so
-    every native path gates on one set.
+    The single source for every native path: install admission, lockfile
+    status, ``apm approve`` and ``apm policy explain`` all read this set.
     """
     import json
 
@@ -531,7 +594,7 @@ def native_plugin_exec_types(
 
     root = Path(plugin_root)
     found: dict[str, None] = dict.fromkeys(scan_package_executables(root, "", "").exec_types)
-    found.update(dict.fromkeys(extra))
+    found.update(dict.fromkeys(agent_plugin_exec_types(root)))
     found.update(dict.fromkeys(native_root_exec_types(root)))
     markers = {
         "hooks": EXEC_TYPE_HOOKS,
@@ -560,7 +623,15 @@ def native_plugin_exec_types(
 
 
 # Executable surfaces of a native plugin whose text may reference other files.
-_NATIVE_SURFACES = ("hooks", "bin", ".mcp.json", ".lsp.json", "lsp.json", *_PLUGIN_MANIFESTS)
+_NATIVE_SURFACES = (
+    "hooks",
+    "bin",
+    ".mcp.json",
+    ".lsp.json",
+    "lsp.json",
+    *_COMMAND_RUNNING_ROOTS,
+    *_PLUGIN_MANIFESTS,
+)
 _APM_OWNED_REFERENCE = re.compile(r"(?<![\w.-])(\.apm/[^\s\"']*|apm\.yml)(?![\w.-])")
 
 
@@ -631,7 +702,7 @@ def admit_native_plugin(
     plugin_root: Path,
     *,
     transitive: bool = False,
-    extra_types: tuple[str, ...] | list[str] = (),
+    one_off: bool = False,
 ) -> Admission:
     """Decide whether a natively loaded plugin may run, as one unit.
 
@@ -639,7 +710,11 @@ def admit_native_plugin(
     (``executables.allow.<pkg>.plugin``) to :func:`native_plugin_fingerprint`
     of *plugin_root* (the ``apm_modules`` source). *allow_executables* is an
     ``EffectiveExecMap``, an :class:`ExecTrustContext`, or ``None`` (gate off).
+    *one_off* is ``--trust-transitive-mcp`` for this run.
 
+    - transitive plugin with MCP servers, gate off:
+      decided by :func:`admit` rungs 3-4 (pin, one-off, else parked
+      ``untrusted-transitive``), as for a loose transitive server
     - gate off                             -> admitted
     - no declared executables and no pin   -> admitted, no pin needed
     - org / user / project deny            -> parked ``denied``
@@ -647,13 +722,32 @@ def admit_native_plugin(
       ``.apm/`` or ``apm.yml``             -> parked ``apm-owned-reference``
     - plugin pin matches                   -> admitted
     - plugin pin differs (any byte/mode)   -> parked ``definition-changed``
+    - transitive with MCP, not one-off     -> parked ``untrusted-transitive``
     - no pin, every declared type granted  -> admitted (legacy, warned)
     - otherwise                            -> parked ``unapproved-executables``
     """
     ctx = _trust_context(allow_executables)
-    if ctx is None or not ctx.gate_enabled:
+    gate_on = ctx is not None and ctx.gate_enabled
+    if not gate_on and not transitive:
         return Admission(True, None, LAYER_GATE_DISABLED)
-    exec_types = native_plugin_exec_types(plugin_root, extra_types)
+    exec_types = native_plugin_exec_types(plugin_root)
+    needs_trust = transitive and EXEC_TYPE_MCP in exec_types
+    if not gate_on:
+        if not needs_trust:
+            return Admission(True, None, LAYER_GATE_DISABLED)
+        try:
+            fingerprint: str | None = native_plugin_fingerprint(Path(plugin_root))
+        except (OSError, ValueError):
+            fingerprint = None
+        subject = TrustSubject(
+            package_keys,
+            PLUGIN_GRANT_KEY,
+            PLUGIN_ITEM,
+            fingerprint,
+            needs_transitive_trust=True,
+            exec_gated=False,
+        )
+        return admit(ctx, subject, one_off=one_off)
     pinned = plugin_pin(ctx, package_keys)
     if not exec_types and pinned is None:
         return Admission(True, None, LAYER_NOT_GATED)
@@ -673,18 +767,30 @@ def admit_native_plugin(
         except (OSError, ValueError):
             current = None
         if current is not None and current == pin:
-            return Admission(True, None, layer)
+            return Admission(True, None, layer, pin=pin)
         return Admission(False, REASON_DEFINITION_CHANGED, layer)
-    if transitive and EXEC_TYPE_MCP in exec_types:
+    if needs_trust and not one_off:
         # D2: a type-level grant never satisfies transitive MCP trust.
         return Admission(False, REASON_UNTRUSTED_TRANSITIVE, LAYER_DEFAULT_DENY)
     decisions = [_type_decision(ctx, package_keys, exec_type) for exec_type in exec_types]
     if decisions and all(decision.allowed for decision in decisions):
-        return Admission(True, None, decisions[0].deciding_layer)
-    return Admission(False, REASON_UNAPPROVED, LAYER_DEFAULT_DENY)
+        return Admission(True, None, decisions[0].deciding_layer, one_off=needs_trust)
+    missing = [t for t, decision in zip(exec_types, decisions, strict=True) if not decision.allowed]
+    # Name the gap only when some type is granted: the grant is incomplete.
+    detail = ", ".join(missing) if len(missing) < len(decisions) else None
+    return Admission(False, REASON_UNAPPROVED, LAYER_DEFAULT_DENY, detail=detail)
 
 
-def parked_plugin_message(package: str, reason: str, detail: str | None = None) -> str:
+def native_declaration(declaration: Any, plugin_root: Path) -> Any:
+    """Return *declaration* carrying the native gate's type set for *plugin_root*."""
+    from dataclasses import replace
+
+    return replace(declaration, native_exec_types=native_plugin_exec_types(plugin_root))
+
+
+def parked_plugin_message(
+    package: str, reason: str, detail: str | None = None, *, user_scope: bool = False
+) -> str:
     """Return the warning for a native plugin the trust owner parked."""
     if reason == REASON_APM_REFERENCE:
         return (
@@ -693,31 +799,103 @@ def parked_plugin_message(package: str, reason: str, detail: str | None = None) 
             "    Ask the publisher to move them out of .apm/ and apm.yml"
         )
     if reason == REASON_DENIED:
-        return f"Parked native plugin {package}: denied\n    Explain: apm policy explain {package}"
+        return (
+            f"Parked native plugin {package}: denied\n"
+            f"    Explain: {explain_command(package, user_scope=user_scope)}"
+        )
     if reason == REASON_UNTRUSTED_TRANSITIVE:
         return (
             f"Parked native plugin {package}: a transitive plugin with MCP servers needs "
             "a pinned approval; 'mcp: true' is not enough\n"
-            f"    Review: apm approve --pending  |  Pin: apm approve {package}"
+            f"    Pin: {approve_command(package, user_scope=user_scope)}  |  "
+            "This run only: --trust-transitive-mcp"
         )
     why = (
         "content changed since approval" if reason == REASON_DEFINITION_CHANGED else "not approved"
     )
+    if reason == REASON_UNAPPROVED and detail:
+        why = f"not approved (missing grant: {detail})"
     return (
         f"Parked native plugin {package}: {why}\n"
-        f"    Review: apm approve --pending  |  Re-approve: apm approve {package}"
+        f"    Review: {approve_command('--pending', user_scope=user_scope)}  |  "
+        f"Re-approve: {approve_command(package, user_scope=user_scope)}"
     )
 
 
-def hooks_package_admissible(allow_executables: Any, package_keys: tuple[str, ...]) -> bool:
-    """Return whether pinned hook items may admit some hook file of the package."""
+def hooks_package_admissible(
+    allow_executables: Any, package_keys: tuple[str, ...], package_info: Any
+) -> bool:
+    """Return whether pinned hook items admit some hook file of the package.
+
+    A package none of whose hook files matches its pin is not admissible, so
+    install retires the hooks it deployed earlier, as for a revoked approval.
+    """
     ctx = getattr(allow_executables, "trust_context", None)
     if ctx is None or not has_item_pins(ctx, package_keys, EXEC_TYPE_HOOKS):
         return False
-    return not any(
-        resolve_exec_decision(ctx, key, EXEC_TYPE_HOOKS).trust_state == TRUST_DENIED
-        for key in package_keys
+    # admit() applies the deny ladder first, so a denied package admits nothing.
+    return HookFileAdmission(ctx, package_keys, Path(package_info.install_path)).admits_any()
+
+
+@dataclass(frozen=True)
+class HookPinMismatch:
+    """A hook file the lockfile records as deployed that its approval no longer admits."""
+
+    package: str
+    item: str
+    reason: str
+
+    def describe(self) -> str:
+        why = (
+            "its definition changed since approval"
+            if self.reason == REASON_DEFINITION_CHANGED
+            else "it is not approved"
+        )
+        return (
+            f"{self.package}: hook file '{self.item}' is deployed per apm.lock.yaml but "
+            f"{why}; re-approve with 'apm approve {self.package}' or retire it with 'apm install'"
+        )
+
+
+def recorded_hook_pin_mismatches(
+    ctx: ExecTrustContext | Callable[[], ExecTrustContext | None] | None,
+    package_keys: tuple[str, ...],
+    install_path: Path,
+    *,
+    package: str,
+    recorded_status: str | None,
+    recorded_allowed: tuple[str, ...] = (),
+) -> list[HookPinMismatch]:
+    """Return the recorded-deployed hook files whose pinned approval no longer admits them.
+
+    ``apm install --frozen`` (before anything deploys) and ``apm audit --ci``
+    both ask this, so they reach one verdict (#4188). A deny is not reported
+    here: the deny ladder owns that verdict. *ctx* may be a provider; it is
+    called only for a package the lock records as deploying hook files.
+    """
+    from apm_cli.integration.hook_integrator import HookIntegrator
+
+    from .executables import TRUST_DEPLOYED
+
+    recorded_deployed = (
+        recorded_status in (None, TRUST_DEPLOYED) or EXEC_TYPE_HOOKS in recorded_allowed
     )
+    root = install_path.resolve()
+    hook_files = HookIntegrator().find_hook_files(root) if recorded_deployed else []
+    if not hook_files:
+        return []
+    if callable(ctx):
+        ctx = ctx()
+    if ctx is None or not ctx.gate_enabled or not has_item_pins(ctx, package_keys, EXEC_TYPE_HOOKS):
+        return []
+    mismatches: list[HookPinMismatch] = []
+    for hook_file in hook_files:
+        verdict = admit(ctx, hook_subject(package_keys, root, hook_file))
+        if not verdict.allowed and verdict.reason != REASON_DENIED:
+            mismatches.append(
+                HookPinMismatch(package, hook_item_key(root, hook_file), str(verdict.reason))
+            )
+    return mismatches
 
 
 def package_mcp_declarations(install_path: Path) -> list[Any]:
@@ -725,7 +903,7 @@ def package_mcp_declarations(install_path: Path) -> list[Any]:
     from apm_cli.models.dependency.mcp import MCPDependency
     from apm_cli.utils.yaml_io import load_yaml
 
-    manifest = install_path / "apm.yml"
+    manifest = manifest_file(install_path)
     try:
         data = load_yaml(manifest) if manifest.is_file() and not manifest.is_symlink() else {}
     except Exception:
@@ -866,6 +1044,22 @@ def _type_decision(ctx: ExecTrustContext, package_keys: tuple[str, ...], exec_ty
     return decisions[0]
 
 
+def package_grants_type(
+    ctx: ExecTrustContext, package_keys: tuple[str, ...], exec_type: str
+) -> bool:
+    """Whether any of a package's approval keys still grants *exec_type*."""
+    return bool(package_keys) and _type_decision(ctx, package_keys, exec_type).allowed
+
+
+def package_denies_type(
+    ctx: ExecTrustContext | None, package_keys: tuple[str, ...], exec_type: str
+) -> bool:
+    """Whether a deny rule, not a missing approval, withholds *exec_type* from the package."""
+    if ctx is None or not package_keys:
+        return False
+    return _type_decision(ctx, package_keys, exec_type).trust_state == TRUST_DENIED
+
+
 def package_type_verdicts(
     ctx: ExecTrustContext,
     package_keys: tuple[str, ...],
@@ -975,15 +1169,73 @@ def package_exec_status(
     native: bool = False,
 ) -> str | None:
     """Worst-case lockfile ``exec_status`` for a package's declared executables."""
+    return package_exec_decision(ctx, package_keys, install_path, exec_types, native=native)[0]
+
+
+def package_exec_decision(
+    ctx: ExecTrustContext | None,
+    package_keys: tuple[str, ...],
+    install_path: Path | None,
+    exec_types: tuple[str, ...] | list[str],
+    *,
+    native: bool = False,
+) -> tuple[str | None, tuple[str, ...]]:
+    """Return the worst-case ``exec_status`` and the declared types still allowed.
+
+    The allowed types are what a gated or denied row records as
+    ``exec_allowed_types`` (#3991): the worst case alone cannot show a partial
+    approval. They are empty when the gate is off or every type agrees.
+    """
     from .executables import more_severe_exec_status
 
     if ctx is None or not exec_types or not ctx.gate_enabled:
-        return None
+        return None, ()
     status: str | None = None
+    allowed: set[str] = set()
     verdicts = package_type_verdicts(ctx, package_keys, install_path, exec_types, native=native)
-    for verdict in verdicts.values():
+    for exec_type, verdict in verdicts.items():
         status = more_severe_exec_status(status, "deployed" if verdict.allowed else verdict.state)
-    return status
+        if verdict.allowed:
+            allowed.add(exec_type)
+    partial = allowed and len(allowed) < len(verdicts)
+    return status, tuple(sorted(allowed)) if partial else ()
+
+
+def package_withholding_layers(
+    ctx: ExecTrustContext | None,
+    package_keys: tuple[str, ...],
+    install_path: Path | None,
+    exec_types: tuple[str, ...] | list[str],
+    *,
+    native: bool = False,
+) -> tuple[str, ...]:
+    """Return the deciding layers that withhold this package's executables now.
+
+    Empty when the gate is off or every declared type is allowed. The layers
+    name where the decision came from (org policy, a local deny, or no
+    approval), which ``install --frozen`` and ``--dry-run`` report (#4043).
+    """
+    withheld = package_withheld_verdicts(ctx, package_keys, install_path, exec_types, native=native)
+    return tuple(sorted({verdict.layer for verdict in withheld.values()}))
+
+
+def package_withheld_verdicts(
+    ctx: ExecTrustContext | None,
+    package_keys: tuple[str, ...],
+    install_path: Path | None,
+    exec_types: tuple[str, ...] | list[str],
+    *,
+    native: bool = False,
+) -> dict[str, TypeVerdict]:
+    """Return the verdict of each declared type the gate withholds now, by type.
+
+    Empty when the gate is off or every declared type is allowed; ``--dry-run``
+    names each withheld surface with its verdict (#4454).
+    """
+    if ctx is None or not exec_types or not ctx.gate_enabled:
+        return {}
+    verdicts = package_type_verdicts(ctx, package_keys, install_path, exec_types, native=native)
+    return {exec_type: verdict for exec_type, verdict in verdicts.items() if not verdict.allowed}
 
 
 # -------------------------------------------------------------------
@@ -1232,6 +1484,21 @@ def native_plugin_pin(plugin_root: Path) -> PinnedItem:
         return PinnedItem(PLUGIN_GRANT_KEY, PLUGIN_ITEM, None, summary, str(exc))
 
 
+def approval_scan_dir(source_dir: Path, installed_dir: Path) -> Path:
+    """Return the directory ``apm approve`` scans for a local dependency.
+
+    A local dependency is the consumer's own source, so approve reads it
+    there. A native plugin has no ``apm.yml`` at its source; install gates the
+    normalized copy whose synthesized manifest carries the plugin's MCP
+    servers, so approve reads that same copy (#4154).
+    """
+    from apm_cli.core.scope import manifest_file
+
+    if not manifest_file(source_dir).is_file() and manifest_file(installed_dir).is_file():
+        return installed_dir
+    return source_dir
+
+
 def installed_content_matches_lock(locked_dependency: Any, package_dir: Path) -> bool:
     """Return whether installed bytes still match the locked content hash.
 
@@ -1243,14 +1510,18 @@ def installed_content_matches_lock(locked_dependency: Any, package_dir: Path) ->
     if locked_dependency is None or not expected or locked_dependency.is_local_source:
         return True
     from apm_cli.deps.carried_license import carried_license_paths
-    from apm_cli.utils.content_hash import compute_package_hash
+    from apm_cli.utils.content_hash import verify_package_hash
 
     excluded = carried_license_paths(tuple(locked_dependency.carried_licenses or ()))
     try:
-        actual = compute_package_hash(package_dir, exclude=excluded)
+        return verify_package_hash(
+            package_dir,
+            expected,
+            exclude=excluded,
+            framed=getattr(locked_dependency, "content_hash_framed", True),
+        )
     except (OSError, ValueError):
         return False
-    return actual == expected
 
 
 def record_pins(

@@ -1,0 +1,19 @@
+{
+  "issue": 3658,
+  "summary": "Traps install/audit disagreeing on denied transitives and cached policy (#3658, #3659); needs org policy server and policy cache expiry.",
+  "failure_modes": [
+    "cache",
+    "outcome",
+    "transaction"
+  ],
+  "properties": [
+    "cache.successful_reads_refresh_recency",
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_policy_cache_transitive_lifecycle.py::test_audit_ci_agrees_with_install_on_denied_transitive",
+    "tests/integration/test_policy_cache_transitive_lifecycle.py::test_audit_no_cache_fetches_fresh_auto_discovered_policy",
+    "tests/integration/test_policy_cache_transitive_lifecycle.py::test_transitive_denial_install_chain_is_atomic"
+  ]
+}

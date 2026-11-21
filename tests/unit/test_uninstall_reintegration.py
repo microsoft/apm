@@ -9,9 +9,11 @@ from pathlib import Path
 
 import pytest  # noqa: F401
 
+from apm_cli.install.deployed_paths import skill_bundle_file_entries
 from apm_cli.integration import AgentIntegrator, PromptIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import (
     APMPackage,
     GitReferenceType,
@@ -20,6 +22,18 @@ from apm_cli.models.apm_package import (
     PackageType,
     ResolvedReference,
 )
+from tests.utils.deployment_evidence import receipted_evidence
+
+
+def _sync(integrator, target: str, package, project_root: Path, managed: set[str]) -> dict:
+    """Uninstall-sync *managed* as on the machine that deployed it (#3701)."""
+    return integrator.sync_for_target(
+        KNOWN_TARGETS[target],
+        package,
+        project_root,
+        managed_files=managed,
+        evidence=receipted_evidence(project_root),
+    )
 
 
 def _make_package(
@@ -122,7 +136,7 @@ class TestUninstallPreservesOtherPackagePrompts:
             ".github/prompts/lint.prompt.md",
         }
         dummy_pkg = APMPackage(name="root", version="0.0.0")
-        prompt_int.sync_integration(dummy_pkg, project_root, managed_files=managed_files)
+        _sync(prompt_int, "copilot", dummy_pkg, project_root, managed_files)
 
         # Everything removed
         assert not (prompts_dir / "review.prompt.md").exists()
@@ -175,7 +189,7 @@ class TestUninstallPreservesOtherPackageAgents:
             ".github/agents/planner.agent.md",
         }
         dummy_pkg = APMPackage(name="root", version="0.0.0")
-        agent_int.sync_integration(dummy_pkg, project_root, managed_files=managed_files)
+        _sync(agent_int, "copilot", dummy_pkg, project_root, managed_files)
 
         assert not (agents_dir / "security.agent.md").exists()
         assert not (agents_dir / "planner.agent.md").exists()
@@ -252,7 +266,16 @@ class TestUninstallPreservesOtherPackageSkills:
         )
         root_pkg = APMPackage.from_apm_yml(remaining_manifest)
 
-        skill_int.sync_integration(root_pkg, project_root, managed_files={".agents/skills/skill-a"})
+        skill_int.sync_integration(
+            root_pkg,
+            project_root,
+            # The lockfile records the directory and every bundle member (#3701).
+            managed_files={
+                ".agents/skills/skill-a",
+                *skill_bundle_file_entries(skills_dir / "skill-a", project_root, targets=[]),
+            },
+            evidence=receipted_evidence(project_root),
+        )
 
         # skill-a removed, skill-b preserved
         assert not (skills_dir / "skill-a").exists()
@@ -358,9 +381,9 @@ class TestUninstallLastPackageLeavesCleanDirs:
             ".claude/commands/guide.md",
         }
         dummy_pkg = APMPackage(name="root", version="0.0.0")
-        prompt_int.sync_integration(dummy_pkg, project_root, managed_files=managed_files)
-        agent_int.sync_integration(dummy_pkg, project_root, managed_files=managed_files)
-        cmd_int.sync_integration(dummy_pkg, project_root, managed_files=managed_files)
+        _sync(prompt_int, "copilot", dummy_pkg, project_root, managed_files)
+        _sync(agent_int, "copilot", dummy_pkg, project_root, managed_files)
+        _sync(cmd_int, "claude", dummy_pkg, project_root, managed_files)
 
         assert not (prompts_dir / "guide.prompt.md").exists()
         assert not (agents_dir / "helper.agent.md").exists()

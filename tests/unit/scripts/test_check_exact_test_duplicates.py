@@ -11,12 +11,11 @@ RATCHET_TEST_SCOPE = "fixture"
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "check_exact_test_duplicates.py"
-sys.path.insert(0, str(SCRIPT.parent))
-from check_exact_test_duplicates import ALGORITHM_DESCRIPTION  # noqa: E402
+ALGORITHM_DOC = json.loads(
+    (REPO_ROOT / "tests" / "quality" / "exact_test_duplicates.json").read_text(encoding="utf-8")
+)["algorithm_doc"]
 
-BODY = b"def test_value():\n    assert 1 == 1\n"
-CLASS_A = b"class TestThing:\n    def test_value(self):\n        assert 'a' == 'a'\n"
-CLASS_B = b"class TestThing:\n    def test_value(self):\n        assert 'b' == 'b'\n"
+BODY = "def test_value():\n    assert 1 == 1\n"
 
 
 def _run(root: Path, baseline: Path, *extra: str) -> subprocess.CompletedProcess[str]:
@@ -38,35 +37,28 @@ def _run(root: Path, baseline: Path, *extra: str) -> subprocess.CompletedProcess
 
 
 def _payload(
-    bodies: list[list[str]] | None = None,
-    names: list[dict[str, object]] | None = None,
+    bodies: dict[str, list[str]] | None = None,
+    names: dict[str, list[str]] | None = None,
 ) -> dict[str, object]:
     return {
-        "algorithm": "ast-body-v2",
-        "algorithm_description": ALGORITHM_DESCRIPTION,
-        "body_duplicate_groups": bodies or [],
-        "name_collision_groups": names or [],
-        "schema_version": 3,
+        "algorithm": "ast-body-v1",
+        "algorithm_doc": ALGORITHM_DOC,
+        "duplicate_bodies": bodies or {},
+        "duplicate_names": names or {},
+        "schema_version": 2,
         "scope": ["tests/**/test_*.py", "tests/**/*_test.py"],
     }
 
 
-def _write_baseline(
-    path: Path,
-    bodies: list[list[str]] | None = None,
-    names: list[dict[str, object]] | None = None,
-) -> None:
+def _write_baseline(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(_payload(bodies, names), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _write_bytes(root: Path, name: str, content: bytes) -> Path:
+def _write(root: Path, name: str, content: str) -> Path:
     path = root / "tests" / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(content)
+    path.write_text(content, encoding="utf-8")
     return path
 
 
@@ -75,265 +67,208 @@ def _track_tests(root: Path) -> None:
     subprocess.run(["git", "-C", str(root), "add", "tests"], check=True)
 
 
-def _repo(tmp_path: Path, files: dict[str, bytes]) -> Path:
+def test_seeded_duplicate_body_fails_naming_file_and_fix(tmp_path: Path) -> None:
     root = tmp_path / "repo"
-    for name, content in files.items():
-        _write_bytes(root, name, content)
-    _track_tests(root)
-    return root
-
-
-def test_seeded_duplicate_body_fails_naming_tests_and_fix(tmp_path: Path) -> None:
-    root = _repo(
-        tmp_path,
-        {
-            "test_a.py": BODY,
-            "test_b.py": b"def test_other():\n    assert 2 == 2\n\n\n"
-            b"def test_copy():\n    assert 1 == 1\n",
-        },
+    _write(root, "test_a.py", BODY)
+    _write(
+        root,
+        "test_b.py",
+        'def test_other_name():\n    """Docstrings and comments are ignored."""\n'
+        "    # comment\n    assert 1 == 1\n",
     )
+    _track_tests(root)
     baseline = root / "baseline.json"
-    _write_baseline(baseline)
+    _write_baseline(baseline, _payload())
 
     result = _run(root, baseline)
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert "duplicate test body ast-body-v2:" in result.stderr
-    assert "  - tests/test_a.py::test_value (new)" in result.stderr
-    assert "  - tests/test_b.py::test_copy (new)" in result.stderr
-    assert "test_other" not in result.stderr
-    assert "Fix: delete the redundant copy" in result.stderr
-
-
-def test_duplicate_bodies_inside_one_file_fail(tmp_path: Path) -> None:
-    root = _repo(
-        tmp_path,
-        {
-            "test_a.py": CLASS_A
-            + b"\n\nclass TestCopy:\n    def test_again(self):\n        assert 'a' == 'a'\n"
-        },
+    assert "[x] tests/test_a.py: test test_value duplicates the body (ast-body-v1 " in (
+        result.stderr
     )
+    assert "[x] tests/test_b.py: test test_other_name duplicates the body" in result.stderr
+    assert "Fix: delete the copy, or parametrize/differentiate it" in result.stderr
+
+
+def test_different_literal_is_not_a_duplicate(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _write(root, "test_a.py", BODY)
+    _write(root, "test_b.py", "def test_value():\n    assert 1 == 2\n")
+    _track_tests(root)
     baseline = root / "baseline.json"
-    _write_baseline(baseline)
-
-    result = _run(root, baseline)
-
-    assert result.returncode == 1
-    assert "  - tests/test_a.py::TestCopy::test_again (new)" in result.stderr
-
-
-def test_formatting_docstrings_and_comments_are_normalized(tmp_path: Path) -> None:
-    root = _repo(
-        tmp_path,
-        {
-            "test_lf.py": BODY,
-            "test_crlf.py": b'def test_other():\r\n    """Doc."""\r\n'
-            b"    # comment\r\n    assert 1  ==  1\r\n",
-        },
-    )
-    baseline = root / "baseline.json"
-    _write_baseline(baseline)
-
-    result = _run(root, baseline)
-
-    assert result.returncode == 1
-    assert "tests/test_crlf.py::test_other (new)" in result.stderr
-
-
-@pytest.mark.parametrize(
-    "other",
-    [
-        b"def test_value():\n    assert 1 == 2\n",
-        b"import pytest\n\n@pytest.mark.parametrize('x', [2])\n"
-        b"def test_value(x):\n    assert 1 == 1\n",
-        b"def test_value(tmp_path):\n    assert 1 == 1\n",
-        b"def helper_value():\n    assert 1 == 1\n",
-    ],
-)
-def test_distinct_tests_pass(tmp_path: Path, other: bytes) -> None:
-    root = _repo(tmp_path, {"test_a.py": BODY, "test_b.py": other})
-    baseline = root / "baseline.json"
-    _write_baseline(baseline)
+    _write_baseline(baseline, _payload())
 
     result = _run(root, baseline)
 
     assert result.returncode == 0, result.stderr
-    assert "0 allowed body duplicate group(s)" in result.stdout
 
 
-def test_same_class_test_name_in_one_directory_fails(tmp_path: Path) -> None:
-    root = _repo(tmp_path, {"test_a.py": CLASS_A, "test_b.py": CLASS_B})
+def test_class_name_reused_across_files_fails(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _write(root, "test_a.py", "class TestX:\n    def test_y(self):\n        assert 1\n")
+    _write(root, "test_b.py", "class TestX:\n    def test_y(self):\n        assert 2\n")
+    _track_tests(root)
     baseline = root / "baseline.json"
-    _write_baseline(baseline)
+    _write_baseline(baseline, _payload(names={"tests/test_a.py": ["TestX::test_y"]}))
 
     result = _run(root, baseline)
 
     assert result.returncode == 1
     assert (
-        "test name tests/::TestThing::test_value is defined in more than one file of one directory"
+        "[x] tests/test_b.py: test TestX::test_y reuses a Class::name already defined "
+        "in tests/test_a.py. Fix: rename the class or test"
     ) in result.stderr
-    assert "  - tests/test_a.py (new)" in result.stderr
-    assert "  - tests/test_b.py (new)" in result.stderr
-    assert "Fix: rename the new class or test" in result.stderr
+    assert "tests/test_a.py: test" not in result.stderr
 
 
-def test_baselined_groups_pass_and_report_counts(tmp_path: Path) -> None:
-    root = _repo(
-        tmp_path,
-        {"test_a.py": BODY, "test_b.py": BODY, "test_c.py": CLASS_A, "test_d.py": CLASS_B},
-    )
+PAIR = {"tests/test_a.py": ["test_value"], "tests/test_b.py": ["test_value"]}
+
+
+def test_third_copy_exceeds_baselined_pair(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    for name in ("test_a.py", "test_b.py", "test_c.py"):
+        _write(root, name, BODY)
+    _track_tests(root)
     baseline = root / "baseline.json"
-    _write_baseline(
-        baseline,
-        [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]],
-        [
-            {
-                "name": "tests/::TestThing::test_value",
-                "paths": ["tests/test_c.py", "tests/test_d.py"],
-            }
-        ],
-    )
-
-    result = _run(root, baseline)
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == (
-        "[+] exact test duplicate ratchet clean: 4 files, 4 tests, "
-        "1 allowed body duplicate group(s), 1 allowed name collision group(s)\n"
-    )
-
-
-def test_tandem_edit_of_baselined_group_passes(tmp_path: Path) -> None:
-    edited = b"def test_value():\n    assert 3 == 3\n"
-    root = _repo(tmp_path, {"test_a.py": edited, "test_b.py": edited})
-    baseline = root / "baseline.json"
-    _write_baseline(baseline, [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]])
-
-    result = _run(root, baseline)
-
-    assert result.returncode == 0, result.stderr
-
-
-def test_third_copy_exceeds_pair_baseline(tmp_path: Path) -> None:
-    root = _repo(tmp_path, {"test_a.py": BODY, "test_b.py": BODY, "test_c.py": BODY})
-    baseline = root / "baseline.json"
-    _write_baseline(baseline, [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]])
+    _write_baseline(baseline, _payload(bodies=PAIR))
 
     result = _run(root, baseline)
 
     assert result.returncode == 1
-    assert "  - tests/test_a.py::test_value\n" in result.stderr
-    assert "  - tests/test_c.py::test_value (new)" in result.stderr
+    assert "[x] tests/test_c.py: test test_value duplicates the body" in result.stderr
+    assert "of tests/test_a.py::test_value, tests/test_b.py::test_value" in result.stderr
+    assert "[x] tests/test_a.py" not in result.stderr
 
 
-def test_merging_two_baselined_groups_fails(tmp_path: Path) -> None:
-    root = _repo(
-        tmp_path,
-        {"test_a.py": BODY, "test_b.py": BODY, "test_c.py": BODY, "test_d.py": BODY},
-    )
+def test_lockstep_edit_of_baselined_pair_passes(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    edited = "def test_value():\n    assert 2 == 2\n"
+    for name in ("test_a.py", "test_b.py"):
+        _write(root, name, edited)
+    _track_tests(root)
     baseline = root / "baseline.json"
-    _write_baseline(
-        baseline,
-        [
-            ["tests/test_a.py::test_value", "tests/test_b.py::test_value"],
-            ["tests/test_c.py::test_value", "tests/test_d.py::test_value"],
-        ],
-    )
+    _write_baseline(baseline, _payload(bodies=PAIR))
 
     result = _run(root, baseline)
 
-    assert result.returncode == 1
-    assert "is new or grew" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert "[i]" not in result.stdout
 
 
 def test_update_refuses_growth_without_writing(tmp_path: Path) -> None:
-    root = _repo(tmp_path, {"test_a.py": BODY, "test_b.py": BODY})
+    root = tmp_path / "repo"
+    _write(root, "test_a.py", BODY)
+    _write(root, "test_b.py", BODY)
+    _track_tests(root)
     baseline = root / "baseline.json"
-    _write_baseline(baseline)
+    _write_baseline(baseline, _payload())
     before = baseline.read_bytes()
 
     result = _run(root, baseline, "--update-baseline")
 
     assert result.returncode == 1
-    assert "refusing to update exact-duplicate baseline with new debt" in result.stderr
+    assert "refusing to update test-duplicate baseline with new duplicates" in result.stderr
     assert baseline.read_bytes() == before
 
 
-def test_reduction_requires_baseline_tightening(tmp_path: Path) -> None:
-    root = _repo(tmp_path, {"test_a.py": BODY, "test_c.py": CLASS_A})
+def test_stale_entries_are_info_and_update_prunes_them(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _write(root, "test_a.py", BODY)
+    _write(root, "test_b.py", BODY)
+    _track_tests(root)
     baseline = root / "baseline.json"
     _write_baseline(
         baseline,
-        [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]],
-        [
-            {
-                "name": "tests/::TestThing::test_value",
-                "paths": ["tests/test_c.py", "tests/test_d.py"],
-            }
-        ],
+        _payload(
+            bodies={**PAIR, "tests/test_gone.py": ["test_value"]},
+            names={"tests/test_gone.py": ["TestGone::test_value"]},
+        ),
     )
 
     stale = _run(root, baseline)
     updated = _run(root, baseline, "--update-baseline")
 
-    assert stale.returncode == 1
-    assert "body duplicate group reduced:" in stale.stderr
-    assert "name collision group tests/::TestThing::test_value reduced" in stale.stderr
+    assert stale.returncode == 0
+    assert stale.stderr == ""
     assert (
-        "uv run --frozen python scripts/check_exact_test_duplicates.py --update-baseline"
-    ) in stale.stderr
+        "[i] stale test-duplicate baseline entry (no longer duplicated): "
+        "duplicate_bodies tests/test_gone.py::test_value"
+    ) in stale.stdout
+    assert "duplicate_names tests/test_gone.py::TestGone::test_value" in stale.stdout
     assert updated.returncode == 0
     assert (
-        "[+] updated exact-duplicate baseline: 1 -> 0 body group(s), 1 -> 0 name group(s)"
-    ) in updated.stdout
-    assert json.loads(baseline.read_text(encoding="utf-8")) == _payload()
+        "[+] updated test-duplicate baseline: removed 2 stale and re-keyed 0 moved entries"
+        in updated.stdout
+    )
+    assert json.loads(baseline.read_text(encoding="utf-8")) == _payload(bodies=PAIR)
+
+
+def test_moved_baselined_duplicate_is_rekeyed_not_new(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    named = "class TestX:\n    def test_value(self):\n        assert 1 == 1\n"
+    _write(root, "test_a.py", named)
+    _write(root, "integration/test_b.py", named)
+    _track_tests(root)
+    baseline = root / "baseline.json"
+    _write_baseline(
+        baseline,
+        _payload(
+            bodies={
+                "tests/test_a.py": ["TestX::test_value"],
+                "tests/test_b.py": ["TestX::test_value"],
+            },
+            names={
+                "tests/test_a.py": ["TestX::test_value"],
+                "tests/test_b.py": ["TestX::test_value"],
+            },
+        ),
+    )
+
+    moved = _run(root, baseline)
+    updated = _run(root, baseline, "--update-baseline")
+
+    assert moved.returncode == 0, moved.stderr
+    assert (
+        "[i] moved test-duplicate baseline entry: duplicate_bodies tests/test_b.py::TestX::"
+        "test_value -> duplicate_bodies tests/integration/test_b.py::TestX::test_value"
+    ) in moved.stdout
+    assert updated.returncode == 0
+    rekeyed = {
+        "tests/integration/test_b.py": ["TestX::test_value"],
+        "tests/test_a.py": ["TestX::test_value"],
+    }
+    assert json.loads(baseline.read_text(encoding="utf-8")) == _payload(
+        bodies=rekeyed, names=rekeyed
+    )
 
 
 @pytest.mark.parametrize(
-    "mutate",
+    "mutation",
     [
-        lambda payload: payload.update(body_duplicate_groups=[["b::t", "a::t"]]),
-        lambda payload: payload.update(body_duplicate_groups=[["a::t", "b::t"], ["a::t", "c::t"]]),
-        lambda payload: payload.update(
-            name_collision_groups=[{"name": "a/::T::t", "paths": ["a/x"]}]
-        ),
-        lambda payload: payload.update(
-            name_collision_groups=[{"name": "a/::T::t", "paths": ["a/x", "b/y"]}]
-        ),
-        lambda payload: payload.update(algorithm_description="anything"),
-        lambda payload: payload.update(algorithm="ast-body-v1", schema_version=2),
+        {"duplicate_bodies": {"tests/test_a.py": {"test_value": "abc"}}},
+        {"duplicate_bodies": {"tests/test_a.py": []}},
+        {"duplicate_names": {"tests/test_a.py": ["b::c", "a::c"]}},
+        {"algorithm": "sha256-bytes-v1"},
+        {"algorithm_doc": "undocumented"},
+        {"schema_version": 1},
     ],
 )
-def test_malformed_baseline_fails_closed(tmp_path: Path, mutate: object) -> None:
+def test_malformed_baseline_fails_closed(tmp_path: Path, mutation: dict[str, object]) -> None:
     root = tmp_path / "repo"
     baseline = root / "baseline.json"
-    payload = _payload()
-    mutate(payload)  # type: ignore[operator]
-    root.mkdir()
-    baseline.write_text(json.dumps(payload), encoding="utf-8")
+    _write_baseline(baseline, {**_payload(), **mutation})
 
     result = _run(root, baseline)
 
     assert result.returncode == 2
     assert result.stdout == ""
-    assert "[x] invalid exact-duplicate baseline" in result.stderr
-
-
-def test_unparseable_test_module_fails_closed(tmp_path: Path) -> None:
-    root = _repo(tmp_path, {"test_a.py": b"def test_value(:\n"})
-    baseline = root / "baseline.json"
-    _write_baseline(baseline)
-
-    result = _run(root, baseline)
-
-    assert result.returncode == 2
-    assert "[x] exact-duplicate scan failed" in result.stderr
+    assert "[x] invalid test-duplicate baseline" in result.stderr
 
 
 def test_tracked_symlink_inside_root_fails_closed(tmp_path: Path) -> None:
     root = tmp_path / "repo"
-    target = _write_bytes(root, "fixture.py", BODY)
+    target = _write(root, "fixture.py", BODY)
     link = root / "tests" / "test_link.py"
     try:
         link.symlink_to(target.name)
@@ -341,7 +276,7 @@ def test_tracked_symlink_inside_root_fails_closed(tmp_path: Path) -> None:
         pytest.skip(f"symlink creation unavailable: {error}")
     _track_tests(root)
     baseline = root / "baseline.json"
-    _write_baseline(baseline)
+    _write_baseline(baseline, _payload())
 
     result = _run(root, baseline)
 
@@ -354,7 +289,7 @@ def test_symlink_outside_root_fails_containment_check(tmp_path: Path) -> None:
     tests = root / "tests"
     tests.mkdir(parents=True)
     outside = tmp_path / "outside.py"
-    outside.write_bytes(BODY)
+    outside.write_text(BODY, encoding="utf-8")
     link = tests / "test_escape.py"
     try:
         link.symlink_to(outside)
@@ -362,7 +297,7 @@ def test_symlink_outside_root_fails_containment_check(tmp_path: Path) -> None:
         pytest.skip(f"symlink creation unavailable: {error}")
     _track_tests(root)
     baseline = root / "baseline.json"
-    _write_baseline(baseline)
+    _write_baseline(baseline, _payload())
 
     result = _run(root, baseline)
 
@@ -370,46 +305,51 @@ def test_symlink_outside_root_fails_containment_check(tmp_path: Path) -> None:
     assert "tracked Python path resolves outside repository" in result.stderr
 
 
-def test_worktree_edits_are_scanned_without_staging(tmp_path: Path) -> None:
-    root = _repo(
-        tmp_path, {"test_a.py": BODY, "test_b.py": b"def test_value():\n    assert 2 == 2\n"}
-    )
-    (root / "tests" / "test_b.py").write_bytes(BODY)
+def test_worktree_edits_are_hashed_without_staging(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _write(root, "test_a.py", BODY)
+    second = _write(root, "test_b.py", "def test_value():\n    assert 2 == 2\n")
+    _track_tests(root)
+    second.write_text(BODY, encoding="utf-8")
     baseline = root / "baseline.json"
-    _write_baseline(baseline)
+    _write_baseline(baseline, _payload())
 
     result = _run(root, baseline)
 
     assert result.returncode == 1
-    assert "duplicate test body" in result.stderr
+    assert "duplicates the body" in result.stderr
 
 
 def test_untracked_duplicate_is_out_of_scope(tmp_path: Path) -> None:
-    root = _repo(tmp_path, {"test_tracked.py": BODY})
-    _write_bytes(root, "test_untracked.py", BODY)
+    root = tmp_path / "repo"
+    _write(root, "test_tracked.py", BODY)
+    _track_tests(root)
+    _write(root, "test_untracked.py", BODY)
     baseline = root / "baseline.json"
-    _write_baseline(baseline)
+    _write_baseline(baseline, _payload())
 
     result = _run(root, baseline)
 
     assert result.returncode == 0
-    assert "1 files, 1 tests, 0 allowed body duplicate group(s)" in result.stdout
+    assert "1 files, 1 tests, 0 duplicate body group(s)" in result.stdout
 
 
 def test_provisional_baseline_requires_explicit_allow(tmp_path: Path) -> None:
-    root = _repo(tmp_path, {"test_tracked.py": BODY})
+    root = tmp_path / "repo"
+    _write(root, "test_tracked.py", BODY)
+    _track_tests(root)
     baseline = root / "baseline.json"
     payload = _payload()
     payload["provisional"] = {
         "basis_commit": "abc123",
         "required_follow_up": "remeasure",
     }
-    baseline.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_baseline(baseline, payload)
 
     final = _run(root, baseline)
     provisional = _run(root, baseline, "--allow-provisional")
     del payload["provisional"]
-    baseline.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_baseline(baseline, payload)
     finalized = _run(root, baseline)
 
     assert final.returncode == 2
@@ -420,121 +360,87 @@ def test_provisional_baseline_requires_explicit_allow(tmp_path: Path) -> None:
     assert finalized.stderr == ""
 
 
-def test_same_class_test_name_in_other_directories_passes(tmp_path: Path) -> None:
-    root = _repo(tmp_path, {"test_a.py": CLASS_A, "unit/test_b.py": CLASS_B})
-    baseline = root / "baseline.json"
-    _write_baseline(baseline)
+def test_equal_copy_report_lists_only_d5_equal_copies(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    fixture = "import pytest\n\n@pytest.fixture\ndef value():\n    return {}\n\n"
+    body = "def test_value(value):\n    assert value == {}\n"
+    _write(root, "unit/test_a.py", fixture.replace("{}", "1") + body.replace("{}", "1"))
+    _write(root, "unit/test_b.py", fixture.replace("{}", "1") + body.replace("{}", "1"))
+    _write(root, "unit/test_c.py", fixture.replace("{}", "2") + body.replace("{}", "1"))
+    _write(
+        root,
+        "unit/test_d.py",
+        fixture.replace("{}", "1") + "@pytest.mark.slow\n" + body.replace("{}", "1"),
+    )
+    _write(root, "integration/test_e.py", fixture.replace("{}", "1") + body.replace("{}", "1"))
+    _track_tests(root)
 
-    result = _run(root, baseline)
+    result = _run(root, root / "unused.json", "--report-equal-copies")
 
     assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "[i] equal copies of tests/unit/test_a.py::test_value: tests/unit/test_b.py::test_value",
+        "[i] equal-copy report (D5): 1 group(s), 1 deletable copy(ies); report only",
+    ]
 
 
 @pytest.mark.parametrize(
     ("first", "second"),
     [
-        (
-            b"class TestCopilot:\n    target = 'copilot'\n\n"
-            b"    def test_value(self):\n        assert self.target\n",
-            b"class TestClaude:\n    target = 'claude'\n\n"
-            b"    def test_value(self):\n        assert self.target\n",
+        pytest.param(
+            "class TestX:\n    def _make(self):\n        return 1\n\n"
+            "    def test_value(self):\n        assert self._make() == 1\n",
+            "class TestX:\n    def _make(self):\n        return 2\n\n"
+            "    def test_value(self):\n        assert self._make() == 1\n",
+            id="class-helper",
         ),
-        (
-            b"TARGET = 'copilot'\n\ndef test_value():\n    assert TARGET\n",
-            b"TARGET = 'claude'\n\ndef test_value():\n    assert TARGET\n",
+        pytest.param(
+            "import pytest\n\n@pytest.fixture\ndef env():\n    return 1\n\n"
+            "@pytest.mark.usefixtures('env')\ndef test_value():\n    assert True\n",
+            "import pytest\n\n@pytest.fixture\ndef env():\n    return 2\n\n"
+            "@pytest.mark.usefixtures('env')\ndef test_value():\n    assert True\n",
+            id="usefixtures",
+        ),
+        pytest.param(
+            "from pathlib import Path\n\nHERE = Path(__file__).parent\n\n"
+            "def test_value():\n    assert HERE.exists()\n",
+            "from pathlib import Path\n\nHERE = Path(__file__).parent\n\n"
+            "def test_value():\n    assert HERE.exists()\n",
+            id="file-location",
         ),
     ],
-    ids=["class-level-target", "module-level-constant"],
 )
-def test_context_assignments_distinguish_identical_bodies(
-    tmp_path: Path, first: bytes, second: bytes
+def test_equal_copy_report_rejects_context_differences(
+    tmp_path: Path, first: str, second: str
 ) -> None:
-    root = _repo(tmp_path, {"test_a.py": first, "test_b.py": second})
-    baseline = root / "baseline.json"
-    _write_baseline(baseline)
+    root = tmp_path / "repo"
+    _write(root, "unit/test_a.py", first)
+    _write(root, "unit/test_b.py", second)
+    _track_tests(root)
 
-    result = _run(root, baseline)
+    result = _run(root, root / "unused.json", "--report-equal-copies")
 
     assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "[i] equal-copy report (D5): 0 group(s), 0 deletable copy(ies); report only"
+    ]
 
 
-def test_renamed_locals_are_still_duplicates(tmp_path: Path) -> None:
-    root = _repo(
-        tmp_path,
-        {
-            "test_a.py": b"def test_value(tmp_path):\n    total = [n for n in range(3)]\n"
-            b"    for item in total:\n        assert item >= 0\n",
-            "test_b.py": b"def test_other(tmp_path):\n    values = [k for k in range(3)]\n"
-            b"    for entry in values:\n        assert entry >= 0\n",
-        },
-    )
+def test_unique_but_present_test_is_not_a_move_source(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    named = "class TestX:\n    def test_value(self):\n        assert 1 == 1\n"
+    _write(root, "test_a.py", named.replace("1 == 1", "2 == 2"))
+    _write(root, "test_b.py", named)
+    _write(root, "integration/test_c.py", named)
+    _track_tests(root)
     baseline = root / "baseline.json"
-    _write_baseline(baseline)
+    pair = {"tests/test_a.py": ["TestX::test_value"], "tests/test_b.py": ["TestX::test_value"]}
+    _write_baseline(baseline, _payload(bodies=pair))
 
     result = _run(root, baseline)
 
     assert result.returncode == 1
-    assert "tests/test_b.py::test_other (new)" in result.stderr
-
-
-def test_pure_move_of_baselined_group_needs_only_tightening(tmp_path: Path) -> None:
-    root = _repo(tmp_path, {"test_c.py": BODY, "test_d.py": BODY})
-    baseline = root / "baseline.json"
-    _write_baseline(baseline, [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]])
-
-    moved = _run(root, baseline)
-    updated = _run(root, baseline, "--update-baseline")
-
-    assert moved.returncode == 1
-    assert "is new or grew" not in moved.stderr
-    assert "body duplicate group moved or removed:" in moved.stderr
-    assert updated.returncode == 0, updated.stderr
-    assert json.loads(baseline.read_text(encoding="utf-8")) == _payload(
-        [["tests/test_c.py::test_value", "tests/test_d.py::test_value"]]
+    assert "[x] tests/integration/test_c.py: test TestX::test_value duplicates the body" in (
+        result.stderr
     )
-
-
-def test_move_that_grows_the_group_fails_with_hint(tmp_path: Path) -> None:
-    root = _repo(tmp_path, {"test_c.py": BODY, "test_d.py": BODY, "test_e.py": BODY})
-    baseline = root / "baseline.json"
-    _write_baseline(baseline, [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]])
-
-    result = _run(root, baseline)
-
-    assert result.returncode == 1
-    assert "is new or grew" in result.stderr
-    assert "If you only moved or renamed baselined copies" in result.stderr
-
-
-def test_baseline_growth_against_merge_base_fails(tmp_path: Path) -> None:
-    root = _repo(tmp_path, {"test_a.py": BODY, "test_b.py": BODY})
-    baseline = root / "baseline.json"
-    base = root / "base.json"
-    _write_baseline(baseline, [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]])
-    _write_baseline(base)
-
-    result = _run(root, baseline, "--base-baseline", str(base))
-
-    assert result.returncode == 1
-    assert "baseline grew relative to the merge-base" in result.stderr
-    assert "may only shrink" in result.stderr
-
-
-def test_baseline_shrink_or_algorithm_change_against_merge_base_passes(
-    tmp_path: Path,
-) -> None:
-    root = _repo(tmp_path, {"test_a.py": BODY, "test_b.py": BODY})
-    group = [["tests/test_a.py::test_value", "tests/test_b.py::test_value"]]
-    baseline = root / "baseline.json"
-    base = root / "base.json"
-    _write_baseline(baseline, group)
-    _write_baseline(base, [*group, ["tests/test_x.py::test_x", "tests/test_y.py::test_y"]])
-    old = root / "old.json"
-    old.write_text(json.dumps({"algorithm": "sha256-bytes-v1"}), encoding="utf-8")
-
-    shrunk = _run(root, baseline, "--base-baseline", str(base))
-    reseeded = _run(root, baseline, "--base-baseline", str(old))
-
-    assert shrunk.returncode == 0, shrunk.stderr
-    assert reseeded.returncode == 0, reseeded.stderr
-    assert "monotonicity starts from this baseline" in reseeded.stdout
+    assert "moved" not in result.stdout

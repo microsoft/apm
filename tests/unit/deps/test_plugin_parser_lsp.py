@@ -11,6 +11,7 @@ import json
 import logging
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from apm_cli.deps.plugin_parser import (
@@ -19,6 +20,8 @@ from apm_cli.deps.plugin_parser import (
     _read_lsp_json,
     synthesize_apm_yml_from_plugin,
 )
+
+pytestmark = pytest.mark.component
 
 # ===========================================================================
 # _read_lsp_json
@@ -30,15 +33,19 @@ class TestReadLspJson:
         lsp_file = tmp_path / ".lsp.json"
         lsp_file.write_text(json.dumps({"pyright": {"command": "pyright-langserver"}}))
 
-        result = _read_lsp_json(lsp_file, logging.getLogger("test"))
+        with caplog.at_level(logging.WARNING, logger="test"):
+            result = _read_lsp_json(lsp_file, logging.getLogger("test"))
         assert "pyright" in result
+        assert not caplog.records
 
     def test_returns_empty_on_invalid_json(self, tmp_path, caplog):
         lsp_file = tmp_path / ".lsp.json"
         lsp_file.write_text("not valid json{")
 
-        result = _read_lsp_json(lsp_file, logging.getLogger("test"))
+        with caplog.at_level(logging.WARNING, logger="test"):
+            result = _read_lsp_json(lsp_file, logging.getLogger("test"))
         assert result == {}
+        assert "Failed to read LSP config" in caplog.text
 
     def test_returns_empty_on_non_dict_json(self, tmp_path):
         lsp_file = tmp_path / ".lsp.json"

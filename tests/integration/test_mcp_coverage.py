@@ -139,8 +139,8 @@ class TestHandleRegistryNetworkError:
 
         assert result is False
 
-    def test_handle_error_with_rich_console(self):
-        """Network error message uses Rich console when available."""
+    def test_handle_error_with_rich_console(self, capsys):
+        """Network error message renders through the shared console helpers."""
         mock_exception = Exception("Connection timeout")
         mock_registry = MagicMock()
         mock_registry.client.registry_url = "https://registry.example.com"
@@ -155,8 +155,8 @@ class TestHandleRegistryNetworkError:
         )
 
         assert result is True
-        # Console.print should have been called
-        mock_console.print.assert_called()
+        captured = capsys.readouterr()
+        assert "Could not reach MCP registry" in captured.out + captured.err
 
     def test_handle_error_uses_action_word(self):
         """Error message includes the provided action word."""

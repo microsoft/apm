@@ -237,8 +237,16 @@ def test_locked_text_auto_package_replays_across_host_eol(
     assert (consumer / "apm.lock.yaml").read_bytes() == stale_bytes
     assert (consumer / "apm.yml").read_bytes() == manifest_bytes
 
-    # Deliberate non-frozen refresh re-records the intended hash at the same pin.
-    result = run(consumer, (*_INSTALL, "--update"), frozen_env, "reviewed-refresh")
+    # An update never re-pins new content for an unchanged commit (#4027).
+    result = run(consumer, (*_INSTALL, "--update"), frozen_env, "update-refused")
+    assert result.returncode != 0, _evidence(result)
+    assert (consumer / "apm.lock.yaml").read_bytes() == stale_bytes
+
+    # Deliberate re-pin: drop the stale entry and install records the intended hash.
+    stale = load_yaml(consumer / "apm.lock.yaml")
+    stale["dependencies"] = []
+    dump_yaml(stale, consumer / "apm.lock.yaml")
+    result = run(consumer, _INSTALL, frozen_env, "reviewed-refresh")
     assert result.returncode == 0, _evidence(result)
     refreshed = LockFile.read(consumer / "apm.lock.yaml")
     assert refreshed is not None

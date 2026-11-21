@@ -269,9 +269,9 @@ def _validate_virtual_package(
     """
     from apm_cli.deps.github_downloader import GitHubPackageDownloader
 
-    from ..deps.registry_proxy import is_enforce_only
+    from ..deps.egress_route import EgressSurface, is_refused
 
-    if is_enforce_only():
+    if is_refused(EgressSurface.SOURCE_PROBE):
         # PROXY_REGISTRY_ONLY=1: skip virtual package validation probe.
         # The download step will surface a proxy 404 if the package is absent.
         if logger:
@@ -395,9 +395,9 @@ def _validate_ado_git_package(
     )
     from apm_cli.utils.github_host import is_azure_devops_hostname, is_github_hostname
 
-    from ..deps.registry_proxy import is_enforce_only
+    from ..deps.egress_route import EgressSurface, is_refused
 
-    if is_enforce_only():
+    if is_refused(EgressSurface.SOURCE_PROBE):
         # PROXY_REGISTRY_ONLY=1: skip direct git ls-remote probe for ADO/GHES.
         # The download step will surface a proxy 404 if the package is absent.
         if logger:
@@ -439,10 +439,8 @@ def _validate_ado_git_package(
         dep_ref.repo_url,
         use_ssh=candidate_uses_ssh,
         dep_ref=dep_ref,
-        token="",
     )
     dep_ctx = None if is_generic else auth_resolver.resolve_for_dep(dep_ref)
-    auth_scheme = getattr(dep_ctx, "auth_scheme", "basic") or "basic"
     transport_plan = ado_downloader._transport_selector.select(
         dep_ref=dep_ref,
         cli_pref=resolved_pref,
@@ -452,6 +450,11 @@ def _validate_ado_git_package(
     )
     attempts: list[tuple[object, str, dict[str, str]]] = []
     org = dependency_repository_owner(dep_ref)
+    if verbose_log and dep_ctx is not None:
+        verbose_log(
+            f"Auth resolved: host={dep_ctx.host_info.display_name}, org={org}, "
+            f"source={dep_ctx.source}, type={dep_ctx.token_type}"
+        )
     for attempt in transport_plan.attempts:
         if attempt.requested_url is not None:
             probe_url = attempt.requested_url
@@ -460,8 +463,6 @@ def _validate_ado_git_package(
                 dep_ref.repo_url,
                 use_ssh=attempt.scheme == "ssh",
                 dep_ref=dep_ref,
-                token="",
-                auth_scheme=auth_scheme if attempt.use_token else "basic",
             )
         policy_url = attempt.effective_url or probe_url
         attempt_ctx = dep_ctx
@@ -677,14 +678,14 @@ def _validate_github_package(
     public repos are probed anonymously before burning a rate-limited token.
     Returns True/False; surfaces verbose auth context on failure.
     """
-    from ..deps.registry_proxy import is_enforce_only
+    from ..deps.egress_route import EgressSurface, is_refused
 
     host = dep_ref.host or default_host()
     port = dep_ref.port
     org = dependency_repository_owner(dep_ref)
     host_info = auth_resolver.classify_host(host, port=port)
 
-    if is_enforce_only():
+    if is_refused(EgressSurface.SOURCE_PROBE):
         # PROXY_REGISTRY_ONLY=1: skip the GitHub API probe.
         # Marketplace/lockfile resolution already ran through the proxy;
         # the download step will surface a proxy 404 if absent.
@@ -784,7 +785,7 @@ def _validate_parse_failure_fallback(
     API.  Rejects anything that doesn't match the strict slug pattern so
     path-confusion sequences cannot reach the API URL or git credential fill.
     """
-    from ..deps.registry_proxy import is_enforce_only
+    from ..deps.egress_route import EgressSurface, is_refused
 
     host = default_host()
     org = repository_owner(package)
@@ -799,7 +800,7 @@ def _validate_parse_failure_fallback(
     if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repo_path):
         return False
 
-    if is_enforce_only():
+    if is_refused(EgressSurface.SOURCE_PROBE):
         # PROXY_REGISTRY_ONLY=1: skip the GitHub API fallback probe.
         # The download step will surface a proxy 404 if the package is absent.
         if logger:
