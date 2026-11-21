@@ -175,6 +175,13 @@ def credential_fill_env(base_env: Mapping[str, str]) -> dict[str, str]:
     return env
 
 
+# Upper bound for a ``git credential fill`` password accepted by
+# ``GitHubTokenManager._is_valid_credential_token``. Enterprise IdP tokens
+# issued through Git Credential Manager carry extra claims and exceed 2600
+# characters, so the cap only guards against unbounded garbage output.
+MAX_CREDENTIAL_TOKEN_LENGTH = 16384
+
+
 class GitHubTokenManager:
     """Manages GitHub token environment setup for different AI runtimes."""
 
@@ -226,7 +233,7 @@ class GitHubTokenManager:
         """
         if not token:
             return False
-        if len(token) > 1024:
+        if len(token) > MAX_CREDENTIAL_TOKEN_LENGTH:
             return False
         if any(c in token for c in (" ", "\t", "\n", "\r")):
             return False
