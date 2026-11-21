@@ -1044,6 +1044,13 @@ def _type_decision(ctx: ExecTrustContext, package_keys: tuple[str, ...], exec_ty
     return decisions[0]
 
 
+def package_grants_type(
+    ctx: ExecTrustContext, package_keys: tuple[str, ...], exec_type: str
+) -> bool:
+    """Whether any of a package's approval keys still grants *exec_type*."""
+    return bool(package_keys) and _type_decision(ctx, package_keys, exec_type).allowed
+
+
 def package_type_verdicts(
     ctx: ExecTrustContext,
     package_keys: tuple[str, ...],
