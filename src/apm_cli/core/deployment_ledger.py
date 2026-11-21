@@ -597,12 +597,11 @@ class DeploymentMaterializationSession:
         committed.flush()
 
     def _persist(self, records: dict[str, DeploymentRecord], destinations: dict[str, str]) -> None:
-        from apm_cli.integration.write_seam import atomic_write_text, record_before_mkdir
+        from apm_cli.integration.write_seam import atomic_write_text, mkdir
 
         self._validate_paths()
         if self._installation is None:
-            record_before_mkdir(self.identity_path.parent)
-            self.identity_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            mkdir(self.identity_path.parent, mode=0o700, parents=True, exist_ok=True)
             ignore = self.identity_path.parent / ".gitignore"
             self._validate_paths()
             if ignore.exists():
@@ -618,8 +617,7 @@ class DeploymentMaterializationSession:
                 self.identity_path, installation + "\n", new_file_mode=0o600, create_only=True
             )
             self._installation = installation
-        record_before_mkdir(self.state_path.parent)
-        self.state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        mkdir(self.state_path.parent, mode=0o700, parents=True, exist_ok=True)
         self._validate_paths()
         data = {
             "version": 1,
