@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apm_cli.integration.lsp_integrator import LSPIntegrator
+from apm_cli.integration.lsp_integrator import LspInstallRecord, LSPIntegrator
 from apm_cli.models.dependency.lsp import LSPDependency
 
 pytestmark = pytest.mark.component
@@ -494,7 +494,12 @@ class TestManagedEntryKeptEdits:
         return config
 
     def _install(self, tmp_path, *, locked=_LOCKED, command="pyright-langserver") -> dict:
-        diagnostics, kept = MagicMock(), {}
+        diagnostics, record = (
+            MagicMock(),
+            LspInstallRecord(
+                locked_configs={**locked, "ruff": {"name": "ruff", "command": "old-ruff"}}
+            ),
+        )
         LSPIntegrator.install(
             [
                 _make_dep("pyright", command=command, extension_to_language=None),
@@ -503,11 +508,10 @@ class TestManagedEntryKeptEdits:
             project_root=tmp_path,
             target_runtimes=["copilot"],
             managed_target_servers={"copilot": {"pyright", "ruff"}},
-            locked_configs={**locked, "ruff": {"name": "ruff", "command": "old-ruff"}},
-            kept_servers=kept,
+            record=record,
             diagnostics=diagnostics,
         )
-        return {"kept": kept, "diagnostics": diagnostics}
+        return {"kept": record.kept_edits, "diagnostics": diagnostics}
 
     def test_drift_edit_is_kept_with_a_warning_and_other_servers_update(self, tmp_path):
         edited = {"command": "my-pyright", "args": []}

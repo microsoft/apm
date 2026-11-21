@@ -344,7 +344,7 @@ def run_owned_lsp_integration(
 ) -> int:
     """Reconcile one bundle owner's LSP servers and persist ownership."""
     from apm_cli.deps.lockfile import LockFile
-    from apm_cli.integration.lsp_integrator import LSPIntegrator
+    from apm_cli.integration.lsp_integrator import LspInstallRecord, LSPIntegrator
 
     lockfile = LockFile.read(lock_path) or LockFile()
     owner_token = f"{_BUNDLE_LSP_OWNER_PREFIX}{owner}"
@@ -382,7 +382,8 @@ def run_owned_lsp_integration(
     supported_target_runtimes = LSPIntegrator.supported_target_runtimes(target_runtimes)
     count = 0
     user_conflict = None
-    kept: dict[str, set[str]] = {}
+    record = LspInstallRecord()
+    kept = record.kept_unowned
     if dependencies:
         require_lsp_capable_target(supported_target_runtimes, bundle=True)
         try:
@@ -395,7 +396,7 @@ def run_owned_lsp_integration(
                 fail_on_write_error=fail_on_write_error,
                 managed_target_servers=old_targets,
                 force=force,
-                kept_unowned=kept,
+                record=record,
             )
         except LSPUserEntryConflictError as exc:
             # The other servers were written; record them, then fail (#4628).
@@ -714,7 +715,7 @@ def run_lsp_integration(  # noqa: PLR0913
         Number of LSP servers configured.
     """
     from apm_cli.install.errors import LSPUserEntryConflictError
-    from apm_cli.integration.lsp_integrator import LSPIntegrator
+    from apm_cli.integration.lsp_integrator import LspInstallRecord, LSPIntegrator
 
     if target_context is not None:
         apm_config, explicit_target, scope = target_context
@@ -794,8 +795,8 @@ def run_lsp_integration(  # noqa: PLR0913
             )
 
         conflict = None
-        kept: dict[str, set[str]] = {}
-        kept_servers: dict[str, str] = {}
+        record = LspInstallRecord(locked_configs=old_lsp_configs)
+        kept, kept_servers = record.kept_unowned, record.kept_edits
         if lsp_deps:
             if fail_on_write_error:
                 require_lsp_capable_target(target_runtimes)
@@ -810,9 +811,7 @@ def run_lsp_integration(  # noqa: PLR0913
                     fail_on_write_error=fail_on_write_error,
                     managed_target_servers=old_lsp_targets,
                     force=force,
-                    kept_unowned=kept,
-                    locked_configs=old_lsp_configs,
-                    kept_servers=kept_servers,
+                    record=record,
                     **_legacy_lsp_owner_names(old_lsp_servers, old_lsp_targets_present),
                 )
             except LSPUserEntryConflictError as exc:

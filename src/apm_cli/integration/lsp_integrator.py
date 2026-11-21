@@ -180,6 +180,23 @@ class _PreparedTargetConfig:
     kept: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass
+class LspInstallRecord:
+    """What one ``LSPIntegrator.install`` call is told and what it kept.
+
+    *locked_configs* (in) are the server configs of the existing lock, the
+    evidence of which entry APM wrote (#4626); ``None`` judges no entry.
+    *kept_unowned* (out) maps runtime -> server names left as the user wrote
+    them, never to be recorded as APM-owned (#4628). *kept_edits* (out) maps a
+    managed server whose edit install kept to ``"drift"``, ``"blocked"`` or
+    ``"unproven"``; the caller keeps its locked config (#4626).
+    """
+
+    locked_configs: dict[str, dict] | None = None
+    kept_unowned: dict[str, builtins.set] = field(default_factory=dict)
+    kept_edits: dict[str, str] = field(default_factory=dict)
+
+
 _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
     "claude": _LSPTargetSpec(
         runtime="claude",
@@ -914,15 +931,15 @@ class LSPIntegrator:
         user_scope: bool,
         diagnostics,
         logger,
-        kept_servers: dict[str, str] | None,
+        kept_edits: dict[str, str] | None,
     ) -> None:
         """Name each kept entry: a drift edit warns, a blocked or unproven one fails (#4626)."""
         from apm_cli.integration.base_integrator import kept_entry_message
 
         for _runtime, spec, prepared in prepared_targets:
             for name, kind in sorted(prepared.kept.items()):
-                if kept_servers is not None:
-                    kept_servers[name] = kind
+                if kept_edits is not None:
+                    kept_edits[name] = kind
                 message = kept_entry_message(
                     f"LSP server '{name}' in {spec.label(user_scope=user_scope)}",
                     user_scope=user_scope,
@@ -1194,18 +1211,12 @@ class LSPIntegrator:
         managed_target_servers: dict[str, set[str]] | None = None,
         force: bool = False,
         legacy_server_names: builtins.set | None = None,
-        kept_unowned: dict[str, builtins.set] | None = None,
-        locked_configs: dict[str, dict] | None = None,
-        kept_servers: dict[str, str] | None = None,
+        record: LspInstallRecord | None = None,
     ) -> int:
         """Install LSP dependencies by writing target-specific runtime config.
 
-        *kept_unowned*, when given, receives runtime -> the server names left as
-        the user wrote them; the caller must not record them as APM-owned (#4628).
-        *locked_configs* are the server configs of the existing lock: the
-        evidence of which entry APM wrote. A managed entry the user edited is
-        kept, named, and recorded into *kept_servers* so the caller keeps its
-        locked config (#4626).
+        *record*, when given, carries the lock evidence in and the kept user
+        entries and edits out (:class:`LspInstallRecord`).
         """
         if logger is None:
             logger = NullCommandLogger()
@@ -1250,7 +1261,7 @@ class LSPIntegrator:
                     force=force,
                     legacy_server_names=legacy_server_names,
                     locked_servers=LSPIntegrator._locked_target_servers(
-                        locked_configs,
+                        record.locked_configs if record is not None else None,
                         runtime_deps,
                         spec,
                         project_root=project_root_path,
@@ -1284,13 +1295,13 @@ class LSPIntegrator:
             user_scope=user_scope,
             diagnostics=diagnostics,
             logger=logger,
-            kept_servers=kept_servers,
+            kept_edits=record.kept_edits if record is not None else None,
         )
         changed_servers: builtins.set = builtins.set()
         preserved: dict[str, builtins.set] = {}
         for runtime, spec, prepared in prepared_targets:
-            if kept_unowned is not None and (prepared.preserved or prepared.matching):
-                kept_unowned[runtime] = {*prepared.preserved, *prepared.matching}
+            if record is not None and (prepared.preserved or prepared.matching):
+                record.kept_unowned[runtime] = {*prepared.preserved, *prepared.matching}
             for name in prepared.matching:
                 logger.verbose_detail(
                     f"LSP server '{name}' already matches the {runtime} entry in "
