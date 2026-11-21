@@ -1,0 +1,15 @@
+{
+  "issue": 4685,
+  "fixed_in": "Unreleased",
+  "summary": "A refused native plugin registration (for example a user's file at a Claude plugin bin path) restored apm.lock.yaml with an added empty mcp_target_servers field; the rollback now returns the previous lock untouched when no MCP/LSP record changed.",
+  "failure_modes": [
+    "transaction",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/unit/install/test_services_before_native_registration.py::test_a_refused_declaration_with_unchanged_services_restores_the_lock_byte_for_byte"
+  ]
+}

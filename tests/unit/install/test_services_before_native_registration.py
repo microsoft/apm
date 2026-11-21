@@ -156,3 +156,21 @@ def test_a_failed_native_declaration_keeps_the_reconciled_services_recorded(
     rolled_back = get_lockfile_path(tmp_path).read_text(encoding="utf-8")
     assert _SERVER in rolled_back
     assert ("owner/kept" in rolled_back) is previous
+
+
+def test_a_refused_declaration_with_unchanged_services_restores_the_lock_byte_for_byte(
+    tmp_path: Path,
+) -> None:
+    """#4685: no service record changed, so the rollback is the previous lock as written."""
+    ctx = _ctx(tmp_path, None)
+    previous = LockFile(dependencies={"owner/kept": LockedDependency(repo_url="owner/kept")})
+    ctx.existing_lockfile = previous
+    expected = tmp_path / "expected" / "apm.lock.yaml"
+    expected.parent.mkdir()
+    previous.write(expected)
+
+    _install_tail(ctx, declare_fails=True)
+
+    rolled_back = get_lockfile_path(tmp_path).read_text(encoding="utf-8")
+    assert "mcp_target_servers" not in rolled_back
+    assert rolled_back == expected.read_text(encoding="utf-8")

@@ -86,7 +86,11 @@ def run(ctx: InstallContext) -> None:
 
 
 def _with_reconciled_services(previous: LockFile | None, committed: LockFile | None):
-    """*previous* carrying the MCP/LSP records *committed* holds for what reached disk."""
+    """*previous* carrying the MCP/LSP records *committed* holds for what reached disk.
+
+    When the install changed no service record, *previous* is returned untouched,
+    so a refused declaration restores the previous lock byte for byte (#4685).
+    """
     if committed is None or (
         previous is None
         and not committed.mcp_servers
@@ -95,6 +99,9 @@ def _with_reconciled_services(previous: LockFile | None, committed: LockFile | N
     ):
         return previous
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    if previous is not None and _service_records(previous) == _service_records(committed):
+        return previous
 
     rollback = copy.deepcopy(previous) if previous is not None else LockFile()
     rollback.mcp_servers = list(committed.mcp_servers)
@@ -111,3 +118,21 @@ def _with_reconciled_services(previous: LockFile | None, committed: LockFile | N
     )
     DeploymentLedgerCodec.replace_lsp_target_servers(rollback, committed.lsp_target_servers)
     return rollback
+
+
+def _service_records(lock: LockFile) -> tuple:
+    """The MCP/LSP records the rollback carries from the committed lock."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    return (
+        sorted(lock.mcp_servers),
+        lock.mcp_configs,
+        lock.mcp_omissions,
+        lock.mcp_config_provenance,
+        sorted(lock.lsp_servers),
+        lock.lsp_configs,
+        lock.lsp_config_provenance,
+        {target: sorted(names) for target, names in lock.mcp_target_servers.items() if names},
+        {target: sorted(names) for target, names in lock.lsp_target_servers.items() if names},
+        DeploymentLedgerCodec.mcp_native_hashes(lock),
+    )
