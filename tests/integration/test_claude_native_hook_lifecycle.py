@@ -837,15 +837,15 @@ def test_native_claude_install_with_mcp_keeps_the_lockfile_equal_to_disk(
     run("audit", "--ci", cwd=isolated.config_root)
 
 
-@pytest.mark.skipif(not INOTIFY_AVAILABLE, reason="counting lockfile writes requires Linux inotify")
-@pytest.mark.xfail(
-    strict=True,
-    reason="#4329: native Claude registration commits the lockfile before MCP/LSP reconciliation",
+@pytest.mark.skipif(
+    not INOTIFY_AVAILABLE,
+    reason="counting lockfile writes needs Linux inotify; the phase order is unit-tested "
+    "on every OS in tests/unit/install/test_services_before_native_registration.py",
 )
-def test_native_claude_install_with_mcp_writes_the_lockfile_once(
+def test_native_claude_install_with_mcp_and_lsp_writes_the_lockfile_once(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """An install that registers a native Claude plugin and an MCP server writes once."""
+    """#4329: MCP/LSP reconcile before native registration commits the lock, once (I1)."""
     scenario = _native_scenario(tmp_path)
     isolated, env = scenario.isolated, scenario.env
     factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
@@ -863,6 +863,13 @@ def test_native_claude_install_with_mcp_writes_the_lockfile_once(
             "mcp": [
                 {"name": "native-srv", "registry": False, "transport": "stdio", "command": "srv"}
             ],
+            "lsp": [
+                {
+                    "name": "native-lsp",
+                    "command": "native-lsp",
+                    "extensionToLanguage": {".nl": "native"},
+                }
+            ],
         },
         "executables": {"allow": {}},
     }
@@ -878,8 +885,22 @@ def test_native_claude_install_with_mcp_writes_the_lockfile_once(
     with count_lockfile_writes(isolated.config_root) as counter:
         run("install", "--global", "--target", "claude")
 
-    assert scenario.plugins.is_dir()
     assert counter.writes == 1, counter.events
+    lock = load_yaml(isolated.config_root / "apm.lock.yaml")
+    assert lock["mcp_servers"] == ["native-srv"], lock
+    assert lock["lsp_servers"] == ["native-lsp"], lock
+    (entry,) = lock["dependencies"]
+    root = isolated.home / entry["native_plugin"]["root"]
+    assert (root / ".claude-plugin/plugin.json").is_file(), lock
+    claude = isolated.home / ".claude"  # CLAUDE_CONFIG_DIR
+    claude_json = json.loads((claude / ".claude.json").read_text(encoding="utf-8"))
+    assert "native-srv" in claude_json["mcpServers"], claude_json
+    lsp_plugin = claude / "skills/apm-lsp/.claude-plugin/plugin.json"
+    assert "native-lsp" in json.loads(lsp_plugin.read_text(encoding="utf-8"))["lspServers"]
+    run("audit", "--ci", cwd=isolated.config_root)
+    with count_lockfile_writes(isolated.config_root) as counter:
+        run("install", "--global", "--target", "claude")
+    assert counter.writes == 0, counter.events
 
 
 def test_frozen_install_verifies_native_plugin_files_like_audit(

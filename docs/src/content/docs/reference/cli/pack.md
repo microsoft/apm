@@ -315,7 +315,7 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 - **Empty bundle warning.** If no package files match after dependency resolution, `apm pack` emits a warning and exits `0` with an empty bundle. Missing dependency content is an error, not an empty bundle.
 - **Share line.** On success, `apm pack` prints the command a consumer runs: `Share with: apm install ./build/<bundle>` for the default Claude plugin bundle, `apm unpack ./build/<bundle>` (deprecated) for `--format apm`, and, for `--format agent-plugin`, adding the bundle path under `dependencies.apm` in the consumer's `apm.yml` and running `apm install --target copilot`.
 - **Marketplace fallback.** With no `marketplace:` block in `apm.yml`, a legacy `marketplace.yml` file is read with a deprecation warning. Both files present is a hard error.
-- **Marketplace outputs.** Configure via `marketplace.outputs` map (keyed by format). Claude is included by default. The legacy list form (`outputs: [claude]`) still parses with a deprecation warning. Use `--marketplace=` to filter which formats are built in a given invocation.
+- **Marketplace outputs.** Configure via `marketplace.outputs` map (keyed by format). Claude is included by default. The legacy list form (`outputs: [claude]`) still parses; `apm pack` prints a deprecation warning showing the map form, and lists it in `--json` `warnings`. Use `--marketplace=` to filter which formats are built in a given invocation.
 - **JSON mode.** `--json` makes `apm pack` machine-friendly: stdout is a single JSON object, all human-readable logs move to stderr. Combine with `--marketplace=` for selective CI matrix builds.
 
 ## Exit codes
