@@ -113,6 +113,15 @@ _SKIPPED = "skipped"
 _WRITTEN = "written"
 
 
+class CodexAgentInvalid(ValueError):
+    """A rendered Codex agent the Codex role-file parser would reject.
+
+    Codex rejects a blank ``description`` and a blank or missing
+    ``developer_instructions`` (openai/codex ``agent_role_config.rs``); such an
+    agent is skipped, never written or claimed.
+    """
+
+
 class AgentIntegrator(BaseIntegrator):
     """Handles integration of APM package agents into .github/agents/, .claude/agents/, .cursor/agents/, and .kiro/agents/."""
 
@@ -293,13 +302,20 @@ class AgentIntegrator(BaseIntegrator):
                     agents_dir.mkdir(parents=True, exist_ok=True)
                     agents_dir_created = True
                 if mapping.format_id == "codex_agent":
-                    rendered, links_resolved = self._render_codex_agent(
-                        source_file,
-                        target_path,
-                        diagnostics=diagnostics,
-                        package_name=package_info.package.name,
-                        resolve_links=self.resolve_links,
-                    )
+                    try:
+                        rendered, links_resolved = self._render_codex_agent(
+                            source_file,
+                            target_path,
+                            diagnostics=diagnostics,
+                            package_name=package_info.package.name,
+                            resolve_links=self.resolve_links,
+                        )
+                    except CodexAgentInvalid as exc:
+                        self._warn_codex_agent_skipped(
+                            diagnostics, source_file, package_info.package.name, exc
+                        )
+                        files_skipped += 1
+                        continue
                 else:
                     rendered, links_resolved = self._render_copy_agent(source_file, target_path)
 
@@ -676,6 +692,7 @@ class AgentIntegrator(BaseIntegrator):
         diagnostics: DiagnosticCollector | None = None,
         package_name: str = "",
         resolve_links: ResolveLinks | None = None,
+        content: str | None = None,
     ) -> tuple[str, int]:
         """Render an ``.agent.md`` file to Codex ``.toml`` format.
 
@@ -686,14 +703,22 @@ class AgentIntegrator(BaseIntegrator):
         owner; it rewrites source-relative Markdown links in the body from
         *source* for the generated *target* before serialization (#2966).
 
+        *content* is an already-read snapshot of *source* (for example bytes
+        verified against a digest); when given, *source* is never reopened.
+
         Returns:
             tuple[str, int]: Rendered TOML string and number of links resolved.
+
+        Raises:
+            CodexAgentInvalid: The agent has a blank ``description`` or an
+                empty body, which Codex rejects.
         """
-        if source.is_symlink():
-            raise ValueError(f"Refusing to read symlink source: {source}")
         import toml as _toml
 
-        content = source.read_text(encoding="utf-8")
+        if content is None:
+            if source.is_symlink():
+                raise ValueError(f"Refusing to read symlink source: {source}")
+            content = source.read_text(encoding="utf-8")
 
         name = source.stem
         if name.endswith(".agent"):
@@ -802,7 +827,39 @@ class AgentIntegrator(BaseIntegrator):
             **model_settings,
             "developer_instructions": body.strip(),
         }
+        AgentIntegrator._validate_codex_agent(doc)
         return _toml.dumps(doc), links_resolved
+
+    @staticmethod
+    def _validate_codex_agent(doc: dict) -> None:
+        """Raise :class:`CodexAgentInvalid` for fields the Codex parser rejects."""
+        description = doc.get("description")
+        if not isinstance(description, str) or not description.strip():
+            raise CodexAgentInvalid(
+                "Codex requires a non-blank string 'description'; add one to the agent frontmatter"
+            )
+        if not doc.get("developer_instructions"):
+            raise CodexAgentInvalid(
+                "Codex requires non-blank 'developer_instructions'; the agent body is empty"
+            )
+
+    @staticmethod
+    def _warn_codex_agent_skipped(
+        diagnostics: DiagnosticCollector | None,
+        source: Path,
+        package_name: str,
+        error: CodexAgentInvalid,
+    ) -> None:
+        """Warn that a source agent Codex would reject was not deployed."""
+        if diagnostics is None:
+            return
+        diagnostics.warn(
+            message=(
+                f"Skipped Codex agent {printable_ascii_text(source.name)}: {error}. "
+                "Fix the agent source, then rerun the install."
+            ),
+            package=printable_ascii_text(package_name),
+        )
 
     @staticmethod
     def _write_codex_agent(

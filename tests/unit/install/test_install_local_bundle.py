@@ -193,7 +193,7 @@ def _expected_deployed_command_path(project: Path, target: TargetProfile) -> Pat
 
 _AGENT_FILES = {
     "agents/rev.agent.md": "---\nname: rev\ndescription: Review agent\n---\nReview the diff.\n",
-    "agents/lint.md": "# Lint\n",
+    "agents/lint.md": "---\ndescription: Lint agent\n---\n# Lint\n",
 }
 
 
@@ -936,6 +936,113 @@ class TestLocalBundlePathRouting:
         [warning] = diagnostics.by_category()[CATEGORY_WARNING]
         assert "'agents/rev.agent.md'" in warning.message
         assert "pack.bundle_files" in warning.message
+
+    def test_codex_bundle_agent_renders_the_verified_bytes_not_a_second_read(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The source swapped after digest verification never reaches Codex (#4007)."""
+        import tomllib
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        project = _make_project(tmp_path / "dst")
+        packed = bundle / "agents/rev.agent.md"
+        swapped = "---\nname: evil\ndescription: Evil\n---\nInjected.\n"
+        real_read_bytes = Path.read_bytes
+
+        def read_then_swap(self: Path) -> bytes:
+            data = real_read_bytes(self)
+            if self == packed:
+                self.write_text(swapped, encoding="utf-8")
+            return data
+
+        monkeypatch.setattr(Path, "read_bytes", read_then_swap)
+        result, _diagnostics = _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
+
+        assert packed.read_text(encoding="utf-8") == swapped
+        rev = project / ".codex/agents/rev.toml"
+        assert tomllib.loads(rev.read_text(encoding="utf-8"))["developer_instructions"] == (
+            "Review the diff."
+        )
+        claim = result["deployed_file_hashes"][".codex/agents/rev.toml"]
+        assert claim == f"sha256:{hashlib.sha256(rev.read_bytes()).hexdigest()}"
+
+    @pytest.mark.parametrize(
+        ("digest", "deployed"),
+        [
+            (lambda d: f"  {d.upper()}\n", True),
+            (lambda d: f"sha256:{d.upper()} ", True),
+            (lambda d: f"sha512:{d}", False),
+            (lambda d: "sha256:not-a-digest", False),
+        ],
+        ids=["uppercase-padded", "prefixed-uppercase-padded", "unsupported-algorithm", "not-hex"],
+    )
+    def test_codex_bundle_agent_digest_is_normalized_like_bundle_admission(
+        self, tmp_path: Path, digest, deployed: bool
+    ) -> None:
+        """Admission's hash normalization applies; an invalid digest skips by name (#4007)."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        files = {"agents/rev.agent.md": _AGENT_FILES["agents/rev.agent.md"]}
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=files)
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        bundle_files = lockfile["pack"]["bundle_files"]
+        bundle_files["agents/rev.agent.md"] = digest(bundle_files["agents/rev.agent.md"])
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(
+            bundle, project, KNOWN_TARGETS["codex"], lockfile=lockfile
+        )
+
+        assert (project / ".codex/agents/rev.toml").exists() is deployed
+        assert bool(result["deployed_files"]) is deployed
+        if not deployed:
+            [warning] = diagnostics.by_category()[CATEGORY_WARNING]
+            assert "'agents/rev.agent.md'" in warning.message
+            assert "not a SHA-256 hex digest" in warning.message
+
+    @pytest.mark.parametrize(
+        ("content", "field"),
+        [
+            ("# Lint\n", "'description'"),
+            ("---\ndescription: Lint\n---\n\n", "'developer_instructions'"),
+        ],
+        ids=["no-description", "empty-body"],
+    )
+    def test_codex_bundle_agent_codex_would_reject_is_skipped(
+        self, tmp_path: Path, content: str, field: str
+    ) -> None:
+        """An agent Codex rejects is warned about, never written or claimed (#4007)."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        bundle = _make_bundle(
+            tmp_path / "src", pack_target="claude", files={"agents/lint.md": content}
+        )
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
+
+        assert result["deployed_files"] == []
+        assert result["written_files"] == []
+        assert result["skipped"] == 1
+        assert not (project / ".codex").exists()
+        [warning] = diagnostics.by_category()[CATEGORY_WARNING]
+        assert "'agents/lint.md' for target codex" in warning.message
+        assert field in warning.message
+
+    def test_codex_bundle_agent_write_is_receipt_evidence(self, tmp_path: Path) -> None:
+        """Only a real render write joins written_files: no dry run, no adoption (#4007)."""
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        project = _make_project(tmp_path / "dst")
+        codex = KNOWN_TARGETS["codex"]
+        agents = [".codex/agents/lint.toml", ".codex/agents/rev.toml"]
+
+        preview, _diagnostics = _integrate_agents(bundle, project, codex, dry_run=True)
+        assert preview["written_files"] == []
+        installed, _diagnostics = _integrate_agents(bundle, project, codex)
+        assert sorted(installed["written_files"]) == agents
+        adopted, _diagnostics = _integrate_agents(bundle, project, codex)
+        assert sorted(adopted["deployed_files"]) == agents
+        assert adopted["written_files"] == []
 
     @pytest.mark.parametrize(
         "target_name",

@@ -52,8 +52,9 @@ KNOWN_LARGE_MODULES = {
     # target reconciliation or generic integrator can mutate state.
     # Decomposition tracked as follow-up.
     # Local plugin bundle hooks route through HookIntegrator (#3700).
-    # Bundle Codex agents render through AgentIntegrator (#3714).
-    "services.py": 1210,
+    # Bundle Codex agents render through AgentIntegrator (#3714) and report
+    # their written agents as receipt evidence (+1 line).
+    "services.py": 1211,
     # drift.py crossed 1000 when replay target-root claim scoping (#2655)
     # merged atop main's replay growth. Decomposition tracked as follow-up.
     # Replay builds the project's own package through the install builder (#3151).

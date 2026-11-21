@@ -1173,12 +1173,15 @@ class TestCodexAgentIntegration:
         assert data["description"] == "A test agent"
         assert data["developer_instructions"] == "Do something useful."
 
-    def test_agent_md_to_toml_without_frontmatter(self):
-        """Agent .md without frontmatter uses filename as name."""
+    def test_agent_md_to_toml_without_name_uses_filename(self):
+        """Agent .md without a frontmatter name uses the filename as name."""
         import toml
 
         source = self.root / "helper.agent.md"
-        source.write_text("Instructions for the helper agent.\n", encoding="utf-8")
+        source.write_text(
+            "---\ndescription: Helper\n---\nInstructions for the helper agent.\n",
+            encoding="utf-8",
+        )
         target = self.root / ".codex" / "agents" / "helper.toml"
         target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1186,8 +1189,59 @@ class TestCodexAgentIntegration:
 
         data = toml.loads(target.read_text(encoding="utf-8"))
         assert data["name"] == "helper"
-        assert data["description"] == ""
+        assert data["description"] == "Helper"
         assert "Instructions for the helper agent." in data["developer_instructions"]
+
+    @pytest.mark.parametrize(
+        ("content", "field"),
+        [
+            ("Instructions without frontmatter.\n", "'description'"),
+            ("---\nname: x\ndescription: '  '\n---\nBody.\n", "'description'"),
+            ("---\nname: x\ndescription: 7\n---\nBody.\n", "'description'"),
+            ("---\nname: x\ndescription: X\n---\n  \n", "'developer_instructions'"),
+        ],
+        ids=["no-frontmatter", "blank-description", "non-string-description", "empty-body"],
+    )
+    def test_codex_renderer_rejects_fields_codex_rejects(self, content: str, field: str):
+        """Codex rejects a blank description or body, so the renderer refuses (#4007)."""
+        from apm_cli.integration.agent_integrator import CodexAgentInvalid
+
+        source = self.root / "x.agent.md"
+        source.write_text(content, encoding="utf-8")
+        target = self.root / ".codex" / "agents" / "x.toml"
+
+        with pytest.raises(CodexAgentInvalid, match=field):
+            AgentIntegrator._write_codex_agent(source, target)
+        assert not target.exists()
+
+    def test_source_install_skips_codex_agent_codex_would_reject(self):
+        """A source agent Codex rejects is warned about and skipped, never written (#4007)."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        package_dir = self.root / "pkg"
+        agents = package_dir / ".apm" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "bare.agent.md").write_text("No frontmatter.\n", encoding="utf-8")
+        (agents / "ok.agent.md").write_text(
+            "---\nname: ok\ndescription: Fine\n---\nWork.\n", encoding="utf-8"
+        )
+        diagnostics = DiagnosticCollector()
+
+        result = AgentIntegrator().integrate_agents_for_target(
+            KNOWN_TARGETS["codex"],
+            self._create_package_info(package_dir),
+            self.root,
+            diagnostics=diagnostics,
+        )
+
+        assert result.files_integrated == 1
+        assert result.files_skipped == 1
+        assert (self.root / ".codex/agents/ok.toml").is_file()
+        assert not (self.root / ".codex/agents/bare.toml").exists()
+        [warning] = diagnostics.by_category()[CATEGORY_WARNING]
+        assert "Skipped Codex agent bare.agent.md" in warning.message
+        assert "'description'" in warning.message
 
     def test_codex_agent_target_filename_is_toml(self):
         """AgentIntegrator generates .toml filenames for Codex target."""
@@ -1252,7 +1306,8 @@ class TestCodexAgentIntegration:
         """Do not stringify invalid YAML shapes or silently drop null settings."""
         source = self.root / "invalid-setting.agent.md"
         source.write_text(
-            f"---\n{yaml_to_str({'name': 'reviewer', field: value})}---\nReview changes.\n",
+            f"---\n{yaml_to_str({'name': 'reviewer', 'description': 'Review', field: value})}"
+            "---\nReview changes.\n",
             encoding="utf-8",
         )
         target = self.root / "reviewer.toml"
@@ -1264,7 +1319,7 @@ class TestCodexAgentIntegration:
 
         assert tomllib.loads(target.read_text(encoding="utf-8")) == {
             "name": "reviewer",
-            "description": "",
+            "description": "Review",
             "developer_instructions": "Review changes.",
         }
         warnings = diagnostics.by_category().get(CATEGORY_AGENT_LOSSY_COMPILATION, [])
@@ -1296,6 +1351,7 @@ class TestCodexAgentIntegration:
         }
         frontmatter = {
             "name": "reviewer",
+            "description": "Review",
             "model": "gpt-5.6-sol",
             "model_reasoning_effort": "high",
             "tools": [],
@@ -1313,7 +1369,7 @@ class TestCodexAgentIntegration:
 
         assert tomllib.loads(target.read_text(encoding="utf-8")) == {
             "name": "reviewer",
-            "description": "",
+            "description": "Review",
             "developer_instructions": "Review changes.",
             "model": "gpt-5.6-sol",
             "model_reasoning_effort": "high",
@@ -1367,7 +1423,7 @@ class TestCodexAgentIntegration:
         """
         source = self.root / "oversized-key.agent.md"
         oversized_key = "x" * 20_000
-        frontmatter = {"name": "reviewer", oversized_key: "value"}
+        frontmatter = {"name": "reviewer", "description": "Review", oversized_key: "value"}
         source.write_text(
             f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
         )
@@ -1419,7 +1475,7 @@ class TestCodexAgentIntegration:
         """
         source = self.root / "boundary-count.agent.md"
         unsupported = {f"field_{i}": "value" for i in range(key_count)}
-        frontmatter = {"name": "reviewer", **unsupported}
+        frontmatter = {"name": "reviewer", "description": "Review", **unsupported}
         source.write_text(
             f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
         )
@@ -1472,7 +1528,7 @@ class TestCodexAgentIntegration:
         """
         source = self.root / "boundary-length.agent.md"
         key = "k" * key_len
-        frontmatter = {"name": "reviewer", key: "value"}
+        frontmatter = {"name": "reviewer", "description": "Review", key: "value"}
         source.write_text(
             f"---\n{yaml_to_str(frontmatter)}---\nReview changes.\n", encoding="utf-8"
         )
@@ -1643,7 +1699,8 @@ class TestCodexAgentIntegration:
 
         source = package_dir / ".apm" / "agents" / "reviewer.agent.md"
         source.write_text(
-            "---\nname: reviewer\n---\nUpdated: read [guide](../skills/guide/SKILL.md#usage).\n",
+            "---\nname: reviewer\ndescription: Review code\n---\n"
+            "Updated: read [guide](../skills/guide/SKILL.md#usage).\n",
             encoding="utf-8",
         )
         update = AgentIntegrator().integrate_agents_for_target(
@@ -1765,14 +1822,18 @@ class TestCodexAgentIntegration:
         target = self.root / ".codex" / "agents" / "list-frontmatter.toml"
         target.parent.mkdir(parents=True, exist_ok=True)
         diagnostics = DiagnosticCollector()
+        from apm_cli.integration.agent_integrator import CodexAgentInvalid
 
-        AgentIntegrator._write_codex_agent(
-            source,
-            target,
-            diagnostics=diagnostics,
-            package_name="test-pkg",
-        )
+        # With its frontmatter ignored the agent has no description, which Codex rejects.
+        with pytest.raises(CodexAgentInvalid, match="'description'"):
+            AgentIntegrator._write_codex_agent(
+                source,
+                target,
+                diagnostics=diagnostics,
+                package_name="test-pkg",
+            )
 
+        assert not target.exists()
         warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
         assert len(warnings) == 1
         assert "must be a mapping and was ignored" in warnings[0].message
@@ -1799,12 +1860,15 @@ class TestCodexAgentIntegration:
             diagnostics=diagnostics,
         )
 
-        assert result.files_integrated == 1
+        # With its frontmatter ignored the agent has no description: skipped (#4007).
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
         warnings = diagnostics.by_category().get(CATEGORY_WARNING, [])
-        assert len(warnings) == 1
+        assert len(warnings) == 2
         assert "broken.agent.md" in warnings[0].message
         assert "invalid YAML frontmatter" in warnings[0].message
         assert "tool access" in warnings[0].message
+        assert "Skipped Codex agent broken.agent.md" in warnings[1].message
 
     def test_codex_agent_warning_sanitizes_package_name(self, capsys):
         """Package attribution must not inject terminal control sequences."""
@@ -1971,7 +2035,7 @@ class TestCodexAgentIntegration:
         """The 'visibility: internal' alias must also trip the drop warning."""
         source = self.root / "aliased.agent.md"
         source.write_text(
-            "---\nname: aliased\nvisibility: internal\n---\nReview changes.\n",
+            "---\nname: aliased\ndescription: Aliased\nvisibility: internal\n---\nReview changes.\n",
             encoding="utf-8",
         )
         target = self.root / ".codex" / "agents" / "aliased.toml"
@@ -1997,7 +2061,7 @@ class TestCodexAgentIntegration:
         """A user-invocable agent (the default) must stay silent."""
         source = self.root / "public.agent.md"
         source.write_text(
-            "---\nname: public\nuser-invocable: true\n---\nReview changes.\n",
+            "---\nname: public\ndescription: Public\nuser-invocable: true\n---\nReview changes.\n",
             encoding="utf-8",
         )
         target = self.root / ".codex" / "agents" / "public.toml"

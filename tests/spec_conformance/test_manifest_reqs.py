@@ -956,7 +956,7 @@ def test_consumer_maps_cursor_universal_instruction_to_always_apply(
 def test_consumer_diagnoses_lossy_agent_capability_conversion(tmp_path, capsys):
     source = tmp_path / "scoped.agent.md"
     source.write_text(
-        "---\nname: scoped\ntools: [read]\n---\nReview changes.\n",
+        "---\nname: scoped\ndescription: Scoped\ntools: [read]\n---\nReview changes.\n",
         encoding="utf-8",
     )
     target = tmp_path / "scoped.toml"
@@ -987,12 +987,16 @@ def test_consumer_diagnoses_lossy_agent_capability_conversion(tmp_path, capsys):
         encoding="utf-8",
     )
     unverified = DiagnosticCollector()
-    AgentIntegrator._write_codex_agent(
-        non_mapping,
-        tmp_path / "non-mapping.toml",
-        diagnostics=unverified,
-        package_name="spec-fixture",
-    )
+    from apm_cli.integration.agent_integrator import CodexAgentInvalid
+
+    # Ignored frontmatter leaves no description, which Codex rejects (#4007).
+    with pytest.raises(CodexAgentInvalid):
+        AgentIntegrator._write_codex_agent(
+            non_mapping,
+            tmp_path / "non-mapping.toml",
+            diagnostics=unverified,
+            package_name="spec-fixture",
+        )
     warnings = unverified.by_category().get(CATEGORY_WARNING, [])
     assert len(warnings) == 1
     assert "could not be verified" in warnings[0].message
@@ -1412,7 +1416,7 @@ def test_codex_native_model_settings_preserved_and_dropped_metadata_bounded(
     # Both fields present -> both reach the generated TOML verbatim.
     both_source = tmp_path / "both.agent.md"
     both_source.write_text(
-        f"---\n{yaml_to_str({'name': 'reviewer', 'model': 'gpt-5.6-sol', 'model_reasoning_effort': 'high'})}---\nReview changes.\n",
+        f"---\n{yaml_to_str({'name': 'reviewer', 'description': 'Review', 'model': 'gpt-5.6-sol', 'model_reasoning_effort': 'high'})}---\nReview changes.\n",
         encoding="utf-8",
     )
     both_target = tmp_path / "both.toml"
@@ -1429,7 +1433,7 @@ def test_codex_native_model_settings_preserved_and_dropped_metadata_bounded(
     # parsed TOML.
     one_source = tmp_path / "one.agent.md"
     one_source.write_text(
-        f"---\n{yaml_to_str({'name': 'reviewer', 'model': 'gpt-5.6-sol'})}---\nReview changes.\n",
+        f"---\n{yaml_to_str({'name': 'reviewer', 'description': 'Review', 'model': 'gpt-5.6-sol'})}---\nReview changes.\n",
         encoding="utf-8",
     )
     one_target = tmp_path / "one.toml"
@@ -1443,7 +1447,7 @@ def test_codex_native_model_settings_preserved_and_dropped_metadata_bounded(
     # Neither present -> neither key appears.
     neither_source = tmp_path / "neither.agent.md"
     neither_source.write_text(
-        f"---\n{yaml_to_str({'name': 'reviewer'})}---\nReview changes.\n",
+        f"---\n{yaml_to_str({'name': 'reviewer', 'description': 'Review'})}---\nReview changes.\n",
         encoding="utf-8",
     )
     neither_target = tmp_path / "neither.toml"
@@ -1461,7 +1465,7 @@ def test_codex_native_model_settings_preserved_and_dropped_metadata_bounded(
     # field (not its value).
     bad_source = tmp_path / "bad.agent.md"
     bad_source.write_text(
-        f"---\n{yaml_to_str({'name': 'reviewer', 'model_reasoning_effort': 7})}---\nReview changes.\n",
+        f"---\n{yaml_to_str({'name': 'reviewer', 'description': 'Review', 'model_reasoning_effort': 7})}---\nReview changes.\n",
         encoding="utf-8",
     )
     bad_target = tmp_path / "bad.toml"
@@ -1494,7 +1498,7 @@ def test_codex_native_model_settings_preserved_and_dropped_metadata_bounded(
     }
     meta_source = tmp_path / "meta.agent.md"
     meta_source.write_text(
-        f"---\n{yaml_to_str({'name': 'reviewer', 'model': 'gpt-5.6-sol', **unsupported})}---\nReview changes.\n",
+        f"---\n{yaml_to_str({'name': 'reviewer', 'description': 'Review', 'model': 'gpt-5.6-sol', **unsupported})}---\nReview changes.\n",
         encoding="utf-8",
     )
     meta_target = tmp_path / "meta.toml"
@@ -1524,7 +1528,7 @@ def test_codex_native_model_settings_preserved_and_dropped_metadata_bounded(
     # dropped `tools` field still fires its own, separate warning.
     tools_source = tmp_path / "tools.agent.md"
     tools_source.write_text(
-        f"---\n{yaml_to_str({'name': 'reviewer', 'model': 'gpt-5.6-sol', 'tools': ['read']})}---\nReview changes.\n",
+        f"---\n{yaml_to_str({'name': 'reviewer', 'description': 'Review', 'model': 'gpt-5.6-sol', 'tools': ['read']})}---\nReview changes.\n",
         encoding="utf-8",
     )
     tools_target = tmp_path / "tools.toml"
@@ -1625,7 +1629,7 @@ def test_codex_claude_model_value_preserved_verbatim(tmp_path: Path, model: str)
     """
     source = tmp_path / "shared.agent.md"
     source.write_text(
-        f"---\n{yaml_to_str({'name': 'shared', 'model': model})}---\nReview changes.\n",
+        f"---\n{yaml_to_str({'name': 'shared', 'description': 'Shared', 'model': model})}---\nReview changes.\n",
         encoding="utf-8",
     )
     target = tmp_path / "shared.toml"

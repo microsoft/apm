@@ -364,6 +364,7 @@ def install_local_bundle(
                 staged=staged_instructions,
                 staged_hashes=result.get("staged_file_hashes", {}),
                 staged_fallback_hashes=staged_fallbacks,
+                targets=_external_claim_targets(deployed, project_root, targets, scope),
             )
             # Receipts are a bundle file's only deletion evidence (#4223); a
             # dry run writes nothing, so it reports no written files.
@@ -773,6 +774,35 @@ def _home_relative_claims(
     return [_relative(path) for path in deployed], {
         _relative(path): digest for path, digest in hashes.items()
     }
+
+
+def _external_claim_targets(
+    deployed: list[str], project_root: Path, targets: Any, scope: Any
+) -> dict[str, str]:
+    """Name the target of each claim outside *project_root*, by its canonical locator.
+
+    A ``$CODEX_HOME`` outside HOME leaves an absolute claim whose path prefix
+    names no target; the canonical locator keeps it with that target (#4007).
+    Targets with their own external locator form are left as they are.
+    """
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..core.deployment_state import LocatorKind
+
+    attributed: dict[str, str] = {}
+    for record in (claim for claim in deployed if Path(claim).is_absolute()):
+        for target in targets:
+            if getattr(target, "external_locator_encoder", None) is not None:
+                continue
+            try:
+                locator = DeploymentLedgerCodec.locator_for_path(
+                    record, project_root=project_root, target=target, scope=scope
+                )
+            except (RuntimeError, OSError, ValueError):
+                continue
+            if locator.kind is LocatorKind.TARGET_RELATIVE:
+                attributed[record] = target.name
+                break
+    return attributed
 
 
 def _bootstrap_project_manifest(logger) -> None:

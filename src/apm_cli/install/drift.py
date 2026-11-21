@@ -866,15 +866,24 @@ def diff_scratch_against_project(
 
     local_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
     if local_bundle_paths:
+        from apm_cli.install.audit_target_roots import claims_for_root
+
+        # An external root ($CODEX_HOME) compares root-relative keys (#4007).
+        bundle_keys = claims_for_root(
+            dict.fromkeys(local_bundle_paths, ""),
+            project_root,
+            absolute_only=absolute_claims_only,
+            targets=tuple(targets),
+        )
         scratch_files = {
             relative_path: path
             for relative_path, path in scratch_files.items()
-            if relative_path not in local_bundle_paths
+            if relative_path not in bundle_keys
         }
         project_files = {
             relative_path: path
             for relative_path, path in project_files.items()
-            if relative_path not in local_bundle_paths
+            if relative_path not in bundle_keys
         }
 
     # Canvas extensions are executable bundles that the drift replay does

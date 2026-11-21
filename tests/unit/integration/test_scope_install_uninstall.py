@@ -67,7 +67,9 @@ def _make_pkg(
     if agents:
         d = pkg / ".apm" / "agents"
         d.mkdir(parents=True, exist_ok=True)
-        (d / "reviewer.agent.md").write_text("# Code reviewer agent")
+        (d / "reviewer.agent.md").write_text(
+            "---\ndescription: Code reviewer\n---\n# Code reviewer agent"
+        )
 
     if commands:
         # command_integrator.find_prompt_files searches .apm/prompts/

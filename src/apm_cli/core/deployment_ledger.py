@@ -1284,12 +1284,13 @@ class DeploymentLedgerCodec:
         staged: Collection[str] = (),
         staged_hashes: Mapping[str, str] | None = None,
         staged_fallback_hashes: Mapping[str, str] | None = None,
+        targets: Mapping[str, str] | None = None,
     ) -> None:
         """Persist imperative bundle files without making them replayable source.
 
         *scope* is the install scope that deployed *files*; their rows record
         it, so a user-scope bundle keeps ``scope: user`` (#3995). It has no
-        default: the owner never guesses a scope.
+        default: the owner never guesses a scope; *targets* keeps an external file's target.
 
         *staged* is compile input under ``apm_modules/<slug>/.apm/`` (#3705):
         it is recorded in ``local_staged_files`` and never claimed. Every prior
@@ -1327,11 +1328,11 @@ class DeploymentLedgerCodec:
             merged_hashes,
         )
 
-        scope_value = scope.value
         DeploymentLedgerCodec._mark_local_bundle_paths(
             lockfile,
             prior_bundle_paths.union(files),
-            scopes=dict.fromkeys(files, scope_value),
+            scopes=dict.fromkeys(files, scope.value),
+            targets=targets,
         )
         lockfile.local_staged_files = sorted(
             set(lockfile.local_staged_files).union(staged, retired_paths)
@@ -1561,9 +1562,9 @@ class DeploymentLedgerCodec:
         """Rebuild compatibility rows and restore surviving bundle provenance.
 
         A surviving bundle row keeps the scope its unambiguous prior claim
-        recorded (*bundle_scopes*, default: from *prior_ledger*); the path
-        prefix alone cannot tell a user-scope ``.claude/`` path from a project
-        one (#3995).
+        recorded (*bundle_scopes*, default: from *prior_ledger*) and its prior
+        target; the path alone cannot tell a user-scope ``.claude/`` path from a
+        project one (#3995), nor name a ``$CODEX_HOME`` target (#4007).
         """
         if bundle_scopes is None and prior_ledger is not None:
             bundle_scopes = DeploymentLedgerCodec._bundle_scopes((prior_ledger,))
@@ -1631,10 +1632,12 @@ class DeploymentLedgerCodec:
         DeploymentLedgerCodec._mark_local_bundle_paths(
             lockfile,
             surviving_paths,
-            scopes={
-                path: scope
-                for path, scope in (bundle_scopes or {}).items()
-                if path in surviving_paths
+            scopes=bundle_scopes,
+            targets={
+                record.locator.value: record.locator.target
+                for record in (prior_ledger.records.values() if prior_ledger else ())
+                if record.active_owner == _LOCAL_BUNDLE_OWNER
+                and record.locator.target != UNATTRIBUTED_TARGET
             },
         )
 
@@ -1663,11 +1666,9 @@ class DeploymentLedgerCodec:
         bundle_paths: frozenset[str],
         *,
         scopes: Mapping[str, str] | None = None,
+        targets: Mapping[str, str] | None = None,
     ) -> None:
-        """Mark existing ledger rows as hash-audited imperative bundle output.
-
-        *scopes* records the install scope of a path's bundle claim.
-        """
+        """Mark rows as hash-audited bundle output; *scopes*/*targets* override per path."""
         if not bundle_paths:
             return
         records = dict(lockfile.deployment_ledger.records)
@@ -1678,18 +1679,17 @@ class DeploymentLedgerCodec:
                 continue
             _require_local_bundle_hash(path, record.content_hash)
             owners = tuple(owner for owner in record.owners if owner != _LOCAL_BUNDLE_OWNER)
-            scope = (scopes or {}).get(path, record.locator.scope)
-            locator = (
-                record.locator
-                if scope == record.locator.scope
-                else replace(record.locator, scope=scope)
+            locator = replace(
+                record.locator,
+                scope=(scopes or {}).get(path, record.locator.scope),
+                target=(targets or {}).get(path, record.locator.target),
             )
             del records[key]
-            records[locator.key] = DeploymentRecord(
+            records[locator.key] = replace(
+                record,
                 locator=locator,
                 owners=(*owners, _LOCAL_BUNDLE_OWNER),
                 active_owner=_LOCAL_BUNDLE_OWNER,
-                content_hash=record.content_hash,
             )
             marked_paths.add(path)
         missing = bundle_paths - marked_paths

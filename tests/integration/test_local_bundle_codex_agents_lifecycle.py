@@ -9,6 +9,7 @@ records the rendered hash, so ``apm audit --ci`` verifies the bytes Codex reads.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import tomllib
 from pathlib import Path
@@ -92,6 +93,15 @@ def _assert_rendered(agent: Path, lockfile: Path, record: str) -> None:
     assert lock["local_deployed_file_hashes"][record] == compute_file_hash(agent)
 
 
+def _receipt_destinations(world: _World) -> set[str]:
+    destinations: set[str] = set()
+    for receipt in world.isolated.config_root.glob("deployment-receipts*/*.json"):
+        destinations.update(
+            json.loads(receipt.read_text(encoding="utf-8"))["destinations"].values()
+        )
+    return destinations
+
+
 def _rendered_hash(packed: Path, agent: Path) -> str:
     """Hash of the agent integrator's Codex rendering of a packed agent."""
     from apm_cli.integration.agent_integrator import AgentIntegrator
@@ -124,6 +134,8 @@ def test_codex_bundle_agent_project_lifecycle(tmp_path: Path, apm_binary_path: P
     agent = project / _AGENT
     world.apm(project, *install)
     _assert_rendered(agent, project / "apm.lock.yaml", _AGENT)
+    # The rendered write is the bundle claim's deletion evidence (#4007).
+    assert str(agent.resolve()) in _receipt_destinations(world)
     world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
     rendered = agent.read_bytes()
     lock = (project / "apm.lock.yaml").read_bytes()
@@ -222,3 +234,41 @@ def test_codex_bundle_agent_user_scope_lock_and_audit(
     assert lock["local_deployed_file_hashes"][_AGENT] == compute_file_hash(home / _AGENT)
     audit = world.apm(world.isolated.config_root, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
     assert audit.returncode == 0, _output(audit)
+
+
+def test_codex_bundle_agent_in_external_codex_home_audits_beside_another_target(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A -g agent under a $CODEX_HOME outside HOME stays a Codex claim (#4007).
+
+    With a Claude claim already in the user lock and no manifest targets,
+    ``audit --ci`` must still resolve, hash-check and drift-check the Codex agent.
+    """
+    world = _World(tmp_path, apm_binary_path)
+    bundle = world.pack()
+    home = world.isolated.home
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    world.env = world.isolated.subprocess_env(overrides={"CODEX_HOME": str(codex_home)})
+    (home / ".claude").mkdir(exist_ok=True)
+    _write(world.isolated.config_root / "apm.yml", "name: user\nversion: 1.0.0\n")
+    for target in ("claude", "codex"):
+        world.apm(world.root, "install", "-g", str(bundle), "--target", target, _NO_POLICY)
+
+    agent = codex_home / "agents/rev.toml"
+    assert tomllib.loads(agent.read_text(encoding="utf-8")) == _EXPECTED_TOML
+    lock = load_yaml(world.isolated.config_root / "apm.lock.yaml")
+    rows = {(row["target"], row["value"]) for row in lock["deployments"]}
+    assert ("codex", "agents/rev.toml") in rows, rows
+    assert ("claude", ".claude/agents/rev.md") in rows, rows
+    assert str(agent.resolve()) in _receipt_destinations(world)
+    audit = world.apm(world.isolated.config_root, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+    assert audit.returncode == 0, _output(audit)
+
+    # The claim keeps its target when a later bundle install rewrites the lock.
+    world.apm(world.root, "install", "-g", str(bundle), "--target", "claude", _NO_POLICY)
+    lock = load_yaml(world.isolated.config_root / "apm.lock.yaml")
+    assert ("codex", "agents/rev.toml") in {
+        (row["target"], row["value"]) for row in lock["deployments"]
+    }
+    world.apm(world.isolated.config_root, "audit", "--ci", _NO_POLICY, "--no-fail-fast")

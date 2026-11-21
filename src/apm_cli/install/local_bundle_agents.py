@@ -5,7 +5,8 @@ copies them as packed for Markdown-agent targets; for a ``codex_agent``
 mapping this module renders the agent with the agent integrator's Codex
 renderer and deploys it through the integrator's render-then-adopt write
 contract, so the comparison, the preview, the written bytes and the recorded
-hash are all the same rendered text (#3714).
+hash are all the same rendered text (#3714). The render reads only the packed
+bytes verified against ``pack.bundle_files``, never the source a second time.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
     from ..utils.diagnostics import DiagnosticCollector
 
 _RENDER_ERRORS = (OSError, UnicodeDecodeError, ValueError, TypeError)
+_HEX_DIGITS = frozenset("0123456789abcdef")
 
 
 def deploy_bundle_codex_agent(
@@ -28,19 +30,24 @@ def deploy_bundle_codex_agent(
     record: str,
     deployed_files: list[str],
     deployed_hashes: dict[str, str],
+    written_files: list[str],
     **kwargs: Any,
 ) -> int:
     """Deploy one packed agent as Codex TOML and record its rendered-hash claim.
 
     *kwargs* are the keyword-only arguments of :func:`render_and_deploy_codex_agent`.
     Returns the number of skipped files (``0`` or ``1``); a skipped agent
-    records no claim.
+    records no claim. *record* joins *written_files*, the bundle's receipt
+    evidence, only when this install wrote it (never a dry run or adoption).
     """
-    claim = render_and_deploy_codex_agent(src, dest, record=record, **kwargs)
-    if claim is None:
+    deployed = render_and_deploy_codex_agent(src, dest, record=record, **kwargs)
+    if deployed is None:
         return 1
+    claim, written = deployed
     deployed_files.append(record)
     deployed_hashes[record] = claim
+    if written:
+        written_files.append(record)
     return 0
 
 
@@ -58,25 +65,28 @@ def render_and_deploy_codex_agent(
     dry_run: bool,
     diagnostics: DiagnosticCollector | None,
     logger: Any,
-) -> str | None:
+) -> tuple[str, bool] | None:
     """Render one packed Markdown agent to Codex TOML and deploy it.
 
     The packed bytes are checked against their ``pack.bundle_files`` digest
-    before rendering. The agent is rendered once, before any adopt or
-    collision decision. A dry run previews the rendered hash and writes
-    nothing.
+    (normalized as bundle admission does) and rendered from that verified
+    snapshot. The agent is rendered once, before any adopt or collision
+    decision. A dry run previews the rendered hash and writes nothing.
 
     *record* is the lockfile claim (absolute at user scope). The collision
     check takes *dest* relative to the first of *collision_roots* that
     contains it, since the integrator resolves that key against *dest*.
 
     Returns:
-        The ``sha256:<hex>`` hash of the rendered text when the agent is
-        written, adopted unchanged, or previewed; ``None`` when it is skipped
-        (digest mismatch, render failure, unsafe destination or collision).
-        A skipped agent writes nothing and must not be recorded as deployed.
+        ``(claim, written)``: the ``sha256:<hex>`` hash of the rendered text
+        and whether this call wrote the file (``False`` when it was adopted
+        unchanged or previewed); ``None`` when it is skipped (invalid or
+        mismatched digest, render failure, an agent Codex rejects, unsafe
+        destination or collision). A skipped agent writes nothing and must
+        not be recorded as deployed.
     """
-    from ..integration.agent_integrator import _SKIPPED, AgentIntegrator
+    from ..bundle.local_bundle import _normalize_hash
+    from ..integration.agent_integrator import _SKIPPED, AgentIntegrator, CodexAgentInvalid
     from ..utils.atomic_io import normalize_crlf_to_lf
     from ..utils.diagnostics import DiagnosticCollector
     from ..utils.path_security import PathTraversalError
@@ -88,11 +98,21 @@ def render_and_deploy_codex_agent(
             logger.warning(message)
 
     try:
+        expected_digest = _normalize_hash(expected_hash)
+    except (ValueError, AttributeError):
+        expected_digest = ""
+    if len(expected_digest) != 64 or not set(expected_digest) <= _HEX_DIGITS:
+        _warn(
+            f"Skipped packed bundle agent {rel_path!r}: its pack.bundle_files digest is "
+            "not a SHA-256 hex digest. Repack the bundle, then rerun the install."
+        )
+        return None
+    try:
         packed = src.read_bytes()
     except OSError as exc:
         _warn(f"Skipped packed bundle agent {rel_path!r}: it could not be read ({exc}).")
         return None
-    if hashlib.sha256(packed).hexdigest() != expected_hash.removeprefix("sha256:"):
+    if hashlib.sha256(packed).hexdigest() != expected_digest:
         _warn(
             f"Skipped packed bundle agent {rel_path!r}: its bytes do not match "
             "pack.bundle_files. Repack the bundle, then rerun the install."
@@ -109,7 +129,14 @@ def render_and_deploy_codex_agent(
                 diagnostics=collector,
                 package_name=slug,
                 resolve_links=integrator.resolve_links,
+                content=_universal_newlines(packed.decode("utf-8")),
             )
+        except CodexAgentInvalid as exc:
+            _warn(
+                f"Skipped packed bundle agent {rel_path!r} for target {target_name}: "
+                f"{exc}. Fix the agent source, repack the bundle, then rerun the install."
+            )
+            return None
         except _RENDER_ERRORS as exc:
             _warn(
                 f"Skipped packed bundle agent {rel_path!r} for target {target_name}: "
@@ -121,7 +148,7 @@ def render_and_deploy_codex_agent(
         if dry_run:
             if logger is not None:
                 logger.verbose_detail(f"[dry-run] would deploy {record}")
-            return f"sha256:{rendered_hash}"
+            return f"sha256:{rendered_hash}", False
         try:
             outcome = integrator._deploy_rendered_agent(
                 dest,
@@ -140,10 +167,16 @@ def render_and_deploy_codex_agent(
             return None
         if logger is not None:
             logger.verbose_detail(f"deployed {record}")
-        return f"sha256:{rendered_hash}"
+        # The integrator reports only real writes, never an adopted file.
+        return f"sha256:{rendered_hash}", bool(integrator.take_rendered_writes())
     finally:
         if collector is not diagnostics:
             _relay(collector, record, logger)
+
+
+def _universal_newlines(text: str) -> str:
+    """Translate newlines as ``Path.read_text`` does, so a snapshot renders identically."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _collision_key(dest: Path, roots: tuple[Path, ...]) -> str:
