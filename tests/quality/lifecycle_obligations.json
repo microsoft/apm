@@ -10019,9 +10019,8 @@
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4600",
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=marketplace|SCOPE=project|LOCK=newer-generator": {
@@ -15999,9 +15998,8 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4600",
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=marketplace|LOCK=newer-generator": {
@@ -16049,6 +16047,7 @@
   "pair|OP=marketplace|SCOPE=project": {
    "credited_by": [
     "T4|marketplace|project|absent",
+    "T4|marketplace|project|consistent",
     "T4|marketplace|project|newer",
     "T4|marketplace|project|stale"
    ],

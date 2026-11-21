@@ -370,26 +370,9 @@ def drift_cells(scope: str) -> frozenset[str]:
     )
 
 
-_REGISTRY = ".apm/marketplaces.json"
-
-
-def _lists_into_a_fresh_registry(machine, op, before, after, result) -> bool:
-    """``apm marketplace list`` on a HOME without a registry (it creates one, #4600)."""
-    del machine, after, result
-    return op.name == "marketplace" and _REGISTRY not in before.artifacts.snapshot("home").paths
-
-
-DRIFT_KNOWN_CELLS: tuple[KnownCell, ...] = (
-    KnownCell(
-        "marketplace-list-creates-registry",
-        "I5",
-        "#4600",
-        r"marketplace wrote home:\['\.apm/marketplaces\.json'\]",
-        _lists_into_a_fresh_registry,
-    ),
-)
+DRIFT_KNOWN_CELLS: tuple[KnownCell, ...] = ()
 # T4 cells whose step is a strict known cell -> tracking issue (known-failing).
-KNOWN_T4: dict[str, str] = {"T4|marketplace|project|consistent": "#4600"}
+KNOWN_T4: dict[str, str] = {}
 
 
 class DriftMachine(ScopeLockMachine):
