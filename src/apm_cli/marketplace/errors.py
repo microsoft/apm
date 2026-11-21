@@ -8,6 +8,7 @@ from ..core.remediation import (
     MARKETPLACE_FETCH_FAILED,
     MARKETPLACE_ORIGIN_RESTORE,
     MARKETPLACE_ORIGIN_SWITCH,
+    MARKETPLACE_ORIGIN_SWITCH_GLOBAL,
     MARKETPLACE_UNREGISTERED_SHORTHAND,
     MARKETPLACE_UNREGISTERED_URL,
     either_sentence,
@@ -91,9 +92,22 @@ class DependencyConfusionError(MarketplaceError, ValueError):
 
 
 class MarketplaceOriginConflictError(MarketplaceError):
-    """Raised when an alias now names a different marketplace than the lock recorded."""
+    """Raised when an alias now names a different marketplace than the lock recorded.
 
-    def __init__(self, marketplace_name: str, plugin_name: str, locked: str, current: str):
+    *user_scope* renders the switch remedy against the user manifest
+    (``~/.apm/apm.yml``, ``apm install -g``). The restore remedy is the same at
+    both scopes: the marketplace registry is user-global.
+    """
+
+    def __init__(
+        self,
+        marketplace_name: str,
+        plugin_name: str,
+        locked: str,
+        current: str,
+        *,
+        user_scope: bool = False,
+    ):
         import shlex
 
         from .source_identity import parse_marketplace_source
@@ -102,6 +116,7 @@ class MarketplaceOriginConflictError(MarketplaceError):
         self.plugin_name = plugin_name
         self.locked_origin = locked
         self.current_origin = current
+        self.user_scope = user_scope
         try:
             parse_marketplace_source(locked)
         except ValueError:
@@ -113,9 +128,11 @@ class MarketplaceOriginConflictError(MarketplaceError):
             restore = MARKETPLACE_ORIGIN_RESTORE.bind(
                 source=shlex.quote(locked), name=shlex.quote(marketplace_name)
             ).sentence()
-        switch = MARKETPLACE_ORIGIN_SWITCH.bind(plugin=repr(plugin_name)).clause()
+        switch_entry = MARKETPLACE_ORIGIN_SWITCH_GLOBAL if user_scope else MARKETPLACE_ORIGIN_SWITCH
+        switch = switch_entry.bind(plugin=repr(plugin_name)).clause()
+        lockfile = "~/.apm/apm.lock.yaml" if user_scope else "apm.lock.yaml"
         super().__init__(
-            f"marketplace {marketplace_name!r} now points at {current}, but apm.lock.yaml "
+            f"marketplace {marketplace_name!r} now points at {current}, but {lockfile} "
             f"recorded {plugin_name!r} from {locked}. Nothing was changed. {restore} "
             f"To switch marketplaces on purpose, {switch}."
         )

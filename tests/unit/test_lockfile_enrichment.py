@@ -58,6 +58,43 @@ class TestLockfileEnrichment:
         assert parsed["lockfile_version"] == "1"
         assert parsed["pack"]["format"] == expected_format
 
+    def test_author_install_state_never_reaches_the_packed_lock(self):
+        """Packing after ``apm install`` yields the same lock as before it (RA-031)."""
+        installed = LockFile.from_yaml(
+            """\
+lockfile_version: '1'
+apm_version: 0.37.0
+manifest_targets: [codex, copilot]
+dependencies: []
+deployments:
+- {kind: project-relative, target: codex, value: .agents/skills/s1/SKILL.md,
+   runtime: null, scope: project, owners: [.], active_owner: .,
+   content_hash: 'sha256:aa'}
+- {kind: uri, target: mcp, value: remote-srv, runtime: codex, scope: project,
+   owners: [.], active_owner: ., content_hash: 'sha256:bb'}
+mcp_servers: [remote-srv]
+mcp_configs:
+  remote-srv: {name: remote-srv, transport: http, registry: false,
+               url: 'https://example.com/mcp'}
+mcp_target_servers: {codex: [remote-srv], copilot: [remote-srv]}
+local_deployed_files: [.agents/skills/s1/SKILL.md]
+local_deployed_file_hashes: {.agents/skills/s1/SKILL.md: 'sha256:aa'}
+"""
+        )
+        files = {"skills/s1/SKILL.md": "aa", ".mcp.json": "cc"}
+
+        def pack(lock: LockFile) -> str:
+            return enrich_lockfile_for_pack(
+                lock, "plugin", "all", bundle_files=files, packed_at="2026-01-01T00:00:00Z"
+            )
+
+        packed = pack(installed)
+
+        assert packed == pack(LockFile(apm_version="0.37.0"))
+        parsed = yaml.safe_load(packed)
+        for key in ("deployments", "mcp_configs", "mcp_target_servers", "manifest_targets"):
+            assert key not in parsed
+
     def test_does_not_mutate_original(self):
         lf = _make_lockfile()
         original_yaml = lf.to_yaml()

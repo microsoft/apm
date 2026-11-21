@@ -32,8 +32,29 @@ if TYPE_CHECKING:
     from .models import MarketplaceSource
 
 
+def invocation_user_scope() -> bool:
+    """Whether the running ``apm`` command was invoked at user scope (``-g``).
+
+    Read from the Click invocation, so a refusal raised below a command that
+    does not thread its scope still renders the remedy for that scope. Outside
+    a Click invocation (library use) the scope is the project.
+    """
+    import click
+
+    ctx = click.get_current_context(silent=True)
+    while ctx is not None:
+        if ctx.params.get("global_"):
+            return True
+        ctx = ctx.parent
+    return False
+
+
 def require_locked_catalog_origin(
-    marketplace_name: str, plugin_name: str, lockfile: LockFile | None
+    marketplace_name: str,
+    plugin_name: str,
+    lockfile: LockFile | None,
+    *,
+    user_scope: bool | None = None,
 ) -> None:
     """Refuse to resolve through an alias that now names a different catalog.
 
@@ -46,6 +67,9 @@ def require_locked_catalog_origin(
     the catalog path, so a move to another path in the same repository is
     not detected (see :func:`same_marketplace_catalog`).
 
+    *user_scope* selects the scope the refusal's remedy names; ``None``
+    reads it from the invocation (:func:`invocation_user_scope`).
+
     Raises:
         MarketplaceOriginConflictError: The alias's registered origin differs
             from an origin the lockfile recorded for this plugin.
@@ -54,10 +78,15 @@ def require_locked_catalog_origin(
     if lockfile is None:
         return
     for dep in lockfile.marketplace_rows(marketplace_name, plugin_name):
-        require_locked_row_origin(dep, marketplace_name=marketplace_name)
+        require_locked_row_origin(dep, marketplace_name=marketplace_name, user_scope=user_scope)
 
 
-def require_locked_row_origin(locked: LockedDependency, *, marketplace_name: str = "") -> None:
+def require_locked_row_origin(
+    locked: LockedDependency,
+    *,
+    marketplace_name: str = "",
+    user_scope: bool | None = None,
+) -> None:
     """Refuse one lock row whose alias now names a different catalog (#3959).
 
     For consumers that already hold the row, such as ``apm outdated``. A row
@@ -79,6 +108,7 @@ def require_locked_row_origin(locked: LockedDependency, *, marketplace_name: str
             locked.marketplace_plugin_name,
             locked.source_url,
             current or source.display_source,
+            user_scope=invocation_user_scope() if user_scope is None else user_scope,
         )
 
 

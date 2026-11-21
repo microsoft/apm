@@ -599,6 +599,50 @@ class TestIntegrateRootProject:
 
         assert result is None
 
+    @pytest.mark.parametrize(
+        ("scope_value", "expected", "forbidden"),
+        [
+            ("user", "  [+] <user scope> (local)", "<project root>"),
+            ("project", "  [+] <project root> (local)", "<user scope>"),
+        ],
+    )
+    def test_root_row_names_the_install_scope_on_stdout(
+        self, tmp_path: Path, capsys, scope_value: str, expected: str, forbidden: str
+    ) -> None:
+        """RA-020: apm install -g never labels the user scope as the project root."""
+        from apm_cli.core.command_logger import InstallLogger
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.integrate import _integrate_root_project
+
+        ctx = _make_ctx(tmp_path)
+        ctx.scope = InstallScope(scope_value)
+        ctx.root_has_local_primitives = True
+        ctx.targets = [MagicMock()]
+        ctx.logger = InstallLogger(verbose=False)
+        ctx.managed_files = set()
+        ctx.old_local_deployed = []
+        ctx.package_deployed_files = {}
+        ctx.integrators = {
+            name: MagicMock()
+            for name in ("prompt", "agent", "skill", "instruction", "command", "hook")
+        }
+
+        with (
+            patch(
+                "apm_cli.install.services.integrate_local_content",
+                side_effect=RuntimeError("stop after the root row"),
+            ),
+            patch(
+                "apm_cli.integration.base_integrator.BaseIntegrator.normalize_managed_files",
+                return_value=set(),
+            ),
+        ):
+            _integrate_root_project(ctx)
+
+        out = capsys.readouterr().out
+        assert expected in out.splitlines()
+        assert forbidden not in out
+
 
 # ---------------------------------------------------------------------------
 # _check_cowork_caps

@@ -151,6 +151,23 @@ def install_local_bundle(
 
             targets = resolve_skill_layout(targets, legacy_skill_paths=True)
 
+        from .bundle_admission import admit_bundle, plugin_bundle_integrity
+
+        verify_integrity = plugin_bundle_integrity(bundle_info, logger)
+        integrity_verified = False
+
+        def integrity_check(require_hashes: bool) -> None:
+            nonlocal integrity_verified
+            if not integrity_verified:
+                verify_integrity(require_hashes)
+                integrity_verified = bundle_info.lockfile is not None
+
+        if bundle_info.lockfile is not None:
+            # A bundle with a manifest is verified whatever the policy says, so
+            # refuse a tampered one before the executables gate offers to
+            # approve its content (RA-035). admit_bundle reuses this verdict.
+            integrity_check(False)
+
         bundle_mcp_deps: list[MCPDependency] = []
         bundle_mcp_declared = False
         if bundle_info.lockfile is not None:
@@ -204,8 +221,6 @@ def install_local_bundle(
             logger=logger,
             user_scope=global_,
         )
-        from .bundle_admission import admit_bundle, plugin_bundle_integrity
-
         deployment_decision = EffectiveTargetDecision(
             [resolved.name for resolved in targets], "bundle deployment targets"
         )
@@ -214,7 +229,7 @@ def install_local_bundle(
             apm_deps=(),
             mcp_deps=bundle_mcp_deps,
             target_decision=deployment_decision,
-            integrity_check=plugin_bundle_integrity(bundle_info, logger),
+            integrity_check=integrity_check,
             no_policy=no_policy,
             logger=logger,
             dry_run=dry_run,

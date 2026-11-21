@@ -1133,6 +1133,52 @@ class _CheckResult:
         self.error = error
 
 
+_CHECK_FLAG_HEADERS = ("Reachable", "Version Found", "Ref OK")
+
+
+def _check_table_min_width(results) -> int:
+    """Width the check table needs before Rich crushes a column to ``..``.
+
+    Six columns cost 7 borders plus 2 padding cells each; Status is fixed at
+    6, the Package column never wraps, and every other header must fit whole.
+    """
+    longest_name = max((len(r.name) for r in results), default=0)
+    package = max(len("Package"), longest_name)
+    flags = sum(len(header) for header in _CHECK_FLAG_HEADERS)
+    return 7 + 6 * 2 + 6 + package + flags + len("Detail")
+
+
+def _render_check_list(console, results):
+    """Render check results as a list when the table cannot fit the terminal.
+
+    Same narrow-terminal approach as ``apm marketplace browse``: a squeezed
+    table truncates exactly the text users read, so each entry gets its own
+    lines and the detail wraps instead.
+    """
+    import textwrap
+
+    width = max(40, console.width)
+
+    def emit(line: str) -> None:
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
+
+    console.print()
+    emit("Entry Health Check:")
+    for r in results:
+        flags = (r.reachable, r.version_found, r.ref_ok)
+        emit(f"  {'[+]' if r.ref_ok else '[x]'} {r.name}")
+        emit(
+            "      "
+            + "  ".join(
+                f"{header}: {'[+]' if ok else '[x]'}"
+                for header, ok in zip(_CHECK_FLAG_HEADERS, flags, strict=True)
+            )
+        )
+        detail = f"Detail: {r.error if r.error else 'OK'}"
+        for line in textwrap.wrap(detail, width=width - 6) or [detail]:
+            emit(f"      {line}")
+
+
 def _render_check_table(logger, results):
     """Render the check-results table."""
     console = _get_console()
@@ -1141,6 +1187,10 @@ def _render_check_table(logger, results):
             icon = "[+]" if r.ref_ok else "[x]"
             detail = r.error if r.error else "OK"
             logger.tree_item(f"  {icon} {r.name}: {detail}")
+        return
+
+    if console.width < _check_table_min_width(results):
+        _render_check_list(console, results)
         return
 
     from rich.text import Text

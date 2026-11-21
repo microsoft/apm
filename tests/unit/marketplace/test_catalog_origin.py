@@ -103,3 +103,56 @@ def test_row_level_check_refuses_a_rebound_alias_and_accepts_legacy_rows(registe
 
     (legacy,) = _lock(None).dependencies.values()
     catalog_origin.require_locked_row_origin(legacy)
+
+
+_PROJECT_CONFLICT = (
+    f"marketplace 'company' now points at {_B}, but apm.lock.yaml recorded 'plugin' "
+    f"from {_A}. Nothing was changed. Run 'apm marketplace add {_A} --name company' "
+    "to keep the locked marketplace (add --ref or --path if the original "
+    "registration used them). To switch marketplaces on purpose, remove 'plugin' from "
+    "apm.yml, then run 'apm install' to drop the plugin locked from the old marketplace, "
+    "then add it back and run 'apm install' again."
+)
+_USER_CONFLICT = (
+    f"marketplace 'company' now points at {_B}, but ~/.apm/apm.lock.yaml recorded "
+    f"'plugin' from {_A}. Nothing was changed. Run 'apm marketplace add {_A} --name "
+    "company' to keep the locked marketplace (add --ref or --path if the original "
+    "registration used them). To switch marketplaces on purpose, remove 'plugin' from "
+    "~/.apm/apm.yml, then run 'apm install -g' to drop the plugin locked from the old "
+    "marketplace, then add it back and run 'apm install -g' again."
+)
+
+
+def test_conflict_remedy_names_the_refused_scope() -> None:
+    """RA-029: a user-scope refusal names the user manifest and ``apm install -g``.
+
+    The restore remedy keeps no ``-g``: the marketplace registry is user-global.
+    """
+    project = MarketplaceOriginConflictError("company", "plugin", _A, _B)
+    user = MarketplaceOriginConflictError("company", "plugin", _A, _B, user_scope=True)
+
+    assert str(project) == _PROJECT_CONFLICT
+    assert str(user) == _USER_CONFLICT
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [(["-g"], _USER_CONFLICT), ([], _PROJECT_CONFLICT)],
+    ids=["global", "project"],
+)
+def test_origin_refusal_reads_the_scope_of_the_invoking_command(registered, argv, expected) -> None:
+    """RA-029: ``apm install -g x@m`` raises below install, which does not thread scope."""
+    import click
+    from click.testing import CliRunner
+
+    registered(_B)
+
+    @click.command()
+    @click.option("--global", "-g", "global_", is_flag=True)
+    def install(global_):
+        catalog_origin.require_locked_catalog_origin("company", "plugin", _lock(_A))
+
+    result = CliRunner().invoke(install, argv)
+
+    assert isinstance(result.exception, MarketplaceOriginConflictError)
+    assert str(result.exception) == expected

@@ -58,7 +58,7 @@ def _format_primitive_counts(primitives):
     return ", ".join(parts)
 
 
-_PROVIDER_SOURCE_LABELS = {"ado": "azure-devops", "gitlab": "gitlab"}
+_PROVIDER_SOURCE_LABELS = {"ado": "azure-devops", "gitlab": "gitlab", "generic": "git"}
 
 
 def _deps_list_source_label(
@@ -71,7 +71,8 @@ def _deps_list_source_label(
     """Map a dependency's provider to the ``apm deps list`` Source column.
 
     Remote hosts classify through the canonical provider registry, so a
-    declared or locked ``host_type`` labels a self-hosted GitLab correctly.
+    declared or locked ``host_type`` labels a self-hosted GitLab correctly,
+    and an unrecognized host is labeled ``git`` rather than ``github``.
     """
     from ...core.host_providers import classify_host_provider
 
