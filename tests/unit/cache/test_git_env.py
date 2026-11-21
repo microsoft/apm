@@ -42,6 +42,51 @@ pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 _REAL_SUBPROCESS_RUN = subprocess.run
 
 
+class _FakeGitConfigChild:
+    """Stand in for the ``git config`` child process started through ``subprocess.Popen``.
+
+    Every start is recorded; the first *time_out* bounded waits expire.
+    """
+
+    def __init__(
+        self,
+        returncode: int = 0,
+        *,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        time_out: int = 0,
+    ) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.time_out = time_out
+        self.commands: list[list[str]] = []
+        self.timeouts: list[float] = []
+
+    def __call__(self, command, **_kwargs) -> "_FakeGitConfigChild":
+        self.commands.append(list(command))
+        return self
+
+    def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+        if timeout is not None:
+            self.timeouts.append(timeout)
+            if len(self.timeouts) <= self.time_out:
+                raise subprocess.TimeoutExpired(self.commands[-1], timeout)
+        return self.stdout, self.stderr
+
+    def kill(self) -> None:
+        return None
+
+
+def _tool(directory: Path, name: str) -> Path:
+    """Place a stand-in executable named *name* in *directory*; it is never run."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / (f"{name}.exe" if os.name == "nt" else name)
+    path.write_bytes(b"")
+    path.chmod(0o755)
+    return path
+
+
 def _run_real_git_config_and_fake_clone(args, **kwargs):
     """Use real local config parsing while preventing any clone network I/O."""
     if len(args) > 1 and args[1] == "config":
@@ -93,45 +138,37 @@ class TestGetGitExecutable:
     def teardown_method(self) -> None:
         reset_git_cache()
 
-    @patch(
-        "apm_cli.utils.git_env._resolve_trusted_executable",
-        return_value="/usr/bin/git",
-    )
-    def test_returns_git_path(self, mock_resolve) -> None:
-        result = get_git_executable()
-        assert result == "/usr/bin/git"
-        mock_resolve.assert_called_once_with("git")
+    def test_returns_git_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        git = _tool(tmp_path / "bin", "git")
+        monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+        assert get_git_executable() == str(git.resolve())
 
-    @patch(
-        "apm_cli.utils.git_env._resolve_trusted_executable",
-        return_value="/usr/bin/git",
-    )
-    def test_cached_after_first_call(self, mock_resolve) -> None:
-        """Resolution runs only once across multiple invocations."""
-        get_git_executable()
-        get_git_executable()
-        get_git_executable()
-        mock_resolve.assert_called_once()
+    def test_cached_after_first_call(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Resolution runs only once: a later PATH change does not move it."""
+        first = _tool(tmp_path / "first", "git")
+        monkeypatch.setenv("PATH", str(tmp_path / "first"))
+        assert get_git_executable() == str(first.resolve())
+        _tool(tmp_path / "second", "git")
+        monkeypatch.setenv("PATH", str(tmp_path / "second"))
+        assert get_git_executable() == str(first.resolve())
 
-    @patch(
-        "apm_cli.utils.git_env._resolve_trusted_executable",
-        side_effect=FileNotFoundError,
-    )
-    def test_raises_if_git_not_found(self, mock_resolve) -> None:
+    def test_raises_if_git_not_found(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        (tmp_path / "empty").mkdir()
+        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
         with pytest.raises(FileNotFoundError, match=r"git executable not found"):
             get_git_executable()
 
-    @patch(
-        "apm_cli.utils.git_env._resolve_trusted_executable",
-        side_effect=[FileNotFoundError, "/usr/bin/git"],
-    )
-    def test_transient_failure_does_not_poison_later_resolution(self, mock_resolve) -> None:
+    def test_transient_failure_does_not_poison_later_resolution(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A transient PATH miss raises but remains retryable."""
+        (tmp_path / "bin").mkdir()
+        monkeypatch.setenv("PATH", str(tmp_path / "bin"))
         with pytest.raises(FileNotFoundError):
             get_git_executable()
 
-        assert get_git_executable() == "/usr/bin/git"
-        assert mock_resolve.call_count == 2
+        git = _tool(tmp_path / "bin", "git")
+        assert get_git_executable() == str(git.resolve())
 
 
 @pytest.mark.trusted_executable
@@ -144,11 +181,11 @@ class TestGetGhExecutable:
     def teardown_method(self) -> None:
         reset_git_cache()
 
-    @patch(
-        "apm_cli.utils.git_env._resolve_trusted_executable",
-        side_effect=FileNotFoundError,
-    )
-    def test_missing_gh_has_actionable_error(self, mock_resolve) -> None:
+    def test_missing_gh_has_actionable_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "empty").mkdir()
+        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
         with pytest.raises(FileNotFoundError, match=r"Please install it"):
             get_gh_executable()
 
@@ -450,17 +487,15 @@ class TestGitSubprocessEnv:
 
     def test_rewrite_probe_failure_shows_first_redacted_stderr_line(self) -> None:
         token = "ghp_" + "Q7xR2mK9pL4vN8wT3yZ6bC1dF5gH0jS2aE4u"
-        result = subprocess.CompletedProcess(
-            ["git", "config"],
+        child = _FakeGitConfigChild(
             128,
-            stdout=b"",
             stderr=(
                 f"error: invalid key: https://x-access-token:{token}@github.com/\n"
                 "fatal: unable to parse command-line config\n"
             ).encode(),
         )
         with (
-            patch("apm_cli.utils.git_env._git_config_run", return_value=result),
+            patch("subprocess.Popen", child),
             pytest.raises(GitUrlRewriteProbeError) as raised,
         ):
             git_network_env("https://git.example.com/acme/repo")
@@ -476,29 +511,18 @@ class TestGitSubprocessEnv:
         assert "unable to parse" not in message
 
     def test_rewrite_probe_retries_once_after_timeout(self) -> None:
-        calls: list[int] = []
-
-        def fake_probe(args, **kwargs):
-            calls.append(kwargs["timeout"])
-            if len(calls) == 1:
-                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
-            return subprocess.CompletedProcess(args, 0, stdout=b"", stderr=b"")
-
-        with patch("apm_cli.utils.git_env._git_config_run", side_effect=fake_probe):
+        child = _FakeGitConfigChild(time_out=1)
+        with patch("subprocess.Popen", child):
             env = git_network_env("https://git.example.com/acme/repo")
 
         assert env["GIT_TRACE_REDACT"] == "1"
-        assert calls == [10, 30]
+        assert child.timeouts == [10, 30]
+        assert len(child.commands) == 2
 
     def test_rewrite_probe_still_fails_closed_after_retry_timeouts(self) -> None:
-        calls: list[int] = []
-
-        def fake_probe(args, **kwargs):
-            calls.append(kwargs["timeout"])
-            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
-
+        child = _FakeGitConfigChild(time_out=2)
         with (
-            patch("apm_cli.utils.git_env._git_config_run", side_effect=fake_probe),
+            patch("subprocess.Popen", child),
             pytest.raises(GitUrlRewriteProbeError) as raised,
         ):
             git_network_env("https://git.example.com/acme/repo")
@@ -507,7 +531,7 @@ class TestGitSubprocessEnv:
         assert "Git config probe timed out" in message
         assert "check Git configuration and retry" in message
         assert "'git config --show-origin --list'" in message
-        assert calls == [10, 30]
+        assert child.timeouts == [10, 30]
 
     def test_clone_retains_url_rewrite_without_restoring_parent_auth(self, tmp_path) -> None:
         config = tmp_path / "gitconfig"
@@ -1081,25 +1105,18 @@ class TestGitSubprocessEnv:
 
     def test_scp_ssh_url_reports_no_http_authorization_without_probing_git(self) -> None:
         headers = (GitConfigEntry("command", "http.extraheader", "Authorization: Basic sentinel"),)
-        with patch(
-            "apm_cli.utils.git_env._git_config_run",
-            side_effect=AssertionError("the URL-match probe must not run for a non-HTTP URL"),
-        ) as probe:
+        child = _FakeGitConfigChild()
+        with patch("subprocess.Popen", child):
             authorized = git_url_has_authorization("git@git.example.com:acme/repo", headers)
 
         assert authorized is False
-        probe.assert_not_called()
+        assert child.commands == []
 
     def test_http_urlmatch_failure_reports_status_without_raw_config(self) -> None:
         headers = (GitConfigEntry("command", "http.extraheader", "Authorization: Basic sentinel"),)
-        result = subprocess.CompletedProcess(
-            ["git", "config"],
-            128,
-            stdout=b"",
-            stderr=b"private config detail",
-        )
+        child = _FakeGitConfigChild(128, stderr=b"private config detail")
         with (
-            patch("apm_cli.utils.git_env._git_config_run", return_value=result),
+            patch("subprocess.Popen", child),
             pytest.raises(GitUrlRewriteProbeError) as raised,
         ):
             git_url_has_authorization("https://git.example.com/acme/repo", headers)
@@ -1358,12 +1375,6 @@ class TestGitSubprocessEnv:
         ]
 
     def test_remote_refs_replaces_ambient_repository_environment(self) -> None:
-        config_result = subprocess.CompletedProcess(
-            ["git", "config"],
-            0,
-            stdout=b"",
-            stderr=b"",
-        )
         network_result = subprocess.CompletedProcess(
             ["git", "ls-remote"],
             0,
@@ -1380,7 +1391,7 @@ class TestGitSubprocessEnv:
                 },
                 clear=True,
             ),
-            patch("apm_cli.utils.git_env._git_config_run", return_value=config_result),
+            patch("subprocess.Popen", _FakeGitConfigChild()),
             patch("subprocess.run", return_value=network_result) as run,
         ):
             git_remote_refs("https://git.example.com/acme/repo")
@@ -1392,14 +1403,8 @@ class TestGitSubprocessEnv:
 
     def test_remote_refs_timeout_does_not_expose_authenticated_url(self) -> None:
         token = "remote-ref-timeout-token"
-        config_result = subprocess.CompletedProcess(
-            ["git", "config"],
-            0,
-            stdout=b"",
-            stderr=b"",
-        )
         with (
-            patch("apm_cli.utils.git_env._git_config_run", return_value=config_result),
+            patch("subprocess.Popen", _FakeGitConfigChild()),
             patch(
                 "subprocess.run",
                 side_effect=subprocess.TimeoutExpired(
@@ -1415,12 +1420,6 @@ class TestGitSubprocessEnv:
 
     def test_remote_refs_redacts_authorization_trace_output(self) -> None:
         secret = "trace-secret"
-        config_result = subprocess.CompletedProcess(
-            ["git", "config"],
-            0,
-            stdout=b"",
-            stderr=b"",
-        )
         network_result = subprocess.CompletedProcess(
             ["git", "ls-remote"],
             1,
@@ -1428,7 +1427,7 @@ class TestGitSubprocessEnv:
             stderr=f"trace: Authorization: Basic {secret}\nfatal: denied",
         )
         with (
-            patch("apm_cli.utils.git_env._git_config_run", return_value=config_result),
+            patch("subprocess.Popen", _FakeGitConfigChild()),
             patch("subprocess.run", return_value=network_result),
         ):
             result = git_remote_refs("https://git.example.com/acme/repo")
@@ -1509,47 +1508,35 @@ class TestGitSubprocessEnv:
 
     def test_network_env_reuses_single_validated_rewrite_snapshot(self) -> None:
         remote_url = "https://git.example.com/acme/repo"
-        rewrites = (("file:///fixture/", "https://git.example.com/"),)
+        real_popen = subprocess.Popen
+        snapshots: list[list[str]] = []
+
+        def count_config_snapshots(command, **kwargs):
+            if "--show-scope" in command:
+                snapshots.append(list(command))
+            return real_popen(command, **kwargs)
+
         with (
             patch.dict(
                 os.environ,
                 {
                     "PATH": os.environ["PATH"],
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                    "GIT_CONFIG_GLOBAL": os.devnull,
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": "url.file:///fixture/.insteadOf",
+                    "GIT_CONFIG_VALUE_0": "https://git.example.com/",
                     "GIT_HTTP_EXTRAHEADER": "Authorization: Basic sentinel",
                 },
                 clear=True,
             ),
-            patch(
-                "apm_cli.utils.git_env._read_effective_git_config",
-                return_value=_GitConfigSnapshot(
-                    (
-                        GitConfigEntry(
-                            "command",
-                            "url.file:///fixture/.insteadOf",
-                            "https://git.example.com/",
-                        ),
-                        GitConfigEntry(
-                            "command",
-                            "http.extraheader",
-                            "Authorization: Basic sentinel",
-                        ),
-                    ),
-                    rewrites,
-                    (
-                        GitConfigEntry(
-                            "command",
-                            "http.extraheader",
-                            "Authorization: Basic sentinel",
-                        ),
-                    ),
-                ),
-            ) as read_rewrites,
+            patch("subprocess.Popen", side_effect=count_config_snapshots),
         ):
             child = git_network_env(remote_url)
 
-        read_rewrites.assert_called_once()
+        assert len(snapshots) == 1
         assert "GIT_HTTP_EXTRAHEADER" not in child
-        assert child["GIT_CONFIG_KEY_0"] == "url.file:///fixture/.insteadOf"
+        assert child["GIT_CONFIG_KEY_0"].lower() == "url.file:///fixture/.insteadof"
         assert child["GIT_CONFIG_VALUE_0"] == "https://git.example.com/"
 
     def test_clone_streams_git_progress_to_reporter(self, tmp_path) -> None:
