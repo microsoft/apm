@@ -124,7 +124,9 @@ Read `references/walker-brief.md` and `references/lenses.md` now.
 
 - Wave 1: plain journeys with lenses L1 and L2.
 - Gate: merge the new findings
-  (`python3 scripts/findings.py add --ledger findings.json --findings <worker>/findings.jsonl`),
+  (`python3 scripts/findings.py add --ledger findings.json --findings <worker>/findings.jsonl --sha <sha>`;
+  `--sha` binds the ledger even when a wave finds nothing, and an unbound
+  ledger never yields GO),
   drop duplicates, check whether the PR head moved (if it did, record
   the new SHA and re-run only the affected steps), and re-rank.
 - Wave 2: lenses L3 to L6 on the ranked journeys.

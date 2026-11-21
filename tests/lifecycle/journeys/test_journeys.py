@@ -1065,7 +1065,8 @@ class JourneyRun:
     def _o12(self, facts: _StepFacts) -> list[str]:
         log = self.world.services.egress_log()
         refused = sorted({entry["host"] for entry in log if entry["status"] == 502})
-        facts.record("O12", Evidence(egress=tuple(log), egress_absent_hosts=refused))
+        # The fact: no request went to a host the world refuses (502).
+        facts.record("O12", Evidence(egress=tuple(log), expected=[], observed=refused))
         return [f"contacted a host the world does not serve: {host}" for host in refused]
 
     def _o13(self, facts: _StepFacts) -> list[str]:
