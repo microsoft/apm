@@ -642,7 +642,7 @@ def test_warning_protected_prompt_names_manual_remediation(project: Path) -> Non
     assert "manually" in result.output
     stripped = CliRunner().invoke(cli, ["audit", "--strip"])
     assert stripped.exit_code == 1, stripped.output
-    assert relative + "/prompt" in " ".join(stripped.output.split())
+    assert f"{relative} at /prompt" in " ".join(stripped.output.split())
 
 
 @pytest.mark.parametrize("count", [10, 100])

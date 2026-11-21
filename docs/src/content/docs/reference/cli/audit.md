@@ -258,8 +258,10 @@ For the full workflow, see [Enforce in CI](../../../enterprise/enforce-in-ci/).
 Whole-project audit discovers recognized primitives even without a lockfile.
 Discovery is not a safety verdict: command-only hooks are listed as
 discovered/untracked when appropriate, without failing the prompt check.
-`tracked` means a file claim exists, not that every entry in a shared file
-is APM-owned or hash-verified. Hash and ownership checks remain independent.
+Each line names its ownership evidence: `recorded-file` (the lockfile claims
+the file), `apm-owned-entry` (APM merged that entry into a shared hook config
+such as `.claude/settings.json`), or `untracked`. A JSON field renders as
+`<file> at <pointer>`. Hash and ownership checks remain independent.
 
 User-scope replay preserves the `~/.apm/apm_modules/` layout in relative
 asset links, so intact global prompts do not report drift from a scratch-path difference.
