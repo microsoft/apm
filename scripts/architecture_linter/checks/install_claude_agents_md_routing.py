@@ -6,7 +6,9 @@ hand-authored root file blocks that route (``claude_agents_md_blocker``).
 Install must filter ``.claude/rules/`` through both, compile must drop
 instructions ``.claude/rules/`` already delivers through the owner, and the
 generated ``CLAUDE.md`` must be the ``@AGENTS.md`` import, so install and
-compile cannot drift apart about where an instruction lives.
+compile cannot drift apart about where an instruction lives. A local bundle
+install routes Claude instructions through the same owner and renders the
+rest through the integrator's Claude rule projection (#4034).
 """
 
 from __future__ import annotations
@@ -40,6 +42,26 @@ _CONTRACTS = (
         "src/apm_cli/integration/instruction_integrator.py",
         "InstructionIntegrator._claude_rule_sources",
         "claude_agents_md_blocker",
+    ),
+    (
+        "src/apm_cli/install/services.py",
+        "integrate_local_bundle",
+        "_ClaudeBundleRouting",
+    ),
+    (
+        "src/apm_cli/install/local_bundle_instructions.py",
+        "ClaudeBundleRouting._stages",
+        "routes_to_agents_md",
+    ),
+    (
+        "src/apm_cli/install/local_bundle_instructions.py",
+        "ClaudeBundleRouting.__init__",
+        "claude_agents_md_blocker",
+    ),
+    (
+        "src/apm_cli/install/local_bundle_instructions.py",
+        "render_claude_bundle_rule",
+        "InstructionIntegrator._convert_to_claude_rules",
     ),
     (
         "src/apm_cli/compilation/agents_compiler.py",

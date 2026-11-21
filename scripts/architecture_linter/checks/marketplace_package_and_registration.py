@@ -337,19 +337,24 @@ def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...
                 "for primitive_kind in spec.primitive_kinds:",
                 "_retarget_basename(parts[-1], mapping, spec.apm_basename_fn)",
                 '_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command"})',
-                '_RENDERED_PLUGIN_FORMAT_IDS = frozenset({"codex_agent"})',
+                '_RENDERED_PLUGIN_FORMAT_IDS = frozenset({"codex_agent", "claude_rules"})',
             ),
             "local bundle deployment must route through PLUGIN_LAYOUT and TargetProfile.primitives",
         )
     )
-    # Codex bundle agents render through AgentIntegrator, never a copy (#3714).
+    # Codex bundle agents render through AgentIntegrator, never a copy (#3714);
+    # Claude bundle instructions route through ClaudeBundleRouting (#4034).
     findings.extend(
         _require_subs(
             provider,
             inv,
             _RID_BUNDLE_LAYOUT,
             _INSTALL_SERVICES,
-            ("if _bundle_render_format(", "skipped += _deploy_bundle_codex_agent("),
+            (
+                "_render_fmt = _bundle_render_format(",
+                'if _render_fmt == "codex_agent":',
+                "skipped += _deploy_bundle_codex_agent(",
+            ),
             "the bundle deploy loop must hand rendered-format agents to local_bundle_agents",
         )
     )

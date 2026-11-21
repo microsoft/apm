@@ -22,7 +22,7 @@ apm pack [OPTIONS]
 
 The bundle is built from `apm.lock.yaml`. An enriched copy of the lockfile (per-file SHA-256 in `bundle_files`, plus `pack:` metadata) is embedded inside the bundle so `apm install <bundle>` can verify integrity at install time. In the default Claude plugin format, a project with no `apm.lock.yaml` (for example `dependencies: {}` with only local primitives) still gets an embedded lockfile with an empty dependency list and the full `bundle_files` manifest. `--format agent-plugin` needs the lockfile only when `apm.yml` declares dependencies, so a fresh `apm plugin init` scaffold packs as is; `--format apm` requires the project lockfile.
 
-Bundles are target-agnostic. The consumer's project decides where files land at install time -- the bundle carries no harness binding. Flags whose scope does not match the detected outputs are silent no-ops, not errors, so the same `apm pack` invocation works in CI across projects that produce only a bundle, only a marketplace, or both.
+Bundles are target-agnostic. The consumer's project decides where files land at install time -- the bundle carries no harness binding. Flags whose scope does not match the detected outputs are silent no-ops, not errors, so the same `apm pack` invocation works in CI across projects that produce only a bundle, only a marketplace, or both. Install routes Claude instructions through `AGENTS.md` like a package install, so the same bundle works for every consumer.
 
 ## Options
 

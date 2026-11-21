@@ -25,6 +25,7 @@ from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
 from .exec_gate import plugin_bin_deployable, resolve_bin_skip
 from .local_bundle_agents import deploy_bundle_codex_agent as _deploy_bundle_codex_agent
+from .local_bundle_instructions import ClaudeBundleRouting as _ClaudeBundleRouting
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
@@ -964,6 +965,9 @@ def integrate_local_bundle(
     # link-resolution logic with the dependency-resolver pipeline.
     # TODO(#1098-v0.13): unify with integrate_package_primitives if/when
     # the bundle format grows primitive-typed transforms.
+    _claude_routing = _ClaudeBundleRouting(
+        project_root, user_scope=scope is InstallScope.USER, diagnostics=diagnostics, logger=logger
+    )
     for target in targets:
         _allowed_deploy_prefixes = _target_bundle_prefixes(target)
         # Resolve deploy root for this target.  Cowork targets can return
@@ -1029,7 +1033,15 @@ def integrate_local_bundle(
                     skipped += 1
                 continue
             _first_seg = _deploy_rel.split("/", 1)[0] if "/" in _deploy_rel else ""
-            _staged = _first_seg == "instructions" and "instructions" not in target.primitives
+            _render_fmt = _bundle_render_format(
+                _rel_norm, _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
+            )
+            _claude_text = _claude_routing.source_text(_render_fmt, src, _normalized_bundle_text)
+            _staged = _claude_routing.staged(
+                _claude_text,
+                _rel_norm,
+                default=_first_seg == "instructions" and "instructions" not in target.primitives,
+            )
             if _staged:
                 _slug_str = str(slug)
                 if _slug_error := _bundle_slug_error(_slug_str):
@@ -1048,18 +1060,7 @@ def integrate_local_bundle(
                         logger.warning(f"Skipped unsafe stage root for {slug!r}: {exc}")
                     skipped += 1
                     continue
-                # PR #1217 review: preserve nested subdirs under
-                # ``instructions/`` so two files with the same basename
-                # (e.g. ``instructions/a/x.md`` and
-                # ``instructions/b/x.md``) do not collide at the staged
-                # location.  ``rel`` already starts with
-                # ``instructions/`` so we strip that prefix before
-                # joining under the stage root (which itself ends in
-                # ``.apm/instructions``).
-                _rel_under_instructions = (
-                    _deploy_rel.split("/", 1)[1] if "/" in _deploy_rel else Path(_deploy_rel).name
-                )
-                dest = stage_root / _rel_under_instructions
+                dest = stage_root / _claude_routing.stage_tail(_claude_text, _rel_norm, _deploy_rel)
                 deploy_root = stage_root
             else:
                 # Route the file to the correct deploy root.  If the first
@@ -1090,9 +1091,7 @@ def integrate_local_bundle(
             except ValueError:
                 record = dest.as_posix()
 
-            if _bundle_render_format(  # rendered (Codex TOML), never copied (#3714)
-                _rel_norm, _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
-            ):
+            if _render_fmt == "codex_agent":  # rendered (Codex TOML), never copied (#3714)
                 skipped += _deploy_bundle_codex_agent(
                     src,
                     dest,
@@ -1113,6 +1112,7 @@ def integrate_local_bundle(
                 continue
 
             normalized_text = _normalized_bundle_text(src)
+            normalized_text = _claude_routing.rendered(_claude_text, _staged, normalized_text)
             if normalized_text is None:
                 desired_hash = expected_hash
             else:

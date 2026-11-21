@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
 - An `http://` registry URL whose host is an integer, hex or leading-zero IPv4 spelling (`http://167772161/apm`) no longer counts as a private network host; write the dotted address (`http://10.0.0.1/apm`) or set `insecure: true`. (#4521)
+- `apm install <bundle>` into a Claude project stages always-on and directory instructions for `apm compile` into `AGENTS.md` and renders the rest as `.claude/rules/` files with `paths:`, like a package install. (closes #4034, #4071)
 
 ### Fixed
 
