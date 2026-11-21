@@ -2519,7 +2519,8 @@ SPEC_REQUIRED_CHECKS = (
     "Spec tests (3/3)",
 )
 NEVER_REQUIRED_CHECKS = ("Check conformance statement", "Architecture Scaling (Linux)")
-SPEC_EVENTS = frozenset({"pull_request", MERGE_GROUP_EVENT})
+# workflow_call: merge-train.yml runs the spec checks on queue/* refs (#4574).
+SPEC_EVENTS = frozenset({"pull_request", MERGE_GROUP_EVENT, "workflow_call"})
 
 
 def _with_expected_checks(merge_gate: WorkflowNode, contexts: dict[str, tuple[str, ...]]) -> None:
@@ -3330,7 +3331,7 @@ TRAIN_GATE_JOB = "train-gate"
 TRAIN_GATE_STEP = "Require every train job"
 TRAIN_SCOPE_STEP = "Parse scope"
 TRAIN_RATCHET_STEP = "Run ratchet contract tests"
-TRAIN_TIERS = {"tier1": "ci.yml", "tier2": "ci-integration.yml"}
+TRAIN_TIERS = {"tier1": "ci.yml", "tier2": "ci-integration.yml", "spec": "spec-conformance.yml"}
 # A branch deletion fires `push` with deleted true on the default branch SHA.
 TRAIN_NOT_DELETED = "github.event.deleted != true"
 TRAIN_FULL_SCOPE = f"{TRAIN_NOT_DELETED} && needs.scope.outputs.scope == 'full'"
@@ -3338,7 +3339,13 @@ TRAIN_CLEANUP_JOB = "cleanup"
 TRAIN_CLEANUP_STEP = "Delete the train branch"
 TRAIN_BASE_STEP = "Resolve train base"
 TRAIN_BASE = "${{ needs.scope.outputs.base_sha }}"
-TRAIN_GATE_RESULTS = ("SCOPE_RESULT", "GUARD_RESULT", "TIER1_RESULT", "TIER2_RESULT")
+TRAIN_GATE_RESULTS = (
+    "SCOPE_RESULT",
+    "GUARD_RESULT",
+    "TIER1_RESULT",
+    "TIER2_RESULT",
+    "SPEC_RESULT",
+)
 LINT_CHAIN_ACTION = "./.github/actions/lint-chain"
 LINT_CHAIN_BASE = (
     "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha "
@@ -3626,8 +3633,8 @@ def test_train_gate_drift_fails(mutation: str) -> None:
 @pytest.mark.parametrize(
     ("scope", "baseline"),
     [
-        ("full", ("success", "success", "success", "success")),
-        ("guard", ("success", "success", "skipped", "skipped")),
+        ("full", ("success", "success", "success", "success", "success")),
+        ("guard", ("success", "success", "skipped", "skipped", "skipped")),
     ],
 )
 def test_train_gate_passes_only_when_every_job_is_green(

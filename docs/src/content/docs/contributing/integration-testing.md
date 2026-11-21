@@ -663,7 +663,7 @@ single `train-gate` check at that SHA:
 | Ref | Runs | Time |
 |---|---|---|
 | `queue/t<id>/p<k>-guard` | `scope`, `guard`, `train-gate` | about 5-10 min |
-| `queue/t<id>/p<k>-full` | the guard plus `tier1` (ci.yml) and `tier2` (ci-integration.yml) | about 30-35 min |
+| `queue/t<id>/p<k>-full` | the guard plus `tier1` (ci.yml), `tier2` (ci-integration.yml) and `spec` (spec-conformance.yml) | about 30-35 min |
 | `queue/b<sha12>/p0-full` | a full proof of a `main` SHA | about 30-35 min |
 
 `guard` runs the Lint chain (`.github/actions/lint-chain`, shared with the
