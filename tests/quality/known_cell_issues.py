@@ -146,6 +146,61 @@ def known_cells() -> dict[str, str]:
     return dict(sorted(cells.items()))
 
 
+# GitHub's closing keywords, then an issue of this repository (#N, owner/repo#N or URL).
+_CLOSING = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s+"
+    r"(?:https://github\.com/microsoft/apm/issues/|(?:microsoft/apm)?#)(\d+)\b",
+    re.IGNORECASE,
+)
+
+
+def closing_issues(text: str) -> set[int]:
+    """Issues a pull request body closes on merge, by GitHub's closing keywords."""
+    return {int(number) for number in _CLOSING.findall(text or "")}
+
+
+def pr_closing_issues(event_path: str | None) -> set[int]:
+    """Closing issues of the pull request in a GitHub Actions event file (``GITHUB_EVENT_PATH``).
+
+    Any other event (push, merge_group, schedule) closes nothing here.
+    """
+    if not event_path or not Path(event_path).is_file():
+        return set()
+    event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+    return closing_issues((event.get("pull_request") or {}).get("body") or "")
+
+
+def _where(label: str) -> tuple[str, str]:
+    """``(cell id, file)`` of a known-cell label from :func:`known_cells`."""
+    kind, _, rest = label.partition(":")
+    if kind == "source":
+        path, _, line = rest.rpartition(":")
+        return f"line {line}", path
+    if kind == "generated":
+        return rest, GENERATED_PATH.relative_to(ROOT).as_posix()
+    if kind == "journey":
+        jid, _, cell = rest.partition(":")
+        return cell, f"tests/lifecycle/journeys (journey {jid})"
+    if kind == "rule":
+        return rest, "tests/lifecycle/generator/rules.py"
+    return rest, "tests/lifecycle/machines"
+
+
+def unflipped_cells(closing: set[int], cells: dict[str, str] | None = None) -> list[str]:
+    """One remedy line per strict known cell still citing an issue this change closes."""
+    cells = known_cells() if cells is None else cells
+    lines = []
+    for label, tracking in sorted(cells.items()):
+        number = int(tracking.lstrip("#")) if re.fullmatch(r"#\d+", tracking) else None
+        if number in closing:
+            cell, where = _where(label)
+            lines.append(
+                f"PR closes #{number} but strict cell {cell} in {where} still cites it: "
+                "flip it to required in this PR."
+            )
+    return lines
+
+
 def cited_issues(cells: dict[str, str] | None = None) -> list[int]:
     cells = known_cells() if cells is None else cells
     return sorted({int(t.lstrip("#")) for t in cells.values() if re.fullmatch(r"#\d+", t)})
