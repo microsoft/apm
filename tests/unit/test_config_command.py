@@ -1,165 +1,157 @@
-"""Tests for the apm config command."""
+"""Tests for the apm config command and the apm_cli.config owner.
 
+Every test reads and writes a real ``config.json`` in an isolated APM home
+(the ``isolated_config`` fixture) and asserts the command output or the bytes
+left in that file, instead of patching the owner's getters and setters.
+"""
+
+import json
 import os
-import sys  # noqa: F401
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 
+import apm_cli.config as cfg_module
 from apm_cli.commands.config import config
+
+_TRANSPORT_ENV = (
+    "APM_ALLOW_PROTOCOL_FALLBACK",
+    "APM_GITHUB_AUTH_FIRST",
+    "APM_GIT_PROTOCOL",
+    "APM_TEMP_DIR",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolated_config(tmp_path, monkeypatch):
+    """Point the owner's config store at a temp APM home and return config.json.
+
+    No test reads or writes the real ``~/.apm``; environment overrides of the
+    transport keys are cleared so the file is the only source of truth.
+    """
+    config_dir = tmp_path / ".apm"
+    config_file = config_dir / "config.json"
+    monkeypatch.setattr(cfg_module, "CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(cfg_module, "CONFIG_FILE", str(config_file))
+    for name in _TRANSPORT_ENV:
+        monkeypatch.delenv(name, raising=False)
+    cfg_module._invalidate_config_cache()
+    yield config_file
+    cfg_module._invalidate_config_cache()
+
+
+@pytest.fixture
+def runner():
+    return CliRunner()
+
+
+def write_config(path: Path, data: dict) -> None:
+    """Seed config.json with *data* and drop the owner's read cache."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    cfg_module._invalidate_config_cache()
+
+
+def read_config(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def flat(output: str) -> str:
+    return " ".join(output.split())
+
+
+def _no_rich_table():
+    import rich.table
+
+    return patch.object(rich.table, "Table", side_effect=ImportError("no rich"))
 
 
 class TestConfigShow:
     """Tests for `apm config` (show current configuration)."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-        self.original_dir = os.getcwd()
+    @pytest.fixture(autouse=True)
+    def _cwd(self, tmp_path, monkeypatch):
+        self.project = tmp_path / "project"
+        self.project.mkdir()
+        monkeypatch.chdir(self.project)
 
-    def teardown_method(self):
-        try:  # noqa: SIM105
-            os.chdir(self.original_dir)
-        except (FileNotFoundError, OSError):
-            pass
-
-    def test_config_show_outside_project(self):
+    def test_config_show_outside_project(self, runner):
         """Show config when not in an APM project directory."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            try:
-                with patch("apm_cli.commands.config.get_version", return_value="1.2.3"):
-                    result = self.runner.invoke(config, [])
-            finally:
-                os.chdir(self.original_dir)
+        with patch("apm_cli.commands.config.get_version", return_value="1.2.3"):
+            result = runner.invoke(config, [])
         assert result.exit_code == 0
+        assert "Not in an APM project directory" in flat(result.output)
+        assert "1.2.3" in result.output
 
-    def test_config_show_inside_project(self):
+    def test_config_show_inside_project(self, runner):
         """Show config when apm.yml is present."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            try:
-                apm_yml = Path(tmp_dir) / "apm.yml"
-                apm_yml.write_text("name: myproject\nversion: '0.1'\n")
-                with (
-                    patch("apm_cli.commands.config.get_version", return_value="1.2.3"),
-                    patch(
-                        "apm_cli.commands.config._load_apm_config",
-                        return_value={
-                            "name": "myproject",
-                            "version": "0.1",
-                            "entrypoint": "main.md",
-                        },
-                    ),
-                ):
-                    result = self.runner.invoke(config, [])
-            finally:
-                os.chdir(self.original_dir)
+        (self.project / "apm.yml").write_text(
+            "name: myproject\nversion: '0.1'\nentrypoint: main.md\n"
+        )
+        with patch("apm_cli.commands.config.get_version", return_value="1.2.3"):
+            result = runner.invoke(config, [])
         assert result.exit_code == 0
+        assert "myproject" in result.output
+        assert "main.md" in result.output
+        assert "Using defaults (no config)" in flat(result.output)
 
-    def test_config_show_inside_project_with_compilation(self):
+    def test_config_show_inside_project_with_compilation(self, runner):
         """Show config when apm.yml has compilation settings."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            try:
-                apm_yml = Path(tmp_dir) / "apm.yml"
-                apm_yml.write_text("name: myproject\ncompilation:\n  output: AGENTS.md\n")
-                apm_config = {
-                    "name": "myproject",
-                    "version": "0.1",
-                    "compilation": {
-                        "output": "AGENTS.md",
-                        "chatmode": "copilot",
-                        "resolve_links": False,
-                    },
-                    "dependencies": {"mcp": ["server1", "server2"]},
-                }
-                with (
-                    patch("apm_cli.commands.config.get_version", return_value="1.2.3"),
-                    patch("apm_cli.commands.config._load_apm_config", return_value=apm_config),
-                ):
-                    result = self.runner.invoke(config, [])
-            finally:
-                os.chdir(self.original_dir)
+        (self.project / "apm.yml").write_text(
+            "name: myproject\nversion: '0.1'\n"
+            "compilation:\n  output: CUSTOM.md\n  chatmode: copilot\n  resolve_links: false\n"
+            "dependencies:\n  mcp:\n    - server1\n    - server2\n"
+        )
+        with patch("apm_cli.commands.config.get_version", return_value="1.2.3"):
+            result = runner.invoke(config, [])
         assert result.exit_code == 0
+        assert "CUSTOM.md" in result.output
+        assert "copilot" in result.output
+        assert "False" in result.output
 
-    def test_config_show_rich_import_error_fallback(self):
+    def test_config_show_rich_import_error_fallback(self, runner):
         """Fallback plain-text display when Rich (rich.table.Table) is unavailable."""
-        import rich.table
-
-        mock_table_cls = MagicMock(side_effect=ImportError("no rich"))  # noqa: F841
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            try:
-                with (
-                    patch("apm_cli.commands.config.get_version", return_value="0.9.0"),
-                    patch.object(rich.table, "Table", side_effect=ImportError("no rich")),
-                ):
-                    result = self.runner.invoke(config, [])
-            finally:
-                os.chdir(self.original_dir)
+        with (
+            patch("apm_cli.commands.config.get_version", return_value="0.9.0"),
+            _no_rich_table(),
+        ):
+            result = runner.invoke(config, [])
         assert result.exit_code == 0
+        assert "Current APM Configuration:" in result.output
+        assert "APM CLI Version: 0.9.0" in flat(result.output)
 
-    def test_config_show_fallback_inside_project(self):
+    def test_config_show_fallback_inside_project(self, runner):
         """Fallback display inside a project directory when console/table unavailable."""
-        import rich.table
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            try:
-                apm_yml = Path(tmp_dir) / "apm.yml"
-                apm_yml.write_text("name: proj\n")
-                apm_config = {
-                    "name": "proj",
-                    "version": "1.0",
-                    "entrypoint": None,
-                    "dependencies": {"mcp": []},
-                }
-                with (
-                    patch("apm_cli.commands.config.get_version", return_value="0.9.0"),
-                    patch("apm_cli.commands.config._load_apm_config", return_value=apm_config),
-                    patch.object(rich.table, "Table", side_effect=ImportError("no rich")),
-                ):
-                    result = self.runner.invoke(config, [])
-            finally:
-                os.chdir(self.original_dir)
+        (self.project / "apm.yml").write_text("name: proj\nversion: '1.0'\n")
+        with (
+            patch("apm_cli.commands.config.get_version", return_value="0.9.0"),
+            _no_rich_table(),
+        ):
+            result = runner.invoke(config, [])
         assert result.exit_code == 0
+        assert "Name: proj" in flat(result.output)
+        assert "MCP Dependencies: 0" in flat(result.output)
 
-    def test_config_show_displays_temp_dir_in_global_section(self):
+    def test_config_show_displays_temp_dir_in_global_section(self, runner, isolated_config):
         """Fallback display includes Temp Directory row when temp-dir is configured."""
-        import rich.table
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            try:
-                with (
-                    patch("apm_cli.commands.config.get_version", return_value="1.2.3"),
-                    patch("apm_cli.config.get_temp_dir", return_value="/custom/tmp"),
-                    patch.object(rich.table, "Table", side_effect=ImportError("no rich")),
-                ):
-                    result = self.runner.invoke(config, [])
-            finally:
-                os.chdir(self.original_dir)
+        write_config(isolated_config, {"temp_dir": "/custom/tmp"})
+        with (
+            patch("apm_cli.commands.config.get_version", return_value="1.2.3"),
+            _no_rich_table(),
+        ):
+            result = runner.invoke(config, [])
         assert result.exit_code == 0
         assert "Temp Directory: /custom/tmp" in result.output
 
-    def test_config_show_omits_temp_dir_when_not_configured(self):
+    def test_config_show_omits_temp_dir_when_not_configured(self, runner):
         """Fallback display omits Temp Directory row when temp-dir is not configured."""
-        import rich.table
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            try:
-                with (
-                    patch("apm_cli.commands.config.get_version", return_value="1.2.3"),
-                    patch("apm_cli.config.get_temp_dir", return_value=None),
-                    patch.object(rich.table, "Table", side_effect=ImportError("no rich")),
-                ):
-                    result = self.runner.invoke(config, [])
-            finally:
-                os.chdir(self.original_dir)
+        with (
+            patch("apm_cli.commands.config.get_version", return_value="1.2.3"),
+            _no_rich_table(),
+        ):
+            result = runner.invoke(config, [])
         assert result.exit_code == 0
         assert "Temp Directory" not in result.output
 
@@ -167,145 +159,91 @@ class TestConfigShow:
 class TestConfigSet:
     """Tests for `apm config set <key> <value>`."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_set_auto_integrate_true(self):
-        """Enable auto-integration."""
-        with patch("apm_cli.config.set_auto_integrate") as mock_set:
-            result = self.runner.invoke(config, ["set", "auto-integrate", "true"])
+    @pytest.mark.parametrize(
+        ("value", "stored"),
+        [
+            ("true", True),
+            ("yes", True),
+            ("1", True),
+            ("TRUE", True),
+            ("false", False),
+            ("no", False),
+            ("0", False),
+        ],
+    )
+    def test_set_auto_integrate_stores_value(self, runner, isolated_config, value, stored):
+        """auto-integrate accepts every boolean alias, case-insensitively."""
+        result = runner.invoke(config, ["set", "auto-integrate", value])
         assert result.exit_code == 0
-        mock_set.assert_called_once_with(True)
+        assert read_config(isolated_config)["auto_integrate"] is stored
 
-    def test_set_auto_integrate_yes(self):
-        """Enable auto-integration with 'yes' alias."""
-        with patch("apm_cli.config.set_auto_integrate") as mock_set:
-            result = self.runner.invoke(config, ["set", "auto-integrate", "yes"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(True)
-
-    def test_set_auto_integrate_one(self):
-        """Enable auto-integration with '1' alias."""
-        with patch("apm_cli.config.set_auto_integrate") as mock_set:
-            result = self.runner.invoke(config, ["set", "auto-integrate", "1"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(True)
-
-    def test_set_auto_integrate_false(self):
-        """Disable auto-integration."""
-        with patch("apm_cli.config.set_auto_integrate") as mock_set:
-            result = self.runner.invoke(config, ["set", "auto-integrate", "false"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(False)
-
-    def test_set_auto_integrate_no(self):
-        """Disable auto-integration with 'no' alias."""
-        with patch("apm_cli.config.set_auto_integrate") as mock_set:
-            result = self.runner.invoke(config, ["set", "auto-integrate", "no"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(False)
-
-    def test_set_auto_integrate_zero(self):
-        """Disable auto-integration with '0' alias."""
-        with patch("apm_cli.config.set_auto_integrate") as mock_set:
-            result = self.runner.invoke(config, ["set", "auto-integrate", "0"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(False)
-
-    def test_set_auto_integrate_invalid_value(self):
+    def test_set_auto_integrate_invalid_value(self, runner, isolated_config):
         """Reject an invalid value for auto-integrate."""
-        result = self.runner.invoke(config, ["set", "auto-integrate", "maybe"])
+        result = runner.invoke(config, ["set", "auto-integrate", "maybe"])
         assert result.exit_code == 1
+        assert "auto_integrate" not in read_config(isolated_config)
 
-    def test_set_unknown_key(self):
+    def test_set_unknown_key(self, runner, isolated_config):
         """Reject an unknown configuration key."""
-        result = self.runner.invoke(config, ["set", "nonexistent", "value"])
+        result = runner.invoke(config, ["set", "nonexistent", "value"])
         assert result.exit_code == 1
+        assert "nonexistent" not in read_config(isolated_config)
 
-    def test_set_auto_integrate_case_insensitive(self):
-        """Value comparison is case-insensitive."""
-        with patch("apm_cli.config.set_auto_integrate") as mock_set:
-            result = self.runner.invoke(config, ["set", "auto-integrate", "TRUE"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(True)
-
-    def test_set_auto_integrate_warns_deprecated(self):
+    def test_set_auto_integrate_warns_deprecated(self, runner):
         """auto-integrate is still accepted but warns that it has no effect (#3839)."""
-        with patch("apm_cli.config.set_auto_integrate"):
-            result = self.runner.invoke(config, ["set", "auto-integrate", "false"])
-        output = " ".join(result.output.split())
+        result = runner.invoke(config, ["set", "auto-integrate", "false"])
         assert result.exit_code == 0
-        assert "[!] 'auto-integrate' is deprecated and has no effect" in output
+        assert "[!] 'auto-integrate' is deprecated and has no effect" in flat(result.output)
 
-    def test_set_auto_integrate_warns_first_and_claims_no_success(self):
+    def test_set_auto_integrate_warns_first_and_claims_no_success(self, runner):
         """A deprecated key never prints a success line implying it took effect."""
-        with patch("apm_cli.config.set_auto_integrate"):
-            result = self.runner.invoke(config, ["set", "auto-integrate", "false"])
-        output = " ".join(result.output.split())
+        result = runner.invoke(config, ["set", "auto-integrate", "false"])
+        output = flat(result.output)
         assert result.exit_code == 0
         assert "Auto-integration set to" not in output
         assert "[i] Stored auto-integrate=false (no effect)" in output
         assert output.index("deprecated") < output.index("Stored auto-integrate")
 
-    def test_set_target(self):
+    def test_set_target(self, runner, isolated_config):
         """Set install default target."""
-        with patch("apm_cli.config.set_install_target", return_value="claude") as mock_set:
-            result = self.runner.invoke(config, ["set", "target", "claude"])
+        result = runner.invoke(config, ["set", "target", "claude"])
         assert result.exit_code == 0
-        mock_set.assert_called_once_with("claude")
+        assert "Default install target set to: claude" in flat(result.output)
+        assert cfg_module.get_install_target() == "claude"
 
-    def test_set_target_invalid_value(self):
+    def test_set_target_invalid_value(self, runner, isolated_config):
         """Reject invalid target value."""
-        with patch(
-            "apm_cli.config.set_install_target",
-            side_effect=ValueError("Invalid target: 'oops' is not a valid target"),
-        ):
-            result = self.runner.invoke(config, ["set", "target", "oops"])
+        result = runner.invoke(config, ["set", "target", "oops"])
         assert result.exit_code == 1
+        assert "install_target" not in read_config(isolated_config)
 
-    def test_set_self_update_channel(self):
+    def test_set_self_update_channel(self, runner, isolated_config):
         """Set self-update channel preference."""
-        with patch("apm_cli.config.set_self_update_channel", return_value="prerelease") as mock_set:
-            result = self.runner.invoke(config, ["set", "self-update.channel", "prerelease"])
+        result = runner.invoke(config, ["set", "self-update.channel", "prerelease"])
         assert result.exit_code == 0
-        mock_set.assert_called_once_with("prerelease")
+        assert read_config(isolated_config)["self_update_channel"] == "prerelease"
+        assert "Self-update channel saved: prerelease" in flat(result.output)
 
-    def test_set_self_update_install_dir(self):
+    def test_set_self_update_install_dir(self, runner, isolated_config, tmp_path):
         """Windows retains the existing saved-directory confirmation."""
-        with (
-            patch("apm_cli.commands.self_update._is_windows_platform", return_value=True),
-            patch(
-                "apm_cli.config.set_self_update_install_dir",
-                return_value="/opt/apm/bin",
-            ) as mock_set,
-        ):
-            result = self.runner.invoke(
-                config,
-                ["set", "self-update.install-dir", "/opt/apm/bin"],
-            )
+        target = str(tmp_path / "apm-bin")
+        with patch("apm_cli.commands.self_update._is_windows_platform", return_value=True):
+            result = runner.invoke(config, ["set", "self-update.install-dir", target])
         assert result.exit_code == 0
-        mock_set.assert_called_once_with("/opt/apm/bin")
-        assert "Self-update install directory saved: /opt/apm/bin" in result.output
+        assert read_config(isolated_config)["self_update_install_dir"] == target
+        assert f"Self-update install directory saved: {target}" in flat(result.output)
 
-    def test_set_self_update_install_dir_describes_unix_preservation(self):
+    def test_set_self_update_install_dir_describes_unix_preservation(self, runner, tmp_path):
         """Unix describes the value as a matching preservation preference."""
-        with (
-            patch("apm_cli.commands.self_update._is_windows_platform", return_value=False),
-            patch(
-                "apm_cli.config.set_self_update_install_dir",
-                return_value="/opt/apm/bin",
-            ),
-        ):
-            result = self.runner.invoke(
-                config,
-                ["set", "self-update.install-dir", "/opt/apm/bin"],
-            )
+        target = str(tmp_path / "apm-bin")
+        with patch("apm_cli.commands.self_update._is_windows_platform", return_value=False):
+            result = runner.invoke(config, ["set", "self-update.install-dir", target])
 
         assert result.exit_code == 0
         assert (
-            "Self-update launcher directory preference saved: /opt/apm/bin "
+            f"Self-update launcher directory preference saved: {target} "
             "(must match the existing Unix installation)"
-        ) in " ".join(result.output.split())
+        ) in flat(result.output)
 
     @pytest.mark.parametrize(
         "key",
@@ -316,72 +254,52 @@ class TestConfigSet:
             "self-update.command",
         ],
     )
-    def test_set_rejects_secret_or_executable_self_update_keys(self, key):
+    def test_set_rejects_secret_or_executable_self_update_keys(self, runner, isolated_config, key):
         """Do not persist secret or executable self-update settings."""
-        result = self.runner.invoke(config, ["set", key, "value"])
+        result = runner.invoke(config, ["set", key, "value"])
 
         assert result.exit_code == 1
         assert "self-update config only supports non-secret installer preferences" in result.output
+        assert read_config(isolated_config) == {}
 
 
 class TestConfigGet:
     """Tests for `apm config get [key]`."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_get_auto_integrate(self):
+    @pytest.mark.parametrize(("stored", "shown"), [(True, "true"), (False, "false")])
+    def test_get_auto_integrate(self, runner, isolated_config, stored, shown):
         """Get the auto-integrate setting."""
-        with patch("apm_cli.config.get_auto_integrate", return_value=True):
-            result = self.runner.invoke(config, ["get", "auto-integrate"])
+        write_config(isolated_config, {"auto_integrate": stored})
+        result = runner.invoke(config, ["get", "auto-integrate"])
         assert result.exit_code == 0
-        assert "auto-integrate: true" in result.output
+        assert f"auto-integrate: {shown}" in result.output
 
-    def test_get_auto_integrate_disabled(self):
-        """Get auto-integrate when disabled."""
-        with patch("apm_cli.config.get_auto_integrate", return_value=False):
-            result = self.runner.invoke(config, ["get", "auto-integrate"])
-        assert result.exit_code == 0
-        assert "auto-integrate: false" in result.output
-
-    def test_get_auto_integrate_warns_deprecated(self):
+    def test_get_auto_integrate_warns_deprecated(self, runner):
         """Reading the deprecated key still works but warns (#3839)."""
-        with patch("apm_cli.config.get_auto_integrate", return_value=True):
-            result = self.runner.invoke(config, ["get", "auto-integrate"])
-        output = " ".join(result.output.split())
+        result = runner.invoke(config, ["get", "auto-integrate"])
         assert result.exit_code == 0
-        assert "[!] 'auto-integrate' is deprecated and has no effect" in output
+        assert "[!] 'auto-integrate' is deprecated and has no effect" in flat(result.output)
 
-    def test_get_unknown_key(self):
+    def test_get_unknown_key(self, runner):
         """Reject an unknown key."""
-        result = self.runner.invoke(config, ["get", "nonexistent"])
+        result = runner.invoke(config, ["get", "nonexistent"])
         assert result.exit_code == 1
+        assert "Unknown configuration key: 'nonexistent'" in flat(result.output)
 
-    def test_get_all_config(self):
+    def test_get_all_config(self, runner, isolated_config):
         """Show all config when no key is provided."""
-        with patch("apm_cli.config.get_auto_integrate", return_value=True):
-            result = self.runner.invoke(config, ["get"])
+        write_config(isolated_config, {"auto_integrate": True, "default_client": "copilot"})
+        result = runner.invoke(config, ["get"])
         assert result.exit_code == 0
         # Deprecated keys are not listed in the summary (#3839).
         assert "auto-integrate" not in result.output
         # Internal keys must not appear - users cannot set them via apm config set
         assert "default_client" not in result.output
 
-    def test_list_config_matches_get_without_key(self):
+    def test_list_config_matches_get_without_key(self, runner):
         """`apm config list` is an alias for listing all effective config values."""
-        with (
-            patch("apm_cli.config.get_auto_integrate", return_value=True),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.config.get_install_target", return_value=None),
-            patch("apm_cli.config.get_self_update_channel", return_value="stable"),
-            patch("apm_cli.config.get_self_update_install_dir", return_value=None),
-            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
-            patch("apm_cli.config.get_prefer_ssh", return_value=False),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-            patch("apm_cli.config.get_mcp_registry_url", return_value=None),
-        ):
-            get_result = self.runner.invoke(config, ["get"])
-            list_result = self.runner.invoke(config, ["list"])
+        get_result = runner.invoke(config, ["get"])
+        list_result = runner.invoke(config, ["list"])
 
         assert get_result.exit_code == 0
         assert list_result.exit_code == 0
@@ -391,125 +309,84 @@ class TestConfigGet:
             in list_result.output
         )
 
-    def test_get_all_config_fresh_install(self):
+    def test_get_all_config_fresh_install(self, runner):
         """temp-dir is shown even on a fresh install with no key in the file."""
-        with patch("apm_cli.config.get_temp_dir", return_value=None):
-            result = self.runner.invoke(config, ["get"])
+        result = runner.invoke(config, ["get"])
         assert result.exit_code == 0
         assert "temp-dir: Not set" in result.output
 
-    def test_get_all_config_suppresses_default_self_update_channel(self):
+    def test_get_all_config_suppresses_default_self_update_channel(self, runner, isolated_config):
         """apm config get (no key) omits the default stable self-update channel."""
-        with (
-            patch("apm_cli.config.get_auto_integrate", return_value=True),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.config.get_self_update_channel", return_value="stable"),
-            patch("apm_cli.config.get_self_update_install_dir", return_value=None),
-            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
-            patch("apm_cli.config.get_prefer_ssh", return_value=False),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-        ):
-            result = self.runner.invoke(config, ["get"])
+        write_config(isolated_config, {"self_update_channel": "stable"})
+        result = runner.invoke(config, ["get"])
 
         assert result.exit_code == 0
         assert "self-update.channel" not in result.output
 
-    def test_get_all_config_shows_non_default_self_update_channel(self):
+    def test_get_all_config_shows_non_default_self_update_channel(self, runner, isolated_config):
         """apm config get (no key) shows a configured non-default channel."""
-        with (
-            patch("apm_cli.config.get_auto_integrate", return_value=True),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.config.get_self_update_channel", return_value="prerelease"),
-            patch("apm_cli.config.get_self_update_install_dir", return_value=None),
-            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
-            patch("apm_cli.config.get_prefer_ssh", return_value=False),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-        ):
-            result = self.runner.invoke(config, ["get"])
+        write_config(isolated_config, {"self_update_channel": "prerelease"})
+        result = runner.invoke(config, ["get"])
 
         assert result.exit_code == 0
         assert "self-update.channel: prerelease" in result.output
 
-    def test_get_all_config_suppresses_unset_self_update_install_dir(self):
+    def test_get_all_config_suppresses_unset_self_update_install_dir(self, runner):
         """apm config get (no key) omits unset self-update install-dir."""
-        with (
-            patch("apm_cli.config.get_auto_integrate", return_value=True),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.config.get_self_update_channel", return_value="stable"),
-            patch("apm_cli.config.get_self_update_install_dir", return_value=None),
-            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
-            patch("apm_cli.config.get_prefer_ssh", return_value=False),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-        ):
-            result = self.runner.invoke(config, ["get"])
+        result = runner.invoke(config, ["get"])
 
         assert result.exit_code == 0
         assert "self-update.install-dir" not in result.output
 
-    def test_get_all_config_shows_configured_self_update_install_dir(self):
+    def test_get_all_config_shows_configured_self_update_install_dir(self, runner, isolated_config):
         """apm config get (no key) shows configured self-update install-dir."""
-        with (
-            patch("apm_cli.config.get_auto_integrate", return_value=True),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.config.get_self_update_channel", return_value="stable"),
-            patch("apm_cli.config.get_self_update_install_dir", return_value="/opt/apm/bin"),
-            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
-            patch("apm_cli.config.get_prefer_ssh", return_value=False),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-        ):
-            result = self.runner.invoke(config, ["get"])
+        write_config(isolated_config, {"self_update_install_dir": "/opt/apm/bin"})
+        result = runner.invoke(config, ["get"])
 
         assert result.exit_code == 0
         assert "self-update.install-dir: /opt/apm/bin" in result.output
 
-    def test_get_target_when_set(self):
+    def test_get_target_when_set(self, runner, isolated_config):
         """Get configured default install target."""
-        with patch("apm_cli.config.get_install_target", return_value="claude"):
-            result = self.runner.invoke(config, ["get", "target"])
+        write_config(isolated_config, {"install_target": "claude"})
+        result = runner.invoke(config, ["get", "target"])
         assert result.exit_code == 0
         assert "target: claude" in result.output
 
-    def test_get_target_when_unset(self):
+    def test_get_target_when_unset(self, runner):
         """Show not-set message for default install target."""
-        with patch("apm_cli.config.get_install_target", return_value=None):
-            result = self.runner.invoke(config, ["get", "target"])
+        result = runner.invoke(config, ["get", "target"])
         assert result.exit_code == 0
         assert "target: Not set (using auto-detection)" in result.output
 
-    def test_get_self_update_channel(self):
+    def test_get_self_update_channel(self, runner, isolated_config):
         """Get configured self-update channel preference."""
-        with patch("apm_cli.config.get_self_update_channel", return_value="stable"):
-            result = self.runner.invoke(config, ["get", "self-update.channel"])
+        write_config(isolated_config, {"self_update_channel": "stable"})
+        result = runner.invoke(config, ["get", "self-update.channel"])
         assert result.exit_code == 0
         assert "self-update.channel: stable" in result.output
 
-    def test_get_self_update_install_dir(self):
+    def test_get_self_update_install_dir(self, runner, isolated_config):
         """Get configured self-update install directory preference."""
-        with patch("apm_cli.config.get_self_update_install_dir", return_value="/opt/apm/bin"):
-            result = self.runner.invoke(config, ["get", "self-update.install-dir"])
+        write_config(isolated_config, {"self_update_install_dir": "/opt/apm/bin"})
+        result = runner.invoke(config, ["get", "self-update.install-dir"])
         assert result.exit_code == 0
         assert "self-update.install-dir: /opt/apm/bin" in result.output
 
-    def test_get_unset_self_update_install_dir_preserves_unix_installation(self):
+    def test_get_unset_self_update_install_dir_preserves_unix_installation(self, runner):
         """Unix unset state describes preservation, not a default destination."""
-        with (
-            patch("apm_cli.commands.self_update._is_windows_platform", return_value=False),
-            patch("apm_cli.config.get_self_update_install_dir", return_value=None),
-        ):
-            result = self.runner.invoke(config, ["get", "self-update.install-dir"])
+        with patch("apm_cli.commands.self_update._is_windows_platform", return_value=False):
+            result = runner.invoke(config, ["get", "self-update.install-dir"])
 
         assert result.exit_code == 0
         assert (
             "self-update.install-dir: Not set (preserving the detected Unix installation)"
         ) in result.output
 
-    def test_get_unset_self_update_install_dir_keeps_windows_default_wording(self):
+    def test_get_unset_self_update_install_dir_keeps_windows_default_wording(self, runner):
         """Windows retains its installer-default description."""
-        with (
-            patch("apm_cli.commands.self_update._is_windows_platform", return_value=True),
-            patch("apm_cli.config.get_self_update_install_dir", return_value=None),
-        ):
-            result = self.runner.invoke(config, ["get", "self-update.install-dir"])
+        with patch("apm_cli.commands.self_update._is_windows_platform", return_value=True):
+            result = runner.invoke(config, ["get", "self-update.install-dir"])
 
         assert result.exit_code == 0
         assert "self-update.install-dir: Not set (using installer default)" in result.output
@@ -520,33 +397,19 @@ class TestAutoIntegrateFunctions:
 
     def test_get_auto_integrate_default(self):
         """Default value is True when not set."""
-        import apm_cli.config as cfg_module
+        assert cfg_module.get_auto_integrate() is True
 
-        with patch.object(cfg_module, "get_config", return_value={}):
-            assert cfg_module.get_auto_integrate() is True
-
-    def test_get_auto_integrate_false(self):
+    def test_get_auto_integrate_false(self, isolated_config):
         """Returns False when set to False."""
-        import apm_cli.config as cfg_module
+        write_config(isolated_config, {"auto_integrate": False})
+        assert cfg_module.get_auto_integrate() is False
 
-        with patch.object(cfg_module, "get_config", return_value={"auto_integrate": False}):
-            assert cfg_module.get_auto_integrate() is False
-
-    def test_set_auto_integrate_calls_update_config(self):
-        """set_auto_integrate delegates to update_config."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_auto_integrate(True)
-            mock_update.assert_called_once_with({"auto_integrate": True})
-
-    def test_set_auto_integrate_false_calls_update_config(self):
-        """set_auto_integrate(False) passes False to update_config."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_auto_integrate(False)
-            mock_update.assert_called_once_with({"auto_integrate": False})
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_set_auto_integrate_persists(self, isolated_config, enabled):
+        """set_auto_integrate writes the flag to config.json."""
+        cfg_module.set_auto_integrate(enabled)
+        assert read_config(isolated_config)["auto_integrate"] is enabled
+        assert cfg_module.get_auto_integrate() is enabled
 
 
 class TestTempDirFunctions:
@@ -554,141 +417,82 @@ class TestTempDirFunctions:
 
     def test_get_temp_dir_default_is_none(self):
         """Returns None when temp_dir is not set."""
-        import apm_cli.config as cfg_module
+        assert cfg_module.get_temp_dir() is None
 
-        with patch.object(cfg_module, "get_config", return_value={}):
-            assert cfg_module.get_temp_dir() is None
-
-    def test_get_temp_dir_returns_stored_value(self):
+    def test_get_temp_dir_returns_stored_value(self, isolated_config):
         """Returns stored temp_dir value."""
-        import apm_cli.config as cfg_module
+        write_config(isolated_config, {"temp_dir": "/custom/tmp"})
+        assert cfg_module.get_temp_dir() == "/custom/tmp"
 
-        with patch.object(cfg_module, "get_config", return_value={"temp_dir": "/custom/tmp"}):
-            assert cfg_module.get_temp_dir() == "/custom/tmp"
+    def test_set_temp_dir_validates_and_stores(self, isolated_config, tmp_path):
+        """set_temp_dir normalises the path and stores it."""
+        target = tmp_path / "scratch"
+        target.mkdir()
+        cfg_module.set_temp_dir(str(target))
+        assert read_config(isolated_config)["temp_dir"] == os.path.abspath(str(target))
 
-    def test_set_temp_dir_validates_and_stores(self):
-        """set_temp_dir normalises path and stores via update_config."""
-        import apm_cli.config as cfg_module
-
-        with tempfile.TemporaryDirectory() as tmp:
-            with patch.object(cfg_module, "update_config") as mock_update:
-                cfg_module.set_temp_dir(tmp)
-                resolved = os.path.abspath(os.path.expanduser(tmp))
-                mock_update.assert_called_once_with({"temp_dir": resolved})
-
-    def test_set_temp_dir_rejects_nonexistent_directory(self):
+    def test_set_temp_dir_rejects_nonexistent_directory(self, isolated_config):
         """Raises ValueError when path does not exist."""
-        import apm_cli.config as cfg_module
-
         with pytest.raises(ValueError, match="does not exist"):
             cfg_module.set_temp_dir("/nonexistent/path/xyz")
+        assert "temp_dir" not in read_config(isolated_config)
 
-    def test_set_temp_dir_rejects_file_path(self):
+    def test_set_temp_dir_rejects_file_path(self, isolated_config, tmp_path):
         """Raises ValueError when path is a file, not a directory."""
-        import apm_cli.config as cfg_module
+        regular = tmp_path / "file.txt"
+        regular.write_text("x")
+        with pytest.raises(ValueError, match="not a directory"):
+            cfg_module.set_temp_dir(str(regular))
+        assert "temp_dir" not in read_config(isolated_config)
 
-        with tempfile.NamedTemporaryFile() as f:
-            with pytest.raises(ValueError, match="not a directory"):
-                cfg_module.set_temp_dir(f.name)
-
-    def test_set_temp_dir_normalises_home_path(self):
+    def test_set_temp_dir_normalises_home_path(self, isolated_config, tmp_path, monkeypatch):
         """Tilde paths are expanded before storage."""
-        import apm_cli.config as cfg_module
+        monkeypatch.setenv("HOME", str(tmp_path))
+        cfg_module.set_temp_dir("~")
+        assert read_config(isolated_config)["temp_dir"] == os.path.expanduser("~")
 
-        home = os.path.expanduser("~")
-        with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_temp_dir("~")
-            mock_update.assert_called_once_with({"temp_dir": home})
-
-    def test_get_apm_temp_dir_prefers_env(self):
-        """Env var takes precedence over config value."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_temp_dir", return_value="/from/config"),
-            patch.dict(os.environ, {"APM_TEMP_DIR": "/from/env"}),
-        ):
-            assert cfg_module.get_apm_temp_dir() == "/from/env"
-
-    def test_get_apm_temp_dir_falls_back_to_config(self):
-        """Falls back to config when env var is not set."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_temp_dir", return_value="/from/config"),
-            patch.dict(os.environ, {}, clear=False),
-        ):
-            os.environ.pop("APM_TEMP_DIR", None)
-            assert cfg_module.get_apm_temp_dir() == "/from/config"
-
-    def test_get_apm_temp_dir_returns_none_when_unset(self):
-        """Returns None when neither config nor env var is set."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_temp_dir", return_value=None),
-            patch.dict(os.environ, {}, clear=False),
-        ):
-            os.environ.pop("APM_TEMP_DIR", None)
-            assert cfg_module.get_apm_temp_dir() is None
-
-    def test_get_apm_temp_dir_ignores_empty_env(self):
-        """Empty APM_TEMP_DIR is treated as unset."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_temp_dir", return_value="/from/config"),
-            patch.dict(os.environ, {"APM_TEMP_DIR": ""}),
-        ):
-            assert cfg_module.get_apm_temp_dir() == "/from/config"
-
-    def test_get_apm_temp_dir_ignores_whitespace_env(self):
-        """Whitespace-only APM_TEMP_DIR is treated as unset."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_temp_dir", return_value=None),
-            patch.dict(os.environ, {"APM_TEMP_DIR": "   "}),
-        ):
-            assert cfg_module.get_apm_temp_dir() is None
-
-    def test_get_apm_temp_dir_ignores_empty_config(self):
-        """Empty config temp_dir is treated as unset."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_temp_dir", return_value=""),
-            patch.dict(os.environ, {}, clear=False),
-        ):
-            os.environ.pop("APM_TEMP_DIR", None)
-            assert cfg_module.get_apm_temp_dir() is None
+    @pytest.mark.parametrize(
+        ("stored", "env", "expected"),
+        [
+            pytest.param("/from/config", "/from/env", "/from/env", id="env-wins"),
+            pytest.param("/from/config", None, "/from/config", id="config-fallback"),
+            pytest.param(None, None, None, id="both-unset"),
+            pytest.param("/from/config", "", "/from/config", id="empty-env-ignored"),
+            pytest.param(None, "   ", None, id="whitespace-env-ignored"),
+            pytest.param("", None, None, id="empty-config-ignored"),
+        ],
+    )
+    def test_get_apm_temp_dir_resolution(self, isolated_config, monkeypatch, stored, env, expected):
+        """APM_TEMP_DIR beats config; blank values on either side count as unset."""
+        if stored is not None:
+            write_config(isolated_config, {"temp_dir": stored})
+        if env is not None:
+            monkeypatch.setenv("APM_TEMP_DIR", env)
+        assert cfg_module.get_apm_temp_dir() == expected
 
 
 class TestConfigSetTempDir:
     """Tests for `apm config set temp-dir <path>`."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_set_temp_dir_success(self):
+    def test_set_temp_dir_success(self, runner, isolated_config, tmp_path):
         """Set a valid temp-dir."""
-        with patch("apm_cli.config.set_temp_dir") as mock_set:
-            result = self.runner.invoke(config, ["set", "temp-dir", "/tmp/apm"])
+        target = tmp_path / "apm-temp"
+        target.mkdir()
+        result = runner.invoke(config, ["set", "temp-dir", str(target)])
         assert result.exit_code == 0
-        mock_set.assert_called_once_with("/tmp/apm")
+        assert read_config(isolated_config)["temp_dir"] == os.path.abspath(str(target))
 
-    def test_set_temp_dir_validation_error(self):
-        """Exit 1 when set_temp_dir raises ValueError."""
-        with patch(
-            "apm_cli.config.set_temp_dir",
-            side_effect=ValueError("Directory does not exist: /bad"),
-        ):
-            result = self.runner.invoke(config, ["set", "temp-dir", "/bad"])
+    def test_set_temp_dir_validation_error(self, runner, isolated_config, tmp_path):
+        """Exit 1 when the directory does not exist."""
+        missing = tmp_path / "missing"
+        result = runner.invoke(config, ["set", "temp-dir", str(missing)])
         assert result.exit_code == 1
+        assert "Directory does not exist" in flat(result.output)
+        assert "temp_dir" not in read_config(isolated_config)
 
-    def test_set_unknown_key_includes_temp_dir_in_valid_keys(self):
+    def test_set_unknown_key_includes_temp_dir_in_valid_keys(self, runner):
         """Error message lists temp-dir as a valid key."""
-        result = self.runner.invoke(config, ["set", "nonexistent", "value"])
+        result = runner.invoke(config, ["set", "nonexistent", "value"])
         assert result.exit_code == 1
         assert "temp-dir" in result.output
 
@@ -696,62 +500,31 @@ class TestConfigSetTempDir:
 class TestConfigGetTempDir:
     """Tests for `apm config get temp-dir`."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_get_temp_dir_when_set(self):
+    def test_get_temp_dir_when_set(self, runner, isolated_config):
         """Display the configured temp-dir."""
-        with patch("apm_cli.config.get_temp_dir", return_value="/custom/tmp"):
-            result = self.runner.invoke(config, ["get", "temp-dir"])
+        write_config(isolated_config, {"temp_dir": "/custom/tmp"})
+        result = runner.invoke(config, ["get", "temp-dir"])
         assert result.exit_code == 0
         assert "temp-dir: /custom/tmp" in result.output
 
-    def test_get_temp_dir_when_unset(self):
+    def test_get_temp_dir_when_unset(self, runner):
         """Display fallback message when temp-dir is not configured."""
-        with patch("apm_cli.config.get_temp_dir", return_value=None):
-            result = self.runner.invoke(config, ["get", "temp-dir"])
+        result = runner.invoke(config, ["get", "temp-dir"])
         assert result.exit_code == 0
         assert "Not set (using system default)" in result.output
 
-    def test_get_unknown_key_includes_temp_dir_in_valid_keys(self):
+    def test_get_unknown_key_includes_temp_dir_in_valid_keys(self, runner):
         """Error message lists temp-dir as a valid key."""
-        result = self.runner.invoke(config, ["get", "nonexistent"])
+        result = runner.invoke(config, ["get", "nonexistent"])
         assert result.exit_code == 1
         assert "temp-dir" in result.output
 
-    def test_get_all_config_maps_temp_dir_key(self):
+    def test_get_all_config_maps_temp_dir_key(self, runner, isolated_config):
         """All-config listing maps internal temp_dir to display temp-dir."""
-        fake_config = {
-            "auto_integrate": True,
-            "temp_dir": "/my/temp",
-        }
-        with patch("apm_cli.config.get_config", return_value=fake_config):
-            result = self.runner.invoke(config, ["get"])
+        write_config(isolated_config, {"auto_integrate": True, "temp_dir": "/my/temp"})
+        result = runner.invoke(config, ["get"])
         assert result.exit_code == 0
         assert "temp-dir: /my/temp" in result.output
-
-
-# ---------------------------------------------------------------------------
-# Isolation fixture used by storage-layer tests that perform real disk writes.
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def isolated_config(tmp_path, monkeypatch):
-    """Redirect CONFIG_FILE to a temp dir so mutator tests never touch ~/.apm.
-
-    Returns the Path to the config.json file for post-write inspection.
-    The cache is invalidated before and after the test body.
-    """
-    import apm_cli.config as _conf
-
-    _conf._invalidate_config_cache()
-    config_dir = tmp_path / ".apm"
-    config_file = config_dir / "config.json"
-    monkeypatch.setattr(_conf, "CONFIG_DIR", str(config_dir))
-    monkeypatch.setattr(_conf, "CONFIG_FILE", str(config_file))
-    yield config_file
-    _conf._invalidate_config_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -760,295 +533,215 @@ def isolated_config(tmp_path, monkeypatch):
 
 
 class TestCoworkSkillsDirFunctions:
-    """Tests for get_copilot_cowork_skills_dir, set_copilot_cowork_skills_dir, unset_copilot_cowork_skills_dir."""
+    """Tests for get/set/unset_copilot_cowork_skills_dir."""
 
     def test_get_copilot_cowork_skills_dir_default_is_none(self):
         """Returns None when copilot_cowork_skills_dir key is absent from the config."""
-        import apm_cli.config as cfg_module
+        assert cfg_module.get_copilot_cowork_skills_dir() is None
 
-        with patch.object(cfg_module, "get_config", return_value={}):
-            assert cfg_module.get_copilot_cowork_skills_dir() is None
-
-    def test_get_copilot_cowork_skills_dir_returns_stored_value(self):
+    def test_get_copilot_cowork_skills_dir_returns_stored_value(self, isolated_config):
         """Returns the stored copilot_cowork_skills_dir value from config."""
-        import apm_cli.config as cfg_module
+        write_config(isolated_config, {"copilot_cowork_skills_dir": "/stored/path"})
+        assert cfg_module.get_copilot_cowork_skills_dir() == "/stored/path"
 
-        with patch.object(
-            cfg_module,
-            "get_config",
-            return_value={"copilot_cowork_skills_dir": "/stored/path"},
-        ):
-            assert cfg_module.get_copilot_cowork_skills_dir() == "/stored/path"
+    def test_set_copilot_cowork_skills_dir_stores_absolute_path(self, isolated_config):
+        """set_copilot_cowork_skills_dir persists the absolute path."""
+        cfg_module.set_copilot_cowork_skills_dir("/absolute/skills")
+        stored = read_config(isolated_config)["copilot_cowork_skills_dir"]
+        assert stored == os.path.normpath("/absolute/skills")
 
-    def test_set_copilot_cowork_skills_dir_stores_absolute_path(self):
-        """set_copilot_cowork_skills_dir persists the absolute path via update_config."""
-        import apm_cli.config as cfg_module
-
-        raw = "/absolute/skills"
-        expected = os.path.normpath(raw)
-        with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_copilot_cowork_skills_dir(raw)
-            mock_update.assert_called_once_with({"copilot_cowork_skills_dir": expected})
-
-    def test_set_copilot_cowork_skills_dir_expands_tilde_before_storing(self):
+    def test_set_copilot_cowork_skills_dir_expands_tilde_before_storing(
+        self, isolated_config, tmp_path, monkeypatch
+    ):
         """Tilde in path is expanded to an absolute path before storage."""
-        import apm_cli.config as cfg_module
+        monkeypatch.setenv("HOME", str(tmp_path))
+        cfg_module.set_copilot_cowork_skills_dir("~/myskills")
+        stored = read_config(isolated_config)["copilot_cowork_skills_dir"]
+        assert stored == os.path.join(os.path.expanduser("~"), "myskills")
 
-        home = os.path.expanduser("~")
-        with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_copilot_cowork_skills_dir("~/myskills")
-            expected = os.path.join(home, "myskills")
-            mock_update.assert_called_once_with({"copilot_cowork_skills_dir": expected})
+    @pytest.mark.parametrize(
+        ("raw", "match"),
+        [
+            pytest.param("", None, id="empty"),
+            pytest.param("   ", None, id="whitespace"),
+            pytest.param("relative/path", "absolute", id="relative"),
+        ],
+    )
+    def test_set_copilot_cowork_skills_dir_rejects(self, isolated_config, raw, match):
+        """Empty, blank and relative paths raise and leave config.json untouched."""
+        with pytest.raises(ValueError, match=match):
+            cfg_module.set_copilot_cowork_skills_dir(raw)
+        assert "copilot_cowork_skills_dir" not in read_config(isolated_config)
 
-    def test_set_copilot_cowork_skills_dir_raises_for_empty_string(self):
-        """Raises ValueError when path is an empty string."""
-        import apm_cli.config as cfg_module
-
-        with pytest.raises(ValueError):
-            cfg_module.set_copilot_cowork_skills_dir("")
-
-    def test_set_copilot_cowork_skills_dir_raises_for_whitespace_only(self):
-        """Raises ValueError when path is whitespace only."""
-        import apm_cli.config as cfg_module
-
-        with pytest.raises(ValueError):
-            cfg_module.set_copilot_cowork_skills_dir("   ")
-
-    def test_set_copilot_cowork_skills_dir_raises_for_relative_path(self):
-        """Raises ValueError when path is relative after tilde expansion."""
-        import apm_cli.config as cfg_module
-
-        with pytest.raises(ValueError, match="absolute"):
-            cfg_module.set_copilot_cowork_skills_dir("relative/path")
-
-    def test_set_copilot_cowork_skills_dir_accepts_nonexistent_absolute_path(self):
+    def test_set_copilot_cowork_skills_dir_accepts_nonexistent_absolute_path(self, isolated_config):
         """Non-existent absolute path is accepted; OneDrive may not yet be synced."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "update_config"):
-            # Should not raise even when the path does not exist on disk.
-            cfg_module.set_copilot_cowork_skills_dir("/nonexistent/absolute/path/xyz")
+        target = "/nonexistent/absolute/path/xyz"
+        cfg_module.set_copilot_cowork_skills_dir(target)
+        stored = read_config(isolated_config)["copilot_cowork_skills_dir"]
+        assert stored == os.path.normpath(target)
 
     def test_unset_copilot_cowork_skills_dir_removes_key(self, isolated_config):
         """unset_copilot_cowork_skills_dir removes the key; subsequent get returns None."""
-        import apm_cli.config as cfg_module
-
         raw = "/absolute/skills/path"
-        expected = os.path.normpath(raw)
         cfg_module.set_copilot_cowork_skills_dir(raw)
-        assert cfg_module.get_copilot_cowork_skills_dir() == expected
+        assert cfg_module.get_copilot_cowork_skills_dir() == os.path.normpath(raw)
 
         cfg_module.unset_copilot_cowork_skills_dir()
         assert cfg_module.get_copilot_cowork_skills_dir() is None
+        assert "copilot_cowork_skills_dir" not in read_config(isolated_config)
 
-    def test_unset_copilot_cowork_skills_dir_noop_when_absent(self, isolated_config):
+    def test_unset_copilot_cowork_skills_dir_noop_when_absent(self):
         """unset_copilot_cowork_skills_dir is a no-op when the key was never set."""
-        import apm_cli.config as cfg_module
-
-        # Should not raise even though the key does not exist.
         cfg_module.unset_copilot_cowork_skills_dir()
         assert cfg_module.get_copilot_cowork_skills_dir() is None
-
-
-# ---------------------------------------------------------------------------
-# Storage layer -- unset_temp_dir (new function added in the same commit)
-# ---------------------------------------------------------------------------
 
 
 class TestUnsetTempDir:
-    """Tests for the new unset_temp_dir function in apm_cli.config."""
+    """Tests for unset_temp_dir in apm_cli.config."""
 
     def test_unset_temp_dir_removes_key(self, isolated_config, tmp_path):
         """unset_temp_dir removes temp_dir; subsequent get_temp_dir returns None."""
-        import apm_cli.config as cfg_module
-
-        # Use tmp_path itself as the real temp directory to satisfy set_temp_dir
-        # validation (must exist and be writable).
         cfg_module.set_temp_dir(str(tmp_path))
         assert cfg_module.get_temp_dir() == str(tmp_path)
 
         cfg_module.unset_temp_dir()
         assert cfg_module.get_temp_dir() is None
+        assert "temp_dir" not in read_config(isolated_config)
 
-    def test_unset_temp_dir_noop_when_absent(self, isolated_config):
+    def test_unset_temp_dir_noop_when_absent(self):
         """unset_temp_dir is a no-op when temp_dir was never set."""
-        import apm_cli.config as cfg_module
-
-        # Should not raise.
         cfg_module.unset_temp_dir()
         assert cfg_module.get_temp_dir() is None
 
 
+def _enable(path: Path, *flags: str, **values) -> None:
+    """Seed config.json with experimental *flags* turned on plus *values*."""
+    write_config(path, {"experimental": dict.fromkeys(flags, True), **values})
+
+
 # ---------------------------------------------------------------------------
-# CLI -- apm config set copilot-cowork-skills-dir
+# CLI -- apm config set/get copilot-cowork-skills-dir
 # ---------------------------------------------------------------------------
 
 
 class TestConfigSetCoworkSkillsDir:
     """Tests for `apm config set copilot-cowork-skills-dir <value>`."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_set_copilot_cowork_skills_dir_flag_enabled_returns_exit_0(self):
+    def test_set_copilot_cowork_skills_dir_flag_enabled_returns_exit_0(
+        self, runner, isolated_config
+    ):
         """Valid absolute path with the cowork flag enabled succeeds."""
-        with (
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch("apm_cli.config.set_copilot_cowork_skills_dir") as mock_set,
-            patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value="/tmp/foo"),
-        ):
-            result = self.runner.invoke(config, ["set", "copilot-cowork-skills-dir", "/tmp/foo"])
+        _enable(isolated_config, "copilot_cowork")
+        result = runner.invoke(config, ["set", "copilot-cowork-skills-dir", "/tmp/foo"])
         assert result.exit_code == 0
-        mock_set.assert_called_once_with("/tmp/foo")
+        stored = read_config(isolated_config)["copilot_cowork_skills_dir"]
+        assert stored == os.path.normpath("/tmp/foo")
 
-    def test_set_copilot_cowork_skills_dir_flag_disabled_returns_exit_1(self):
+    def test_set_copilot_cowork_skills_dir_flag_disabled_returns_exit_1(
+        self, runner, isolated_config
+    ):
         """Attempting to set copilot-cowork-skills-dir without the cowork flag exits 1."""
-        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
-            result = self.runner.invoke(config, ["set", "copilot-cowork-skills-dir", "/tmp/foo"])
+        result = runner.invoke(config, ["set", "copilot-cowork-skills-dir", "/tmp/foo"])
         assert result.exit_code == 1
-        # The phrase may be line-wrapped in terminal output; check for the
-        # key parts that appear on the same output line.
         assert "experimental" in result.output
         assert "enable copilot-cowork" in result.output
+        assert "copilot_cowork_skills_dir" not in read_config(isolated_config)
 
-    def test_set_copilot_cowork_skills_dir_relative_path_exits_1(self):
-        """Relative path is rejected with exit code 1 and an absolute-path hint."""
-        with (
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch(
-                "apm_cli.config.set_copilot_cowork_skills_dir",
-                side_effect=ValueError("Path must be absolute: relative/path"),
-            ),
-        ):
-            result = self.runner.invoke(
-                config, ["set", "copilot-cowork-skills-dir", "relative/path"]
-            )
+    @pytest.mark.parametrize(
+        ("raw", "message"),
+        [
+            pytest.param("relative/path", "absolute", id="relative"),
+            pytest.param("", None, id="empty"),
+        ],
+    )
+    def test_set_copilot_cowork_skills_dir_invalid_path_exits_1(
+        self, runner, isolated_config, raw, message
+    ):
+        """Relative or empty paths are rejected with exit code 1."""
+        _enable(isolated_config, "copilot_cowork")
+        result = runner.invoke(config, ["set", "copilot-cowork-skills-dir", raw])
         assert result.exit_code == 1
-        assert "absolute" in result.output
-
-    def test_set_copilot_cowork_skills_dir_empty_string_exits_1(self):
-        """Empty string is rejected with exit code 1."""
-        with (
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch(
-                "apm_cli.config.set_copilot_cowork_skills_dir",
-                side_effect=ValueError("Path cannot be empty"),
-            ),
-        ):
-            result = self.runner.invoke(config, ["set", "copilot-cowork-skills-dir", ""])
-        assert result.exit_code == 1
-
-
-# ---------------------------------------------------------------------------
-# CLI -- apm config get copilot-cowork-skills-dir
-# ---------------------------------------------------------------------------
+        if message:
+            assert message in result.output
+        assert "copilot_cowork_skills_dir" not in read_config(isolated_config)
 
 
 class TestConfigGetCoworkSkillsDir:
     """Tests for `apm config get copilot-cowork-skills-dir`."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_get_copilot_cowork_skills_dir_displays_stored_value(self):
+    def test_get_copilot_cowork_skills_dir_displays_stored_value(self, runner, isolated_config):
         """Displays the configured copilot-cowork-skills-dir path."""
-        with patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value="/my/skills"):
-            result = self.runner.invoke(config, ["get", "copilot-cowork-skills-dir"])
+        write_config(isolated_config, {"copilot_cowork_skills_dir": "/my/skills"})
+        result = runner.invoke(config, ["get", "copilot-cowork-skills-dir"])
         assert result.exit_code == 0
         assert "/my/skills" in result.output
 
-    def test_get_copilot_cowork_skills_dir_when_unset_shows_not_set(self):
-        """Displays a 'Not set' message when copilot-cowork-skills-dir has not been configured."""
-        with patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None):
-            result = self.runner.invoke(config, ["get", "copilot-cowork-skills-dir"])
+    def test_get_copilot_cowork_skills_dir_when_unset_shows_not_set(self, runner):
+        """get needs no copilot-cowork flag and reports 'Not set' when unconfigured."""
+        result = runner.invoke(config, ["get", "copilot-cowork-skills-dir"])
         assert result.exit_code == 0
         assert "Not set" in result.output
 
-    def test_get_copilot_cowork_skills_dir_requires_no_flag(self):
-        """get copilot-cowork-skills-dir does not require the copilot-cowork experimental flag."""
-        with patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None):
-            # No patch on is_enabled -- the real function must not gate the get path.
-            result = self.runner.invoke(config, ["get", "copilot-cowork-skills-dir"])
-        assert result.exit_code == 0
-
 
 # ---------------------------------------------------------------------------
-# CLI -- apm config unset copilot-cowork-skills-dir / temp-dir
+# CLI -- apm config unset
 # ---------------------------------------------------------------------------
 
 
 class TestConfigUnsetSubcommand:
     """Tests for `apm config unset <key>`."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_unset_copilot_cowork_skills_dir_exits_0(self):
-        """apm config unset copilot-cowork-skills-dir exits 0 and prints success message."""
-        with patch("apm_cli.config.unset_copilot_cowork_skills_dir") as mock_unset:
-            result = self.runner.invoke(config, ["unset", "copilot-cowork-skills-dir"])
+    @pytest.mark.parametrize(
+        ("key", "stored"),
+        [
+            ("copilot-cowork-skills-dir", {"copilot_cowork_skills_dir": "/s"}),
+            ("temp-dir", {"temp_dir": "/t"}),
+            ("target", {"install_target": "claude"}),
+            ("self-update.channel", {"self_update_channel": "prerelease"}),
+        ],
+    )
+    def test_unset_removes_the_key(self, runner, isolated_config, key, stored):
+        """apm config unset <key> exits 0 and removes only that key."""
+        write_config(isolated_config, {**stored, "prefer_ssh": True})
+        result = runner.invoke(config, ["unset", key])
         assert result.exit_code == 0
-        mock_unset.assert_called_once()
+        assert read_config(isolated_config) == {"prefer_ssh": True}
 
-    def test_unset_copilot_cowork_skills_dir_idempotent(self):
+    def test_unset_copilot_cowork_skills_dir_idempotent(self, runner, isolated_config):
         """Unsetting an absent copilot-cowork-skills-dir key is safe and exits 0."""
-        with patch(
-            "apm_cli.config.unset_copilot_cowork_skills_dir"
-        ):  # real no-op behaviour tested in storage tests
-            result = self.runner.invoke(config, ["unset", "copilot-cowork-skills-dir"])
+        result = runner.invoke(config, ["unset", "copilot-cowork-skills-dir"])
         assert result.exit_code == 0
+        assert "copilot_cowork_skills_dir" not in read_config(isolated_config)
 
-    def test_unset_temp_dir_exits_0(self):
-        """apm config unset temp-dir exits 0."""
-        with patch("apm_cli.config.unset_temp_dir") as mock_unset:
-            result = self.runner.invoke(config, ["unset", "temp-dir"])
-        assert result.exit_code == 0
-        mock_unset.assert_called_once()
-
-    def test_unset_target_exits_0(self):
-        """apm config unset target exits 0."""
-        with patch("apm_cli.config.unset_install_target") as mock_unset:
-            result = self.runner.invoke(config, ["unset", "target"])
-        assert result.exit_code == 0
-        mock_unset.assert_called_once()
-
-    def test_unset_self_update_channel_exits_0(self):
-        """apm config unset self-update.channel exits 0."""
-        with patch("apm_cli.config.unset_self_update_channel") as mock_unset:
-            result = self.runner.invoke(config, ["unset", "self-update.channel"])
-        assert result.exit_code == 0
-        mock_unset.assert_called_once()
-
-    def test_unset_self_update_install_dir_exits_0(self):
+    def test_unset_self_update_install_dir_exits_0(self, runner, isolated_config):
         """Windows retains the existing removed-directory confirmation."""
-        with (
-            patch("apm_cli.commands.self_update._is_windows_platform", return_value=True),
-            patch("apm_cli.config.unset_self_update_install_dir") as mock_unset,
-        ):
-            result = self.runner.invoke(config, ["unset", "self-update.install-dir"])
+        write_config(isolated_config, {"self_update_install_dir": "/opt/apm/bin"})
+        with patch("apm_cli.commands.self_update._is_windows_platform", return_value=True):
+            result = runner.invoke(config, ["unset", "self-update.install-dir"])
         assert result.exit_code == 0
-        mock_unset.assert_called_once()
+        assert "self_update_install_dir" not in read_config(isolated_config)
         assert "Self-update install directory removed (will use installer default)" in result.output
 
-    def test_unset_self_update_install_dir_describes_unix_preservation(self):
+    def test_unset_self_update_install_dir_describes_unix_preservation(
+        self, runner, isolated_config
+    ):
         """Unix removal describes preservation of the detected installation."""
-        with (
-            patch("apm_cli.commands.self_update._is_windows_platform", return_value=False),
-            patch("apm_cli.config.unset_self_update_install_dir") as mock_unset,
-        ):
-            result = self.runner.invoke(config, ["unset", "self-update.install-dir"])
+        write_config(isolated_config, {"self_update_install_dir": "/opt/apm/bin"})
+        with patch("apm_cli.commands.self_update._is_windows_platform", return_value=False):
+            result = runner.invoke(config, ["unset", "self-update.install-dir"])
 
         assert result.exit_code == 0
-        mock_unset.assert_called_once()
+        assert "self_update_install_dir" not in read_config(isolated_config)
         assert (
             "Self-update launcher directory preference removed "
             "(will preserve the detected Unix installation)"
-        ) in " ".join(result.output.split())
+        ) in flat(result.output)
 
-    def test_unset_unknown_key_exits_1(self):
+    def test_unset_unknown_key_exits_1(self, runner):
         """Unsetting an unknown key exits 1 with an informative error."""
-        result = self.runner.invoke(config, ["unset", "unknown-key"])
+        result = runner.invoke(config, ["unset", "unknown-key"])
         assert result.exit_code == 1
+        assert "Unknown configuration key: 'unknown-key'" in flat(result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -1057,83 +750,73 @@ class TestConfigUnsetSubcommand:
 
 
 class TestConfigListingFlagGating:
-    """Tests that copilot-cowork-skills-dir appears in listings only when the flag is enabled."""
+    """copilot-cowork-skills-dir appears in listings only when the flag is enabled."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-        self.original_dir = os.getcwd()
+    @pytest.fixture(autouse=True)
+    def _cwd(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
 
-    def teardown_method(self):
-        try:  # noqa: SIM105
-            os.chdir(self.original_dir)
-        except (FileNotFoundError, OSError):
-            pass
-
-    def test_config_get_shows_copilot_cowork_skills_dir_when_flag_enabled(self):
+    def test_config_get_shows_copilot_cowork_skills_dir_when_flag_enabled(
+        self, runner, isolated_config
+    ):
         """apm config get (no key) includes copilot-cowork-skills-dir when the flag is on."""
-        fake_config = {"auto_integrate": True}
-        with (
-            patch("apm_cli.config.get_config", return_value=fake_config),
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch(
-                "apm_cli.config.get_copilot_cowork_skills_dir",
-                return_value="/enabled/path",
-            ),
-        ):
-            result = self.runner.invoke(config, ["get"])
+        _enable(isolated_config, "copilot_cowork", copilot_cowork_skills_dir="/enabled/path")
+        result = runner.invoke(config, ["get"])
         assert result.exit_code == 0
-        assert "copilot-cowork-skills-dir" in result.output
+        assert "copilot-cowork-skills-dir: /enabled/path" in flat(result.output)
 
-    def test_config_get_hides_copilot_cowork_skills_dir_when_flag_disabled(self):
+    def test_config_get_lists_scanner_and_registry_settings_when_flags_enabled(
+        self, runner, isolated_config
+    ):
+        """With the external-scanners and registries flags on, the listing shows their keys."""
+        _enable(
+            isolated_config,
+            "external_scanners",
+            "registries",
+            audit_on_install="warn",
+            external_scanners={"skillspector": {"llm": False, "args": ["--model", "m1"]}},
+            registries={"corp": {"url": "https://registry.corp.example", "token": "s3cret-tok"}},
+        )
+        result = runner.invoke(config, ["get"])
+        output = flat(result.output)
+        assert result.exit_code == 0
+        assert "audit-on-install: warn" in output
+        assert "external.skillspector.llm: false" in output
+        assert "external.skillspector.args: --model m1" in output
+        assert "external.sarif" not in output
+        assert "registry.corp.url: https://registry.corp.example" in output
+        assert "registry.corp.token:" in output
+        assert "s3cret-tok" not in output
+
+    def test_config_get_hides_copilot_cowork_skills_dir_when_flag_disabled(
+        self, runner, isolated_config
+    ):
         """apm config get (no key) omits copilot-cowork-skills-dir when the flag is off."""
-        fake_config = {"auto_integrate": True}
-        with (
-            patch("apm_cli.config.get_config", return_value=fake_config),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-        ):
-            result = self.runner.invoke(config, ["get"])
+        write_config(isolated_config, {"copilot_cowork_skills_dir": "/hidden/path"})
+        result = runner.invoke(config, ["get"])
         assert result.exit_code == 0
         assert "copilot-cowork-skills-dir" not in result.output
 
-    def test_config_show_includes_copilot_cowork_skills_dir_when_flag_enabled(self):
+    def test_config_show_includes_copilot_cowork_skills_dir_when_flag_enabled(
+        self, runner, isolated_config
+    ):
         """apm config (no subcommand) includes copilot-cowork-skills-dir when the flag is on."""
-        import rich.table
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            try:
-                with (
-                    patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
-                    patch("apm_cli.config.get_temp_dir", return_value=None),
-                    patch("apm_cli.core.experimental.is_enabled", return_value=True),
-                    patch(
-                        "apm_cli.config.get_copilot_cowork_skills_dir",
-                        return_value="/cowork/skills",
-                    ),
-                    patch.object(rich.table, "Table", side_effect=ImportError("no rich")),
-                ):
-                    result = self.runner.invoke(config, [])
-            finally:
-                os.chdir(self.original_dir)
+        _enable(isolated_config, "copilot_cowork", copilot_cowork_skills_dir="/cowork/skills")
+        with (
+            patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
+            _no_rich_table(),
+        ):
+            result = runner.invoke(config, [])
         assert result.exit_code == 0
-        assert "Cowork Skills Dir" in result.output
+        assert "Cowork Skills Dir: /cowork/skills" in flat(result.output)
 
-    def test_config_show_omits_copilot_cowork_skills_dir_when_flag_disabled(self):
+    def test_config_show_omits_copilot_cowork_skills_dir_when_flag_disabled(self, runner):
         """apm config (no subcommand) omits copilot-cowork-skills-dir when the flag is off."""
-        import rich.table
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            os.chdir(tmp_dir)
-            try:
-                with (
-                    patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
-                    patch("apm_cli.config.get_temp_dir", return_value=None),
-                    patch("apm_cli.core.experimental.is_enabled", return_value=False),
-                    patch.object(rich.table, "Table", side_effect=ImportError("no rich")),
-                ):
-                    result = self.runner.invoke(config, [])
-            finally:
-                os.chdir(self.original_dir)
+        with (
+            patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
+            _no_rich_table(),
+        ):
+            result = runner.invoke(config, [])
         assert result.exit_code == 0
         assert "Cowork Skills Dir" not in result.output
 
@@ -1146,28 +829,21 @@ class TestConfigListingFlagGating:
 class TestFlagGatingRegression:
     """Regression checks: only copilot-cowork-skills-dir is gated on the copilot-cowork flag."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_auto_integrate_set_is_not_gated(self):
+    def test_auto_integrate_set_is_not_gated(self, runner, isolated_config):
         """apm config set auto-integrate does not require the cowork flag."""
-        with patch("apm_cli.config.set_auto_integrate"):
-            result = self.runner.invoke(config, ["set", "auto-integrate", "true"])
+        result = runner.invoke(config, ["set", "auto-integrate", "true"])
         assert result.exit_code == 0
+        assert read_config(isolated_config)["auto_integrate"] is True
 
-    def test_temp_dir_set_is_not_gated(self):
+    def test_temp_dir_set_is_not_gated(self, runner, isolated_config, tmp_path):
         """apm config set temp-dir does not require the cowork flag."""
-        with (
-            patch("apm_cli.config.set_temp_dir"),
-            patch("apm_cli.config.get_temp_dir", return_value="/tmp/foo"),
-        ):
-            result = self.runner.invoke(config, ["set", "temp-dir", "/tmp/foo"])
+        result = runner.invoke(config, ["set", "temp-dir", str(tmp_path)])
         assert result.exit_code == 0
+        assert read_config(isolated_config)["temp_dir"] == os.path.abspath(str(tmp_path))
 
-    def test_copilot_cowork_skills_dir_set_is_gated(self):
+    def test_copilot_cowork_skills_dir_set_is_gated(self, runner):
         """apm config set copilot-cowork-skills-dir exits 1 when the copilot-cowork flag is off."""
-        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
-            result = self.runner.invoke(config, ["set", "copilot-cowork-skills-dir", "/some/path"])
+        result = runner.invoke(config, ["set", "copilot-cowork-skills-dir", "/some/path"])
         assert result.exit_code == 1
 
 
@@ -1178,48 +854,29 @@ class TestValidConfigKeys:
         """copilot-cowork-skills-dir is hidden when the copilot_cowork flag is off."""
         from apm_cli.commands.config import _valid_config_keys
 
-        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
-            result = _valid_config_keys()
+        result = _valid_config_keys()
 
         assert "auto-integrate" not in result
         assert "temp-dir" in result
         assert "copilot-cowork-skills-dir" not in result
+        # Transport keys are listed regardless of feature flags.
+        assert "allow-protocol-fallback" in result
+        assert "ssh" in result
 
-    def test_valid_config_keys_includes_cowork_when_flag_on(self):
+    def test_valid_config_keys_includes_cowork_when_flag_on(self, isolated_config):
         """copilot-cowork-skills-dir is listed when the copilot_cowork flag is on."""
         from apm_cli.commands.config import _valid_config_keys
 
-        with patch("apm_cli.core.experimental.is_enabled", return_value=True):
-            result = _valid_config_keys()
+        _enable(isolated_config, "copilot_cowork")
+        result = _valid_config_keys()
 
         assert "auto-integrate" not in result
         assert "temp-dir" in result
         assert "copilot-cowork-skills-dir" in result
 
-    def test_valid_config_keys_always_includes_transport_keys(self):
-        """allow-protocol-fallback and ssh are always listed regardless of feature flags."""
-        from apm_cli.commands.config import _valid_config_keys
-
-        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
-            result = _valid_config_keys()
-
-        assert "allow-protocol-fallback" in result
-        assert "ssh" in result
-
 
 class TestConfigKeyRegistry:
     """The valid-key registry and the get/set/unset dispatch must agree."""
-
-    @pytest.fixture(autouse=True)
-    def _isolated_config(self, tmp_path, monkeypatch):
-        import apm_cli.config as conf
-
-        monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setattr(conf, "CONFIG_DIR", str(tmp_path / ".apm"))
-        monkeypatch.setattr(conf, "CONFIG_FILE", str(tmp_path / ".apm" / "config.json"))
-        conf._invalidate_config_cache()
-        yield
-        conf._invalidate_config_cache()
 
     @staticmethod
     def _concrete(name: str) -> str:
@@ -1228,30 +885,34 @@ class TestConfigKeyRegistry:
         placeholder = sorted(SUPPORTED_SCANNERS)[0] if name.startswith("external.") else "corp"
         return name.replace("<name>", placeholder)
 
+    @pytest.fixture(autouse=True)
+    def _home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+
     @pytest.mark.parametrize("operation", ["get", "set", "unset"])
-    def test_unknown_key_is_a_plain_user_error(self, operation):
+    def test_unknown_key_is_a_plain_user_error(self, runner, operation):
         args = [operation, "no-such-key"] + (["x"] if operation == "set" else [])
-        result = CliRunner().invoke(config, args)
+        result = runner.invoke(config, args)
 
         assert result.exit_code == 1
         assert "Unknown configuration key: 'no-such-key'" in result.output
         assert "command routing" not in result.output
         assert "github-auth-first" in result.output
 
-    def test_every_registered_key_is_dispatched(self):
+    def test_every_registered_key_is_dispatched(self, runner, isolated_config):
         from apm_cli.commands.config import _CONFIG_KEYS
+        from apm_cli.core.experimental import FLAGS
 
-        runner = CliRunner()
-        with patch("apm_cli.core.experimental.is_enabled", return_value=True):
-            for name, _flag, unsettable in _CONFIG_KEYS:
-                key = self._concrete(name)
-                operations = [["get", key], ["set", key, "true"]]
-                if unsettable:
-                    operations.append(["unset", key])
-                for args in operations:
-                    result = runner.invoke(config, args)
-                    assert "Unknown configuration key" not in result.output, (args, result.output)
-            rejected = runner.invoke(config, ["unset", "auto-integrate"])
+        for name, _flag, unsettable in _CONFIG_KEYS:
+            _enable(isolated_config, *FLAGS)
+            key = self._concrete(name)
+            operations = [["get", key], ["set", key, "true"]]
+            if unsettable:
+                operations.append(["unset", key])
+            for args in operations:
+                result = runner.invoke(config, args)
+                assert "Unknown configuration key" not in result.output, (args, result.output)
+        rejected = runner.invoke(config, ["unset", "auto-integrate"])
 
         assert "Unknown configuration key: 'auto-integrate'" in rejected.output
         valid = rejected.output.split("Valid keys:", 1)[1]
@@ -1260,854 +921,331 @@ class TestConfigKeyRegistry:
 
 
 # ---------------------------------------------------------------------------
-# Storage layer -- allow_protocol_fallback
+# Storage layer -- boolean transport preferences
 # ---------------------------------------------------------------------------
 
+_BOOLEAN_KEYS = [
+    pytest.param(
+        "allow_protocol_fallback", "allow-protocol-fallback", id="allow-protocol-fallback"
+    ),
+    pytest.param("prefer_ssh", "prefer-ssh", id="prefer-ssh"),
+    pytest.param("github_auth_first", "github-auth-first", id="github-auth-first"),
+]
 
-class TestAllowProtocolFallbackFunctions:
-    """Tests for get_allow_protocol_fallback and set_allow_protocol_fallback in apm_cli.config."""
 
-    def test_get_allow_protocol_fallback_default_is_false(self):
+@pytest.mark.parametrize(("stored_key", "_cli_key"), _BOOLEAN_KEYS)
+class TestBooleanPreferenceFunctions:
+    """get_<key>/set_<key> for allow_protocol_fallback, prefer_ssh and github_auth_first."""
+
+    def test_default_is_false(self, stored_key, _cli_key):
         """Default value is False when not set."""
-        import apm_cli.config as cfg_module
+        assert getattr(cfg_module, f"get_{stored_key}")() is False
 
-        with patch.object(cfg_module, "get_config", return_value={}):
-            assert cfg_module.get_allow_protocol_fallback() is False
+    def test_reads_true_from_config(self, isolated_config, stored_key, _cli_key):
+        """Returns True when config.json stores True."""
+        write_config(isolated_config, {stored_key: True})
+        assert getattr(cfg_module, f"get_{stored_key}")() is True
 
-    def test_get_allow_protocol_fallback_true(self):
-        """Returns True when set to True."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "get_config", return_value={"allow_protocol_fallback": True}):
-            assert cfg_module.get_allow_protocol_fallback() is True
-
-    def test_set_allow_protocol_fallback_calls_update_config(self):
-        """set_allow_protocol_fallback delegates to update_config."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_allow_protocol_fallback(True)
-            mock_update.assert_called_once_with({"allow_protocol_fallback": True})
-
-    def test_set_allow_protocol_fallback_false_calls_update_config(self):
-        """set_allow_protocol_fallback(False) passes False to update_config."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_allow_protocol_fallback(False)
-            mock_update.assert_called_once_with({"allow_protocol_fallback": False})
-
-
-# ---------------------------------------------------------------------------
-# Storage layer -- prefer-ssh
-# ---------------------------------------------------------------------------
-
-
-class TestPreferSshFunctions:
-    """Tests for get_prefer_ssh and set_prefer_ssh in apm_cli.config."""
-
-    def test_get_prefer_ssh_default_is_false(self):
-        """Default value is False when not set."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "get_config", return_value={}):
-            assert cfg_module.get_prefer_ssh() is False
-
-    def test_get_prefer_ssh_true(self):
-        """Returns True when set to True."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "get_config", return_value={"prefer_ssh": True}):
-            assert cfg_module.get_prefer_ssh() is True
-
-    def test_set_prefer_ssh_calls_update_config(self):
-        """set_prefer_ssh delegates to update_config."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_prefer_ssh(True)
-            mock_update.assert_called_once_with({"prefer_ssh": True})
-
-    def test_set_prefer_ssh_false_calls_update_config(self):
-        """set_prefer_ssh(False) passes False to update_config."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_prefer_ssh(False)
-            mock_update.assert_called_once_with({"prefer_ssh": False})
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_set_persists(self, isolated_config, stored_key, _cli_key, enabled):
+        """set_<key> writes the value to config.json."""
+        getattr(cfg_module, f"set_{stored_key}")(enabled)
+        assert read_config(isolated_config)[stored_key] is enabled
+        assert getattr(cfg_module, f"get_{stored_key}")() is enabled
 
 
 # ---------------------------------------------------------------------------
 # Effective-value helpers (env > config > default)
 # ---------------------------------------------------------------------------
 
-
-class TestGetApmAllowProtocolFallback:
-    """Tests for get_apm_allow_protocol_fallback resolution chain."""
-
-    def test_env_var_wins_over_config(self):
-        """APM_ALLOW_PROTOCOL_FALLBACK=1 wins even when config is False."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_allow_protocol_fallback", return_value=False),
-            patch.dict(os.environ, {"APM_ALLOW_PROTOCOL_FALLBACK": "1"}),
-        ):
-            assert cfg_module.get_apm_allow_protocol_fallback() is True
-
-    def test_env_var_true_wins(self):
-        """APM_ALLOW_PROTOCOL_FALLBACK=true is accepted."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_allow_protocol_fallback", return_value=False),
-            patch.dict(os.environ, {"APM_ALLOW_PROTOCOL_FALLBACK": "true"}),
-        ):
-            assert cfg_module.get_apm_allow_protocol_fallback() is True
-
-    def test_config_used_when_env_unset(self):
-        """Config value is used when APM_ALLOW_PROTOCOL_FALLBACK is unset."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_allow_protocol_fallback", return_value=True),
-            patch.dict(os.environ, {}, clear=False),
-        ):
-            os.environ.pop("APM_ALLOW_PROTOCOL_FALLBACK", None)
-            assert cfg_module.get_apm_allow_protocol_fallback() is True
-
-    def test_returns_false_when_both_unset(self):
-        """Returns False when neither env var nor config is set."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_allow_protocol_fallback", return_value=False),
-            patch.dict(os.environ, {}, clear=False),
-        ):
-            os.environ.pop("APM_ALLOW_PROTOCOL_FALLBACK", None)
-            assert cfg_module.get_apm_allow_protocol_fallback() is False
-
-    def test_env_var_explicit_zero_overrides_config_true(self):
-        """APM_ALLOW_PROTOCOL_FALLBACK=0 overrides a persisted config value of True."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_allow_protocol_fallback", return_value=True),
-            patch.dict(os.environ, {"APM_ALLOW_PROTOCOL_FALLBACK": "0"}),
-        ):
-            assert cfg_module.get_apm_allow_protocol_fallback() is False
-
-    def test_empty_env_var_falls_through_to_config(self):
-        """Empty APM_ALLOW_PROTOCOL_FALLBACK (unset/empty) falls back to config."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_allow_protocol_fallback", return_value=True),
-            patch.dict(os.environ, {"APM_ALLOW_PROTOCOL_FALLBACK": ""}),
-        ):
-            assert cfg_module.get_apm_allow_protocol_fallback() is True
+_ENV_RESOLUTION = [
+    pytest.param(False, "1", True, id="env-1-wins-over-config"),
+    pytest.param(False, "true", True, id="env-true-wins"),
+    pytest.param(True, None, True, id="config-used-when-env-unset"),
+    pytest.param(False, None, False, id="false-when-both-unset"),
+    pytest.param(True, "0", False, id="env-0-overrides-config-true"),
+    pytest.param(True, "", True, id="empty-env-falls-through"),
+]
 
 
-class TestGithubAuthFirstFunctions:
-    """Tests for get_github_auth_first and set_github_auth_first in apm_cli.config."""
-
-    def test_get_github_auth_first_default_is_false(self):
-        """Default value is False when not set."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "get_config", return_value={}):
-            assert cfg_module.get_github_auth_first() is False
-
-    def test_get_github_auth_first_true(self):
-        """Returns True when set to True."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "get_config", return_value={"github_auth_first": True}):
-            assert cfg_module.get_github_auth_first() is True
-
-    def test_set_github_auth_first_calls_update_config(self):
-        """set_github_auth_first delegates to update_config."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_github_auth_first(True)
-            mock_update.assert_called_once_with({"github_auth_first": True})
-
-    def test_set_github_auth_first_false_calls_update_config(self):
-        """set_github_auth_first(False) passes False to update_config."""
-        import apm_cli.config as cfg_module
-
-        with patch.object(cfg_module, "update_config") as mock_update:
-            cfg_module.set_github_auth_first(False)
-            mock_update.assert_called_once_with({"github_auth_first": False})
-
-
-class TestGetApmGithubAuthFirst:
-    """Tests for get_apm_github_auth_first resolution chain."""
-
-    def test_env_var_wins_over_config(self):
-        """APM_GITHUB_AUTH_FIRST=1 wins even when config is False."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_github_auth_first", return_value=False),
-            patch.dict(os.environ, {"APM_GITHUB_AUTH_FIRST": "1"}),
-        ):
-            assert cfg_module.get_apm_github_auth_first() is True
-
-    def test_env_var_true_wins(self):
-        """APM_GITHUB_AUTH_FIRST=true is accepted."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_github_auth_first", return_value=False),
-            patch.dict(os.environ, {"APM_GITHUB_AUTH_FIRST": "true"}),
-        ):
-            assert cfg_module.get_apm_github_auth_first() is True
-
-    def test_config_used_when_env_unset(self):
-        """Config value is used when APM_GITHUB_AUTH_FIRST is unset."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_github_auth_first", return_value=True),
-            patch.dict(os.environ, {}, clear=False),
-        ):
-            os.environ.pop("APM_GITHUB_AUTH_FIRST", None)
-            assert cfg_module.get_apm_github_auth_first() is True
-
-    def test_returns_false_when_both_unset(self):
-        """Returns False when neither env var nor config is set."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_github_auth_first", return_value=False),
-            patch.dict(os.environ, {}, clear=False),
-        ):
-            os.environ.pop("APM_GITHUB_AUTH_FIRST", None)
-            assert cfg_module.get_apm_github_auth_first() is False
-
-    def test_env_var_explicit_zero_overrides_config_true(self):
-        """APM_GITHUB_AUTH_FIRST=0 overrides a persisted config value of True."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_github_auth_first", return_value=True),
-            patch.dict(os.environ, {"APM_GITHUB_AUTH_FIRST": "0"}),
-        ):
-            assert cfg_module.get_apm_github_auth_first() is False
-
-    def test_empty_env_var_falls_through_to_config(self):
-        """Empty APM_GITHUB_AUTH_FIRST (unset/empty) falls back to config."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_github_auth_first", return_value=True),
-            patch.dict(os.environ, {"APM_GITHUB_AUTH_FIRST": ""}),
-        ):
-            assert cfg_module.get_apm_github_auth_first() is True
+@pytest.mark.parametrize(("stored", "env", "expected"), _ENV_RESOLUTION)
+@pytest.mark.parametrize(
+    ("stored_key", "env_name", "resolver"),
+    [
+        pytest.param(
+            "allow_protocol_fallback",
+            "APM_ALLOW_PROTOCOL_FALLBACK",
+            "get_apm_allow_protocol_fallback",
+            id="allow-protocol-fallback",
+        ),
+        pytest.param(
+            "github_auth_first",
+            "APM_GITHUB_AUTH_FIRST",
+            "get_apm_github_auth_first",
+            id="github-auth-first",
+        ),
+    ],
+)
+def test_effective_boolean_resolution(
+    isolated_config, monkeypatch, stored_key, env_name, resolver, stored, env, expected
+):
+    """The environment variable beats config.json; an empty value falls through."""
+    write_config(isolated_config, {stored_key: stored})
+    if env is not None:
+        monkeypatch.setenv(env_name, env)
+    assert getattr(cfg_module, resolver)() is expected
 
 
 class TestGetApmProtocolPref:
     """Tests for get_apm_protocol_pref resolution chain."""
 
-    def test_env_var_ssh_wins_over_config(self):
-        """APM_GIT_PROTOCOL=ssh wins even when config prefer_ssh is False."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_prefer_ssh", return_value=False),
-            patch.dict(os.environ, {"APM_GIT_PROTOCOL": "ssh"}),
-        ):
-            assert cfg_module.get_apm_protocol_pref() == "ssh"
-
-    def test_env_var_https_wins(self):
-        """APM_GIT_PROTOCOL=https is returned as-is."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_prefer_ssh", return_value=True),
-            patch.dict(os.environ, {"APM_GIT_PROTOCOL": "https"}),
-        ):
-            assert cfg_module.get_apm_protocol_pref() == "https"
-
-    def test_config_prefer_ssh_used_when_env_unset(self):
-        """Config prefer_ssh=True maps to 'ssh' when APM_GIT_PROTOCOL is unset."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_prefer_ssh", return_value=True),
-            patch.dict(os.environ, {}, clear=False),
-        ):
-            os.environ.pop("APM_GIT_PROTOCOL", None)
-            assert cfg_module.get_apm_protocol_pref() == "ssh"
-
-    def test_returns_none_when_both_unset(self):
-        """Returns None when neither env var nor config is set."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_prefer_ssh", return_value=False),
-            patch.dict(os.environ, {}, clear=False),
-        ):
-            os.environ.pop("APM_GIT_PROTOCOL", None)
-            assert cfg_module.get_apm_protocol_pref() is None
-
-    def test_invalid_env_var_ignored(self):
-        """An unrecognised APM_GIT_PROTOCOL value falls back to config."""
-        import apm_cli.config as cfg_module
-
-        with (
-            patch.object(cfg_module, "get_prefer_ssh", return_value=True),
-            patch.dict(os.environ, {"APM_GIT_PROTOCOL": "git"}),
-        ):
-            assert cfg_module.get_apm_protocol_pref() == "ssh"
+    @pytest.mark.parametrize(
+        ("prefer_ssh", "env", "expected"),
+        [
+            pytest.param(False, "ssh", "ssh", id="env-ssh-wins"),
+            pytest.param(True, "https", "https", id="env-https-wins"),
+            pytest.param(True, None, "ssh", id="config-used-when-env-unset"),
+            pytest.param(False, None, None, id="none-when-both-unset"),
+            pytest.param(True, "git", "ssh", id="invalid-env-ignored"),
+        ],
+    )
+    def test_resolution(self, isolated_config, monkeypatch, prefer_ssh, env, expected):
+        write_config(isolated_config, {"prefer_ssh": prefer_ssh})
+        if env is not None:
+            monkeypatch.setenv("APM_GIT_PROTOCOL", env)
+        assert cfg_module.get_apm_protocol_pref() == expected
 
 
 # ---------------------------------------------------------------------------
-# CLI -- apm config set allow-protocol-fallback
+# CLI -- apm config set/get for the boolean transport keys
 # ---------------------------------------------------------------------------
 
 
-class TestConfigSetAllowProtocolFallback:
-    """Tests for `apm config set allow-protocol-fallback <value>`."""
+@pytest.mark.parametrize(("stored_key", "cli_key"), _BOOLEAN_KEYS)
+class TestConfigSetBooleanKey:
+    """`apm config set <key> <value>` for allow-protocol-fallback, prefer-ssh, github-auth-first."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_set_allow_protocol_fallback_true(self):
-        """Set allow-protocol-fallback to true."""
-        with patch("apm_cli.config.set_allow_protocol_fallback") as mock_set:
-            result = self.runner.invoke(config, ["set", "allow-protocol-fallback", "true"])
+    @pytest.mark.parametrize(
+        ("value", "stored"),
+        [
+            ("true", True),
+            ("false", False),
+            ("yes", True),
+            ("0", False),
+            ("TRUE", True),
+            ("1", True),
+            ("no", False),
+        ],
+    )
+    def test_set_stores_value(self, runner, isolated_config, stored_key, cli_key, value, stored):
+        """Every boolean alias is accepted, case-insensitively, without a feature flag."""
+        result = runner.invoke(config, ["set", cli_key, value])
         assert result.exit_code == 0
-        mock_set.assert_called_once_with(True)
+        assert read_config(isolated_config)[stored_key] is stored
 
-    def test_set_allow_protocol_fallback_false(self):
-        """Set allow-protocol-fallback to false."""
-        with patch("apm_cli.config.set_allow_protocol_fallback") as mock_set:
-            result = self.runner.invoke(config, ["set", "allow-protocol-fallback", "false"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(False)
-
-    def test_set_allow_protocol_fallback_yes(self):
-        """'yes' is accepted as a truthy value."""
-        with patch("apm_cli.config.set_allow_protocol_fallback") as mock_set:
-            result = self.runner.invoke(config, ["set", "allow-protocol-fallback", "yes"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(True)
-
-    def test_set_allow_protocol_fallback_zero(self):
-        """'0' is accepted as a falsy value."""
-        with patch("apm_cli.config.set_allow_protocol_fallback") as mock_set:
-            result = self.runner.invoke(config, ["set", "allow-protocol-fallback", "0"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(False)
-
-    def test_set_allow_protocol_fallback_invalid_value(self):
+    def test_set_invalid_value(self, runner, isolated_config, stored_key, cli_key):
         """Reject an invalid value."""
-        result = self.runner.invoke(config, ["set", "allow-protocol-fallback", "maybe"])
+        result = runner.invoke(config, ["set", cli_key, "maybe"])
         assert result.exit_code == 1
+        assert stored_key not in read_config(isolated_config)
 
-    def test_set_allow_protocol_fallback_case_insensitive(self):
-        """Value comparison is case-insensitive."""
-        with patch("apm_cli.config.set_allow_protocol_fallback") as mock_set:
-            result = self.runner.invoke(config, ["set", "allow-protocol-fallback", "TRUE"])
+    def test_unknown_key_error_lists_key_as_valid(self, runner, stored_key, cli_key):
+        """Error listings for unknown keys name the key as valid (get and set)."""
+        for args in (["get", "nonexistent"], ["set", "nonexistent", "true"]):
+            result = runner.invoke(config, args)
+            assert result.exit_code == 1
+            assert cli_key in result.output
+
+
+@pytest.mark.parametrize(("stored_key", "cli_key"), _BOOLEAN_KEYS)
+class TestConfigGetBooleanKey:
+    """`apm config get [<key>]` for allow-protocol-fallback, prefer-ssh, github-auth-first."""
+
+    @pytest.mark.parametrize(("stored", "shown"), [(True, "true"), (False, "false")])
+    def test_get_key(self, runner, isolated_config, stored_key, cli_key, stored, shown):
+        """Display the configured value."""
+        write_config(isolated_config, {stored_key: stored})
+        result = runner.invoke(config, ["get", cli_key])
         assert result.exit_code == 0
-        mock_set.assert_called_once_with(True)
+        assert f"{cli_key}: {shown}" in result.output
 
-    def test_set_allow_protocol_fallback_not_gated(self):
-        """allow-protocol-fallback does not require any experimental flag."""
-        with patch("apm_cli.config.set_allow_protocol_fallback"):
-            result = self.runner.invoke(config, ["set", "allow-protocol-fallback", "true"])
+    def test_get_all_config_includes_key_when_true(
+        self, runner, isolated_config, stored_key, cli_key
+    ):
+        """apm config get (no key) shows the key only when true."""
+        write_config(isolated_config, {stored_key: True})
+        result = runner.invoke(config, ["get"])
         assert result.exit_code == 0
+        assert cli_key in result.output
 
-
-# ---------------------------------------------------------------------------
-# CLI -- apm config get allow-protocol-fallback
-# ---------------------------------------------------------------------------
-
-
-class TestConfigGetAllowProtocolFallback:
-    """Tests for `apm config get allow-protocol-fallback`."""
-
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_get_allow_protocol_fallback_when_true(self):
-        """Display the configured allow-protocol-fallback when True."""
-        with patch("apm_cli.config.get_allow_protocol_fallback", return_value=True):
-            result = self.runner.invoke(config, ["get", "allow-protocol-fallback"])
+    def test_get_all_config_suppresses_key_when_false(
+        self, runner, isolated_config, stored_key, cli_key
+    ):
+        """apm config get (no key) omits the key when false (noise reduction)."""
+        write_config(isolated_config, {stored_key: False})
+        result = runner.invoke(config, ["get"])
         assert result.exit_code == 0
-        assert "allow-protocol-fallback: true" in result.output
-
-    def test_get_allow_protocol_fallback_when_false(self):
-        """Display the configured allow-protocol-fallback when False."""
-        with patch("apm_cli.config.get_allow_protocol_fallback", return_value=False):
-            result = self.runner.invoke(config, ["get", "allow-protocol-fallback"])
-        assert result.exit_code == 0
-        assert "allow-protocol-fallback: false" in result.output
-
-    def test_get_all_config_includes_allow_protocol_fallback(self):
-        """apm config get (no key) shows allow-protocol-fallback only when true."""
-        with (
-            patch("apm_cli.config.get_auto_integrate", return_value=True),
-            patch("apm_cli.config.get_allow_protocol_fallback", return_value=True),
-            patch("apm_cli.config.get_prefer_ssh", return_value=False),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-        ):
-            result = self.runner.invoke(config, ["get"])
-        assert result.exit_code == 0
-        assert "allow-protocol-fallback" in result.output
-
-    def test_get_all_config_suppresses_allow_protocol_fallback_when_false(self):
-        """apm config get (no key) omits allow-protocol-fallback when false (noise reduction)."""
-        with (
-            patch("apm_cli.config.get_auto_integrate", return_value=True),
-            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
-            patch("apm_cli.config.get_prefer_ssh", return_value=False),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-        ):
-            result = self.runner.invoke(config, ["get"])
-        assert result.exit_code == 0
-        assert "allow-protocol-fallback" not in result.output
-
-    def test_unknown_key_error_lists_allow_protocol_fallback(self):
-        """Error message for unknown keys lists allow-protocol-fallback as valid."""
-        result = self.runner.invoke(config, ["get", "nonexistent"])
-        assert result.exit_code == 1
-        assert "allow-protocol-fallback" in result.output
-
-
-# ---------------------------------------------------------------------------
-# CLI -- apm config set github-auth-first
-# ---------------------------------------------------------------------------
-
-
-class TestConfigSetGithubAuthFirst:
-    """Tests for `apm config set github-auth-first <value>`."""
-
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_set_github_auth_first_true(self):
-        """Set github-auth-first to true."""
-        with patch("apm_cli.config.set_github_auth_first") as mock_set:
-            result = self.runner.invoke(config, ["set", "github-auth-first", "true"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(True)
-
-    def test_set_github_auth_first_false(self):
-        """Set github-auth-first to false."""
-        with patch("apm_cli.config.set_github_auth_first") as mock_set:
-            result = self.runner.invoke(config, ["set", "github-auth-first", "false"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(False)
-
-    def test_set_github_auth_first_invalid_value(self):
-        """Reject an invalid value."""
-        result = self.runner.invoke(config, ["set", "github-auth-first", "maybe"])
-        assert result.exit_code == 1
-
-    def test_set_github_auth_first_not_gated(self):
-        """github-auth-first does not require any experimental flag."""
-        with patch("apm_cli.config.set_github_auth_first"):
-            result = self.runner.invoke(config, ["set", "github-auth-first", "true"])
-        assert result.exit_code == 0
-
-
-# ---------------------------------------------------------------------------
-# CLI -- apm config get github-auth-first
-# ---------------------------------------------------------------------------
-
-
-class TestConfigGetGithubAuthFirst:
-    """Tests for `apm config get github-auth-first`."""
-
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_get_github_auth_first_when_true(self):
-        """Display the configured github-auth-first when True."""
-        with patch("apm_cli.config.get_github_auth_first", return_value=True):
-            result = self.runner.invoke(config, ["get", "github-auth-first"])
-        assert result.exit_code == 0
-        assert "github-auth-first: true" in result.output
-
-    def test_get_github_auth_first_when_false(self):
-        """Display the configured github-auth-first when False."""
-        with patch("apm_cli.config.get_github_auth_first", return_value=False):
-            result = self.runner.invoke(config, ["get", "github-auth-first"])
-        assert result.exit_code == 0
-        assert "github-auth-first: false" in result.output
-
-    def test_get_all_config_includes_github_auth_first(self):
-        """apm config get (no key) shows github-auth-first only when true."""
-        with (
-            patch("apm_cli.config.get_auto_integrate", return_value=True),
-            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
-            patch("apm_cli.config.get_prefer_ssh", return_value=False),
-            patch("apm_cli.config.get_github_auth_first", return_value=True),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-        ):
-            result = self.runner.invoke(config, ["get"])
-        assert result.exit_code == 0
-        assert "github-auth-first" in result.output
-
-    def test_get_all_config_suppresses_github_auth_first_when_false(self):
-        """apm config get (no key) omits github-auth-first when false (noise reduction)."""
-        with (
-            patch("apm_cli.config.get_auto_integrate", return_value=True),
-            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
-            patch("apm_cli.config.get_prefer_ssh", return_value=False),
-            patch("apm_cli.config.get_github_auth_first", return_value=False),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-        ):
-            result = self.runner.invoke(config, ["get"])
-        assert result.exit_code == 0
-        assert "github-auth-first" not in result.output
-
-    def test_unknown_key_error_lists_github_auth_first(self):
-        """Error message for unknown keys lists github-auth-first as valid."""
-        result = self.runner.invoke(config, ["get", "nonexistent"])
-        assert result.exit_code == 1
-        assert "github-auth-first" in result.output
-
-
-# ---------------------------------------------------------------------------
-# CLI -- apm config set prefer-ssh
-# ---------------------------------------------------------------------------
-
-
-class TestConfigSetPreferSsh:
-    """Tests for `apm config set prefer-ssh <value>`."""
-
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_set_prefer_ssh_true(self):
-        """Set prefer-ssh to true."""
-        with patch("apm_cli.config.set_prefer_ssh") as mock_set:
-            result = self.runner.invoke(config, ["set", "prefer-ssh", "true"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(True)
-
-    def test_set_prefer_ssh_false(self):
-        """Set prefer-ssh to false."""
-        with patch("apm_cli.config.set_prefer_ssh") as mock_set:
-            result = self.runner.invoke(config, ["set", "prefer-ssh", "false"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(False)
-
-    def test_set_prefer_ssh_one(self):
-        """'1' is accepted as a truthy value."""
-        with patch("apm_cli.config.set_prefer_ssh") as mock_set:
-            result = self.runner.invoke(config, ["set", "prefer-ssh", "1"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(True)
-
-    def test_set_prefer_ssh_no(self):
-        """'no' is accepted as a falsy value."""
-        with patch("apm_cli.config.set_prefer_ssh") as mock_set:
-            result = self.runner.invoke(config, ["set", "prefer-ssh", "no"])
-        assert result.exit_code == 0
-        mock_set.assert_called_once_with(False)
-
-    def test_set_prefer_ssh_invalid_value(self):
-        """Reject an invalid value."""
-        result = self.runner.invoke(config, ["set", "prefer-ssh", "enabled"])
-        assert result.exit_code == 1
-
-    def test_set_prefer_ssh_not_gated(self):
-        """prefer-ssh does not require any experimental flag."""
-        with patch("apm_cli.config.set_prefer_ssh"):
-            result = self.runner.invoke(config, ["set", "prefer-ssh", "true"])
-        assert result.exit_code == 0
-
-    def test_set_prefer_ssh_unknown_key_lists_prefer_ssh_as_valid(self):
-        """Error listing includes 'prefer-ssh' as a valid key."""
-        result = self.runner.invoke(config, ["set", "nonexistent", "true"])
-        assert result.exit_code == 1
-        assert "prefer-ssh" in result.output
-
-
-# ---------------------------------------------------------------------------
-# CLI -- apm config get prefer-ssh
-# ---------------------------------------------------------------------------
-
-
-class TestConfigGetPreferSsh:
-    """Tests for `apm config get prefer-ssh`."""
-
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_get_prefer_ssh_when_true(self):
-        """Display the configured prefer-ssh preference when True."""
-        with patch("apm_cli.config.get_prefer_ssh", return_value=True):
-            result = self.runner.invoke(config, ["get", "prefer-ssh"])
-        assert result.exit_code == 0
-        assert "prefer-ssh: true" in result.output
-
-    def test_get_prefer_ssh_when_false(self):
-        """Display the configured prefer-ssh preference when False."""
-        with patch("apm_cli.config.get_prefer_ssh", return_value=False):
-            result = self.runner.invoke(config, ["get", "prefer-ssh"])
-        assert result.exit_code == 0
-        assert "prefer-ssh: false" in result.output
-
-    def test_get_all_config_includes_prefer_ssh(self):
-        """apm config get (no key) shows prefer-ssh only when true."""
-        with (
-            patch("apm_cli.config.get_auto_integrate", return_value=True),
-            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
-            patch("apm_cli.config.get_prefer_ssh", return_value=True),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-        ):
-            result = self.runner.invoke(config, ["get"])
-        assert result.exit_code == 0
-        assert "prefer-ssh" in result.output
-
-    def test_get_all_config_suppresses_prefer_ssh_when_false(self):
-        """apm config get (no key) omits prefer-ssh when false (noise reduction)."""
-        with (
-            patch("apm_cli.config.get_auto_integrate", return_value=True),
-            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
-            patch("apm_cli.config.get_prefer_ssh", return_value=False),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-        ):
-            result = self.runner.invoke(config, ["get"])
-        assert result.exit_code == 0
-        assert "prefer-ssh" not in result.output
-
-    def test_unknown_key_error_lists_prefer_ssh_as_valid(self):
-        """Error message for unknown keys lists prefer-ssh as valid."""
-        result = self.runner.invoke(config, ["get", "nonexistent"])
-        assert result.exit_code == 1
-        assert "prefer-ssh" in result.output
+        assert cli_key not in result.output
 
 
 class TestConfigShowTempDir:
-    """Lines 127, 132-135: config show with temp-dir and copilot cowork dir."""
+    """`apm config` (rich table) with temp-dir and the copilot cowork dir."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
+    @pytest.fixture(autouse=True)
+    def _cwd(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
 
-    def test_show_with_temp_dir_set(self):
-        """Line 127: temp_dir is set -- shown in config table."""
-        with (
-            patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
-            patch("apm_cli.config.get_temp_dir", return_value="/tmp/apm-temp"),
-            patch("apm_cli.core.experimental.is_enabled", return_value=False),
-        ):
-            result = self.runner.invoke(config, [])
+    def test_show_with_temp_dir_set(self, runner, isolated_config):
+        """temp_dir is set -- shown in the config table."""
+        write_config(isolated_config, {"temp_dir": "/tmp/apm-temp"})
+        with patch("apm_cli.commands.config.get_version", return_value="1.0.0"):
+            result = runner.invoke(config, [])
         assert result.exit_code == 0
-        assert "/tmp/apm-temp" in result.output or "Temp Directory" in result.output
+        assert "/tmp/apm-temp" in result.output
+        assert "Temp Directory" in result.output
 
-    def test_show_with_copilot_cowork_dir_set(self):
-        """Lines 132-135: copilot_cowork enabled + dir set -- shown."""
-        with (
-            patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value="/some/skills"),
-        ):
-            result = self.runner.invoke(config, [])
+    def test_show_with_copilot_cowork_dir_set(self, runner, isolated_config):
+        """copilot_cowork enabled + dir set -- shown."""
+        _enable(isolated_config, "copilot_cowork", copilot_cowork_skills_dir="/some/skills")
+        with patch("apm_cli.commands.config.get_version", return_value="1.0.0"):
+            result = runner.invoke(config, [])
         assert result.exit_code == 0
-        assert "/some/skills" in result.output or "Cowork Skills Dir" in result.output
+        assert "/some/skills" in result.output
 
-    def test_show_with_copilot_cowork_dir_not_set(self):
-        """Lines 132-138: copilot_cowork enabled + dir NOT set -- auto-detection msg."""
-        with (
-            patch("apm_cli.commands.config.get_version", return_value="1.0.0"),
-            patch("apm_cli.config.get_temp_dir", return_value=None),
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None),
-        ):
-            result = self.runner.invoke(config, [])
+    def test_show_with_copilot_cowork_dir_not_set(self, runner, isolated_config):
+        """copilot_cowork enabled + dir NOT set -- auto-detection message."""
+        _enable(isolated_config, "copilot_cowork")
+        with patch("apm_cli.commands.config.get_version", return_value="1.0.0"):
+            result = runner.invoke(config, [])
         assert result.exit_code == 0
-        assert "auto-detection" in result.output or "Cowork" in result.output
+        assert "auto-detection" in flat(result.output)
 
 
 class TestAuditOnInstallCommand:
     """`apm config set/get/unset audit-on-install` (flag-gated)."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_set_blocked_without_flag(self):
-        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
-            result = self.runner.invoke(config, ["set", "audit-on-install", "warn"])
+    def test_set_blocked_without_flag(self, runner, isolated_config):
+        result = runner.invoke(config, ["set", "audit-on-install", "warn"])
         assert result.exit_code == 1
         assert "external-scanners experimental flag" in result.output
+        assert "audit_on_install" not in read_config(isolated_config)
 
-    def test_set_allowed_with_flag(self):
-        with (
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch("apm_cli.config.set_audit_on_install") as mock_set,
-            patch("apm_cli.config.get_audit_on_install", return_value="warn"),
-        ):
-            result = self.runner.invoke(config, ["set", "audit-on-install", "warn"])
+    def test_set_allowed_with_flag(self, runner, isolated_config):
+        _enable(isolated_config, "external_scanners")
+        result = runner.invoke(config, ["set", "audit-on-install", "warn"])
         assert result.exit_code == 0
-        mock_set.assert_called_once_with("warn")
+        assert read_config(isolated_config)["audit_on_install"] == "warn"
 
-    def test_get_audit_on_install(self):
-        with patch("apm_cli.config.get_audit_on_install", return_value="block"):
-            result = self.runner.invoke(config, ["get", "audit-on-install"])
+    def test_get_audit_on_install(self, runner, isolated_config):
+        write_config(isolated_config, {"audit_on_install": "block"})
+        result = runner.invoke(config, ["get", "audit-on-install"])
         assert result.exit_code == 0
         assert "block" in result.output
 
-    def test_unset_audit_on_install(self):
-        with patch("apm_cli.config.unset_audit_on_install") as mock_unset:
-            result = self.runner.invoke(config, ["unset", "audit-on-install"])
+    def test_unset_audit_on_install(self, runner, isolated_config):
+        write_config(isolated_config, {"audit_on_install": "block"})
+        result = runner.invoke(config, ["unset", "audit-on-install"])
         assert result.exit_code == 0
-        mock_unset.assert_called_once()
+        assert "audit_on_install" not in read_config(isolated_config)
 
 
 class TestExternalScannerConfigCommand:
     """`apm config set/get/unset external.<name>.{llm,args}` (flag-gated)."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
+    def _scanners(self, path: Path) -> dict:
+        return read_config(path).get("external_scanners", {})
 
-    def test_set_llm_blocked_without_flag(self):
-        with patch("apm_cli.core.experimental.is_enabled", return_value=False):
-            result = self.runner.invoke(config, ["set", "external.skillspector.llm", "true"])
+    def test_set_llm_blocked_without_flag(self, runner, isolated_config):
+        result = runner.invoke(config, ["set", "external.skillspector.llm", "true"])
         assert result.exit_code == 1
         assert "external-scanners experimental" in result.output
+        assert self._scanners(isolated_config) == {}
 
-    def test_set_llm_with_flag(self):
-        with (
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch("apm_cli.config.set_scanner_llm") as mock_set,
-        ):
-            result = self.runner.invoke(config, ["set", "external.skillspector.llm", "true"])
+    def test_set_llm_with_flag(self, runner, isolated_config):
+        _enable(isolated_config, "external_scanners")
+        result = runner.invoke(config, ["set", "external.skillspector.llm", "true"])
         assert result.exit_code == 0
-        mock_set.assert_called_once_with("skillspector", True)
+        assert self._scanners(isolated_config) == {"skillspector": {"llm": True}}
 
-    def test_set_args_shlex_split(self):
-        with (
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch("apm_cli.config.set_scanner_args") as mock_set,
-        ):
-            result = self.runner.invoke(
-                config, ["set", "external.skillspector.args", "--", "--model gpt-4o"]
-            )
+    def test_set_args_shlex_split(self, runner, isolated_config):
+        _enable(isolated_config, "external_scanners")
+        result = runner.invoke(
+            config, ["set", "external.skillspector.args", "--", "--model gpt-4o"]
+        )
         assert result.exit_code == 0
-        mock_set.assert_called_once_with("skillspector", ["--model", "gpt-4o"])
+        assert self._scanners(isolated_config) == {"skillspector": {"args": ["--model", "gpt-4o"]}}
 
-    def test_set_args_empty_string_rejected(self):
-        with (
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch("apm_cli.config.set_scanner_args") as mock_set,
-        ):
-            result = self.runner.invoke(config, ["set", "external.skillspector.args", "--", "   "])
+    def test_set_args_empty_string_rejected(self, runner, isolated_config):
+        _enable(isolated_config, "external_scanners")
+        result = runner.invoke(config, ["set", "external.skillspector.args", "--", "   "])
         assert result.exit_code == 1
-        mock_set.assert_not_called()
+        assert self._scanners(isolated_config) == {}
 
-    def test_set_unknown_scanner_rejected(self):
-        with patch("apm_cli.core.experimental.is_enabled", return_value=True):
-            result = self.runner.invoke(config, ["set", "external.bogus.llm", "true"])
+    def test_set_unknown_scanner_rejected(self, runner, isolated_config):
+        _enable(isolated_config, "external_scanners")
+        result = runner.invoke(config, ["set", "external.bogus.llm", "true"])
         assert result.exit_code == 1
         assert "Unknown external scanner" in result.output
+        assert self._scanners(isolated_config) == {}
 
-    def test_get_llm(self):
-        with (
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch(
-                "apm_cli.config.get_scanner_options",
-                return_value=(True, None),
-            ),
-        ):
-            result = self.runner.invoke(config, ["get", "external.skillspector.llm"])
+    def test_get_llm(self, runner, isolated_config):
+        _enable(
+            isolated_config,
+            "external_scanners",
+            external_scanners={"skillspector": {"llm": True}},
+        )
+        result = runner.invoke(config, ["get", "external.skillspector.llm"])
         assert result.exit_code == 0
         assert "true" in result.output
 
-    def test_get_args_not_set(self):
-        with (
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch(
-                "apm_cli.config.get_scanner_options",
-                return_value=(None, None),
-            ),
-        ):
-            result = self.runner.invoke(config, ["get", "external.skillspector.args"])
+    def test_get_args_not_set(self, runner, isolated_config):
+        _enable(isolated_config, "external_scanners")
+        result = runner.invoke(config, ["get", "external.skillspector.args"])
         assert result.exit_code == 0
         assert "Not set" in result.output
 
-    def test_unset_llm(self):
-        with (
-            patch("apm_cli.core.experimental.is_enabled", return_value=True),
-            patch("apm_cli.config.unset_scanner_llm") as mock_unset,
-        ):
-            result = self.runner.invoke(config, ["unset", "external.skillspector.llm"])
+    def test_unset_llm(self, runner, isolated_config):
+        _enable(
+            isolated_config,
+            "external_scanners",
+            external_scanners={"skillspector": {"llm": True, "args": ["-v"]}},
+        )
+        result = runner.invoke(config, ["unset", "external.skillspector.llm"])
         assert result.exit_code == 0
-        mock_unset.assert_called_once_with("skillspector")
+        assert self._scanners(isolated_config) == {"skillspector": {"args": ["-v"]}}
 
 
 class TestMcpRegistryUrlCommand:
     """`apm config set/get/unset mcp-registry-url` -- issue #818."""
 
-    def setup_method(self):
-        self.runner = CliRunner()
-
-    def test_set_valid_https_url(self):
-        with (
-            patch("apm_cli.config.set_mcp_registry_url") as mock_set,
-            patch(
-                "apm_cli.config.get_mcp_registry_url",
-                return_value="https://corp.mcp.example.com",
-            ),
-        ):
-            result = self.runner.invoke(
-                config, ["set", "mcp-registry-url", "https://corp.mcp.example.com"]
-            )
+    def test_set_valid_https_url(self, runner, isolated_config):
+        result = runner.invoke(config, ["set", "mcp-registry-url", "https://corp.mcp.example.com"])
         assert result.exit_code == 0
-        mock_set.assert_called_once_with("https://corp.mcp.example.com")
+        assert read_config(isolated_config)["mcp_registry_url"] == "https://corp.mcp.example.com"
         from urllib.parse import urlparse
 
         urls = [tok for tok in result.output.split() if "://" in tok]
         assert len(urls) >= 1
         assert urlparse(urls[0]).hostname == "corp.mcp.example.com"
 
-    def test_set_valid_http_url(self):
-        with (
-            patch("apm_cli.config.set_mcp_registry_url") as mock_set,
-            patch(
-                "apm_cli.config.get_mcp_registry_url",
-                return_value="http://internal.corp/mcp",
-            ),
-        ):
-            result = self.runner.invoke(
-                config, ["set", "mcp-registry-url", "http://internal.corp/mcp"]
-            )
+    def test_set_valid_http_url(self, runner, isolated_config):
+        result = runner.invoke(config, ["set", "mcp-registry-url", "http://internal.corp/mcp"])
         assert result.exit_code == 0
-        mock_set.assert_called_once_with("http://internal.corp/mcp")
+        assert read_config(isolated_config)["mcp_registry_url"] == "http://internal.corp/mcp"
         # Config-sourced URLs are exempt from the env-var gate; do not point at it.
         assert "MCP_REGISTRY_ALLOW_HTTP" not in result.output
         assert "[!]" in result.output
-        assert "plaintext HTTP" in " ".join(result.output.split())
+        assert "plaintext HTTP" in flat(result.output)
 
-    def test_set_invalid_scheme_rejected(self):
-        with patch(
-            "apm_cli.config.set_mcp_registry_url",
-            side_effect=ValueError("scheme 'file' is not supported"),
-        ):
-            result = self.runner.invoke(config, ["set", "mcp-registry-url", "file:///etc/hosts"])
+    def test_set_invalid_scheme_rejected(self, runner, isolated_config):
+        result = runner.invoke(config, ["set", "mcp-registry-url", "file:///etc/hosts"])
         assert result.exit_code == 1
-        assert "file" in result.output or "not supported" in result.output
+        assert "not supported" in flat(result.output) or "file" in result.output
+        assert "mcp_registry_url" not in read_config(isolated_config)
 
-    def test_get_when_set(self):
-        with patch(
-            "apm_cli.config.get_mcp_registry_url",
-            return_value="https://corp.mcp.example.com",
-        ):
-            result = self.runner.invoke(config, ["get", "mcp-registry-url"])
+    def test_get_when_set(self, runner, isolated_config):
+        write_config(isolated_config, {"mcp_registry_url": "https://corp.mcp.example.com"})
+        result = runner.invoke(config, ["get", "mcp-registry-url"])
         assert result.exit_code == 0
         from urllib.parse import urlparse
 
@@ -2115,15 +1253,14 @@ class TestMcpRegistryUrlCommand:
         assert len(urls) >= 1
         assert urlparse(urls[0]).hostname == "corp.mcp.example.com"
 
-    def test_get_when_not_set(self):
-        with patch("apm_cli.config.get_mcp_registry_url", return_value=None):
-            result = self.runner.invoke(config, ["get", "mcp-registry-url"])
+    def test_get_when_not_set(self, runner):
+        result = runner.invoke(config, ["get", "mcp-registry-url"])
         assert result.exit_code == 0
         assert "Not set" in result.output
 
-    def test_unset_removes_key(self):
-        with patch("apm_cli.config.unset_mcp_registry_url") as mock_unset:
-            result = self.runner.invoke(config, ["unset", "mcp-registry-url"])
+    def test_unset_removes_key(self, runner, isolated_config):
+        write_config(isolated_config, {"mcp_registry_url": "https://corp.mcp.example.com"})
+        result = runner.invoke(config, ["unset", "mcp-registry-url"])
         assert result.exit_code == 0
-        mock_unset.assert_called_once()
+        assert "mcp_registry_url" not in read_config(isolated_config)
         assert "removed" in result.output
