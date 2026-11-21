@@ -51,6 +51,7 @@ from .identity import (
     case_insensitive_identity_prefix_segments,
     effective_policy_host,
     is_case_insensitive_package_identity,
+    normalise_local_path_separators,
     normalize_package_repo_url,
 )
 from .manifest_host import manifest_host_strips, qualify_manifest_shorthand
@@ -68,22 +69,6 @@ from .types import VirtualPackageType
 if TYPE_CHECKING:
     from .replacement import ReplacementBinding
     from .subsets import EdgeSelection, SkillTargetSelection
-
-_BACKSLASH_LOCAL_PREFIXES = (".\\", "..\\", "~\\")
-
-
-def normalise_local_path_separators(local_path: str) -> str:
-    """Return *local_path* in POSIX form when it starts with a backslash prefix.
-
-    OpenAPM v0.1 Section 4.3.1: ``.\\``, ``..\\`` and ``~\\`` local paths are
-    normalised to POSIX form on read, so they resolve, anchor and pass every
-    traversal and containment check exactly like ``./``, ``../`` and ``~/``.
-    Windows absolute forms (``C:\\x``, ``\\\\server\\share``) are left as written.
-    """
-    if local_path.startswith(_BACKSLASH_LOCAL_PREFIXES):
-        return local_path.replace("\\", "/")
-    return local_path
-
 
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
