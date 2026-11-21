@@ -380,14 +380,19 @@ def run(
     selection = build_selection(base, changed, root)
     selection["shard"] = list(shard) if shard else None
     selection["durations"] = durations
-    # Outside the checkout: a selection file must never land in the working tree.
-    location = Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()) / (
-        "owner-surface-selection.json"
-    )
-    location.write_text(json.dumps(selection, indent=2), encoding="utf-8")
     print(f"owner-surface keys ({len(selection['keys'])}): {', '.join(selection['keys'])}")
-    os.environ[SELECTION_ENV] = str(location)
-    code = int(pytest.main([*selection["targets"], "-p", "scripts.owner_surface", *extra]))
+    # A private directory per invocation, outside the checkout: concurrent runs
+    # never share a selection, and xdist workers read it before it is removed.
+    with tempfile.TemporaryDirectory(
+        prefix="owner-surface-", dir=os.environ.get("RUNNER_TEMP") or None
+    ) as scratch:
+        location = Path(scratch) / "selection.json"
+        location.write_text(json.dumps(selection, indent=2), encoding="utf-8")
+        os.environ[SELECTION_ENV] = str(location)
+        try:
+            code = int(pytest.main([*selection["targets"], "-p", "scripts.owner_surface", *extra]))
+        finally:
+            os.environ.pop(SELECTION_ENV, None)
     # Nothing selected is a pass: no reachable owner test.
     return 0 if code == int(pytest.ExitCode.NO_TESTS_COLLECTED) else code
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -307,3 +308,36 @@ def test_parametrized_rule_tests_match_their_body_and_rule_constants(function, k
     item = _item(owner_surface.MUTATION_TESTS, params={"old": "x"}, function=function)
     selection = {**SELECTION, "keys": ["hooks-merge-guard", "hooks-merge-rule"]}
     assert owner_surface.keep_item(item, selection, {}.__getitem__) is kept
+
+
+def test_each_run_reads_its_own_selection_and_removes_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Concurrent runs never share a selection file (review: shared temp name)."""
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setattr(
+        owner_surface,
+        "build_selection",
+        lambda base, changed, root: {
+            "keys": [base],
+            "changed": [],
+            "install": False,
+            "targets": [],
+        },
+    )
+    seen: list[tuple[Path, list[str]]] = []
+
+    def fake_main(args: list[str]) -> int:
+        location = Path(os.environ[owner_surface.SELECTION_ENV])
+        seen.append((location, json.loads(location.read_text(encoding="utf-8"))["keys"]))
+        return 0
+
+    monkeypatch.setattr(owner_surface.pytest, "main", fake_main)
+    changed = tmp_path / "changed.txt"
+    changed.write_text("", encoding="utf-8")
+    assert owner_surface.run("base-a", changed, []) == 0
+    assert owner_surface.run("base-b", changed, []) == 0
+    (first, keys_a), (second, keys_b) = seen
+    assert first != second and (keys_a, keys_b) == (["base-a"], ["base-b"])
+    assert not first.exists() and not second.exists()
+    assert owner_surface.SELECTION_ENV not in os.environ
