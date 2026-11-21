@@ -192,13 +192,19 @@ def _pair(tmp_path: Path, before_files: dict[str, str], after_files: dict[str, s
 def test_e2e_receipt_needs_an_assertion_fact() -> None:
     """Negative control (#4586): an e2e receipt that asserts nothing is refused."""
     start = len(receipts.earned())
-    with pytest.raises(AssertionError, match="needs at least one assertion fact"):
-        oracles.check_obligation(
-            "G|install|local-deny|hook",
-            strength="e2e",
-            result=_result(),
-            evidence=oracles.Evidence(),
-        )
+    for empty in (
+        oracles.Evidence(),
+        oracles.Evidence(egress=()),
+        oracles.Evidence(absent={"project": ()}, present={}, unchanged={"home": []}),
+    ):
+        for strength in ("e2e", "e2e-evidence"):
+            with pytest.raises(AssertionError, match="needs at least one assertion fact"):
+                oracles.check_obligation(
+                    "G|install|local-deny|hook",
+                    strength=strength,
+                    result=_result(),
+                    evidence=empty,
+                )
     assert len(receipts.earned()) == start
     for facts in (
         oracles.Evidence(exit=0),

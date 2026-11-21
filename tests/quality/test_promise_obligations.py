@@ -334,11 +334,25 @@ def test_an_explicit_receipts_directory_keeps_every_session(
 def test_required_receipts_fail_when_one_witness_did_not_report() -> None:
     """A full-set run that deselected one witness fails once receipts are required (#4586)."""
     catalog = load_catalog()
-    witnesses = sorted(set(catalog.required.values()))
-    dropped = witnesses[0]
-    earned = [_receipt(node) for node in witnesses[1:]]
-    with pytest.raises(AssertionError, match=re.escape(dropped)):
-        _hold_the_ratchet(catalog, earned, required=True)
+    scope = "tests/lifecycle/,!tests/lifecycle/journeys/"
+    every = set(catalog.required.values()) | set(catalog.generated_required.values())
+    witnesses = sorted(node for node in every if in_scope(node, scope))
+    assert any("/security/" in node for node in witnesses), "generated witnesses are in scope"
+    assert not any("/journeys/" in node for node in witnesses)
+    for dropped in (sorted(set(catalog.required.values()))[0], witnesses[-1]):
+        earned = [_receipt(node) for node in witnesses if node != dropped]
+        with pytest.raises(AssertionError, match=re.escape(dropped)):
+            _hold_the_ratchet(catalog, earned, required=True, scope=scope)
+
+
+def test_receipt_scope_includes_and_excludes_by_prefix() -> None:
+    journey = "tests/lifecycle/journeys/test_journeys.py::test_journey[J01]"
+    table = "tests/lifecycle/security/test_egress.py::test_x[E1|a]"
+    assert in_scope(journey, "") and in_scope(table, "")
+    assert not in_scope(journey, "tests/lifecycle/,!tests/lifecycle/journeys/")
+    assert in_scope(table, "tests/lifecycle/,!tests/lifecycle/journeys/")
+    assert in_scope(journey, "tests/lifecycle/journeys/")
+    assert not in_scope(table, "tests/lifecycle/journeys/")
 
 
 def test_the_full_lifecycle_run_requires_its_receipts() -> None:
@@ -353,8 +367,17 @@ def test_the_full_lifecycle_run_requires_its_receipts() -> None:
     )
     assert steps.index(check) > steps.index(run)
     assert check["env"]["APM_LIFECYCLE_RECEIPTS_REQUIRED"] == "1"
+    assert check["env"][RECEIPTS_SCOPE_ENV] == "tests/lifecycle/,!tests/lifecycle/journeys/"
     directory = run["env"][receipts.DIRECTORY_ENV]
     assert directory and check["env"][receipts.DIRECTORY_ENV] == directory
+    journeys = workflow["jobs"]["journeys"]["steps"]
+    run = next(step for step in journeys if "test_journeys.py" in step.get("run", ""))
+    check = next(
+        step for step in journeys if "test_merged_receipts_hold_the_ratchet" in step.get("run", "")
+    )
+    assert check["env"][RECEIPTS_SCOPE_ENV] == "tests/lifecycle/journeys/"
+    assert check["env"]["APM_LIFECYCLE_RECEIPTS_REQUIRED"] == "1"
+    assert check["env"][receipts.DIRECTORY_ENV] == run["env"][receipts.DIRECTORY_ENV]
 
 
 def test_required_receipts_never_pass_vacuously() -> None:
@@ -379,21 +402,46 @@ def _receipts_dir() -> Path:
 def test_merged_receipts_hold_the_ratchet() -> None:
     """Each witness that reported covers its rows; a covered baseline row must be promoted.
 
-    With ``APM_LIFECYCLE_RECEIPTS_REQUIRED=1`` every witness must have reported.
+    With ``APM_LIFECYCLE_RECEIPTS_REQUIRED=1`` every required witness in the job's
+    scope (``APM_LIFECYCLE_RECEIPTS_SCOPE``) must have reported, the promise
+    witnesses and the generated (security, journey, replay, machine) witnesses alike.
     """
     required = os.environ.get("APM_LIFECYCLE_RECEIPTS_REQUIRED") == "1"
-    _hold_the_ratchet(load_catalog(), receipts.load(_receipts_dir()), required=required)
+    scope = os.environ.get(RECEIPTS_SCOPE_ENV, "")
+    _hold_the_ratchet(
+        load_catalog(), receipts.load(_receipts_dir()), required=required, scope=scope
+    )
 
 
-def _hold_the_ratchet(catalog: Catalog, earned: list[receipts.Receipt], *, required: bool) -> None:
+RECEIPTS_SCOPE_ENV = "APM_LIFECYCLE_RECEIPTS_SCOPE"
+
+
+def in_scope(node: str, scope: str) -> bool:
+    """*scope*: comma-separated node path prefixes; a ``!`` prefix excludes. Empty: every node."""
+    rules = [rule.strip() for rule in scope.split(",") if rule.strip()]
+    include = [rule for rule in rules if not rule.startswith("!")]
+    exclude = [rule[1:] for rule in rules if rule.startswith("!")]
+    return (not include or any(node.startswith(p) for p in include)) and not any(
+        node.startswith(p) for p in exclude
+    )
+
+
+def _hold_the_ratchet(
+    catalog: Catalog, earned: list[receipts.Receipt], *, required: bool, scope: str = ""
+) -> None:
     by_node: dict[str, list[receipts.Receipt]] = {}
     for receipt in earned:
         by_node.setdefault(receipt.node, []).append(receipt)
     witnesses = set(catalog.required.values())
     if required:
+        expected = {
+            node
+            for node in witnesses | set(catalog.generated_required.values())
+            if in_scope(node, scope)
+        }
         assert earned, f"no lifecycle receipts under {_receipts_dir()}; run tests/lifecycle first"
-        assert witnesses & set(by_node), "no required witness reported a receipt"
-        assert witnesses <= set(by_node), sorted(witnesses - set(by_node))
+        assert expected & set(by_node), "no required witness reported a receipt"
+        assert expected <= set(by_node), sorted(expected - set(by_node))
     problems = [
         failure
         for witness in sorted(witnesses & set(by_node))

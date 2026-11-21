@@ -87,6 +87,9 @@ def add(ledger: dict, new: list[dict], sha: str | None = None) -> dict:
     row cannot vouch for that SHA.
     """
     if sha is not None:
+        stale = sorted({str(raw.get("sha")) for raw in new if raw.get("sha") != sha})
+        if stale:
+            raise LedgerError(f"findings from {stale} cannot be merged into a walk of {sha}")
         bind(ledger, sha)
     index = {f["fingerprint"]: f for f in ledger["findings"]}
     added, duplicates = [], []

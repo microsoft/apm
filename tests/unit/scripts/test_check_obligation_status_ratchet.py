@@ -90,6 +90,13 @@ def test_a_rule_the_change_names_allows_the_demotion(name: str, key: str, value:
     assert ratchet.demoted_between(_files(), head) == []
 
 
+@pytest.mark.parametrize("waiver", [None, False, 0, {}, "", "   "])
+def test_a_removal_entry_must_name_a_rule(waiver: object) -> None:
+    head = _files(t1="baseline")
+    head["removals"]["removals"][T1] = waiver
+    assert ratchet.demoted_between(_files(), head) == [T1]
+
+
 def test_a_rule_already_at_the_base_does_not_excuse_a_new_demotion() -> None:
     base = _files()
     base["removals"]["removals"][T1] = "old ruling"

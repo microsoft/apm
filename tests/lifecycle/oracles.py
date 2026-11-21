@@ -828,11 +828,17 @@ class Evidence:
         )
 
     def state_facts(self) -> bool:
+        """A path, egress or persisted-secret predicate that names something to check.
+
+        An empty path collection or an egress log with no host expectation checks nothing.
+        """
+        paths = (self.absent, self.present, self.unchanged)
         return bool(
-            self.absent
-            or self.present
-            or self.unchanged
-            or self.egress is not None
+            any(any(map(len, rows.values())) for rows in paths)
+            or (
+                self.egress is not None
+                and bool(self.egress_absent_hosts or self.egress_present_hosts)
+            )
             or self.secrets_absent
         )
 

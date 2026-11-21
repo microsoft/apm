@@ -374,6 +374,17 @@ class TestLedger:
         assert findings.main([*add, "--sha", "def5678"]) != 0
         assert "bound to abc1234" in capsys.readouterr().err
 
+    def test_add_with_sha_refuses_findings_of_another_walk(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Old-walk findings cannot bind a ledger to a new SHA and yield GO for it."""
+        ledger, old = tmp_path / "findings.json", tmp_path / "old.jsonl"
+        old.write_text(json.dumps(_finding(sha="abc1234")) + "\n", encoding="utf-8")
+        argv = ["add", "--ledger", str(ledger), "--findings", str(old), "--sha", "def5678"]
+        assert findings.main(argv) != 0
+        assert "cannot be merged into a walk of def5678" in capsys.readouterr().err
+        assert not ledger.exists()
+
     def test_recheck_must_cover_every_unresolved_finding(self) -> None:
         ledger = {"sha": None, "findings": []}
         findings.add(

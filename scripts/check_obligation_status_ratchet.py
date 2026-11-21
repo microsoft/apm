@@ -72,7 +72,7 @@ def ruled_ids(base: Mapping[str, Mapping], head: Mapping[str, Mapping]) -> set[s
             | {
                 key
                 for key, rule in files["removals"].get("removals", {}).items()
-                if str(rule).strip()
+                if isinstance(rule, str) and rule.strip()
             }
         )
 
