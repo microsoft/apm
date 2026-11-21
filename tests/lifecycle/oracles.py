@@ -80,7 +80,9 @@ ORACLE_LAWS: Mapping[str, OracleLaw] = {
     "I6": OracleLaw("output is ASCII; JSON mode prints valid JSON", ()),
     "I7": OracleLaw(
         "no silent success; a failed command preserves durable state "
-        "(I7-X1: except retiring an executable it denies or revoked)",
+        "(I7-X1: except retiring an executable it denies or revoked; "
+        "I7-X2: an install that keeps a user edit may write the lockfile and the "
+        "files it names as written)",
         ("transaction.failed_command_preserves_state",),
     ),
     "I8": OracleLaw(
@@ -668,9 +670,10 @@ def _i7_failure_preserves_state(
     if result is None or result.returncode == 0 or op.edit_only:
         return None
     found = []
+    kept_writes = _i7_x2_kept_writes(op, result)
     if after.state.manifest_bytes != before.state.manifest_bytes:
         found.append(Violation("I7", f"failed {op.name} changed the manifest"))
-    if after.state.lockfile_bytes != before.state.lockfile_bytes:
+    if after.state.lockfile_bytes != before.state.lockfile_bytes and kept_writes is None:
         found.append(Violation("I7", f"failed {op.name} changed the lockfile"))
     retirement = _i7_x1_retirement(before, after, model)
     if retirement is None:
@@ -685,6 +688,7 @@ def _i7_failure_preserves_state(
         and path.split(":", 1)[1] != report
         and not _within_retirement(path, retirement)
         and not (retirement and _RETIREMENT_BOOKKEEPING in path)
+        and path.split(":", 1)[1] not in (kept_writes or ())
     ]
     if changed:
         found.append(Violation("I7", f"failed {op.name} changed durable files: {changed}"))
@@ -693,6 +697,36 @@ def _i7_failure_preserves_state(
             Violation("I7", f"failed {op.name} exited {result.returncode} without announcing why")
         )
     return found
+
+
+_KEPT_LINE = re.compile(r"\bKept \S.*?: ")
+_KEPT_WRITTEN = re.compile(
+    r"This install wrote (\d+) file\(s\), recorded in apm\.lock\.yaml:\n((?:[ \t]+\S[^\n]*\n?)*)"
+)
+
+
+def _i7_x2_kept_writes(op: Operation, result: CommandResult) -> frozenset[str] | None:
+    """I7-X2: the files a failed install that kept a user edit wrote, or None.
+
+    An install that keeps a proven edit blocking an update, or an unproven
+    mismatch (#4360, #4626), exits 1 yet writes the outputs it proved APM
+    wrote and the lockfile recording them. The exception is closed: a Kept
+    line names the edit and every written file is listed under "This install
+    wrote N file(s)"; nothing else may change (the exit code is exactly 1).
+    """
+    if result.returncode != 1 or (op.command or op.name.split("-", 1)[0]) not in {
+        "install",
+        "update",
+    }:
+        return None
+    text = f"{result.stdout}\n{result.stderr}"
+    if not _KEPT_LINE.search(text):
+        return None
+    match = _KEPT_WRITTEN.search(text)
+    if match is None:
+        return frozenset()
+    written = frozenset(line.strip() for line in match.group(2).splitlines() if line.strip())
+    return written if len(written) == int(match.group(1)) else None
 
 
 def _requested_report(command) -> str | None:

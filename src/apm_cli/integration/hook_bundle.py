@@ -221,6 +221,11 @@ def copy_deployed_hook_bundle(
             diagnostics=diagnostics,
         ):
             continue
+        # An edited copied script is kept like any managed file (#4626).
+        if integrator.keeps_edited_output(
+            target_file, source_file, target_rel, force, diagnostics, target_paths
+        ):
+            continue
         target_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_file, target_file)
         integrator.note_rendered_write(target_file)
@@ -247,6 +252,16 @@ def copy_deployed_hook_bundle(
             managed_files,
             force,
             diagnostics=diagnostics,
+        ):
+            continue
+        if integrator.keeps_edited_output(
+            target_file,
+            target_file,
+            target_rel,
+            force,
+            diagnostics,
+            target_paths,
+            expected_content=content,
         ):
             continue
         target_file.parent.mkdir(parents=True, exist_ok=True)

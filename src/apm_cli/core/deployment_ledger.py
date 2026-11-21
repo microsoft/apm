@@ -704,6 +704,17 @@ def recorded_writes(
         )
 
 
+def edit_kind(recorded: object, rendered: object) -> str:
+    """Classify a proven user edit of an output APM recorded deploying as *recorded*.
+
+    ``"drift"`` when the package still renders *recorded* (nothing new to
+    deploy: kept, reported, exit 0); ``"blocked"`` when it renders something
+    new that the kept edit holds back (exit 1). Files compare hashes, LSP
+    server entries compare rendered entries (#4398, RA-012, #4626).
+    """
+    return "drift" if rendered == recorded else "blocked"
+
+
 @dataclass(frozen=True)
 class OverwriteGate:
     """The evidence one integrator call needs to replace a deployed file (#4360).
@@ -763,7 +774,7 @@ class OverwriteGate:
         recorded = self.session.legacy_recorded_hash(claim) if self.session else None
         if recorded is None or compute_file_hash(path) == recorded:
             return None
-        return "drift" if rendered_hash == recorded else "blocked"
+        return edit_kind(recorded, rendered_hash)
 
     @property
     def user_scope(self) -> bool:

@@ -410,6 +410,9 @@ class CanvasIntegrator(BaseIntegrator):
                 target_paths.append(dest)
             return "adopted"
 
+        if self._keeps_edited_bundle(planned, force, diagnostics, target_paths):
+            return "skipped"
+
         for src, dest, _rel in planned:
             dest.parent.mkdir(parents=True, exist_ok=True)
             # Guard: reject dest if it is a symlink (TOCTOU defence --
@@ -426,6 +429,31 @@ class CanvasIntegrator(BaseIntegrator):
             self.note_rendered_write(dest)
             target_paths.append(dest)
         return "integrated"
+
+    def _keeps_edited_bundle(
+        self,
+        planned: list[tuple[Path, Path, str]],
+        force: bool,
+        diagnostics,
+        target_paths: list[Path],
+    ) -> bool:
+        """Leave a bundle whole when any member is an edit install must keep (#4626).
+
+        Each member goes through the shared overwrite gate, which names a kept
+        member and carries its prior lock entry; the bundle's other deployed
+        members stay as they are, so a half-updated extension never runs.
+        """
+        kept = [
+            dest
+            for src, dest, rel in planned
+            if self.keeps_edited_output(dest, src, rel, force, diagnostics, target_paths)
+        ]
+        if not kept:
+            return False
+        target_paths.extend(
+            dest for _src, dest, _rel in planned if dest not in kept and dest.is_file()
+        )
+        return True
 
     def _plan_bundle_files(
         self,

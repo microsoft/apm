@@ -145,6 +145,17 @@ def _write_kiro_hook_docs(
                 ):
                     files_skipped += 1
                     continue
+                if integrator.keeps_edited_output(
+                    target_path,
+                    hook_file,
+                    rel_path,
+                    force,
+                    diagnostics,
+                    target_paths,
+                    expected_content=rendered,
+                ):
+                    files_skipped += 1
+                    continue
 
                 atomic_write_text(target_path, rendered, new_file_mode=0o600)
                 integrator.note_rendered_write(target_path)

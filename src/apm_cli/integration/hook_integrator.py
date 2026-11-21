@@ -1119,42 +1119,54 @@ class HookIntegrator(BaseIntegrator):
                 )
                 continue
 
-            # Write rewritten JSON; byte-identical output is unchanged (#4184).
-            if self.write_text_if_changed(target_path, json.dumps(rewritten, indent=2) + "\n"):
-                self.note_rendered_write(target_path)
-                hooks_integrated += 1
-            elif not self.receipted_unchanged(target_path):
-                # A managed file already holding the render is APM's bytes (#3701).
-                if managed_files and rel_path in managed_files:
+            content = json.dumps(rewritten, indent=2) + "\n"
+            # An edited deployed hook file is kept without deployment evidence
+            # (#4626); its scripts are still gated one by one below.
+            if not self.keeps_edited_output(
+                target_path,
+                hook_file,
+                rel_path,
+                force,
+                diagnostics,
+                target_paths,
+                expected_content=content,
+            ):
+                # Write rewritten JSON; byte-identical output is unchanged (#4184).
+                if self.write_text_if_changed(target_path, content):
                     self.note_rendered_write(target_path)
-                scripts_adopted += 1
-            target_paths.append(target_path)
-            materializations.append(
-                MaterializationResult(
-                    locator=DeploymentLedgerCodec.locator_for_path(
-                        target_path,
-                        project_root=project_root,
-                        target=target or KNOWN_TARGETS["copilot"],
-                        scope=InstallScope.PROJECT,
-                    ),
-                    owners=frozenset({package_info.get_canonical_dependency_string()}),
-                    status=(
-                        MaterializationStatus.WRITTEN
-                        if validation.valid
-                        else MaterializationStatus.FAILED
-                    ),
-                    content_hash=compute_file_hash(target_path),
-                    validation=validation,
+                    hooks_integrated += 1
+                elif not self.receipted_unchanged(target_path):
+                    # A managed file already holding the render is APM's bytes (#3701).
+                    if managed_files and rel_path in managed_files:
+                        self.note_rendered_write(target_path)
+                    scripts_adopted += 1
+                target_paths.append(target_path)
+                materializations.append(
+                    MaterializationResult(
+                        locator=DeploymentLedgerCodec.locator_for_path(
+                            target_path,
+                            project_root=project_root,
+                            target=target or KNOWN_TARGETS["copilot"],
+                            scope=InstallScope.PROJECT,
+                        ),
+                        owners=frozenset({package_info.get_canonical_dependency_string()}),
+                        status=(
+                            MaterializationStatus.WRITTEN
+                            if validation.valid
+                            else MaterializationStatus.FAILED
+                        ),
+                        content_hash=compute_file_hash(target_path),
+                        validation=validation,
+                    )
                 )
-            )
-            display_payloads.append(
-                self._build_display_payload(
-                    f"{root_dir}/hooks/",
-                    target_filename,
-                    hook_file,
-                    rewritten,
+                display_payloads.append(
+                    self._build_display_payload(
+                        f"{root_dir}/hooks/",
+                        target_filename,
+                        hook_file,
+                        rewritten,
+                    )
                 )
-            )
 
             copy_result = copy_deployed_hook_bundle(
                 self,

@@ -759,6 +759,7 @@ def run_lsp_integration(  # noqa: PLR0913
                 "the owning bundle; --force does not transfer ownership."
             )
 
+        kept_servers: dict[str, str] = {}
         if lsp_deps:
             if fail_on_write_error:
                 require_lsp_capable_target(target_runtimes)
@@ -772,6 +773,8 @@ def run_lsp_integration(  # noqa: PLR0913
                 fail_on_write_error=fail_on_write_error,
                 managed_target_servers=old_lsp_targets,
                 force=force,
+                locked_configs=old_lsp_configs,
+                kept_servers=kept_servers,
             )
 
         new_targets = {
@@ -795,6 +798,12 @@ def run_lsp_integration(  # noqa: PLR0913
             )
 
         new_regular_configs = LSPIntegrator.get_server_configs(lsp_deps)
+        # A kept entry keeps its locked config: an edit never becomes APM's baseline (#4626).
+        for name in kept_servers:
+            if name in old_lsp_configs:
+                new_regular_configs[name] = old_lsp_configs[name]
+            else:
+                new_regular_configs.pop(name, None)
         new_configs = {
             name: config for name, config in old_lsp_configs.items() if name in bundle_names
         }

@@ -184,6 +184,10 @@ RESTORE_EDITED = _entry(
 # A managed file install kept because it may hold local edits (#4360, #4504).
 # Never 'apm install --force': it also deploys despite critical findings (RA-008).
 KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
+# A managed config entry (an LSP server) install kept the same way (#4626).
+KEPT_ENTRY_RESTORE = _entry(
+    "kept-entry-restore", "apm install", "restore it", before="remove the entry"
+)
 # Files an APM before 0.37 rendered, kept as committed by a frozen replay (#4398).
 LEGACY_RENDER_MIGRATE = _entry(
     "legacy-render-migrate",

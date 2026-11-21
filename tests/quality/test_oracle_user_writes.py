@@ -1,11 +1,13 @@
-"""I1-X2 and I4-X2: a declared user write is the user's, and APM must keep it (#4101).
+"""I1-X2, I4-X2 and I7-X2: a declared user write is the user's, and APM must keep it (#4101).
 
 A scenario that edits a deployed file, or writes its own file at a package's
 path, declares those bytes (``Scenario.user_write``). I1 exempts the path from
 lock==disk only while disk holds exactly the declared bytes, and an exempted
 step earns no I1 receipt. I4-X2 exempts a gate surface holding only such
 bytes only when the step announces the keep and ``audit --ci`` fails naming
-it. These negative controls keep both exceptions narrow.
+it. I7-X2 lets a failed install that kept an edit (#4626) change only the
+lockfile and the files it lists as written. These negative controls keep the
+exceptions narrow.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ pytestmark = [
     pytest.mark.unit,
     pytest.mark.promise("P-INV-I1"),
     pytest.mark.promise("P-INV-I4"),
+    pytest.mark.promise("P-INV-I7"),
 ]
 
 _SKILL = ".agents/skills/p-skill/SKILL.md"
@@ -157,3 +160,63 @@ def test_an_undetected_keep_fails_i4(tmp_path: Path) -> None:
 
 def test_an_announced_detected_keep_is_exempt_and_earns_no_receipt(tmp_path: Path) -> None:
     assert _i4(tmp_path, user=True, output=_KEPT, audit=_DETECTED) is None
+
+
+_SCRIPT = ".github/hooks/scripts/o-exec/session/run.sh"
+_KEPT_BLOCKED = (
+    "  [x] 1 package failed:\n"
+    "  +- o-exec -- Kept .github/extensions/o-exec/extension.mjs: it was modified since "
+    "APM deployed it.\n"
+)
+_WROTE = f"This install wrote 1 file(s), recorded in apm.lock.yaml:\n  {_HOOK}\n"
+
+
+def _i7(root: Path, output: str, *, writes: tuple[str, ...], returncode: int = 1) -> list[str]:
+    """I7 after a failed install that rewrote the lock and *writes*."""
+    (root / "apm.lock.yaml").write_text("lockfile_version: '1'\n", encoding="ascii")
+    for relative in (_HOOK, _SCRIPT):
+        (root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (root / relative).write_text("v1\n", encoding="ascii")
+
+    def observe() -> object:
+        return oracles.Observation(
+            LifecycleStateSnapshot.capture(root),
+            ArtifactSnapshotSet.capture({"project": root}),
+            frozenset(),
+            root,
+            None,
+        )
+
+    before = observe()
+    (root / "apm.lock.yaml").write_text("lockfile_version: '1'\n# v2\n", encoding="ascii")
+    for relative in writes:
+        (root / relative).write_text("v2\n", encoding="ascii")
+    result = SimpleNamespace(returncode=returncode, stdout=output, stderr="", command=("install",))
+    op = oracles.operation_for(("install",))
+    violations = oracles._CHECKS["I7"](before, observe(), result, _NothingAllowed(), op)
+    return [v.message for v in violations]
+
+
+def test_a_kept_edit_install_may_write_the_lock_and_its_listed_files(tmp_path: Path) -> None:
+    assert _i7(tmp_path, _KEPT_BLOCKED + _WROTE, writes=(_HOOK,)) == []
+
+
+def test_a_kept_edit_install_never_admits_an_unlisted_write(tmp_path: Path) -> None:
+    violations = _i7(tmp_path, _KEPT_BLOCKED + _WROTE, writes=(_HOOK, _SCRIPT))
+
+    assert violations == [f"failed install changed durable files: ['project:{_SCRIPT}']"]
+
+
+def test_a_failed_install_without_a_kept_line_preserves_the_lock(tmp_path: Path) -> None:
+    violations = _i7(tmp_path, "[x] Install failed\n" + _WROTE, writes=(_HOOK,))
+
+    assert violations == [
+        "failed install changed the lockfile",
+        f"failed install changed durable files: ['project:{_HOOK}']",
+    ]
+
+
+def test_the_kept_edit_exemption_needs_exit_code_one(tmp_path: Path) -> None:
+    violations = _i7(tmp_path, _KEPT_BLOCKED + _WROTE, writes=(_HOOK,), returncode=2)
+
+    assert "failed install changed the lockfile" in violations

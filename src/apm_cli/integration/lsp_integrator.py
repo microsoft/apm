@@ -11,7 +11,7 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -170,6 +170,8 @@ class _PreparedTargetConfig:
     changed: builtins.set
     created_servers_key: bool = False
     owner_only: bool = False
+    # Managed server name -> "drift" | "blocked" | "unproven" for an entry kept (#4626).
+    kept: dict[str, str] = field(default_factory=dict)
 
 
 _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
@@ -685,8 +687,15 @@ class LSPIntegrator:
         user_scope: bool,
         managed_server_names: builtins.set | None = None,
         force: bool = False,
+        locked_servers: dict[str, dict] | None = None,
     ) -> _PreparedTargetConfig:
-        """Validate and render one target config without writing it."""
+        """Validate and render one target config without writing it.
+
+        *locked_servers* holds the entries APM renders for this target from
+        the locked server configs: a managed entry that differs from both the
+        new render and the locked one is kept, never rewritten (#4626).
+        ``None`` (a caller without lock evidence) judges no entry.
+        """
         config_path = LSPIntegrator._target_config_path(
             spec,
             project_root,
@@ -776,6 +785,7 @@ class LSPIntegrator:
             config[servers_key] = existing
 
         changed: builtins.set = builtins.set()
+        kept: dict[str, str] = {}
         for name, server_config in servers.items():
             # A same-name entry APM does not manage is user content: refuse to
             # overwrite it (and so never claim it) unless --force is given.
@@ -791,8 +801,23 @@ class LSPIntegrator:
                     f"{spec.label(user_scope=user_scope)} and is not managed by APM; "
                     "rename it or rerun with --force"
                 )
-            if existing.get(name) != server_config:
-                changed.add(name)
+            if existing.get(name) == server_config:
+                existing[name] = server_config
+                continue
+            kind = (
+                None
+                if force
+                or locked_servers is None
+                or name not in existing
+                or name not in managed_names
+                else LSPIntegrator._kept_entry_kind(
+                    existing[name], locked_servers.get(name), server_config
+                )
+            )
+            if kind is not None:
+                kept[name] = kind
+                continue
+            changed.add(name)
             existing[name] = server_config
 
         return _PreparedTargetConfig(
@@ -801,7 +826,88 @@ class LSPIntegrator:
             changed=changed,
             created_servers_key=created_servers_key,
             owner_only=user_scope,
+            kept=kept,
         )
+
+    @staticmethod
+    def _locked_target_servers(
+        locked_configs: dict[str, dict] | None,
+        runtime_deps: list,
+        spec: _LSPTargetSpec,
+        *,
+        project_root: Path,
+        user_scope: bool,
+    ) -> dict[str, dict] | None:
+        """The entries APM renders for *spec* from the locked server configs (#4626).
+
+        Only servers this install renders are judged; a locked config that no
+        longer parses proves nothing. ``None`` without locked configs.
+        """
+        from apm_cli.models.dependency.lsp import LSPDependency
+
+        if locked_configs is None:
+            return None
+        roots = {dep.name: dep for dep in runtime_deps if hasattr(dep, "name")}
+        locked: list[LSPDependency] = []
+        for name, config in locked_configs.items():
+            if name not in roots or not isinstance(config, dict):
+                continue
+            try:
+                dep = LSPDependency.from_dict({**config, "name": name})
+            except (TypeError, ValueError):
+                continue
+            dep.plugin_root = getattr(roots[name], "plugin_root", None)
+            locked.append(dep)
+        servers = LSPIntegrator._servers_for_target(
+            LSPIntegrator._base_server_entries(locked), spec, warn=lambda _message: None
+        )
+        return LSPIntegrator._render_plugin_roots(
+            servers, locked, spec, project_root=project_root, user_scope=user_scope
+        )
+
+    @staticmethod
+    def _report_kept_entries(
+        prepared_targets: list,
+        *,
+        user_scope: bool,
+        diagnostics,
+        logger,
+        kept_servers: dict[str, str] | None,
+    ) -> None:
+        """Name each kept entry: a drift edit warns, a blocked or unproven one fails (#4626)."""
+        from apm_cli.integration.base_integrator import kept_entry_message
+
+        for _runtime, spec, prepared in prepared_targets:
+            for name, kind in sorted(prepared.kept.items()):
+                if kept_servers is not None:
+                    kept_servers[name] = kind
+                message = kept_entry_message(
+                    f"LSP server '{name}' in {spec.label(user_scope=user_scope)}",
+                    user_scope=user_scope,
+                    proven_edit=kind != "unproven",
+                )
+                if diagnostics is None:
+                    (logger.warning if kind == "drift" else logger.error)(message)
+                elif kind == "drift":
+                    diagnostics.warn(message)
+                else:
+                    diagnostics.error(message)
+
+    @staticmethod
+    def _kept_entry_kind(current: object, locked: dict | None, rendered: dict) -> str | None:
+        """Judge one managed entry that differs from the new render (#4626).
+
+        ``None`` replaces it: it still holds the entry APM rendered from the
+        locked config. Otherwise it is kept: ``"unproven"`` without a locked
+        render, else the proven edit's ``"drift"`` or ``"blocked"``.
+        """
+        from apm_cli.core.deployment_ledger import edit_kind
+
+        if locked is None:
+            return "unproven"
+        if current == locked:
+            return None
+        return edit_kind(locked, rendered)
 
     @staticmethod
     def _write_prepared_target_config(prepared: _PreparedTargetConfig) -> builtins.set:
@@ -1045,8 +1151,16 @@ class LSPIntegrator:
         managed_server_names: builtins.set | None = None,
         managed_target_servers: dict[str, set[str]] | None = None,
         force: bool = False,
+        locked_configs: dict[str, dict] | None = None,
+        kept_servers: dict[str, str] | None = None,
     ) -> int:
-        """Install LSP dependencies by writing target-specific runtime config."""
+        """Install LSP dependencies by writing target-specific runtime config.
+
+        *locked_configs* are the server configs of the existing lock: the
+        evidence of which entry APM wrote. A managed entry the user edited is
+        kept, named, and recorded into *kept_servers* so the caller keeps its
+        locked config (#4626).
+        """
         if logger is None:
             logger = NullCommandLogger()
         if not lsp_deps:
@@ -1088,6 +1202,13 @@ class LSPIntegrator:
                     user_scope=user_scope,
                     managed_server_names=managed_names,
                     force=force,
+                    locked_servers=LSPIntegrator._locked_target_servers(
+                        locked_configs,
+                        runtime_deps,
+                        spec,
+                        project_root=project_root_path,
+                        user_scope=user_scope,
+                    ),
                 )
                 prepared_targets.append((runtime, spec, prepared))
             except Exception as exc:
@@ -1111,6 +1232,13 @@ class LSPIntegrator:
                         "only for a reviewed ownership collision."
                     ) from exc
 
+        LSPIntegrator._report_kept_entries(
+            prepared_targets,
+            user_scope=user_scope,
+            diagnostics=diagnostics,
+            logger=logger,
+            kept_servers=kept_servers,
+        )
         changed_servers: builtins.set = builtins.set()
         for runtime, spec, prepared in prepared_targets:
             try:

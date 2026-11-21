@@ -20,7 +20,9 @@ applies I1-I9 after every step and pins the exact changed set of the removal.
 from __future__ import annotations
 
 import json
+import re
 import shutil
+from pathlib import PurePosixPath
 
 import pytest
 
@@ -28,6 +30,7 @@ from tests.lifecycle.scenarios._kit import (
     Scenario,
     Tree,
     assert_changes,
+    credits,
     serve_repository,
 )
 from tests.lifecycle.world import use_policy
@@ -228,3 +231,210 @@ def test_mcp_only_package_removal_keeps_unmanaged_and_sibling(lifecycle_world) -
     )
     assert "o-mcp-mcp" not in _mcp_servers(lifecycle_world.project)
     _survives(scenario, tree, "MCP-only uninstall", "p-exec-mcp")
+
+
+# -- #4626: edited executable outputs are kept like any managed file -------------
+#
+# PROMISE: P-LAW-ownership.preserve_unowned via I1-X2 -- apm install never
+# rewrites a deployed hook file, copied hook script, canvas file or APM-managed
+# LSP entry unless deployment evidence proves APM wrote its current bytes
+# (source: integration/base_integrator.py BaseIntegrator.keeps_unproven_file).
+
+EDITED = "o-exec"
+_HOOK_JSON = f".github/hooks/{EDITED}-session.json"
+_SCRIPT = f".github/hooks/scripts/{EDITED}/session/run.sh"
+_CANVAS_ENTRY = f".github/extensions/{EDITED}/extension.mjs"
+_CANVAS_ICON = f".github/extensions/{EDITED}/icon.txt"
+_LSP = ".github/lsp.json"
+EDITED_LSP = "o-lsp"
+_LSP_SERVER = f"{EDITED_LSP}-server"
+_EXEC_KINDS = ("hook", "canvas", "lsp")
+
+
+def _author_exec(world, revision: str = "v1", *, lsp: str | None = None) -> dict[str, str]:
+    """Author ``o-exec`` (hook + copied script, two-member canvas) at *revision*.
+
+    ``o-lsp`` is authored at *lsp* (default: *revision*).
+    """
+    owned = world.root / "owned"
+    for name in (EDITED, EDITED_LSP):
+        if (owned / name).exists():
+            shutil.rmtree(owned / name)
+    factory = LocalPackageFactory(owned)
+    package = factory.create(EDITED, version="1.0.0")
+    command = f"sh ./session/run.sh {revision}"
+    hook = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}}
+    factory.add_hook(package, "session", hook)
+    script = f"#!/bin/sh\necho {revision}\n"
+    factory.add_hook_asset(package, "session", PurePosixPath("run.sh"), script, executable=True)
+    extension = f"export default function render() {{\n  return '{revision}';\n}}\n"
+    icon = {PurePosixPath("icon.txt"): f"{revision}\n".encode()}
+    factory.add_canvas(package, EDITED, extension, assets=icon)
+    server = {
+        "name": _LSP_SERVER,
+        "command": "apm-lifecycle-inert-server",
+        "args": ["--stdio", f"--{lsp or revision}"],
+        "extensionToLanguage": {".fixture": "fixture"},
+    }
+    lsp = factory.create(EDITED_LSP, version="1.0.0", lsp_dependencies=[server])
+    return {EDITED: str(package.root), EDITED_LSP: str(lsp.root)}
+
+
+def _exec_scenario(world) -> tuple[Scenario, Tree]:
+    kinds = {EDITED: ("hook", "canvas"), EDITED_LSP: ("lsp",)}
+    scenario, tree = _start(world, _author_exec(world), kinds=kinds)
+    scenario.run(f"install {EDITED} {EDITED_LSP}")
+    scenario.run(f"approve {EDITED} {EDITED_LSP}")
+    scenario.run("install")
+    scenario.assert_deployed()
+    for relative in (_HOOK_JSON, _SCRIPT, _CANVAS_ENTRY, _CANVAS_ICON, _LSP):
+        assert (world.project / relative).is_file(), relative
+    return scenario, tree
+
+
+def _claims(scenario: Scenario) -> dict[str, object]:
+    """The lock's claims on o-exec's files and LSP server, as the kept outputs see them."""
+    lock = scenario.lock()
+    (row,) = [dep for dep in lock.get_package_dependencies() if dep.repo_url.endswith(EDITED)]
+    hashes = dict(row.deployed_file_hashes)
+    return {
+        **{path: hashes.get(path) for path in (_HOOK_JSON, _SCRIPT, _CANVAS_ENTRY, _CANVAS_ICON)},
+        "lsp": lock.lsp_configs.get(_LSP_SERVER),
+    }
+
+
+def _edit_lsp_entry(scenario: Scenario) -> str:
+    """Edit o-exec's LSP entry; add an unrelated top-level key and a user server."""
+    path = scenario.world.project / _LSP
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config["lspServers"][_LSP_SERVER]["args"] = ["--stdio", "--mine"]
+    config["lspServers"]["user-server"] = {"command": "user-lsp", "args": []}
+    config["userSetting"] = True
+    return scenario.user_write(_LSP, json.dumps(config, indent=2) + "\n")
+
+
+def _kept(step, *subjects: str) -> None:
+    for subject in subjects:
+        assert re.search(rf"\[!\]\s*Kept {re.escape(subject)}:", step.result.stdout) or re.search(
+            rf"Kept {re.escape(subject)}:", step.output
+        ), f"no Kept line for {subject}:\n{step.result.stdout}\n{step.result.stderr}"
+
+
+def _edit(world, relative: str, text: str) -> str:
+    return (world.project / relative).read_text(encoding="utf-8") + text
+
+
+_EDITED_CREDITS = tuple({"PRIM": kind, "DEPLOYED": "edited"} for kind in _EXEC_KINDS)
+
+
+def test_edited_executable_files_are_kept(lifecycle_world) -> None:
+    """A proven edit with nothing new to deploy is kept and named; install exits 0."""
+    scenario, tree = _exec_scenario(lifecycle_world)
+    world = lifecycle_world
+    scenario.user_write(
+        _HOOK_JSON, _edit(world, _HOOK_JSON, "").replace("run.sh v1", "run.sh mine")
+    )
+    scenario.user_write(_SCRIPT, _edit(world, _SCRIPT, "echo mine\n"))
+    scenario.user_write(_CANVAS_ENTRY, _edit(world, _CANVAS_ENTRY, "// mine\n"))
+    _edit_lsp_entry(scenario)
+    claims = _claims(scenario)
+
+    step = scenario.run("install", credit=_EDITED_CREDITS)
+    assert step.result.returncode == 0
+    _kept(step, _HOOK_JSON, _SCRIPT, _CANVAS_ENTRY, f"LSP server '{_LSP_SERVER}' in {_LSP}")
+    assert_changes(step.changed, (), label="install keeps every edit")
+    assert _claims(scenario) == claims, "a kept edit became APM's baseline"
+    tree.assert_intact("install")
+    scenario.finish()
+
+    # --force still overwrites.
+    for relative in (_HOOK_JSON, _SCRIPT, _CANVAS_ENTRY, _LSP):
+        scenario.release_user_write(relative)
+    forced = scenario.run("install --force")
+    assert "Kept" not in forced.output
+    assert "mine" not in (world.project / _CANVAS_ENTRY).read_text(encoding="utf-8")
+    lsp = json.loads((world.project / _LSP).read_text(encoding="utf-8"))
+    assert lsp["lspServers"][_LSP_SERVER]["args"] == ["--stdio", "--v1"]
+    assert lsp["userSetting"] is True and "user-server" in lsp["lspServers"]
+    scenario.finish()
+
+
+def test_edited_outputs_block_an_update_and_unedited_ones_update(lifecycle_world) -> None:
+    """A proven edit that blocks an update is kept and named; install exits 1.
+
+    Unedited outputs update silently, except a canvas bundle with a kept
+    member, which is left whole.
+    """
+    scenario, tree = _exec_scenario(lifecycle_world)
+    world = lifecycle_world
+    scenario.user_write(_SCRIPT, _edit(world, _SCRIPT, "echo mine\n"))
+    scenario.user_write(_CANVAS_ENTRY, _edit(world, _CANVAS_ENTRY, "// mine\n"))
+    claims = _claims(scenario)
+    icon = (world.project / _CANVAS_ICON).read_bytes()
+    _author_exec(world, "v2")
+    scenario.source_moved()
+    # Pinned approvals cover exact definitions: the user approves v2 first.
+    scenario.run(f"approve {EDITED} {EDITED_LSP}")
+
+    step = scenario.run("install", exit=1)
+    _kept(step, _SCRIPT, _CANVAS_ENTRY)
+    assert f"Kept {_HOOK_JSON}" not in step.output
+    assert "run.sh v2" in (world.project / _HOOK_JSON).read_text(encoding="utf-8")
+    assert (world.project / _CANVAS_ICON).read_bytes() == icon, "a kept canvas bundle changed"
+    after = _claims(scenario)
+    for relative in (_SCRIPT, _CANVAS_ENTRY, _CANVAS_ICON):
+        assert after[relative] == claims[relative], f"{relative}: the kept claim moved"
+    tree.assert_intact("blocked update")
+
+    # The printed remedy: move the kept files aside, then run 'apm install'.
+    for relative in (_SCRIPT, _CANVAS_ENTRY):
+        moved = world.root / "aside" / relative
+        moved.parent.mkdir(parents=True, exist_ok=True)
+        (world.project / relative).rename(moved)
+        scenario.release_user_write(relative)
+    restored = scenario.run("install")
+    assert "Kept" not in restored.output
+    assert (world.project / _SCRIPT).read_text(encoding="utf-8") == "#!/bin/sh\necho v2\n"
+    assert (world.project / _CANVAS_ICON).read_text(encoding="utf-8") == "v2\n"
+    lsp = json.loads((world.project / _LSP).read_text(encoding="utf-8"))
+    assert lsp["lspServers"][_LSP_SERVER]["args"] == ["--stdio", "--v2"]
+
+    # An edited LSP entry blocks the next server update; unrelated keys survive.
+    _edit_lsp_entry(scenario)
+    locked = scenario.lock().lsp_configs[_LSP_SERVER]
+    _author_exec(world, "v2", lsp="v3")
+    scenario.run(f"approve {EDITED} {EDITED_LSP}")
+    blocked = scenario.run("install", exit=1)
+    _kept(blocked, f"LSP server '{_LSP_SERVER}' in {_LSP}")
+    assert scenario.lock().lsp_configs[_LSP_SERVER] == locked, "a kept entry became the baseline"
+    tree.assert_intact("blocked LSP update")
+    scenario.finish()
+
+
+def test_unproven_mismatch_is_kept(lifecycle_world) -> None:
+    """Without a receipt or locked render proving APM wrote it, a mismatch is kept; exit 1."""
+    scenario, tree = _exec_scenario(lifecycle_world)
+    world = lifecycle_world
+    for receipts in (
+        world.home / ".apm" / "deployment-receipts",
+        world.apm_home / "deployment-receipts",
+    ):
+        if receipts.exists():
+            shutil.rmtree(receipts)
+    scenario.user_write(
+        _HOOK_JSON, _edit(world, _HOOK_JSON, "").replace("run.sh v1", "run.sh mine")
+    )
+    claims = _claims(scenario)
+
+    step = scenario.run("install", exit=1)
+    _kept(step, _HOOK_JSON)
+    assert "no local deployment receipt" in step.output
+    assert _claims(scenario) == claims, "an unproven file became APM's baseline"
+    tree.assert_intact("unproven mismatch")
+    scenario.finish()
+
+
+CREDITS = credits(
+    __file__,
+    {"test_edited_executable_files_are_kept": _EDITED_CREDITS},
+)
