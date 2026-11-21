@@ -159,6 +159,7 @@
         "src/apm_cli/agent_plugins/projection.py",
         "src/apm_cli/models/validation.py",
         "src/apm_cli/install/drift.py",
+        "src/apm_cli/install/drift_replay_support.py",
         "src/apm_cli/install/native_plugin_admission.py"
       ],
       "guards": ["marketplace-integrations-package-projection"]
