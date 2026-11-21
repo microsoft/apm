@@ -5,7 +5,7 @@ After ``apm deny`` withholds an installed hook package's executables, the lock
 is stale. ``apm install --frozen`` may not rewrite it, so it refuses in its
 preflight and keeps every deployed file and the lockfile byte for byte; the
 plain ``apm install`` it names retires the hook, after which ``--frozen``
-passes again.
+passes again. ``apm audit --ci`` agrees with ``--frozen`` on both sides (I3).
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.promise("P-INV-I7"),
+    pytest.mark.promise("P-INV-I3"),
 ]
 
 _HOOK = Path(".github") / "hooks" / "p-hook-session.json"
@@ -95,6 +96,7 @@ def test_frozen_refuses_a_deny_before_any_write_and_install_retires(
     _ok(world, "deny", spec)
     before = _state(world)
 
+    audit = _apm(world, "audit", "--ci")
     frozen = _apm(world, "install", "--frozen")
 
     assert frozen.returncode == 1, _evidence(frozen)
@@ -102,8 +104,13 @@ def test_frozen_refuses_a_deny_before_any_write_and_install_retires(
     assert "[x] --frozen" in text, _evidence(frozen)
     assert "apm install" in text, _evidence(frozen)
     assert _state(world) == before, "I7: refused --frozen changed durable state"
+    assert audit.returncode != 0, "I3: audit --ci passed where --frozen refused\n" + _evidence(
+        audit
+    )
+    assert "apm install" in " ".join(f"{audit.stdout} {audit.stderr}".split()), _evidence(audit)
 
     # The named remedy converges: install retires the hook, then --frozen agrees.
     _ok(world, "install")
     assert not (world.project / _HOOK).exists()
     _ok(world, "install", "--frozen")
+    _ok(world, "audit", "--ci")
