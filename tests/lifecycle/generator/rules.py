@@ -113,7 +113,7 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/audit.py", 1478, '"--no-policy"'),
     ),
     "marketplace": (
-        Ev("src/apm_cli/commands/marketplace/__init__.py", 357, "def add(source, name"),
+        Ev("src/apm_cli/commands/marketplace/__init__.py", 372, "def add(source, name"),
     ),
 }
 # Refusals that exit 1 (a semantic refusal, ClickException) instead of a
@@ -155,7 +155,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "pack": Ev(_PACK, 177, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 92, "def prune(ctx, dry_run)"),
     "audit": Ev("src/apm_cli/commands/audit.py", 1542, "def audit("),
-    "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 357, "def add(source, name"),
+    "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 372, "def add(source, name"),
 }
 
 # -- Rule evidence -------------------------------------------------------------

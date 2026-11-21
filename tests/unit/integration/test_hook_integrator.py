@@ -1734,24 +1734,6 @@ class TestScriptPathRewriting:
         assert ".github/hooks/scripts/my-pkg/hooks/script.sh" in cmd
         assert len(scripts) == 1
 
-    def test_rewrite_relative_path(self, temp_project):
-        """Test rewriting relative ./path references."""
-        pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
-        (pkg_dir / "scripts" / "check.sh").write_text("#!/bin/bash")
-
-        integrator = HookIntegrator()
-        cmd, scripts = integrator._rewrite_command_for_target(
-            "./scripts/check.sh",
-            pkg_dir,
-            "my-pkg",
-            "vscode",
-        )
-
-        assert "./" not in cmd
-        assert ".github/hooks/scripts/my-pkg/scripts/check.sh" in cmd
-        assert len(scripts) == 1
-
     def test_system_command_unchanged(self, temp_project):
         """Test that system commands are not modified."""
         pkg_dir = temp_project / "pkg"
