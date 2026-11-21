@@ -3,7 +3,8 @@
 Native registration flushes the staged lockfile before it declares plugins,
 so services that reconcile after it stage a second write. These tests drive
 the real lockfile write authority and the real ``claude_plugins`` phase; only
-the Claude registrar (the harness boundary) is replaced.
+the Claude registrar (the harness boundary) is replaced, and it records the
+lockfile on disk when it declares: that commit must be the final one.
 """
 
 from __future__ import annotations
@@ -49,42 +50,39 @@ def _stage_mcp(ctx: InstallContext):
 
 
 def _install_tail(ctx: InstallContext) -> list[str]:
-    """The pipeline tail: services, then native registration; return lock writes."""
+    """Run the pipeline tail and the command's deferred raise.
+
+    Returns the lockfile on disk each time native registration declared.
+    """
     lock_path = get_lockfile_path(ctx.apm_dir)
-    writes: list[str] = []
-    from apm_cli.utils import atomic_io
+    declared_against: list[str] = []
 
-    real_write = atomic_io.atomic_write_text
+    def declare(**_kwargs) -> None:
+        declared_against.append(lock_path.read_text(encoding="utf-8"))
 
-    def counting_write(path, text, *args, **kwargs):
-        if Path(path) == lock_path:
-            writes.append(text)
-        return real_write(path, text, *args, **kwargs)
-
-    with (
-        patch.object(atomic_io, "atomic_write_text", counting_write),
-        patch.object(claude_plugins, "reconcile_claude_plugins") as registrar,
-        lockfile_write_scope(LockfileWriter.INSTALL),
-    ):
-        LockFile().write(lock_path)
-        services.run(ctx)
-        if services.native_registration_allowed(ctx):
-            claude_plugins.run(ctx)
-        ctx.registrar = registrar
-    return writes
+    with patch.object(claude_plugins, "reconcile_claude_plugins", side_effect=declare):
+        try:
+            with lockfile_write_scope(LockfileWriter.INSTALL):
+                LockFile().write(lock_path)
+                services.run(ctx)
+                if services.native_registration_allowed(ctx):
+                    claude_plugins.run(ctx)
+                if ctx.service_failure is not None:
+                    raise ctx.service_failure
+        except Exception as error:
+            assert error is ctx.service_failure
+    return declared_against
 
 
 def test_services_reconcile_before_native_registration_commits_once(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path, None)
     ctx.reconcile_services = _stage_mcp(ctx)
 
-    writes = _install_tail(ctx)
+    declared_against = _install_tail(ctx)
 
-    assert len(writes) == 1, writes
-    assert _SERVER in writes[0]
-    assert ctx.registrar.call_args.kwargs["lockfile"].mcp_servers == [_SERVER]
-    assert LockFile.read(get_lockfile_path(tmp_path)).mcp_servers == [_SERVER]
-    assert ctx.service_failure is None
+    on_disk = get_lockfile_path(tmp_path).read_text(encoding="utf-8")
+    assert declared_against == [on_disk]
+    assert _SERVER in on_disk
 
 
 def test_a_committing_reconcile_failure_still_registers_and_commits_once(
@@ -100,15 +98,15 @@ def test_a_committing_reconcile_failure_still_registers_and_commits_once(
 
     ctx.reconcile_services = reconcile
 
-    writes = _install_tail(ctx)
+    declared_against = _install_tail(ctx)
 
     assert ctx.service_failure is failure
-    ctx.registrar.assert_called_once()
-    assert len(writes) == 1, writes
-    assert _SERVER in writes[0]
+    on_disk = get_lockfile_path(tmp_path).read_text(encoding="utf-8")
+    assert declared_against == [on_disk]
+    assert _SERVER in on_disk
 
 
-def test_a_refused_reconcile_registers_nothing(tmp_path: Path) -> None:
+def test_a_refused_reconcile_registers_and_commits_nothing(tmp_path: Path) -> None:
     refusal = PolicyViolationError("MCP server blocked by org policy")
 
     def reconcile(_result) -> None:
@@ -116,10 +114,11 @@ def test_a_refused_reconcile_registers_nothing(tmp_path: Path) -> None:
 
     ctx = _ctx(tmp_path, reconcile)
 
-    _install_tail(ctx)
+    declared_against = _install_tail(ctx)
 
     assert ctx.service_failure is refusal
-    ctx.registrar.assert_not_called()
+    assert declared_against == []
+    assert not get_lockfile_path(tmp_path).exists()
 
 
 def test_an_install_finalize_fails_reconciles_nothing(tmp_path: Path) -> None:
@@ -127,6 +126,9 @@ def test_an_install_finalize_fails_reconciles_nothing(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path, reconcile)
     ctx.diagnostics.error("integration failed", package="owner/native")
 
-    services.run(ctx)
+    declared_against = _install_tail(ctx)
 
     reconcile.assert_not_called()
+    on_disk = get_lockfile_path(tmp_path).read_text(encoding="utf-8")
+    assert declared_against == [on_disk]
+    assert _SERVER not in on_disk
