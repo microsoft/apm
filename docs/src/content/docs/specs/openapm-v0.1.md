@@ -707,13 +707,62 @@ selection is configured per project.
 
 #### 4.3.5 Local-path dependencies
 
+A local-path entry is resolved against a **source anchor**: the
+directory of the manifest that declared it. The trust boundary is the
+declaring manifest, not the consumer project root. A developer who
+declares a local path, directly or through a local package they
+added, trusts that layout, so an anchored path MAY leave the consumer
+project root (for example `/work/app` depending on
+`../shared-skills`). Containment boundaries apply where content is not
+under that developer's control: remote repositories, symbolic links
+inside a copied package, and the consumer's own write destinations.
+
 <a id="req-mf-016"></a>
 **[req-mf-016]** A conforming **consumer** implementation MUST
-recognise dependency strings beginning with `./`, `../`, `/`, `~/`,
-`.\`, `..\`, or `~\` as local-path entries. The resolver MUST refuse
-any local-path entry whose normalised form contains `..` segments
-that would escape the project root, with a diagnostic naming the
-offending path.
+satisfy each of the following clauses for local-path entries:
+
+- (a) **Recognition.** It MUST recognise dependency strings beginning
+  with `./`, `../`, `/`, `~/`, `.\`, `..\`, or `~\`, and object
+  entries whose only source key is `path:`, as local-path entries.
+- (b) **Source anchor.** It MUST resolve a relative local path
+  against its source anchor: for an entry declared by a local
+  package, that package's source directory (not its materialized
+  copy), at every installation scope; for a direct entry at project
+  scope, the directory containing the root manifest. A path that is
+  absolute, or home-relative (`~/`, `~\`) after expansion, is used
+  as written.
+- (c) **Trusted-local admission.** It MUST NOT refuse an anchored
+  local path solely because the resolved directory lies outside the
+  consumer project root. A path that does not resolve to an existing
+  package or supported single-file primitive MUST fail the install
+  with a diagnostic naming the declared path.
+- (d) **Unanchored user-scope input.** At user scope a direct entry
+  has no source anchor. The consumer MUST refuse a relative direct
+  entry at user scope with a diagnostic naming the path, and MUST
+  NOT resolve it against the current working directory, the user
+  manifest directory, or any other implicit location.
+- (e) **Remote containment.** A relative local path declared by a
+  package fetched from a remote repository MUST resolve inside that
+  repository's authenticated root and MUST be fetched from the same
+  origin and resolved ref as a path within that repository, never
+  read from the consumer filesystem. An absolute or home-relative
+  path, or a relative path that resolves outside that root, MUST be
+  refused with a diagnostic naming the path and the declaring
+  package.
+- (f) **Symlink containment.** When copying a local directory
+  package, the consumer MUST copy each symbolic link inside it as the
+  content of its target only when the target resolves inside that
+  package directory. A link that resolves outside the package, is
+  broken, or forms a cycle MUST fail the install of that package,
+  naming the link, and MUST NOT leave a partial copy. A single-file
+  local dependency that is itself a symbolic link MUST be refused.
+- (g) **Destination safety.** The materialization destination of a
+  local package MUST be derived inside the consumer's dependency
+  directory independently of the source location, and an entry whose
+  destination name would escape that directory MUST be refused.
+  Deployment of a local package's primitives MUST apply the same
+  destination containment as any other dependency. Clause (c)
+  widens only where content is read from, never where it is written.
 
 #### 4.3.6 MCP dependencies
 
@@ -5677,9 +5726,10 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.72  | 2026-11-20 | Amendment from the spec-conformance linking review (Part of #4092). Revised [req-sc-005](#req-sc-005) (Section 10.3, consumer MUST) in place: beside identical eTLD+1 (a) and an explicit `aliases:` entry (b), a third basis (c) admits the built-in GitHub-operated host class, which is `github.com` and every `*.ghe.com` host, plus a GitHub Enterprise Server host only when the operator names it through the `GITHUB_HOST` setting, never through a manifest. An implementation that uses (c) documents the class in its conformance statement and applies it under the [req-sc-013](#req-sc-013) determinism and precedence rules. Basis (c) covers only those hosts and does not widen (a) or (b) for any other host. Under Section 9.2 this changes an evaluation defined by a normative statement, so it is an amendment, not errata. Proposed and adopted 2026-11-20 in this Working Draft by editor decision (steward ruling, issue #4092), without the Section 9.3 reviewer-panel approval and public comment period. No statement added; the count remains 149 (144 MUST, 5 SHOULD). |
 | 0.1.73 (proposed) | 2026-11-21 | Amendment for accepted issue #2903 (root project marketplace map). Added Section 4.2.5 `marketplaces` and two consumer MUSTs, both conditional on resolving marketplace references, which stay non-normative in v0.1. [req-mf-028](#req-mf-028): the root project manifest may declare a `marketplaces:` list (`name`, `source`, optional `ref`); malformed, unknown-key and duplicate-name entries are rejected; a declared name resolves through its entry, never through a same-named user or machine registration; names are manifest-local and the lockfile records the catalog origin and resolved commit; a declared entry is never persisted to a user-level or machine-level registry. [req-mf-029](#req-mf-029): a dependency whose manifest declares `marketplaces:` is refused, and when the root declares the list a transitive marketplace reference must name a root-declared entry or resolution fails with a diagnostic naming the entry to add. Under Section 9.2, a consumer that resolves marketplace references and ignores a dependency's `marketplaces:` key, or lets a same-named registration override a root declaration, no longer conforms; the reference implementation previously refused the key in every project and package manifest. Sections 1.3, 4.2, 4.9, 7.1, 11.3.2, Appendix C, the requirements manifest, a conformance fixture and conformance coverage are updated; schema bytes are unchanged (the manifest schemas already admit unknown top-level keys). Adds two MUSTs. Statement count: 149 -> 151 (146 MUST, 5 SHOULD). |
 
+| 0.1.74 (proposed) | 2026-11-21 | Amendment for accepted issue #2818 (local-path trust model). Revised [req-mf-016](#req-mf-016) (Section 4.3.5, consumer MUST) in place. The former second sentence required refusing any local-path entry whose `..` segments escape the project root; it is replaced by clauses (a) to (g): (a) recognition, unchanged in substance, now also naming `path:`-only object entries already classified local by Section 7.1; (b) the source anchor is the declaring local package's source directory at every scope, or the root manifest directory for a direct project-scope entry; (c) an anchored path MUST NOT be refused solely because it resolves outside the consumer project root, and a missing path fails the install naming it; (d) a relative direct entry at user scope has no anchor and MUST be refused; (e) a relative path declared by a remote package stays inside the authenticated repository root and is fetched from the same origin and ref, while absolute, home-relative and escaping paths are refused; (f) symbolic links in a copied local package are dereferenced only inside the package, and escaping, broken or cyclic links, and single-file symlink dependencies, are refused; (g) the materialization destination is derived inside the dependency directory and deployment keeps the same destination containment. An informative paragraph before the requirement states the trust model. Version treatment: this changes the evaluation of an existing MUST and is not editorial errata under Section 9.4. Under Section 9.2 it loosens a refusal obligation (a consumer that refused anchored sibling paths no longer conforms) and pins clauses (b) and (d) to (g), which the reference implementation already meets. It is a normative amendment requiring the Section 9.3 panel of two qualified non-author reviewers and the 14-day public comment period; neither is waived, and issue-scope acceptance is not specification adoption. Migration: no manifest, lockfile or policy form is removed or newly refused for a manifest the reference implementation accepted, so no Section 9.5 deprecation window opens; an implementation that implemented the former refusal must admit anchored sibling paths to conform, and this row is that announcement. Keyword, section and conformance class are unchanged, so the Section 4.9 and Section 11.3.2 enumerations, the Appendix C row and the requirements manifest entry are unchanged. No new normative statement; count remains 151 (146 MUST, 5 SHOULD). |
 In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63, 0.1.65 and 0.1.69 that is the adoption date, and each of those rows states its proposal date.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals, the adopted 0.1.63 and 0.1.69 amendments and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, and the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place; none adds a statement. Together, this
+0.1.60 proposals, the adopted 0.1.63 and 0.1.69 amendments and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, and the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place, and the 0.1.74 proposal revises [req-mf-016](#req-mf-016) in place; none adds a statement. Together, this
 working draft
 contains 151 statements (146 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), amendment 0.1.65 on the same date by editor decision (issue #3919), and amendment 0.1.69 on 2026-11-20 by editor decision (issue #3701), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.
