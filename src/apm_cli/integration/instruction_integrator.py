@@ -17,9 +17,11 @@ from typing import TYPE_CHECKING, ClassVar
 import yaml
 
 from apm_cli.core.remediation import INSTRUCTION_FRONTMATTER_REJECTED
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import RULE_FORMATS
-from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
+from apm_cli.integration.write_seam import write_text_lf
+from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
 from apm_cli.utils.paths import portable_relpath
@@ -407,7 +409,7 @@ class InstructionIntegrator(BaseIntegrator):
             }
 
         deploy_dir = target_root / mapping.subdir
-        deploy_dir.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(deploy_dir, parents=True, exist_ok=True)
 
         fmt = mapping.format_id
 
