@@ -692,6 +692,7 @@ def run_lsp_integration(  # noqa: PLR0913
     force: bool = False,
     no_policy: bool = False,
     persist: bool = True,
+    refuse_unwritten_conflict: bool = True,
     prepared: PreparedLspIntegration | None = None,
 ) -> int:
     """Run LSP server integration after APM package installation.
@@ -721,6 +722,11 @@ def run_lsp_integration(  # noqa: PLR0913
         scope: Optional InstallScope for user/project filtering.
         target_context: Compact `(apm_config, explicit_target, scope)` tuple
             used by the install command to keep entry-point glue small.
+        persist: False when an uninstall reconciles survivors in memory; a
+            user-entry conflict then finishes reconciliation before failing.
+        refuse_unwritten_conflict: Whether a user-entry conflict that wrote no
+            server refuses the commit (#4697). False when this command already
+            staged other service writes (an MCP connection) that must be recorded.
 
     Returns:
         Number of LSP servers configured.
@@ -825,7 +831,7 @@ def run_lsp_integration(  # noqa: PLR0913
                     **_legacy_lsp_owner_names(old_lsp_servers, old_lsp_targets_present),
                 )
             except LSPUserEntryConflictError as exc:
-                if not exc.wrote_servers:
+                if not exc.wrote_servers and persist and refuse_unwritten_conflict:
                     raise _refusal(exc) from None
                 # The other servers were written; record them, then fail (#4628).
                 conflict = exc

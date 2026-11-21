@@ -11,7 +11,8 @@
     "transaction.failed_command_preserves_state"
   ],
   "regression_tests": [
+    "tests/integration/test_lsp_user_entry_lifecycle.py::test_an_mcp_write_stays_recorded_when_a_user_lsp_entry_conflicts",
     "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_lsp_entry_is_never_taken_over",
-    "tests/unit/install/test_lsp_integration.py::TestRunLspIntegration::test_user_entry_conflict_commits_only_when_a_server_was_written"
+    "tests/unit/install/test_lsp_integration.py::TestRunLspIntegration::test_user_entry_conflict_refuses_only_an_install_that_wrote_nothing"
   ]
 }
