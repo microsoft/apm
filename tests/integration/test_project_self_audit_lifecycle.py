@@ -137,6 +137,7 @@ def test_required_project_self_audit_replays_install_without_sibling_skills(
         managed,
         "project-self-repair-changed-refused",
         environment=scenario.environment,
+        local=True,
     )
     managed.unlink()
     run(_INSTALL_ARGS, "project-self-repair-changed")
