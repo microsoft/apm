@@ -13778,15 +13778,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[compile-staged]"
   },
   "pair|OP=bundle-install|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[deployed]"
   },
   "pair|OP=bundle-install|FORCE=on": {
    "credited_by": [
@@ -14114,15 +14116,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[compile-staged]"
   },
   "pair|OP=compile|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[deployed]"
   },
   "pair|OP=compile|GATE=allowed": {
    "family": "pair",
@@ -14492,15 +14496,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-compile-staged]"
   },
   "pair|OP=install|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-deployed]"
   },
   "pair|OP=install|FORCE=on": {
    "family": "pair",
@@ -14941,8 +14947,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-compile-staged]"
   },
   "pair|OP=install|TGT=multi-unchanged": {
    "family": "pair",
@@ -14956,15 +14963,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-widened-compile-staged]"
   },
   "pair|OP=install|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-narrowed-compile-staged]"
   },
   "pair|OP=install|TGT=single-unchanged": {
    "family": "pair",
@@ -14978,8 +14987,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-widened-compile-staged]"
   },
   "pair|OP=install|UPDATE=on": {
    "family": "pair",
@@ -16370,15 +16380,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[compile-staged]"
   },
   "pair|OP=prune|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[deployed]"
   },
   "pair|OP=prune|GATE=allowed": {
    "family": "pair",
@@ -16764,15 +16776,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[compile-staged]"
   },
   "pair|OP=uninstall|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[deployed]"
   },
   "pair|OP=uninstall|GATE=allowed": {
    "family": "pair",
@@ -17188,15 +17202,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[compile-staged]"
   },
   "pair|OP=update|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[deployed]"
   },
   "pair|OP=update|FORCE=on": {
    "family": "pair",
@@ -18860,15 +18876,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-compile-staged]"
   },
   "pair|PRIM=other-file|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-deployed]"
   },
   "pair|PRIM=skill|DEPLOYED=absent": {
    "family": "pair",
@@ -18919,15 +18937,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-compile-staged]"
   },
   "pair|PRIM=skill|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-deployed]"
   },
   "pair|PRIM=skill|FORCE=on": {
    "family": "pair",
@@ -19080,8 +19100,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-compile-staged]"
   },
   "pair|PRIM=skill|TGT=multi-unchanged": {
    "family": "pair",
@@ -19095,15 +19116,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-widened-compile-staged]"
   },
   "pair|PRIM=skill|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-narrowed-compile-staged]"
   },
   "pair|PRIM=skill|TGT=single-unchanged": {
    "family": "pair",
@@ -19117,8 +19140,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-widened-compile-staged]"
   },
   "pair|PRIM=skill|UPDATE=on": {
    "family": "pair",
@@ -22678,15 +22702,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-compile-staged]"
   },
   "pair|TGT=multi-narrowed|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-deployed]"
   },
   "pair|TGT=multi-narrowed|FORCE=on": {
    "family": "pair",
@@ -22749,15 +22775,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-unchanged-compile-staged]"
   },
   "pair|TGT=multi-unchanged|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-unchanged-deployed]"
   },
   "pair|TGT=multi-unchanged|FORCE=on": {
    "family": "pair",
@@ -22825,15 +22853,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-widened-compile-staged]"
   },
   "pair|TGT=multi-widened|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-widened-deployed]"
   },
   "pair|TGT=multi-widened|FORCE=on": {
    "family": "pair",
@@ -22895,15 +22925,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-narrowed-compile-staged]"
   },
   "pair|TGT=single-narrowed|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-narrowed-deployed]"
   },
   "pair|TGT=single-narrowed|FORCE=on": {
    "family": "pair",
@@ -22966,15 +22998,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-unchanged-compile-staged]"
   },
   "pair|TGT=single-unchanged|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-unchanged-deployed]"
   },
   "pair|TGT=single-unchanged|FORCE=on": {
    "family": "pair",
@@ -23042,15 +23076,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-widened-compile-staged]"
   },
   "pair|TGT=single-widened|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-widened-deployed]"
   },
   "pair|TGT=single-widened|FORCE=on": {
    "family": "pair",
