@@ -394,6 +394,7 @@ def run_mcp_integration(  # noqa: PLR0913
             enforces the same policy before anything deploys.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.core.null_logger import NullCommandLogger
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.errors import MCPNativeConflictError
     from apm_cli.install.mcp.retired_destinations import (
@@ -603,6 +604,8 @@ def run_mcp_integration(  # noqa: PLR0913
                         managed_target_servers=managed_target_servers,
                         native_hashes=native_hashes,
                         resolved_targets=resolved_targets,
+                        # Console output as before; the Targets line stays once per command.
+                        logger=NullCommandLogger(targets_owner=logger),
                     )
                     if mcp_deps
                     else 0

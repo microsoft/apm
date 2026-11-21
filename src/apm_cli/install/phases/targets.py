@@ -423,10 +423,13 @@ def _resolve_targets_by_scope(
             ctx.logger.error(str(exc), symbol="error")
         raise SystemExit(2) from exc
 
-    from apm_cli.utils.console import _rich_info
-
     _provenance_msg = format_provenance(_resolved)
-    _rich_info(_provenance_msg, symbol="info")
+    if ctx.logger:
+        ctx.logger.announce_targets(_provenance_msg)
+    else:
+        from apm_cli.utils.console import _rich_info
+
+        _rich_info(_provenance_msg, symbol="info")
 
     from apm_cli.integration.targets import materialize_project_target_profiles
 

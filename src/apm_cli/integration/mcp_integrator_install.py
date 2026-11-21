@@ -1230,7 +1230,8 @@ def _resolve_target_runtimes(
     elif selection_source is _TargetSelectionSource.MANIFEST:
         from apm_cli.core.target_detection import provenance_line
 
-        logger.progress(provenance_line(target_runtimes, "apm.yml"))
+        # The install targets phase may already have announced the targets.
+        logger.announce_targets(provenance_line(target_runtimes, "apm.yml"))
     elif selection_source is _TargetSelectionSource.FALLBACK:
         logger.progress("No runtimes installed, using VS Code as fallback")
     elif (

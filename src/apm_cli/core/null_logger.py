@@ -45,11 +45,21 @@ class NullCommandLogger:
 
     verbose = False
 
+    def __init__(self, targets_owner: object | None = None) -> None:
+        # A command logger here owns the once-per-command Targets line.
+        self._targets_owner = targets_owner
+
     def start(self, message: str, symbol: str = "running"):
         _rich_info(message, symbol=symbol)
 
     def progress(self, message: str, symbol: str = "info"):
         _rich_info(message, symbol=symbol)
+
+    def announce_targets(self, line: str) -> None:
+        if self._targets_owner is not None:
+            self._targets_owner.announce_targets(line)
+            return
+        _rich_info(line, symbol="info")
 
     def info(self, message: str, symbol: str = "info", *, soft_wrap: bool = False):
         # Only soft-wrapped calls pass the flag; the default call shape stays unchanged.
