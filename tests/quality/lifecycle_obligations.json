@@ -14782,7 +14782,8 @@
     "X|install|pkg-registry|SCOPE=project",
     "X|install|pkg-registry|SELECT=on",
     "X|install|pkg-registry|TGT=multi-unchanged",
-    "X|install|pkg-registry|TGT=single-unchanged"
+    "X|install|pkg-registry|TGT=single-unchanged",
+    "X|install|pkg-registry|UPDATE=on"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -22417,9 +22418,8 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4572",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|TGT=multi-narrowed|DRYRUN=on": {
