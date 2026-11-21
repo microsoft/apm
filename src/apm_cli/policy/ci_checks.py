@@ -179,7 +179,7 @@ def _check_ref_consistency(
     # row the manifest no longer declares may be that dependency's identity
     # rewritten, so re-resolve everything from the manifest instead.
     if unlocked and not requires_update:
-        requires_update = bool(_orphaned_direct_keys(manifest, lock))
+        requires_update = not _check_no_orphans(manifest, lock).passed
     repair_command = "apm update" if requires_update else "apm install"
     n = len(mismatches)
     noun = "mismatch" if n == 1 else "mismatches"
@@ -455,8 +455,18 @@ def _check_lockfile_targets_current(
     )
 
 
-def _orphaned_direct_keys(manifest: APMPackage, lock: LockFile) -> list[str]:
-    """Direct lockfile entries the manifest no longer declares (orphan owner's projection)."""
+def _check_no_orphans(
+    manifest: APMPackage,
+    lock: LockFile,
+) -> CheckResult:
+    """Verify no packages in lockfile are absent from manifest.
+
+    Only DIRECT dependencies (``depth == 1`` / no ``resolved_by``) are
+    candidates for orphan detection. Transitive deps belong to a
+    sub-package's manifest, not the root manifest, so the root manifest
+    cannot make them go away by editing its dependency lists. This is the
+    orphan owner's direct-entry projection of the install decision.
+    """
     from ..install.orphans import OrphanOperation, decide_orphan_removal
 
     decision = decide_orphan_removal(
@@ -470,22 +480,7 @@ def _orphaned_direct_keys(manifest: APMPackage, lock: LockFile) -> list[str]:
         reachability=None,
         deployment_claims=None,
     )
-    return [dep_key for dep_key in lock.dependencies if dep_key in decision.removed_keys]
-
-
-def _check_no_orphans(
-    manifest: APMPackage,
-    lock: LockFile,
-) -> CheckResult:
-    """Verify no packages in lockfile are absent from manifest.
-
-    Only DIRECT dependencies (``depth == 1`` / no ``resolved_by``) are
-    candidates for orphan detection. Transitive deps belong to a
-    sub-package's manifest, not the root manifest, so the root manifest
-    cannot make them go away by editing its dependency lists. This is the
-    orphan owner's direct-entry projection of the install decision.
-    """
-    orphaned = _orphaned_direct_keys(manifest, lock)
+    orphaned = [dep_key for dep_key in lock.dependencies if dep_key in decision.removed_keys]
     if not orphaned:
         return CheckResult(
             name="no-orphaned-packages",
