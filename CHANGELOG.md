@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes and upgrade notes
+
+- Claude projects load always-on and directory instructions from `AGENTS.md`, imported by `CLAUDE.md`: run `apm install`, then `apm compile`, and commit; hand-authored `CLAUDE.md` needs `@AGENTS.md`. (closes #3939, #4005)
 ### Added
 
 - `APM_STRICT_HOST_CREDENTIALS=1` keeps GitHub token variables on the configured host; other `github.com` and `*.ghe.com` hosts need their own sign-in. (closes #4324, #4615)

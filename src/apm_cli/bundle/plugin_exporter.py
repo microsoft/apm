@@ -951,6 +951,35 @@ def _collect_lsp_servers(
     return dict(sorted(servers.items())), sorted(names - servers.keys())
 
 
+def _routed_rule_components(lockfile, project_root: Path) -> dict[str, list[tuple[Path, str]]]:
+    """Render Claude rules #3939 routed to AGENTS.md as plugin instructions.
+
+    A pre-#3939 install deployed them as ``.claude/rules/`` files, which the
+    plugin pack mapped to ``instructions/``; render them through the same
+    projection so the bundle keeps those bytes. Keyed by dependency key.
+    """
+    import atexit
+    import tempfile
+
+    from .claude_routed_rules import routed_claude_rules, write_routed_claude_rules
+
+    components: dict[str, list[tuple[Path, str]]] = {}
+    routed = routed_claude_rules(lockfile, project_root)
+    if not routed:
+        return components
+    rendered_root = Path(tempfile.mkdtemp(prefix="apm-pack-rules-"))
+    atexit.register(shutil.rmtree, rendered_root, ignore_errors=True)
+    for dep_key, rules in routed.items():
+        dep_root = rendered_root / hashlib.sha256(dep_key.encode()).hexdigest()[:16]
+        write_routed_claude_rules(dep_root, rules)
+        components[dep_key] = [
+            (dep_root / rel, plugin_rel)
+            for rel in sorted(rules)
+            if (plugin_rel := _plugin_rel_for_deployed_path(rel, None)) is not None
+        ]
+    return components
+
+
 def export_plugin_bundle(
     project_root: Path,
     output_dir: Path,
@@ -1032,6 +1061,7 @@ def export_plugin_bundle(
 
     apm_modules_dir = project_root / "apm_modules"
 
+    routed_rules = _routed_rule_components(lockfile, project_root)
     if lockfile:
         for dep in lockfile.get_all_dependencies():
             # Prefer lockfile is_dev flag (covers transitive deps);
@@ -1050,6 +1080,7 @@ def export_plugin_bundle(
             # ``apm_modules`` is an unattested cache -- it carries no integrity
             # or provenance guarantee, so no bytes from it may reach the bundle.
             install_path = _dep_install_path(dep, apm_modules_dir)
+            dep_routed = routed_rules.get(dep.get_unique_key(), [])
             if dep.deployed_files:
                 dep_components = _collect_deployed_components(project_root, dep)
                 if dep.skill_subset and not dep_components:
@@ -1060,7 +1091,7 @@ def export_plugin_bundle(
                         "were not found among its installed files. "
                         f"{PACK_SKILL_SUBSET_MISSING.sentence()}"
                     )
-            elif _cache_would_contribute_primitives(install_path, dep):
+            elif not dep_routed and _cache_would_contribute_primitives(install_path, dep):
                 # Unattested primitives sit in the cache but the lockfile
                 # recorded none of them: a stale or partial install. Refuse
                 # to pack the cache -- fail loudly with a fix.
@@ -1092,7 +1123,7 @@ def export_plugin_bundle(
                 else:
                     _rich_warning(_warn, symbol="warning")
 
-            _merge_file_map(file_map, dep_components, dep_name, force, collisions)
+            _merge_file_map(file_map, dep_components + dep_routed, dep_name, force, collisions)
 
     # 6. Collect own components according to the local source authority.
     from ..core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
