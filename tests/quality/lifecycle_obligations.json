@@ -11358,29 +11358,34 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|DEPLOYED=edited|FORCE=on": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_force_replaces_an_edited_deployed_skill"
   },
   "pair|DEPLOYED=edited|FROZEN=on": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|DEPLOYED=edited|GATE=allowed": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4626",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept"
   },
   "pair|DEPLOYED=edited|GATE=denied-dependency": {
    "family": "pair",
@@ -11393,43 +11398,49 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_hook_outlives_a_closed_gate_announced_and_detected[revoked-after-deploy]"
   },
   "pair|DEPLOYED=edited|GATE=none": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|DEPLOYED=edited|GATE=revoked-after-deploy": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_hook_outlives_a_closed_gate_announced_and_detected[revoked-after-deploy]"
   },
   "pair|DEPLOYED=edited|GATE=unapproved-exec": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_hook_outlives_a_closed_gate_announced_and_detected[unapproved-exec]"
   },
   "pair|DEPLOYED=edited|NET=offline": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_the_users_skill_survives_online_and_offline[edited-offline]"
   },
   "pair|DEPLOYED=edited|NET=online": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_the_users_skill_survives_online_and_offline[edited-online]"
   },
   "pair|DEPLOYED=edited|NOPOLICY=on": {
    "family": "pair",
@@ -11442,85 +11453,97 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|DEPLOYED=edited|TGT=multi-narrowed": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[edited-multi-narrowed]"
   },
   "pair|DEPLOYED=edited|TGT=multi-unchanged": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[edited-multi-unchanged]"
   },
   "pair|DEPLOYED=edited|TGT=multi-widened": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[edited-multi-widened]"
   },
   "pair|DEPLOYED=edited|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[edited-single-narrowed]"
   },
   "pair|DEPLOYED=edited|TGT=single-unchanged": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|DEPLOYED=edited|TGT=single-widened": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[edited-single-widened]"
   },
   "pair|DEPLOYED=edited|UPDATE=on": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|DEPLOYED=present-provenance-unknown|DRYRUN=on": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_files_without_a_lock_survive_every_operation"
   },
   "pair|DEPLOYED=present-provenance-unknown|FORCE=on": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_files_without_a_lock_survive_every_operation"
   },
   "pair|DEPLOYED=present-provenance-unknown|FROZEN=on": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_files_without_a_lock_survive_every_operation"
   },
   "pair|DEPLOYED=present-provenance-unknown|GATE=allowed": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_executables_without_a_lock_are_kept"
   },
   "pair|DEPLOYED=present-provenance-unknown|GATE=denied-dependency": {
    "family": "pair",
@@ -11540,8 +11563,9 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_files_without_a_lock_survive_every_operation"
   },
   "pair|DEPLOYED=present-provenance-unknown|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -11561,15 +11585,17 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_the_users_skill_survives_online_and_offline[present-provenance-unknown-offline]"
   },
   "pair|DEPLOYED=present-provenance-unknown|NET=online": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_the_users_skill_survives_online_and_offline[present-provenance-unknown-online]"
   },
   "pair|DEPLOYED=present-provenance-unknown|NOPOLICY=on": {
    "family": "pair",
@@ -11582,85 +11608,97 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_files_without_a_lock_survive_every_operation"
   },
   "pair|DEPLOYED=present-provenance-unknown|TGT=multi-narrowed": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[present-provenance-unknown-multi-narrowed]"
   },
   "pair|DEPLOYED=present-provenance-unknown|TGT=multi-unchanged": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[present-provenance-unknown-multi-unchanged]"
   },
   "pair|DEPLOYED=present-provenance-unknown|TGT=multi-widened": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[present-provenance-unknown-multi-widened]"
   },
   "pair|DEPLOYED=present-provenance-unknown|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[present-provenance-unknown-single-narrowed]"
   },
   "pair|DEPLOYED=present-provenance-unknown|TGT=single-unchanged": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_files_without_a_lock_survive_every_operation"
   },
   "pair|DEPLOYED=present-provenance-unknown|TGT=single-widened": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[present-provenance-unknown-single-widened]"
   },
   "pair|DEPLOYED=present-provenance-unknown|UPDATE=on": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_files_without_a_lock_survive_every_operation"
   },
   "pair|DEPLOYED=unowned|DRYRUN=on": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|DEPLOYED=unowned|FORCE=on": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_force_replaces_a_users_file_at_a_package_path"
   },
   "pair|DEPLOYED=unowned|FROZEN=on": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|DEPLOYED=unowned|GATE=allowed": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_users_own_executable_files_at_package_paths_survive"
   },
   "pair|DEPLOYED=unowned|GATE=denied-dependency": {
    "family": "pair",
@@ -11673,43 +11711,49 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_users_own_executable_files_at_package_paths_survive"
   },
   "pair|DEPLOYED=unowned|GATE=none": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|DEPLOYED=unowned|GATE=revoked-after-deploy": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_users_own_executable_files_at_package_paths_survive"
   },
   "pair|DEPLOYED=unowned|GATE=unapproved-exec": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_users_own_executable_files_at_package_paths_survive"
   },
   "pair|DEPLOYED=unowned|NET=offline": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_the_users_skill_survives_online_and_offline[unowned-offline]"
   },
   "pair|DEPLOYED=unowned|NET=online": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_the_users_skill_survives_online_and_offline[unowned-online]"
   },
   "pair|DEPLOYED=unowned|NOPOLICY=on": {
    "family": "pair",
@@ -11722,57 +11766,65 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|DEPLOYED=unowned|TGT=multi-narrowed": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[unowned-multi-narrowed]"
   },
   "pair|DEPLOYED=unowned|TGT=multi-unchanged": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[unowned-multi-unchanged]"
   },
   "pair|DEPLOYED=unowned|TGT=multi-widened": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[unowned-multi-widened]"
   },
   "pair|DEPLOYED=unowned|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[unowned-single-narrowed]"
   },
   "pair|DEPLOYED=unowned|TGT=single-unchanged": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|DEPLOYED=unowned|TGT=single-widened": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_target_change_keeps_the_users_skill[unowned-single-widened]"
   },
   "pair|DEPLOYED=unowned|UPDATE=on": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|DRYRUN=on|FORCE=on": {
    "family": "pair",
@@ -13622,22 +13674,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[edited]"
   },
   "pair|OP=approve-deny|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[present-provenance-unknown]"
   },
   "pair|OP=approve-deny|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[unowned]"
   },
   "pair|OP=approve-deny|GATE=allowed": {
    "family": "pair",
@@ -13967,22 +14022,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|OP=audit|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_files_without_a_lock_survive_every_operation"
   },
   "pair|OP=audit|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|OP=audit|DRYRUN=on": {
    "family": "pair",
@@ -14331,22 +14389,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[edited]"
   },
   "pair|OP=bundle-install|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[present-provenance-unknown]"
   },
   "pair|OP=bundle-install|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[unowned]"
   },
   "pair|OP=bundle-install|DRYRUN=on": {
    "credited_by": [
@@ -14730,22 +14791,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|OP=compile|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_files_without_a_lock_survive_every_operation"
   },
   "pair|OP=compile|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|OP=compile|DRYRUN=on": {
    "family": "pair",
@@ -15114,22 +15178,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|OP=install|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_files_without_a_lock_survive_every_operation"
   },
   "pair|OP=install|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|OP=install|DRYRUN=on": {
    "family": "pair",
@@ -15658,22 +15725,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|OP=lock|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_files_without_a_lock_survive_every_operation"
   },
   "pair|OP=lock|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|OP=lock|GATE=allowed": {
    "family": "pair",
@@ -16085,22 +16155,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[edited]"
   },
   "pair|OP=marketplace|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[present-provenance-unknown]"
   },
   "pair|OP=marketplace|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[unowned]"
   },
   "pair|OP=marketplace|GATE=allowed": {
    "family": "pair",
@@ -16359,22 +16432,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[edited]"
   },
   "pair|OP=mcp-install|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[present-provenance-unknown]"
   },
   "pair|OP=mcp-install|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[unowned]"
   },
   "pair|OP=mcp-install|DRYRUN=on": {
    "family": "pair",
@@ -16723,22 +16799,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[edited]"
   },
   "pair|OP=pack|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[present-provenance-unknown]"
   },
   "pair|OP=pack|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[unowned]"
   },
   "pair|OP=pack|DRYRUN=on": {
    "family": "pair",
@@ -16974,22 +17053,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|OP=prune|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_removals_without_a_lock_never_delete_the_skill"
   },
   "pair|OP=prune|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|OP=prune|DRYRUN=on": {
    "family": "pair",
@@ -17374,22 +17456,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|OP=uninstall|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_removals_without_a_lock_never_delete_the_skill"
   },
   "pair|OP=uninstall|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|OP=uninstall|DRYRUN=on": {
    "family": "pair",
@@ -17806,22 +17891,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|OP=update|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_removals_without_a_lock_never_delete_the_skill"
   },
   "pair|OP=update|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|OP=update|DRYRUN=on": {
    "family": "pair",
@@ -18264,22 +18352,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_plugin_bin_is_restored_and_said"
   },
   "pair|PRIM=bin|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_plugin_bin_without_a_lock_is_kept"
   },
   "pair|PRIM=bin|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_file_at_the_plugin_bin_path_refuses_the_plugin"
   },
   "pair|PRIM=bin|DRYRUN=on": {
    "family": "pair",
@@ -18501,22 +18592,26 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4626",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept"
   },
   "pair|PRIM=canvas|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_executables_without_a_lock_are_kept"
   },
   "pair|PRIM=canvas|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_users_own_executable_files_at_package_paths_survive"
   },
   "pair|PRIM=canvas|DRYRUN=on": {
    "family": "pair",
@@ -18762,22 +18857,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_hook_outlives_a_closed_gate_announced_and_detected[revoked-after-deploy]"
   },
   "pair|PRIM=hook|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_executables_without_a_lock_are_kept"
   },
   "pair|PRIM=hook|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_users_own_executable_files_at_package_paths_survive"
   },
   "pair|PRIM=hook|DRYRUN=on": {
    "family": "pair",
@@ -19015,22 +19113,27 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4626",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept"
   },
   "pair|PRIM=lsp|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_executables_without_a_lock_are_kept"
   },
   "pair|PRIM=lsp|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4628",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_lsp_entry_is_never_taken_over"
   },
   "pair|PRIM=lsp|DRYRUN=on": {
    "family": "pair",
@@ -19276,22 +19379,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_mcp_entry_is_refused_not_overwritten"
   },
   "pair|PRIM=mcp|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_executables_without_a_lock_are_kept"
   },
   "pair|PRIM=mcp|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_mcp_entry_blocks_a_server_of_the_same_name[mcp-registry]"
   },
   "pair|PRIM=mcp|DRYRUN=on": {
    "family": "pair",
@@ -19550,22 +19656,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[edited-marketplace-file]"
   },
   "pair|PRIM=skill|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[present-provenance-unknown-marketplace-file]"
   },
   "pair|PRIM=skill|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|PRIM=skill|DRYRUN=on": {
    "family": "pair",
@@ -19824,22 +19933,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|SCOPE=project|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_files_without_a_lock_survive_every_operation"
   },
   "pair|SCOPE=project|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|SCOPE=project|DRYRUN=on": {
    "family": "pair",
@@ -20497,22 +20609,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[edited]"
   },
   "pair|SRC=git|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_operations_beside_a_users_skill_keep_its_bytes[present-provenance-unknown]"
   },
   "pair|SRC=git|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_the_users_skill_survives_online_and_offline[unowned-online]"
   },
   "pair|SRC=git|DRYRUN=on": {
    "family": "pair",
@@ -20831,22 +20946,26 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_mcp_entry_from_each_source_is_refused[inline-mcp]"
   },
   "pair|SRC=inline-mcp|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_mcp_entry_without_a_lock_is_kept[inline-mcp]"
   },
   "pair|SRC=inline-mcp|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4268",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]"
   },
   "pair|SRC=inline-mcp|DRYRUN=on": {
    "credited_by": [
@@ -21071,22 +21190,26 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_local_bundle_never_replaces_the_users_hook[edited]"
   },
   "pair|SRC=local-bundle|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4634",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_local_bundle_never_replaces_the_users_hook[present-provenance-unknown]"
   },
   "pair|SRC=local-bundle|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_local_bundle_never_replaces_the_users_hook[unowned]"
   },
   "pair|SRC=local-bundle|DRYRUN=on": {
    "credited_by": [
@@ -21382,22 +21505,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|SRC=local-path|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_executables_without_a_lock_are_kept"
   },
   "pair|SRC=local-path|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|SRC=local-path|DRYRUN=on": {
    "family": "pair",
@@ -21679,22 +21805,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[edited-marketplace-file]"
   },
   "pair|SRC=marketplace-file|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[present-provenance-unknown-marketplace-file]"
   },
   "pair|SRC=marketplace-file|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[unowned-marketplace-file]"
   },
   "pair|SRC=marketplace-file|DRYRUN=on": {
    "family": "pair",
@@ -21943,22 +22072,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[edited-marketplace-git]"
   },
   "pair|SRC=marketplace-git|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[present-provenance-unknown-marketplace-git]"
   },
   "pair|SRC=marketplace-git|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[unowned-marketplace-git]"
   },
   "pair|SRC=marketplace-git|DRYRUN=on": {
    "credited_by": [
@@ -22332,22 +22464,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[edited-marketplace-local]"
   },
   "pair|SRC=marketplace-local|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[present-provenance-unknown-marketplace-local]"
   },
   "pair|SRC=marketplace-local|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[unowned-marketplace-local]"
   },
   "pair|SRC=marketplace-local|DRYRUN=on": {
    "family": "pair",
@@ -22593,22 +22728,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_mcp_entry_from_each_source_is_refused[mcp-registry]"
   },
   "pair|SRC=mcp-registry|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_mcp_entry_without_a_lock_is_kept[mcp-registry]"
   },
   "pair|SRC=mcp-registry|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_mcp_entry_blocks_a_server_of_the_same_name[mcp-registry]"
   },
   "pair|SRC=mcp-registry|DRYRUN=on": {
    "family": "pair",
@@ -22820,22 +22958,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_native_plugins_skill_in_the_users_hands_survives_install[edited]"
   },
   "pair|SRC=native-plugin|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_native_plugins_skill_in_the_users_hands_survives_install[present-provenance-unknown]"
   },
   "pair|SRC=native-plugin|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_native_plugins_skill_in_the_users_hands_survives_install[unowned]"
   },
   "pair|SRC=native-plugin|DRYRUN=on": {
    "credited_by": [
@@ -23151,22 +23292,25 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[edited-pkg-registry]"
   },
   "pair|SRC=pkg-registry|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[present-provenance-unknown-pkg-registry]"
   },
   "pair|SRC=pkg-registry|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_skill_from_each_source_survives_install[unowned-pkg-registry]"
   },
   "pair|SRC=pkg-registry|DRYRUN=on": {
    "credited_by": [
