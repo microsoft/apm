@@ -233,9 +233,13 @@ def test_config_default_target_provenance_names_config_source(tmp_path: Path, ca
     project = tmp_path / "project"
     project.mkdir()
     (project / "apm.yml").write_text("name: demo\nversion: 0.1.0\n", encoding="utf-8")
+    from apm_cli.core.command_logger import InstallLogger
+
     ctx = _make_ctx(tmp_path)
     ctx.project_root = project
     ctx.apm_package = APMPackage.from_apm_yml(project / "apm.yml")
+    # The command logger owns the Targets line, so a real one prints it.
+    ctx.logger = InstallLogger()
 
     with patch("apm_cli.config.get_install_target", return_value="claude"):
         run(ctx)
