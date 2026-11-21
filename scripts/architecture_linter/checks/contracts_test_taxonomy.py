@@ -105,7 +105,9 @@ _LOCKFILE_CONSUMERS = (
     "src/apm_cli/bundle/agent_plugin_exporter.py",
     "src/apm_cli/commands/outdated.py",
     "src/apm_cli/commands/lock.py",
+    "src/apm_cli/install/bundle_admission.py",
 )
+_LOCKFILE_READ_SCOPES = {"lock.py": "lock_export", "bundle_admission.py": "_recorded_lockfile"}
 
 
 def _facts_for(provider: FactsProvider, path: str, rule_id: str):
@@ -269,10 +271,10 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
         if consumer_failures or consumer.tree_index is None:
             continue
         nodes = consumer.tree_index.nodes
-        if consumer_path == "src/apm_cli/commands/lock.py":
-            export = consumer.tree_index.function("lock_export")
+        if (scope := _LOCKFILE_READ_SCOPES.get(consumer_path.rsplit("/", 1)[-1])) is not None:
+            export = consumer.tree_index.function(scope)
             if export is None:
-                findings.append(_summary(rule_id, consumer_path, "Lockfile export must exist"))
+                findings.append(_summary(rule_id, consumer_path, f"{scope} must exist"))
                 continue
             nodes = consumer.tree_index.own_scope(export)
         imported = {
@@ -289,7 +291,7 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
                 and keyword.value.value is True
                 for keyword in calls[0].keywords
             )
-            if consumer_path in {"src/apm_cli/commands/outdated.py", "src/apm_cli/commands/lock.py"}
+            if scope is not None or consumer_path == "src/apm_cli/commands/outdated.py"
             else _keyword_is_name(calls[0], "read_only", "dry_run")
         )
         if (

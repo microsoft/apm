@@ -15,7 +15,8 @@ from typing import Any
 
 import click
 
-LEDGER = "tests/fixtures/lifecycle_bug_ledger.json"
+from scripts.lifecycle_ledger import read_ledger, read_ledger_at
+
 CONTRACT_ID = "pr2876-alias-path-complete-lifecycle"
 _REQUIRED = "tests/integration/test_required_lifecycle_state_machine.py"
 _GENERATED = "tests/lifecycle/machines/test_m_spine.py"
@@ -92,9 +93,9 @@ def command_path(args: list[str], inventory: dict[str, click.Command]) -> str:
         path, remaining, parent = candidate, remaining[1:], context
 
 
-def load_ledger(text: str) -> dict[str, Any]:
-    """Decode the additive ledger, expanding authored shared trajectory segments."""
-    value = json.loads(text)
+def load_ledger(root: Path) -> dict[str, Any]:
+    """Read the additive ledger, expanding authored shared trajectory segments."""
+    value = read_ledger(root)
     _require(isinstance(value, dict) and value.get("schema_version") == 1, "Unsupported ledger")
     for contract in value.get("lifecycle_contracts", []):
         trajectories = contract.get("trajectories", {})
@@ -194,8 +195,8 @@ def candidate_contract(
     root: Path, base: str, inventory: dict[str, click.Command]
 ) -> dict[str, Any]:
     """Always select #2867; preserve legacy property, bug and known-gap records."""
-    previous = json.loads(git(root, "show", f"{base}:{LEDGER}"))
-    current = load_ledger((root / LEDGER).read_text(encoding="utf-8"))
+    previous = read_ledger_at(root, base)
+    current = load_ledger(root)
     for field in ("property_catalog", "bugs", "known_gaps"):
         for row in previous.get(field, []):
             _require(row in current[field], f"Removed/changed legacy {field} record")

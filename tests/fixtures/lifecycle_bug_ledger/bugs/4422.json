@@ -1,0 +1,14 @@
+{
+  "issue": 4422,
+  "fixed_in": "Unreleased",
+  "summary": "install --frozen reports a dependency MCP server parked for unapproved executables once, from the MCP phase, instead of again from the hydrated frozen check.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_frozen_parked_executables_notice_lifecycle.py::test_frozen_install_reports_a_parked_mcp_server_once"
+  ]
+}

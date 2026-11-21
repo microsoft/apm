@@ -108,7 +108,7 @@ listed lessons and decisions, and write the one-page wisdom block into
 ### P2 -- plan (risk-ranked queue)
 
 1. List what changed since the last tag: `git log --oneline <tag>..<sha>`
-   and the `[Unreleased]` block of `CHANGELOG.md`.
+   the `changelog.d/` fragments, and the `[Unreleased]` block of `CHANGELOG.md`.
 2. Map changed files to owners (`.apm/architecture/owners/`) and owners
    to journeys and lenses with `references/lenses.md`.
 3. Rank journey x lens pairs: golden journeys first, then pairs that

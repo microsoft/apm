@@ -1,0 +1,15 @@
+{
+  "issue": 3959,
+  "summary": "Traps rebound marketplace alias failing closed on install and outdated; needs marketplace catalogs and global scope.",
+  "failure_modes": [
+    "reference",
+    "transaction"
+  ],
+  "properties": [
+    "source.ref_cache_coherent",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_origin_entry_points_lifecycle.py::test_rebound_alias_fails_closed_on_cli_install_and_outdated"
+  ]
+}

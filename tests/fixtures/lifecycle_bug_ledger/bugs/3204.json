@@ -1,0 +1,16 @@
+{
+  "issue": 3204,
+  "summary": "Traps unsatisfied persisted skill selection refusing without losing skills; needs skill subsets, claude target, ownership snapshots.",
+  "failure_modes": [
+    "outcome",
+    "transaction"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_unmatched_skill_selection_lifecycle.py::test_empty_source_install_requires_a_satisfiable_selection",
+    "tests/integration/test_unmatched_skill_selection_lifecycle.py::test_unmatched_persisted_selection_refuses_without_losing_skills"
+  ]
+}

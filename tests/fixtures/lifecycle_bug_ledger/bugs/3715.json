@@ -1,0 +1,20 @@
+{
+  "issue": 3715,
+  "fixed_in": "0.36.1",
+  "summary": "Repository segments were stripped as a character set instead of a literal .git suffix, so names such as git/git or jonas/tig were rejected and URL installs persisted manifest entries the next run could not parse; marketplace builds dropped the leading dot of ./.hidden sources.",
+  "failure_modes": [
+    "reference",
+    "idempotency"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_git_named_repository_lifecycle.py::test_repository_named_with_git_letters_installs_reinstalls_and_uninstalls",
+    "tests/integration/test_git_named_repository_lifecycle.py::test_manifest_written_by_url_install_on_an_older_release_is_readable",
+    "tests/integration/test_git_named_repository_lifecycle.py::test_dot_only_or_bare_suffix_repository_names_stay_rejected_without_writes",
+    "tests/integration/test_git_named_repository_lifecycle.py::test_marketplace_build_keeps_the_leading_dot_of_a_hidden_local_source",
+    "tests/integration/test_git_named_repository_lifecycle.py::test_policy_deny_pattern_matches_a_git_named_repository"
+  ]
+}

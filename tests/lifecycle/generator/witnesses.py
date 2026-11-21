@@ -3,7 +3,8 @@
 The state machines credit their own cell ids through
 ``oracles.check_obligation``: M-SOURCE ``T3|<op>|<form>|<kind>``,
 ``T5|<dry-run|real>|<op>|<form>`` and the context ids
-``X|<op>|<form>|<FACTOR>=<value>``, M-SCOPE-LOCK ``T4|<op>|<scope>|<lock>``,
+``X|<op>|<form>|<FACTOR>=<value>`` and the rule cells it witnesses directly
+(``rule|...``), M-SCOPE-LOCK ``T4|<op>|<scope>|<lock>``,
 the M-GATE matrix ``G1|<op>|<prim>|<gate>|<scope>``.
 This module translates each machine id into the factor assignment it proves
 and lists the generated obligations that assignment implies (every pair and
@@ -98,10 +99,11 @@ class MachineCell:
 def _source_assignment(key: str) -> dict[str, str] | None:
     family, *parts = key.split("|")
     if family == "X":
-        op, form, context = parts
-        name, value = context.split("=", 1)
+        op, form, *contexts = parts
         op = "bundle-install" if form == "bundle" and op == "install" else op
-        return {"OP": op, "SRC": FORM_SOURCES[form], name: value}
+        assignment = {"OP": op, "SRC": FORM_SOURCES[form]}
+        assignment.update(context.split("=", 1) for context in contexts)
+        return assignment
     if family == "T3":
         op, form, kind = parts
         if kind == "native":
@@ -135,6 +137,8 @@ def machine_cells() -> list[MachineCell]:
 
     cells: list[MachineCell] = []
     known_source = getattr(test_m_source, "KNOWN_CELLS_BY_ID", {})
+    for key in sorted(test_m_source.rule_cells()):
+        cells.append(MachineCell(key, SOURCE_SPINE, "T-2", {}, known_source.get(key)))
     source_cells = test_m_source.t3_cells() | test_m_source.t5_cells()
     for key in sorted(source_cells | test_m_source.x_cells()):
         assignment = _source_assignment(key)
@@ -165,6 +169,14 @@ def implied(assignment: Mapping[str, str]) -> Iterator[str]:
             yield cell_id(family, {name: assignment[name] for name in factors})
 
 
+def credited_ids(cell: MachineCell) -> Iterator[str]:
+    """Obligation ids a receipt of *cell* can discharge: a rule cell names itself."""
+    if cell.id.startswith("rule|"):
+        yield cell.id
+    else:
+        yield from implied(cell.assignment)
+
+
 @dataclass(frozen=True)
 class Witness:
     node: str
@@ -182,7 +194,7 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
     """
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
-        for key in implied(cell.assignment):
+        for key in credited_ids(cell):
             if cell.anchor and f"|{cell.anchor}=" not in key:
                 continue
             if key in obligations:

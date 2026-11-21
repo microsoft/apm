@@ -21,6 +21,7 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 | `GH_TOKEN` | `gh` CLI token. Last in the GitHub `modules` chain before `gh auth token` and credential helpers. | unset | Forwarded to the Copilot runtime. |
 | `GITHUB_COPILOT_PAT` | First-choice token for the Copilot runtime. | unset | Only consulted by the `copilot` purpose. |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | Forwarded to the Copilot runtime when present. | unset | Not part of the `modules` resolution chain. |
+| `APM_STRICT_HOST_CREDENTIALS` | Set to `1` (or `true`/`yes`/`on`) to send `GITHUB_APM_PAT_<ORG>`, `GITHUB_APM_PAT`, `GITHUB_TOKEN` and `GH_TOKEN` only to the configured host (`GITHUB_HOST`, else `github.com`); other `github.com` / `*.ghe.com` hosts use `gh auth token` or a credential helper run without those variables. | unset | Unrecognised values turn strict mode on and print a warning. See [Authentication](../../getting-started/authentication/). |
 | `GITHUB_HOST` | GHES / GHE Cloud hostname (e.g. `ghe.example.com`). Switches host classification, transport selection, and auth chain. | `github.com` | Process-wide; affects clone URLs and host detection. |
 | `GITLAB_APM_PAT` | APM module access on GitLab SaaS or self-managed. First in the `gitlab_modules` chain. | unset | |
 | `GITLAB_TOKEN` | GitLab fallback token. | unset | |

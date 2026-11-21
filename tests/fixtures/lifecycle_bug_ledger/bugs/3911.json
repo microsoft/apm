@@ -1,0 +1,16 @@
+{
+  "issue": 3911,
+  "summary": "Marketplace lock replay and ref-pinning behavior are explicitly excluded.",
+  "failure_modes": [
+    "reference"
+  ],
+  "properties": [
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_lock_replay_lifecycle.py::test_catalog_defined_servers_replay_warm_and_reresolve_cold",
+    "tests/integration/test_marketplace_lock_replay_lifecycle.py::test_catalog_repin_of_a_server_owning_package_needs_update",
+    "tests/integration/test_marketplace_lock_replay_lifecycle.py::test_locked_marketplace_entry_replays_without_catalog_until_update",
+    "tests/integration/test_marketplace_lock_replay_lifecycle.py::test_transitive_marketplace_entry_replays_cold_and_frozen_refuses_unlocked"
+  ]
+}
