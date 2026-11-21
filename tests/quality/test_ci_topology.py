@@ -1805,6 +1805,81 @@ def _assert_windows_unit_layout(release: WorkflowNode) -> None:
     assert not accepts(values[:-1]), "Windows push gate accepted a missing shard"
 
 
+RELEASE_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "build-release.yml"
+RELEASE_PLAN_JOB = "release-plan"
+# Jobs that never run on a tag push, so the tag reachability gate need not precede them.
+RELEASE_PLAN_EXEMPT_CONDITIONS = {
+    "github.event_name == 'push' && github.ref_type == 'branch'": (
+        "windows-installer",
+        "windows-unit-1",
+        "windows-unit-2",
+        "windows-unit-3",
+    ),
+    "github.event_name == 'repository_dispatch' && github.event.action == 'publish-existing-tag'": (
+        "recover-tag",
+    ),
+}
+
+
+def _needs_closure(jobs: WorkflowNode, job_id: str) -> set[str]:
+    seen: set[str] = set()
+    pending = [job_id]
+    while pending:
+        needs = jobs[pending.pop()].get("needs") or []
+        for dep in [needs] if isinstance(needs, str) else needs:
+            if dep not in seen:
+                seen.add(dep)
+                pending.append(dep)
+    return seen
+
+
+def _assert_release_plan_gates_tag_runs(release: WorkflowNode) -> None:
+    """The release plan (tag reachability, then evidence) precedes every job a tag push runs."""
+    jobs = release["jobs"]
+    plan = workflow_job(release, RELEASE_PLAN_JOB)
+    step = workflow_step(plan, "Decide validation mode")
+    assert step["run"] == "python3 scripts/release_plan.py"
+    assert "if" not in step and "continue-on-error" not in step
+    assert "continue-on-error" not in plan
+    exempt: dict[str, tuple[str, ...]] = {}
+    for job_id, job in jobs.items():
+        if job_id == RELEASE_PLAN_JOB:
+            continue
+        if RELEASE_PLAN_JOB in _needs_closure(jobs, job_id):
+            continue
+        condition = " ".join(str(job.get("if", "")).split())
+        exempt.setdefault(condition, ())
+        exempt[condition] += (job_id,)
+    assert exempt == RELEASE_PLAN_EXEMPT_CONDITIONS, exempt
+
+
+def test_release_plan_precedes_every_tag_build_and_publish_job() -> None:
+    _assert_release_plan_gates_tag_runs(load_workflow(RELEASE_WORKFLOW_PATH))
+
+
+@pytest.mark.parametrize(
+    ("job_id", "mutation"),
+    [
+        ("create-release", "drop-plan"),
+        ("build-linux-x86", "drop-plan"),
+        ("publish-pypi", "drop-plan"),
+        ("windows-installer", "run-on-tags"),
+        ("release-plan", "continue-on-error"),
+    ],
+)
+def test_release_plan_gate_drift_fails(job_id: str, mutation: str) -> None:
+    release = load_workflow(RELEASE_WORKFLOW_PATH)
+    job = workflow_job(release, job_id)
+    if mutation == "drop-plan":
+        job["needs"] = []
+    elif mutation == "run-on-tags":
+        job["if"] = "github.event_name == 'push'"
+    else:
+        job["continue-on-error"] = True
+    with pytest.raises(AssertionError):
+        _assert_release_plan_gates_tag_runs(release)
+
+
 def _assert_macos_arm_split(release: WorkflowNode) -> None:
     jobs = release["jobs"]
     unit = jobs[MACOS_ARM_UNIT_JOB]
