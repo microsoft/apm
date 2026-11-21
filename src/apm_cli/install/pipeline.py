@@ -141,8 +141,6 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     if session is not None:
         session.locked_sources = locked
         session.verify_only = InstallService.frozen_disposition(ctx).replay
-        if InstallService.frozen_disposition(ctx).withhold_lockfile_writes and ctx.transaction:
-            ctx.transaction.hold_deploy_journal_until_commit()
         retire_receipts_of_missing_projects()
     try:
         with (
@@ -882,7 +880,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             return stop_before_integration(ctx, diagnostics)
 
         ctx.tui.start_phase("integrate", total=len(ctx.deps_to_install) or 1)
-        transaction.journal_deploy_writes()
+        transaction.journal_deploy_writes(ctx)
         materialization_session = _run_integration_phase(ctx)
 
         # A direct dependency failing integration fails the install; transitive ones continue.
