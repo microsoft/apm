@@ -227,9 +227,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 750, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 751, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 754, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 713, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 714, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 717, 'target.name == "claude"'),
         ),
     ),
     "U9": (
