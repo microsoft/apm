@@ -162,7 +162,7 @@ dependencies:
 
 `required-packages` (declared in `apm.yml`) and `required-packages-deployed` (present in `apm.lock.yaml`) compare the same identity. An entry that matches no declared package fails both checks; when the package is declared on another host, the message names that host and the policy entry that would match it, so you can either move the dependency or, for a trusted host, change the entry.
 
-A dependency written as an explicit registry-proxy path (`host/artifactory/...`) is identified by the proxy host; set `PROXY_REGISTRY_URL` and keep plain shorthand so default-host entries keep matching.
+A dependency written as an explicit registry-proxy path (`art.example.com/artifactory/github/acme/tools`) is identified by the proxy host: require it as `art.example.com/acme/tools`. Both checks pass, because `apm.lock.yaml` records that package under the same host. To keep default-host entries matching instead, set `PROXY_REGISTRY_URL` and keep plain shorthand.
 
 A project's `default_host:` does not change what a hostless entry names, and `GITHUB_HOST` can differ between machines: for an org-wide policy, write every `require` entry with its host. Ports are ignored, as for `deny`.
 
