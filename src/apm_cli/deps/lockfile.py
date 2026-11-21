@@ -168,10 +168,9 @@ def _declared_target_names(root: Path, *, user_scope: bool) -> list[str] | None:
 
     if not manifest_file(root).is_file():
         return None
-    from apm_cli.install.manifest_reconcile import declared_target_profiles
+    from apm_cli.install.manifest_reconcile import declared_target_names
 
-    profiles = declared_target_profiles(root, user_scope=user_scope)
-    return sorted({profile.name for profile in profiles}) if profiles else []
+    return declared_target_names(root, user_scope=user_scope)
 
 
 def installed_apm_version() -> str:

@@ -321,17 +321,13 @@ def union_preserving(
     return files, merged_hashes
 
 
-def declared_target_profiles(
-    project_root: Path,
-    *,
-    user_scope: bool = False,
-    active_targets: Iterable[TargetProfile] | None = None,
-    diagnostics: DiagnosticCollector | None = None,
+def _declared_manifest_profiles(
+    project_root: Path, *, user_scope: bool
 ) -> list[TargetProfile] | None:
-    """Resolve the target universe declared by a project manifest."""
+    """The profiles apm.yml's ``target:``/``targets:`` names; None without a declaration."""
     from apm_cli.core.errors import TargetResolutionError
     from apm_cli.core.target_catalog import normalize_target_name
-    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+    from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.models.manifest_targets import read_manifest_target_declaration
 
     declaration = read_manifest_target_declaration(manifest_file(project_root), lenient=True)
@@ -341,19 +337,41 @@ def declared_target_profiles(
         names = declaration.restriction() or []
     except TargetResolutionError:
         return None
-    active_by_name = _profiles_by_name(active_targets)
     if not names:
         return None
-
     profiles: list[TargetProfile] = []
-    if names:
-        for name in dict.fromkeys(normalize_target_name(name) for name in names):
-            profile = KNOWN_TARGETS.get(name)
-            if profile is None:
-                continue
-            scoped = profile.for_scope(user_scope=user_scope)
-            if scoped is not None:
-                profiles.append(scoped)
+    for name in dict.fromkeys(normalize_target_name(name) for name in names):
+        profile = KNOWN_TARGETS.get(name)
+        scoped = profile.for_scope(user_scope=user_scope) if profile is not None else None
+        if scoped is not None:
+            profiles.append(scoped)
+    return profiles
+
+
+def declared_target_names(project_root: Path, *, user_scope: bool = False) -> list[str]:
+    """The target names apm.yml declares ([] for auto-detect), as the lock records them.
+
+    Only the declaration: never the gated and always-on targets
+    :func:`declared_target_profiles` adds to its reconcile universe (#4517).
+    """
+    profiles = _declared_manifest_profiles(project_root, user_scope=user_scope)
+    return sorted({profile.name for profile in profiles or ()})
+
+
+def declared_target_profiles(
+    project_root: Path,
+    *,
+    user_scope: bool = False,
+    active_targets: Iterable[TargetProfile] | None = None,
+    diagnostics: DiagnosticCollector | None = None,
+) -> list[TargetProfile] | None:
+    """Resolve the target universe declared by a project manifest."""
+    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+
+    profiles = _declared_manifest_profiles(project_root, user_scope=user_scope)
+    if profiles is None:
+        return None
+    active_by_name = _profiles_by_name(active_targets)
     for name, profile in KNOWN_TARGETS.items():
         if _is_manifest_target(name):
             continue
