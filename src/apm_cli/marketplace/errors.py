@@ -91,6 +91,21 @@ class DependencyConfusionError(MarketplaceError, ValueError):
         )
 
 
+def _manifest_entry_label(entry: str | dict | None, plugin_name: str) -> str:
+    """Name a dependency the way ``apm.yml`` writes it (RA-042).
+
+    A marketplace install records the resolved source (a string or a
+    ``git`` + ``path`` mapping), never the plugin name, so the remedy quotes
+    that entry. Without it, fall back to the plugin name.
+    """
+    if isinstance(entry, str) and entry:
+        return repr(entry)
+    if isinstance(entry, dict) and entry:
+        fields = ", ".join(f"{key}: {value}" for key, value in entry.items())
+        return f"the entry '{fields}'"
+    return repr(plugin_name)
+
+
 class MarketplaceOriginConflictError(MarketplaceError):
     """Raised when an alias now names a different marketplace than the lock recorded.
 
@@ -107,6 +122,7 @@ class MarketplaceOriginConflictError(MarketplaceError):
         current: str,
         *,
         user_scope: bool = False,
+        manifest_entry: str | dict | None = None,
     ):
         import shlex
 
@@ -117,6 +133,7 @@ class MarketplaceOriginConflictError(MarketplaceError):
         self.locked_origin = locked
         self.current_origin = current
         self.user_scope = user_scope
+        self.manifest_entry = manifest_entry
         try:
             parse_marketplace_source(locked)
         except ValueError:
@@ -129,7 +146,9 @@ class MarketplaceOriginConflictError(MarketplaceError):
                 source=shlex.quote(locked), name=shlex.quote(marketplace_name)
             ).sentence()
         switch_entry = MARKETPLACE_ORIGIN_SWITCH_GLOBAL if user_scope else MARKETPLACE_ORIGIN_SWITCH
-        switch = switch_entry.bind(plugin=repr(plugin_name)).clause()
+        switch = switch_entry.bind(
+            plugin=_manifest_entry_label(manifest_entry, plugin_name)
+        ).clause()
         lockfile = "~/.apm/apm.lock.yaml" if user_scope else "apm.lock.yaml"
         super().__init__(
             f"marketplace {marketplace_name!r} now points at {current}, but {lockfile} "

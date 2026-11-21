@@ -103,13 +103,55 @@ def require_locked_row_origin(
     source = get_marketplace_by_name(alias)
     current = marketplace_origin(source)
     if not same_marketplace_origin(locked.source_url, current):
+        refused_user_scope = invocation_user_scope() if user_scope is None else user_scope
         raise MarketplaceOriginConflictError(
             alias,
             locked.marketplace_plugin_name,
             locked.source_url,
             current or source.display_source,
-            user_scope=invocation_user_scope() if user_scope is None else user_scope,
+            user_scope=refused_user_scope,
+            manifest_entry=declared_manifest_entry(locked, user_scope=refused_user_scope),
         )
+
+
+def declared_manifest_entry(locked: LockedDependency, *, user_scope: bool) -> str | dict | None:
+    """Return the ``apm.yml`` dependency entry that declares *locked*, as written.
+
+    The remedy for a rebound alias names this entry (RA-042): a marketplace
+    install records the resolved source, not ``name@marketplace``. ``None``
+    when the scope's manifest is absent, unreadable or declares no match.
+    """
+    import yaml
+
+    from ..core.scope import InstallScope, get_apm_dir, manifest_file
+    from ..models.dependency.reference import DependencyReference
+
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    try:
+        wanted = locked.to_dependency_ref(effective=False).get_unique_key()
+        data = yaml.safe_load(manifest_file(get_apm_dir(scope)).read_text(encoding="utf-8"))
+        entries = (data or {}).get("dependencies", {}).get("apm", []) or []
+    except (OSError, ValueError, AttributeError, TypeError, yaml.YAMLError):
+        return None
+    for entry in entries:
+        try:
+            if isinstance(entry, str):
+                ref = DependencyReference.parse(entry)
+            elif isinstance(entry, dict):
+                ref = DependencyReference.parse_from_dict(entry)
+            else:
+                continue
+        except (ValueError, TypeError, KeyError):
+            continue
+        if ref.is_marketplace:
+            if (ref.marketplace_plugin_name, ref.marketplace_name) == (
+                locked.marketplace_plugin_name,
+                locked.discovered_via,
+            ):
+                return entry
+        elif ref.get_unique_key() == wanted:
+            return entry
+    return None
 
 
 def registrations_sharing_origin(
