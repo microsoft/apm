@@ -598,6 +598,51 @@ def _suppression(
     return suppressed, managed
 
 
+def plan_native_declarations(
+    *,
+    modules_dir: Path,
+    scope: InstallScope,
+    previous: Mapping[str, NativeOwnership] | None,
+    lockfile: Any,
+    prepared: Mapping[str, ClaudeNativePlugin] | None,
+    deploy_root: Path | None,
+    run_targets: Collection[str] | None,
+) -> dict[str, frozenset[str]] | None:
+    """The harnesses :func:`reconcile_native_plugins` will declare, read-only.
+
+    The install stamps them into the lock before its one commit, so a
+    successful run writes the lockfile once (#4329); the reconcile result
+    still decides what is recorded. ``None`` when the plan cannot be read.
+    """
+    following = native_ownership(lockfile) if lockfile is not None else {}
+    if not following:
+        return None
+    user_scope = is_user_scope(scope)
+    modules_dir = Path(modules_dir).absolute()
+    if user_scope:
+        deploy_root = get_deploy_root(InstallScope.USER) if deploy_root is None else deploy_root
+    elif deploy_root is None:
+        deploy_root = modules_dir.parent
+    deploy_root = Path(deploy_root).absolute()
+    settings_paths = {
+        harness: settings_path(harness, user_scope=user_scope, project_root=deploy_root)
+        for harness in HARNESSES
+    }
+    try:
+        marketplace, _path = scope_binding(
+            user_scope=user_scope,
+            modules_dir=modules_dir,
+            deploy_root=deploy_root,
+            previous=previous,
+        )
+        declared = {own.record.name: (key, own, None) for key, own in following.items()}
+        return _declared_harnesses(
+            declared, lockfile, prepared or {}, settings_paths, marketplace, run_targets
+        )
+    except (NativeLayoutError, NativeSettingsError, OSError, ValueError):
+        return None
+
+
 def _declared_harnesses(
     declared: Mapping[str, tuple[str, NativeOwnership, Path]],
     lockfile: Any,

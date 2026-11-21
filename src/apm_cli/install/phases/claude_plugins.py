@@ -10,7 +10,11 @@ import copy
 from typing import TYPE_CHECKING
 
 from apm_cli.claude_plugins.admission import ClaudeNativePluginError
-from apm_cli.claude_plugins.registrar import native_ownership, reconcile_native_plugins
+from apm_cli.claude_plugins.registrar import (
+    native_ownership,
+    plan_native_declarations,
+    reconcile_native_plugins,
+)
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.deps.lockfile_write_authority import flush_lockfile_writes, remove_lockfile
 
@@ -66,6 +70,9 @@ def run(ctx: InstallContext) -> None:
         None if ctx.existing_lockfile is None else native_ownership(ctx.existing_lockfile)
     )
     if ctx.claude_native_plugins or previous_owned:
+        planned = _planned_declarations(ctx, lock_path, previous_owned)
+        if planned is not None:
+            planned.write(lock_path)
         # Claude's declarations never run ahead of the lock they follow.
         flush_lockfile_writes()
     committed = LockFile.read(lock_path)
@@ -98,6 +105,29 @@ def run(ctx: InstallContext) -> None:
     stamped = _record_declared(LockFile.read(lock_path), declared)
     if stamped is not None:
         stamped.write(lock_path)
+
+
+def _planned_declarations(ctx: InstallContext, lock_path, previous_owned) -> LockFile | None:
+    """The lock with the planned ``native_declared``, so the flush commits once (#4329).
+
+    A failed declaration restores the previous lock, so a stamp ahead of the
+    settings never survives; a plan that differs from the result is rewritten.
+    """
+    from apm_cli.install.service import InstallService
+
+    if ctx.dry_run or InstallService.frozen_disposition(ctx).withhold_lockfile_writes:
+        return None
+    staged = LockFile.read(lock_path)
+    planned = plan_native_declarations(
+        modules_dir=ctx.apm_modules_dir,
+        scope=ctx.scope,
+        previous=previous_owned,
+        lockfile=staged,
+        prepared=ctx.claude_native_plugins,
+        deploy_root=ctx.project_root,
+        run_targets=frozenset(target.name for target in ctx.targets or ()),
+    )
+    return _record_declared(staged, planned)
 
 
 def _record_declared(lockfile: LockFile | None, declared) -> LockFile | None:
