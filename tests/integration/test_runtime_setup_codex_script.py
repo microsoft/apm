@@ -101,7 +101,7 @@ from pathlib import Path
 
 args = sys.argv[1:]
 if args[-1] == {metadata!r}:
-    sys.stdout.write(Path(os.environ["FAKE_RELEASE_JSON"]).read_text())
+    Path(args[args.index("-o") + 1]).write_text(Path(os.environ["FAKE_RELEASE_JSON"]).read_text())
 elif {upstream!r} in args:
     args[args.index({upstream!r})] = os.environ["TEST_ARCHIVE_URL"]
     output = args[args.index("-o") + 1]
@@ -214,6 +214,145 @@ def test_setup_codex_http_download(
         assert config.read_bytes() == b"existing configuration\n"
     else:
         assert not config.exists()
+
+
+@contextmanager
+def _metadata_server(
+    responses: tuple[tuple[int, bytes, bool], ...],
+) -> Iterator[tuple[str, list[str]]]:
+    """Serve release metadata as ``(status, body, cut)`` per attempt, recording each attempt.
+
+    ``cut`` sends a 200 whose body stops short of its Content-Length and drops
+    the connection, so curl holds a partial response when it fails.
+    """
+    requested: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            status, body, cut = responses[min(len(requested), len(responses) - 1)]
+            requested.append(self.path)
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(body) + (64 if cut else 0)))
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+            if cut:
+                self.close_connection = True
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            pass
+
+    with HTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{server.server_port}/metadata", requested
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+
+
+def _metadata_curl_shim(path: Path, real_curl: str, *, retry_all_errors: bool) -> None:
+    """Route the metadata URL to a local server through real curl, with the script's flags.
+
+    ``retry_all_errors`` decides what ``curl --help all`` advertises, so both
+    branches of ``curl_retry_flags`` run against the same real curl.
+    """
+    metadata = f"https://api.github.com/repos/openai/codex/releases/tags/{TEST_VERSION}"
+    help_text = "--retry <num>\n" + ("--retry-all-errors\n" if retry_all_errors else "")
+    path.write_text(
+        f"""#!{sys.executable}
+import os
+import shutil
+import sys
+
+args = sys.argv[1:]
+if args[:1] == ["--help"]:
+    sys.stdout.write({help_text!r})
+elif args[-1] == {metadata!r}:
+    args[-1] = os.environ["TEST_METADATA_URL"]
+    with open(os.environ["TEST_CURL_ARGS"], "a") as log:
+        log.write(" ".join(args[:-1]) + "\\n")
+    os.execv({real_curl!r}, [{real_curl!r}, "--disable", "--noproxy", "*", *args])
+elif "-o" in args and any("/releases/download/" in arg for arg in args):
+    shutil.copyfile(os.environ["FAKE_TARBALL"], args[args.index("-o") + 1])
+else:
+    sys.exit("Unexpected curl request; external network is forbidden")
+""",
+        encoding="ascii",
+    )
+    path.chmod(0o755)
+
+
+@pytest.mark.parametrize(
+    ("retry_all_errors", "responses", "attempts", "succeeds"),
+    [
+        pytest.param(True, ((503, b"", False), (200, None, False)), 2, True, id="503-then-200"),
+        pytest.param(True, ((503, b"", False),), 4, False, id="exhausted-503"),
+        pytest.param(
+            True, ((200, "partial", True), (200, None, False)), 2, True, id="partial-then-200"
+        ),
+        pytest.param(
+            False, ((503, b"", False), (200, None, False)), 2, True, id="old-curl-503-then-200"
+        ),
+        pytest.param(
+            False, ((200, "partial", True), (200, None, False)), 1, False, id="old-curl-partial"
+        ),
+    ],
+)
+def test_setup_codex_retries_release_metadata(
+    tmp_path: Path,
+    codex_platform: str,
+    retry_all_errors: bool,
+    responses: tuple,
+    attempts: int,
+    succeeds: bool,
+) -> None:
+    """A transient metadata failure is retried; a partial body never reaches the parser."""
+    real_curl = shutil.which("curl")
+    assert real_curl is not None
+    asset_name = f"codex-{codex_platform}.tar.gz"
+    tarball = tmp_path / asset_name
+    metadata = tmp_path / "release.json"
+    write_fake_archive(tarball)
+    write_release_metadata(metadata, asset_name=asset_name, digest=sha256(tarball))
+    full = metadata.read_bytes()
+    # The partial body names another release, so a body glued to the retry's
+    # body would pick the wrong tag or break the JSON.
+    partial = full.replace(TEST_VERSION.encode(), b"rust-v0.0.0-partial")[: len(full) // 2]
+    served = tuple(
+        (status, full if body is None else partial if body == "partial" else body, cut)
+        for status, body, cut in responses
+    )
+    curl_script = tmp_path / "metadata-curl"
+    _metadata_curl_shim(curl_script, real_curl, retry_all_errors=retry_all_errors)
+    curl_args = tmp_path / "curl-args.txt"
+
+    with _metadata_server(served) as (url, requested):
+        result = run_setup(
+            tmp_path,
+            release_json=metadata,
+            tarball=tarball,
+            curl_script=curl_script,
+            env_updates={"TEST_METADATA_URL": url, "TEST_CURL_ARGS": str(curl_args)},
+        )
+
+    output = result.stdout + result.stderr
+    assert requested == ["/metadata"] * attempts, output
+    flags = curl_args.read_text().split()
+    assert ("--retry-all-errors" in flags) is retry_all_errors
+    assert flags[flags.index("--retry") + 1] == "3"
+    assert not list(tmp_path.glob("apm-codex-metadata.*"))
+    installed = tmp_path / "home" / ".apm" / "runtimes" / "codex"
+    if succeeds:
+        assert result.returncode == 0, output
+        assert "rust-v0.0.0-partial" not in output
+        assert "Verified Codex archive checksum" in output
+        assert installed.read_bytes() == b"#!/bin/sh\nprintf 'codex test version\\n'\n"
+    else:
+        assert result.returncode != 0, output
+        assert "Failed to fetch Codex release metadata" in output
+        assert not installed.exists()
 
 
 def test_setup_codex_verifies_checksum_before_extracting(
