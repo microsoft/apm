@@ -89,6 +89,7 @@ from apm_cli.install.manifest_helpers import (
 # names. Aliases live in mcp/writer.py and mcp/entry.py respectively.
 from apm_cli.install.mcp.entry import _build_mcp_entry  # noqa: F401
 from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
+from apm_cli.install.outcome import frozen_verified_line
 from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
     apply_cli_skill_pin,
@@ -148,7 +149,7 @@ from apm_cli.marketplace.errors import MarketplaceFreshnessError
 from apm_cli.marketplace.version_pins import staged_ref_pin_keys, withdraw_ref_pins
 from apm_cli.models.dependency.replacement import project_manifest_dependencies
 from apm_cli.models.results import InstallDisposition, InstallResult
-from apm_cli.policy.install_preflight import identity_policy_scope
+from apm_cli.policy.install_preflight import identity_policy_refuses, identity_policy_scope
 from apm_cli.policy.outcome_routing import discover_trust_policy
 from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
 
@@ -234,17 +235,11 @@ except ImportError as e:
     _ScopedInstallDependencyResolver = None  # type: ignore[misc,assignment]
 
 
-def _frozen_verified_line(result) -> str:
-    """The closing line of a successful --frozen replay."""
-    adopted = int(getattr(result, "legacy_adopted", 0) or 0)
-    if not adopted:
-        return "Deployed files verified against apm.lock.yaml."
-    from apm_cli.core.remediation import LEGACY_RENDER_MIGRATE
-
-    return (
-        f"Adopted {adopted} file(s) deployed by APM before 0.37, unchanged as committed. "
-        f"{LEGACY_RENDER_MIGRATE.sentence()}"
-    )
+def _reject(invalid_outcomes, logger, package, reason) -> None:
+    """Record *package* as invalid for *reason* and report it."""
+    invalid_outcomes.append((package, reason))
+    if logger:
+        logger.validation_fail(package, reason)
 
 
 def _scoped_lockfile(scope):
@@ -286,7 +281,6 @@ def _resolve_package_references(
     Returns the validation outcomes, manifest entries, and change state.
     """
     from ..install.registry_wiring import should_skip_github_probe_for_dep, validate_registry_ref
-    from ..policy.install_preflight import active_identity_policy, identity_policy_denial
 
     valid_outcomes = []  # (canonical, already_present) tuples
     invalid_outcomes = []  # (package, reason) tuples
@@ -363,16 +357,12 @@ def _resolve_package_references(
                     raise
                 except Exception as mkt_err:
                     reason = str(mkt_err)
-                    invalid_outcomes.append((package, reason))
-                    if logger:
-                        logger.validation_fail(package, reason)
+                    _reject(invalid_outcomes, logger, package, reason)
                     continue
             else:
                 # No slash, not a local path, and not a marketplace ref
                 reason = "invalid format -- use 'owner/repo' or 'plugin-name@marketplace'"
-                invalid_outcomes.append((package, reason))
-                if logger:
-                    logger.validation_fail(package, reason)
+                _reject(invalid_outcomes, logger, package, reason)
                 continue
 
         # Canonicalize input
@@ -409,9 +399,7 @@ def _resolve_package_references(
                 requested_entries.setdefault(canonical, dependency_reference_to_yaml_entry(dep_ref))
         except ValueError as e:
             reason = str(e)
-            invalid_outcomes.append((package, reason))
-            if logger:
-                logger.validation_fail(package, reason)
+            _reject(invalid_outcomes, logger, package, reason)
             continue
 
         if dep_ref.is_insecure:
@@ -431,9 +419,7 @@ def _resolve_package_references(
 
         scope_reject = user_scope_rejection_reason(dep_ref, scope)
         if scope_reject:
-            invalid_outcomes.append((package, scope_reject))
-            if logger:
-                logger.validation_fail(package, scope_reject)
+            _reject(invalid_outcomes, logger, package, scope_reject)
             continue
 
         if skill_subset and canonical not in requested_entries:
@@ -445,21 +431,17 @@ def _resolve_package_references(
         verbose = bool(logger and logger.verbose)
         # Registry routing is authoritative: it validates its own version
         # selectors before git semver eligibility can defer the raw-ref probe.
-        if identity_policy_denial(dep_ref, active_identity_policy()) is not None:
-            # Org policy refuses this identity: never contact its source; the
-            # install's policy gate reports the refusal.
-            package_accessible = True
-        elif existing_source_is_registry or should_skip_github_probe_for_dep(
-            dep_ref, default_registry
+        denied = identity_policy_refuses(dep_ref)  # never contact a denied source
+        if not denied and (
+            existing_source_is_registry
+            or should_skip_github_probe_for_dep(dep_ref, default_registry)
         ):
             ref_ok, ref_err = validate_registry_ref(dep_ref)
             if not ref_ok:
-                invalid_outcomes.append((package, ref_err))
-                if logger:
-                    logger.validation_fail(package, ref_err)
+                _reject(invalid_outcomes, logger, package, ref_err)
                 continue
             package_accessible = True
-        elif is_git_semver_resolution_eligible(dep_ref):
+        elif denied or is_git_semver_resolution_eligible(dep_ref):
             package_accessible = True
         else:
             from ..utils.git_env import GitUrlRewriteError, GitUrlRewriteProbeError
@@ -476,9 +458,7 @@ def _resolve_package_references(
                 )
             except (GitUrlRewriteError, GitUrlRewriteProbeError) as exc:
                 reason = str(exc)
-                invalid_outcomes.append((package, reason))
-                if logger:
-                    logger.validation_fail(package, reason)
+                _reject(invalid_outcomes, logger, package, reason)
                 continue
         if package_accessible:
             updates_existing_entry, update_error = try_update_existing_dependency_entry(
@@ -493,9 +473,7 @@ def _resolve_package_references(
                 logger=logger,
             )
             if update_error:
-                invalid_outcomes.append((package, update_error))
-                if logger:
-                    logger.validation_fail(package, update_error)
+                _reject(invalid_outcomes, logger, package, update_error)
                 continue
             _apm_yml_entries.update(requested_entries)
             _apm_yml_entries.setdefault(canonical, dep_ref.to_apm_yml_entry())
@@ -514,9 +492,7 @@ def _resolve_package_references(
             reason = _local_path_failure_reason(dep_ref) or _ambiguous_subpath_hint(dep_ref)
             if not reason:
                 reason = probe_failure_reason(dep_ref, package, auth_resolver, verbose, scope=scope)
-            invalid_outcomes.append((package, reason))
-            if logger:
-                logger.validation_fail(package, reason)
+            _reject(invalid_outcomes, logger, package, reason)
 
     # A package that will not install records no ref pin (#4322).
     for rejected, _reason in invalid_outcomes:
@@ -1638,7 +1614,7 @@ def install(  # noqa: PLR0913
             ):
                 # --frozen verified lockfile structure and deployed hashes (req-lk-017),
                 # also on a converged run that installs nothing (#4184).
-                logger.info(_frozen_verified_line(command_result), symbol="info")
+                logger.info(frozen_verified_line(command_result), symbol="info")
 
     except AgentPluginError as e:
         logger.error(str(e))

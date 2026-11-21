@@ -331,3 +331,16 @@ def local_bundle_parked_next_step(slug: str, exec_types, scope) -> str:
         f"Local bundle '{slug}': {', '.join(exec_types)} parked, awaiting approval. "
         f"{remedy.sentence()}"
     )
+
+
+def frozen_verified_line(result) -> str:
+    """The closing line of a successful --frozen replay."""
+    adopted = int(getattr(result, "legacy_adopted", 0) or 0)
+    if not adopted:
+        return "Deployed files verified against apm.lock.yaml."
+    from apm_cli.core.remediation import LEGACY_RENDER_MIGRATE
+
+    return (
+        f"Adopted {adopted} file(s) deployed by APM before 0.37, unchanged as committed. "
+        f"{LEGACY_RENDER_MIGRATE.sentence()}"
+    )

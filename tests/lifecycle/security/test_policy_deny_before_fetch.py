@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import subprocess
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 import yaml
@@ -20,7 +21,7 @@ from tests.lifecycle import driver
 from tests.lifecycle.world import World
 from tests.lifecycle.world.builder import TAG
 from tests.lifecycle.world.scopes import use_policy
-from tests.lifecycle.world.services import DENIED_PACKAGE, ORG
+from tests.lifecycle.world.services import DENIED_PACKAGE, HOST_ALIASES, ORG
 
 pytestmark = [
     pytest.mark.e2e,
@@ -45,8 +46,12 @@ def _tree_digest(root: Path) -> str:
 
 
 def _denied_requests(world: World) -> list[dict]:
-    needle = f"/{ORG}/{DENIED_PACKAGE}"
-    return [entry for entry in world.services.egress_log() if needle in str(entry["path"])]
+    """Every request naming the denied repository, on any host or API shape."""
+    return [
+        entry
+        for entry in world.services.egress_log()
+        if DENIED_PACKAGE in unquote(str(entry["path"]))
+    ]
 
 
 def _cached_denied(world: World) -> list[str]:
@@ -173,3 +178,43 @@ def test_frozen_and_audit_refuse_a_locked_denied_dependency_alike(lifecycle_worl
         assert f"{ORG}/{DENIED_PACKAGE}" in output, output
     assert _denied_requests(world) == [], _denied_requests(world)
     assert _project_state(world) == state_before
+
+
+def _refused_without_contact(world: World, argv: list[str], subject: str) -> None:
+    """*argv* is refused by the deny rule; the denied repository is never contacted."""
+    driver.run(world, ["policy", "status"])
+    cache_before = _tree_digest(_cache_root(world))
+    state_before = _project_state(world)
+    world.services.reset()
+
+    result = driver.run(world, argv)
+
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, output
+    assert f"{subject} -- denied by pattern: **/{DENIED_PACKAGE}" in output, output
+    assert _BLOCKED in output, output
+    assert _denied_requests(world) == [], _denied_requests(world)
+    assert _cached_denied(world) == [], _cached_denied(world)
+    assert _tree_digest(_cache_root(world)) == cache_before
+    assert _project_state(world) == state_before
+
+
+def test_denied_gitlab_shorthand_is_never_probed(lifecycle_world: World) -> None:
+    """The GitLab host/path boundary probe never reaches a denied repository."""
+    world = lifecycle_world
+    use_policy(world, "deny-pkg")
+    host, prefix = HOST_ALIASES["gitlab"]
+    spec = f"{host}/{prefix}/{DENIED_PACKAGE}#{TAG}"
+    _refused_without_contact(world, ["install", spec], f"{host}/{prefix}/{DENIED_PACKAGE}")
+
+
+def test_marketplace_entry_resolving_to_a_denied_repo_is_never_fetched(
+    lifecycle_world: World,
+) -> None:
+    """The catalog may be read; the denied repository it names is never fetched."""
+    world = lifecycle_world
+    use_policy(world, "deny-pkg")
+    added = driver.run(world, ["marketplace", "add", "lifecycle/marketplace"])
+    assert added.returncode == 0, added.stdout + added.stderr
+    spec = world.packages[f"{DENIED_PACKAGE}:marketplace"].spec
+    _refused_without_contact(world, ["install", spec], f"github.com/{ORG}/{DENIED_PACKAGE}")
