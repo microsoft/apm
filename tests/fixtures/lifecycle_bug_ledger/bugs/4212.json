@@ -1,0 +1,17 @@
+{
+  "issue": 4212,
+  "fixed_in": "0.37.0",
+  "summary": "The marketplace resolver recorded the plugin ref in APM_HOME cache/marketplace/version-pins.json on every resolution, so install --dry-run (and read-only apm view) wrote user-scope state.",
+  "failure_modes": [
+    "transaction",
+    "cache"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_install_dry_run_of_marketplace_plugin_writes_no_ref_pin",
+    "tests/integration/test_install_transaction.py::test_marketplace_ref_pins_are_written_only_on_commit"
+  ]
+}

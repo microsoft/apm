@@ -1,0 +1,15 @@
+{
+  "issue": 3928,
+  "summary": "Traps uninstall of object-form marketplace declaration offline; marketplace is outside replay vocabulary.",
+  "failure_modes": [
+    "cleanup",
+    "reference"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_marketplace_object_form_lifecycle.py::test_uninstall_selects_object_form_marketplace_declaration_offline"
+  ]
+}

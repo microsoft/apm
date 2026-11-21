@@ -1,0 +1,25 @@
+{
+  "issue": 3727,
+  "fixed_in": "0.36.1",
+  "summary": "LSP dependencies had no OpenCode target, and the no-LSP-target error fired after skills and .gitignore were already written.",
+  "failure_modes": [
+    "routing",
+    "transaction"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_opencode_lsp_lifecycle.py::test_fresh_project_writes_lsp_to_opencode_json",
+    "tests/integration/test_opencode_lsp_lifecycle.py::test_target_without_lsp_support_fails_before_any_write",
+    "tests/integration/test_opencode_lsp_lifecycle.py::test_exclude_that_empties_the_lsp_targets_fails_before_any_write",
+    "tests/integration/test_opencode_lsp_lifecycle.py::test_existing_opencode_json_keeps_schema_and_mcp",
+    "tests/integration/test_opencode_lsp_lifecycle.py::test_lsp_false_in_opencode_json_is_refused_untouched",
+    "tests/integration/test_opencode_lsp_lifecycle.py::test_only_apm_is_not_gated_by_lsp_support",
+    "tests/integration/test_opencode_lsp_lifecycle.py::test_uninstall_removes_the_opencode_lsp_entry",
+    "tests/integration/test_opencode_lsp_lifecycle.py::test_update_without_lsp_support_fails_before_any_write",
+    "tests/integration/test_opencode_lsp_lifecycle.py::test_user_scope_without_lsp_support_fails_before_any_write",
+    "tests/integration/test_opencode_lsp_lifecycle.py::test_user_scope_writes_lsp_to_user_opencode_json"
+  ]
+}

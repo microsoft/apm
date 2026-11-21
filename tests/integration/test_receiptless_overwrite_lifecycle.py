@@ -76,7 +76,8 @@ class _World:
 def _write_package(root: Path) -> None:
     files = {
         "apm.yml": "name: kit\nversion: 1.0.0\n",
-        ".apm/instructions/style.instructions.md": "---\napplyTo: '**'\n---\n# Style\n",
+        # A file-type glob keeps a per-file Claude rule at both scopes (#3939).
+        ".apm/instructions/style.instructions.md": "---\napplyTo: '**/*.py'\n---\n# Style\n",
         ".apm/agents/helper.agent.md": "---\nname: helper\ndescription: Helper\n---\n# Helper\n",
         ".apm/prompts/review.prompt.md": "---\ndescription: Review\n---\n# Review\n",
     }

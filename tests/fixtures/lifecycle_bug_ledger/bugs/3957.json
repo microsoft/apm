@@ -1,0 +1,17 @@
+{
+  "issue": 3957,
+  "summary": "Traps wrong remediation after deny (#3957): frozen message and layered approve; needs claude MCP, user store and multi-layer denies.",
+  "failure_modes": [
+    "outcome",
+    "routing"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_deny_remediation_lifecycle.py::test_approve_exits_1_when_another_layer_still_denies",
+    "tests/integration/test_deny_remediation_lifecycle.py::test_frozen_names_the_gate_and_approve_lifts_a_project_deny",
+    "tests/integration/test_deny_remediation_lifecycle.py::test_user_store_deny_and_approve_work_outside_a_project"
+  ]
+}

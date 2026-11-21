@@ -87,6 +87,13 @@ when:
   - refusal|OP=bundle-install|FROZEN=on
   unchanged:
   - '*'
+- run: apm install p-exec --update
+  exit: 2
+  message: not valid with a local bundle install
+  cells:
+  - refusal|OP=bundle-install|UPDATE=on
+  unchanged:
+  - '*'
 - run: apm compile --force
   exit: 2
   cells:
@@ -109,12 +116,6 @@ when:
   exit: 2
   cells:
   - refusal|OP=compile|UPDATE=on
-  unchanged:
-  - '*'
-- run: apm install --frozen --update
-  exit: 2
-  cells:
-  - refusal|OP=install|FROZEN=on|UPDATE=on
   unchanged:
   - '*'
 then:

@@ -1,0 +1,15 @@
+{
+  "issue": 4192,
+  "fixed_in": "0.37.0",
+  "summary": "Local bundle install printed only 'Installed N file(s) from local bundle' and never named the folders it wrote to.",
+  "failure_modes": [
+    "outcome",
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_install_summary_destinations_lifecycle.py::test_local_bundle_install_names_destination_folders"
+  ]
+}
