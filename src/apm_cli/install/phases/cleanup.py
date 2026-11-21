@@ -350,11 +350,20 @@ class _ReceiptedDeployment:
 def _receipted_stand_in(ctx: InstallContext, dep_key: str) -> _ReceiptedDeployment | None:
     """Stand in for a prior lock record the lock does not hold (it was lost or regenerated).
 
-    This installation's deployment receipts for *dep_key* are the prior
-    deployment, so a lost lock converges like a kept one; lockfile assembly
-    reconciles the same record. Deletion stays gated by deployment evidence.
+    Only for a package whose executables this run's gate withholds: its
+    deployment receipts here are the prior deployment, so a lost lock retires
+    what the gate no longer deploys like a kept one; lockfile assembly
+    reconciles the same record. A path this run skipped as an existing local
+    file is never stale. Deletion stays gated by deployment evidence.
     """
+    from apm_cli.security.executables import TRUST_DEPLOYED
+    from apm_cli.utils.diagnostics import CATEGORY_COLLISION
+
+    if getattr(ctx, "package_exec_status", {}).get(dep_key) in (None, TRUST_DEPLOYED):
+        return None
     receipted = deployment_evidence(ctx).receipted_claims(dep_key, ctx.targets or ())
+    skipped = {item.message for item in ctx.diagnostics.by_category().get(CATEGORY_COLLISION, ())}
+    receipted = {path: digest for path, digest in receipted.items() if path not in skipped}
     if not receipted:
         return None
     stand_ins = getattr(ctx, "receipted_prior_deployments", None)
