@@ -1087,3 +1087,36 @@ def test_hook_fingerprint_ignores_a_sibling_hook_document(tmp_path: Path) -> Non
 
     assert hook_file_fingerprint(tmp_path, hook) == original
     assert "go" in sibling.read_text(encoding="utf-8"), "pinning is read-only"
+
+
+def test_hook_fingerprint_matches_a_copy_that_dereferenced_an_in_package_link(
+    tmp_path: Path,
+) -> None:
+    """Approving the source tree and installing its local copy agree on the pin."""
+    import shutil
+
+    source = tmp_path / "source"
+    hook = _bundled_hook_package(source)
+    shared = source / "shared" / "helper.mjs"
+    shared.parent.mkdir()
+    shared.write_text("export const shared = 1;\n", encoding="utf-8")
+    link = hook.parent / "lib" / "shared.mjs"
+    link.symlink_to(Path("..") / ".." / ".." / "shared" / "helper.mjs")
+    copy = tmp_path / "copy"
+    shutil.copytree(source, copy, symlinks=False)
+
+    assert not (copy / ".apm/hooks/lib/shared.mjs").is_symlink()
+    assert hook_file_fingerprint(source, hook) == hook_file_fingerprint(
+        copy, copy / ".apm/hooks/run.json"
+    )
+
+
+def test_hook_bundle_link_leaving_the_package_cannot_be_pinned(tmp_path: Path) -> None:
+    hook = _bundled_hook_package(tmp_path / "pkg")
+    outside = tmp_path / "outside.mjs"
+    outside.write_text("export const x = 1;\n", encoding="utf-8")
+    (hook.parent / "lib" / "out.mjs").symlink_to(outside)
+
+    with pytest.raises(ValueError, match=r"escapes|outside"):
+        hook_file_fingerprint(tmp_path / "pkg", hook)
+    assert outside.read_text(encoding="utf-8") == "export const x = 1;\n"

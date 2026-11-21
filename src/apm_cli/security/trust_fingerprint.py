@@ -19,8 +19,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from apm_cli.utils.paths import portable_relpath
-
 FINGERPRINT_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 DISPLAY_LENGTH = 8
 
@@ -117,6 +115,14 @@ def hook_item_key(package_path: Path, hook_file: Path) -> str:
     return normalized_hook_source(relative, root) or relative
 
 
+def _bundle_key(package_path: Path, path: Path) -> str:
+    """Publisher-relative key of a bundle file at its own (unresolved) location."""
+    from apm_cli.deps.plugin_parser import normalized_hook_source
+
+    relative = path.relative_to(package_path).as_posix()
+    return normalized_hook_source(relative, package_path) or relative
+
+
 def hook_file_fingerprint(package_path: Path, hook_file: Path) -> str:
     """Fingerprint one hook file and the whole bundle that deploys with it.
 
@@ -143,8 +149,9 @@ def hook_file_fingerprint(package_path: Path, hook_file: Path) -> str:
     if data is None:
         raise UnfingerprintableError(f"hook file {hook_file.name} is not a hook document")
 
-    def _digest(path: Path) -> list[str]:
-        return [hook_item_key(package_path, path), hashlib.sha256(path.read_bytes()).hexdigest()]
+    def _digest(path: Path, key: str | None = None) -> list[str]:
+        key = key or hook_item_key(package_path, path)
+        return [key, hashlib.sha256(path.read_bytes()).hexdigest()]
 
     referenced = sorted(_referenced_hook_source_files(data, package_path, hook_file.parent))
     descriptors = {path.resolve() for path in HookIntegrator().find_hook_files(package_path)}
@@ -152,9 +159,14 @@ def hook_file_fingerprint(package_path: Path, hook_file: Path) -> str:
     bundle: dict[str, list[str]] = {}
     for root in roots:
         for path in iter_deployable_hook_bundle_files(
-            root, descriptor_files=descriptors, include_package_metadata=True
+            root,
+            descriptor_files=descriptors,
+            include_package_metadata=True,
+            dereference_within=package_path,
         ):
-            item = _digest(path)
+            # Keyed by where the file deploys (a link's own name), as a copy
+            # that dereferenced the link lays it out.
+            item = _digest(path, _bundle_key(package_path, path))
             bundle[item[0]] = item
     return definition_fingerprint(
         KIND_HOOK,
@@ -164,7 +176,7 @@ def hook_file_fingerprint(package_path: Path, hook_file: Path) -> str:
             "scripts": [_digest(script) for script in referenced],
             "bundle": [bundle[key] for key in sorted(bundle)],
             "module_types": [
-                [portable_relpath(root, package_path), _hook_module_type(package_path, root)]
+                [hook_item_key(package_path, root), _hook_module_type(package_path, root)]
                 for root in roots
             ],
         },

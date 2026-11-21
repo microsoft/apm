@@ -533,9 +533,8 @@ class HookIntegrator(BaseIntegrator):
         per target.
         """
         integrator = cls()
-        discovered_files = (
-            hook_files if hook_files is not None else integrator.find_hook_files(package_path)
-        )
+        known = integrator.find_hook_files(package_path)
+        discovered_files = hook_files if hook_files is not None else known
         return select_hook_sources(
             package_path,
             target_names,
@@ -543,6 +542,7 @@ class HookIntegrator(BaseIntegrator):
             parse_hook_json=integrator._parse_hook_json,
             iter_bundle_files=iter_deployable_hook_bundle_files,
             merge_target_names=_MERGE_HOOK_TARGETS,
+            known_descriptors=known,
         )
 
     def select_hook_sources_for_target(
