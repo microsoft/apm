@@ -224,6 +224,7 @@ SCENARIO_MODULES = (
     "test_history_upgrade",
     "test_ownership_siblings",
     "test_platform",
+    "test_policy_pairs",
 )
 
 

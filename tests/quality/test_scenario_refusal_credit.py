@@ -72,7 +72,8 @@ def test_a_declared_refusal_that_refuses_cleanly_credits() -> None:
 
 def test_every_declared_refusal_names_its_law_and_source() -> None:
     for key, refusal in EXPECTED_REFUSALS.items():
-        assert key.startswith("pair|") and "DEPLOYED=" in key, key
+        # A refusal credit proves a user-state or org-policy pair (T-6b, T-7b).
+        assert key.startswith("pair|") and ("DEPLOYED=" in key or "GATE=denied-dependency" in key)
         assert refusal.exit != 0, key
         assert refusal.upholds.startswith(("P-LAW-", "P-INV-")), key
         assert refusal.source, key

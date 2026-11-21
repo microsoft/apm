@@ -683,7 +683,7 @@ def skill_package(factory, name: str, *, dependencies: Sequence[str] = ()) -> Pa
 
 OBLIGATIONS_PATH = Path(__file__).parents[2] / "quality" / "lifecycle_obligations.json"
 # Lanes whose generated obligations the scenario suites discharge (#4100-#4106).
-SCENARIO_LANES = frozenset({"T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g"})
+SCENARIO_LANES = frozenset({"T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g", "T-7b"})
 NODE_ROOT = "tests/lifecycle/scenarios"
 
 
@@ -753,7 +753,42 @@ class ExpectedRefusal:
 # T-6b (#4101): ownership pairs whose designed outcome is a refusal. Declared,
 # never inferred from what the CLI did: a refusal of any other pair fails the
 # step, and so does a declared pair whose command succeeds.
+# An org policy that denies a declared dependency refuses every resolving
+# install and writes nothing (policy/install_preflight.py, dependency-denylist).
+POLICY_BLOCK = ExpectedRefusal(
+    1,
+    r"Blocked by org policy .*Nothing was changed|Nothing was written",
+    "P-INV-I4",
+    "docs reference/cli/install.md: a blocked install exits 1 and changes nothing",
+)
+POLICY_REFUSALS = (
+    "pair|DEPLOYED=clean|GATE=denied-dependency",
+    "pair|DEPLOYED=edited|GATE=denied-dependency",
+    "pair|DEPLOYED=present-provenance-unknown|GATE=denied-dependency",
+    "pair|DEPLOYED=unowned|GATE=denied-dependency",
+    "pair|GATE=denied-dependency|FORCE=on",
+    "pair|GATE=denied-dependency|NET=offline",
+    "pair|GATE=denied-dependency|NET=online",
+    "pair|GATE=denied-dependency|SELECT=on",
+    "pair|GATE=denied-dependency|UPDATE=on",
+    *(
+        f"pair|GATE=denied-dependency|TGT={shape}-{change}"
+        for shape in ("single", "multi")
+        for change in ("unchanged", "narrowed", "widened")
+    ),
+    "pair|SRC=git|GATE=denied-dependency",
+    "pair|SRC=local-path|GATE=denied-dependency",
+    "pair|SRC=marketplace-file|GATE=denied-dependency",
+    "pair|SRC=marketplace-git|GATE=denied-dependency",
+    "pair|SRC=marketplace-local|GATE=denied-dependency",
+    "pair|SRC=native-plugin|GATE=denied-dependency",
+    "pair|SRC=pkg-registry|GATE=denied-dependency",
+    "pair|SRC=mcp-registry|GATE=denied-dependency",
+    "pair|SRC=inline-mcp|GATE=denied-dependency",
+)
+
 EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
+    **dict.fromkeys(POLICY_REFUSALS, POLICY_BLOCK),
     "pair|DEPLOYED=edited|FROZEN=on": ExpectedRefusal(
         1,
         r"--frozen: deployed files do not match the hashes recorded in apm\.lock\.yaml",
