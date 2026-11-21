@@ -357,6 +357,26 @@ def test_runtime_setup_uses_builtin_github_api_token(
     assert step["env"]["GITHUB_APM_PAT"] == "${{ secrets.GH_CLI_PAT }}"
 
 
+CI_INTEGRATION = ROOT / ".github" / "workflows" / "ci-integration.yml"
+# Merge-time steps whose scripts/test-integration.sh run sets up the Codex runtime.
+CI_INTEGRATION_RUNTIME_SETUP_STEPS = (
+    ("integration-tests-shard", "Run integration tests (sharded + parallelized)"),
+    ("integration-network", "Run network-dependent integration tests"),
+    ("release-validation", "Run release validation tests"),
+)
+
+
+@pytest.mark.parametrize(("job_id", "step_name"), CI_INTEGRATION_RUNTIME_SETUP_STEPS)
+def test_merge_time_runtime_setup_uses_builtin_github_api_token(
+    job_id: str,
+    step_name: str,
+) -> None:
+    """INFRA-1: Codex release metadata must not ride on the private-module PAT."""
+    step = workflow_step(workflow_job(load_workflow(CI_INTEGRATION), job_id), step_name)
+    assert step["env"]["GITHUB_API_TOKEN"] == "${{ github.token }}"
+    assert step["env"]["GITHUB_APM_PAT"] == "${{ secrets.GH_CLI_PAT }}"
+
+
 def test_release_validation_keeps_live_inference_decoupled() -> None:
     """Release gates install runtimes but do not invoke paid live inference."""
     workflow = _workflow()
