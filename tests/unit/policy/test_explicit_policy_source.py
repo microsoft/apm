@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 
 from apm_cli.install.errors import PolicyViolationError
 from apm_cli.policy import discovery
@@ -85,26 +88,86 @@ def test_explicit_source_cannot_loosen_discovered(project: Path) -> None:
 
 
 @pytest.mark.parametrize("default", ["warn", "block"])
-def test_unavailable_explicit_source_follows_fetch_failure_default(
+def test_unavailable_explicit_source_fails_closed_whatever_the_default(
     project: Path, default: str
 ) -> None:
     result = _partial()
     unreachable_source = "url:https://policy.invalid/p.yml"
     assert [u.source for u in result.unavailable_sources] == [unreachable_source]
-    org_policy = result.policy
 
     logger = MagicMock()
-    if default == "block":
-        with pytest.raises(PolicyViolationError, match="could not be loaded"):
-            route_discovery_outcome(result, logger=logger, fetch_failure_default=default)
-    else:
-        policy = route_discovery_outcome(result, logger=logger, fetch_failure_default=default)
-        assert policy is org_policy
+    with pytest.raises(PolicyViolationError, match="explicit policy source url:https"):
+        route_discovery_outcome(result, logger=logger, fetch_failure_default=default)
     logger.policy_source_unavailable.assert_called_once_with(
         source=unreachable_source,
         error="connection refused",
-        blocking=default == "block",
+        blocking=True,
+        explicit=True,
     )
+
+
+@pytest.mark.parametrize("default", ["warn", "block"])
+def test_discovered_failure_with_loaded_explicit_follows_the_default(
+    project: Path, default: str
+) -> None:
+    """Only the named source fails closed; a failed discovery keeps its routing."""
+    (project / "org-policy.yml").write_text(_DENY_B, encoding="utf-8")
+    discovered = PolicyFetchResult(
+        source="org:contoso/.github", outcome="cache_miss_fetch_fail", error="timed out"
+    )
+    with explicit_policy_scope("./org-policy.yml"):
+        result = compose_explicit_policy(
+            discovered, lambda source: discovery.discover_policy(project, policy_override=source)
+        )
+
+    logger = MagicMock()
+    if default == "block":
+        with pytest.raises(PolicyViolationError, match="discovered policy source org:contoso"):
+            route_discovery_outcome(result, logger=logger, fetch_failure_default=default)
+    else:
+        policy = route_discovery_outcome(result, logger=logger, fetch_failure_default=default)
+        assert policy is not None and policy.dependencies.deny == ("contoso/pkg-b",)
+    logger.policy_source_unavailable.assert_called_once_with(
+        source="org:contoso/.github", error="timed out", blocking=default == "block"
+    )
+
+
+def test_stale_cached_explicit_url_counts_as_loaded(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A valid stale cached copy of the named source is loaded, not a failure."""
+    url = "https://policy.example.com/org-policy.yml"
+    online = {"up": True}
+
+    def transport(_session, method, url=None, **_kwargs):
+        if not online["up"]:
+            raise requests.ConnectionError("connection refused")
+        response = requests.Response()
+        response.status_code = 200
+        response._content = _DENY_B.encode("utf-8")
+        response.encoding = "utf-8"
+        response.url = url
+        return response
+
+    monkeypatch.setattr(requests.Session, "request", transport)
+    with explicit_policy_scope(url):
+        fresh = discover_policy_with_chain(project)
+    assert fresh.outcome == "found"
+
+    meta = next(discovery._get_cache_dir(project).glob("*.meta.json"))
+    payload = json.loads(meta.read_text(encoding="utf-8"))
+    payload["cached_at"] = time.time() - discovery.DEFAULT_CACHE_TTL - 60
+    meta.write_text(json.dumps(payload), encoding="utf-8")
+    online["up"] = False
+
+    with explicit_policy_scope(url):
+        stale = discover_policy_with_chain(project)
+
+    assert stale.outcome == "cached_stale"
+    assert stale.unavailable_sources == []
+    policy = route_discovery_outcome(stale, logger=None, fetch_failure_default="block")
+    allowed, _ = check_dependency_allowed("contoso/pkg-b", policy.dependencies)
+    assert not allowed
 
 
 def test_missing_explicit_file_is_a_routed_failure(project: Path) -> None:
@@ -138,24 +201,28 @@ def _partial() -> PolicyFetchResult:
 
 
 @pytest.mark.parametrize("default", ["warn", "block"])
-def test_partial_policy_is_unresolved_for_every_reader(default: str) -> None:
+def test_partial_policy_is_unresolved_and_blocks_for_every_reader(default: str) -> None:
     route = classify_discovery_outcome(_partial(), fetch_failure_default=default)
     assert route.unresolved
     assert route.unavailable_source == "cache_miss_fetch_fail"
-    assert route.blocks is (default == "block")
+    assert route.blocks
+    assert not route.from_fetch_failure_default
 
 
-def test_trust_reader_routes_an_unavailable_explicit_source(
+def test_trust_reader_fails_closed_on_an_unavailable_explicit_source(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A trust reader whose logger has no policy wording reports the source neutrally."""
+    """A trust reader whose logger has no policy wording still names the source."""
     result = _partial()
 
     class _PlainLogger:
         verbose = False
 
-    policy = resolve_trust_policy(project, logger=_PlainLogger(), fetch_result=result)
+    with pytest.raises(PolicyViolationError, match="explicit policy source"):
+        resolve_trust_policy(project, logger=_PlainLogger(), fetch_result=result)
 
-    assert policy is not None
     captured = capsys.readouterr()
-    assert "url:https://policy.invalid/p.yml could not be loaded" in captured.out + captured.err
+    assert (
+        "Explicit policy source url:https://policy.invalid/p.yml could not be loaded"
+        in captured.out + captured.err
+    )

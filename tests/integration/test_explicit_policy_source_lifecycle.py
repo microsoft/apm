@@ -7,8 +7,12 @@ Promises under test:
    the local file needs no network.
 2. The explicit source only adds constraints: it cannot re-allow what the
    auto-discovered org policy denies.
-3. An unreachable ``--policy`` URL follows ``policy.fetch_failure_default``:
-   ``warn`` reports it and installs, ``block`` fails closed without writes.
+3. A named ``--policy`` source that cannot be loaded (an unreachable URL, a
+   missing file) fails closed for ``install``, ``install --mcp`` and
+   ``update`` with nothing to change, under ``policy.fetch_failure_default``
+   ``warn`` and ``block`` alike: non-zero exit, no file written.
+4. With a loadable explicit source, a discovered-policy failure still follows
+   ``policy.fetch_failure_default``.
 """
 
 from __future__ import annotations
@@ -140,73 +144,87 @@ def test_explicit_policy_cannot_reallow_discovered_deny(
         assert _snapshot(project) == before, "blocked install wrote files"
 
 
-def test_unreachable_explicit_policy_follows_fetch_failure_default(
-    tmp_path: Path, apm_binary_path: Path
+_MISSING_FILE = "./missing-policy.yml"
+_COMMANDS = {
+    "install": lambda source: ("install", "--policy", source),
+    "install-mcp": lambda source: (
+        "install",
+        "--mcp",
+        "fetch",
+        "--policy",
+        source,
+        "--",
+        "npx",
+        "-y",
+        "@mcp/fetch",
+    ),
+    "update": lambda source: ("update", "--yes", "--policy", source),
+}
+
+
+@pytest.mark.parametrize("command", sorted(_COMMANDS))
+def test_unloadable_explicit_policy_fails_closed_whatever_the_default(
+    tmp_path: Path, apm_binary_path: Path, command: str
 ) -> None:
     world = PolicyScopeWorld(tmp_path, dict(os.environ))
     pkg_a = world.publish_package("pkg-a")
     project = world.consumer(dependencies=[f"{pkg_a.slug}#v1.0.0"])
     _plain_git(world, project)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=900)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        run_step(runner, ("install",), cwd=project, env=env, step="0-install")
+        assert lock_repo_urls(project) == {pkg_a.slug}
+
+        for source in (_UNREACHABLE_URL, _MISSING_FILE):
+            for default in ("warn", "block"):
+                manifest = load_yaml(project / "apm.yml")
+                manifest["policy"] = {"fetch_failure_default": default}
+                dump_yaml(manifest, project / "apm.yml")
+                before = _snapshot(project)
+                r = run_step(
+                    runner,
+                    _COMMANDS[command](source),
+                    cwd=project,
+                    env=env,
+                    step=f"{command}-{default}-{'url' if '://' in source else 'file'}",
+                    expected=1,
+                )
+                text = r.stdout + r.stderr
+                assert "explicit policy source" in text.lower(), text
+                assert "could not be loaded" in text, text
+                assert _snapshot(project) == before, "a failed --policy wrote files"
+
+
+@pytest.mark.parametrize("default", ["warn", "block"])
+def test_discovered_failure_with_loadable_explicit_follows_the_default(
+    tmp_path: Path, apm_binary_path: Path, default: str
+) -> None:
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    pkg_a = world.publish_package("pkg-a")
+    world.publish_policy({"name": "broken", "version": "1.0.0", "enforcement": "sometimes"})
+    project = world.consumer(
+        dependencies=[f"{pkg_a.slug}#v1.0.0"],
+        extra={"policy": {"fetch_failure_default": default}},
+    )
+    dump_yaml(_DENY_B, project / "org-policy.yml")
     runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=600)
 
     with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
         env = fx.child_environment(world.git_env())
-
-        # fetch_failure_default: block -> fail closed, nothing written.
-        manifest = load_yaml(project / "apm.yml")
-        manifest["policy"] = {"fetch_failure_default": "block"}
-        dump_yaml(manifest, project / "apm.yml")
         before = _snapshot(project)
         r = run_step(
             runner,
-            ("install", "--policy", _UNREACHABLE_URL),
+            ("install", "--policy", "./org-policy.yml"),
             cwd=project,
             env=env,
-            step="1-unreachable-block",
-            expected=1,
+            step=f"1-install-{default}",
+            expected=1 if default == "block" else 0,
         )
-        assert "could not be loaded" in (r.stdout + r.stderr)
-        assert _snapshot(project) == before, "fail-closed install wrote files"
-
-        # Default (warn) -> the unreachable source is reported, install proceeds.
-        del manifest["policy"]
-        dump_yaml(manifest, project / "apm.yml")
-        r = run_step(
-            runner,
-            ("install", "--policy", _UNREACHABLE_URL),
-            cwd=project,
-            env=env,
-            step="2-unreachable-warn",
-        )
-        assert "could not be loaded" in (r.stdout + r.stderr)
-        assert lock_repo_urls(project) == {pkg_a.slug}
-
-
-def test_update_with_nothing_to_change_still_routes_unreachable_explicit_policy(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
-    """The no-change shortcut must not skip fetch_failure_default for --policy (#1925)."""
-    world = PolicyScopeWorld(tmp_path, dict(os.environ))
-    pkg_a = world.publish_package("pkg-a")
-    project = world.consumer(dependencies=[f"{pkg_a.slug}#v1.0.0"])
-    _plain_git(world, project)
-    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=600)
-
-    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
-        env = fx.child_environment(world.git_env())
-        run_step(runner, ("install",), cwd=project, env=env, step="1-install")
-        lock = (project / "apm.lock.yaml").read_bytes()
-        update = ("update", "--yes", "--policy", _UNREACHABLE_URL)
-
-        # Default (warn): reported, nothing to change, exit 0.
-        r = run_step(runner, update, cwd=project, env=env, step="2-update-warn")
-        assert "could not be loaded" in (r.stdout + r.stderr)
-        assert "already at their latest" in (r.stdout + r.stderr)
-
-        # fetch_failure_default: block -> nonzero even with nothing to change.
-        manifest = load_yaml(project / "apm.yml")
-        manifest["policy"] = {"fetch_failure_default": "block"}
-        dump_yaml(manifest, project / "apm.yml")
-        r = run_step(runner, update, cwd=project, env=env, step="3-update-block", expected=1)
-        assert "could not be loaded" in (r.stdout + r.stderr)
-        assert (project / "apm.lock.yaml").read_bytes() == lock
+        text = r.stdout + r.stderr
+        assert "discovered policy source" in text.lower(), text
+        if default == "block":
+            assert _snapshot(project) == before, "blocked install wrote files"
+        else:
+            assert lock_repo_urls(project) == {pkg_a.slug}

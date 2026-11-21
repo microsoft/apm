@@ -1091,18 +1091,25 @@ class InstallLogger(CommandLogger):
         self._policy_banners.add(key)
         return True
 
-    def policy_source_unavailable(self, source: str, error: str, blocking: bool = False):
+    def policy_source_unavailable(
+        self, source: str, error: str, blocking: bool = False, explicit: bool = False
+    ):
         """Log a composed policy source that could not be loaded (#1925).
 
-        Always visible: a named source that silently drops out would hide
-        a gap in enforcement. With ``blocking`` the caller fails closed
-        right after, so the line is an error instead of a warning.
+        Always visible: a source that silently drops out would hide a gap in
+        enforcement. The line names whether the explicit ``--policy`` source
+        or the discovered policy failed. With ``blocking`` the caller fails
+        closed right after, so the line is an error instead of a warning; an
+        explicit source always blocks.
         """
+        kind = "Explicit" if explicit else "Discovered"
         if blocking:
-            _rich_error(f"Policy source {source} could not be loaded: {error}", symbol="error")
+            _rich_error(
+                f"{kind} policy source {source} could not be loaded: {error}", symbol="error"
+            )
             return
         _rich_warning(
-            f"Policy source {source} could not be loaded ({error}); continuing "
+            f"{kind} policy source {source} could not be loaded ({error}); continuing "
             "without it. Set policy.fetch_failure_default: block in apm.yml to fail closed.",
             symbol="warning",
         )

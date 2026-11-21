@@ -14,8 +14,9 @@ This module owns two decisions:
 * :func:`compose_explicit_policy`, which combines the discovered result with
   the explicit one through tighten-only inheritance (the explicit source can
   add constraints, never remove them). A source that cannot be loaded is kept
-  in ``unavailable_sources`` so outcome routing applies
-  ``policy.fetch_failure_default`` to it.
+  in ``unavailable_sources``: outcome routing fails closed on the named
+  ``--policy`` source whatever ``policy.fetch_failure_default`` says, and
+  applies that default only to a failed discovered policy.
 """
 
 from __future__ import annotations
@@ -115,7 +116,9 @@ def compose_explicit_policy(
     The discovered policy is the parent and the explicit policy the child of
     a tighten-only merge, so the explicit source can never re-allow what the
     discovered policy denies. A failed component is carried in
-    ``unavailable_sources`` and routed by ``route_discovery_outcome``.
+    ``unavailable_sources`` (the explicit one marked ``explicit=True``) and
+    routed by ``route_discovery_outcome``. A valid stale cached copy counts
+    as loaded.
     """
     from . import inheritance
     from .discovery import _is_policy_empty, _redact_policy_ref
@@ -128,7 +131,10 @@ def compose_explicit_policy(
     if explicit.outcome == "disabled":
         return discovered
     if explicit.policy is None:
-        failed = _as_unavailable(explicit, f"--policy {_redact_policy_ref(source)}")
+        # The named source failed: routing blocks on it unconditionally.
+        failed = replace(
+            _as_unavailable(explicit, f"--policy {_redact_policy_ref(source)}"), explicit=True
+        )
         return replace(
             discovered,
             explicit=True,
