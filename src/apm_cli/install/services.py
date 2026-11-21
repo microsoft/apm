@@ -1141,7 +1141,11 @@ def integrate_local_bundle(
         project_root,
         targets=targets,
         slug=str(slug),
-        hooks_approved=_hooks_approved_bundle,
+        hooks_approved=(
+            None
+            if not _hooks_approved_bundle and _hooks_denied_bundle(allow_executables, approval_key)
+            else _hooks_approved_bundle
+        ),
         approval_key=approval_key,
         force=force,
         dry_run=dry_run,
@@ -1170,3 +1174,13 @@ def integrate_local_bundle(
         "prompts": 0,
         "sub_skills": 0,
     }
+
+
+def _hooks_denied_bundle(allow_executables: Any, approval_key: str | None) -> bool:
+    """Whether a deny of this exact bundle, not a missing approval, withholds its hooks."""
+    if approval_key is None:
+        return False
+    from ..security.executables import EXEC_TYPE_HOOKS
+    from .local_bundle_handler import bundle_type_denied
+
+    return bundle_type_denied(allow_executables, approval_key, EXEC_TYPE_HOOKS)

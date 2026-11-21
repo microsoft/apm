@@ -39,7 +39,7 @@ def integrate_local_bundle_hooks(
     *,
     targets: Any,
     slug: str,
-    hooks_approved: bool,
+    hooks_approved: bool | None,
     approval_key: str | None,
     force: bool,
     dry_run: bool,
@@ -47,7 +47,11 @@ def integrate_local_bundle_hooks(
     diagnostics: Any = None,
     logger: Any = None,
 ) -> BundleHookResult:
-    """Register the bundle's plugin hooks for every hook-capable target."""
+    """Register the bundle's plugin hooks for every hook-capable target.
+
+    *hooks_approved* is ``True`` when approved, ``False`` when pending
+    approval, and ``None`` when the user denied this exact bundle's hooks.
+    """
     from .local_bundle_paths import bundle_pack_files, bundle_slug_validation_error
 
     result = BundleHookResult()
@@ -69,15 +73,17 @@ def integrate_local_bundle_hooks(
             if retired
             else f"Skipped {len(hook_paths)} bundle hook file(s) from {slug}"
         )
-        _warn(
-            f"{lead}: hooks are executable and not approved for this exact bundle content. "
-            + local_bundle_approval_hint(
-                str(approval_key), "hooks", user_scope=scope == InstallScope.USER
-            ),
-            slug,
-            diagnostics,
-            logger,
-        )
+        user_scope = scope == InstallScope.USER
+        if hooks_approved is None:
+            from .local_bundle_handler import bundle_denied_hint
+
+            reason = bundle_denied_hint(str(approval_key), "hooks", user_scope=user_scope)
+        else:
+            reason = (
+                "hooks are executable and not approved for this exact bundle content. "
+                + local_bundle_approval_hint(str(approval_key), "hooks", user_scope=user_scope)
+            )
+        _warn(f"{lead}: {reason}", slug, diagnostics, logger)
         return result
     hook_targets = [target for target in targets if target.supports("hooks")]
     if not hook_targets:

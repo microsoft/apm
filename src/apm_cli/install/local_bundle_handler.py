@@ -645,8 +645,10 @@ def _filter_bundle_executables(
         return dependencies
     noun = "executable" if len(dependencies) == 1 else "executables"
     lead = f"Skipped {len(dependencies)} bundle {exec_type.upper()} {noun} from {bundle_info.package_id}"
-    if _bundle_denied(allow_executables, approval_key, exec_type):
-        logger.warning(f"{lead}: {_denied_hint(approval_key, exec_type, user_scope=user_scope)}")
+    if bundle_type_denied(allow_executables, approval_key, exec_type):
+        logger.warning(
+            f"{lead}: {bundle_denied_hint(approval_key, exec_type, user_scope=user_scope)}"
+        )
     else:
         logger.warning(
             f"{lead}. " + local_bundle_approval_hint(approval_key, exec_type, user_scope=user_scope)
@@ -654,7 +656,7 @@ def _filter_bundle_executables(
     return []
 
 
-def _bundle_denied(allow_executables: Any, approval_key: str, exec_type: str) -> bool:
+def bundle_type_denied(allow_executables: Any, approval_key: str, exec_type: str) -> bool:
     """Whether a deny of this exact bundle, not a missing approval, withholds *exec_type*."""
     from ..security.trust import package_denies_type
 
@@ -662,8 +664,12 @@ def _bundle_denied(allow_executables: Any, approval_key: str, exec_type: str) ->
     return package_denies_type(context, (approval_key,), exec_type)
 
 
-def _denied_hint(approval_key: str, exec_type: str, *, user_scope: bool) -> str:
-    """Name the deny and the user's own command that lifts it (RA-041)."""
+def bundle_denied_hint(approval_key: str, exec_type: str, *, user_scope: bool) -> str:
+    """Name the deny and the user's own command that lifts it (RA-041).
+
+    The one wording for a denied local bundle's hooks, MCP and LSP: a deny is
+    never reported as a pending approval.
+    """
     from ..core.remediation import LOCAL_BUNDLE_EXECUTABLES_DENIED
     from ..security.trust import approve_command
 

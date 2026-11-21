@@ -107,4 +107,7 @@ def test_deny_then_install_retires_every_bundle_executable(
     text = " ".join(f"{again.stdout} {again.stderr}".split())
     assert f"mcp is denied for this exact bundle ({key.group(1)})" in text, _evidence(again)
     assert "To approve this exact local bundle's mcp" not in text, _evidence(again)
+    assert f"hooks is denied for this exact bundle ({key.group(1)})" in text, _evidence(again)
+    assert "To approve this exact local bundle's hooks" not in text, _evidence(again)
+    assert "not approved for this exact bundle content" not in text, _evidence(again)
     assert _executables(world)["mcp"] == [], _evidence(again)
