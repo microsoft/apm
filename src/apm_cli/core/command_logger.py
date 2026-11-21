@@ -1043,9 +1043,10 @@ class InstallLogger(CommandLogger):
                     + self._policy_reason_blocked(
                         dep_ref,
                         source,
-                        remedy=None if self._refused_add(declared_by, dep_ref) else remedy,
+                        remedy=remedy,
                         declared_by=declared_by,
                         rule=rule,
+                        refused_add=self._refused_add(declared_by, dep_ref),
                     ),
                     color="dim",
                     err=True,
@@ -1117,15 +1118,20 @@ class InstallLogger(CommandLogger):
         remedy: PolicyRemedy | None = None,
         declared_by: str | None = None,
         rule: str | None = None,
+        refused_add: bool = False,
     ) -> str:
         """Actionable reason for a blocked dependency; never a policy bypass (RA-015).
 
         Only :class:`~apm_cli.policy.models.PolicyRemedy` members render an
-        apm.yml edit; ``None`` or an unknown remedy renders none.
+        apm.yml edit; ``None`` or an unknown remedy renders none. A package
+        this command was adding is not in apm.yml, so its remedy is to choose
+        another package (RA-015b).
         """
         from apm_cli.policy.models import PolicyRemedy
 
-        if remedy == PolicyRemedy.ADD:
+        if refused_add:
+            edit = "Choose a package the policy allows, or contact"
+        elif remedy == PolicyRemedy.ADD:
             edit = f"Add `{dep_ref}` to apm.yml, or contact"
         elif remedy == PolicyRemedy.PIN:
             edit = f"Pin `{dep_ref}` to a semver range, tag, or SHA in apm.yml, or contact"

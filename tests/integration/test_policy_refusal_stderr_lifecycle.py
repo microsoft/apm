@@ -91,7 +91,7 @@ def test_policy_refusals_and_approve_usage_error_write_stderr(
         _assert_refusal_on_stderr(
             refused_add,
             f"Policy violation: github.com/{added.slug}",
-            "Nothing was changed. Contact your policy admin to allow it.",
+            "Nothing was changed. Choose a package the policy allows, or contact your policy admin to allow it.",
         )
         assert "from apm.yml" not in refused_add.stdout + refused_add.stderr
         _assert_no_bypass(refused_add)

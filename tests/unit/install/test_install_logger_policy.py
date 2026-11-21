@@ -712,7 +712,9 @@ class TestPolicyReasonHelpers:
         )
         err = " ".join(capsys.readouterr().err.split())
         assert "apm.yml" not in err
-        assert "Contact your policy admin to allow it." in err
+        assert (
+            "Choose a package the policy allows, or contact your policy admin to allow it." in err
+        )
 
     def test_reason_blocked_transitive_mcp_names_declaring_dependency(self):
         msg = InstallLogger._policy_reason_blocked(
