@@ -360,6 +360,29 @@ def _build_dependency_graph(ctx: InstallContext, resolver):
     return dependency_graph
 
 
+def _prefetch_policy_refusal(ctx: InstallContext):
+    """Return ``refuse(dep_ref) -> bool``: a blocking org policy refuses by identity.
+
+    The policy is read once, lazily, at the scope manifest root. A refused
+    dependency is never contacted, cloned or cached; it is recorded on
+    ``ctx.prefetch_policy_denials`` and the policy gate reports it.
+    """
+    from apm_cli.install.phases.policy_gate import _policy_root
+    from apm_cli.policy.install_preflight import identity_policy_denial, prefetch_identity_policy
+
+    state: dict = {}
+
+    def refuse(dep_ref) -> bool:
+        if "policy" not in state:
+            state["policy"] = prefetch_identity_policy(_policy_root(ctx), no_policy=ctx.no_policy)
+        if identity_policy_denial(dep_ref, state["policy"]) is None:
+            return False
+        ctx.prefetch_policy_denials.append(dep_ref)
+        return True
+
+    return refuse
+
+
 def _resolve_dependencies(
     ctx: InstallContext,
     staging_session: ResolutionStagingSession,
@@ -445,6 +468,8 @@ def _resolve_dependencies(
 
     verbose = ctx.verbose  # noqa: F841
 
+    refuse_before_fetch = _prefetch_policy_refusal(ctx)
+
     def download_callback(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
         """Download a package during dependency resolution.
 
@@ -459,6 +484,8 @@ def _resolve_dependencies(
                 transitive ``../sibling`` resolves against the declaring
                 package's directory rather than the root consumer (#857).
         """
+        if refuse_before_fetch(dep_ref):
+            return None
         install_path = replacement_path = None
         try:
             install_path = _prepare_callback_materialization_path(
@@ -808,7 +835,9 @@ def _resolve_dependencies(
         deps_to_install,
         downloader,
         update_refs=update_refs,
-        failed_keys=callback_failures,
+        # A dependency refused by identity is never contacted, not even for its ref.
+        failed_keys=callback_failures
+        | {dep.get_unique_key() for dep in ctx.prefetch_policy_denials},
     )
 
     # ------------------------------------------------------------------

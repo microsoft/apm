@@ -109,7 +109,7 @@ def run(ctx: InstallContext) -> None:
             extra_kwargs["registries"] = registries_map
 
     audit_result = run_dependency_policy_checks(
-        ctx.deps_to_install,
+        _with_prefetch_denials(ctx),
         lockfile=ctx.existing_lockfile,
         policy=policy,
         mcp_deps=mcp_deps,
@@ -163,6 +163,20 @@ def run(ctx: InstallContext) -> None:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def _with_prefetch_denials(ctx: InstallContext) -> list:
+    """The resolved dependencies plus any refused by identity before fetching."""
+    denied = getattr(ctx, "prefetch_policy_denials", None) or ()
+    if not denied:
+        return ctx.deps_to_install
+    deps = list(ctx.deps_to_install)
+    seen = {dep.get_unique_key() for dep in deps}
+    for dep in denied:
+        if dep.get_unique_key() not in seen:
+            seen.add(dep.get_unique_key())
+            deps.append(dep)
+    return deps
 
 
 def _is_policy_disabled(ctx: InstallContext) -> bool:

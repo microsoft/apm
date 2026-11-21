@@ -13,7 +13,9 @@ rather than duplicate it.  The gate phase adds pipeline-specific wiring
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import contextlib
+from collections.abc import Iterator, Mapping
+from contextvars import ContextVar
 from pathlib import Path
 
 # #832: Canonical exception type lives in ``apm_cli.install.errors``.
@@ -221,3 +223,51 @@ def run_policy_preflight(
             )
 
     return fetch_result, True
+
+
+def prefetch_identity_policy(policy_root: Path, *, no_policy: bool = False):
+    """The blocking org policy that refuses a dependency before it is fetched.
+
+    A deny or allow rule decides on the dependency identity alone, so a
+    dependency the policy blocks is never contacted, cloned or cached.
+    Returns ``None`` when policy is disabled, unusable or not blocking;
+    the install gate then reports the outcome as before.
+    """
+    from .discovery import policy_disabled_by_env
+    from .outcome_routing import resolve_trust_policy
+
+    if no_policy or policy_disabled_by_env():
+        return None
+    policy = resolve_trust_policy(policy_root, announce=False, raise_blocking_errors=False)
+    if policy is None or policy.enforcement != "block":
+        return None
+    return policy
+
+
+def identity_policy_denial(dependency, policy) -> str | None:
+    """The reason *policy* refuses *dependency* by identity, else ``None``."""
+    if policy is None:
+        return None
+    from .matcher import check_dependency_allowed
+
+    allowed, reason = check_dependency_allowed(dependency, policy.dependencies)
+    return None if allowed else reason
+
+
+_IDENTITY_POLICY: ContextVar[object | None] = ContextVar("identity_policy", default=None)
+
+
+@contextlib.contextmanager
+def identity_policy_scope(policy_root: Path, *, no_policy: bool = False) -> Iterator[None]:
+    """Make the blocking policy visible to package validation for one install."""
+    policy = prefetch_identity_policy(Path(policy_root).resolve(), no_policy=no_policy)
+    token = _IDENTITY_POLICY.set(policy)
+    try:
+        yield
+    finally:
+        _IDENTITY_POLICY.reset(token)
+
+
+def active_identity_policy():
+    """The blocking policy of the enclosing :func:`identity_policy_scope`, if any."""
+    return _IDENTITY_POLICY.get()

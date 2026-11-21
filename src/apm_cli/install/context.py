@@ -267,6 +267,8 @@ class InstallContext:
     # ------------------------------------------------------------------
     policy_fetch: Any = None  # Optional[PolicyFetchResult] from discovery
     policy_enforcement_active: bool = False
+    # Dependencies a blocking org policy refused by identity before any fetch.
+    prefetch_policy_denials: list[Any] = field(default_factory=list)
     no_policy: bool = False  # W2-escape-hatch will wire --no-policy here
     audit_override: str | None = None  # --audit/--no-audit CLI override (off|warn|block)
     skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages
