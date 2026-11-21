@@ -496,10 +496,14 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
             if source != ConfigSource.NONE:
                 from ..marketplace.migration import load_marketplace_config
 
-                # The build above loaded this config and already reported its
-                # warnings; this second load must not repeat them (#4046).
+                # The build above loaded this config and collected its load
+                # warnings. The render loop below reports them, except under an
+                # implicit --check-clean dry run (non-JSON), which skips every
+                # producer: only there does this reload report them (#4046).
+                report_reload = implicit_check_clean_dry_run and not json_output
                 gate_config = load_marketplace_config(
-                    project_root, warn_callback=lambda _message: None
+                    project_root,
+                    warn_callback=logger.warning if report_reload else lambda _message: None,
                 )
         except MarketplaceYmlError as exc:
             _emit_json_error_or_raise(

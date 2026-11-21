@@ -293,6 +293,10 @@ _OUTPUTS_LIST = _MARKETPLACE + "  outputs: [claude]\n"
 _OUTPUTS_LIST_WARNING = "[!] outputs: [claude] is deprecated; use the map form: outputs: claude: {}"
 # The legacy warning's wording is pinned by the "marketplace-yml" scenario.
 _LEGACY_YML_WARNING = _collapse(SCENARIOS["marketplace-yml"].text.removeprefix("[!] "))
+_LEGACY_YML_FILES = {
+    "apm.yml": _MANIFEST,
+    "marketplace.yml": "name: m\ndescription: d\nversion: 1.0.0\nowner:\n  name: o\npackages: []\n",
+}
 
 
 def _both(result: subprocess.CompletedProcess[str]) -> str:
@@ -349,15 +353,39 @@ def test_legacy_marketplace_yml_warning_prints_once_when_pack_reloads(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """The release gate's second config load repeats no load warning."""
-    files = {
-        "apm.yml": _MANIFEST,
-        "marketplace.yml": "name: m\ndescription: d\nversion: 1.0.0\nowner:\n  name: o\n"
-        "packages: []\n",
-    }
-    result = _run(tmp_path, apm_binary_path, files, ("pack", "--check-versions"))
+    result = _run(tmp_path, apm_binary_path, _LEGACY_YML_FILES, ("pack", "--check-versions"))
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert _both(result).count(_LEGACY_YML_WARNING) == 1, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("files", "warning"),
+    [
+        ({"apm.yml": _OUTPUTS_LIST}, "outputs: [claude] is deprecated; use the map form"),
+        (_LEGACY_YML_FILES, _LEGACY_YML_WARNING),
+    ],
+    ids=["outputs-list", "legacy-marketplace-yml"],
+)
+@pytest.mark.parametrize(
+    "argv",
+    [("pack", "--check-clean"), ("pack", "--check-clean", "--dry-run")],
+    ids=["implicit-dry-run", "explicit-dry-run"],
+)
+def test_check_clean_prints_each_config_load_warning_once(
+    argv: tuple[str, ...],
+    files: dict[str, str],
+    warning: str,
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """--check-clean alone skips producer rendering; load warnings still print once."""
+    result = _run(tmp_path, apm_binary_path, files, argv)
+    evidence = f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+
+    # No marketplace.json exists yet, so the drift gate fails with exit 4.
+    assert result.returncode == 4, evidence
+    assert _both(result).count(warning) == 1, evidence
 
 
 def test_pack_json_carries_the_outputs_list_warning_without_corrupting_stdout(
