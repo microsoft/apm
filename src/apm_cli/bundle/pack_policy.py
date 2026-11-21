@@ -16,11 +16,13 @@ if TYPE_CHECKING:
     from ..models.dependency.reference import DependencyReference
 
 
-def pack_policy_preflight(project_root: Path, logger: Any) -> None:
+def pack_policy_preflight(project_root: Path, logger: Any) -> list[str]:
     """Refuse to pack when org policy denies a package whose content would ship.
 
     A project with no declared or locked package ships only its own content
-    and is not checked. Raises ``ValueError`` naming each denied package.
+    and is not checked. Raises ``ValueError`` naming each denied package
+    under ``enforcement: block``; under ``warn`` returns one pack warning per
+    denied package, which the pack result carries and reports.
     """
     from ..core.command_logger import InstallLogger
     from ..deps.lockfile import resolve_lockfile_path_for_read
@@ -31,12 +33,13 @@ def pack_policy_preflight(project_root: Path, logger: Any) -> None:
     declared = _declared_dependencies(project_root)
     bundled = locked_package_refs(resolve_lockfile_path_for_read(project_root, read_only=True))
     if not declared and not bundled:
-        return
+        return []
+    policy_logger = InstallLogger(verbose=bool(getattr(logger, "verbose", False)), command="pack")
     try:
         run_policy_preflight(
             project_root=project_root,
             apm_deps=declared,
-            logger=InstallLogger(verbose=bool(getattr(logger, "verbose", False)), command="pack"),
+            logger=policy_logger,
             bundled_deps=DenyOnlySubjects(tuple(bundled)),
         )
     except PolicyViolationError as exc:
@@ -52,6 +55,13 @@ def pack_policy_preflight(project_root: Path, logger: Any) -> None:
         raise ValueError(
             f"Pack blocked by org policy: {', '.join(refused)}. Nothing was packed."
         ) from exc
+    from ..utils.diagnostics import CATEGORY_POLICY
+
+    return [
+        f"Policy warning: {item.package} -- {item.message}. It is packed because org "
+        "policy enforcement is warn."
+        for item in policy_logger.diagnostics.by_category().get(CATEGORY_POLICY, [])
+    ]
 
 
 def _declared_dependencies(project_root: Path) -> list[DependencyReference]:

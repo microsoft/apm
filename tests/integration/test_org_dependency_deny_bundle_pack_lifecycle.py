@@ -5,13 +5,17 @@ A local bundle whose package the org policy denies is refused by
 ``apm install <bundle>`` like a denied git dependency, before any file is
 written, and so is a bundle whose embedded lockfile records a denied package.
 ``apm pack`` (``--dry-run`` and ``--archive`` too) refuses a project whose
-lockfile holds a denied package, so its content never ships. With no
+lockfile holds a denied package, so its content never ships; under
+``enforcement: warn`` it packs and names the package in its warnings (text
+and ``--json``). With no
 deny in force, an approved dependency's attested hooks file packs and pack
 does not claim otherwise.
 """
 
 from __future__ import annotations
 
+import json
+import subprocess
 import zipfile
 
 import pytest
@@ -127,3 +131,47 @@ def test_pack_refuses_denied_dependency_and_packs_attested_hooks(
     assert install.returncode == 1, _evidence(install)
     assert denied in text, text
     assert _state(world) == before
+
+
+def _serve_warn_deny_policy(world: World) -> None:
+    """Serve an ``enforcement: warn`` policy denying the package; point the project at it."""
+    org = "policy-warn-deny"
+    tree = world.root / "warn-policy-src"
+    tree.mkdir()
+    policy = {
+        "name": "warn-deny",
+        "version": "1.0",
+        "enforcement": "warn",
+        "dependencies": {"deny": [f"**/{DENIED_PACKAGE}"]},
+    }
+    (tree / "apm-policy.yml").write_text(json.dumps(policy), encoding="utf-8")
+    git = ("git", "-c", "user.name=lifecycle", "-c", "user.email=lifecycle@example.invalid")
+    bare = world.root / "warn-policy.git"
+    for args in (
+        ("-C", str(tree), "init", "-q", "--initial-branch=main"),
+        ("-C", str(tree), "add", "-A"),
+        ("-C", str(tree), "commit", "-qm", "policy"),
+        ("clone", "-q", "--bare", str(tree), str(bare)),
+    ):
+        subprocess.run((*git, *args), env=world.env, check=True, capture_output=True)
+    world.services.serve(f"{org}/.github", bare)
+    project = ("git", "-C", str(world.project))
+    if not (world.project / ".git").exists():
+        subprocess.run((*project, "init", "-q", "--initial-branch=main"), env=world.env, check=True)
+    remote = f"https://github.com/{org}/consumer.git"
+    subprocess.run((*project, "remote", "add", "origin", remote), env=world.env, check=True)
+
+
+def test_pack_under_warn_enforcement_names_the_denied_dependency(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    world = lifecycle_world
+    _ok(world, "install", world.packages[f"{DENIED_PACKAGE}:git"].spec)
+    _serve_warn_deny_policy(world)
+    subject = f"github.com/{ORG}/{DENIED_PACKAGE}"
+
+    text = _text(_ok(world, "pack", "--dry-run"))
+    assert subject in text and "denied by pattern" in text, text
+
+    envelope = json.loads(_ok(world, "pack", "--dry-run", "--json").stdout)
+    assert any(subject in warning for warning in envelope["warnings"]), envelope
