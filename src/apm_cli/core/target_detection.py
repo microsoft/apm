@@ -413,7 +413,7 @@ def get_target_description(target: UserTargetType) -> str:
         "claude": "CLAUDE.md + .claude/commands/ + .claude/agents/ + .claude/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "cursor": ".cursor/agents/ + .agents/skills/ + .cursor/rules/",
-        "gemini": "GEMINI.md + .gemini/commands/ + .agents/skills/ + .gemini/settings.json (MCP/hooks)",
+        "gemini": "GEMINI.md + .gemini/agents/ + .gemini/commands/ + .agents/skills/ + .gemini/settings.json (MCP/hooks)",
         "grok-bot": "agent-data/workflows/ (project) or ~/agent-data/workflows/ (--global) -- skills only, explicit --target only",
         "grok-build": "AGENTS.md + .grok/rules/ + .grok/agents/ + .grok/commands/ + .grok/skills/",
         "hermes": "AGENTS.md + .agents/skills/ (project) or $HERMES_HOME/skills/ + $HERMES_HOME/config.yaml MCP (explicit --target only)",

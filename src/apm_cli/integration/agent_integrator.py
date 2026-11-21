@@ -107,6 +107,111 @@ def is_kiro_agent_tool(value: str) -> bool:
     return value in KIRO_AGENT_ALLOWED_TOOLS or bool(_KIRO_SELECTOR_RE.fullmatch(value))
 
 
+# Gemini CLI local-agent frontmatter, qualified against Gemini CLI v0.70.0.
+# Sources (accessed 2026-11-21):
+#   https://github.com/google-gemini/gemini-cli/blob/v0.70.0/packages/core/src/agents/agentLoader.ts
+#   https://github.com/google-gemini/gemini-cli/blob/v0.70.0/packages/core/src/tools/tool-names.ts
+#   https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/core/subagents.md
+#   https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/reference/tools.md
+# The loader schema is strict (one unknown key rejects the file), so the
+# renderer emits only these keys. A value Gemini would reject, or one APM
+# cannot carry without changing the agent's access, blocks deployment of
+# that agent only; sibling agents still deploy.
+GEMINI_AGENT_BUILTIN_TOOLS: frozenset[str] = frozenset(
+    {
+        "activate_skill",
+        "ask_user",
+        "complete_task",
+        "enter_plan_mode",
+        "exit_plan_mode",
+        "get_internal_docs",
+        "glob",
+        "google_web_search",
+        "grep_search",
+        "invoke_agent",
+        "list_directory",
+        "list_mcp_resources",
+        "read_file",
+        "read_many_files",
+        "read_mcp_resource",
+        "replace",
+        "run_shell_command",
+        "tracker_add_dependency",
+        "tracker_create_task",
+        "tracker_get_task",
+        "tracker_list_tasks",
+        "tracker_update_task",
+        "tracker_visualize",
+        "update_topic",
+        "web_fetch",
+        "write_file",
+        "write_todos",
+        # Legacy alias of grep_search.
+        "search_file_content",
+    }
+)
+# Optional native fields carried through verbatim after a type check that
+# matches the loader schema (number, positive integer, string).
+_GEMINI_AGENT_OPTIONAL_FIELDS: tuple[str, ...] = (
+    "display_name",
+    "temperature",
+    "max_turns",
+    "timeout_mins",
+)
+# Source keys that would change what the agent can reach if APM dropped them
+# (agent-scoped MCP servers, deny lists, permission modes) or that describe a
+# remote (A2A) agent. Such an agent is not deployed.
+_GEMINI_AGENT_REJECTED_FIELDS: frozenset[str] = frozenset(
+    {
+        "mcp_servers",
+        "mcpServers",
+        "mcp-servers",
+        "disallowedTools",
+        "disallowed-tools",
+        "permissionMode",
+        "agent_card_url",
+        "agent_card_json",
+        "auth",
+    }
+)
+_GEMINI_AGENT_NAME_RE = re.compile(r"[a-z0-9_-]+")
+_GEMINI_MCP_SLUG_RE = re.compile(r"[A-Za-z0-9_.:-]+")
+_GEMINI_AGENTS_REF = (
+    "Ref: https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/core/subagents.md"
+)
+
+
+def is_gemini_agent_tool(value: str) -> bool:
+    """Return True when Gemini CLI v0.70.0 accepts *value* in an agent's ``tools``.
+
+    Mirrors ``isValidToolName(value, {allowWildcards: true})``: built-in
+    names, the legacy alias, ``discovered_tool_*``, ``*``, and MCP names
+    ``mcp_<server>_<tool>`` with ``mcp_*`` / ``mcp_<server>_*`` wildcards.
+    """
+    if value in GEMINI_AGENT_BUILTIN_TOOLS or value in ("*", "mcp_*"):
+        return True
+    if value.startswith("discovered_tool_"):
+        return True
+    if not value.startswith("mcp_") or value.startswith("mcp__"):
+        return False
+    server, sep, tool = value[len("mcp_") :].partition("_")
+    if not (sep and server and tool) or not _GEMINI_MCP_SLUG_RE.fullmatch(server):
+        return False
+    if tool == "*":
+        return True
+    return tool.strip("_") != "" and bool(_GEMINI_MCP_SLUG_RE.fullmatch(tool))
+
+
+def is_gemini_agent_model(value: str) -> bool:
+    """Return True for a ``model`` APM deploys to Gemini.
+
+    APM's conservative rule: ``inherit`` (the default in the subagents doc)
+    or a ``gemini-*`` model id (the doc's example form). Other providers' ids
+    are rejected rather than mapped.
+    """
+    return value == "inherit" or value.startswith("gemini-")
+
+
 # Outcomes of :meth:`AgentIntegrator._deploy_rendered_agent`.
 _ADOPTED = "adopted"
 _SKIPPED = "skipped"
@@ -122,7 +227,7 @@ class CodexAgentFieldError(ValueError):
 
 
 class AgentIntegrator(BaseIntegrator):
-    """Handles integration of APM package agents into .github/agents/, .claude/agents/, .cursor/agents/, and .kiro/agents/."""
+    """Handles integration of APM package agents into .github/agents/, .claude/agents/, .cursor/agents/, .kiro/agents/, .gemini/agents/, and other target agent directories."""
 
     # Deploys via write_text_lf -> compare adopt candidates in LF mode.
     _LF_NORMALIZED_DEPLOY = True
@@ -293,6 +398,17 @@ class AgentIntegrator(BaseIntegrator):
                     package_name=package_info.package.name,
                 )
                 if not ok:
+                    files_skipped += 1
+                    continue
+            elif mapping.format_id == "gemini_agent":
+                # Same preflight contract as Kiro: validate before any mutation.
+                rendered, links_resolved = self._preflight_render_gemini_agent(
+                    source_file,
+                    target_path,
+                    diagnostics=diagnostics,
+                    package_name=package_info.package.name,
+                )
+                if rendered is None:
                     files_skipped += 1
                     continue
             else:
@@ -1008,6 +1124,134 @@ class AgentIntegrator(BaseIntegrator):
             rendered = body
 
         return rendered, True
+
+    # ------------------------------------------------------------------
+    # Gemini CLI agent transformer (MD -> validated MD)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _gemini_agent_problem(fm: dict, filename: str) -> str | None:
+        """Return why Gemini would reject *fm* (or APM must not deploy it), or None."""
+        rejected = sorted(str(k) for k in fm if k in _GEMINI_AGENT_REJECTED_FIELDS)
+        if rejected:
+            return (
+                f"field(s) {rejected!a} cannot be deployed to Gemini without changing the "
+                "agent's access. Fix: remove them, or keep this agent out of the gemini target"
+            )
+        if fm.get("kind", "local") != "local":
+            return "only local agents are supported ('kind' must be 'local' or omitted)"
+        name = fm.get("name", filename)
+        if not isinstance(name, str) or not _GEMINI_AGENT_NAME_RE.fullmatch(name):
+            return (
+                "'name' must be a lowercase slug (a-z, 0-9, '-', '_'). "
+                "Fix: set 'name', or rename the file to a slug"
+            )
+        description = fm.get("description")
+        if not isinstance(description, str) or not description.strip():
+            return "'description' is required. Fix: add a one-line 'description'"
+        if "tools" in fm:
+            tools = fm["tools"]
+            if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
+                return "'tools' must be a list of Gemini tool names"
+            invalid = sorted({t for t in tools if not is_gemini_agent_tool(t)})
+            if invalid:
+                return (
+                    f"unsupported tool(s) {invalid!a}; APM does not map other "
+                    "providers' tool names. Fix: use Gemini tool names (for example "
+                    "read_file, grep_search, run_shell_command, mcp_<server>_<tool>), "
+                    "or omit 'tools' to inherit the session's tools"
+                )
+        if "model" in fm:
+            model = fm["model"]
+            if not isinstance(model, str) or not is_gemini_agent_model(model):
+                return (
+                    "'model' must be 'inherit' or a gemini-* model id; APM does not map "
+                    "other providers' models. Fix: use a Gemini model, or omit 'model' to "
+                    "use the session model"
+                )
+        return AgentIntegrator._gemini_optional_field_problem(fm)
+
+    @staticmethod
+    def _gemini_optional_field_problem(fm: dict) -> str | None:
+        """Type-check the optional native fields the way the loader schema does."""
+        display_name = fm.get("display_name")
+        if display_name is not None and not isinstance(display_name, str):
+            return "'display_name' must be a string"
+        temperature = fm.get("temperature")
+        if temperature is not None and (
+            isinstance(temperature, bool) or not isinstance(temperature, int | float)
+        ):
+            return "'temperature' must be a number"
+        for field in ("max_turns", "timeout_mins"):
+            value = fm.get(field)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            ):
+                return f"'{field}' must be a positive integer"
+        return None
+
+    def _preflight_render_gemini_agent(
+        self,
+        source: Path,
+        target: Path,
+        *,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> tuple[str | None, int]:
+        """Validate and render a Gemini CLI agent file; return (rendered, links).
+
+        SINGLE OWNER of the Gemini render+validate decision. Like the Kiro
+        preflight it MUST run before any adopt check, mkdir, or write. On
+        failure it returns ``(None, 0)`` after an actionable warning and the
+        caller skips every target mutation for this agent.
+
+        The output keeps ``name`` (frontmatter value or file stem),
+        ``description``, ``tools`` and ``model`` when the source declares
+        them, and the optional native fields. Every other source key is
+        dropped. An omitted ``tools`` stays omitted, which Gemini documents
+        as inheriting the parent session's tools.
+        """
+        if source.is_symlink():
+            raise ValueError(f"Refusing to read symlink source: {source}")
+        content = source.read_text(encoding="utf-8")
+        stem = target.name[: -len(".md")]
+        body = content
+        fm: object = {}
+        problem = None
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
+        if fm_match:
+            body = content[fm_match.end() :]
+            try:
+                fm = load_yaml_str(fm_match.group(1)) or {}
+            except yaml.YAMLError:
+                problem = "frontmatter is not valid YAML"
+        if problem is None and not isinstance(fm, dict):
+            problem = "frontmatter must be a YAML mapping"
+        if problem is None and stem.startswith("_"):
+            problem = "Gemini CLI ignores agent files whose name starts with '_'"
+        if problem is None:
+            problem = AgentIntegrator._gemini_agent_problem(fm, stem)
+        if problem is not None:
+            if diagnostics is not None:
+                diagnostics.warn(
+                    message=(
+                        f"Gemini agent {printable_ascii_text(source.name)}: "
+                        f"{printable_ascii_text(problem)} -- agent will not be deployed. "
+                        f"{_GEMINI_AGENTS_REF}"
+                    ),
+                    package=printable_ascii_text(package_name),
+                )
+            return None, 0
+
+        out_fm: dict = {"name": fm.get("name", stem), "description": fm["description"]}
+        for field in ("tools", "model", *_GEMINI_AGENT_OPTIONAL_FIELDS):
+            if fm.get(field) is not None:
+                out_fm[field] = fm[field]
+        AgentIntegrator._warn_user_invocable_dropped(
+            fm, source, "Gemini", diagnostics, package_name
+        )
+        body, links_resolved = self.resolve_links(body, source, target)
+        return f"---\n{yaml_to_str(out_fm)}---\n{body}", links_resolved
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def integrate_package_agents(

@@ -1020,7 +1020,13 @@ class TestLocalBundlePathRouting:
 
     @pytest.mark.parametrize(
         "target_name",
-        sorted(name for name, target in KNOWN_TARGETS.items() if "agents" in target.primitives),
+        sorted(
+            name
+            for name, target in KNOWN_TARGETS.items()
+            if "agents" in target.primitives
+            # Gemini agents are skipped instead; see the test below.
+            and target.primitives["agents"].format_id != "gemini_agent"
+        ),
     )
     def test_only_codex_agents_are_rendered_across_agent_targets(
         self, tmp_path: Path, target_name: str
@@ -1049,6 +1055,26 @@ class TestLocalBundlePathRouting:
                 assert tomllib.loads(deployed.decode("utf-8"))["developer_instructions"]
             else:
                 assert deployed == (bundle / packed).read_bytes()
+
+    def test_packed_markdown_agents_are_skipped_for_gemini_with_one_warning_each(
+        self, tmp_path: Path
+    ) -> None:
+        """Bundle install cannot run the Gemini agent validation, so it skips (#2990)."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(bundle, project, KNOWN_TARGETS["gemini"])
+
+        assert result["deployed_files"] == []
+        assert result["skipped"] == 2
+        assert not (project / ".gemini" / "agents").exists()
+        warnings = sorted(w.message for w in diagnostics.by_category()[CATEGORY_WARNING])
+        assert len(warnings) == 2
+        assert "'agents/lint.md' for target gemini" in warnings[0]
+        assert "'agents/rev.agent.md' for target gemini" in warnings[1]
+        assert all("gemini_agent (.md)" in message for message in warnings)
 
     @pytest.mark.parametrize(
         "target_name",
