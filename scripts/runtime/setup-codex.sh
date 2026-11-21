@@ -85,6 +85,16 @@ extract_release_asset_digest() {
     ' RS=,
 }
 
+# Retry transient GitHub API failures (5xx, resets) so one blip cannot fail
+# setup. --retry-all-errors needs curl 7.71+; older curl keeps plain --retry.
+curl_retry_flags() {
+    if curl --help all 2>/dev/null | grep -q -- '--retry-all-errors'; then
+        echo "--retry 3 --retry-all-errors --retry-delay 2"
+    else
+        echo "--retry 3 --retry-delay 2"
+    fi
+}
+
 fetch_github_api() {
     local url="$1"
     local use_auth="$2"
@@ -103,10 +113,12 @@ fetch_github_api() {
     fi
 
     if command -v curl >/dev/null 2>&1; then
+        local -a retry
+        read -r -a retry <<< "$(curl_retry_flags)"
         if [[ -n "$token" ]]; then
-            curl -fsSL -H "Authorization: Bearer $token" "$url"
+            curl -fsSL "${retry[@]}" -H "Authorization: Bearer $token" "$url"
         else
-            curl -fsSL "$url"
+            curl -fsSL "${retry[@]}" "$url"
         fi
     elif command -v wget >/dev/null 2>&1; then
         if [[ -n "$token" ]]; then
