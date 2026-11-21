@@ -71,6 +71,13 @@ hash portability is not guaranteed.
 |---|---|---|
 | `--root DIR` | `$PWD` | Redirect every write -- `apm_modules/`, `apm.lock.yaml`, `.gitignore`, and integrated harness files -- under `DIR`, while `apm.yml`, `.apm/`, and local-path dependencies still resolve from the current working directory. Mirrors `pip install --target` / `npm install --prefix`. `DIR` is created if missing (except under `--dry-run`, which refuses to create it). Not valid with `--global` (user scope), which exits `2`. |
 
+When run from a subdirectory of a project without an `apm.yml`, project-scope
+`apm install` (including `--dry-run` and positional packages) discovers the
+nearest ancestor `apm.yml`. Sources, deploy paths, `apm_modules/`,
+`apm.lock.yaml`, and target provenance anchor to that project root, restoring the
+working directory on exit. Passing `--root DIR` keeps sources resolving from the
+working directory without discovery.
+
 `apm install --root DIR --frozen` checks `DIR/apm.lock.yaml` against the
 source manifest. A source-side lockfile is not a substitute for a missing or
 stale deployment lock. To create or repair it, rerun the same install command

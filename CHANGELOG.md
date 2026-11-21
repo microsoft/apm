@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Project-scope `apm install` (including `--dry-run` and positional packages) discovers the project root from subdirectories using an ancestor `apm.yml` walk. (closes #4545)
 - OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
 
 ### Fixed

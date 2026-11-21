@@ -1102,7 +1102,7 @@ def _handle_mcp_install(  # noqa: PLR0913
 )
 @click.pass_context
 @serialized_lifecycle_unless_fresh_preview("dry_run")
-def install(  # noqa: PLR0913
+def install(  # noqa: PLR0913, PLR0917
     ctx,
     packages,
     runtime,
@@ -1181,532 +1181,540 @@ def install(  # noqa: PLR0913
     logger = dry_run_manifest_tmp = None
     command_result: InstallResult | None = None
     transaction: InstallTransaction | None = None
-    from ..install.service import InstallService, resolve_frozen
-
-    frozen = resolve_frozen(frozen, update or refresh or packages or mcp_name, global_, root)
-    ctx.with_resource(InstallService.frozen_writes(frozen))
-    ctx.with_resource(
-        InstallService.catalog_freshness(update_refs=update, refresh=refresh, frozen=frozen)
-    )
-    try:
-        if mcp_name is not None:
-            InstallService.reject_frozen_mutation(frozen, "--mcp")
-        elif packages:
-            InstallService.reject_frozen_mutation(frozen, "positional packages")
-    except FrozenInstallError as exc:
-        raise click.ClickException(str(exc)) from exc
-    if frozen and update:
-        raise click.UsageError(
-            f"--frozen and --update are mutually exclusive. {FROZEN_UPDATE_CONFLICT.sentence()}"
-        )
     if root and global_:
         raise click.UsageError("--root is not valid with --global (user scope)")
-    from ..core.install_audit import resolve_audit_override_from_cli
-    from ..install.root_redirect import install_root_redirect
+    from ._helpers import discover_project_root
 
-    try:
-        audit_override = resolve_audit_override_from_cli(no_audit, audit_mode)
-    except ValueError as exc:
-        raise click.UsageError(str(exc)) from exc
+    with discover_project_root(enabled=not global_ and not root):
+        from ..install.service import InstallService, resolve_frozen
 
-    try:
-        InstallService.reject_missing_frozen_root(frozen, root)
-    except FrozenInstallError as exc:
-        raise click.ClickException(str(exc)) from exc
-    # Refuse a --target apm.yml cannot record before any write (#3878).
-    manifest_targets = preflight_bootstrap_targets(
-        packages, target, mcp_name=mcp_name, global_=global_
-    )
-    _source_root = Path.cwd()
-    _root_redirect = install_root_redirect(root, dry_run=dry_run)
-    _root_redirect.__enter__()
-    try:
-        check_current_cli(
-            _get_apm_dir(_InstallScope.USER if global_ else _InstallScope.PROJECT),
-            command="apm install",
+        frozen = resolve_frozen(frozen, update or refresh or packages or mcp_name, global_, root)
+        ctx.with_resource(InstallService.frozen_writes(frozen))
+        ctx.with_resource(
+            InstallService.catalog_freshness(update_refs=update, refresh=refresh, frozen=frozen)
         )
-        is_partial = bool(packages)
-        logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
-        # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
-        if not legacy_skill_paths:
-            from ..integration.targets import should_use_legacy_skill_paths
-
-            legacy_skill_paths = should_use_legacy_skill_paths()
-
-        create_user_config = not dry_run
-
-        if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
-            from ..bundle.local_bundle import detect_local_bundle as _detect_lb
-
-            try:
-                _bundle_info = _detect_lb(_probe)
-            except AgentPluginError:
-                raise
-            except ValueError as exc:
-                raise click.UsageError(f"Bundle security check failed: {exc}") from exc
-            if _bundle_info is not None:
-                enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)
-                from ..install.local_bundle_handler import (
-                    effective_bundle_allow_map as _effective_bundle_allow_map,
-                )
-                from ..install.local_bundle_handler import install_local_bundle as _install_lb
-
-                _bundle_project_root = _source_root
-                # One policy discovery, at the scope manifest root, serves the
-                # trust map and the bundle policy preflight.
-                _allow_execs_for_bundle = _effective_bundle_allow_map(
-                    _bundle_project_root,
-                    user_scope=global_,
-                    no_policy=no_policy,
-                    logger=logger,
-                    migrate_user_legacy=not dry_run,
-                    dry_run=dry_run,
-                    policy_fetch_result=(
-                        _bundle_policy := None
-                        if no_policy
-                        else discover_trust_policy(
-                            _scope_manifest_root(_bundle_project_root, user_scope=global_)
-                        )
-                    ),
-                )
-                lockfile_writer(LockfileWriter.INSTALL_BUNDLE)(_install_lb)(
-                    bundle_info=_bundle_info,
-                    bundle_arg=packages[0],
-                    target=target,
-                    global_=global_,
-                    force=force,
-                    dry_run=dry_run,
-                    verbose=verbose,
-                    no_policy=no_policy,
-                    alias=alias,
-                    logger=logger,
-                    legacy_skill_paths=legacy_skill_paths,
-                    allow_executables=_allow_execs_for_bundle,
-                    create_config=create_user_config,
-                    policy_fetch_result=None if global_ else _bundle_policy,
-                    # Rejected-flag context for consolidated UsageError:
-                    rejected_flags={
-                        "--update": update,
-                        "--only": only,
-                        "--runtime": runtime,
-                        "--exclude": exclude,
-                        "--dev": dev,
-                        "--ssh": use_ssh,
-                        "--https": use_https,
-                        "--allow-protocol-fallback": allow_protocol_fallback,
-                        "--auth-first": auth_first,
-                        "--mcp": mcp_name,
-                        "--registry": registry_url,
-                        "--skill": bool(skill_names),
-                        "--parallel-downloads": parallel_downloads != 4,
-                        "--allow-insecure": allow_insecure,
-                        "--allow-insecure-host": bool(allow_insecure_hosts),
-                    },
-                )
-                # The local-bundle handler renders its own success summary.
-                summary_rendered = True
-                return
-            # IM7: path exists but isn't a recognised bundle.  For archive
-            # extensions (.zip / .tar.gz / .tgz) raise a targeted UsageError
-            # instead of falling through to the registry clone path.
-            # For bare directories we still fall through, because
-            # ``apm install ./packages/source-pkg`` is a supported local-path
-            # install that goes through the dependency-resolver pipeline.
-            _suffix = _probe.name.lower()
-            if _probe.is_file() and _suffix.endswith((".zip", ".tar.gz", ".tgz")):
-                # Distinguish legacy --format apm bundles (apm.lock.yaml
-                # present, plugin.json absent) from arbitrary tarballs so
-                # the error message guides the user to the right next step.
-                from ..bundle.local_bundle import _looks_like_legacy_apm_bundle
-
-                if _looks_like_legacy_apm_bundle(_probe):
-                    raise click.UsageError(
-                        f"'{packages[0]}' was packed with '--format apm' (legacy format). "
-                        "'apm install <bundle>' requires the plugin format. "
-                        f"{either_sentence(BUNDLE_REPACK_PLUGIN, LEGACY_BUNDLE_UNPACK)}"
-                    )
-                raise click.UsageError(
-                    f"'{packages[0]}' is not a valid APM bundle archive "
-                    "(no plugin.json found at the bundle root). "
-                    f"{either_sentence(REGISTRY_PACKAGE_INSTALL, BUNDLE_REPACK_PLUGIN)}"
-                )
-        # IM8: --as is only meaningful for local-bundle installs.  If we get
-        # here, no local bundle was detected, so reject --as instead of
-        # silently ignoring it.
-        if alias:
+        try:
+            if mcp_name is not None:
+                InstallService.reject_frozen_mutation(frozen, "--mcp")
+            elif packages:
+                InstallService.reject_frozen_mutation(frozen, "positional packages")
+            InstallService.reject_missing_frozen_root(frozen, root)
+        except FrozenInstallError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if frozen and update:
             raise click.UsageError(
-                "--as requires a local bundle path (directory, .zip, or .tar.gz "
-                "produced by 'apm pack'). It has no effect on registry installs."
+                f"--frozen and --update are mutually exclusive. {FROZEN_UPDATE_CONFLICT.sentence()}"
             )
-        # HACK(#852): surface --verbose to deeper auth layers via env var until
-        # AuthResolver gains a first-class verbose channel. Restored in finally
-        # below to keep the mutation scoped to this command invocation.
-        if verbose:
-            os.environ["APM_VERBOSE"] = "1"
+        from ..core.install_audit import resolve_audit_override_from_cli
+        from ..install.root_redirect import install_root_redirect
 
-        # --mcp branch (W3): when --mcp is set, route to the dedicated
-        # MCP-add path.  We compute the post-`--` argv here BEFORE Click's
-        # silent handling: see _split_argv_at_double_dash().
-        _, command_argv = _split_argv_at_double_dash(_get_invocation_argv())
-        # `packages` from Click already includes the post-`--` items; the
-        # pre-`--` portion is what the user typed as positional packages.
-        if command_argv:
-            split_idx = len(packages) - len(command_argv)
-            split_idx = max(split_idx, 0)
-            pre_dash_packages = builtins.tuple(packages[:split_idx])
-        else:
-            pre_dash_packages = builtins.tuple(packages)
-
-        # Validate --registry (raises UsageError on a bad URL).
-        validated_registry_url = _validate_registry_url(registry_url)
-        from ..core.scope import InstallScope
-
-        scope = InstallScope.USER if global_ else InstallScope.PROJECT
-
-        _validate_mcp_conflicts(
-            mcp_name=mcp_name,
-            packages=packages,
-            pre_dash_packages=pre_dash_packages,
-            transport=transport,
-            url=url,
-            env=env_pairs,
-            headers=header_pairs,
-            mcp_version=mcp_version,
-            command_argv=command_argv,
-            only=only,
-            update=update,
-            any_transport_flag=use_ssh or use_https or allow_protocol_fallback,
-            registry_url=validated_registry_url,
+        try:
+            audit_override = resolve_audit_override_from_cli(no_audit, audit_mode)
+        except ValueError as exc:
+            raise click.UsageError(str(exc)) from exc
+        # Refuse a --target apm.yml cannot record before any write (#3878).
+        manifest_targets = preflight_bootstrap_targets(
+            packages, target, mcp_name=mcp_name, global_=global_
         )
-        # Normalize --skill: '*' means all (same as absent). Reject with --mcp.
-        if skill_names and mcp_name is not None:
-            raise click.UsageError("--skill cannot be combined with --mcp.")
-        _skill_subset = cli_skill_subset(skill_names)
+        _source_root = Path.cwd()
+        _root_redirect = install_root_redirect(root, dry_run=dry_run)
+        _root_redirect.__enter__()
+        try:
+            check_current_cli(
+                _get_apm_dir(_InstallScope.USER if global_ else _InstallScope.PROJECT),
+                command="apm install",
+            )
+            is_partial = bool(packages)
+            logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
+            # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
+            if not legacy_skill_paths:
+                from ..integration.targets import should_use_legacy_skill_paths
 
-        if mcp_name is not None:
-            _handle_mcp_install(
+                legacy_skill_paths = should_use_legacy_skill_paths()
+
+            create_user_config = not dry_run
+
+            if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
+                from ..bundle.local_bundle import detect_local_bundle as _detect_lb
+
+                try:
+                    _bundle_info = _detect_lb(_probe)
+                except AgentPluginError:
+                    raise
+                except ValueError as exc:
+                    raise click.UsageError(f"Bundle security check failed: {exc}") from exc
+                if _bundle_info is not None:
+                    enforce_agent_plugin_deployment_boundary(bundle_info=_bundle_info)
+                    from ..install.local_bundle_handler import (
+                        effective_bundle_allow_map as _effective_bundle_allow_map,
+                    )
+                    from ..install.local_bundle_handler import install_local_bundle as _install_lb
+
+                    _bundle_project_root = _source_root
+                    # One policy discovery, at the scope manifest root, serves the
+                    # trust map and the bundle policy preflight.
+                    _allow_execs_for_bundle = _effective_bundle_allow_map(
+                        _bundle_project_root,
+                        user_scope=global_,
+                        no_policy=no_policy,
+                        logger=logger,
+                        migrate_user_legacy=not dry_run,
+                        dry_run=dry_run,
+                        policy_fetch_result=(
+                            _bundle_policy := None
+                            if no_policy
+                            else discover_trust_policy(
+                                _scope_manifest_root(_bundle_project_root, user_scope=global_)
+                            )
+                        ),
+                    )
+                    lockfile_writer(LockfileWriter.INSTALL_BUNDLE)(_install_lb)(
+                        bundle_info=_bundle_info,
+                        bundle_arg=packages[0],
+                        target=target,
+                        global_=global_,
+                        force=force,
+                        dry_run=dry_run,
+                        verbose=verbose,
+                        no_policy=no_policy,
+                        alias=alias,
+                        logger=logger,
+                        legacy_skill_paths=legacy_skill_paths,
+                        allow_executables=_allow_execs_for_bundle,
+                        create_config=create_user_config,
+                        policy_fetch_result=None if global_ else _bundle_policy,
+                        # Rejected-flag context for consolidated UsageError:
+                        rejected_flags={
+                            "--update": update,
+                            "--only": only,
+                            "--runtime": runtime,
+                            "--exclude": exclude,
+                            "--dev": dev,
+                            "--ssh": use_ssh,
+                            "--https": use_https,
+                            "--allow-protocol-fallback": allow_protocol_fallback,
+                            "--auth-first": auth_first,
+                            "--mcp": mcp_name,
+                            "--registry": registry_url,
+                            "--skill": bool(skill_names),
+                            "--parallel-downloads": parallel_downloads != 4,
+                            "--allow-insecure": allow_insecure,
+                            "--allow-insecure-host": bool(allow_insecure_hosts),
+                        },
+                    )
+                    # The local-bundle handler renders its own success summary.
+                    summary_rendered = True
+                    return
+                # IM7: path exists but isn't a recognised bundle.  For archive
+                # extensions (.zip / .tar.gz / .tgz) raise a targeted UsageError
+                # instead of falling through to the registry clone path.
+                # For bare directories we still fall through, because
+                # ``apm install ./packages/source-pkg`` is a supported local-path
+                # install that goes through the dependency-resolver pipeline.
+                _suffix = _probe.name.lower()
+                if _probe.is_file() and _suffix.endswith((".zip", ".tar.gz", ".tgz")):
+                    # Distinguish legacy --format apm bundles (apm.lock.yaml
+                    # present, plugin.json absent) from arbitrary tarballs so
+                    # the error message guides the user to the right next step.
+                    from ..bundle.local_bundle import _looks_like_legacy_apm_bundle
+
+                    if _looks_like_legacy_apm_bundle(_probe):
+                        raise click.UsageError(
+                            f"'{packages[0]}' was packed with '--format apm' (legacy format). "
+                            "'apm install <bundle>' requires the plugin format. "
+                            f"{either_sentence(BUNDLE_REPACK_PLUGIN, LEGACY_BUNDLE_UNPACK)}"
+                        )
+                    raise click.UsageError(
+                        f"'{packages[0]}' is not a valid APM bundle archive "
+                        "(no plugin.json found at the bundle root). "
+                        f"{either_sentence(REGISTRY_PACKAGE_INSTALL, BUNDLE_REPACK_PLUGIN)}"
+                    )
+            # IM8: --as is only meaningful for local-bundle installs.  If we get
+            # here, no local bundle was detected, so reject --as instead of
+            # silently ignoring it.
+            if alias:
+                raise click.UsageError(
+                    "--as requires a local bundle path (directory, .zip, or .tar.gz "
+                    "produced by 'apm pack'). It has no effect on registry installs."
+                )
+            # HACK(#852): surface --verbose to deeper auth layers via env var until
+            # AuthResolver gains a first-class verbose channel. Restored in finally
+            # below to keep the mutation scoped to this command invocation.
+            if verbose:
+                os.environ["APM_VERBOSE"] = "1"
+
+            # --mcp branch (W3): when --mcp is set, route to the dedicated
+            # MCP-add path.  We compute the post-`--` argv here BEFORE Click's
+            # silent handling: see _split_argv_at_double_dash().
+            _, command_argv = _split_argv_at_double_dash(_get_invocation_argv())
+            # `packages` from Click already includes the post-`--` items; the
+            # pre-`--` portion is what the user typed as positional packages.
+            if command_argv:
+                split_idx = len(packages) - len(command_argv)
+                split_idx = max(split_idx, 0)
+                pre_dash_packages = builtins.tuple(packages[:split_idx])
+            else:
+                pre_dash_packages = builtins.tuple(packages)
+
+            # Validate --registry (raises UsageError on a bad URL).
+            validated_registry_url = _validate_registry_url(registry_url)
+            from ..core.scope import InstallScope
+
+            scope = InstallScope.USER if global_ else InstallScope.PROJECT
+
+            _validate_mcp_conflicts(
                 mcp_name=mcp_name,
+                packages=packages,
+                pre_dash_packages=pre_dash_packages,
                 transport=transport,
                 url=url,
-                env_pairs=env_pairs,
-                header_pairs=header_pairs,
+                env=env_pairs,
+                headers=header_pairs,
                 mcp_version=mcp_version,
                 command_argv=command_argv,
-                dev=dev,
-                force=force,
-                runtime=runtime,
-                target=target,
-                exclude=exclude,
-                verbose=verbose,
-                logger=logger,
-                no_policy=no_policy,
-                validated_registry_url=validated_registry_url,
-                scope=scope,
-            )
-            summary_rendered = True
-            return
-
-        # Resolve transport selection inputs.
-        from ..deps.transport_selection import ProtocolPreference
-
-        if use_ssh and use_https:
-            _rich_error("Options --ssh and --https are mutually exclusive.", symbol="error")
-            sys.exit(2)
-        if use_ssh:
-            protocol_pref = ProtocolPreference.SSH
-        elif use_https:
-            protocol_pref = ProtocolPreference.HTTPS
-        else:
-            # Precedence: APM_GIT_PROTOCOL env var > apm config ssh > git insteadOf
-            from ..config import get_apm_protocol_pref as _get_apm_protocol_pref
-
-            _pref_str = _get_apm_protocol_pref(create_config=not dry_run)
-            protocol_pref = ProtocolPreference.from_str(_pref_str)
-        # CLI flag > env var (APM_ALLOW_PROTOCOL_FALLBACK) > apm config > default.
-        # get_apm_allow_protocol_fallback() already encodes env > config > False.
-        from ..config import get_apm_allow_protocol_fallback as _get_apm_apf
-
-        allow_protocol_fallback = allow_protocol_fallback or _get_apm_apf(create_config=not dry_run)
-
-        # Resolve scope
-        from ..core.scope import (
-            ensure_user_dirs,
-            get_apm_dir,
-            get_manifest_path,
-            get_modules_dir,
-        )
-
-        if scope is InstallScope.USER:
-            _prepare_user_scope_for_install(
-                dry_run=dry_run,
-                logger=logger,
-                ensure_user_dirs=ensure_user_dirs,
-            )
-
-        # Scope-aware paths
-        manifest_path = get_manifest_path(scope)
-        manifest_dir = manifest_path.parent  # Dry runs may redirect the manifest to a temp file.
-        apm_dir = get_apm_dir(scope)
-        # Display name for messages (short for project scope, full for user scope)
-        manifest_display = str(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME
-        manifest_path, dry_run_manifest_tmp = _prepare_dry_run_manifest_path(
-            manifest_path,
-            dry_run=dry_run,
-            has_packages=bool(packages),
-        )
-
-        # Project root for integration (used by both dep and local integration)
-        from ..core.scope import get_deploy_root
-
-        project_root = get_deploy_root(scope)
-
-        # Create shared auth resolver for all downloads in this CLI invocation
-        # to ensure credentials are cached and reused (prevents duplicate auth popups)
-        # issue #2545: --auth-first is CLI-scoped here; AuthResolver falls back to
-        # APM_GITHUB_AUTH_FIRST / apm config github-auth-first when not passed.
-        auth_resolver = AuthResolver(github_auth_first=auth_first)
-        # F2/F3 #856: thread the InstallLogger into AuthResolver so the verbose
-        # auth-source line and the deferred stale-PAT [!] warning route through
-        # CommandLogger / DiagnosticCollector instead of stderr/inline writes.
-        auth_resolver.set_logger(logger)
-
-        # Capture manifest state before this attempt can auto-create apm.yml.
-        apm_yml_exists = manifest_path.exists()
-        transaction = InstallTransaction(
-            manifest_path=manifest_path,
-            apm_modules_dir=get_modules_dir(scope),
-            validation=None,
-            logger=logger,
-            acquire_lock=not dry_run,
-        )
-
-        if not apm_yml_exists and packages:
-            derived_project_name = (
-                Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
-            )
-            project_name = _resolve_bootstrap_project_name(derived_project_name)
-            if project_name != derived_project_name:
-                logger.verbose_detail(
-                    f'Using default project name "{project_name}" because '
-                    f"derived name {derived_project_name!a} is invalid"
-                )
-            config = _get_bootstrap_config(project_name) | (
-                {"targets": manifest_targets} if manifest_targets else {}
-            )
-            _create_minimal_apm_yml(config, target_path=manifest_path)
-            _report_bootstrap_manifest(
-                logger=logger,
-                manifest_display=manifest_display,
-                manifest_targets=manifest_targets,
-                dry_run=dry_run,
-            )
-
-        if not apm_yml_exists and not packages:
-            logger.error(f"No {manifest_display} found")
-            if scope is InstallScope.USER:
-                logger.progress(USER_MANIFEST_MISSING.sentence())
-            else:
-                logger.progress(
-                    either_sentence(PROJECT_MANIFEST_MISSING, PROJECT_MANIFEST_BOOTSTRAP)
-                )
-            sys.exit(1)
-
-        reconcile_user_marketplaces_or_exit(manifest_path, scope, logger=logger, dry_run=dry_run)
-        outcome = None
-        if packages:
-            _validated_packages, outcome = _validate_and_add_under_identity_policy(
-                no_policy,
-                packages,
-                dry_run,
-                dev=dev,
-                logger=logger,
-                manifest_path=manifest_path,
-                auth_resolver=auth_resolver,
-                scope=scope,
-                allow_insecure=allow_insecure,
-                skill_subset=_skill_subset,
-                skill_subset_from_cli=bool(skill_names),
-                protocol_pref=protocol_pref,
-                allow_protocol_fallback=allow_protocol_fallback,
-                create_config=create_user_config,
-                manifest_display=manifest_display,
-                source_root=manifest_dir,
-            )
-            transaction.record_validation(outcome)
-            command_result = transaction.validation_result()
-            if command_result is not None:
-                summary_rendered = True
-            # Note: Empty validated_packages is OK if packages are already in apm.yml;
-            # only_packages is derived from validation outcomes below.
-
-        if command_result is None:
-            install_ctx = InstallContext(
-                scope=scope,
-                manifest_path=manifest_path,
-                manifest_display=manifest_display,
-                apm_dir=apm_dir,
-                project_root=project_root,
-                logger=logger,
-                auth_resolver=auth_resolver,
-                verbose=verbose,
-                force=force,
-                dry_run=dry_run,
+                only=only,
                 update=update,
-                dev=dev,
-                runtime=runtime,
-                exclude=exclude,
-                target=target,
-                parallel_downloads=parallel_downloads,
-                allow_insecure=allow_insecure,
-                allow_insecure_hosts=allow_insecure_hosts,
-                protocol_pref=protocol_pref,
-                allow_protocol_fallback=allow_protocol_fallback,
-                trust_transitive_mcp=trust_transitive_mcp,
-                no_policy=no_policy,
-                audit_override=audit_override,
-                install_mode=InstallMode(only) if only else InstallMode.ALL,
-                packages=packages,
-                transaction=transaction,
-                refresh=refresh,
-                only_packages=only_packages_from_validation(packages, outcome),
-                legacy_skill_paths=legacy_skill_paths,
-                frozen=frozen,
-                plan_callback=None,
-                skill_subset=_skill_subset,
-                skill_subset_from_cli=bool(skill_names),
-                trust_bin=trust_bin,
-                create_config=create_user_config,
+                any_transport_flag=use_ssh or use_https or allow_protocol_fallback,
+                registry_url=validated_registry_url,
+            )
+            # Normalize --skill: '*' means all (same as absent). Reject with --mcp.
+            if skill_names and mcp_name is not None:
+                raise click.UsageError("--skill cannot be combined with --mcp.")
+            _skill_subset = cli_skill_subset(skill_names)
+
+            if mcp_name is not None:
+                _handle_mcp_install(
+                    mcp_name=mcp_name,
+                    transport=transport,
+                    url=url,
+                    env_pairs=env_pairs,
+                    header_pairs=header_pairs,
+                    mcp_version=mcp_version,
+                    command_argv=command_argv,
+                    dev=dev,
+                    force=force,
+                    runtime=runtime,
+                    target=target,
+                    exclude=exclude,
+                    verbose=verbose,
+                    logger=logger,
+                    no_policy=no_policy,
+                    validated_registry_url=validated_registry_url,
+                    scope=scope,
+                )
+                summary_rendered = True
+                return
+
+            # Resolve transport selection inputs.
+            from ..deps.transport_selection import ProtocolPreference
+
+            if use_ssh and use_https:
+                _rich_error("Options --ssh and --https are mutually exclusive.", symbol="error")
+                sys.exit(2)
+            if use_ssh:
+                protocol_pref = ProtocolPreference.SSH
+            elif use_https:
+                protocol_pref = ProtocolPreference.HTTPS
+            else:
+                # Precedence: APM_GIT_PROTOCOL env var > apm config ssh > git insteadOf
+                from ..config import get_apm_protocol_pref as _get_apm_protocol_pref
+
+                _pref_str = _get_apm_protocol_pref(create_config=not dry_run)
+                protocol_pref = ProtocolPreference.from_str(_pref_str)
+            # CLI flag > env var (APM_ALLOW_PROTOCOL_FALLBACK) > apm config > default.
+            # get_apm_allow_protocol_fallback() already encodes env > config > False.
+            from ..config import get_apm_allow_protocol_fallback as _get_apm_apf
+
+            allow_protocol_fallback = allow_protocol_fallback or _get_apm_apf(
+                create_config=not dry_run
             )
 
-            apm_count, mcp_count, lsp_count, apm_diagnostics = _install_apm_packages(
-                install_ctx,
-                outcome,
+            # Resolve scope
+            from ..core.scope import (
+                ensure_user_dirs,
+                get_apm_dir,
+                get_manifest_path,
+                get_modules_dir,
             )
 
-            from apm_cli.install.outcome import finalize_install_result
+            if scope is InstallScope.USER:
+                _prepare_user_scope_for_install(
+                    dry_run=dry_run,
+                    logger=logger,
+                    ensure_user_dirs=ensure_user_dirs,
+                )
 
-            command_result = install_ctx.install_result or InstallResult(
-                installed_count=apm_count,
-                diagnostics=apm_diagnostics,
+            # Scope-aware paths
+            manifest_path = get_manifest_path(scope)
+            manifest_dir = (
+                manifest_path.parent
+            )  # Dry runs may redirect the manifest to a temp file.
+            apm_dir = get_apm_dir(scope)
+            # Display name for messages (short for project scope, full for user scope)
+            manifest_display = (
+                str(manifest_path) if scope is InstallScope.USER else APM_YML_FILENAME
             )
-            command_result.installed_count = apm_count
-            command_result.diagnostics = apm_diagnostics
-            if dry_run and command_result.disposition is not InstallDisposition.FAILED:
-                command_result.disposition = InstallDisposition.DRY_RUN
-            command_result = finalize_install_result(
-                command_result,
-                force=force,
+            manifest_path, dry_run_manifest_tmp = _prepare_dry_run_manifest_path(
+                manifest_path,
+                dry_run=dry_run,
+                has_packages=bool(packages),
             )
-            command_result = transaction.complete(command_result)
 
-            command_result = _post_install_summary(
+            # Project root for integration (used by both dep and local integration)
+            from ..core.scope import get_deploy_root
+
+            project_root = get_deploy_root(scope)
+
+            # Create shared auth resolver for all downloads in this CLI invocation
+            # to ensure credentials are cached and reused (prevents duplicate auth popups)
+            # issue #2545: --auth-first is CLI-scoped here; AuthResolver falls back to
+            # APM_GITHUB_AUTH_FIRST / apm config github-auth-first when not passed.
+            auth_resolver = AuthResolver(github_auth_first=auth_first)
+            # F2/F3 #856: thread the InstallLogger into AuthResolver so the verbose
+            # auth-source line and the deferred stale-PAT [!] warning route through
+            # CommandLogger / DiagnosticCollector instead of stderr/inline writes.
+            auth_resolver.set_logger(logger)
+
+            # Capture manifest state before this attempt can auto-create apm.yml.
+            apm_yml_exists = manifest_path.exists()
+            transaction = InstallTransaction(
+                manifest_path=manifest_path,
+                apm_modules_dir=get_modules_dir(scope),
+                validation=None,
                 logger=logger,
-                apm_count=apm_count,
-                mcp_count=mcp_count,
-                lsp_count=lsp_count,
-                apm_diagnostics=apm_diagnostics,
-                force=force,
-                elapsed_seconds=time.perf_counter() - install_started_at,
-                result=command_result,
+                acquire_lock=not dry_run,
             )
-            summary_rendered = True
 
-            if (
-                frozen
-                and command_result.exit_code == 0
-                and getattr(command_result, "disposition", None) is not InstallDisposition.FAILED
-                and getattr(_scoped_lockfile(scope), "dependencies", None)
-            ):
-                # --frozen verified lockfile structure and deployed hashes (req-lk-017),
-                # also on a converged run that installs nothing (#4184).
-                logger.info(frozen_verified_line(command_result), symbol="info")
+            if not apm_yml_exists and packages:
+                derived_project_name = (
+                    Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
+                )
+                project_name = _resolve_bootstrap_project_name(derived_project_name)
+                if project_name != derived_project_name:
+                    logger.verbose_detail(
+                        f'Using default project name "{project_name}" because '
+                        f"derived name {derived_project_name!a} is invalid"
+                    )
+                config = _get_bootstrap_config(project_name) | (
+                    {"targets": manifest_targets} if manifest_targets else {}
+                )
+                _create_minimal_apm_yml(config, target_path=manifest_path)
+                _report_bootstrap_manifest(
+                    logger=logger,
+                    manifest_display=manifest_display,
+                    manifest_targets=manifest_targets,
+                    dry_run=dry_run,
+                )
 
-    except AgentPluginError as e:
-        logger.error(str(e))
-        command_result = (
-            transaction.fail(e)
-            if transaction is not None
-            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
-        )
-    except (
-        InsecureDependencyPolicyError,
-        InstallFailureAlreadyRendered,
-        LockfileGeneratorError,
-    ) as e:
-        if isinstance(e, LockfileGeneratorError):
-            # The shared refusal renderer: [x] on stderr, like every other command.
-            refusal_exit(e).show()
-        command_result = (
-            transaction.fail(e)
-            if transaction is not None
-            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
-        )
-    except AuthenticationError as e:
-        logger.error(str(e))
-        if e.diagnostic_context:
-            logger.error_detail(e.diagnostic_context)
-        logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
-        command_result = (
-            transaction.fail(e)
-            if transaction is not None
-            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
-        )
-    except FrozenInstallError as e:
-        log_frozen_install_error(e, logger)
-        command_result = (
-            transaction.fail(e)
-            if transaction is not None
-            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
-        )
-    except DirectDependencyError as e:
-        logger.error(str(e))
-        command_result = (
-            transaction.fail(e)
-            if transaction is not None
-            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
-        )
-    except click.UsageError:
-        # Conflict matrix / argv parser raises UsageError -- let Click
-        # render with exit code 2 and the standard "Usage: ..." prefix.
-        raise
-    except Exception as e:
-        failure_logger = logger or InstallLogger(verbose=verbose, dry_run=dry_run)
-        failure_logger.exception(install_failure_message(e))
-        command_result = (
-            transaction.fail(e)
-            if transaction is not None
-            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
-        )
-    finally:
-        # Restore cwd before summary rendering, regardless of the exit path.
-        # Always close the transaction even if root restoration fails.
-        close_install_contexts(_root_redirect, transaction)
-        if dry_run_manifest_tmp is not None:
-            dry_run_manifest_tmp.cleanup()
-        # F5 (#1116): render minimal elapsed-time line on exit paths that
-        # did not already render the full install summary. Best-effort:
-        # never let a render failure mask the original exception/exit.
-        if not summary_rendered and logger is not None:
-            with contextlib.suppress(Exception):
-                elapsed = time.perf_counter() - install_started_at
-                if (
-                    command_result is not None
-                    and command_result.disposition is InstallDisposition.FAILED
-                ):
-                    logger.install_failed(elapsed_seconds=elapsed)
+            if not apm_yml_exists and not packages:
+                logger.error(f"No {manifest_display} found")
+                if scope is InstallScope.USER:
+                    logger.progress(USER_MANIFEST_MISSING.sentence())
                 else:
-                    logger.install_interrupted(elapsed_seconds=elapsed)
-        # HACK(#852) cleanup: restore APM_VERBOSE so it stays scoped to this call.
-        if _apm_verbose_prev is None:
-            os.environ.pop("APM_VERBOSE", None)
-        else:
-            os.environ["APM_VERBOSE"] = _apm_verbose_prev
+                    logger.progress(
+                        either_sentence(PROJECT_MANIFEST_MISSING, PROJECT_MANIFEST_BOOTSTRAP)
+                    )
+                sys.exit(1)
 
-    if command_result is not None:
-        from apm_cli.install.outcome import apply_install_command_outcome
+            reconcile_user_marketplaces_or_exit(
+                manifest_path, scope, logger=logger, dry_run=dry_run
+            )
+            outcome = None
+            if packages:
+                _validated_packages, outcome = _validate_and_add_under_identity_policy(
+                    no_policy,
+                    packages,
+                    dry_run,
+                    dev=dev,
+                    logger=logger,
+                    manifest_path=manifest_path,
+                    auth_resolver=auth_resolver,
+                    scope=scope,
+                    allow_insecure=allow_insecure,
+                    skill_subset=_skill_subset,
+                    skill_subset_from_cli=bool(skill_names),
+                    protocol_pref=protocol_pref,
+                    allow_protocol_fallback=allow_protocol_fallback,
+                    create_config=create_user_config,
+                    manifest_display=manifest_display,
+                    source_root=manifest_dir,
+                )
+                transaction.record_validation(outcome)
+                command_result = transaction.validation_result()
+                if command_result is not None:
+                    summary_rendered = True
+                # Note: Empty validated_packages is OK if packages are already in apm.yml;
+                # only_packages is derived from validation outcomes below.
 
-        outcome = apply_install_command_outcome(command_result)
-        ctx.exit(outcome.exit_code)
+            if command_result is None:
+                install_ctx = InstallContext(
+                    scope=scope,
+                    manifest_path=manifest_path,
+                    manifest_display=manifest_display,
+                    apm_dir=apm_dir,
+                    project_root=project_root,
+                    logger=logger,
+                    auth_resolver=auth_resolver,
+                    verbose=verbose,
+                    force=force,
+                    dry_run=dry_run,
+                    update=update,
+                    dev=dev,
+                    runtime=runtime,
+                    exclude=exclude,
+                    target=target,
+                    parallel_downloads=parallel_downloads,
+                    allow_insecure=allow_insecure,
+                    allow_insecure_hosts=allow_insecure_hosts,
+                    protocol_pref=protocol_pref,
+                    allow_protocol_fallback=allow_protocol_fallback,
+                    trust_transitive_mcp=trust_transitive_mcp,
+                    no_policy=no_policy,
+                    audit_override=audit_override,
+                    install_mode=InstallMode(only) if only else InstallMode.ALL,
+                    packages=packages,
+                    transaction=transaction,
+                    refresh=refresh,
+                    only_packages=only_packages_from_validation(packages, outcome),
+                    legacy_skill_paths=legacy_skill_paths,
+                    frozen=frozen,
+                    plan_callback=None,
+                    skill_subset=_skill_subset,
+                    skill_subset_from_cli=bool(skill_names),
+                    trust_bin=trust_bin,
+                    create_config=create_user_config,
+                )
+
+                apm_count, mcp_count, lsp_count, apm_diagnostics = _install_apm_packages(
+                    install_ctx,
+                    outcome,
+                )
+
+                from apm_cli.install.outcome import finalize_install_result
+
+                command_result = install_ctx.install_result or InstallResult(
+                    installed_count=apm_count,
+                    diagnostics=apm_diagnostics,
+                )
+                command_result.installed_count = apm_count
+                command_result.diagnostics = apm_diagnostics
+                if dry_run and command_result.disposition is not InstallDisposition.FAILED:
+                    command_result.disposition = InstallDisposition.DRY_RUN
+                command_result = finalize_install_result(
+                    command_result,
+                    force=force,
+                )
+                command_result = transaction.complete(command_result)
+
+                command_result = _post_install_summary(
+                    logger=logger,
+                    apm_count=apm_count,
+                    mcp_count=mcp_count,
+                    lsp_count=lsp_count,
+                    apm_diagnostics=apm_diagnostics,
+                    force=force,
+                    elapsed_seconds=time.perf_counter() - install_started_at,
+                    result=command_result,
+                )
+                summary_rendered = True
+
+                if (
+                    frozen
+                    and command_result.exit_code == 0
+                    and getattr(command_result, "disposition", None)
+                    is not InstallDisposition.FAILED
+                    and getattr(_scoped_lockfile(scope), "dependencies", None)
+                ):
+                    # --frozen verified lockfile structure and deployed hashes (req-lk-017),
+                    # also on a converged run that installs nothing (#4184).
+                    logger.info(frozen_verified_line(command_result), symbol="info")
+
+        except AgentPluginError as e:
+            logger.error(str(e))
+            command_result = (
+                transaction.fail(e)
+                if transaction is not None
+                else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+            )
+        except (
+            InsecureDependencyPolicyError,
+            InstallFailureAlreadyRendered,
+            LockfileGeneratorError,
+        ) as e:
+            if isinstance(e, LockfileGeneratorError):
+                # The shared refusal renderer: [x] on stderr, like every other command.
+                refusal_exit(e).show()
+            command_result = (
+                transaction.fail(e)
+                if transaction is not None
+                else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+            )
+        except AuthenticationError as e:
+            logger.error(str(e))
+            if e.diagnostic_context:
+                logger.error_detail(e.diagnostic_context)
+            logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
+            command_result = (
+                transaction.fail(e)
+                if transaction is not None
+                else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+            )
+        except FrozenInstallError as e:
+            log_frozen_install_error(e, logger)
+            command_result = (
+                transaction.fail(e)
+                if transaction is not None
+                else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+            )
+        except DirectDependencyError as e:
+            logger.error(str(e))
+            command_result = (
+                transaction.fail(e)
+                if transaction is not None
+                else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+            )
+        except click.UsageError:
+            # Conflict matrix / argv parser raises UsageError -- let Click
+            # render with exit code 2 and the standard "Usage: ..." prefix.
+            raise
+        except Exception as e:
+            failure_logger = logger or InstallLogger(verbose=verbose, dry_run=dry_run)
+            failure_logger.exception(install_failure_message(e))
+            command_result = (
+                transaction.fail(e)
+                if transaction is not None
+                else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+            )
+        finally:
+            # Restore cwd before summary rendering, regardless of the exit path.
+            # Always close the transaction even if root restoration fails.
+            close_install_contexts(_root_redirect, transaction)
+            if dry_run_manifest_tmp is not None:
+                dry_run_manifest_tmp.cleanup()
+            # F5 (#1116): render minimal elapsed-time line on exit paths that
+            # did not already render the full install summary. Best-effort:
+            # never let a render failure mask the original exception/exit.
+            if not summary_rendered and logger is not None:
+                with contextlib.suppress(Exception):
+                    elapsed = time.perf_counter() - install_started_at
+                    if (
+                        command_result is not None
+                        and command_result.disposition is InstallDisposition.FAILED
+                    ):
+                        logger.install_failed(elapsed_seconds=elapsed)
+                    else:
+                        logger.install_interrupted(elapsed_seconds=elapsed)
+            # HACK(#852) cleanup: restore APM_VERBOSE so it stays scoped to this call.
+            if _apm_verbose_prev is None:
+                os.environ.pop("APM_VERBOSE", None)
+            else:
+                os.environ["APM_VERBOSE"] = _apm_verbose_prev
+
+        if command_result is not None:
+            from apm_cli.install.outcome import apply_install_command_outcome
+
+            outcome = apply_install_command_outcome(command_result)
+            ctx.exit(outcome.exit_code)
 
 
 @lockfile_writer(LockfileWriter.INSTALL)

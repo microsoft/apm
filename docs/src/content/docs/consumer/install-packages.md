@@ -29,6 +29,18 @@ You can also edit the manifest and run a bare `apm install`:
 +    - contoso/review-skills#v1.1.0
 ```
 
+### Working from subdirectories
+
+Running `apm install` from a subdirectory of a project automatically discovers
+the nearest ancestor `apm.yml`. Sources, lockfiles, and deployed harness files
+anchor to that project root, leaving the subdirectory clean:
+
+```bash frame="terminal"
+cd src/components
+apm install contoso/review-skills#v1.1.0
+# [i] Using apm.yml at /path/to/project/apm.yml (project root: /path/to/project)
+```
+
 ## Reference formats
 
 `apm install` and `dependencies.apm` accept these forms:
