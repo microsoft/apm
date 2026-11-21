@@ -32,20 +32,6 @@ if TYPE_CHECKING:  # pragma: no cover - type-checking only
 _LOCK = threading.RLock()
 _active_source: str | None = None
 
-# Outcomes that mean "the source answered but no policy is published there".
-# Normal for auto-discovery; a failure for a source the caller named.
-_NO_POLICY_OUTCOMES = frozenset({"absent", "no_git_remote"})
-# Outcomes routed with their own fail-closed handling.
-_ROUTED_FAILURE_OUTCOMES = frozenset(
-    {
-        "cache_miss_fetch_fail",
-        "garbage_response",
-        "hash_mismatch",
-        "incomplete_chain",
-        "malformed",
-    }
-)
-
 
 def normalize_explicit_policy_source(source: str | None) -> str | None:
     """Return the canonical explicit source, or ``None`` for discovery only.
@@ -97,12 +83,14 @@ def _as_unavailable(result: PolicyFetchResult, label: str) -> PolicyFetchResult:
     The label is credential-free: it is printed and raised as-is.
     """
     from .discovery import _redact_policy_ref
+    from .outcome_routing import POLICY_NOT_PUBLISHED_OUTCOMES, classify_discovery_outcome
 
     source = _redact_policy_ref(result.source) if result.source else label
-    if result.outcome in _ROUTED_FAILURE_OUTCOMES:
+    if classify_discovery_outcome(result, fetch_failure_default="warn").unresolved:
+        # A resolution failure keeps its outcome and fail-closed routing.
         return replace(result, source=source)
     reason = result.error or result.fetch_error
-    if not reason and result.outcome in _NO_POLICY_OUTCOMES:
+    if not reason and result.outcome in POLICY_NOT_PUBLISHED_OUTCOMES:
         # A cache-only (offline) lookup with no cached copy reports no source.
         reason = "no apm-policy.yml found" if result.source else "no cached copy available offline"
     return replace(
@@ -131,6 +119,7 @@ def compose_explicit_policy(
     """
     from . import inheritance
     from .discovery import _is_policy_empty, _redact_policy_ref
+    from .outcome_routing import POLICY_NOT_PUBLISHED_OUTCOMES
 
     source = active_explicit_policy_source()
     if source is None or discovered.outcome == "disabled":
@@ -148,7 +137,7 @@ def compose_explicit_policy(
 
     if discovered.policy is None:
         failed = []
-        if discovered.outcome not in _NO_POLICY_OUTCOMES and (
+        if discovered.outcome not in POLICY_NOT_PUBLISHED_OUTCOMES and (
             discovered.outcome or discovered.error
         ):
             failed.append(_as_unavailable(discovered, "org policy discovery"))

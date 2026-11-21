@@ -23,7 +23,6 @@ from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration._policy_scope_kit import (
     PolicyScopeWorld,
     lock_repo_urls,
-    output,
     run_step,
     tree_snapshot,
 )
@@ -34,7 +33,8 @@ from tests.utils.local_github_https_fixture import (
 )
 
 pytestmark = [
-    pytest.mark.integration,
+    pytest.mark.e2e,
+    pytest.mark.promise("req-pl-001"),
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI not available"),
 ]
@@ -93,7 +93,7 @@ def test_plain_git_explicit_policy_blocks_denied_dependency(
             step="1-install-explicit-deny",
             expected=1,
         )
-        text = output(r)
+        text = r.stdout + r.stderr
         assert "pkg-b" in text
         assert "org-policy.yml" in text, "effective policy source not reported"
         assert _snapshot(project) == before, "blocked install wrote files"
@@ -134,7 +134,7 @@ def test_explicit_policy_cannot_reallow_discovered_deny(
             step="1-install-loosen-attempt",
             expected=1,
         )
-        text = output(r)
+        text = r.stdout + r.stderr
         assert "pkg-b" in text
         assert "enforcement=block" in text, "explicit enforcement=off relaxed the org policy"
         assert _snapshot(project) == before, "blocked install wrote files"
@@ -165,7 +165,7 @@ def test_unreachable_explicit_policy_follows_fetch_failure_default(
             step="1-unreachable-block",
             expected=1,
         )
-        assert "could not be loaded" in output(r)
+        assert "could not be loaded" in (r.stdout + r.stderr)
         assert _snapshot(project) == before, "fail-closed install wrote files"
 
         # Default (warn) -> the unreachable source is reported, install proceeds.
@@ -178,7 +178,7 @@ def test_unreachable_explicit_policy_follows_fetch_failure_default(
             env=env,
             step="2-unreachable-warn",
         )
-        assert "could not be loaded" in output(r)
+        assert "could not be loaded" in (r.stdout + r.stderr)
         assert lock_repo_urls(project) == {pkg_a.slug}
 
 
@@ -200,13 +200,13 @@ def test_update_with_nothing_to_change_still_routes_unreachable_explicit_policy(
 
         # Default (warn): reported, nothing to change, exit 0.
         r = run_step(runner, update, cwd=project, env=env, step="2-update-warn")
-        assert "could not be loaded" in output(r)
-        assert "already at their latest" in output(r)
+        assert "could not be loaded" in (r.stdout + r.stderr)
+        assert "already at their latest" in (r.stdout + r.stderr)
 
         # fetch_failure_default: block -> nonzero even with nothing to change.
         manifest = load_yaml(project / "apm.yml")
         manifest["policy"] = {"fetch_failure_default": "block"}
         dump_yaml(manifest, project / "apm.yml")
         r = run_step(runner, update, cwd=project, env=env, step="3-update-block", expected=1)
-        assert "could not be loaded" in output(r)
+        assert "could not be loaded" in (r.stdout + r.stderr)
         assert (project / "apm.lock.yaml").read_bytes() == lock
