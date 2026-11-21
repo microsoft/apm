@@ -208,3 +208,36 @@ def test_owned_mcp_retires_only_servers_targets_no_longer_select(tmp_path) -> No
     updated = LockFile.read(lock_path)
     assert updated is not None
     assert updated.mcp_target_servers == {"codex": ["b"]}
+
+
+def test_owned_mcp_records_only_servers_this_install_claims(tmp_path) -> None:
+    """A server left to an identical entry APM does not manage is not recorded (#4634)."""
+    lock_path = tmp_path / "apm.lock.yaml"
+    lockfile = LockFile()
+    lockfile.mcp_config_provenance = {"other": "bundle:bundle-b"}
+    lockfile.mcp_configs = {"other": {"name": "other"}}
+    lockfile.mcp_servers = ["other"]
+    lockfile.write(lock_path)
+
+    def fake_install(dependencies, **kwargs):
+        # "unmanaged" matched a foreign entry: the integrator claims only "owned".
+        kwargs["managed_target_servers"].setdefault("codex", set()).add("owned")
+        return 1
+
+    with patch(
+        "apm_cli.integration.mcp_integrator.MCPIntegrator.install", side_effect=fake_install
+    ):
+        run_owned_mcp_integration(
+            dependencies=[_dependency("owned"), _dependency("unmanaged")],
+            owner="bundle-a",
+            lock_path=lock_path,
+            project_root=tmp_path,
+            user_scope=False,
+            target_runtimes=["codex"],
+        )
+
+    updated = LockFile.read(lock_path)
+    assert updated is not None
+    assert updated.mcp_servers == ["other", "owned"]
+    assert set(updated.mcp_configs) == {"other", "owned"}
+    assert updated.mcp_config_provenance == {"other": "bundle:bundle-b", "owned": "bundle:bundle-a"}

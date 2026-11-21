@@ -275,18 +275,66 @@ def run_owned_mcp_integration(
     for name in retired:
         lockfile.mcp_configs.pop(name, None)
         lockfile.mcp_config_provenance.pop(name, None)
-    lockfile.mcp_servers = sorted((set(lockfile.mcp_servers) - retired) | new_names)
-    lockfile.mcp_configs.update(_OwnedMCPIntegrator.get_server_configs(dependencies))
-    lockfile.mcp_config_provenance.update(dict.fromkeys(new_names, owner_token))
     DeploymentLedgerCodec.replace_mcp_target_servers(
         lockfile,
         {target: sorted(names) for target, names in managed_targets.items() if names},
         native_hashes=native_hashes,
     )
+    claimed = {name for names in managed_targets.values() for name in names}
+    recorded = _record_bundle_servers(
+        lockfile, dependencies, new_names & claimed, retired, owner_token
+    )
+    if conflict is None:
+        _report_unrecorded_bundle_servers(
+            logger, owner, dependencies, new_names - recorded, target_runtimes
+        )
     lockfile.write(lock_path)
     if conflict is not None:
         raise conflict
     return count
+
+
+def _record_bundle_servers(
+    lockfile, dependencies: list, claimed: set[str], retired: set[str], owner_token: str
+) -> set[str]:
+    """Record the bundle servers this install claims on at least one runtime (#4634).
+
+    A local bundle is not in apm.yml, so the lock is its servers' only
+    declaration, and the MCP view keeps a ``bundle:`` claim only as a
+    deployment (``mcp_config_view._bundle_owned_baseline``). A server left to
+    an identical entry APM does not manage (equality never establishes
+    ownership) is therefore not recorded: ``audit --ci`` and
+    ``install --frozen`` would reject a provenance claim with no deployment.
+    """
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    lockfile.mcp_servers = sorted((set(lockfile.mcp_servers) - retired) | claimed)
+    configs = MCPIntegrator.get_server_configs(dependencies)
+    lockfile.mcp_configs.update({name: configs[name] for name in claimed if name in configs})
+    lockfile.mcp_config_provenance.update(dict.fromkeys(claimed, owner_token))
+    return claimed
+
+
+def _report_unrecorded_bundle_servers(
+    logger, owner: str, dependencies: list, unrecorded: set[str], target_runtimes: list[str]
+) -> None:
+    """Name each selected bundle server left to an existing entry APM does not manage."""
+    from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
+
+    selected = {
+        name
+        for runtime in target_runtimes
+        for name in mcp_servers_for_runtime(dependencies, runtime)
+    }
+    if logger is None:
+        return
+    for name in sorted(unrecorded & selected):
+        logger.warning(
+            f"Skipping MCP server '{name}' from bundle {owner} -- an entry with that name "
+            "exists that APM does not manage. Remove the entry, then reinstall the bundle "
+            "to manage it.",
+            symbol="warning",
+        )
 
 
 def _legacy_cleanup_runtimes(
