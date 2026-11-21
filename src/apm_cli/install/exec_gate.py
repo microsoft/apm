@@ -408,6 +408,8 @@ class GateRetirements(NamedTuple):
     hook_pins: dict[str, str]
     # Lock key -> why the hooks it recorded as deployed are no longer allowed.
     hook_packages: dict[str, str]
+    # Lock key -> the executable kinds of a hook_packages entry the gate now withholds.
+    retired_kinds: dict[str, tuple[str, ...]]
 
 
 def gate_retirements(
@@ -433,7 +435,7 @@ def gate_retirements(
     from apm_cli.security.trust import McpAdmission
 
     if lockfile is None:
-        return GateRetirements({}, {}, {}, {})
+        return GateRetirements({}, {}, {}, {}, {})
     route = classify_project_policy(manifest_root(project_root, user_scope=user_scope))
     if route.blocks or route.unresolved:
         return None
@@ -468,13 +470,19 @@ def gate_retirements(
     retired = locked_hooks_retired(
         lockfile, modules_dir, _trust_ctx, pinned={item.package for item in pins}
     )
-    return GateRetirements(denied, view.consent_problems(lockfile), hooks, retired)
+    return GateRetirements(
+        denied,
+        view.consent_problems(lockfile),
+        hooks,
+        {key: why for key, (why, _kinds) in retired.items()},
+        {key: kinds for key, (_why, kinds) in retired.items()},
+    )
 
 
 def locked_hooks_retired(
     lockfile: Any, modules_dir: Path, trust_ctx: Callable[[], Any], *, pinned: set[str]
-) -> builtins.dict[str, str]:
-    """Return lock key -> reason for each package whose recorded hooks the gate now refuses.
+) -> builtins.dict[str, tuple[str, tuple[str, ...]]]:
+    """Return lock key -> (reason, withheld kinds) for each package the gate now refuses.
 
     A row recorded as deploying hooks (ungated, or ``hooks`` among
     ``exec_allowed_types``) is judged with :func:`current_exec_decision`, the
@@ -482,6 +490,9 @@ def locked_hooks_retired(
     enabled gate leaves hooks out of the types it allows. A package named in
     *pinned* (its pinned hook approval no longer admits a file) is retired
     too. A package that cannot be read is left to install, which reports it.
+    The withheld kinds are the package's declared executable types the gate
+    no longer allows (``hooks`` for a pin mismatch), so callers name what
+    they retire (#4567).
     """
     from apm_cli.install.drift import _build_package_info
     from apm_cli.security.executables import (
@@ -490,10 +501,11 @@ def locked_hooks_retired(
         TRUST_DENIED,
         TRUST_DEPLOYED,
         _strip_version,
+        rebuild_retired_kinds,
     )
 
     ungated = {None, TRUST_DEPLOYED}
-    retired: builtins.dict[str, str] = {}
+    retired: builtins.dict[str, tuple[str, tuple[str, ...]]] = {}
     for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
         if key == "." or dep.exec_status == TRUST_ABSENT:
             continue
@@ -509,9 +521,14 @@ def locked_hooks_retired(
         except (ExecPolicyUnavailable, OSError, ValueError):
             continue
         if _strip_version(resolve_package_key(package_info, dep.get_unique_key())) in pinned:
-            retired[key] = "hook definition changed since approval"
+            why, withheld = "hook definition changed since approval", {EXEC_TYPE_HOOKS}
         elif status not in ungated and EXEC_TYPE_HOOKS not in allowed:
-            retired[key] = "denied" if status == TRUST_DENIED else "not approved"
+            why, withheld = ("denied" if status == TRUST_DENIED else "not approved"), set()
+        else:
+            continue
+        declared = _declared_exec_types(package_info, dep.get_unique_key())[3]
+        withheld.update(t for t in declared if t not in allowed)
+        retired[key] = (why, rebuild_retired_kinds(declared, withheld, package_info))
     return retired
 
 
@@ -766,6 +783,7 @@ def log_bin_status(
     ctx: InstallContext | None = None,
 ) -> None:
     """Emit integration-tree lines for bin/ deployment or skip reasons."""
+    from apm_cli.security.executables import EXEC_KIND_LABELS
     from apm_cli.utils.diagnostics import printable_ascii_text
 
     package_label = printable_ascii_text(package_name or getattr(package_info, "name", "unknown"))
@@ -787,7 +805,7 @@ def log_bin_status(
         from apm_cli.security.executables import EXEC_TYPE_BIN
 
         reason = executable_skip_reason(
-            ctx, package_name, package_label, EXEC_TYPE_BIN, "bin/ executables"
+            ctx, package_name, package_label, EXEC_TYPE_BIN, EXEC_KIND_LABELS[EXEC_TYPE_BIN]
         )
         log_fn(f"  |-- {reason}")
     elif skill_result.bin_skipped_reason == "not_trusted":
@@ -820,10 +838,12 @@ def log_hooks_skip(
         for d in (install / ".apm" / "hooks", install / "hooks")
     ):
         return
-    from apm_cli.security.executables import EXEC_TYPE_HOOKS
+    from apm_cli.security.executables import EXEC_KIND_LABELS, EXEC_TYPE_HOOKS
 
     label = package_name or getattr(package_info, "name", "unknown")
-    reason = executable_skip_reason(ctx, package_name, label, EXEC_TYPE_HOOKS, "hooks")
+    reason = executable_skip_reason(
+        ctx, package_name, label, EXEC_TYPE_HOOKS, EXEC_KIND_LABELS[EXEC_TYPE_HOOKS]
+    )
     logger.warning(f"{label}: {reason}", symbol="warning")
 
 

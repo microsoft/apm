@@ -1835,6 +1835,7 @@ def gate_retired_hook_survivors(
     """
     from ...install.exec_gate import gate_retirements
     from ...models.apm_package import APMPackage
+    from ...security.executables import exec_kinds_phrase
     from .local_survivors import survivor_ships_hooks
 
     if lockfile is None:
@@ -1866,7 +1867,8 @@ def gate_retired_hook_survivors(
         logger.warning(f"{key} is no longer allowed ({why}); removing its integrated files")
     for key, why in sorted(hooks.items()):
         if key not in denied:
-            logger.warning(f"{key} hooks are no longer allowed ({why}); removing them")
+            kinds = exec_kinds_phrase(retirements.retired_kinds.get(key, ()))
+            logger.warning(f"{key} {kinds} are no longer allowed ({why}); removing them")
     return refreshed | set(denied) | set(hooks), set(denied)
 
 

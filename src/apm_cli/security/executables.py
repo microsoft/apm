@@ -59,6 +59,39 @@ ALL_EXEC_TYPES = (
 )
 
 
+# How install's gate messages name each kind; uninstall and update reuse them
+# when they retire a kind, so every command names a kind identically (#4567).
+EXEC_KIND_LABELS = {
+    EXEC_TYPE_HOOKS: "hooks",
+    EXEC_TYPE_BIN: "bin/ executables",
+    EXEC_TYPE_CANVAS: "canvas extension(s)",
+    EXEC_TYPE_LSP: "LSP server(s)",
+    EXEC_TYPE_MCP: "MCP server(s)",
+}
+
+
+def rebuild_retired_kinds(declared, withheld, package_info) -> tuple[str, ...]:
+    """Kinds a gated survivor rebuild removes: *withheld* among *declared*, in order.
+
+    MCP servers are retired and reported by MCP admission, not the rebuild;
+    bin/ files deploy only for a marketplace plugin.
+    """
+    from apm_cli.models.apm_package import PackageType
+
+    bin_deploys = getattr(package_info, "package_type", None) is PackageType.MARKETPLACE_PLUGIN
+    return tuple(
+        kind
+        for kind in declared
+        if kind in withheld and kind != EXEC_TYPE_MCP and (kind != EXEC_TYPE_BIN or bin_deploys)
+    )
+
+
+def exec_kinds_phrase(kinds) -> str:
+    """Join kind labels once each: ``hooks``, ``hooks and LSP server(s)``."""
+    labels = list(dict.fromkeys(EXEC_KIND_LABELS.get(kind, kind) for kind in kinds)) or ["hooks"]
+    return labels[0] if len(labels) == 1 else f"{', '.join(labels[:-1])} and {labels[-1]}"
+
+
 @dataclass(frozen=True)
 class ExecutableDeclaration:
     """Describes the executable primitives declared by a single package.
