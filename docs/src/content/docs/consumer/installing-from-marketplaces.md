@@ -108,6 +108,12 @@ plus where it was found:
   locked commit still pins the download. If the marketplace now selects another
   source or commit, install fails; run `apm update <plugin>@<marketplace>` to
   move to it.
+- An entry the marketplace routes through a package registry locks the exact
+  version, `resolved_url` and `resolved_hash` instead of a commit, and replays
+  through a registry declared in `apm.yml`, like any registry dependency; the
+  archive hash is checked before anything is extracted. `apm install <plugin>@<marketplace>`
+  writes such an entry to `apm.yml` in registry form (`id`, `registry`,
+  `version`), never as a Git entry.
 - `apm update` and `apm install --refresh` revalidate the marketplace and fail
   rather than use stale data. `apm marketplace update` refreshes the cached
   list and nothing else.
