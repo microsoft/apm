@@ -348,27 +348,32 @@ def superseded_bundle_renderings(
     known_deploy_prefixes: frozenset[str],
     *,
     target: TargetProfile,
-) -> frozenset[str]:
-    """Return bundle paths another rendering of the same primitive replaces.
+) -> dict[str, str]:
+    """Map each bundle path that another path lowering to the same file replaces.
 
     Bundles packed before #3686 can carry one primitive in several target
     renderings (``instructions/py.md`` and ``instructions/py.instructions.md``)
     that lower to the same file. The rendering whose suffix is *target*'s own
-    extension wins, then the rendering a plugin bundle prefers.
+    extension is kept, then the rendering a plugin bundle prefers. Returns
+    ``{skipped: kept}``; callers name every skipped path.
     """
-    from ..bundle.plugin_layout import plugin_rendering_key
+    from ..bundle.plugin_layout import PLUGIN_RENDERING_PREFERENCE, primitive_file_suffix
 
     groups: dict[str, list[tuple[bool, int, str]]] = {}
     for rel in sorted(rel_paths):
         deploy_rel = _deploy_relative_candidate(rel, allowed_prefixes, known_deploy_prefixes)
-        key = plugin_rendering_key(deploy_rel) if deploy_rel else None
-        route = _plugin_layout_route(deploy_rel, target) if key else None
-        lowered = _lower_to_target(deploy_rel, target) if route else None
-        if key is None or route is None or lowered is None:
+        preference = PLUGIN_RENDERING_PREFERENCE.get((deploy_rel or "").partition("/")[0])
+        route = _plugin_layout_route(deploy_rel, target) if preference else None
+        if route is None or _is_unsupported_route(deploy_rel, route[3]):
             continue
-        if _is_unsupported_route(deploy_rel, route[3]):
+        lowered = _lower_to_target(deploy_rel, target)
+        if lowered is None:
             continue
-        groups.setdefault(lowered, []).append((key[1] != route[3].extension, key[2], rel))
-    return frozenset(
-        rel for renderings in groups.values() for *_rank, rel in sorted(renderings)[1:]
-    )
+        suffix = primitive_file_suffix(deploy_rel)
+        rank = preference.index(suffix) if suffix in preference else len(preference)
+        groups.setdefault(lowered, []).append((suffix != route[3].extension, rank, rel))
+    superseded: dict[str, str] = {}
+    for members in groups.values():
+        kept = min(members)[2]
+        superseded.update({rel: kept for *_rank, rel in members if rel != kept})
+    return superseded

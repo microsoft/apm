@@ -34,7 +34,8 @@ from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_err
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import superseded_bundle_renderings as _superseded_renderings
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
-from .local_bundle_rules import render_bundle_rule as _render_bundle_rule
+from .local_bundle_renderings import render_bundle_rule as _render_bundle_rule
+from .local_bundle_renderings import warn_superseded_renderings as _warn_superseded
 from .project_package import build_project_local_package_info
 from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
 from .target_warnings import log_canvas_skip as _log_canvas_skip
@@ -991,7 +992,8 @@ def integrate_local_bundle(
         _superseded = _superseded_renderings(
             list(pack_files), _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
         )
-        for rel in sorted(pack_files.keys() - _superseded):
+        _warn_superseded(target.name, _superseded, diagnostics=diagnostics, logger=logger)
+        for rel in sorted(pack_files.keys() - _superseded.keys()):
             expected_hash = pack_files[rel]
             # CR1: bundle_files keys come from untrusted lockfile YAML
             # inside the bundle.  Reject traversal sequences before

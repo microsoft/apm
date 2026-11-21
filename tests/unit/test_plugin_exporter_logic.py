@@ -241,3 +241,63 @@ class TestUpdatePluginJsonPaths:
 # ---------------------------------------------------------------------------
 # Integration tests: export_plugin_bundle
 # ---------------------------------------------------------------------------
+
+
+class TestDuplicatePluginRenderings:
+    """#3686: one rendering per primitive, identified by the deploying target."""
+
+    @pytest.mark.parametrize(
+        ("deployed", "dropped"),
+        [
+            # claude + copilot agents and instructions: one rendering each.
+            (
+                {
+                    ".claude/agents/rv.md": "agents/rv.md",
+                    ".github/agents/rv.agent.md": "agents/rv.agent.md",
+                    ".claude/rules/py.md": "instructions/py.md",
+                    ".github/instructions/py.instructions.md": "instructions/py.instructions.md",
+                    ".cursor/rules/py.mdc": "instructions/py.mdc",
+                },
+                {"agents/rv.agent.md", "instructions/py.md", "instructions/py.mdc"},
+            ),
+            # Two distinct Claude agents with dotted stems are not renderings.
+            (
+                {
+                    ".claude/agents/rv.md": "agents/rv.md",
+                    ".claude/agents/rv.agent.md": "agents/rv.agent.md",
+                },
+                set(),
+            ),
+            # A dotted stem still pairs its Copilot and Claude instruction renderings.
+            (
+                {
+                    ".github/instructions/review.agent.instructions.md": (
+                        "instructions/review.agent.instructions.md"
+                    ),
+                    ".claude/rules/review.agent.md": "instructions/review.agent.md",
+                },
+                {"instructions/review.agent.md"},
+            ),
+            # Without the APM rendering each native rule rendering is kept.
+            (
+                {
+                    ".claude/rules/py.md": "instructions/py.md",
+                    ".cursor/rules/py.mdc": "instructions/py.mdc",
+                },
+                set(),
+            ),
+            # Own source primitives carry no target provenance.
+            (
+                {".apm/agents/rv.agent.md": "agents/rv.agent.md", "agents/rv.md": "agents/rv.md"},
+                set(),
+            ),
+        ],
+    )
+    def test_drops_only_other_target_renderings(self, deployed, dropped):
+        from apm_cli.bundle.plugin_layout import (
+            deployed_rendering_extension,
+            duplicate_plugin_renderings,
+        )
+
+        renderings = {rel: deployed_rendering_extension(src) for src, rel in deployed.items()}
+        assert duplicate_plugin_renderings(renderings) == dropped

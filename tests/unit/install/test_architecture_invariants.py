@@ -54,8 +54,8 @@ KNOWN_LARGE_MODULES = {
     # Local plugin bundle hooks route through HookIntegrator (#3700).
     # Bundle Codex agents render through AgentIntegrator (#3714).
     # Bundle install keeps one rendering per primitive and converts packed
-    # instructions to rule formats via local_bundle_rules (#3686).
-    "services.py": 1229,
+    # instructions to rule formats via local_bundle_renderings (#3686).
+    "services.py": 1231,
     # drift.py crossed 1000 when replay target-root claim scoping (#2655)
     # merged atop main's replay growth. Decomposition tracked as follow-up.
     # Replay builds the project's own package through the install builder (#3151).

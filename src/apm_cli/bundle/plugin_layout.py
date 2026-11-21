@@ -72,42 +72,69 @@ def primitive_file_suffix(name: str) -> str | None:
 # Plugin directories whose files are per-target renderings of one primitive,
 # with the rendering a plugin bundle keeps, best first (#3686). Agents and
 # commands keep the Claude plugin rendering, which Claude Code and Copilot CLI
-# both load. Instructions keep the APM source rendering (``applyTo``): no
-# plugin host loads it natively, and local bundle install renders it into each
-# target's rule format.
+# both load. Instructions keep the APM rendering (``applyTo``), which local
+# bundle install converts into each target's rule format.
 PLUGIN_RENDERING_PREFERENCE: dict[str, tuple[str, ...]] = {
     "agents": (".md", ".agent.md", ".toml"),
     "commands": (".md", ".prompt.md", ".toml"),
     "instructions": (".instructions.md", ".md", ".mdc"),
 }
 
+# Each rule format scopes paths its own way and none converts to another, so
+# instruction renderings are dropped only next to the APM rendering.
+_DROP_ONLY_BESIDE: dict[str, str] = {"instructions": ".instructions.md"}
 
-def plugin_rendering_key(plugin_rel: str) -> tuple[str, str, int] | None:
-    """Return ``(primitive, suffix, rank)`` for a path that renders a primitive.
 
-    Two paths with the same primitive are renderings of one source primitive
-    for different targets, e.g. ``agents/rv.md`` and ``agents/rv.agent.md``;
-    the lower *rank* is the rendering a plugin bundle keeps.
+def deployed_rendering_extension(deployed_rel: str) -> str | None:
+    """Return the target extension of a deployed agent, command or instruction.
+
+    *deployed_rel* is a project-relative deployed path such as
+    ``.github/agents/rv.agent.md``; ``None`` when no target deploys it.
     """
-    head, _, tail = plugin_rel.partition("/")
-    preference = PLUGIN_RENDERING_PREFERENCE.get(head)
-    suffix = primitive_file_suffix(tail) if preference and tail else None
-    if suffix is None or suffix not in preference:
-        return None
-    return f"{head}/{tail[: -len(suffix)]}", suffix, preference.index(suffix)
+    from ..integration.targets import KNOWN_TARGETS
 
-
-def duplicate_plugin_renderings(plugin_rels: list[str]) -> set[str]:
-    """Return the paths that duplicate a better rendering of the same primitive."""
-    best: dict[str, tuple[int, str]] = {}
-    for rel in plugin_rels:
-        if (key := plugin_rendering_key(rel)) is not None:
-            best[key[0]] = min(best.get(key[0], (key[2], rel)), (key[2], rel))
-    return {
-        rel
-        for rel in plugin_rels
-        if (key := plugin_rendering_key(rel)) is not None and best[key[0]][1] != rel
+    kinds = {
+        kind for head in PLUGIN_RENDERING_PREFERENCE for kind in PLUGIN_LAYOUT[head].primitive_kinds
     }
+    for profile in KNOWN_TARGETS.values():
+        for kind, mapping in profile.primitives.items():
+            root = mapping.deploy_root or profile.root_dir
+            prefix = f"{root.strip('/')}/{mapping.subdir}/"
+            if kind not in kinds or not mapping.subdir or not mapping.extension:
+                continue
+            if deployed_rel.startswith(prefix) and deployed_rel.endswith(mapping.extension):
+                return mapping.extension
+    return None
+
+
+def duplicate_plugin_renderings(renderings: dict[str, str | None]) -> set[str]:
+    """Return plugin paths that duplicate a kept rendering of one primitive.
+
+    *renderings* maps each plugin path of one package to the extension of the
+    target that deployed it (:func:`deployed_rendering_extension`). Two paths
+    render one primitive only when their names match once each target's own
+    extension is removed, so ``agents/rv.md`` (Claude) and
+    ``agents/rv.agent.md`` (Copilot) pair up, while two Claude agents never do.
+    """
+    groups: dict[str, list[tuple[int, str]]] = {}
+    for rel, extension in renderings.items():
+        head, _, tail = rel.partition("/")
+        preference = PLUGIN_RENDERING_PREFERENCE.get(head)
+        if not preference or not extension or len(tail) <= len(extension):
+            continue
+        if not tail.endswith(extension):
+            continue
+        rank = preference.index(extension) if extension in preference else len(preference)
+        groups.setdefault(f"{head}/{tail[: -len(extension)]}", []).append((rank, rel))
+    dropped: set[str] = set()
+    for primitive, members in groups.items():
+        rank, kept = min(members)
+        preference = PLUGIN_RENDERING_PREFERENCE[primitive.partition("/")[0]]
+        kept_extension = preference[rank] if rank < len(preference) else None
+        if _DROP_ONLY_BESIDE.get(primitive.partition("/")[0], kept_extension) != kept_extension:
+            continue
+        dropped.update(rel for _rank, rel in members if rel != kept)
+    return dropped
 
 
 PLUGIN_LAYOUT: dict[str, PluginDirSpec] = {

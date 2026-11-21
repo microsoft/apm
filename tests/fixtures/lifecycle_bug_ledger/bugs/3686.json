@@ -13,6 +13,7 @@
   "regression_tests": [
     "tests/integration/test_pack_bundle_roundtrip_lifecycle.py::test_multi_target_pack_ships_one_rendering_per_primitive",
     "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_duplicated_bundle_keeps_the_target_own_rendering",
-    "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_packed_apm_instructions_render_to_the_target_rule_format"
+    "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_packed_apm_instructions_render_to_the_target_rule_format",
+    "tests/unit/test_plugin_exporter_logic.py::TestDuplicatePluginRenderings::test_drops_only_other_target_renderings"
   ]
 }

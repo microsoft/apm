@@ -1,4 +1,4 @@
-"""Rule rendering for APM instructions packed into a local bundle (#3686)."""
+"""Rendering choices for files packed into a local bundle (#3686)."""
 
 from __future__ import annotations
 
@@ -40,3 +40,24 @@ def render_bundle_rule(
         elif logger is not None:
             logger.warning(message)
         return None, True
+
+
+def warn_superseded_renderings(
+    target_name: str,
+    superseded: dict[str, str],
+    *,
+    diagnostics: DiagnosticCollector | None,
+    logger: InstallLogger | None,
+) -> None:
+    """Name every bundle path skipped for another rendering of the same file."""
+    if not superseded:
+        return
+    skipped = ", ".join(f"{rel} (kept {kept})" for rel, kept in sorted(superseded.items()))
+    message = (
+        f"Skipped bundle files for target {target_name} that deploy to the same "
+        f"file as another rendering: {skipped}"
+    )
+    if diagnostics is not None:
+        diagnostics.warn(message)
+    elif logger is not None:
+        logger.warning(message)

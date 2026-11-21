@@ -1344,7 +1344,7 @@ class TestLocalBundlePathRouting:
                 target_bundle_deploy_prefixes(target),
                 known_bundle_deploy_prefixes(),
                 target=target,
-            )
+            ).keys()
             == superseded
         )
 
