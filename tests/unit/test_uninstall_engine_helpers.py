@@ -928,3 +928,64 @@ class TestShrinkRetiredPaths:
         assert shrink_retired_paths(self._lockfile(), {"org/bundle": _ShrunkNode(None, None)}) == (
             set()
         )
+
+    def test_a_skill_selected_for_another_target_retires_from_this_root(self):
+        from apm_cli.commands.uninstall.selection_shrink import shrink_retired_paths
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        node = _ShrunkNode(None, None)
+        node._selection = merge_edge_pairings([(["alpha"], ["claude"]), (["beta"], ["copilot"])])
+
+        retired = shrink_retired_paths(self._lockfile(), {"org/bundle": node})
+
+        assert retired == {".agents/skills/alpha", ".agents/skills/alpha/SKILL.md"}
+
+    def test_a_retired_skill_takes_its_hash_only_members(self):
+        from apm_cli.commands.uninstall.selection_shrink import shrink_retired_paths
+
+        lockfile = self._lockfile()
+        lockfile.get_dependency("org/bundle").deployed_file_hashes = {
+            ".agents/skills/beta/assets/data.json": "sha256:" + "0" * 64
+        }
+
+        retired = shrink_retired_paths(lockfile, {"org/bundle": _ShrunkNode(["alpha"], None)})
+
+        assert ".agents/skills/beta/assets/data.json" in retired
+
+    def test_a_path_another_shrinking_survivor_keeps_is_retained(self):
+        from apm_cli.commands.uninstall.selection_shrink import shrink_path_split
+
+        lockfile = self._lockfile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/other",
+                resolved_commit="def",
+                deployed_files=[".agents/skills/beta", ".agents/skills/beta/SKILL.md"],
+            )
+        )
+
+        retired, retained = shrink_path_split(
+            lockfile,
+            {
+                "org/bundle": _ShrunkNode(["alpha"], None),
+                "org/other": _ShrunkNode(None, None),
+            },
+        )
+
+        assert ".agents/skills/beta/SKILL.md" in retired & retained
+
+    def test_dynamic_root_targets_are_never_resolved(self, monkeypatch):
+        from apm_cli.commands.uninstall.selection_shrink import _skill_root_sharers
+        from apm_cli.integration import targets
+
+        real = targets.scoped_profile_or_none
+
+        def strict(profile, *, user_scope):
+            if profile.user_root_resolver is not None:
+                raise RuntimeError(f"resolved dynamic root of {profile.name}")
+            return real(profile, user_scope=user_scope)
+
+        monkeypatch.setattr(targets, "scoped_profile_or_none", strict)
+        assert any(p.user_root_resolver is not None for p in targets.KNOWN_TARGETS.values())
+
+        assert ".agents/skills" in _skill_root_sharers()

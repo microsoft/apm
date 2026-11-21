@@ -61,7 +61,11 @@ from .engine import (
     manifest_dependency_entries,
     project_shrunk_selections,
 )
-from .selection_shrink import _shrink_surviving_selections, shrink_retired_paths
+from .selection_shrink import (
+    _shrink_surviving_selections,
+    shrink_path_split,
+    shrink_retired_paths,
+)
 
 
 def _uninstall_summary(removed_count: int, retained_count: int, orphan_count: int) -> str:
@@ -604,8 +608,11 @@ def _refuse_uninstall_without_evidence(
                 lockfile, excluded_dependency_keys=cleanup_keys | builtins.set(shrunk)
             ),
         )
-        retired = BaseIntegrator.normalize_managed_files(shrink_retired_paths(lockfile, shrunk))
-        candidates |= (retired or builtins.set()) - others - builtins.set(other_hashes)
+        retired, retained = shrink_path_split(lockfile, shrunk)
+        retired = BaseIntegrator.normalize_managed_files(retired) or builtins.set()
+        # A path another shrinking survivor keeps deploying is not deleted.
+        retained = BaseIntegrator.normalize_managed_files(retained) or builtins.set()
+        candidates |= retired - others - builtins.set(other_hashes) - retained
     candidates -= builtins.set(lockfile.local_deployed_files)
     candidates -= builtins.set(preserved_values or ())
     refused = evidence.refusals(sorted(candidates))
