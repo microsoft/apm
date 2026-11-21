@@ -96,13 +96,9 @@ def _recorded(scope_dir: Path) -> list[PendingBundle]:
     return found
 
 
-def recorded_bundle_slugs(scope_dir: Path, *, exec_type: str | None = None) -> list[str]:
-    """Return installed bundle slugs, optionally only those shipping *exec_type*."""
-    return [
-        bundle.slug
-        for bundle in _recorded(scope_dir)
-        if exec_type is None or exec_type in bundle.exec_types
-    ]
+def recorded_bundle_slugs(scope_dir: Path) -> list[str]:
+    """Return the slugs of the installed bundles that ship executables."""
+    return [bundle.slug for bundle in _recorded(scope_dir)]
 
 
 def drop_bundle_exec_type(scope_dir: Path, slug: str, exec_type: str) -> None:

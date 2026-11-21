@@ -61,6 +61,7 @@ from .engine import (
     manifest_dependency_entries,
     project_shrunk_selections,
 )
+from .local_bundle import uninstall_selected_local_bundles
 from .selection_shrink import (
     _shrink_surviving_selections,
     shrink_path_split,
@@ -961,20 +962,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         lockfile = LockFile.read(lockfile_path)
 
         # A local bundle is not in apm.yml; its hooks leave through the hook owner (#3700).
-        from .local_bundle import select_local_bundles, uninstall_local_bundles
-
-        bundle_slugs, bundle_scope = select_local_bundles(
+        if uninstall_selected_local_bundles(
             packages,
             current_deps,
             lockfile,
             scope=scope,
             manifest_path=manifest_path,
             logger=logger,
-        )
-        if bundle_scope is not None:
-            uninstall_local_bundles(
-                bundle_slugs, bundle_scope, scope=scope, logger=logger, dry_run=dry_run
-            )
+            dry_run=dry_run,
+        ):
             return
 
         # Step 1: Validate packages

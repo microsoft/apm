@@ -448,7 +448,8 @@ the same hook merge a source install uses, once the exact bundle key printed by
 with one warning. Every later `apm install` (including `--frozen`), `apm update`
 and `apm prune` re-checks that exact key against current approvals and org
 policy and retires the hooks when it no longer holds; `apm audit --ci` reports
-them first. `apm uninstall` does not remove local-bundle content. A
+them first. `apm uninstall <bundle>` (or the bundle name) removes the bundle's
+deployed hooks, their scripts and lockfile claims; its other files stay. A
 portable Agent Plugins v1 package installs declaratively instead:
 declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
 whole and registers it without locating or executing Copilot. Stable Copilot

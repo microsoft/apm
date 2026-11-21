@@ -870,9 +870,8 @@ def _validate_uninstall_packages(
             elif is_local and looks_like_local_bundle(Path(package)):
                 logger.error(
                     f"'{Path(package).name}' is a local bundle. Bundles "
-                    "installed with 'apm install <bundle>' are not recorded in apm.yml, "
-                    "and 'apm uninstall' cannot remove local-bundle content yet "
-                    "(tracked in #3887)."
+                    "installed with 'apm install <bundle>' are not recorded in apm.yml; "
+                    "uninstall them apart from other packages to remove their hooks."
                 )
             elif is_local:
                 logger.error(

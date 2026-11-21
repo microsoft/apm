@@ -567,6 +567,12 @@ def test_uninstall_bundle_removes_its_hooks_and_claims(
     assert "Would remove hooks from local bundle 'hookpkg'" in preview, preview
     assert tree_bytes(consumer) == before
 
+    # Mixing a bundle with an apm.yml package is refused before any write.
+    mixed = output(world.apm(consumer, "uninstall", str(bundle), str(dep), expect=1))
+    assert f"cannot be uninstalled with other packages ({dep})" in mixed, mixed
+    assert "Run 'apm uninstall <bundle>' to remove a local bundle's hooks" in mixed, mixed
+    assert tree_bytes(consumer) == before
+
     removed = world.apm(consumer, "uninstall", str(bundle))
     text = output(removed)
     assert "Removed hooks from local bundle 'hookpkg'" in text, text
@@ -589,10 +595,12 @@ def test_uninstall_bundle_removes_its_hooks_and_claims(
     assert (consumer / ".claude" / "skills" / "hs" / "SKILL.md").is_file()
     assert ".claude/skills/hs/SKILL.md" in world.lock(consumer)["local_deployed_files"]
     world.apm(consumer, "audit", "--ci")
+    pending = output(world.apm(consumer, "approve", "--pending"))
+    assert "All packages with executables are approved." in pending, pending
 
     # Converged: a second uninstall finds nothing to remove and changes no bytes.
     again = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
-    assert "Local bundle 'hookpkg' has no hooks installed" in again, again
+    assert "Local bundle 'hookpkg' has no hooks deployed" in again, again
     assert tree_bytes(consumer) == after
 
     # Symmetric: reinstalling the approved bundle registers it again.

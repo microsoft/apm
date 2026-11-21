@@ -56,7 +56,8 @@ def _installed_slugs(bundle_scope: _BundleScope) -> set[str]:
     return set(deployed) | set(recorded_bundle_slugs(bundle_scope.lock_dir))
 
 
-def _resolve_scope(scope: Any, manifest_path: Path, logger: Any) -> _BundleScope:
+def _resolve_scope(scope: Any, manifest_path: Path, logger: Any) -> _BundleScope | str:
+    """Return the scope's bundle hook inputs, or the reason they cannot be resolved."""
     from ...core.scope import get_apm_dir
     from ...install.local_bundle_hook_trust import (
         BundleHookTargetsUnresolved,
@@ -70,8 +71,7 @@ def _resolve_scope(scope: Any, manifest_path: Path, logger: Any) -> _BundleScope
             scope, apm_package, no_policy=True, logger=logger
         )
     except (BundleHookTargetsUnresolved, ValueError, OSError) as exc:
-        logger.error(f"Local bundle hooks could not be located: {exc}")
-        sys.exit(1)
+        return str(exc)
     return _BundleScope(root, targets, get_apm_dir(scope), apm_package)
 
 
@@ -104,6 +104,11 @@ def select_local_bundles(
         return [], None
 
     bundle_scope = _resolve_scope(scope, manifest_path, logger)
+    if isinstance(bundle_scope, str):
+        if bundle_paths:
+            logger.error(f"Local bundle hooks could not be located: {bundle_scope}")
+            sys.exit(1)
+        return [], None
     installed = _installed_slugs(bundle_scope) if names else set()
     slugs = [name for name in names if name in installed]
     for package in bundle_paths:
@@ -117,10 +122,15 @@ def select_local_bundles(
     if len(slugs) != len(packages):
         others = [p for p in packages if p not in names or p not in installed]
         others = [p for p in others if p not in bundle_paths]
+        from ...core.remediation import LOCAL_BUNDLE_UNINSTALL_APART
+        from ...core.scope import is_user_scope
+
+        remedy = LOCAL_BUNDLE_UNINSTALL_APART
+        if is_user_scope(scope):
+            remedy = remedy.with_command("apm uninstall -g <bundle>")
         logger.error(
-            f"Uninstall local bundles apart from other packages ({', '.join(others)}): "
-            "run 'apm uninstall' once for the bundles and once for the rest; "
-            "no changes were made."
+            f"Local bundles cannot be uninstalled with other packages ({', '.join(others)}); "
+            f"no changes were made. {remedy.sentence()}"
         )
         sys.exit(1)
     return list(dict.fromkeys(slugs)), bundle_scope
@@ -136,16 +146,15 @@ def uninstall_local_bundles(
         local_bundle_paths,
         retire_bundle_hooks,
     )
-    from ...install.local_bundle_pending import drop_bundle_exec_type, recorded_bundle_slugs
+    from ...install.local_bundle_pending import drop_bundle_exec_type
 
     root, targets, lock_dir = bundle_scope.root, bundle_scope.targets, bundle_scope.lock_dir
     deployed = deployed_bundle_hook_keys(root, targets, local_bundle_paths(lock_dir))
-    recorded = set(recorded_bundle_slugs(lock_dir, exec_type="hooks"))
-    missing = [slug for slug in slugs if slug not in deployed and slug not in recorded]
+    missing = [slug for slug in slugs if slug not in deployed]
     for slug in missing:
         logger.error(
-            f"Local bundle '{slug}' has no hooks installed. 'apm uninstall' removes a "
-            "local bundle's hooks only; no changes were made."
+            f"Local bundle '{slug}' has no hooks deployed. 'apm uninstall' removes a "
+            "local bundle's deployed hooks only; no changes were made."
         )
     if missing:
         sys.exit(1)
@@ -173,3 +182,23 @@ def uninstall_local_bundles(
             f"Kept {kept} other file(s) from local bundles: 'apm uninstall' removes a "
             "local bundle's hooks only."
         )
+
+
+def uninstall_selected_local_bundles(
+    packages: tuple[str, ...] | list[str],
+    current_deps: list,
+    lockfile: Any,
+    *,
+    scope: Any,
+    manifest_path: Path,
+    logger: Any,
+    dry_run: bool,
+) -> bool:
+    """Uninstall the local bundles *packages* name; ``False`` when they name none."""
+    slugs, bundle_scope = select_local_bundles(
+        packages, current_deps, lockfile, scope=scope, manifest_path=manifest_path, logger=logger
+    )
+    if bundle_scope is None:
+        return False
+    uninstall_local_bundles(slugs, bundle_scope, scope=scope, logger=logger, dry_run=dry_run)
+    return True

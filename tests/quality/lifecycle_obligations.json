@@ -24997,7 +24997,7 @@
   "generated_cover-14-refusals.yaml": "2668f5641e39462b11e3f3366c0d1681113945255df1cad9a6e65d4bc2cccba0",
   "generated_cover-15-refusals.yaml": "bb74265dd38bb0ef66bfcf59bcc51f2a30addd6ca53890071624e80b8e439a6f",
   "generated_cover-16-source-refusals.yaml": "dabc3fdbb50c3b1dfcf110c5831e492e34dfce99da84fec4d815d9bb0e1bc473",
-  "generated_cover-17-local-bundle-refusals.yaml": "db88b18bb7af9c0adb424dc06ee2e1d159ae8dd520124411ac49b93b3ae31eae"
+  "generated_cover-17-local-bundle-refusals.yaml": "7934f647d22a5d8a4f72b7bc63fafc9fb215ffa59e176c6160398a8acc626d49"
  },
  "rules": {
   "E1": {
@@ -25094,13 +25094,13 @@
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:50",
     "src/apm_cli/commands/uninstall/engine.py:727",
-    "src/apm_cli/commands/uninstall/engine.py:890",
-    "src/apm_cli/commands/uninstall/engine.py:719",
+    "src/apm_cli/commands/uninstall/engine.py:889",
+    "src/apm_cli/commands/uninstall/local_bundle.py:156",
     "src/apm_cli/commands/update.py:560",
     "src/apm_cli/core/command_logger.py:297",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
-   "text": "the source decides the command: bundle-install is install of a local bundle (install x local-bundle maps to it; no other source can state it); install --mcp takes an MCP registry name or an inline server (--url, or a command after --), never a package source, and an MCP source delivers only MCP; a package registry delivers whole packages. Parsed-then-refused shapes are refusal cells, one per message class: marketplace add of a source without a catalog, uninstall of an MCP server (a registry name is not found in apm.yml; an inline name is an MCP server), and a local bundle, which writes no manifest entry (uninstall refuses it; update and prune leave it untouched). A native plugin carries no canvas primitive"
+   "text": "the source decides the command: bundle-install is install of a local bundle (install x local-bundle maps to it; no other source can state it); install --mcp takes an MCP registry name or an inline server (--url, or a command after --), never a package source, and an MCP source delivers only MCP; a package registry delivers whole packages. Parsed-then-refused shapes are refusal cells, one per message class: marketplace add of a source without a catalog, uninstall of an MCP server (a registry name is not found in apm.yml; an inline name is an MCP server), and a local bundle, which writes no manifest entry (uninstall removes only its deployed hooks and refuses a bundle with none; update and prune leave it untouched). A native plugin carries no canvas primitive"
   },
   "U9": {
    "evidence": [

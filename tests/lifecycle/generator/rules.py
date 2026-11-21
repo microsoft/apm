@@ -209,8 +209,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "packages. Parsed-then-refused shapes are refusal cells, one per message class: "
         "marketplace add of a source without a catalog, uninstall of an MCP server "
         "(a registry name is not found in apm.yml; an inline name is an MCP server), and a "
-        "local bundle, which writes no manifest entry (uninstall refuses it; update and "
-        "prune leave it untouched). A native plugin carries no canvas primitive",
+        "local bundle, which writes no manifest entry (uninstall removes only its deployed "
+        "hooks and refuses a bundle with none; update and prune leave it untouched). "
+        "A native plugin carries no canvas primitive",
         (
             Ev(_INSTALL, 1249, "detect_local_bundle"),
             Ev(_INSTALL, 1013, '"--registry"'),
@@ -218,8 +219,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/models/dependency/reference.py", 860, '"registry" in entry'),
             Ev("src/apm_cli/marketplace/registration.py", 50, "No marketplace.json found"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 727, "is an MCP server, not a package"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 890, "was not found in apm.yml"),
-            Ev("src/apm_cli/commands/uninstall/engine.py", 719, "cannot remove local-bundle"),
+            Ev("src/apm_cli/commands/uninstall/engine.py", 889, "was not found in apm.yml"),
+            Ev("src/apm_cli/commands/uninstall/local_bundle.py", 156, "has no hooks deployed"),
             Ev("src/apm_cli/commands/update.py", 560, "No APM dependencies to update"),
             Ev("src/apm_cli/core/command_logger.py", 297, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
@@ -320,8 +321,8 @@ UNINSTALL_MCP_REFUSALS: Mapping[str, str] = {
     "mcp-registry": "rule|U8|uninstall-refuses-a-registry-mcp-name",
     "inline-mcp": "rule|U8|uninstall-refuses-an-inline-mcp-name",
 }
-# A local bundle writes no manifest entry: uninstall refuses it, update and
-# prune parse and leave it untouched (one cell per message class).
+# A local bundle writes no manifest entry: uninstall refuses one with no deployed
+# hooks (#3700), update and prune parse and leave it untouched (one cell per message class).
 LOCAL_BUNDLE_REFUSALS: Mapping[str, str] = {
     "uninstall": "rule|U8|uninstall-refuses-a-local-bundle",
     "update": "rule|U8|update-leaves-a-local-bundle-untouched",
@@ -332,7 +333,7 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     MARKETPLACE_ADD_REFUSAL: (1, r"No marketplace\.json found in"),
     UNINSTALL_MCP_REFUSALS["mcp-registry"]: (1, r"was not found in apm\.yml"),
     UNINSTALL_MCP_REFUSALS["inline-mcp"]: (1, r"is an MCP server, not a package"),
-    LOCAL_BUNDLE_REFUSALS["uninstall"]: (1, r"is a local bundle\. Bundles installed with"),
+    LOCAL_BUNDLE_REFUSALS["uninstall"]: (1, r"Local bundle 'p-exec' has no hooks deployed\."),
     # p-exec ships only executables the gate parks, so its bundle install records
     # nothing: update has no bundle to name (#4318 names a recorded one).
     LOCAL_BUNDLE_REFUSALS["update"]: (0, r"No APM dependencies"),
