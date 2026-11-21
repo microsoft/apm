@@ -439,7 +439,8 @@ or `$CODEX_HOME/agents/`), and the lockfile records the rendered hash. An agent
 that cannot be rendered, or whose name, description or body is empty (Codex
 rejects those), is skipped with a warning. For a project-scope Claude
 target, bundle instructions route like a package install: always-on and
-directory ones (files named `*.instructions.md`) are staged for `apm compile`
+directory ones (files named `*.instructions.md`; a directory one only where
+compile can deliver that directory's `AGENTS.md`) are staged for `apm compile`
 into the `AGENTS.md` that `CLAUDE.md` imports, and install prints a
 `Run 'apm compile'` hint. The rest deploy to `.claude/rules/` with `paths:`;
 a rule already carrying `paths:` is copied as packed. A hand-authored
