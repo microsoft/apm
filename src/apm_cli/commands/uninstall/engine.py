@@ -1783,13 +1783,14 @@ def _restage_changed_local_survivors(
     Returns the restaged lock keys; their lock rows record the new content hash.
     """
     from ...install.phases.local_content import _copy_local_package, compute_local_package_hash
+    from ...native_plugins.scopes import native_source_current
 
     restaged: set[str] = set()
     for key, dep in sorted(lockfile.dependencies.items()):
         if key == "." or key in skip_keys or dep.source != "local" or dep.depth != 1:
             continue
-        if dep.native_plugin is not None:  # the native reconcile owns it whole (#3921)
-            continue
+        if dep.native_plugin is not None and native_source_current(dep, source_root):
+            continue  # an unchanged native plugin is never re-copied (#3921)
         try:
             dep_ref = dep.to_dependency_ref()
             source = (source_root / dep_ref.local_path).resolve()
@@ -1797,8 +1798,7 @@ def _restage_changed_local_survivors(
             current = compute_local_package_hash(source, framed=dep.content_hash_framed)
         except (OSError, ValueError, TypeError, PathTraversalError):
             continue
-        # Judge the source against the materialized copy, not the lock row: a
-        # native plugin's locked hash is recorded from its normalized image.
+        # Judge the source against the materialized copy, not the lock row.
         if not install_path.is_dir() or current == compute_local_package_hash(
             install_path, framed=dep.content_hash_framed
         ):

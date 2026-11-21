@@ -82,6 +82,28 @@ def record_harnesses(package_type: str | None, marketplace_path: str) -> frozens
     )
 
 
+def native_source_current(locked: Any, source_root: Path) -> bool:
+    """Whether a local native plugin's source still carries its recorded root digest.
+
+    A changed source is re-copied so the executable gate re-judges it (#4446);
+    an unchanged one never is, or its files would be rebuilt loose.
+    """
+    from apm_cli.claude_plugins.admission import (
+        ClaudeNativePluginError,
+        fingerprint_native_claude_source,
+    )
+
+    record = locked.native_plugin
+    try:
+        source = (Path(source_root) / locked.to_dependency_ref().local_path).resolve()
+        observed = fingerprint_native_claude_source(
+            source, portable=is_project_path(record.marketplace_path)
+        )
+    except (ClaudeNativePluginError, OSError, ValueError, TypeError):
+        return False
+    return observed == record.fingerprint
+
+
 def native_harnesses(lockfile: Any, dep_key: str) -> frozenset[str]:
     """Harnesses that load a locked dependency whole through its ``native_plugin`` record.
 
