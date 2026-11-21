@@ -31,6 +31,10 @@ class FakeApi:
         self.calls.append(("POST", path, dict(body)))
         return self.post_handler(path, body)
 
+    def patch(self, path: str, body: Mapping[str, Any]) -> Response:
+        self.calls.append(("PATCH", path, dict(body)))
+        return Response(200, {})
+
     def delete(self, path: str) -> Response:
         self.calls.append(("DELETE", path, None))
         return Response(204, None)

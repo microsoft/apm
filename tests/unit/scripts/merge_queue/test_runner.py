@@ -138,12 +138,13 @@ def test_queued_prs_are_not_composed_twice() -> None:
         ("post", f"repos/{REPO}/merges", {"base": "queue/t0001/p1-full", "head": MAIN}),
         ("delete", f"repos/{REPO}/git/refs/heads/main", None),
         ("delete", f"repos/{REPO}/git/refs/tags/v1", None),
+        ("patch", f"repos/{REPO}/issues/7", {"state": "closed"}),
     ],
 )
 def test_the_shadow_guard_refuses_every_write_outside_queue_refs(method, path, body) -> None:
     guard = runner.ShadowApi(FakeApi())
     with pytest.raises(runner.ShadowViolation):
-        guard.post(path, body) if method == "post" else guard.delete(path)
+        getattr(guard, method)(*((path, body) if body is not None else (path,)))
 
 
 def test_only_one_runner_holds_the_lock(tmp_path) -> None:

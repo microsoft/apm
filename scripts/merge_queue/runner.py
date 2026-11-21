@@ -1,7 +1,11 @@
-"""The shadow runner: ``tick`` once, or ``run --interval 60``. Never writes to main.
+"""The queue runner: ``tick`` once, or ``run --interval 60``.
 
-python -m scripts.merge_queue.runner tick  [--state-dir DIR] [--depth N]
-python -m scripts.merge_queue.runner run   [--state-dir DIR] [--interval 60]
+Shadow by default: trains are built and proven on queue refs, and nothing is written
+to main. With ``--land`` the runner also admin-merges proven trains (landing.py);
+every train-building write still goes through ShadowApi.
+
+python -m scripts.merge_queue.runner tick  [--state-dir DIR] [--depth N] [--land]
+python -m scripts.merge_queue.runner run   [--state-dir DIR] [--interval 60] [--land]
 python -m scripts.merge_queue.runner metrics [--state-dir DIR]
 """
 
@@ -17,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from scripts.merge_queue import metrics, proof, refs, state, tickets, train
+from scripts.merge_queue import landing, metrics, proof, refs, state, tickets, train
 from scripts.merge_queue.api import REPO, Api, GhApi, Response, get_all
 
 DEFAULT_STATE_DIR = Path.home() / ".apm-queue"
@@ -55,6 +59,9 @@ class ShadowApi:
         else:
             raise ShadowViolation(f"shadow runner refused POST {path}")
         return self.inner.post(path, body)
+
+    def patch(self, path: str, body: Mapping[str, Any]) -> Response:
+        raise ShadowViolation(f"shadow runner refused PATCH {path}")
 
     def delete(self, path: str) -> Response:
         prefix = f"{self._REFS}/heads/"
@@ -289,21 +296,31 @@ def single_instance(lock_path: Path) -> Iterator[bool]:
         yield _try_lock(handle)
 
 
-def _one_tick(api: Api, state_dir: Path, depth: int) -> None:
+def _one_tick(api: Api, state_dir: Path, depth: int, merge: landing.Merger | None = None) -> None:
+    """One pass. ``merge`` set means --land: proven trains are landed after the shadow pass."""
     state_path = state_dir / "state.json"
     live = state.rebuild(api)
     current = state.reconcile(state.load(state_path), live) if state_path.is_file() else live
-    tick(api, current, Log(state_dir / "events.jsonl"), depth)
+    log = Log(state_dir / "events.jsonl")
+    tick(api, current, log, depth)
+    if merge is not None:
+        landing_path = state_dir / "landing.json"
+        lander = landing.load(landing_path)
+        landing.tick(api, current, lander, log, merge)
+        landing.save(lander, landing_path)
     state.save(current, state_path)
     (state_dir / "heartbeat").write_text(_now() + "\n", encoding="utf-8")
 
 
-def main(argv: Sequence[str], api: Api | None = None) -> int:
+def main(argv: Sequence[str], api: Api | None = None, merge: landing.Merger | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.merge_queue.runner")
     parser.add_argument("command", choices=("tick", "run", "metrics"))
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE_DIR)
     parser.add_argument("--depth", type=int, default=2)
     parser.add_argument("--interval", type=int, default=60)
+    parser.add_argument(
+        "--land", action="store_true", help="admin-merge proven trains (default: shadow only)"
+    )
     args = parser.parse_args(argv)
     if args.command == "metrics":
         print(json.dumps(metrics.summarize(metrics.read_events(args.state_dir / "events.jsonl"))))
@@ -314,7 +331,12 @@ def main(argv: Sequence[str], api: Api | None = None) -> int:
             return EXIT_LOCKED
         client = api or GhApi()
         while True:
-            _one_tick(client, args.state_dir, args.depth)
+            _one_tick(
+                client,
+                args.state_dir,
+                args.depth,
+                (merge or landing.gh_merge) if args.land else None,
+            )
             if args.command == "tick":
                 return 0
             time.sleep(args.interval)
