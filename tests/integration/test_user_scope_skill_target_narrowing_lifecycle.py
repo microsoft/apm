@@ -40,7 +40,7 @@ _V2 = "---\nname: kit\ndescription: Kit skill\n---\nVersion two.\n"
 _CLAUDE_SKILL = f".claude/skills/{_SKILL}/SKILL.md"
 _AGENTS_SKILL = f".agents/skills/{_SKILL}/SKILL.md"
 _KEPT_LINE = f"~/.claude/skills/{_SKILL}"
-_HINT = re.compile(r"Run '(apm install [^']+)'")
+_HINT = re.compile(r"Run '(apm install [^']+)' to refresh it\.")
 
 
 def _evidence(result: CommandResult) -> str:
@@ -82,7 +82,7 @@ def _kept_copy_hint(result: CommandResult, kept: str, target: str) -> list[str]:
     shown = " ".join(_output(result).split())
     assert shown.count(kept) == 1, _evidence(result)
     assert f"Kept stale skill copy {kept}: target '{target}'" in shown, _evidence(result)
-    hint = _HINT.search(_output(result))
+    hint = _HINT.search(shown)
     assert hint is not None, _evidence(result)
     argv = shlex.split(hint.group(1))
     assert argv[:2] == ["apm", "install"] and "-g" in argv, hint.group(1)

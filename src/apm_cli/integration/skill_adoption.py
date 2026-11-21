@@ -460,6 +460,7 @@ def report_stale_kept_copies(
     owner = integrator._skill_current_owner
     if owner is None or diagnostics is None:
         return
+    from apm_cli.core import remediation
     from apm_cli.core.scope import InstallScope, get_apm_dir
 
     user_scope = integrator.install_user_scope()
@@ -493,10 +494,14 @@ def report_stale_kept_copies(
         names = ",".join(
             dict.fromkeys([*(t.name for t in integrator._skill_targets), profile.name])
         )
-        command = f"apm install{' -g' if user_scope else ''} --target {names}"
-        command += " --legacy-skill-paths" if legacy else ""
+        flags = f"{' -g' if user_scope else ''} --target {names}"
+        remedy = remediation.KEPT_SKILL_REFRESH.bind(targets=names).with_command(
+            f"apm install{flags}{' --legacy-skill-paths' if legacy else ''}"
+        )
         diagnostics.warn(
-            f"Kept stale skill copy {'~/' if user_scope else ''}{entry}: target "
-            f"'{profile.name}' is not part of this install, so it was not refreshed."
-            f"\n    Run '{command}' to refresh it."
+            remediation.kept_file_message(
+                f"stale skill copy {'~/' if user_scope else ''}{entry}",
+                f"target '{profile.name}' is not part of this install, so it was not refreshed",
+                remedy,
+            )
         )
