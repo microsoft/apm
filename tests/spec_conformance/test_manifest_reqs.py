@@ -206,18 +206,29 @@ def _local_package(path: Path, name: str) -> Path:
 @pytest.mark.req("req-mf-016")
 def test_consumer_recognises_local_path_entries(tmp_path):
     """Clause (a): the seven prefixes and `path:`-only objects are local."""
+    from apm_cli.install.phases.local_content import copy_local_dependency
     from apm_cli.models.dependency.reference import DependencyReference
 
     for entry in ("./a", "../a", "/abs/a", "~/a", ".\\a", "..\\a", "~\\a"):
         assert DependencyReference.is_local_path(entry), entry
     for entry in ("owner/repo", "github.com/owner/repo", "https://h/o/r"):
         assert not DependencyReference.is_local_path(entry), entry
+    project = _local_package(tmp_path / "work" / "app", "app")
+    _local_package(tmp_path / "work" / "shared", "shared")
     package = APMPackage.from_mapping(
         {"name": "p", "version": "1.0.0", "dependencies": {"apm": [{"path": "../shared"}]}},
-        package_path=tmp_path,
+        package_path=project,
     )
     (dependency,) = package.get_apm_dependencies()
     assert dependency.is_local and dependency.local_path == "../shared"
+
+    # A recognised entry is materialized as a local copy, never fetched as a repository.
+    target = dependency.get_install_path(project / "apm_modules")
+    copy_local_dependency(
+        dependency, target, declaring_dir=None, source_root=project, user_scope=False
+    )
+    assert (target / "apm.yml").exists()
+    assert not (target / ".git").exists()
 
 
 @pytest.mark.req("req-mf-016")
@@ -297,7 +308,7 @@ def test_consumer_refuses_unanchored_relative_entry_at_user_scope(tmp_path, monk
 
 
 @pytest.mark.req("req-mf-016")
-def test_consumer_contains_remote_declared_paths_in_repository(tmp_path):
+def test_consumer_contains_remote_declared_paths_in_repository(tmp_path, capsys):
     """Clause (e): same-repo paths expand remotely; other paths are refused."""
     from apm_cli.deps.apm_resolver import APMDependencyResolver
     from apm_cli.models.dependency.reference import DependencyReference
@@ -325,6 +336,10 @@ def test_consumer_contains_remote_declared_paths_in_repository(tmp_path):
         assert resolver.expand_transitive_declaration(parent, package, child) is None
         assert resolver._try_load_dependency_package(child, parent_pkg=package) is None
         assert child.get_unique_key() in resolver._rejected_remote_local_keys
+        # The refusal names the declared path and the declaring package.
+        captured = capsys.readouterr()
+        diagnostic = " ".join((captured.out + captured.err).split())
+        assert f"'{escaping}'" in diagnostic and "'frontend'" in diagnostic, diagnostic
 
 
 @pytest.mark.req("req-mf-016")
