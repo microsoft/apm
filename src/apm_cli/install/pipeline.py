@@ -944,6 +944,10 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
             _run_phase("audit", _audit_phase, ctx)
         commit_point_seam_for_tests()
+        from .service import InstallService
+
+        if InstallService.frozen_disposition(ctx).withhold_lockfile_writes:
+            transaction.hold_deploy_journal_until_commit()
         transaction.release_deploy_targets()
 
         # ------------------------------------------------------------------

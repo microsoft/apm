@@ -132,6 +132,7 @@ class InstallTransaction:
         self._lock = threading.RLock()
         self._deploy_journal: DeployJournal | None = None
         self._journal_released = False
+        self._journal_held_until_commit = False
         self._created_target_roots: list[Path] = []
         self.committed = False
         self._completed = False
@@ -260,6 +261,14 @@ class InstallTransaction:
         journal = self._deploy_journal
         return journal is not None and bool(journal.units)
 
+    def hold_deploy_journal_until_commit(self) -> None:
+        """``--frozen`` withholds the lockfile: keep the journal until this install commits (#4638).
+
+        Its no-rewrite check runs after the pipeline; a refusal there rolls
+        back every journaled path, merged hook configuration included.
+        """
+        self._journal_held_until_commit = True
+
     def release_deploy_targets(self) -> None:
         """Every gate that scans deployed bytes passed: keep the journal until the lock commits."""
         from apm_cli.deps.lockfile_write_authority import after_lockfile_commit
@@ -268,6 +277,8 @@ class InstallTransaction:
             if self._deploy_journal is None or self._journal_released:
                 return
             self._journal_released = True
+            if self._journal_held_until_commit:
+                return
         after_lockfile_commit(self._settle_deploy_journal)
 
     def _take_deploy_journal(self) -> DeployJournal | None:
