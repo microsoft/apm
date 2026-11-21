@@ -174,6 +174,11 @@ _GEMINI_AGENT_REJECTED_FIELDS: frozenset[str] = frozenset(
         "auth",
     }
 )
+_GEMINI_TOOLS_HINT = (
+    "Approved Gemini tool names: built-ins ("
+    + ", ".join(sorted(GEMINI_AGENT_BUILTIN_TOOLS))
+    + "); mcp_<server>_<tool>, mcp_<server>_*, mcp_*, *, discovered_tool_<name>."
+)
 _GEMINI_AGENT_NAME_RE = re.compile(r"[a-z0-9_-]+")
 _GEMINI_MCP_SLUG_RE = re.compile(r"[A-Za-z0-9_.:-]+")
 _GEMINI_AGENTS_REF = (
@@ -1157,9 +1162,8 @@ class AgentIntegrator(BaseIntegrator):
             if invalid:
                 return (
                     f"unsupported tool(s) {invalid!a}; APM does not map other "
-                    "providers' tool names. Fix: use Gemini tool names (for example "
-                    "read_file, grep_search, run_shell_command, mcp_<server>_<tool>), "
-                    "or omit 'tools' to inherit the session's tools"
+                    "providers' tool names. Fix: use Gemini tool names, or omit "
+                    f"'tools' to inherit the session's tools. {_GEMINI_TOOLS_HINT}"
                 )
         if "model" in fm:
             model = fm["model"]

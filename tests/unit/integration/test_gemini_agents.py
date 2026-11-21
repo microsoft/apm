@@ -213,6 +213,18 @@ def test_gemini_agent_rejected_with_warning_and_nothing_written(
     assert "agent will not be deployed" in message
 
 
+def test_gemini_tool_rejection_names_the_full_approved_set(tmp_path: Path) -> None:
+    from apm_cli.integration.agent_integrator import GEMINI_AGENT_BUILTIN_TOOLS
+
+    _write_agent(tmp_path, "a.agent.md", "---\ndescription: d\ntools: [Read]\n---\nB\n")
+
+    _, diagnostics = _integrate(tmp_path)
+
+    [message] = _warnings(diagnostics)
+    assert all(tool in message for tool in GEMINI_AGENT_BUILTIN_TOOLS)
+    assert "mcp_<server>_<tool>" in message
+
+
 def test_gemini_invalid_agent_does_not_block_siblings(tmp_path: Path) -> None:
     _write_agent(tmp_path, "good.agent.md", "---\ndescription: Good\n---\nGood.\n")
     _write_agent(tmp_path, "bad.agent.md", "---\ndescription: Bad\ntools: [Bash]\n---\nBad.\n")
