@@ -656,7 +656,7 @@ reachability, take effect only when the receiving harness supports them.
 APM does not filter the picker itself. `visibility: internal` is an accepted
 alias (the canonical field wins if both are set). Verbatim targets (Copilot,
 Claude, Cursor, OpenCode, Grok Build) carry the field through unchanged.
-Codex and Kiro cannot represent it, so APM emits an install-time warning
+Codex, Kiro and Gemini cannot represent it, so APM emits an install-time warning
 naming the agent instead of silently dropping it -- the APM source stays the
 authority for the preserved metadata.
 
@@ -697,8 +697,9 @@ agent with Codex.
 #### Per-harness model values
 
 Agent files and model ids belong to each harness vendor. APM writes a
-string `model` verbatim to every agent target (a Claude `sonnet` also
-lands in the Codex TOML, with a warning naming the agent). APM does
+string `model` verbatim to every agent target except Gemini (a Claude
+`sonnet` also lands in the Codex TOML, with a warning naming the agent;
+Gemini skips the agent instead, see below). APM does
 not add a per-target model map or `codex:`
 override block (#3324). Workarounds:
 
@@ -789,6 +790,37 @@ IDE process, hook, and powers tools); `@server`, `@server/tool`,
 `subagent/<agent>`, `@builtin`, `@mcp`, `*`. `context` and `todo_list` stay accepted for compatibility.
 Ref: [kiro.dev/docs/tools/](https://kiro.dev/docs/tools/)
 (accessed 2026-11-19).
+
+#### Gemini target: validated frontmatter
+
+Gemini CLI (`targets: [gemini]`) loads agents from `.gemini/agents/<name>.md`
+(project) and `~/.gemini/agents/<name>.md` (`--global`). Its loader rejects a
+file with any unknown frontmatter key, so APM writes only `name`,
+`description`, `tools`, `model`, `display_name`, `temperature`, `max_turns`
+and `timeout_mins`, and drops the rest. Qualified against Gemini CLI v0.70.0.
+
+```yaml
+---
+name: build-worker          # defaults to the file stem; lowercase slug
+description: Runs the build # required
+tools:                      # optional; omitted = inherit the session's tools
+  - run_shell_command
+  - read_file
+  - mcp_github_*            # MCP tools: mcp_<server>_<tool>, mcp_<server>_*, mcp_*
+model: inherit              # optional; inherit or a gemini-* id
+---
+```
+
+APM skips the agent with a warning (other agents still deploy) when:
+`description` is missing; `name` is not a lowercase slug; a `tools` value is
+not a Gemini tool name (APM does not map Claude or Copilot names such as
+`Read` or `codebase`); `model` is not `inherit` or `gemini-*`; or the source
+declares agent-scoped MCP servers (`mcp_servers`, `mcpServers`,
+`mcp-servers`), `disallowedTools`, `permissionMode`, or `kind: remote`.
+APM does not write Gemini's folder trust or agent acknowledgement state.
+Refs: [subagents](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/core/subagents.md),
+[tools](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/reference/tools.md),
+[`agentLoader.ts`](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/packages/core/src/agents/agentLoader.ts).
 
 ### 6. Skill (folder-based, `SKILL.md`)
 
