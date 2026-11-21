@@ -56,20 +56,20 @@ _CONTEXT = {"SCOPE": "project", "NET": "offline", "DEPLOYED": "clean"}
 # Package -> the units it proves: (SRC, PRIM, GATE) once its executables are approved.
 _UNITS = {
     "p-skill:git": (("git", "skill", "none"),),
+    # bin/ never deploys at project scope (U-BIN), so no project row proves a bin unit.
     "p-exec": (
         ("local-path", "hook", "allowed"),
         ("local-path", "mcp", "allowed"),
-        ("local-path", "bin", "allowed"),
     ),
     "p-lsp": (("local-path", "lsp", "allowed"),),
     "p-canvas": (("local-path", "canvas", "allowed"),),
-    "p-native-claude-bin": (
-        ("native-plugin", "bin", "allowed"),
-        ("native-plugin", "skill", "allowed"),
-    ),
+    "p-native-claude-bin": (("native-plugin", "skill", "allowed"),),
     "p-skill:registry": (("pkg-registry", "skill", "none"),),
 }
-_CONVERGED = tuple(_UNITS)
+# p-skill:registry resolves through the registry only in the scenario that selects
+# it (use_registry), so the converged project leaves it out.
+_REGISTRY = ("p-skill:registry",)
+_CONVERGED = tuple(name for name in _UNITS if name not in _REGISTRY)
 
 
 def go_offline(world) -> None:
@@ -250,7 +250,6 @@ def test_native_plugin_works_offline(lifecycle_world) -> None:
 
 # -- registries, MCP servers, bundles and pack ---------------------------------------
 
-_REGISTRY = ("p-skill:registry",)
 _INLINE = ("install", "--mcp", "p-inline", "--", "apm-lifecycle-inert-server", "--stdio")
 _MCP_ROWS = {
     "mcp-registry": ("install", "--mcp", REGISTRY_SERVER),

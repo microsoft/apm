@@ -170,10 +170,10 @@ _CONTEXT = {"SCOPE": "project", "NET": "online", "DEPLOYED": "clean"}
 _UNITS = {
     "p-skill:git": (("git", "skill", "none"),),
     "p-child": (("local-path", "skill", "none"),),
+    # bin/ never deploys at project scope (U-BIN), so no row proves a bin unit.
     "p-exec": (
         ("local-path", "hook", "allowed"),
         ("local-path", "mcp", "allowed"),
-        ("local-path", "bin", "allowed"),
     ),
 }
 _PACKAGES = tuple(_UNITS)
@@ -213,7 +213,7 @@ def test_install_after_a_target_change(lifecycle_world, tgt) -> None:
 
 
 # Row -> (command after the target change, OP, packages whose units it proves,
-# factor overrides). Every row must exit 0: scenario-lane pairs are success pairs.
+# factor overrides). Every credited row must exit 0: scenario-lane pairs are success pairs.
 HISTORY_ROWS = {
     "update": ("update --yes", "update", _PACKAGES, {}),
     "uninstall": ("uninstall p-child", "uninstall", ("p-child",), {}),
@@ -237,10 +237,9 @@ def _row_assignments(row: str, tgt: str) -> list[dict[str, str]]:
 
 # Rows whose step is a strict known cell (none: #4636 is fixed).
 KNOWN_ROWS: dict[tuple[str, str], dict[str, Known]] = {}
-# On multi-widened the uninstall repeats a "Skipped .gemini/commands/" hint (I9),
-# which the strict output cell uninstall-new-target-skipped-hint-repeats owns
-# (tests/utils/lifecycle_evidence.py); the row credits nothing until it is fixed.
-UNCREDITED_ROWS = {*KNOWN_ROWS, ("uninstall", "multi-widened")}
+# pack refuses local-path dependencies (both exporters), so a pack row is a
+# refusal, never a success witness: its rows credit nothing.
+UNCREDITED_ROWS = {*KNOWN_ROWS, *(("pack", tgt) for tgt in TARGET_HISTORIES)}
 
 
 @pytest.mark.parametrize("tgt", sorted(TARGET_HISTORIES))
@@ -250,8 +249,12 @@ def test_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
     line = HISTORY_ROWS[row][0]
     credit = () if (row, tgt) in UNCREDITED_ROWS else _row_assignments(row, tgt)
     step = scenario.run(line, credit=credit, known=KNOWN_ROWS.get((row, tgt)))
-    # I8: whatever the row decides, the exit stays inside the command's contract.
-    assert step.result.returncode in exit_contract(line.split()[0]), step.output
+    if credit:
+        # A credited row is a success pair: it must exit 0.
+        assert step.result.returncode == 0, step.output
+    else:
+        # I8: an uncredited row still stays inside the command's exit contract.
+        assert step.result.returncode in exit_contract(line.split()[0]), step.output
     scenario.finish()
 
 
