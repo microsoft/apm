@@ -673,8 +673,11 @@ def _i7_failure_preserves_state(
     kept_writes = _i7_x2_kept_writes(op, result)
     if after.state.manifest_bytes != before.state.manifest_bytes:
         found.append(Violation("I7", f"failed {op.name} changed the manifest"))
-    if after.state.lockfile_bytes != before.state.lockfile_bytes and kept_writes is None:
-        found.append(Violation("I7", f"failed {op.name} changed the lockfile"))
+    if after.state.lockfile_bytes != before.state.lockfile_bytes:
+        message = f"failed {op.name} changed the lockfile"
+        # I7-X2: an install that kept a user edit records what it wrote.
+        if kept_writes is None:
+            found.append(Violation("I7", message))
     retirement = _i7_x1_retirement(before, after, model)
     if retirement is None:
         found.append(Violation("I7", f"failed {op.name} changed deployed surfaces"))

@@ -1119,7 +1119,6 @@ class HookIntegrator(BaseIntegrator):
                 )
                 continue
 
-            content = json.dumps(rewritten, indent=2) + "\n"
             # An edited deployed hook file is kept without deployment evidence
             # (#4626); its scripts are still gated one by one below.
             if not self.keeps_edited_output(
@@ -1129,10 +1128,10 @@ class HookIntegrator(BaseIntegrator):
                 force,
                 diagnostics,
                 target_paths,
-                expected_content=content,
+                expected_content=json.dumps(rewritten, indent=2) + "\n",
             ):
                 # Write rewritten JSON; byte-identical output is unchanged (#4184).
-                if self.write_text_if_changed(target_path, content):
+                if self.write_text_if_changed(target_path, json.dumps(rewritten, indent=2) + "\n"):
                     self.note_rendered_write(target_path)
                     hooks_integrated += 1
                 elif not self.receipted_unchanged(target_path):
