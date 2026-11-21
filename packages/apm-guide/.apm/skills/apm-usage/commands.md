@@ -284,9 +284,6 @@ to retain the needed backups; unrelated packages can still be restored.
 Do not delete unknown, legacy, active, or recovery staging roots,
 elevate APM, change ACLs, or disable security controls to bypass a Windows denial.
 Cleanup of committed staging warns without rolling back the validated package.
-Late Codex native reconciliation
-runs after APM persistence and is not part of that rollback; see its qualified
-contract below.
 
 `apm install` preserves the invoking repository's branch and HEAD when run from
 a Git hook. It rejects cross-host network rewrites for every Git host and scopes
@@ -534,20 +531,14 @@ installs that deploy at least one other package still exit `0`. For this target
 exclusion, `--dry-run` succeeds as a preview without the per-package recovery
 diagnostic; it does not certify real install success.
 
-Compatibility-only `.codex-plugin/plugin.json` bundles use
-`apm install -g <package> --target codex` with Codex CLI 0.163.0 or later on
-`PATH`; native qualification was measured on macOS arm64 only.
-Project scope, older or unrecognized versions, skill subsets, and unsupported native
-shapes fail explicitly. Approve them with `apm approve <package>`, which records one `plugin: sha256:<64 hex>` pin over the whole bundle (per-file hook pins never admit a live-loaded plugin);
-new native registrations remain disabled. Reinstall/update and
-`apm install -g --frozen --target codex` preserve activation and MCP policy,
-repair owned missing/corrupt copies, and never run MCP/plugin code. Healthy
-reinstalls retain their transport generation. `apm uninstall -g <package>`
-refuses foreign or customized native settings before releasing APM ownership;
-retire those entries using Codex and retry. No loose registration or
-cross-target translation is produced. See the
-[qualified contract](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#codex-compatibility-bundles-through-apm)
-for late-failure retry and ownership-journal recovery.
+Codex plugins, `.codex-plugin/plugin.json` bundles included, install as a
+split install at project and user scope: skills, agents, hooks and MCP servers
+deploy as separate primitives and APM never runs `codex` or registers the
+plugin with it (Codex lacks native activation criterion A3). Each such install
+prints one `Codex: split-installed N plugin(s)` line. The next `apm install -g`
+or `apm uninstall -g` retires registrations earlier APM versions made through
+`codex app-server`, keeping any you enabled or changed. See
+[Codex plugins through APM](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#codex-plugins-through-apm).
 Migration names the dependency and retained paths and refuses native registration
 while cleanup retains edited or undeletable loose files. Preserve or relocate your edits, resolve the cleanup
 conflict, then retry; APM does not register duplicate native and loose copies.
