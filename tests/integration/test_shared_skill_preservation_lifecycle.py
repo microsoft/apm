@@ -348,8 +348,10 @@ def test_native_skill_and_legacy_plugin_share_only_member_ownership(
     (native / "SKILL.md").write_bytes(_skill("a"))
     (native / "a.md").write_bytes(b"a asset\n")
     scenario.packages["a"] = native
-    plugin = scenario.packages["b"] / ".claude-plugin"
-    plugin.mkdir()
+    # At project scope a root plugin.json keeps the loose, split route on every
+    # target; a .claude-plugin manifest would install whole there (#3921).
+    plugin = scenario.packages["b"] / ".claude-plugin" if user_scope else scenario.packages["b"]
+    plugin.mkdir(exist_ok=True)
     (plugin / "plugin.json").write_text(
         json.dumps({"name": "b", "version": "1.0.0", "skills": ["./skills/s"]}),
         encoding="utf-8",
