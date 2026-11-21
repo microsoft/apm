@@ -434,7 +434,9 @@ class GitHubTokenManager:
         return True
 
     @staticmethod
-    def resolve_credential_from_gh_cli(host: str | None) -> str | None:
+    def resolve_credential_from_gh_cli(
+        host: str | None, *, env: Mapping[str, str] | None = None
+    ) -> str | None:
         """Resolve a token from the active gh CLI account for *host*.
 
         Uses ``gh auth token --hostname <host>`` as a non-interactive fallback
@@ -446,6 +448,8 @@ class GitHubTokenManager:
         subprocess. A non-zero exit, invalid output, missing ``gh`` binary,
         or timeout all return ``None``; ``stderr`` is debug-logged on
         non-zero exit so ``--verbose`` users can see why the call missed.
+        *env* replaces the inherited environment (strict host credentials
+        pass one without GitHub-class tokens).
         """
         if not GitHubTokenManager._supports_gh_cli_host(host):
             return None
@@ -458,7 +462,7 @@ class GitHubTokenManager:
                 timeout=GitHubTokenManager._get_credential_timeout(),
                 stdin=subprocess.DEVNULL,
                 env={
-                    **os.environ,
+                    **(os.environ if env is None else env),
                     "GH_PROMPT_DISABLED": "1",
                     "GH_NO_UPDATE_NOTIFIER": "1",
                 },
