@@ -98,11 +98,25 @@ def package_blocks(lines: Iterable[str]) -> list[list[str]]:
     return [block for block in blocks if len(block) > 1]
 
 
+# Dependencies resolve concurrently, so their progress lines arrive in any order.
+_RESOLVING = "[>] Resolving "
+
+
 def canonical(lines: list[str]) -> list[str]:
-    """N5: sort each run of consecutive package blocks; other lines keep their order."""
+    """N5: sort each run of consecutive package blocks or resolve-progress lines.
+
+    Other lines keep their order.
+    """
     out: list[str] = []
     index = 0
     while index < len(lines):
+        progress: list[str] = []
+        while index < len(lines) and lines[index].startswith(_RESOLVING):
+            progress.append(lines[index])
+            index += 1
+        if progress:
+            out.extend(sorted(progress))
+            continue
         run: list[list[str]] = []
         while index < len(lines) and _BLOCK_HEAD.match(lines[index]):
             block = [lines[index]]

@@ -51,7 +51,8 @@ steps:
       - .agents/skills/triage/SKILL.md
     key_lines:
       - "ref: 6a2b9bdb -> c9663563 (v1.1.0)"
-      - "[i] Cleaned 2 stale deployed files for acme/release-kit"
+      - "[i] Cleaned 1 stale deployed path for acme/release-kit:"
+      - "  - .agents/skills/legacy/"
   - n: 4
     run:
       - git add -A
