@@ -64,7 +64,11 @@ class RequiredPackageMatch:
 
     def locked_in(self, lock: LockFile) -> LockedDependency | None:
         """Return this dependency's lockfile row -- the only required-check lock read."""
-        return lock.get_dependency(self.lock_key)
+        if self.dependency is None:
+            return lock.get_dependency(self.lock_key)
+        from ..deps.lockfile_lookup import locked_row_for
+
+        return locked_row_for(lock, self.dependency)
 
     @property
     def require_entry(self) -> str:

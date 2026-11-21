@@ -30,6 +30,7 @@ from typing import Literal, Union
 
 import click
 
+from apm_cli.core.deprecations import deprecation_message
 from apm_cli.core.target_catalog import (
     TARGET_CAPABILITIES,
     TargetCapability,
@@ -653,9 +654,7 @@ def parse_target_field(
     if "agents" in raw_parts and source_path is None:
         _agents_alias_detected = True
         warnings.warn(
-            "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
-            "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
-            "(.agents/skills/). Removal in v1.0.",
+            deprecation_message("target-agents"),
             AgentsTargetDeprecationWarning,
             stacklevel=2,
         )

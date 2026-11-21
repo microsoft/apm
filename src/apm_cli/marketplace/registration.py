@@ -15,7 +15,12 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .errors import MarketplaceError
-from .models import MarketplaceManifest, MarketplaceSource, url_names_remote_manifest
+from .models import (
+    ORIGIN_MANUAL,
+    MarketplaceManifest,
+    MarketplaceSource,
+    url_names_remote_manifest,
+)
 
 # A marketplace alias must satisfy this pattern so it can appear on the right
 # of ``@`` in ``apm install <plugin>@<marketplace>`` syntax.
@@ -136,11 +141,13 @@ def probe_registration(
     is_direct_url: bool,
     offline: bool = False,
     explicit_path: str | None = None,
+    origin: str = ORIGIN_MANUAL,
 ) -> tuple[MarketplaceSource, MarketplaceManifest]:
     """Locate and fetch the marketplace manifest behind a parsed source.
 
     Returns the source to register (with the detected manifest path) and
-    the fetched manifest.
+    the fetched manifest. *origin* tags both sources, so a project-declared
+    catalog is cached under its own identity, not its name.
 
     Raises:
         MarketplaceManifestNotFoundError: No manifest at any probed path.
@@ -156,6 +163,7 @@ def probe_registration(
         url=url,
         ref=effective_ref,
         path="" if is_direct_url else "marketplace.json",
+        origin=origin,
     )
     if is_direct_url or local_source_points_to_file(probe_source):
         if explicit_path is not None:
@@ -182,7 +190,9 @@ def probe_registration(
             probe_source.display_source, local=probe_source.kind == "local"
         )
 
-    fetch_source = MarketplaceSource(name=name, url=url, ref=effective_ref, path=detected_path)
+    fetch_source = MarketplaceSource(
+        name=name, url=url, ref=effective_ref, path=detected_path, origin=origin
+    )
     manifest = client.fetch_marketplace(
         fetch_source,
         force_refresh=True,

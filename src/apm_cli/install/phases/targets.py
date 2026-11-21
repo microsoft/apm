@@ -14,6 +14,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.deprecations import deprecation_message
+
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
     from apm_cli.integration.targets import TargetProfile
@@ -511,11 +513,7 @@ def run(ctx: InstallContext) -> None:
 
     if agents_alias_was_detected():
         if ctx.logger:
-            ctx.logger.warning(
-                "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
-                "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
-                "(.agents/skills/). Removal in v1.0."
-            )
+            ctx.logger.warning(deprecation_message("target-agents"))
 
     _is_user = ctx.scope is InstallScope.USER
 

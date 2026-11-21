@@ -311,26 +311,37 @@ class InstallService:
             # rewrite or keep them, so every primitive type answers alike.
             self._enforce_frozen_deployed_hashes(request, deployed=False)
 
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.marketplace.project_marketplaces import bind_project_marketplaces
+
+        # The root project's ``marketplaces:`` map resolves this install,
+        # previews included (#2903). Each path enters the scope once.
+        marketplace_scope = bind_project_marketplaces(
+            getattr(request.apm_package, "marketplaces", None),
+            user_scope=request.scope is InstallScope.USER,
+        )
         if request.dry_run:
             # A preview runs no lifecycle scripts and commits nothing.
-            return self._run_pipeline(request)
+            with marketplace_scope:
+                return self._run_pipeline(request)
 
         runner = self._build_script_runner(request)
         event = self._build_event("pre-install", request)
         runner.fire("pre-install", event)
 
-        if request.frozen:
-            # req-lk-006: the lockfile is never written in frozen mode.
-            # Suppress at the chokepoint, then decide from what was
-            # withheld whether this install can report success.  The
-            # pipeline still deploys, as `npm ci` does.
-            from apm_cli.install.frozen_withdrawal import frozen_capture
+        with marketplace_scope:
+            if request.frozen:
+                # req-lk-006: the lockfile is never written in frozen mode.
+                # Suppress at the chokepoint, then decide from what was
+                # withheld whether this install can report success.  The
+                # pipeline still deploys, as `npm ci` does.
+                from apm_cli.install.frozen_withdrawal import frozen_capture
 
-            with frozen_capture(_frozen_lockfile_path(request)) as withheld:
+                with frozen_capture(_frozen_lockfile_path(request)) as withheld:
+                    result = self._run_pipeline(request)
+            else:
+                withheld = None
                 result = self._run_pipeline(request)
-        else:
-            withheld = None
-            result = self._run_pipeline(request)
 
         install_worked = result.disposition in {
             InstallDisposition.SUCCESS,
@@ -433,6 +444,26 @@ class InstallService:
             request.apm_package.get_apm_dependencies(),
             scope=scope_name,
             working_directory=str(pkg_path) if pkg_path is not None else None,
+        )
+
+    @staticmethod
+    def enforce_frozen_restored(failures: Iterable[tuple[str, str]]) -> None:
+        """Refuse a frozen install whose locked dependencies could not be restored.
+
+        Runs before the hydrated MCP check, so a package that failed to
+        download (for example a lockfile hash mismatch, #4013) is reported
+        with its own cause instead of the MCP drift its missing manifest
+        would imply. Nothing has been deployed at this point.
+        """
+        reasons = [f"  - {message}" for _, message in failures]
+        if not reasons:
+            return
+        from apm_cli.install.errors import FrozenInstallError
+
+        raise FrozenInstallError(
+            "--frozen: locked dependencies could not be restored.",
+            reasons=reasons,
+            tip="Tip: nothing was deployed. Fix the cause above and re-run.",
         )
 
     @staticmethod

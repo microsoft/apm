@@ -14,6 +14,7 @@ that returns a ``PackageInfo``. Wiring into the install pipeline is done in
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from ...bundle.local_bundle import route_agent_plugin_package
 from ...models.apm_package import PackageInfo, validate_apm_package
 from ...models.dependency.reference import DependencyReference
 from ...models.dependency.types import GitReferenceType, ResolvedReference
+from ...utils.console import _rich_info
 from ...utils.credential_rendering import redact_url_userinfo
 from .auth import (
     RegistryAuthContext,
@@ -33,7 +35,7 @@ from .auth import (
     remediation_message,
 )
 from .client import RegistryClient, RegistryError, VersionEntry
-from .extractor import extract_archive
+from .extractor import HashMismatchError, extract_archive, verify_sha256
 from .semver import is_semver_range, pick_best
 
 
@@ -155,6 +157,39 @@ def _package_info_from_extracted_registry_tree(
         package_type=validation_result.package_type,
     )
     return package_info, reg_resolution
+
+
+def _verify_moved_archive(
+    dep_ref: DependencyReference,
+    version: str,
+    archive_bytes: bytes,
+    resolved_hash: str,
+    locked_url: str,
+    configured_url: str,
+) -> None:
+    """Accept bytes from the configured registry for a moved locked URL (req-rs-009).
+
+    Runs before the install target is touched, so a mismatch leaves nothing
+    extracted (req-lk-013).
+    """
+    try:
+        verify_sha256(archive_bytes, resolved_hash)
+    except HashMismatchError as exc:
+        actual = hashlib.sha256(archive_bytes).hexdigest()
+        raise RegistryResolutionError(
+            f"registry archive for {dep_ref.repo_url!r} {version} from the configured "
+            f"registry does not match the lockfile; nothing was extracted.\n"
+            f"  locked URL:     {locked_url}\n"
+            f"  configured URL: {configured_url}\n"
+            f"  expected hash:  {resolved_hash}\n"
+            f"  actual hash:    sha256:{actual}"
+        ) from exc
+    _rich_info(
+        f"{dep_ref.repo_url} {version}: fetched from configured registry "
+        f"{configured_url} instead of lockfile URL {locked_url}; locked hash verified",
+        symbol="info",
+        soft_wrap=True,
+    )
 
 
 class RegistryPackageResolver:
@@ -357,13 +392,14 @@ class RegistryPackageResolver:
     # ------------------------------------------------------------------
     def _lockfile_replay_client(
         self, dep_ref: DependencyReference, resolved_url: str, version: str
-    ) -> RegistryClient:
-        """The client of the declared registry that serves *resolved_url*.
+    ) -> tuple[RegistryClient, str]:
+        """Return the declared registry client and the URL it fetches the locked bytes from.
 
         Any registry declared in apm.yml may serve the locked bytes; the
         caller verifies them against ``resolved_hash`` (req-rs-009, #4278).
-        Each registry's credentials reach only its own archive URL, and a
-        URL no declared registry serves is refused before any fetch.
+        Each registry's credentials reach only its own archive URL. A URL no
+        declared registry serves (a moved endpoint, #4013) is never fetched:
+        the locked version comes from the dependency's configured registry.
         """
         owner, repo = split_registry_identity(dep_ref.repo_url)
         locked_name = dep_ref.registry_name
@@ -374,10 +410,9 @@ class RegistryPackageResolver:
         for name, base_url in candidates:
             client = self._build_client(name, base_url)
             if client.archive_url(owner, repo, version) == resolved_url:
-                return client
-        raise RegistryResolutionError(
-            "lockfile registry URL does not match any registry endpoint declared in apm.yml"
-        )
+                return client, resolved_url
+        client = self._build_client(locked_name, locked_url)
+        return client, client.archive_url(owner, repo, version)
 
     # ------------------------------------------------------------------
     def download_from_lockfile(
@@ -389,22 +424,29 @@ class RegistryPackageResolver:
         resolved_hash: str,
         version: str,
     ) -> PackageInfo:
-        """Fetch from the locked URL and verify against the locked hash.
+        """Fetch the locked version and verify it against the locked hash.
 
         This is the npm-install-model lockfile replay path: instead of calling
-        ``/versions`` to re-negotiate the best semver match, we fetch directly
-        from ``resolved_url`` (recorded in the lockfile) and re-verify the
-        bytes against ``resolved_hash``.  Called by ``apm install`` when the
+        ``/versions`` to re-negotiate the best semver match, we fetch the
+        locked version from a declared registry and re-verify the bytes
+        against ``resolved_hash``. When no declared registry serves the
+        locked ``resolved_url`` (a moved endpoint), the configured registry's
+        bytes must hash to ``resolved_hash`` before anything is extracted
+        (req-rs-009, req-lk-013); the lockfile keeps its recorded URL.  Called by ``apm install`` when the
         lockfile has full replay data and the manifest range still covers the
         locked version.  ``apm update`` bypasses this path entirely via
         ``update_refs=True``.
         """
-        client = self._lockfile_replay_client(dep_ref, resolved_url, version)
+        client, fetch_url = self._lockfile_replay_client(dep_ref, resolved_url, version)
         try:
-            archive_bytes, content_type = client.fetch_from_url(resolved_url)
+            archive_bytes, content_type = client.fetch_from_url(fetch_url)
         except RegistryError as exc:
-            self._raise_for_http(exc, dep_ref, resolved_url)
+            self._raise_for_http(exc, dep_ref, fetch_url)
             raise  # unreachable; appeases type checker
+        if fetch_url != resolved_url:
+            _verify_moved_archive(
+                dep_ref, version, archive_bytes, resolved_hash, resolved_url, fetch_url
+            )
 
         _clear_install_target(target_path)
         actual_hash = extract_archive(

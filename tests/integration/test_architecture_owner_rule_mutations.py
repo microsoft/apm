@@ -3030,6 +3030,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Agent-plugin producer loses its portability admission gate.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-project-map",
+        rule_id="marketplace-integrations-project-map",
+        path="src/apm_cli/marketplace/registry.py",
+        old="    declared = project_marketplace(name)\n",
+        new="    declared = None\n",
+        intent="A same-named registration silently overrides the root marketplaces: map.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-raw-diagnostics",
         rule_id="marketplace-integrations-raw-diagnostics",
         path="src/apm_cli/marketplace/models.py",
@@ -3160,6 +3168,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old='_rich_echo(f"  [x] {error}", color="red")',
         new='click.echo(f"  [x] {error}")',
         intent="A command prints an error line on stdout outside the console stream owner.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-deprecation-catalog",
+        rule_id="registry_delegation.deprecation_catalog",
+        path="src/apm_cli/commands/pack.py",
+        old='logger.warning(deprecation_message("unpack"))',
+        new=(
+            "logger.warning(\"'apm unpack' is deprecated and will be removed in a future "
+            'release.")'
+        ),
+        intent="A command re-spells a deprecation warning instead of reading the catalog.",
     ),
     MutationCase(
         guard_id="registry-delegation-experimental-flags",

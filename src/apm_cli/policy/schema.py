@@ -152,6 +152,20 @@ class RegistrySourcePolicy:
 
 
 @dataclass(frozen=True)
+class MarketplacePolicy:
+    """Rules governing the marketplaces a root project's apm.yml may declare.
+
+    ``allow``: origin patterns (``host/path`` globs such as
+    ``github.com/contoso/*``) that every ``marketplaces:`` entry in the root
+    project manifest must match (#2903 D1). ``None`` = no opinion;
+    ``()`` = no declared marketplace is allowed. A local catalog has no
+    origin and never matches.
+    """
+
+    allow: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True)
 class ScannerGovernance:
     """Per-scanner governance applied at install-time audit (org floor).
 
@@ -291,6 +305,7 @@ class ApmPolicy:
     manifest: ManifestPolicy = field(default_factory=ManifestPolicy)
     unmanaged_files: UnmanagedFilesPolicy = field(default_factory=UnmanagedFilesPolicy)
     registry_source: RegistrySourcePolicy = field(default_factory=RegistrySourcePolicy)
+    marketplace: MarketplacePolicy = field(default_factory=MarketplacePolicy)
     security: SecurityPolicy = field(default_factory=SecurityPolicy)
     # ``bin_deploy`` is the DEPRECATED bin-scoped predecessor of
     # ``executables`` (issue #1873). Retained one minor cycle as an alias the
