@@ -85,6 +85,12 @@ def _uninstall_summary(removed_count: int, retained_count: int, orphan_count: in
     return summary
 
 
+def _report_consented_deletions(logger: CommandLogger, claims: Iterable[str]) -> None:
+    """Name each file ``--trust-lockfile`` consent deleted, with its basis (req-lk-024)."""
+    for claim in claims:
+        logger.progress(f"Deleted {claim} (matched its apm.lock.yaml hash; --trust-lockfile)")
+
+
 def _report_uninstall_outcome(
     logger: CommandLogger,
     summary: str,
@@ -96,8 +102,7 @@ def _report_uninstall_outcome(
     consented_deletions: Iterable[str] = (),
 ) -> bool:
     """Render the final summary and return whether cleanup was incomplete."""
-    for claim in consented_deletions:
-        logger.progress(f"Deleted {claim} (matched its apm.lock.yaml hash; --trust-lockfile)")
+    _report_consented_deletions(logger, consented_deletions)
     # Cleanup evidence warnings (#3701) name kept files before the outcome.
     logger.render_summary()
     integration_incomplete = not integration_cleanup.complete
@@ -511,15 +516,24 @@ def _cleanup_stale_lsp(
 
 
 def _abort_if_retained_target_cleanup_paths(
-    outcome: Any, lockfile: Any, lockfile_path: Any, logger: Any, consent_kept=frozenset()
+    outcome: Any,
+    lockfile: Any,
+    lockfile_path: Any,
+    logger: Any,
+    consent_kept=frozenset(),
+    evidence: Any = None,
 ) -> None:
     """Stop before ownership release when owned target files remain.
 
     Files already removed are dropped from the lockfile so it records exactly
     what is still on disk; apm.yml keeps the package for the retry (#3656).
-    Files ``--trust-lockfile`` kept for lack of evidence, and the skill
-    directories holding them, do not stop the uninstall (#4295).
+    Files ``--trust-lockfile`` kept for lack of evidence (at preflight or at
+    the deletion recheck), and the skill directories holding them, do not stop
+    the uninstall (#4295); its deletions are named first, before any exit.
     """
+    if evidence is not None:
+        _report_consented_deletions(logger, evidence.take_consented_deletions())
+        consent_kept = consent_kept | evidence.kept_under_consent()
     outcome.retained_paths -= {
         path
         for path in outcome.retained_paths
@@ -591,6 +605,7 @@ def _refuse_uninstall_without_evidence(
     user_scope: bool,
     shrunk=None,
     trust_lockfile: bool = False,
+    packages: tuple[str, ...] = (),
 ) -> frozenset[str]:
     """Refuse before any change when a file uninstall would delete lacks evidence.
 
@@ -647,7 +662,7 @@ def _refuse_uninstall_without_evidence(
         )
         logger.error(f"  - {claim}: {refusal_reason(verdict)}; {under_flag}")
     for remedy in uninstall_evidence_remedies(
-        user_scope=user_scope, trust_lockfile=bool(deletable)
+        user_scope=user_scope, trust_lockfile=bool(deletable), packages=packages
     ):
         logger.error(remedy)
     sys.exit(1)
@@ -665,6 +680,7 @@ def _uninstall_evidence_preflight(
     *,
     user_scope: bool,
     trust_lockfile: bool = False,
+    packages: tuple[str, ...] = (),
 ):
     """Collect deletion evidence, then refuse before any change when it is missing.
 
@@ -696,6 +712,7 @@ def _uninstall_evidence_preflight(
         user_scope=user_scope,
         shrunk=shrunk,
         trust_lockfile=trust_lockfile,
+        packages=packages,
     )
     return evidence, consent_kept
 
@@ -1159,6 +1176,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
             logger,
             user_scope=scope is InstallScope.USER,
             trust_lockfile=trust_lockfile,
+            packages=tuple(packages),
         )
 
         # Remove package content before releasing declarations or ownership.
@@ -1231,7 +1249,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
                 preserved_selected_values=profile_survivors,
             )
             _abort_if_retained_target_cleanup_paths(
-                cleanup_outcome, lockfile, lockfile_path, logger, consent_kept
+                cleanup_outcome, lockfile, lockfile_path, logger, consent_kept, deletion_evidence
             )
 
         profile_lock_updated = _retire_selected_profile_packages(
@@ -1349,6 +1367,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
             evidence=deletion_evidence,
             executable_context=survivor_trust,
         )
+        _report_consented_deletions(logger, deletion_evidence.take_consented_deletions())
         cleaned = integration_cleanup.counts
         surviving_deployed_files = integration_cleanup.deployed_files
         lockfile_ready = True
@@ -1477,7 +1496,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
             mcp_cleanup_error,
             lsp_cleanup_error,
             mcp_cleanup_fatal,
-            deletion_evidence.consented_deletions(),
+            deletion_evidence.take_consented_deletions(),
         )
 
         # Fire post-uninstall lifecycle scripts

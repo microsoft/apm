@@ -1141,3 +1141,49 @@ def _receipt_evidence_for(root: Path):
         diagnostics=DiagnosticCollector(),
         kept=(),
     )
+
+
+@pytest.mark.parametrize("lost", ["receipt-store", "installation-marker"])
+def test_trust_lockfile_consent_needs_a_receipt_store_it_could_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lost: str
+) -> None:
+    """An absent store holds no receipt; a store no installation marker binds went unread (#4295)."""
+    from apm_cli.integration.cleanup import DeploymentEvidence, remove_stale_deployed_files
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    content_hash = compute_file_hash(path)
+    session = _session(root, lock)
+    session.record({path: content_hash}, [TARGET], "pkg")
+    session.flush()
+    (session.state_path if lost == "receipt-store" else session.identity_path).unlink()
+
+    def source_gone(*_args, **_kwargs):
+        raise OSError("source unreachable")
+
+    # The locked render is a collaborator: its source is gone, so it cannot run.
+    monkeypatch.setattr("apm_cli.install.drift.run_replay", source_gone)
+    claim = next(iter(lock.deployment_ledger.records.values())).locator.value
+    diagnostics = DiagnosticCollector()
+    evidence = DeploymentEvidence.collect(
+        root, user_scope=False, lockfile=lock, lockfile_root=root, diagnostics=diagnostics, kept=()
+    )
+    evidence.consent_to_lockfile_hashes()
+    result = remove_stale_deployed_files(
+        [claim],
+        root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=evidence,
+        recorded_hashes={claim: content_hash},
+        receipt_retirements=[],
+    )
+
+    if lost == "receipt-store":
+        assert not path.exists() and result.deleted == [claim]
+        assert evidence.consented_deletions() == [claim]
+    else:
+        assert path.read_text(encoding="utf-8") == "rendered old\n" and result.deleted == []
+        assert evidence.kept_under_consent() == frozenset({claim})

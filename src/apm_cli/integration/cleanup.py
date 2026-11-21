@@ -43,6 +43,7 @@ import contextlib
 import copy
 import io
 import os
+import shlex
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -113,6 +114,8 @@ class DeploymentEvidence:
         self._receipts_readable = receipts_readable
         self._lockfile_consent = False
         self._consented: dict[str, None] = {}
+        self._consent_refused: dict[str, None] = {}
+        self._reported: set[str] = set()
 
     @classmethod
     def none(cls, deploy_root: Path) -> DeploymentEvidence:
@@ -147,6 +150,8 @@ class DeploymentEvidence:
             session = DeploymentMaterializationSession(deploy_root, scope, None)
             receipts = session.receipt_hashes()
             owned_receipts = session.receipt_hashes
+            # A store present but unbound was not read: it never counts as empty (#4295).
+            receipts_readable = not session.receipts_unbound
         except (OSError, ValueError) as exc:
             diagnostics.warn(f"Ignored local deployment receipts: {exc}")
             receipts = {}
@@ -382,6 +387,11 @@ class DeploymentEvidence:
         """Accept, for this uninstall only, the req-lk-024 consent exception (#4295)."""
         self._lockfile_consent = True
 
+    @property
+    def lockfile_consent(self) -> bool:
+        """Whether this uninstall carries ``--trust-lockfile`` consent (#4295)."""
+        return self._lockfile_consent
+
     def consented_deletions(self) -> list[str]:
         """Claims ``--trust-lockfile`` consent authorized that are now gone from disk."""
         return [
@@ -389,6 +399,16 @@ class DeploymentEvidence:
             for claim in self._consented
             if (physical := self._physical(claim)) is not None and not os.path.lexists(physical)
         ]
+
+    def take_consented_deletions(self) -> list[str]:
+        """Return the consented deletions not yet reported, and mark them reported."""
+        fresh = [claim for claim in self.consented_deletions() if claim not in self._reported]
+        self._reported.update(fresh)
+        return fresh
+
+    def kept_under_consent(self) -> frozenset[str]:
+        """Claims a deletion decision kept, despite ``--trust-lockfile`` consent, for their evidence."""
+        return frozenset(self._consent_refused)
 
     def lockfile_consentable(self, claim: str, physical: Path) -> bool:
         """Return whether ``--trust-lockfile`` consent may delete *physical* (#4295).
@@ -431,8 +451,16 @@ class DeploymentEvidence:
         """Classify deleting *physical* (lockfile *claim*) as authorized or kept.
 
         *rendered_as* names where the locked render may place the same member
-        instead (skill path migration renders the converged layout).
+        instead (skill path migration renders the converged layout). Under
+        ``--trust-lockfile`` consent every kept claim is recorded, so the
+        command fails only for deletions that were authorized but failed.
         """
+        verdict = self._verdict(claim, physical, rendered_as=rendered_as)
+        if verdict != AUTHORIZED and self._lockfile_consent:
+            self._consent_refused[claim.replace("\\", "/")] = None
+        return verdict
+
+    def _verdict(self, claim: str, physical: Path, *, rendered_as: str | None) -> str:
         try:
             receipt = self._receipt_match(physical)
             if receipt is True:
@@ -753,6 +781,7 @@ def _safe_remove_skill_directory(
     # scripts/, assets/, references/ subdirectories). Member claims extend the
     # directory claim, so project paths and cowork:// URIs share one rule.
     blocking: list[str] = []
+    proven: list[tuple[str, Path]] = []
     # True while every blocking entry is user content (untracked and never
     # deployed); then nothing APM-owned remains and ownership is released.
     user_content_only = True
@@ -777,7 +806,12 @@ def _safe_remove_skill_directory(
         if evidence.verdict(child_rel, child) != AUTHORIZED:
             blocking.append(child_rel)
             user_content_only = False
+        else:
+            proven.append((child_rel, child))
 
+    if blocking and evidence.lockfile_consent:
+        # Consent decides per file (#4295): proven members go, the rest stay named.
+        _remove_proven_members(proven, result, diagnostics, dep_key)
     if blocking:
         # Show up to 5 blocking paths so the user knows which files
         # prevented cleanup (reviewer feedback on PR #1767).
@@ -816,6 +850,23 @@ def _safe_remove_skill_directory(
         _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
 
 
+def _remove_proven_members(
+    proven: list[tuple[str, Path]], result: CleanupResult, diagnostics, dep_key: str
+) -> None:
+    """Delete each proven member of a skill directory other members keep on disk."""
+    for member_rel, member in proven:
+        try:
+            write_seam.unlink(member)
+            result.deleted.append(member_rel)
+            result.deleted_targets.append(member)
+        except OSError as exc:
+            result.failed.append(member_rel)
+            diagnostics.warn(
+                f"Could not remove {member_rel}: {exc}. Fix the file, then retry the uninstall.",
+                package=dep_key,
+            )
+
+
 def _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained):
     """Emit a diagnostic for a failed directory removal."""
     if failed_path_retained:
@@ -852,12 +903,13 @@ def refusal_reason(verdict: str) -> str:
 
 
 def uninstall_evidence_remedies(
-    *, user_scope: bool, trust_lockfile: bool = False
+    *, user_scope: bool, trust_lockfile: bool = False, packages: Iterable[str] = ()
 ) -> tuple[str, ...]:
     """Return the runnable remedies when uninstall lacks deletion evidence.
 
     The ``--trust-lockfile`` remedy is offered only when *trust_lockfile*: at
-    least one refused file is deletable under that consent (#4295).
+    least one refused file is deletable under that consent (#4295). It reruns
+    the uninstall of *packages*, the identifiers the user passed.
     """
     remove = UNINSTALL_EVIDENCE_REMOVE
     reinstall = UNINSTALL_EVIDENCE_REINSTALL
@@ -865,7 +917,8 @@ def uninstall_evidence_remedies(
     if user_scope:
         reinstall = reinstall.with_command("apm install -g")
         remove = remove.with_command("apm uninstall -g")
-        trust = trust.with_command("apm uninstall -g --trust-lockfile")
+        trust = trust.with_command("apm uninstall -g {packages} --trust-lockfile")
+    trust = trust.bind(packages=" ".join(shlex.quote(package) for package in packages))
     reinstall = reinstall.bind(uninstall=remove.command)
     remedies = (reinstall.sentence(), remove.sentence())
     return (*remedies, trust.sentence()) if trust_lockfile else remedies

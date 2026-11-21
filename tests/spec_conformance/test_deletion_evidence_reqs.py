@@ -145,6 +145,9 @@ def test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_has
     assert path.exists() is not consent
     assert result.deleted == ([_PATH] if consent else [])
     assert evidence.consented_deletions() == ([_PATH] if consent else [])
+    # Each deletion is named exactly once, at whichever boundary reports first.
+    assert evidence.take_consented_deletions() == ([_PATH] if consent else [])
+    assert evidence.take_consented_deletions() == []
 
 
 @pytest.mark.req("req-lk-024")
@@ -228,3 +231,58 @@ def test_consent_reads_a_bare_hex_recorded_hash_as_sha256(tmp_path: Path) -> Non
 
     assert result.deleted == [_PATH] and not path.exists()
     assert evidence.consented_deletions() == [_PATH]
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_records_a_file_edited_after_the_preview_as_kept(tmp_path: Path) -> None:
+    """The deletion recheck, not the preview, decides what consent kept."""
+    path = _deployed(tmp_path)
+    evidence = _consent_evidence(tmp_path, path, render=_no_render)
+    evidence.consent_to_lockfile_hashes()
+    assert evidence.consent_preview([_PATH]) == frozenset({_PATH})
+    path.write_text("edited after the preview\n", encoding="utf-8")
+
+    result, _messages = _cleanup(tmp_path, evidence, path)
+
+    assert path.read_text(encoding="utf-8") == "edited after the preview\n"
+    assert result.deleted == [] and evidence.kept_under_consent() == frozenset({_PATH})
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_deletes_each_eligible_member_of_a_skill_directory_it_keeps(
+    tmp_path: Path,
+) -> None:
+    """A legacy lock lists the directory; one edited member keeps only itself."""
+    skill = ".agents/skills/alpha"
+    kept, gone = f"{skill}/SKILL.md", f"{skill}/notes.md"
+    for member in (kept, gone):
+        (tmp_path / member).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / member).write_text(f"{member}\n", encoding="utf-8")
+    hashes = {member: compute_file_hash(tmp_path / member) for member in (kept, gone)}
+    (tmp_path / kept).write_text("my edit\n", encoding="utf-8")
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path,
+        receipts={},
+        render=_no_render,
+        owners={skill: ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={member: frozenset({value}) for member, value in hashes.items()},
+    )
+    evidence.consent_to_lockfile_hashes()
+    diagnostics = DiagnosticCollector()
+
+    result = remove_stale_deployed_files(
+        [skill],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=evidence,
+        recorded_hashes=hashes,
+        receipt_retirements=[],
+    )
+
+    assert not (tmp_path / gone).exists() and gone in result.deleted
+    assert (tmp_path / kept).read_text(encoding="utf-8") == "my edit\n"
+    assert evidence.consented_deletions() == [gone]
+    assert evidence.kept_under_consent() == frozenset({kept})

@@ -354,7 +354,7 @@ UNINSTALL_EVIDENCE_REMOVE = _entry(
 )
 UNINSTALL_EVIDENCE_TRUST_LOCKFILE = _entry(
     "uninstall-evidence-trust-lockfile",
-    "apm uninstall --trust-lockfile",
+    "apm uninstall {packages} --trust-lockfile",
     "delete the files marked deletable and keep the rest",
     before="if the source is gone for good",
 )

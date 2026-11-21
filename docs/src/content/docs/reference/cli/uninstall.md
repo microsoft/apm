@@ -194,9 +194,10 @@ file and why, then offers two remedies:
   then rerun `apm uninstall`. Install rewrites a file it cannot prove it wrote.
 - If the source is unreachable, move each listed file aside or delete it, then
   run `apm uninstall` to finish the uninstall.
-- If the source is gone for good, run `apm uninstall --trust-lockfile`. This
-  remedy is offered only when the refusal marks at least one file
-  `--trust-lockfile would delete it`.
+- If the source is gone for good, rerun the same uninstall with
+  `--trust-lockfile` (for example `apm uninstall owner/repo --trust-lockfile`);
+  the remedy prints that exact command. It is offered only when the refusal
+  marks at least one file `--trust-lockfile would delete it`.
 
 The refusal marks each file `--trust-lockfile would delete it` or
 `kept even with --trust-lockfile`. With `--trust-lockfile`, uninstall deletes
@@ -204,9 +205,11 @@ a file only when no receipt exists for it, its locked version cannot be
 rendered, and its bytes equal the one hash `apm.lock.yaml` records for it. It
 prints each deleted path. An edited file, a file a render or receipt disagrees
 with, a file the lockfile records no single hash for, an unreadable or
-symlinked file, and every file when receipt state cannot be read are kept and
-named; kept files do not fail the command, and the package leaves `apm.yml`
-and `apm.lock.yaml`.
+symlinked file, and every file when receipt state cannot be read (including a
+receipt store no installation marker binds) are kept and named. In a skill
+directory, each eligible file is deleted and only the kept files stay. Kept
+files do not fail the command, and the package leaves `apm.yml` and
+`apm.lock.yaml`; a file that could not be deleted still fails it.
 
 After upgrading, uninstall needs this evidence. If the source is unreachable,
 use the second or third remedy. If a target-scoped file cannot be deleted, uninstall

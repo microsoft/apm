@@ -12,12 +12,13 @@ evidence that a file differs.
 from __future__ import annotations
 
 import json
+import re
+import shlex
 import shutil
 from pathlib import Path
 
 import pytest
 
-from apm_cli.core.remediation import UNINSTALL_EVIDENCE_TRUST_LOCKFILE
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.local_github_https_fixture import openssl_executable
 from tests.utils.skill_selection_world import (
@@ -143,10 +144,14 @@ def test_trust_lockfile_deletes_locked_bytes_and_keeps_an_edit_when_the_source_i
     for name in ("beta", "gamma"):
         assert marks[name].endswith("--trust-lockfile would delete it"), text
     assert marks["alpha"].endswith("kept even with --trust-lockfile"), text
-    assert UNINSTALL_EVIDENCE_TRUST_LOCKFILE.command.split()[-1] in text.splitlines()[-1], text
+    # The printed remedy is the command run next, exactly as printed.
+    printed = re.search(r"'(apm uninstall [^']*--trust-lockfile)'", text.splitlines()[-1])
+    assert printed, text
+    argv = tuple(shlex.split(printed.group(1))[1:])
+    assert argv == scope.args("uninstall", slug, "--trust-lockfile"), text
 
     trusted = world.run(
-        scope.args("uninstall", slug, "--trust-lockfile"),
+        argv,
         cwd=scope.cwd,
         env=env,
         expect=None,
@@ -156,7 +161,7 @@ def test_trust_lockfile_deletes_locked_bytes_and_keeps_an_edit_when_the_source_i
     assert trusted.returncode == 0, text
     for name in ("beta", "gamma"):
         assert not (scope.skills / name).exists(), text
-        assert f"Deleted {_SKILLS_ROOT.as_posix()}/{name}/SKILL.md" in text, text
+        assert text.count(f"Deleted {_SKILLS_ROOT.as_posix()}/{name}/SKILL.md") == 1, text
     assert edited.is_file() and "my edit" in edited.read_text(encoding="utf-8")
     assert "alpha/SKILL.md" in text, text
     assert slug not in json.dumps(load_yaml(scope.apm_root / "apm.yml"))
