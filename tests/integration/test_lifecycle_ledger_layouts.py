@@ -10,7 +10,13 @@ from typing import Any
 import pytest
 
 from apm_cli.utils.git_env import get_git_executable, git_subprocess_env
-from scripts.lifecycle_ledger import LEGACY_LEDGER, read_ledger, read_ledger_at, write_ledger
+from scripts.lifecycle_ledger import (
+    LEDGER_DIR,
+    LEGACY_LEDGER,
+    read_ledger,
+    read_ledger_at,
+    write_ledger,
+)
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-native-lifecycle-evidence")]
 
@@ -63,12 +69,15 @@ def test_committed_ledger_reads_in_either_layout(tmp_path: Path) -> None:
     legacy_path.parent.mkdir(parents=True)
     legacy_path.write_text(json.dumps(_ledger(1, 2), indent=2) + "\n", encoding="ascii")
     legacy = _commit(repo, "legacy layout")
+    legacy_text = legacy_path.read_text(encoding="ascii")
     legacy_path.unlink()
     write_ledger(repo, _ledger(1, 2, 3))
     split = _commit(repo, "per-row layout")
+    _git(repo, "rm", "-q", "-r", LEDGER_DIR)
 
-    assert read_ledger_at(repo, legacy) == _ledger(1, 2)
+    assert read_ledger_at(repo, legacy) == json.loads(legacy_text)
     assert read_ledger_at(repo, split) == _ledger(1, 2, 3)
+    assert not (repo / LEDGER_DIR).exists()
 
 
 @pytest.mark.parametrize("first", ["left", "right"])
@@ -86,4 +95,9 @@ def test_concurrent_row_additions_merge_in_either_order(tmp_path: Path, first: s
     _git(repo, "merge", "-q", "--no-edit", first)
     _git(repo, "merge", "-q", "--no-edit", second)
 
+    assert sorted(path.name for path in (repo / LEDGER_DIR / "bugs").iterdir()) == [
+        "1.json",
+        "2.json",
+        "3.json",
+    ]
     assert read_ledger(repo) == _ledger(1, 2, 3)

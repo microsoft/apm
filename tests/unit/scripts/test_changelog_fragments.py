@@ -1,4 +1,8 @@
-"""CHANGELOG fragments: check, render, assemble and the [Unreleased] edit rule."""
+"""CHANGELOG fragments: the check, render and assemble commands on real files.
+
+Fixtures are written in text mode, so on Windows they carry CRLF line endings,
+as a Windows editor would save them.
+"""
 
 from __future__ import annotations
 
@@ -70,18 +74,29 @@ def _project(root: Path, unreleased: str = "", files: dict[str, str] = FIXTURE) 
     return root
 
 
+def _check(root: Path, name: str, data: bytes) -> int:
+    directory = root / "changelog.d"
+    directory.mkdir()
+    (directory / name).write_bytes(data)
+    return fragments.main(["--root", str(root), "check"])
+
+
 @pytest.mark.parametrize(
-    "name",
-    ["12.fixed.md", "12.breaking-changes-and-upgrade-notes.md", "12.security.md"],
+    ("name", "line"),
+    [
+        ("12.fixed.md", "- Effect. (#12)"),
+        ("12.breaking-changes-and-upgrade-notes.md", "- Effect. (closes #3, #12)"),
+        ("12.security.md", "- Effect. (#10, #11, #12)"),
+        ("12.added.md", "- Effect. -- by @user (#12)"),
+    ],
 )
-def test_valid_fragment_names_and_reference_shapes(name: str) -> None:
-    for line in (
-        "- Effect. (#12)",
-        "- Effect. (closes #3, #12)",
-        "- Effect. (#10, #11, #12)",
-        "- Effect. -- by @user (#12)",
-    ):
-        assert fragments.fragment_problems(name, line + "\n") == []
+@pytest.mark.parametrize("ending", ["", "\n", "\r\n"], ids=["no-eol", "lf", "crlf"])
+def test_valid_fragments_pass_check_with_any_line_ending(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], name: str, line: str, ending: str
+) -> None:
+    assert _check(tmp_path, name, (line + ending).encode("ascii")) == 0
+
+    assert capsys.readouterr().out == "[+] 1 changelog fragment(s) valid\n"
 
 
 @pytest.mark.parametrize(
@@ -91,6 +106,8 @@ def test_valid_fragment_names_and_reference_shapes(name: str) -> None:
         ("12.highlights.md", "- Effect. (#12)\n", "unknown section 'highlights'"),
         ("12.fixes.md", "- Effect. (#12)\n", "unknown section 'fixes'"),
         ("12.fixed.md", "- One. (#12)\n- Two. (#12)\n", "exactly one bullet line"),
+        ("12.fixed.md", "- One. (#12)\r\n- Two. (#12)\r\n", "exactly one bullet line"),
+        ("12.fixed.md", "- One. (#12)\r", "printable ASCII"),
         ("12.fixed.md", "", "exactly one bullet line"),
         ("12.fixed.md", "- Effect \u2014 done. (#12)\n", "printable ASCII"),
         ("12.fixed.md", "Effect. (#12)\n", "single '- ' bullet"),
@@ -100,25 +117,39 @@ def test_valid_fragment_names_and_reference_shapes(name: str) -> None:
         ("12.fixed.md", "- Effect.\n", "(#12)"),
     ],
 )
-def test_invalid_fragments_name_the_broken_rule(name: str, text: str, problem: str) -> None:
-    problems = fragments.fragment_problems(name, text)
-    assert any(problem in found for found in problems), problems
+def test_invalid_fragments_name_the_broken_rule(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], name: str, text: str, problem: str
+) -> None:
+    assert _check(tmp_path, name, text.encode("utf-8")) == 1
+
+    out = capsys.readouterr().out
+    assert out.startswith(f"[x] changelog.d/{name}: ")
+    assert problem in out
 
 
-def test_render_of_fixture_fragments_matches_todays_block(tmp_path: Path) -> None:
+def _render(root: Path, capsys: pytest.CaptureFixture[str], *extra: str) -> str:
+    assert fragments.main(["--root", str(root), "render", *extra]) == 0
+    return capsys.readouterr().out
+
+
+def test_render_of_fixture_fragments_matches_todays_block(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = _project(tmp_path)
 
-    assert fragments.release_block(root) == EXPECTED_BLOCK
-    assert fragments.release_block(root, "0.2.0", "2026-02-02") == (
+    assert _render(root, capsys) == EXPECTED_BLOCK
+    assert _render(root, capsys, "--version", "0.2.0", "--date", "2026-02-02") == (
         f"## [0.2.0] - 2026-02-02\n\n{EXPECTED_BLOCK}"
     )
 
 
-def test_render_puts_legacy_unreleased_bullets_before_fragments(tmp_path: Path) -> None:
+def test_render_puts_legacy_unreleased_bullets_before_fragments(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     legacy = "### Fixed\n\n- Legacy fix. (#4000)\n\n### Removed\n\n- Legacy removal. (#4001)\n\n"
     root = _project(tmp_path, legacy, {"4120.fixed.md": FIXTURE["4120.fixed.md"]})
 
-    assert fragments.release_block(root) == (
+    assert _render(root, capsys) == (
         "### Removed\n\n- Legacy removal. (#4001)\n\n"
         "### Fixed\n\n- Legacy fix. (#4000)\n"
         "- `apm audit --ci` reports a missing lockfile entry once. (#4120)\n"
@@ -138,7 +169,7 @@ def test_assemble_writes_the_version_block_and_deletes_fragments(tmp_path: Path)
     assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == (
         f"{PREAMBLE}## [Unreleased]\n\n## [0.2.0] - 2026-02-02\n\n{block}\n{PREVIOUS}"
     )
-    assert fragments.unreleased_bullets((root / "CHANGELOG.md").read_text()) == []
+    assert b"\r" not in (root / "CHANGELOG.md").read_bytes()
 
 
 @pytest.mark.parametrize(
@@ -175,26 +206,3 @@ def test_check_command_reports_every_bad_fragment(
         "[x] changelog.d/5.fixed.md",
         "[x] changelog.d/x.md",
     ]
-
-
-def _changelog(*unreleased: str) -> str:
-    return PREAMBLE + "## [Unreleased]\n\n### Fixed\n\n" + "".join(unreleased) + "\n" + PREVIOUS
-
-
-@pytest.mark.parametrize(
-    ("base", "head", "added"),
-    [
-        (_changelog("- A. (#1)\n"), _changelog("- A. (#1)\n", "- B. (#2)\n"), ["- B. (#2)"]),
-        (_changelog("- A. (#1)\n"), _changelog("- A, reworded. (#1)\n"), []),
-        (_changelog("- A. (#1)\n"), _changelog(), []),
-        (_changelog("- A. (#1)\n"), _changelog("- A. (#1)\n"), []),
-        (_changelog(), _changelog("- A. (#1)\n", "- A. (#1)\n"), ["- A. (#1)", "- A. (#1)"]),
-        (_changelog(), _changelog().replace("- Old fix. (#1)", "- Old fix. (#1)\n- New."), []),
-        (PREAMBLE + PREVIOUS, _changelog("- A. (#1)\n"), ["- A. (#1)"]),
-    ],
-    ids=["added", "reworded", "released", "unchanged", "duplicate", "older-block", "new-head"],
-)
-def test_unreleased_rule_fails_only_on_net_new_bullets(
-    base: str, head: str, added: list[str]
-) -> None:
-    assert fragments.new_unreleased_bullets(base, head) == added

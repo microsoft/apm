@@ -89,7 +89,7 @@ def write_ledger(root: Path, ledger: Mapping[str, Any]) -> None:
     for path, text in ledger_files(ledger).items():
         target = directory / path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="ascii")
+        target.write_text(text, encoding="ascii", newline="\n")
 
 
 def read_ledger(root: Path) -> dict[str, Any]:

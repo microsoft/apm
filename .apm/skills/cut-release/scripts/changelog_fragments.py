@@ -69,8 +69,16 @@ class Fragment:
     line: str
 
 
+def fragment_line(text: str) -> str:
+    """Return the fragment body: CRLF or LF line endings, one trailing newline dropped."""
+    return text.replace("\r\n", "\n").removesuffix("\n")
+
+
 def fragment_problems(name: str, text: str) -> list[str]:
-    """Return every rule ``changelog.d/<name>`` with content ``text`` breaks."""
+    """Return every rule ``changelog.d/<name>`` with content ``text`` breaks.
+
+    Line endings do not matter: an editor saving CRLF passes like one saving LF.
+    """
     match = _FRAGMENT_NAME.fullmatch(name)
     if match is None:
         return [f"name must be <pr>.<section>.md, with section one of: {', '.join(SECTION_SLUGS)}"]
@@ -79,10 +87,10 @@ def fragment_problems(name: str, text: str) -> list[str]:
         problems.append(
             f"unknown section '{match['slug']}'; use one of: {', '.join(SECTION_SLUGS)}"
         )
-    if any(not (char == "\n" or " " <= char <= "~") for char in text):
+    body = fragment_line(text)
+    if any(not (char == "\n" or " " <= char <= "~") for char in body):
         problems.append("content must be printable ASCII")
-    body = text.removesuffix("\n")
-    if not body or "\n" in body or "\r" in body:
+    if not body or "\n" in body:
         return [*problems, "content must be exactly one bullet line"]
     if not body.startswith("- ") or body != body.strip() or body[2:3] == " ":
         problems.append("the line must be a single '- ' bullet without extra whitespace")
@@ -113,7 +121,7 @@ def read_fragments(root: Path) -> list[Fragment]:
             problems.extend(f"{relative}: {problem}" for problem in found)
             continue
         pr, slug = path.name.split(".")[:2]
-        fragments.append(Fragment(int(pr), SECTION_SLUGS[slug], text.removesuffix("\n")))
+        fragments.append(Fragment(int(pr), SECTION_SLUGS[slug], fragment_line(text)))
     if problems:
         raise ChangelogError("\n".join(problems))
     return sorted(fragments, key=lambda fragment: (fragment.pr, fragment.section))
@@ -204,7 +212,7 @@ def assemble(root: Path, version: str, date: str) -> list[Path]:
         raise ChangelogError(f"{CHANGELOG} has no '{UNRELEASED}' heading")
     tail = lines[span[1] :]
     updated = [*lines[: span[0] + 1], "\n", block, *(["\n", *tail] if tail else [])]
-    path.write_text("".join(updated), encoding="utf-8")
+    path.write_text("".join(updated), encoding="utf-8", newline="\n")
     removed = [
         path
         for path in sorted((root / FRAGMENT_DIR).glob("*.md"))

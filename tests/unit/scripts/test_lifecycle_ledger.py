@@ -60,12 +60,16 @@ def test_directory_layout_wins_over_the_legacy_file(tmp_path: Path) -> None:
     _write_legacy(tmp_path, _ledger(1))
     write_ledger(tmp_path, _ledger(1, 2))
 
+    assert (tmp_path / LEGACY_LEDGER).is_file()
     assert [row["issue"] for row in read_ledger(tmp_path)["bugs"]] == [1, 2]
 
 
 def test_rows_are_ordered_by_id_whatever_the_file_order(tmp_path: Path) -> None:
     write_ledger(tmp_path, _ledger(10, 9, 100))
 
+    bugs = tmp_path / LEDGER_DIR / "bugs"
+    assert sorted(path.name for path in bugs.iterdir()) == ["10.json", "100.json", "9.json"]
+    assert b"\r" not in (bugs / "9.json").read_bytes()
     assert [row["issue"] for row in read_ledger(tmp_path)["bugs"]] == [9, 10, 100]
 
 

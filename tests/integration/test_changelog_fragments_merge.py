@@ -69,7 +69,9 @@ def _branch(repo: Path, name: str, path: str, text: str) -> None:
 
 
 @pytest.mark.parametrize("first", ["pr-21", "pr-22"])
-def test_two_prs_adding_fragments_merge_in_either_order(tmp_path: Path, first: str) -> None:
+def test_two_prs_adding_fragments_merge_in_either_order(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], first: str
+) -> None:
     repo = _repo(tmp_path)
     _branch(repo, "pr-21", "changelog.d/21.fixed.md", "- Fix one. (#21)\n")
     _branch(repo, "pr-22", "changelog.d/22.fixed.md", "- Fix two. (#22)\n")
@@ -78,7 +80,13 @@ def test_two_prs_adding_fragments_merge_in_either_order(tmp_path: Path, first: s
     _git(repo, "merge", "-q", "--no-ff", "--no-edit", first)
     _git(repo, "merge", "-q", "--no-ff", "--no-edit", second)
 
-    assert fragments.release_block(repo) == (
+    assert sorted(path.name for path in (repo / "changelog.d").iterdir()) == [
+        "21.fixed.md",
+        "22.fixed.md",
+        "README.md",
+    ]
+    assert fragments.main(["--root", str(repo), "render"]) == 0
+    assert capsys.readouterr().out == (
         "### Fixed\n\n- Legacy fix. (#10)\n- Fix one. (#21)\n- Fix two. (#22)\n"
     )
 
