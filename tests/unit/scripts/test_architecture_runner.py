@@ -652,6 +652,7 @@ install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
 install-deployment-gate-retirement
 install-deployment-codex-agent-link-resolution
+install-deployment-claude-agents-md-routing
 install-deployment-agent-render-then-adopt
 install-deployment-command-render-then-adopt
 install-deployment-overwrite-evidence
@@ -662,6 +663,7 @@ install-deployment-drift-claim-classification
 install-deployment-effective-selection
 install-deployment-executable-item-admission
 install-deployment-executable-trust-context
+install-deployment-explicit-policy-source-owner
 install-deployment-frozen-flag-reader
 install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority

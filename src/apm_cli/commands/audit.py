@@ -538,6 +538,8 @@ def _render_ci_failures_to_stderr(ci_result: "CIAuditResult") -> None:
         )
         for detail in check.details:
             click.echo(f"    - {printable_ascii_text(detail)}", err=True)
+        if check.next_step:
+            click.echo(f"    {printable_ascii_text(check.next_step)}", err=True)
     summary = ci_result.to_json()["summary"]
     click.echo(
         f"{STATUS_SYMBOLS['cross']} {summary['failed']} of {summary['total']} check(s) failed",
@@ -615,6 +617,8 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
                             color="dim",
                             err=not check.warned,
                         )
+                    if check.next_step and not check.passed:
+                        _rich_echo(f"    {printable_ascii_text(check.next_step)}", err=True)
 
             console.print()
             summary = ci_result.to_json()["summary"]
@@ -645,6 +649,8 @@ def _render_ci_results(ci_result: "CIAuditResult") -> None:
         if (check.warned or not check.passed) and check.details:
             for detail in check.details:
                 _rich_echo(f"      - {printable_ascii_text(detail)}", color="dim")
+        if check.next_step and not check.passed:
+            _rich_echo(f"      {printable_ascii_text(check.next_step)}")
 
     _rich_echo("")
     summary = ci_result.to_json()["summary"]
@@ -840,6 +846,7 @@ def _audit_ci_gate(
                     prepared_replay.modules_root if prepared_replay is not None else None
                 ),
                 no_policy=no_policy,
+                policy_source=fetch_result.source,
             )
             if policy_obj.enforcement == "block":
                 ci_result.checks.extend(policy_result.checks)
@@ -933,6 +940,16 @@ def _audit_ci_gate(
             click.echo(output)
         _render_ci_failures_to_stderr(ci_result)
     else:
+        policy_report = _policy_enforcement_report(fetch_result)
+        if policy_report["source"]:
+            # Name the effective policy sources in text mode too (#1925).
+            chain = policy_report.get("chain") or []
+            chain_text = f" (chain: {' -> '.join(chain)})" if len(chain) > 1 else ""
+            click.echo(
+                f"{STATUS_SYMBOLS['info']} Policy: {policy_report['source']}{chain_text} "
+                f"-- enforcement={policy_report['enforcement']}",
+                err=True,
+            )
         _render_ci_results(ci_result)
         if drift_findings:
             from ..install.drift import render_drift_text

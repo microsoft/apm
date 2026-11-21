@@ -224,6 +224,18 @@ def pack_bundle(
         if f not in seen:
             seen.add(f)
             unique_files.append(f)
+    # Claude rules #3939 compiles into AGENTS.md still ship as rules (#4005).
+    from .claude_routed_rules import (
+        merged_routed_claude_rules,
+        routed_claude_rules,
+        write_routed_claude_rules,
+    )
+
+    rendered_rules = {
+        dep_key: {path: text for path, text in rules.items() if path not in seen}
+        for dep_key, rules in routed_claude_rules(lockfile, project_root, effective_target).items()
+    }
+    rendered_files = merged_routed_claude_rules(rendered_rules)
 
     # 5. Verify each path is safe (no traversal) and exists on disk
     project_root_resolved = project_root.resolve()
@@ -258,7 +270,7 @@ def pack_bundle(
         )
         return PackResult(
             bundle_path=bundle_path,
-            files=unique_files,
+            files=[*unique_files, *rendered_files],
             lockfile_enriched=True,
             mapped_count=len(path_mappings),
             path_mappings=path_mappings,
@@ -355,13 +367,38 @@ def pack_bundle(
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest, follow_symlinks=False)
 
+    write_routed_claude_rules(bundle_dir, rendered_files)
+    if rendered_rules:
+        import copy
+        import hashlib
+
+        from ..core.deployment_ledger import DeploymentLedgerCodec
+
+        provenance = DeploymentLedgerCodec.from_lockfile(lockfile)
+        lockfile = copy.deepcopy(lockfile)
+        for dep in lockfile.get_all_dependencies():
+            added = rendered_rules.get(dep.get_unique_key())
+            if not added:
+                continue
+            hashes = dict(dep.deployed_file_hashes)
+            for rel_path, text in added.items():
+                digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                hashes[rel_path] = f"sha256:{digest}"
+            DeploymentLedgerCodec.replace_legacy_owner(
+                lockfile,
+                dep.get_unique_key(),
+                [*dep.deployed_files, *added],
+                hashes,
+                provenance=provenance,
+            )
+
     # 8. Enrich lockfile copy and write to bundle
     enriched_yaml = enrich_lockfile_for_pack(lockfile, bundle_format.lock_value, effective_target)
     write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
 
     result = PackResult(
         bundle_path=bundle_dir,
-        files=unique_files,
+        files=[*unique_files, *rendered_files],
         lockfile_enriched=True,
         mapped_count=len(path_mappings),
         path_mappings=path_mappings,

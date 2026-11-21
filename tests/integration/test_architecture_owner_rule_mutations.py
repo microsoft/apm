@@ -779,6 +779,12 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
             "                    pass\n",
             id="commit-order-rollback-keeps-created-roots",
         ),
+        pytest.param(
+            "src/apm_cli/install/pipeline.py",
+            '            _run_phase("services", services, ctx)\n',
+            "",
+            id="commit-order-native-commit-before-services",
+        ),
     ],
 )
 def test_audit_gated_deploy_snapshot_is_owned_by_the_transaction(
@@ -2185,6 +2191,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A -g local bundle keeps its lock under the home directory instead of APM_HOME.",
     ),
     MutationCase(
+        guard_id="install-deployment-claude-agents-md-routing",
+        rule_id="install-deployment-claude-agents-md-routing",
+        path="src/apm_cli/integration/instruction_integrator.py",
+        old="            if routes_to_agents_md(",
+        new="            if True or routes_to_agents_md(",
+        intent="Install widens Claude routing beyond the owner's verdict.",
+    ),
+    MutationCase(
         guard_id="install-deployment-cleanup-ownership-release",
         rule_id="install-deployment-cleanup-ownership-release",
         path="src/apm_cli/integration/cleanup.py",
@@ -2263,6 +2277,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def exec_trust_context_for_project(",
         new="def exec_trust_context_for_project_disabled(",
         intent="Executable trust loses its canonical project-context resolver.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-explicit-policy-source-owner",
+        rule_id="install-deployment-explicit-policy-source-owner",
+        path="src/apm_cli/policy/explicit_source.py",
+        old="inheritance.merge_policies(discovered.policy, explicit.policy)",
+        new="inheritance.merge_policies(explicit.policy, discovered.policy)",
+        intent="The explicit --policy source becomes the parent and can loosen org policy.",
     ),
     MutationCase(
         guard_id="install-deployment-frozen-flag-reader",
@@ -3859,6 +3881,14 @@ CASE_IDS: tuple[str, ...] = tuple(case.guard_id for case in MUTATIONS)
 # Multiple routing edges extend existing owners; they do not allocate competing
 # registry guards. Execute these through the same source-override mutation seam.
 USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
+    MutationCase(
+        guard_id="install-deployment-claude-agents-md-routing",
+        rule_id="install-deployment-claude-agents-md-routing",
+        path="src/apm_cli/integration/instruction_integrator.py",
+        old="blocker = claude_agents_md_blocker(live_root)",
+        new="blocker = None",
+        intent="Install routes Claude instructions to AGENTS.md past a hand-authored CLAUDE.md.",
+    ),
     MutationCase(
         guard_id="contracts-tooling-root-context-write-eligibility",
         rule_id="contracts-tooling-root-context-write-eligibility",

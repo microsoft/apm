@@ -103,6 +103,10 @@ class CheckResult:
     # Structured advice that clears this failure, first one primary; serialized
     # by ``apm audit --format json`` as ``remediation`` and ``remediations``.
     remediations: tuple[Remediation, ...] = ()
+    # One rendered catalog sentence that clears this failure, for checks whose
+    # ``message`` does not already carry its remedy: text output prints it after
+    # the details and SARIF appends it to each result message (#4570).
+    next_step: str = ""
 
     def violation_subjects(self) -> tuple[PolicySubject, ...]:
         """Return one :class:`PolicySubject` per violation to report.
@@ -200,11 +204,12 @@ class CIAuditResult:
                 for detail in check.details or [check.message]:
                     if detail in content_details:
                         continue
+                    text = f"{detail}. {check.next_step}" if check.next_step else detail
                     results.append(
                         {
                             "ruleId": check.name,
                             "level": "error",
-                            "message": {"text": detail},
+                            "message": {"text": text},
                             "locations": [
                                 {
                                     "physicalLocation": {

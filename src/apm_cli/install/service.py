@@ -72,6 +72,11 @@ class FrozenDisposition:
         return self.replay
 
     @property
+    def retain_stale_files(self) -> bool:
+        """A locked file this version no longer renders stays on disk and in the lock."""
+        return self.replay
+
+    @property
     def withhold_lockfile_writes(self) -> bool:
         """apm.lock.yaml is never rewritten, so nothing new may be recorded."""
         return self.replay
@@ -407,6 +412,7 @@ class InstallService:
             trust_bin=request.trust_bin,
             transaction=request.transaction,
             lsp_preflight=request.lsp_preflight,
+            reconcile_services=request.reconcile_services,
         )
 
     # -- Lifecycle script helpers ------------------------------------------

@@ -351,6 +351,13 @@
       "guards": ["install-deployment-uninstall-selection"]
     },
     {
+      "id": "explicit-policy-source",
+      "decision": "Explicit install/update --policy source: per-invocation binding, tighten-only composition with discovered org policy, and per-source fetch_failure_default routing of a source that cannot be loaded",
+      "owner": "policy/explicit_source.py (explicit_policy_scope, active_explicit_policy_source, compose_explicit_policy) composed by policy/discovery.py (discover_policy_with_chain) and routed by policy/outcome_routing.py (route_discovery_outcome)",
+      "selectors": ["src/apm_cli/policy/explicit_source.py"],
+      "guards": ["install-deployment-explicit-policy-source-owner"]
+    },
+    {
       "id": "policy-remote-origin-reader",
       "decision": "Reading and parsing the project git remote for org-policy discovery",
       "owner": "policy/_remote.py (_git_remote_origin_url, _remote_url_parts, _parse_remote_url, _extract_org_host_port_from_git_remote)",
@@ -448,6 +455,13 @@
         "install-deployment-local-bundle-hook-trust",
         "install-deployment-local-bundle-hook-retirement"
       ]
+    },
+    {
+      "id": "claude-agents-md-instruction-routing",
+      "decision": "Which Claude project instructions load from AGENTS.md instead of .claude/rules/, and which hand-authored root files block that route (#3939)",
+      "owner": "compilation/claude_agents_md.py (routes_to_agents_md, claude_agents_md_blocker); consumers: InstructionIntegrator._claude_rule_sources at install, AgentsCompiler._compile_agents_md (without_claude_rule_instructions) and AgentsCompiler._compile_claude_md (ClaudeFormatter.format_agents_md_imports) at compile",
+      "selectors": ["src/apm_cli/compilation/claude_agents_md.py", "src/apm_cli/compilation/claude_formatter.py", "src/apm_cli/bundle/claude_routed_rules.py"],
+      "guards": ["install-deployment-claude-agents-md-routing"]
     }
   ]
 }

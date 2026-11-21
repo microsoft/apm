@@ -41,6 +41,10 @@ from scripts.architecture_linter.checks.install_checkout_skill_trust import (
     check_cleanup_retains_kept_members,
     check_skill_adoption_trusted_receipt,
 )
+from scripts.architecture_linter.checks.install_claude_agents_md_routing import (
+    GUARD_CLAUDE_AGENTS_MD_ROUTING,
+    check_claude_agents_md_routing,
+)
 from scripts.architecture_linter.checks.install_cleanup_target_roots import (
     GUARD_CLEANUP_TARGET_ROOTS,
     check_cleanup_target_roots,
@@ -506,6 +510,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_CODEX_AGENT_LINKS,
         "Codex agent bodies are rewritten by BaseIntegrator.resolve_links before serialization.",
         check_codex_agent_link_resolution,
+    ),
+    _rule(
+        GUARD_CLAUDE_AGENTS_MD_ROUTING,
+        "Claude AGENTS.md instruction routing is decided once and consumed by install and compile.",
+        check_claude_agents_md_routing,
     ),
     _rule(
         GUARD_AGENT_RENDER_ADOPT,

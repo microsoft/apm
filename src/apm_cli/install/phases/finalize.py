@@ -123,8 +123,6 @@ def _compile_hint_targets(
             continue
         if scoped.compile_family not in _ROOT_CONTEXT_ONLY_FAMILIES:
             continue
-        if not user_scope and scoped.compile_family == "claude":
-            continue
         if scoped_instructions_only and not scoped.include_scoped_in_user_root_context:
             continue
         families.add(scoped.compile_family)
@@ -223,19 +221,29 @@ def _hint_project_compile_needed(ctx: InstallContext) -> None:
     2. At least one installed dependency directory contains ``.instructions.md``
        files under its ``.apm/instructions/`` subtree.
 
+    It also fires whenever install routed a Claude instruction -- local
+    ``.apm/`` ones included -- to compiled ``AGENTS.md`` instead of
+    ``.claude/rules/`` (#3939) and no compiled ``AGENTS.md`` carries it yet:
+    until ``apm compile`` runs, Claude Code has no copy of it. A no-op
+    reinstall after compile stays quiet.
+
     No file is written.  Compilation stays explicit: the user runs
     ``apm compile`` to materialise AGENTS.md / GEMINI.md / CLAUDE.md.
     """
     if ctx.dry_run:
         return
-    if ctx.installed_count == 0:
+    routed = getattr(
+        (getattr(ctx, "integrators", None) or {}).get("instruction"), "agents_md_stale", None
+    )
+    routed_to_agents_md = isinstance(routed, set) and bool(routed)
+    if ctx.installed_count == 0 and not routed_to_agents_md:
         return
 
     target_names, families = _compile_hint_targets(ctx.targets, user_scope=False)
     if not target_names:
         return
 
-    if not _has_dep_instruction_files(ctx):
+    if not routed_to_agents_md and not _has_dep_instruction_files(ctx):
         return
 
     if ctx.logger:
@@ -384,6 +392,12 @@ def run(ctx: InstallContext) -> InstallResult:
     from apm_cli.install.outcome import result_from_install_context
 
     return result_from_install_context(ctx)
+
+
+def kept_overwrites_fail_install(ctx: InstallContext) -> bool:
+    """Whether finalize will fail this install on kept managed files (#4360)."""
+    kinds = getattr(ctx, "kept_overwrite_kinds", {})
+    return any(kinds.get(entry) != "drift" for _owner, entry in ctx.kept_overwrites or ())
 
 
 def _report_kept_overwrites(ctx: InstallContext) -> None:
