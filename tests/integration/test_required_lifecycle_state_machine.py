@@ -411,15 +411,22 @@ def _run_refused(
     *,
     environment: dict[str, str],
 ) -> None:
-    """Plain install keeps an edited managed file it cannot prove it wrote (#4360)."""
+    """Plain install keeps an edited managed file and names it (#4360, RA-012).
+
+    The receipt proves the edit; with nothing new to deploy the install keeps
+    the file, warns with the true reason and exits 0 (parity with skills).
+    """
     before = kept.read_bytes()
     result = scenario.runner.run(
         _INSTALL_ARGS, scenario_id=scenario_id, cwd=project.root, env=environment
     )
-    text = " ".join((result.stdout + result.stderr).split())
+    text = " ".join(result.stdout.split())
     entry = kept.relative_to(project.root).as_posix()
-    assert result.returncode == 1, text
-    assert f"Kept {entry}:" in text and "Move it aside, then run 'apm install'" in text, text
+    from apm_cli.integration.base_integrator import kept_edit_message
+
+    assert result.returncode == 0, text
+    assert kept_edit_message(entry, user_scope=False, proven_edit=True) in text, text
+    assert "[!] [" in text and "] Kept " in text, text
     assert kept.read_bytes() == before
 
 
