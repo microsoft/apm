@@ -170,6 +170,8 @@ class _PreparedTargetConfig:
     changed: builtins.set
     created_servers_key: bool = False
     owner_only: bool = False
+    # Same-name entries APM did not write, left as the user wrote them (#4628).
+    preserved: tuple[str, ...] = ()
 
 
 _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
@@ -685,6 +687,7 @@ class LSPIntegrator:
         user_scope: bool,
         managed_server_names: builtins.set | None = None,
         force: bool = False,
+        legacy_server_names: builtins.set | None = None,
     ) -> _PreparedTargetConfig:
         """Validate and render one target config without writing it."""
         config_path = LSPIntegrator._target_config_path(
@@ -776,21 +779,27 @@ class LSPIntegrator:
             config[servers_key] = existing
 
         changed: builtins.set = builtins.set()
+        preserved: list[str] = []
         for name, server_config in servers.items():
-            # A same-name entry APM does not manage is user content: refuse to
-            # overwrite it (and so never claim it) unless --force is given.
-            if (
-                (protected_plugin or spec.shared_config)
-                and name in existing
-                and existing[name] != server_config
-                and name not in managed_names
-                and not force
-            ):
+            # A same-name entry APM does not manage is user content: never
+            # overwrite it (and so never claim it).
+            unmanaged = (
+                name in existing and existing[name] != server_config and name not in managed_names
+            )
+            if unmanaged and (protected_plugin or spec.shared_config) and not force:
                 raise FileExistsError(
                     f"LSP server '{name}' already exists in "
                     f"{spec.label(user_scope=user_scope)} and is not managed by APM; "
                     "rename it or rerun with --force"
                 )
+            if (
+                unmanaged
+                and not (protected_plugin or spec.shared_config)
+                and name not in (legacy_server_names or ())
+            ):
+                # Preserved like a native MCP connection; --force does not take it.
+                preserved.append(name)
+                continue
             if existing.get(name) != server_config:
                 changed.add(name)
             existing[name] = server_config
@@ -801,6 +810,7 @@ class LSPIntegrator:
             changed=changed,
             created_servers_key=created_servers_key,
             owner_only=user_scope,
+            preserved=tuple(preserved),
         )
 
     @staticmethod
@@ -1045,6 +1055,7 @@ class LSPIntegrator:
         managed_server_names: builtins.set | None = None,
         managed_target_servers: dict[str, set[str]] | None = None,
         force: bool = False,
+        legacy_server_names: builtins.set | None = None,
     ) -> int:
         """Install LSP dependencies by writing target-specific runtime config."""
         if logger is None:
@@ -1088,6 +1099,7 @@ class LSPIntegrator:
                     user_scope=user_scope,
                     managed_server_names=managed_names,
                     force=force,
+                    legacy_server_names=legacy_server_names,
                 )
                 prepared_targets.append((runtime, spec, prepared))
             except Exception as exc:
@@ -1112,7 +1124,18 @@ class LSPIntegrator:
                     ) from exc
 
         changed_servers: builtins.set = builtins.set()
+        preserved: dict[str, builtins.set] = {}
         for runtime, spec, prepared in prepared_targets:
+            if prepared.preserved:
+                preserved[runtime] = builtins.set(prepared.preserved)
+                for name in prepared.preserved:
+                    logger.error(
+                        f"LSP server '{name}' conflicts with the existing {runtime} entry "
+                        f"in {spec.label(user_scope=user_scope)}. Preserved that entry. "
+                        "Rename or remove the conflicting entry yourself, then retry the "
+                        "same install command. --force does not take ownership of user "
+                        "entries."
+                    )
             try:
                 changed = LSPIntegrator._write_prepared_target_config(prepared)
                 changed_servers.update(changed)
@@ -1160,4 +1183,14 @@ class LSPIntegrator:
                         "Review the path and permissions, then retry."
                     ) from exc
 
+        if preserved:
+            from apm_cli.install.errors import LSPUserEntryConflictError
+
+            message = "LSP installation incomplete: " + ", ".join(
+                f"{name} ({runtime})"
+                for runtime, names in sorted(preserved.items())
+                for name in sorted(names)
+            )
+            logger.error(message)
+            raise LSPUserEntryConflictError(message, preserved=preserved)
         return len(changed_servers)

@@ -275,6 +275,16 @@ Cause: an entry in `.mcp.json` (or another native MCP config) with the same name
 
 Fix: restore the exact value the message names (keep the `:-.` default), or rename or remove the connection, then re-run the same install. Rotate credentials only when the hint names `apm.yml` environment references.
 
+### `LSP server '<name>' conflicts with the existing <runtime> entry`
+
+```
+[x] LSP server 'pyright' conflicts with the existing copilot entry in .github/lsp.json. Preserved that entry. Rename or remove the conflicting entry yourself, then retry the same install command. --force does not take ownership of user entries.
+```
+
+Cause: an LSP config (for example `.github/lsp.json`) already has a server with that name that APM did not write. APM keeps it, configures the other servers, and exits 1.
+
+Fix: rename or remove your entry, then re-run the same install.
+
 ## Compile
 
 ### `Compilation completed but produced no output files`
