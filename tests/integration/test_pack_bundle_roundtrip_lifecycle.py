@@ -235,7 +235,10 @@ def test_multi_target_pack_ships_one_rendering_per_primitive(
     assert len(dropped) == 1, packed
     assert "agents/rv.agent.md" in dropped[0], dropped
     assert "collision" not in packed, packed
-    assert tree_bytes(producer) == sources_before
+    # Pack only adds the generated ecosystem manifests to the project.
+    generated = {".claude-plugin/plugin.json", ".github/plugin/plugin.json"}
+    after = {rel: data for rel, data in tree_bytes(producer).items() if rel not in generated}
+    assert after == sources_before
 
     claude = world.consumer("claude-consumer", targets=("claude",))
     installed = output(world.apm(claude, "install", str(bundle), "--no-policy"))
