@@ -98,12 +98,12 @@ See also: [Install failures](../install-failures/), [Lockfile specification](../
 
 ```
 <owner>/<repo>: not found in lockfile
-1 ref mismatch -- run 'apm update' to update lockfile
+1 ref mismatch -- run 'apm install' to update lockfile
 ```
 
 Cause: a dependency exists in `apm.yml` but has no entry in `apm.lock.yaml`. Most often hit in CI when the lockfile was not regenerated after editing the manifest.
 
-Fix: run `apm install` locally to refresh `apm.lock.yaml` and commit the result. Do not hand-edit the lockfile.
+Fix: run `apm install` locally to refresh `apm.lock.yaml` and commit the result. Do not hand-edit the lockfile. If the lockfile also holds a direct entry `apm.yml` does not declare (for example, a dependency's source was rewritten), the hint names `apm update` instead, which re-resolves every dependency from `apm.yml`.
 
 See also: [Install failures](../install-failures/), [Lockfile specification](../../reference/lockfile-spec/)
 

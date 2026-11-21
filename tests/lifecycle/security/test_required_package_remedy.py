@@ -1,9 +1,10 @@
 """A required package missing from the lock is recorded by a plain ``apm install``.
 
 ``apm audit --ci`` (and ``install --frozen``) refuse a lock that does not
-record a package the org policy requires. The refusal names ``apm install``
-and never a policy bypass; running that remedy records the package and both
-replays then pass (no install-gate catch-22).
+record a declared package the org policy requires. The refusal names plain
+``apm install`` (the minimal converging remedy, not ``apm update``) and never
+a policy bypass; running exactly that records the package and both replays
+then pass (no install-gate catch-22).
 """
 
 from __future__ import annotations
@@ -82,13 +83,16 @@ def test_required_package_missing_from_the_lock_converges_with_plain_install(
             "dependencies": {"require": [_REQUIRED]},
         },
     )
-    # --no-fail-fast: the baseline ref check fails first and would skip policy.
-    refused = driver.run(world, ["audit", "--ci", "--no-fail-fast"])
+    # Fail-fast (the default): the first failing check names the remedy.
+    refused = driver.run(world, ["audit", "--ci"])
     assert refused.returncode == 1, _flat(refused)
-    expected = f"1 required package(s) absent from the lockfile. Hint: {REQUIRED_PACKAGE_UNLOCKED.sentence()}"
-    assert expected in _flat(refused), _flat(refused)
+    assert "1 ref mismatch -- run 'apm install' to update lockfile" in _flat(refused)
     for bypass in ("--no-policy", "APM_POLICY_DISABLE"):
         assert bypass not in _flat(refused), _flat(refused)
+    # The policy check, once reached, names the same remedy.
+    every = driver.run(world, ["audit", "--ci", "--no-fail-fast"])
+    expected = f"1 required package(s) absent from the lockfile. Hint: {REQUIRED_PACKAGE_UNLOCKED.sentence()}"
+    assert expected in _flat(every), _flat(every)
 
     remedy = driver.run(world, ["install"])
     assert remedy.returncode == 0, _flat(remedy)
