@@ -1,0 +1,16 @@
+{
+  "issue": 4245,
+  "fixed_in": "Unreleased",
+  "summary": "apm approve resolves the marketplace spec a package was installed with to that package and approves it; an unresolvable spec exits 1.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_approval_identity_lifecycle.py::test_approve_and_deny_by_install_spec_reach_the_installed_package",
+    "tests/integration/test_approval_identity_lifecycle.py::test_unresolvable_install_spec_exits_1_without_writing"
+  ]
+}

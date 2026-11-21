@@ -1,0 +1,14 @@
+{
+  "issue": 3967,
+  "summary": "Dry-run preview and retired target healing are outside the row command vocabulary.",
+  "failure_modes": [
+    "cleanup",
+    "routing"
+  ],
+  "properties": [
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_retired_preview_lifecycle.py::test_dry_run_preview_matches_the_retired_heal"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "issue": 4290,
+  "fixed_in": "Unreleased",
+  "summary": "install --verbose reports each Azure DevOps auth-chain step once per command, not once per clone attempt.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_ado_verbose_auth_trace_lifecycle.py::test_verbose_ado_auth_steps_print_once"
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "issue": 3735,
+  "fixed_in": "0.36.1",
+  "summary": "A dependency reached through several parents kept only the first edge's skills, targets or alias, so the result depended on manifest order and uninstall, frozen replay and audit could not see the lost selections.",
+  "failure_modes": [
+    "routing",
+    "idempotency",
+    "observation"
+  ],
+  "properties": [
+    "portability.byte_deterministic",
+    "lockfile.frozen_preserves_bytes",
+    "routing.authorized_targets_only",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_diamond_parents_deploy_the_union_of_their_skill_selections_in_any_manifest_order",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_depth_three_chain_keeps_both_ancestor_skill_selections",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_parent_asking_for_whole_bundle_is_not_starved_by_a_narrowing_sibling",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_root_skill_selection_merges_with_a_transitive_selection_and_audit_passes",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_parents_restricting_different_targets_populate_both_harness_roots",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstalling_one_diamond_parent_shrinks_to_the_survivor_selection_then_cleans",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_frozen_install_rejects_a_first_wins_lock_with_an_actionable_reason",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_audit_ci_rejects_a_transitive_skill_subset_that_disagrees_with_declarations",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_user_scope_diamond_shrinks_under_copilot_home",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_pack_ships_the_merged_skill_selection",
+    "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_install_rewrites_an_old_diamond_lock_to_the_union_then_uninstall_shrinks",
+    "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_frozen_install_on_an_old_first_wins_lock_fails_with_remediation",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_user_scope_default_skill_root_never_writes_the_home_copilot_dir",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_dev_declaration_selection_merges_into_the_production_dependency",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_divergent_aliases_keep_the_declaration_order_winner_and_warn",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_divergent_skills_and_targets_pair_per_declaration",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_frozen_install_rejects_a_cross_product_lock_before_deploying",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_frozen_install_replays_a_union_lock_without_rewriting_it",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_prune_dry_run_and_cold_restore_keep_the_merged_selection",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstall_keeps_non_skill_primitives_and_only_selected_skills_of_a_survivor",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstall_keeps_the_locked_union_when_a_survivor_manifest_is_missing",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstall_of_an_unrelated_local_package_keeps_a_local_bundle_skill_pin",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_unknown_skill_named_by_a_transitive_parent_fails_and_preserves_prior_state",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_unrestricted_skills_on_one_harness_do_not_cross_to_the_other",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_update_recomputes_the_union_after_a_parent_changes_its_selection",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_user_scope_diamond_merges_then_shrinks_on_uninstall",
+    "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_audit_ci_flags_an_old_first_wins_skill_selection",
+    "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_install_widens_an_old_target_subset_lock_to_both_harnesses",
+    "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_old_alias_lock_keeps_its_winner_replays_frozen_and_warns_on_install",
+    "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged"
+  ]
+}
