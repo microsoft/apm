@@ -28,7 +28,7 @@ jobs:
           - label: before-fix
             sha: c1bb9d2b27f4a3d0f9d10665b4633c3b12305ff2
           - label: after-fix
-            sha: 6155534969d77c9542d9aea7991df5c9758503c4
+            sha: f1c3128dc761a3cfd8c4e5c00767032a5f30db86
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
