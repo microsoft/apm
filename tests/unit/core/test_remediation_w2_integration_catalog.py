@@ -66,6 +66,7 @@ COMPONENT_ONLY: dict[str, str] = {
     "declares the selection; updating it needs a new revision",
     "uninstall-evidence-reinstall": "executed as printed by test_cleanup_deployment_evidence_lifecycle (full sentence asserted)",
     "uninstall-evidence-remove": "full sentence asserted by test_cleanup_deployment_evidence_lifecycle and test_remediation_gate9_call_sites",
+    "uninstall-evidence-trust-lockfile": "offered and executed by test_uninstall_trust_lockfile_lifecycle (needs an unreachable source and no receipts)",
 }
 
 
