@@ -22,6 +22,7 @@ from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,  # noqa: F401
     _cache_key,
     _get_cache_dir,
+    _policy_fingerprint,
     _read_cache,
     _read_cache_entry,
     _write_cache,
@@ -117,6 +118,11 @@ class TestCacheAtomicity(unittest.TestCase):
             entry = _read_cache_entry(repo_ref, root)
             self.assertIsNotNone(entry, "Cache pair torn by a reader's open handle")
             self.assertEqual(entry.policy.name, "writer-2")
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            document = meta_file.with_name(f"{_cache_key(repo_ref)}.yml").read_text(
+                encoding="utf-8"
+            )
+            self.assertEqual(meta["fingerprint"], _policy_fingerprint(document))
 
     def test_concurrent_writers_different_keys(self):
         """Parallel writes to DIFFERENT cache keys never interfere."""
