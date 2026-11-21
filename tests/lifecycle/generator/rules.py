@@ -234,9 +234,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 719, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 720, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 723, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 715, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 716, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 719, 'target.name == "claude"'),
         ),
     ),
     "U9": (
@@ -253,8 +253,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "executable-gate level of an MCP source is one must-cover cell that witnesses it "
         "(an org policy dependency deny still applies)",
         (
-            Ev(_MCP_VIEW, 1220, "Parked MCP server '{name}' from transitive package"),
-            Ev(_MCP_VIEW, 1232, "Parked MCP server '{name}' ({package})"),
+            Ev(_MCP_VIEW, 1199, "Parked MCP server '{name}' from transitive package"),
+            Ev(_MCP_VIEW, 1211, "Parked MCP server '{name}' ({package})"),
             Ev("docs/src/content/docs/enterprise/control-executables.mdx", 19, "from dependencies"),
             Ev("docs/src/content/docs/consumer/install-mcp-servers.md", 169, "Re-declare it"),
         ),

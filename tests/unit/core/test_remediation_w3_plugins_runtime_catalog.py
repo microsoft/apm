@@ -49,6 +49,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "claude-plugin-binding-moved": _CLAUDE,
     "claude-plugin-source-stale": _CLAUDE,
     "codex-native-cache-differs": _CODEX,
+    "codex-legacy-retirement-retry": "needs a journal and config.toml left by the removed "
+    "Codex app-server route that cannot be read; covered by the split-install unit tests",
     "codex-native-registration-unverified": _CODEX,
     "codex-plugin-user-scope": _CODEX,
     "codex-provenance-reinstall": _CODEX,

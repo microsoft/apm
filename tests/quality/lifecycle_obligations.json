@@ -25022,16 +25022,16 @@
   },
   "U-BIN": {
    "evidence": [
-    "src/apm_cli/install/exec_gate.py:719",
-    "src/apm_cli/install/exec_gate.py:720",
-    "src/apm_cli/install/exec_gate.py:723"
+    "src/apm_cli/install/exec_gate.py:715",
+    "src/apm_cli/install/exec_gate.py:716",
+    "src/apm_cli/install/exec_gate.py:719"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
   "U-FIRST-PARTY-MCP": {
    "evidence": [
-    "src/apm_cli/integration/mcp_config_view.py:1220",
-    "src/apm_cli/integration/mcp_config_view.py:1232",
+    "src/apm_cli/integration/mcp_config_view.py:1199",
+    "src/apm_cli/integration/mcp_config_view.py:1211",
     "docs/src/content/docs/enterprise/control-executables.mdx:19",
     "docs/src/content/docs/consumer/install-mcp-servers.md:169"
    ],
