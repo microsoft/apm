@@ -7,24 +7,21 @@ name: Spec conformance
 # regeneration.
 
 on:
+  # No paths: filter: merge-gate.yml requires the spec gate and its shards on
+  # every PR, so a filtered-out run would leave the gate waiting forever.
   pull_request:
     branches: [ main ]
-    paths:
-      - 'docs/src/content/docs/specs/**'
-      # A req marker may sit on any test under tests/, so any test change can
-      # move the statement.
-      - 'tests/**'
-      - 'src/apm_cli/**'
-      - 'pyproject.toml'
-      - 'CONFORMANCE.md'
-      - 'CONFORMANCE.json'
-      - 'CONTRIBUTING.md'
-      - '.github/workflows/spec-conformance.yml'
-      - '.github/ci-durations/spec-conformance.json'
-      - 'scripts/ci_sharding.py'
   merge_group:
     branches: [ main ]
     types: [ checks_requested ]
+  # merge-train.yml runs the spec checks on write-access queue/* refs (#4574),
+  # since merge_group requires them (#4337).
+  workflow_call:
+    inputs:
+      base_sha:
+        description: Base main SHA of the train.
+        required: false
+        type: string
 
 permissions:
   contents: read

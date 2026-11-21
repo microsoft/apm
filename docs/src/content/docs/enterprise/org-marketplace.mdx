@@ -180,8 +180,9 @@ authoring guide:
   server, over HTTPS or SSH. Private marketplaces use the same credentials as private
   packages ([Use private sources](../../getting-started/authentication/)). Pin the
   marketplace with `--ref` so a moving default branch does not change what is listed.
-- **A `marketplace.json` URL** over HTTPS. APM sends no credentials to it, so reserve
-  this for public lists.
+- **A `marketplace.json` URL** over HTTPS. Anonymous by default; a private list
+  registered with `--name` authenticates with `APM_MARKETPLACE_TOKEN_<NAME>` or a
+  Basic pair ([private hosted catalogs](../../getting-started/authentication/#private-hosted-marketplace-catalogs)).
 - **One marketplace per audience.** Keep several `marketplace.json` files in one
   repository and register each with `--path`. This organizes discovery; it is not
   access control. Use separate repositories when audiences need separate access.

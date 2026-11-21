@@ -2328,15 +2328,25 @@ def _runs_on_merge_group(job: WorkflowNode) -> bool:
     `github.event_name == 'workflow_dispatch'`, an unknown expression) is not
     a merge_group producer, because a skipped check would still pass the gate.
     """
-    condition = str(job.get("if", "")).strip()
-    if condition.startswith("${{") and condition.endswith("}}"):
-        condition = condition[3:-2].strip()
-    return condition in {
+    return _job_condition(job) in {
         "",
         "always()",
         FULL_INTEGRATION_GATE,
         f"always() && ({FULL_INTEGRATION_GATE})",
     }
+
+
+def _job_condition(job: WorkflowNode) -> str:
+    """A job's `if:` with any `${{ }}` expression wrapper removed."""
+    condition = str(job.get("if", "")).strip()
+    if condition.startswith("${{") and condition.endswith("}}"):
+        condition = condition[3:-2].strip()
+    return condition
+
+
+def _runs_unconditionally(job: WorkflowNode) -> bool:
+    """No condition or `always()`: the job runs for every PR and merge group."""
+    return _job_condition(job) in {"", "always()"}
 
 
 def _check_names(job_id: str, job: WorkflowNode) -> tuple[str, ...]:
@@ -2505,6 +2515,115 @@ def test_merge_group_expected_checks_are_produced_by_merge_group_jobs(
     _assert_merge_group_checks_are_produced(
         repository_workflows["merge-gate.yml"], repository_workflows
     )
+
+
+SPEC_WORKFLOW = "spec-conformance.yml"
+SPEC_REQUIRED_CHECKS = (
+    "Spec conformance gate",
+    "Spec tests (1/3)",
+    "Spec tests (2/3)",
+    "Spec tests (3/3)",
+)
+NEVER_REQUIRED_CHECKS = ("Check conformance statement", "Architecture Scaling (Linux)")
+# workflow_call: merge-train.yml runs the spec checks on queue/* refs (#4574).
+SPEC_EVENTS = frozenset({"pull_request", MERGE_GROUP_EVENT, "workflow_call"})
+
+
+def _with_expected_checks(merge_gate: WorkflowNode, contexts: dict[str, tuple[str, ...]]) -> None:
+    wait_step = workflow_step(workflow_job(merge_gate, "gate"), MERGE_GATE_WAIT_STEP)
+    merge_time, labeled, unlabeled = (
+        ",".join(contexts[key])
+        for key in (MERGE_GROUP_EVENT, "pull_request_labeled", "pull_request")
+    )
+    wait_step["env"]["EXPECTED_CHECKS"] = (
+        f"${{{{ github.event_name == 'merge_group' && '{merge_time}' || "
+        "contains(github.event.pull_request.labels.*.name, 'full-integration') "
+        f"&& '{labeled}' || '{unlabeled}' }}}}"
+    )
+
+
+def _assert_spec_checks_gate_every_context(merge_gate: WorkflowNode, spec: WorkflowNode) -> None:
+    """The gate requires the spec checks everywhere, and nothing can filter them out."""
+    for context, names in _expected_checks(merge_gate).items():
+        missing = [name for name in SPEC_REQUIRED_CHECKS if name not in names]
+        assert not missing, f"{context} EXPECTED_CHECKS does not require {missing}"
+        listed = [name for name in NEVER_REQUIRED_CHECKS if name in names]
+        assert not listed, f"{context} EXPECTED_CHECKS must not require {listed}"
+    triggers = spec.get("on")
+    assert isinstance(triggers, dict) and set(triggers) == SPEC_EVENTS, triggers
+    for event in sorted(SPEC_EVENTS):
+        config = triggers[event] or {}
+        filtered = sorted(key for key in ("paths", "paths-ignore") if key in config)
+        assert not filtered, f"{SPEC_WORKFLOW} {event} is filtered by {filtered}"
+    producers: dict[str, list[str]] = {}
+    for job_id, job in spec["jobs"].items():
+        for name in _check_names(job_id, job):
+            producers.setdefault(name, []).append(job_id)
+    for name in SPEC_REQUIRED_CHECKS:
+        jobs = producers.get(name, [])
+        assert len(jobs) == 1, f"{name} must come from exactly one {SPEC_WORKFLOW} job: {jobs}"
+        assert _runs_unconditionally(spec["jobs"][jobs[0]]), f"{name} is conditional: {jobs[0]}"
+
+
+def test_spec_conformance_checks_gate_every_context(
+    repository_workflows: dict[str, WorkflowNode],
+) -> None:
+    _assert_spec_checks_gate_every_context(
+        repository_workflows["merge-gate.yml"], repository_workflows[SPEC_WORKFLOW]
+    )
+
+
+@pytest.mark.parametrize("context", [MERGE_GROUP_EVENT, "pull_request_labeled", "pull_request"])
+@pytest.mark.parametrize("dropped", SPEC_REQUIRED_CHECKS)
+def test_spec_check_dropped_from_a_context_fails(
+    mutable_workflows: dict[str, WorkflowNode], context: str, dropped: str
+) -> None:
+    merge_gate = mutable_workflows["merge-gate.yml"]
+    contexts = _expected_checks(merge_gate)
+    contexts[context] = tuple(name for name in contexts[context] if name != dropped)
+    _with_expected_checks(merge_gate, contexts)
+
+    with pytest.raises(AssertionError, match="does not require"):
+        _assert_spec_checks_gate_every_context(merge_gate, mutable_workflows[SPEC_WORKFLOW])
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "paths",
+        "paths-ignore",
+        "conditional-shard",
+        "label-gated-shard",
+        "wrapped-label-gated-gate",
+        "duplicate-producer",
+        "statement",
+    ],
+)
+def test_spec_gate_drift_fails(mutable_workflows: dict[str, WorkflowNode], mutation: str) -> None:
+    merge_gate = mutable_workflows["merge-gate.yml"]
+    spec = mutable_workflows[SPEC_WORKFLOW]
+    if mutation in ("paths", "paths-ignore"):
+        spec["on"]["pull_request"][mutation] = ["tests/**"]
+    elif mutation == "conditional-shard":
+        spec["jobs"]["spec-2"]["if"] = "github.event_name == 'merge_group'"
+    elif mutation == "label-gated-shard":
+        spec["jobs"]["spec-2"]["if"] = FULL_INTEGRATION_GATE
+    elif mutation == "wrapped-label-gated-gate":
+        gate_id = next(
+            job_id
+            for job_id, job in spec["jobs"].items()
+            if "Spec conformance gate" in _check_names(job_id, job)
+        )
+        spec["jobs"][gate_id]["if"] = f"${{{{ always() && ({FULL_INTEGRATION_GATE}) }}}}"
+    elif mutation == "duplicate-producer":
+        spec["jobs"]["spec-4"] = deepcopy(spec["jobs"]["spec-3"])
+    else:
+        contexts = _expected_checks(merge_gate)
+        contexts["pull_request"] = (*contexts["pull_request"], "Check conformance statement")
+        _with_expected_checks(merge_gate, contexts)
+
+    with pytest.raises(AssertionError):
+        _assert_spec_checks_gate_every_context(merge_gate, spec)
 
 
 def test_merge_time_integration_uses_the_release_planner(
@@ -3218,7 +3337,7 @@ TRAIN_GATE_JOB = "train-gate"
 TRAIN_GATE_STEP = "Require every train job"
 TRAIN_SCOPE_STEP = "Parse scope"
 TRAIN_RATCHET_STEP = "Run ratchet contract tests"
-TRAIN_TIERS = {"tier1": "ci.yml", "tier2": "ci-integration.yml"}
+TRAIN_TIERS = {"tier1": "ci.yml", "tier2": "ci-integration.yml", "spec": "spec-conformance.yml"}
 # A branch deletion fires `push` with deleted true on the default branch SHA.
 TRAIN_NOT_DELETED = "github.event.deleted != true"
 TRAIN_FULL_SCOPE = f"{TRAIN_NOT_DELETED} && needs.scope.outputs.scope == 'full'"
@@ -3226,7 +3345,13 @@ TRAIN_CLEANUP_JOB = "cleanup"
 TRAIN_CLEANUP_STEP = "Delete the train branch"
 TRAIN_BASE_STEP = "Resolve train base"
 TRAIN_BASE = "${{ needs.scope.outputs.base_sha }}"
-TRAIN_GATE_RESULTS = ("SCOPE_RESULT", "GUARD_RESULT", "TIER1_RESULT", "TIER2_RESULT")
+TRAIN_GATE_RESULTS = (
+    "SCOPE_RESULT",
+    "GUARD_RESULT",
+    "TIER1_RESULT",
+    "TIER2_RESULT",
+    "SPEC_RESULT",
+)
 LINT_CHAIN_ACTION = "./.github/actions/lint-chain"
 LINT_CHAIN_BASE = (
     "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha "
@@ -3514,8 +3639,8 @@ def test_train_gate_drift_fails(mutation: str) -> None:
 @pytest.mark.parametrize(
     ("scope", "baseline"),
     [
-        ("full", ("success", "success", "success", "success")),
-        ("guard", ("success", "success", "skipped", "skipped")),
+        ("full", ("success", "success", "success", "success", "success")),
+        ("guard", ("success", "success", "skipped", "skipped", "skipped")),
     ],
 )
 def test_train_gate_passes_only_when_every_job_is_green(
@@ -3995,3 +4120,81 @@ def test_main_push_cache_save_fails(mutation: str) -> None:
     else:
         del workflow_step(shard, "Set up Node.js")["with"]["package-manager-cache"]
     assert _cache_saving_steps(_main_push_reachable_steps(workflows))
+
+
+_EARLY_STOP_FLAGS = ("--maxfail", "-x", "--exitfirst")
+# Env vars whose value reaches pytest as arguments: PYTEST_ADDOPTS is read by
+# pytest itself, PYTEST_EXTRA_ARGS by scripts/test-integration.sh.
+_PYTEST_ARG_ENV = ("PYTEST_ADDOPTS", "PYTEST_EXTRA_ARGS")
+
+
+def _early_stopping_coverage_runs(workflows_dir: Path) -> list[str]:
+    """Steps whose pytest arguments both collect coverage and stop early."""
+    found: list[str] = []
+    for path in sorted(workflows_dir.glob("*.yml")):
+        if path.name.endswith(".lock.yml"):
+            continue
+        found.extend(_early_stopping_in(path.name, load_workflow(path)))
+    return found
+
+
+def _pytest_argument_tokens(
+    workflow: WorkflowNode, job: WorkflowNode, step: WorkflowNode
+) -> list[str]:
+    """Every pytest argument one step can see, across run and inherited env.
+
+    pytest merges PYTEST_ADDOPTS with its command line, so a coverage flag in
+    one source and an early stop in another still stop the coverage run.
+    """
+    env = effective_env(workflow, job, step)
+    tokens = [token for key in _PYTEST_ARG_ENV for token in str(env.get(key, "")).split()]
+    for line in str(step.get("run", "")).replace("\\\n", " ").splitlines():
+        words = line.split()
+        if any("pytest" in word for word in words):
+            tokens.extend(words)
+    return tokens
+
+
+def _early_stopping_in(name: str, workflow: WorkflowNode) -> list[str]:
+    found: list[str] = []
+    for job_id, job in (workflow.get("jobs") or {}).items():
+        for step in (job or {}).get("steps") or []:
+            tokens = _pytest_argument_tokens(workflow, job, step)
+            if not any(token.startswith("--cov") for token in tokens):
+                continue
+            stops = [
+                token
+                for token in tokens
+                if token in _EARLY_STOP_FLAGS or token.startswith("--maxfail=")
+            ]
+            if stops:
+                found.append(f"{name}:{job_id}:{step.get('name', step.get('uses'))}:{stops}")
+    return found
+
+
+def test_coverage_runs_never_stop_early() -> None:
+    """A coverage run that stops at N failures uploads partial data or none (#4552)."""
+    assert _early_stopping_coverage_runs(REPO_ROOT / ".github" / "workflows") == []
+
+
+@pytest.mark.parametrize(
+    "scope",
+    ["extra-args", "step-addopts", "job-addopts", "workflow-addopts", "run-command"],
+)
+@pytest.mark.parametrize("flag", ["--maxfail 10", "--maxfail=1", "-x", "--exitfirst"])
+def test_coverage_run_with_early_stop_fails(flag: str, scope: str) -> None:
+    workflow = load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW)
+    job = workflow_job(workflow, MERGE_GROUP_INTEGRATION_JOB)
+    step = workflow_step(job, MERGE_GROUP_INTEGRATION_STEP)
+    if scope == "extra-args":
+        step["env"]["PYTEST_EXTRA_ARGS"] = f"{step['env']['PYTEST_EXTRA_ARGS']} {flag}"
+    elif scope == "step-addopts":
+        step["env"]["PYTEST_ADDOPTS"] = flag
+    elif scope == "job-addopts":
+        job.setdefault("env", {})["PYTEST_ADDOPTS"] = flag
+    elif scope == "workflow-addopts":
+        workflow.setdefault("env", {})["PYTEST_ADDOPTS"] = flag
+    else:
+        step["run"] = f"{step['run']}uv run pytest tests/integration {flag}\n"
+
+    assert _early_stopping_in("ci-integration.yml", workflow)

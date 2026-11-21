@@ -458,6 +458,17 @@ MARKETPLACE_ALLOW_READD = _entry(
     before="remove its entry from apm.yml",
     then="add it back from an allowed catalog",
 )
+MARKETPLACE_CREDENTIAL_BIND = _entry(
+    "marketplace-credential-bind",
+    "apm marketplace add {url} --name {name}",
+    "bind that name to this catalog",
+    then="set {token} (Bearer), or {user} and {password} (Basic)",
+)
+MARKETPLACE_CREDENTIAL_REBIND = _entry(
+    "marketplace-credential-rebind",
+    "apm marketplace remove {name}",
+    "free the name for a new binding",
+)
 # -- end W2 marketplace --
 # -- W2 bundle --
 PACK_LOCKFILE_MISSING = _entry(
