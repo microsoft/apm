@@ -1331,15 +1331,20 @@ class AuthResolver:
             ]
             secondary = list(self._secondary_sources_tried.get((wanted_host, port), ()))
         sources = list(dict.fromkeys([*(ctx.source for ctx in contexts if ctx.token), *secondary]))
+        withheld = self._strict_scope_withholds(host_info)
         if sources:
             label = "credential" if len(sources) == 1 else "credentials"
-            return f"{label} tried: {', '.join(sources)}"
-        if not contexts:
+            tried = f"{label} tried: {', '.join(sources)}"
+        elif not contexts:
             return "no credential sent"
-        if self._strict_scope_withholds(host_info):
-            # The auth failure repeats the strict-mode notice and its remedy.
-            return "no credential found. " + " ".join(self._strict_withheld_notice(host_info))
-        return f"no credential found in {', '.join(self._credential_sources(host_info, org))}"
+        elif withheld:
+            tried = "no credential found"
+        else:
+            return f"no credential found in {', '.join(self._credential_sources(host_info, org))}"
+        if not withheld:
+            return tried
+        # The auth failure repeats the strict-mode notice and its remedy.
+        return f"{tried}. " + " ".join(self._strict_withheld_notice(host_info))
 
     def build_not_found_message(
         self,

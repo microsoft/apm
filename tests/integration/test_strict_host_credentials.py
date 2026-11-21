@@ -83,8 +83,10 @@ def stubbed_children(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[st
 _RESOLVE = (
     "import json, sys\n"
     "from apm_cli.core.auth import AuthResolver\n"
-    "ctx = AuthResolver().resolve(sys.argv[1], org=sys.argv[2] or None)\n"
-    "print(json.dumps({'token': ctx.token, 'source': ctx.source}))\n"
+    "resolver = AuthResolver()\n"
+    "ctx = resolver.resolve(sys.argv[1], org=sys.argv[2] or None)\n"
+    "tried = resolver.describe_credential_tried(sys.argv[1], sys.argv[2] or None)\n"
+    "print(json.dumps({'token': ctx.token, 'source': ctx.source, 'tried': tried}))\n"
 )
 
 
@@ -129,6 +131,10 @@ def test_strict_mode_scrubs_env_tokens_from_gh_and_credential_fill(
     assert "withheld the environment token from acme.ghe.com;" in warning
     assert "gh auth login --hostname acme.ghe.com" in warning
     assert "(APM_STRICT_HOST_CREDENTIALS)" in warning
+    # A helper credential that the host then rejects still repeats the notice.
+    tried = json.loads(result.stdout.strip().splitlines()[-1])["tried"]
+    assert tried.startswith("credential tried: git-credential-fill. "), tried
+    assert "withheld the environment token from acme.ghe.com;" in tried
     assert _ENV_TOKEN not in warning
 
 
