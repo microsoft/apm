@@ -3154,6 +3154,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A command prints an error line on stdout outside the console stream owner.",
     ),
     MutationCase(
+        guard_id="registry-delegation-deprecation-catalog",
+        rule_id="registry_delegation.deprecation_catalog",
+        path="src/apm_cli/commands/pack.py",
+        old='logger.warning(deprecation_message("unpack"))',
+        new=(
+            "logger.warning(\"'apm unpack' is deprecated and will be removed in a future "
+            'release.")'
+        ),
+        intent="A command re-spells a deprecation warning instead of reading the catalog.",
+    ),
+    MutationCase(
         guard_id="registry-delegation-experimental-flags",
         rule_id="registry_delegation.experimental_flags",
         path="src/apm_cli/version_output.py",

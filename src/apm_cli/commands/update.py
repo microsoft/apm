@@ -72,6 +72,7 @@ from apm_cli.core.scope import manifest_file
 
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger
+from ..core.deprecations import UPDATE_REFRESHES_DEPENDENCIES, deprecation_message
 from ..core.target_catalog import target_help_fragment
 from ..core.target_detection import TargetParamType
 from ..deps.github_downloader import GitHubPackageDownloader
@@ -781,11 +782,7 @@ def update(
                     f"(no apm.yml found). {CLI_BINARY_OUTDATED.sentence()}",
                     symbol="warning",
                 )
-            _rich_warning(
-                "'apm update' refreshes APM dependencies. "
-                f"{CLI_BINARY_OUTDATED.sentence()} Forwarding for back-compat (deprecated).",
-                symbol="warning",
-            )
+            _rich_warning(deprecation_message("update-self-updater"), symbol="warning")
             ctx.invoke(_self_update_cmd, check=check_only)
             return
 
@@ -798,13 +795,7 @@ def update(
                     "Use 'apm update --dry-run' to preview dependency changes.",
                     symbol="warning",
                 )
-            _rich_warning(
-                "'apm update --check' is the deprecated self-updater shim. "
-                "Use 'apm update --dry-run' to preview dependency changes, "
-                "or 'apm self-update --check' to check for a new CLI binary. "
-                "Forwarding for back-compat (deprecated).",
-                symbol="warning",
-            )
+            _rich_warning(deprecation_message("update-check"), symbol="warning")
             ctx.invoke(_self_update_cmd, check=True)
             return
 
@@ -906,7 +897,7 @@ def _run_dep_update_locked(
     # the CLI binary.
     if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
         _rich_info(
-            f"'apm update' refreshes APM dependencies. {CLI_BINARY_OUTDATED.sentence()}",
+            f"{UPDATE_REFRESHES_DEPENDENCIES} {CLI_BINARY_OUTDATED.sentence()}",
             symbol="info",
         )
 
