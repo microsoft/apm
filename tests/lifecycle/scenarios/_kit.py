@@ -408,7 +408,7 @@ class Scenario:
         )
 
     def assert_deployed(self) -> None:
-        observed, _ = self.deployed()
+        observed, _, _ = self.deployed()
         wanted = self.expected_cells()
         assert observed == wanted, f"deployed {sorted(observed)}, model {sorted(wanted)}"
 
