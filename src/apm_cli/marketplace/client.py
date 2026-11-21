@@ -57,6 +57,7 @@ from .errors import (
     MarketplaceNotCachedError,
 )
 from .models import (
+    ORIGIN_PROJECT,
     MarketplaceManifest,
     MarketplacePlugin,
     MarketplaceSource,
@@ -140,6 +141,11 @@ def _sanitize_cache_name(name: str) -> str:
 def _cache_key(source: MarketplaceSource) -> str:
     """Cache key that includes kind+host to avoid collisions across hosts."""
     kind = source.kind
+    if source.origin == ORIGIN_PROJECT:
+        # A project name is local to its apm.yml: key by catalog, never by
+        # name, so it cannot share a cache entry with a same-named registration.
+        identity = "\0".join((kind, source.url, source.ref, source.path))
+        return f"project__{hashlib.sha256(identity.encode()).hexdigest()[:16]}"
     if kind == "url":
         return f"url__{hashlib.sha256(source.url.encode()).hexdigest()[:16]}"
     if kind == "local":

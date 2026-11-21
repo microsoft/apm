@@ -565,10 +565,23 @@ def outdated(global_, verbose, parallel_checks):
 
     downloader = OutdatedRefCache(downloader)
 
-    # Check deps with progress feedback and optional parallelism
-    rows = _check_deps_with_progress(
-        checkable, downloader, verbose, parallel_checks, logger, registry_ctx
+    from ..marketplace.project_marketplaces import (
+        bind_project_marketplaces,
+        read_project_marketplaces,
     )
+
+    # Marketplace rows compare against the root ``marketplaces:`` map (#2903).
+    try:
+        declared_marketplaces = read_project_marketplaces(project_root)
+    except ValueError as exc:
+        logger.error(f"Failed to parse apm.yml: {exc}")
+        sys.exit(1)
+
+    # Check deps with progress feedback and optional parallelism
+    with bind_project_marketplaces(declared_marketplaces, user_scope=global_):
+        rows = _check_deps_with_progress(
+            checkable, downloader, verbose, parallel_checks, logger, registry_ctx
+        )
 
     if not rows:
         logger.success("No remote dependencies to check")
