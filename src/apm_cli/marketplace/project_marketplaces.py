@@ -180,10 +180,10 @@ def _resolve(entry: DeclaredMarketplace) -> MarketplaceSource:
 def _notice_shadowed_registration(scope: _ProjectMarketplaces, source: MarketplaceSource) -> None:
     if scope.notice is None:
         return
-    from .registry import read_registered_marketplaces
+    from .registry import get_registered_marketplaces
 
     lower = source.name.lower()
-    registered = next((s for s in read_registered_marketplaces() if s.name.lower() == lower), None)
+    registered = next((s for s in get_registered_marketplaces() if s.name.lower() == lower), None)
     if registered is None:
         return
     scope.notice(
