@@ -516,6 +516,10 @@ wall-clock scaling ratio stays a separate, non-required `Architecture Scaling
 (Linux)` check, since timing asserts flake. A passing test summary does not
 override a cancelled job.
 
+`gate` also requires `Spec conformance gate` and its three `Spec tests (N/3)`
+shards on every pull request and merge group. `spec-conformance.yml` has no
+`paths:` filter, so these checks always run.
+
 The required Windows compatibility gate runs the full Windows unit suite through
 `scripts/ci_selections.py`, the same selection main push runs, then the
 `windows_compat` tests in `tests/integration` with `APM_E2E_TESTS=1` for marked
