@@ -455,10 +455,16 @@ def test_update_refuses_altered_bytes_for_an_unchanged_registry_version(
         hinted = world.run(env, "install", step="hint-install")
         accepted = world.locked()
         assert (accepted["version"], accepted["resolved_hash"]) == ("1.0.0", _archive_hash(altered))
-        # The dropped entry took its deployment record, so the file is announced as skipped.
-        assert "apm install --force" in output(hinted), output(hinted)
-        world.run(env, "install", "--force", step="hint-install-force")
-        assert "altered" in (world.project / _GUIDE).read_text(encoding="utf-8")
+        # The dropped entry took its deployment record, so the file is announced as
+        # skipped with the move-aside remedy, never --force (RA-008).
+        hinted_text = " ".join(output(hinted).split())
+        assert "1 file skipped -- local files exist, not managed by APM" in hinted_text, hinted_text
+        assert "Move the local files aside, then run 'apm install'" in hinted_text, hinted_text
+        assert "--force" not in hinted_text, hinted_text
+        guide = world.project / _GUIDE
+        guide.rename(guide.with_name(guide.name + ".aside"))
+        world.run(env, "install", step="hint-move-aside-install")
+        assert "altered" in guide.read_text(encoding="utf-8")
 
 
 def test_update_accepts_a_new_registry_version(tmp_path: Path, apm_binary_path: Path) -> None:
