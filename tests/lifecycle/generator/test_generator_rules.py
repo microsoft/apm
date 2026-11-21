@@ -484,6 +484,11 @@ def _u3(cell) -> bool:
     )
 
 
+def _u_mcpown_user(cell) -> bool:
+    """Retired MCP owners exist only at project scope (retired_destinations.py:468)."""
+    return cell.get("SCOPE") == "user" and cell.get("MCPOWN") in ("vscode", "legacy-receipt")
+
+
 @cache
 def _committed_removed() -> dict[str, tuple[str, ...]]:
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
@@ -506,6 +511,7 @@ def _raw() -> dict[str, dict[str, str]]:
         ("U6", _u6),
         ("U8", lambda cell: _u8(cell) is not None),
         ("U-BIN", lambda cell: _u_bin(cell)),
+        ("U-MCPOWN-USER", _u_mcpown_user),
     ],
 )
 def test_definition_rule_removes_exactly_the_cells_its_text_names(rule, holds) -> None:
@@ -624,3 +630,29 @@ def test_a_changed_predicate_reinstates_the_u_bin_cells_as_must_cover(monkeypatc
     assert classify("pair", cell) == Verdict("removed", ("U-BIN",))
     monkeypatch.setattr(bin_pin, "predicate_digest", lambda *_: "0" * 64)
     assert classify("pair", cell) == Verdict("obligation", ("U-BIN",), must_cover=True)
+
+
+# -- U-MCPOWN-USER: bound to the live retired-claim reader ---------------------------
+
+
+def test_u_mcpown_user_holds_only_while_the_reader_ignores_user_scope(tmp_path) -> None:
+    """The removal stands only while split_mcp_claims returns no retired claims at user scope.
+
+    A pre-0.37 lock with a vscode claim and an unsettled copilot claim yields
+    retired claims at project scope; the same lock at user scope yields none.
+    If the reader ever reports user-scope retired claims, the U-MCPOWN-USER
+    cells are reachable again and this test fails.
+    """
+    from apm_cli.install.mcp.retired_destinations import split_mcp_claims
+
+    def claims(user_scope: bool):
+        servers = {"copilot": ["srv"], "vscode": ["srv"]}
+        hashes = {"copilot": {"srv": "sha256:" + "0" * 64}, "vscode": {"srv": "sha256:" + "1" * 64}}
+        return split_mcp_claims(
+            servers, hashes, apm_version="0.36.0", project_root=tmp_path, user_scope=user_scope
+        )
+
+    project = claims(user_scope=False)
+    assert project.names["vscode"] == {"srv"}, "the fixture lock carries a retired claim"
+    user = claims(user_scope=True)
+    assert not any(user.names.values()) and not any(user.hashes.values()), user
