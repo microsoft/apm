@@ -11612,8 +11612,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_dependency_keeps_the_deployed_skill[clean]"
   },
   "pair|DEPLOYED=clean|GATE=denied-executable": {
    "family": "pair",
@@ -11772,8 +11773,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_dependency_keeps_the_deployed_skill[edited]"
   },
   "pair|DEPLOYED=edited|GATE=denied-executable": {
    "family": "pair",
@@ -11827,8 +11829,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_keeps_the_users_skill[edited]"
   },
   "pair|DEPLOYED=edited|SELECT=on": {
    "family": "pair",
@@ -11930,8 +11933,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_dependency_keeps_the_deployed_skill[present-provenance-unknown]"
   },
   "pair|DEPLOYED=present-provenance-unknown|GATE=denied-executable": {
    "family": "pair",
@@ -11984,8 +11988,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_keeps_the_users_skill[present-provenance-unknown]"
   },
   "pair|DEPLOYED=present-provenance-unknown|SELECT=on": {
    "family": "pair",
@@ -12087,8 +12092,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_dependency_keeps_the_deployed_skill[unowned]"
   },
   "pair|DEPLOYED=unowned|GATE=denied-executable": {
    "family": "pair",
@@ -12142,8 +12148,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_keeps_the_users_skill[unowned]"
   },
   "pair|DEPLOYED=unowned|SELECT=on": {
    "family": "pair",
@@ -12413,15 +12420,17 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_dry_run_says_what_the_policy_would_block"
   },
   "pair|GATE=denied-dependency|FORCE=on": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_dependency_refuses_every_resolving_install[force]"
   },
   "pair|GATE=denied-dependency|FROZEN=on": {
    "credited_by": [
@@ -12442,78 +12451,89 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_package_is_refused_offline"
   },
   "pair|GATE=denied-dependency|NET=online": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_git_package_is_refused_online"
   },
   "pair|GATE=denied-dependency|NOPOLICY=on": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_a_denied_dependency_and_says_so"
   },
   "pair|GATE=denied-dependency|SELECT=on": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_dependency_refuses_every_resolving_install[select]"
   },
   "pair|GATE=denied-dependency|TGT=multi-narrowed": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_target_change_under_a_denied_dependency_refuses[multi-narrowed]"
   },
   "pair|GATE=denied-dependency|TGT=multi-unchanged": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_target_change_under_a_denied_dependency_refuses[multi-unchanged]"
   },
   "pair|GATE=denied-dependency|TGT=multi-widened": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_target_change_under_a_denied_dependency_refuses[multi-widened]"
   },
   "pair|GATE=denied-dependency|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_target_change_under_a_denied_dependency_refuses[single-narrowed]"
   },
   "pair|GATE=denied-dependency|TGT=single-unchanged": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_target_change_under_a_denied_dependency_refuses[single-unchanged]"
   },
   "pair|GATE=denied-dependency|TGT=single-widened": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_target_change_under_a_denied_dependency_refuses[single-widened]"
   },
   "pair|GATE=denied-dependency|UPDATE=on": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_dependency_refuses_every_resolving_install[update]"
   },
   "pair|GATE=denied-executable|DRYRUN=on": {
    "family": "pair",
@@ -13992,8 +14012,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_offline"
   },
   "pair|NET=offline|SELECT=on": {
    "family": "pair",
@@ -14839,15 +14860,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[compile-staged]"
   },
   "pair|OP=bundle-install|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[deployed]"
   },
   "pair|OP=bundle-install|FORCE=on": {
    "credited_by": [
@@ -15007,8 +15030,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_a_local_bundle"
   },
   "pair|OP=bundle-install|PRIM=bin": {
    "credited_by": [
@@ -15239,15 +15263,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[compile-staged]"
   },
   "pair|OP=compile|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[deployed]"
   },
   "pair|OP=compile|GATE=allowed": {
    "family": "pair",
@@ -15653,15 +15679,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-compile-staged]"
   },
   "pair|OP=install|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-deployed]"
   },
   "pair|OP=install|FORCE=on": {
    "family": "pair",
@@ -16147,7 +16175,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-install-dry-run]"
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-compile-staged]"
   },
   "pair|OP=install|TGT=multi-unchanged": {
    "family": "pair",
@@ -16163,7 +16191,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-install-dry-run]"
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-widened-compile-staged]"
   },
   "pair|OP=install|TGT=single-narrowed": {
    "family": "pair",
@@ -16171,7 +16199,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-install-dry-run]"
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-narrowed-compile-staged]"
   },
   "pair|OP=install|TGT=single-unchanged": {
    "family": "pair",
@@ -16187,7 +16215,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-install-dry-run]"
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-widened-compile-staged]"
   },
   "pair|OP=install|UPDATE=on": {
    "family": "pair",
@@ -17629,15 +17657,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[compile-staged]"
   },
   "pair|OP=prune|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[deployed]"
   },
   "pair|OP=prune|GATE=allowed": {
    "family": "pair",
@@ -18059,15 +18089,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[compile-staged]"
   },
   "pair|OP=uninstall|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[deployed]"
   },
   "pair|OP=uninstall|GATE=allowed": {
    "family": "pair",
@@ -18522,15 +18554,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[compile-staged]"
   },
   "pair|OP=update|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[deployed]"
   },
   "pair|OP=update|FORCE=on": {
    "family": "pair",
@@ -19035,8 +19069,10 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_plugin_with_bin_is_refused_at_user_scope"
   },
   "pair|PRIM=bin|GATE=denied-executable": {
    "family": "pair",
@@ -20270,15 +20306,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-compile-staged]"
   },
   "pair|PRIM=other-file|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-deployed]"
   },
   "pair|PRIM=skill|DEPLOYED=absent": {
    "family": "pair",
@@ -20332,15 +20370,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-compile-staged]"
   },
   "pair|PRIM=skill|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-deployed]"
   },
   "pair|PRIM=skill|FORCE=on": {
    "family": "pair",
@@ -20512,7 +20552,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-compile-staged]"
   },
   "pair|PRIM=skill|TGT=multi-unchanged": {
    "family": "pair",
@@ -20528,7 +20568,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-widened-compile-staged]"
   },
   "pair|PRIM=skill|TGT=single-narrowed": {
    "family": "pair",
@@ -20536,7 +20576,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-narrowed-compile-staged]"
   },
   "pair|PRIM=skill|TGT=single-unchanged": {
    "family": "pair",
@@ -20552,7 +20592,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-widened-compile-staged]"
   },
   "pair|PRIM=skill|UPDATE=on": {
    "family": "pair",
@@ -21319,8 +21359,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_git_package_is_refused_online"
   },
   "pair|SRC=git|GATE=denied-executable": {
    "family": "pair",
@@ -21666,8 +21707,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_an_org_denied_mcp_server_is_refused[inline-mcp]"
   },
   "pair|SRC=inline-mcp|GATE=none": {
    "credited_by": [
@@ -21731,8 +21773,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_adds_an_mcp_server_and_says_so[inline-mcp]"
   },
   "pair|SRC=inline-mcp|PRIM=mcp": {
    "family": "pair",
@@ -22006,8 +22049,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_a_local_bundle"
   },
   "pair|SRC=local-bundle|PRIM=bin": {
    "credited_by": [
@@ -22222,8 +22266,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_dependency_refuses_every_resolving_install[plain]"
   },
   "pair|SRC=local-path|GATE=denied-executable": {
    "family": "pair",
@@ -22543,8 +22588,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_package_from_each_source_is_refused[marketplace-file]"
   },
   "pair|SRC=marketplace-file|GATE=denied-executable": {
    "family": "pair",
@@ -22633,8 +22679,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_from_each_source_and_says_so[marketplace-file]"
   },
   "pair|SRC=marketplace-file|PRIM=bin": {
    "credited_by": [
@@ -22924,8 +22971,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_package_from_each_source_is_refused[marketplace-git]"
   },
   "pair|SRC=marketplace-git|GATE=denied-executable": {
    "family": "pair",
@@ -23047,8 +23095,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_from_each_source_and_says_so[marketplace-git]"
   },
   "pair|SRC=marketplace-git|PRIM=bin": {
    "credited_by": [
@@ -23316,8 +23365,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_package_from_each_source_is_refused[marketplace-local]"
   },
   "pair|SRC=marketplace-local|GATE=denied-executable": {
    "family": "pair",
@@ -23406,8 +23456,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_from_each_source_and_says_so[marketplace-local]"
   },
   "pair|SRC=marketplace-local|PRIM=bin": {
    "credited_by": [
@@ -23672,8 +23723,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_an_org_denied_mcp_server_is_refused[mcp-registry]"
   },
   "pair|SRC=mcp-registry|GATE=none": {
    "credited_by": [
@@ -23920,8 +23972,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_package_from_each_source_is_refused[native-plugin]"
   },
   "pair|SRC=native-plugin|GATE=denied-executable": {
    "family": "pair",
@@ -24010,8 +24063,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_from_each_source_and_says_so[native-plugin]"
   },
   "pair|SRC=native-plugin|PRIM=bin": {
    "credited_by": [
@@ -24255,8 +24309,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_package_from_each_source_is_refused[pkg-registry]"
   },
   "pair|SRC=pkg-registry|GATE=denied-executable": {
    "family": "pair",
@@ -24345,8 +24400,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_no_policy_installs_from_each_source_and_says_so[pkg-registry]"
   },
   "pair|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -24528,15 +24584,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-compile-staged]"
   },
   "pair|TGT=multi-narrowed|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-deployed]"
   },
   "pair|TGT=multi-narrowed|FORCE=on": {
    "family": "pair",
@@ -24565,8 +24623,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_target_change_with_no_policy_installs_and_says_so[multi-narrowed]"
   },
   "pair|TGT=multi-narrowed|SELECT=on": {
    "family": "pair",
@@ -24596,15 +24655,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-unchanged-compile-staged]"
   },
   "pair|TGT=multi-unchanged|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-unchanged-deployed]"
   },
   "pair|TGT=multi-unchanged|FORCE=on": {
    "family": "pair",
@@ -24674,15 +24735,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-widened-compile-staged]"
   },
   "pair|TGT=multi-widened|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-widened-deployed]"
   },
   "pair|TGT=multi-widened|FORCE=on": {
    "family": "pair",
@@ -24711,8 +24774,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_target_change_with_no_policy_installs_and_says_so[multi-widened]"
   },
   "pair|TGT=multi-widened|SELECT=on": {
    "family": "pair",
@@ -24742,15 +24806,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-narrowed-compile-staged]"
   },
   "pair|TGT=single-narrowed|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-narrowed-deployed]"
   },
   "pair|TGT=single-narrowed|FORCE=on": {
    "family": "pair",
@@ -24779,8 +24845,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_target_change_with_no_policy_installs_and_says_so[single-narrowed]"
   },
   "pair|TGT=single-narrowed|SELECT=on": {
    "family": "pair",
@@ -24810,15 +24877,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-unchanged-compile-staged]"
   },
   "pair|TGT=single-unchanged|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-unchanged-deployed]"
   },
   "pair|TGT=single-unchanged|FORCE=on": {
    "family": "pair",
@@ -24888,15 +24957,17 @@
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-widened-compile-staged]"
   },
   "pair|TGT=single-widened|FILEROUTE=deployed": {
    "family": "pair",
    "issue": "#4102",
    "lane": "T-6c",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-widened-deployed]"
   },
   "pair|TGT=single-widened|FORCE=on": {
    "family": "pair",
@@ -24925,8 +24996,9 @@
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_target_change_with_no_policy_installs_and_says_so[single-widened]"
   },
   "pair|TGT=single-widened|SELECT=on": {
    "family": "pair",
