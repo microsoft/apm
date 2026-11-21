@@ -27,6 +27,12 @@ world:
 given:
 - apm install p-skill
 when:
+- run: apm install --frozen --update
+  exit: 2
+  cells:
+  - refusal|OP=install|FROZEN=on|UPDATE=on
+  unchanged:
+  - '*'
 - run: apm lock --dry-run
   exit: 2
   cells:
@@ -109,12 +115,6 @@ when:
   exit: 2
   cells:
   - refusal|OP=pack|SCOPE=user
-  unchanged:
-  - '*'
-- run: apm pack --update
-  exit: 2
-  cells:
-  - refusal|OP=pack|UPDATE=on
   unchanged:
   - '*'
 then:

@@ -1,0 +1,14 @@
+{
+  "issue": 3655,
+  "summary": "Compile preservation is explicitly outside supported replay commands.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_compile_nested_context_protection_lifecycle.py::test_compile_retains_hand_authored_nested_context_files"
+  ]
+}

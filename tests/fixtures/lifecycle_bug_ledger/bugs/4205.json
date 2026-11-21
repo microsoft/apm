@@ -1,0 +1,16 @@
+{
+  "issue": 4205,
+  "fixed_in": "0.37.0",
+  "summary": "apm run with an unknown script listed the scripts but ended with a placeholder 'apm install <owner>/<repo>/...' line instead of a runnable next step.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_failure_next_step_lifecycle.py::test_run_unknown_script_lists_scripts_and_prints_runnable_next_step"
+  ]
+}

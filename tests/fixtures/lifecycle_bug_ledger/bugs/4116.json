@@ -1,0 +1,19 @@
+{
+  "issue": 4116,
+  "fixed_in": "Unreleased",
+  "summary": "PERF-H1, PERF-H9: the declared merge_group gate (full integration, binary build, release validation, global coverage floor) gated no merge after 2026-09-09 while merge-gate.yml and the workflow comments still described it as live; regressions outside lifecycle smoke surfaced only in the nightly.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/quality/test_ci_topology.py::test_merge_group_expected_checks_are_produced_by_merge_group_jobs",
+    "tests/quality/test_ci_topology.py::test_merge_time_integration_uses_the_release_planner",
+    "tests/quality/test_ci_topology.py::test_global_coverage_floor_gates_the_merge",
+    "tests/quality/test_ci_topology.py::test_merge_queue_freshness_alarm_is_scheduled",
+    "tests/unit/scripts/test_merge_queue_freshness.py::test_bypassed_queue_names_last_run_and_commits_since_it"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "issue": 4073,
+  "summary": "Removed init flags are outside the replay command vocabulary.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "filesystem.open_world_observation",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_init_removed_flags_lifecycle.py::test_plugin_init_writes_the_metadata_the_old_flag_offered",
+    "tests/integration/test_init_removed_flags_lifecycle.py::test_removed_init_flag_exits_2_and_writes_nothing"
+  ]
+}

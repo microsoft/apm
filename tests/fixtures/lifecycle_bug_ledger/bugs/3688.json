@@ -1,0 +1,13 @@
+{
+  "issue": 3688,
+  "summary": "Traps audit root discovery and missing-manifest exit behavior beyond replay-row assertions.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_audit_ci_project_root_lifecycle.py::test_audit_ci_fails_outside_the_project_root"
+  ]
+}

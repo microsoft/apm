@@ -2,14 +2,17 @@
 
 Pins the steward rules (U1-U10, E1-E3) on the generated set, the evidence
 anchors of every rule, the derived target parameters, the checked-in output
-(no drift, stable hash) and the negative control: an obligation is credited
+(no drift, no aggregate, merge-friendly) and the negative control: an obligation is credited
 only by ``oracles.check_obligation``; without that call it stays uncovered.
 """
 
 from __future__ import annotations
 
+import copy
 import hashlib
+import itertools
 import json
+import subprocess
 from functools import cache
 from pathlib import Path
 
@@ -30,6 +33,7 @@ from tests.lifecycle.generator.factors import (
 from tests.lifecycle.generator.rules import (
     ACCEPTS_EVIDENCE,
     EVIDENCE_WINDOW,
+    FIRST_PARTY_MCP_CELL,
     LOCAL_BUNDLE_REFUSALS,
     MARKETPLACE_ADD_REFUSAL,
     REFUSAL_EVIDENCE,
@@ -43,7 +47,7 @@ from tests.lifecycle.generator.rules import (
     refusal_cell,
 )
 from tests.lifecycle.generator.space import build_space, raw_cells
-from tests.lifecycle.generator.witnesses import implied, machine_cells
+from tests.lifecycle.generator.witnesses import credited_ids, machine_cells
 from tests.lifecycle.obligations import Obligation, promise_ids, uncovered
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
@@ -224,16 +228,65 @@ def test_every_rule_cites_code_that_still_says_it() -> None:
         assert any(anchor.needle in line for line in window), f"{anchor}: {anchor.needle!r}"
 
 
-def test_generated_outputs_are_checked_in_and_hashed() -> None:
+def test_generated_outputs_are_checked_in_without_aggregates() -> None:
     text, rows = _generated()
     assert emit.drift() == []
     assert emit.generate() == (text, rows)
     document = json.loads(text)
-    stored = document.pop("sha256")
-    canonical = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    assert stored == hashlib.sha256(canonical.encode("ascii")).hexdigest()
+    assert not {"counts", "sha256"} & set(document), "aggregates make every PR conflict"
+    assert emit.render(document) == text
     assert list(document["obligations"]) == sorted(document["obligations"])
     assert text.isascii() and all(row.isascii() for row in rows.values())
+    assert emit.counts()["obligations_total"] == len(document["obligations"])
+
+
+def _promote(document: dict, key: str, node: str) -> None:
+    """Credit *key* the way a machine witness does (status, lane, witness, credited_by)."""
+    record = document["obligations"][key]
+    document["obligations"][key] = {
+        **record,
+        "credited_by": [f"X|{node}"],
+        "issue": "#4096",
+        "lane": "T-2",
+        "status": "required",
+        "witness": f"tests/lifecycle/test_{node}.py::test_{node}",
+    }
+
+
+def _merge(tmp_path: Path, base: dict, ours: dict, theirs: dict) -> subprocess.CompletedProcess:
+    paths = []
+    for name, document in (("ours", ours), ("base", base), ("theirs", theirs)):
+        path = tmp_path / f"{name}.json"
+        path.write_text(emit.render(document), encoding="ascii")
+        paths.append(str(path))
+    return subprocess.run(
+        ["git", "merge-file", "-p", *paths], capture_output=True, text=True, check=False
+    )
+
+
+def test_parallel_prs_crediting_adjacent_cells_merge_cleanly(tmp_path: Path) -> None:
+    """Two PRs that credit neighbouring cells merge to exactly their regenerated union."""
+    base = json.loads(_generated()[0])
+    keys = list(base["obligations"])
+    first = next(
+        key
+        for key, after in itertools.pairwise(keys)
+        if base["obligations"][key]["status"] == base["obligations"][after]["status"] == "baseline"
+    )
+    second = keys[keys.index(first) + 1]
+    ours, theirs, union = (copy.deepcopy(base) for _ in range(3))
+    _promote(ours, first, "ours")
+    _promote(theirs, second, "theirs")
+    _promote(union, first, "ours")
+    _promote(union, second, "theirs")
+    merged = _merge(tmp_path, base, ours, theirs)
+    assert merged.returncode == 0, merged.stdout
+    assert merged.stdout == emit.render(union)
+    # Negative control: a content hash (the retired ``sha256`` key) differs on every
+    # side, so it brings the conflict back.
+    for document in (base, ours, theirs):
+        document["sha256"] = hashlib.sha256(emit.render(document).encode("ascii")).hexdigest()
+    assert _merge(tmp_path, base, ours, theirs).returncode != 0
 
 
 def test_rows_name_catalog_promises_and_witness_their_required_cells() -> None:
@@ -320,7 +373,7 @@ def test_machine_witnessed_obligations_are_implied_by_their_credited_ids() -> No
     for key, entry in witnessed.items():
         for machine_id in entry["credited_by"]:
             assert cells[machine_id].witness == entry["witness"], (key, machine_id)
-            assert key in set(implied(cells[machine_id].assignment)), (key, machine_id)
+            assert key in set(credited_ids(cells[machine_id])), (key, machine_id)
 
 
 @pytest.mark.usefixtures("isolated_receipts")
@@ -414,6 +467,10 @@ def _u8_mapping(cell) -> str | None:
         return f"uninstall of an MCP server ({src})"  # uninstall/engine.py:710, 869
     if src == "local-bundle" and op in ("uninstall", "update", "prune"):
         return f"{op} of a local bundle"  # uninstall/engine.py:690, update.py:448, prune.py:199
+    if src == "local-bundle" and op is None and {"FROZEN", "UPDATE"} & set(cell):
+        # Only an install states a bundle; it refuses --frozen ("positional packages")
+        # and --update (install.py rejected_flags), so the pair lands on that refusal.
+        return "a local bundle under a modifier its install refuses"
     return None
 
 
@@ -472,6 +529,33 @@ def test_u8_removals_split_by_the_source_each_command_takes() -> None:
     assert sum(clauses.values()) == 295
 
 
+def test_executable_gate_levels_of_an_mcp_source_map_to_the_first_party_rule_cell() -> None:
+    """U-FIRST-PARTY-MCP: the project's own MCP servers are never gated by executables.allow.
+
+    Every executable-gate level of an MCP source lands on one must-cover rule cell
+    that the M-SOURCE spine witnesses; the org-policy deny and GATE=none stay cells.
+    """
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    mapped = {
+        key for key, entry in data["mapped"].items() if entry["rules"] == ["U-FIRST-PARTY-MCP"]
+    }
+    executable = [
+        name for name, authority in GATE_AUTHORITY.items() if authority == "executable-gate"
+    ]
+    assert mapped == {
+        cell_id("pair", {"SRC": src, "GATE": gate})
+        for src in ("inline-mcp", "mcp-registry")
+        for gate in executable
+    }
+    assert all(data["mapped"][key]["maps_to"] == FIRST_PARTY_MCP_CELL for key in mapped)
+    rule = data["obligations"][FIRST_PARTY_MCP_CELL]
+    assert rule["must_cover"] and rule["status"] == "required", rule
+    assert rule["witness"].endswith("test_source_spine_covers_every_form_and_op"), rule
+    for src in ("inline-mcp", "mcp-registry"):
+        for gate in ("none", "denied-dependency"):
+            assert cell_id("pair", {"SRC": src, "GATE": gate}) in data["obligations"]
+
+
 def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
     mapped = {key: entry for key, entry in data["mapped"].items() if entry["rules"][0] == "U8"}
@@ -482,7 +566,11 @@ def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
         family, cell = parse_cell(key)
         clause = _u8_mapping(cell)
         clauses[clause] = clauses.get(clause, 0) + 1
-        if cell["OP"] == "install":
+        if "OP" not in cell:
+            modifier = next(name for name in ("FROZEN", "UPDATE") if name in cell)
+            refusal = cell_id("refusal", {"OP": "bundle-install", modifier: "on"})
+            assert entry["maps_to"] == refusal, key
+        elif cell["OP"] == "install":
             # The bundle-install cell itself, or the refusal its own modifier lands on.
             target = cell_id(family, {**cell, "OP": "bundle-install"})
             assert entry["maps_to"] in (target, data["mapped"].get(target, {}).get("maps_to")), key
@@ -500,6 +588,7 @@ def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
         "prune of a local bundle": 9,
         "uninstall of an MCP server (mcp-registry)": 3,
         "uninstall of an MCP server (inline-mcp)": 3,
+        "a local bundle under a modifier its install refuses": 2,
     }
 
 
