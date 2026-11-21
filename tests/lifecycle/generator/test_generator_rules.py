@@ -2,14 +2,17 @@
 
 Pins the steward rules (U1-U10, E1-E3) on the generated set, the evidence
 anchors of every rule, the derived target parameters, the checked-in output
-(no drift, stable hash) and the negative control: an obligation is credited
+(no drift, no aggregate, merge-friendly) and the negative control: an obligation is credited
 only by ``oracles.check_obligation``; without that call it stays uncovered.
 """
 
 from __future__ import annotations
 
+import copy
 import hashlib
+import itertools
 import json
+import subprocess
 from functools import cache
 from pathlib import Path
 
@@ -224,16 +227,65 @@ def test_every_rule_cites_code_that_still_says_it() -> None:
         assert any(anchor.needle in line for line in window), f"{anchor}: {anchor.needle!r}"
 
 
-def test_generated_outputs_are_checked_in_and_hashed() -> None:
+def test_generated_outputs_are_checked_in_without_aggregates() -> None:
     text, rows = _generated()
     assert emit.drift() == []
     assert emit.generate() == (text, rows)
     document = json.loads(text)
-    stored = document.pop("sha256")
-    canonical = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    assert stored == hashlib.sha256(canonical.encode("ascii")).hexdigest()
+    assert not {"counts", "sha256"} & set(document), "aggregates make every PR conflict"
+    assert emit.render(document) == text
     assert list(document["obligations"]) == sorted(document["obligations"])
     assert text.isascii() and all(row.isascii() for row in rows.values())
+    assert emit.counts()["obligations_total"] == len(document["obligations"])
+
+
+def _promote(document: dict, key: str, node: str) -> None:
+    """Credit *key* the way a machine witness does (status, lane, witness, credited_by)."""
+    record = document["obligations"][key]
+    document["obligations"][key] = {
+        **record,
+        "credited_by": [f"X|{node}"],
+        "issue": "#4096",
+        "lane": "T-2",
+        "status": "required",
+        "witness": f"tests/lifecycle/test_{node}.py::test_{node}",
+    }
+
+
+def _merge(tmp_path: Path, base: dict, ours: dict, theirs: dict) -> subprocess.CompletedProcess:
+    paths = []
+    for name, document in (("ours", ours), ("base", base), ("theirs", theirs)):
+        path = tmp_path / f"{name}.json"
+        path.write_text(emit.render(document), encoding="ascii")
+        paths.append(str(path))
+    return subprocess.run(
+        ["git", "merge-file", "-p", *paths], capture_output=True, text=True, check=False
+    )
+
+
+def test_parallel_prs_crediting_adjacent_cells_merge_cleanly(tmp_path: Path) -> None:
+    """Two PRs that credit neighbouring cells merge to exactly their regenerated union."""
+    base = json.loads(_generated()[0])
+    keys = list(base["obligations"])
+    first = next(
+        key
+        for key, after in itertools.pairwise(keys)
+        if base["obligations"][key]["status"] == base["obligations"][after]["status"] == "baseline"
+    )
+    second = keys[keys.index(first) + 1]
+    ours, theirs, union = (copy.deepcopy(base) for _ in range(3))
+    _promote(ours, first, "ours")
+    _promote(theirs, second, "theirs")
+    _promote(union, first, "ours")
+    _promote(union, second, "theirs")
+    merged = _merge(tmp_path, base, ours, theirs)
+    assert merged.returncode == 0, merged.stdout
+    assert merged.stdout == emit.render(union)
+    # Negative control: a content hash (the retired ``sha256`` key) differs on every
+    # side, so it brings the conflict back.
+    for document in (base, ours, theirs):
+        document["sha256"] = hashlib.sha256(emit.render(document).encode("ascii")).hexdigest()
+    assert _merge(tmp_path, base, ours, theirs).returncode != 0
 
 
 def test_rows_name_catalog_promises_and_witness_their_required_cells() -> None:
