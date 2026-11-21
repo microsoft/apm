@@ -119,7 +119,7 @@ from tests.lifecycle.oracles import (
     operation_for,
 )
 from tests.lifecycle.snapshot import LifecycleSurfaceRoots
-from tests.lifecycle.world.clone import remove_tree
+from tests.lifecycle.world.clone import clone, remove_tree
 from tests.lifecycle.world.scopes import use_policy
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, ArtifactSnapshotSet
@@ -1044,7 +1044,7 @@ class JourneyRun:
     def _o8b(self, facts: _StepFacts) -> list[str]:
         """Diagnostic: the printed advice reveals why the step failed; it does not fix it.
 
-        In a copy of the project the advice runs, writes no durable state and exits 0
+        In a clone of the world the advice runs, writes no durable state and exits 0
         or with the failing command's exit; it prints every promised line, none of
         which the failing step printed (strictly more information); and the failing
         command still exits as it did (the advice keeps the exit class).
@@ -1060,22 +1060,20 @@ class JourneyRun:
         if f"'{advice}'" not in facts.text:
             found.append(f"advice '{advice}' is not printed")
         found += [f"the failing step already prints {p!r}" for p in promises if p in facts.text]
-        copy = self.world.root / f"o8b-{self.journey['id']}-{facts.step['n']}"
-        shutil.copytree(self.world.project, copy, symlinks=True)
-        probe = replace(self.world, project=copy)
-        saved = dict(self.world.env)
-        # The same state as the failing step: its project and its environment.
-        self.world.env.update({k: str(v) for k, v in (facts.step.get("env") or {}).items()})
+        # The same state as the failing step: a full clone of the world (project, HOME,
+        # APM_HOME and caches) under the step's own environment.
+        env = {**self.world.env, **{k: str(v) for k, v in (facts.step.get("env") or {}).items()}}
+        destination = self.world.root.parent / f"o8b-{self.world.root.name}-{facts.step['n']}"
+        probe = clone(replace(self.world, env=env), destination)
         try:
-            before = ArtifactSnapshotSet.capture({"project": copy})
+            before = self._durable(probe)
             ran = self._execute(advice, probe)
-            after = ArtifactSnapshotSet.capture({"project": copy})
+            after = self._durable(probe)
             if ran.result.returncode not in (0, code):
                 found.append(f"advice {advice!r} exited {ran.result.returncode}, not 0 or {code}")
             text = f"{ran.stdout}\n{ran.stderr}"
             found += [f"advice {advice!r} does not print {p!r}" for p in promises if p not in text]
-            changed = sorted(_delta(before.snapshot("project"), after.snapshot("project")))
-            found += [f"diagnostic advice changed {path}" for path in changed]
+            found += [f"diagnostic advice changed {path}" for path in _raw_changes(before, after)]
             for command in failing:
                 again = self._execute(command.line, probe).result
                 if again.returncode != command.result.returncode:
@@ -1092,11 +1090,17 @@ class JourneyRun:
                 ran.result,
             )
         finally:
-            self.world.env.clear()
-            self.world.env.update(saved)
             with contextlib.suppress(OSError):
-                remove_tree(copy)
+                remove_tree(probe.root)
         return found
+
+    @staticmethod
+    def _durable(world) -> ArtifactSnapshotSet:
+        """Every durable root a diagnostic command could write: project, HOME, APM_HOME."""
+        roots = {"project": world.project, "home": world.home}
+        if not world.apm_home.is_relative_to(world.home):
+            roots["apm_home"] = world.apm_home
+        return ArtifactSnapshotSet.capture(roots)
 
     def _remediate(self, world, actions, text: str) -> list[str]:
         found = []
@@ -1395,6 +1399,15 @@ def _removed(facts: _StepFacts) -> list[str]:
 def _kind_destination(child: str) -> tuple[str, str] | None:
     match = re.match(r"\s*\|--\s+(?:\d+\s+)?(.+?)\s+(?:integrated|adopted)\s+->\s+(.+)$", child)
     return (match.group(1), match.group(2)) if match else None
+
+
+def _raw_changes(before: ArtifactSnapshotSet, after: ArtifactSnapshotSet) -> list[str]:
+    """Every entry added, removed or changed in any root, unfiltered (no bookkeeping exempt)."""
+    found = []
+    for root_id, snapshot in before.snapshots:
+        diff = snapshot.diff(after.snapshot(root_id))
+        found += [f"{root_id}:{path}" for path in diff.added | diff.removed | diff.changed]
+    return sorted(found)
 
 
 def _delta(start: ArtifactSnapshot, end: ArtifactSnapshot) -> set[str]:
