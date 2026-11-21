@@ -141,6 +141,8 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     if session is not None:
         session.locked_sources = locked
         session.verify_only = InstallService.frozen_disposition(ctx).replay
+        if InstallService.frozen_disposition(ctx).withhold_lockfile_writes and ctx.transaction:
+            ctx.transaction.hold_deploy_journal_until_commit()
         retire_receipts_of_missing_projects()
     try:
         with (
@@ -944,10 +946,6 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
 
             _run_phase("audit", _audit_phase, ctx)
         commit_point_seam_for_tests()
-        from .service import InstallService
-
-        if InstallService.frozen_disposition(ctx).withhold_lockfile_writes:
-            transaction.hold_deploy_journal_until_commit()
         transaction.release_deploy_targets()
 
         # ------------------------------------------------------------------

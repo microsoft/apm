@@ -235,7 +235,8 @@ still cleans up its managed files, subject to the usual user-edit protections.
   Ctrl-C or SIGTERM, before `apm.lock.yaml` is written, it puts every written
   file back, removes the directories it created and left empty, keeps
   `apm.lock.yaml` unchanged and prints
-  `Deployed files restored to their previous state.` A failure after the
+  `Deployed files restored to their previous state.` A refused `--frozen`
+  install restores them the same way. A failure after the
   lockfile is written (for example an MCP connection collision) keeps the
   deployed files the lockfile records. A killed process (SIGKILL, power loss)
   cannot restore: `apm audit --ci` reports the files the lockfile does not

@@ -4557,6 +4557,20 @@
         "tests/integration/test_cache_pin.py::test_sync_drops_the_marker_of_an_unmarkable_dep",
         "tests/lifecycle/machines/test_m_source.py::test_git_to_registry_switch_drops_the_stale_cache_pin"
       ]
+    },
+    {
+      "issue": 4638,
+      "fixed_in": "Unreleased",
+      "summary": "A --frozen install refused on a widened target set left merged hook configuration (.claude/settings.json, apm-hooks.json, the .gemini pair) on disk; the deploy journal now stays until the install commits, so the refusal restores it.",
+      "failure_modes": [
+        "transaction"
+      ],
+      "properties": [
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/lifecycle/scenarios/test_frozen_target_widening.py::test_a_refused_frozen_widening_leaves_no_hook_config"
+      ]
     }
   ],
   "lifecycle_contracts": [
