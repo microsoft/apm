@@ -325,6 +325,7 @@ class Scenario:
         root = self.deploy_root
         deployed: set[str] = set()
         managed: set[str] = set()
+        users = self._user_files()
         for package, kinds in self.kinds.items():
             for kind in kinds:
                 for target in self.model.targets:
@@ -337,13 +338,35 @@ class Scenario:
                     hits = [
                         path
                         for path in root.glob(pattern.format(pkg=name))
-                        if path.is_file() and marker in path.read_text(encoding="utf-8")
+                        if path.is_file()
+                        and marker in path.read_text(encoding="utf-8")
+                        and path.relative_to(root).as_posix() not in users
                     ]
                     if hits:
                         deployed.add(f"{package}/{kind}/{target}")
                         if not marker:
                             managed.update(path.relative_to(root).as_posix() for path in hits)
         return frozenset(deployed), frozenset(managed)
+
+    def _user_files(self) -> frozenset[str]:
+        """I1-X2: declared user writes the lock does not record: the user's files.
+
+        An edited file the lock still records stays a deployment of its package.
+        """
+        lock = self.lock()
+        recorded = (
+            {path for dep in lock.get_package_dependencies() for path in dep.deployed_files}
+            if lock is not None
+            else set()
+        )
+        root = self.deploy_root
+        return frozenset(
+            relative
+            for relative, digest in self.user_bytes.items()
+            if relative not in recorded
+            and (root / relative).is_file()
+            and hashlib.sha256((root / relative).read_bytes()).hexdigest() == digest
+        )
 
     def observe(self) -> Observation:
         deployed, managed = self.deployed()
