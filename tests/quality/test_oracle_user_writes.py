@@ -25,7 +25,7 @@ from tests.utils.lifecycle_state import LifecycleStateSnapshot
 RATCHET_TEST_SCOPE = "repository"
 
 pytestmark = [
-    pytest.mark.component,
+    pytest.mark.unit,
     pytest.mark.promise("P-INV-I1"),
     pytest.mark.promise("P-INV-I4"),
 ]
