@@ -95,6 +95,51 @@ local_deployed_file_hashes: {.agents/skills/s1/SKILL.md: 'sha256:aa'}
         for key in ("deployments", "mcp_configs", "mcp_target_servers", "manifest_targets"):
             assert key not in parsed
 
+    def test_packed_lock_keeps_shipped_dependency_files_beside_author_state(self):
+        """J11 round trip: stripping author state keeps every dependency's files.
+
+        The dependency files live in the deployment ledger, which to_yaml
+        projects; the bundle must still describe them, or unpack installs
+        nothing ("0 dep(s), 0 file(s)").
+        """
+        installed = LockFile.from_yaml(
+            """\
+lockfile_version: '4'
+apm_version: 0.37.0
+dependencies:
+- repo_url: lifecycle/p-skill
+  host: git.example.invalid
+  resolved_commit: '{commit}'
+  deployed_files: [.agents/skills/p-skill, .agents/skills/p-skill/SKILL.md]
+  deployed_file_hashes: {{.agents/skills/p-skill/SKILL.md: 'sha256:aa'}}
+  content_hash: 'sha256:cc'
+deployments:
+- {{kind: project-relative, target: copilot, value: .agents/skills/p-skill, runtime: null,
+   scope: project, owners: [git.example.invalid/lifecycle/p-skill],
+   active_owner: git.example.invalid/lifecycle/p-skill, content_hash: null}}
+- {{kind: project-relative, target: copilot, value: .agents/skills/p-skill/SKILL.md,
+   runtime: null, scope: project, owners: [git.example.invalid/lifecycle/p-skill],
+   active_owner: git.example.invalid/lifecycle/p-skill, content_hash: 'sha256:aa'}}
+- {{kind: project-relative, target: copilot, value: .agents/skills/review/SKILL.md,
+   runtime: null, scope: project, owners: [.], active_owner: ., content_hash: 'sha256:bb'}}
+local_deployed_files: [.agents/skills/review/SKILL.md]
+local_deployed_file_hashes: {{.agents/skills/review/SKILL.md: 'sha256:bb'}}
+""".format(commit="a" * 40)
+        )
+
+        packed = yaml.safe_load(enrich_lockfile_for_pack(installed, "apm", "copilot"))
+
+        (dep,) = packed["dependencies"]
+        assert dep["repo_url"] == "lifecycle/p-skill"
+        assert dep["deployed_files"] == [
+            ".agents/skills/p-skill",
+            ".agents/skills/p-skill/SKILL.md",
+        ]
+        assert "local_deployed_files" not in packed
+        shipped = [d for d in installed.get_all_dependencies() if d.repo_url == "lifecycle/p-skill"]
+        assert shipped[0].deployed_files == dep["deployed_files"]
+        assert installed.local_deployed_files == [".agents/skills/review/SKILL.md"]
+
     def test_does_not_mutate_original(self):
         lf = _make_lockfile()
         original_yaml = lf.to_yaml()
