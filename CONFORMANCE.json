@@ -647,6 +647,7 @@
       "behavioral_tests": [
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_file_differing_from_its_evidence_is_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_forged_lockfile_hash_keeps_the_file_and_names_it",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_only_this_installations_held_receipt_authorizes_deleting_an_unclaimed_file",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[locked-render]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[receipt]"
       ],
@@ -655,13 +656,15 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 5,
+      "test_count": 7,
       "tests": [
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_file_differing_from_its_evidence_is_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_forged_lockfile_hash_keeps_the_file_and_names_it",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_only_this_installations_held_receipt_authorizes_deleting_an_unclaimed_file",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[locked-render]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[receipt]",
-        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_spec_states_hash_alone_never_authorizes_deletion"
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_spec_states_hash_alone_never_authorizes_deletion",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_spec_states_receipt_bound_deletion_of_unclaimed_files"
       ]
     },
     {

@@ -91,10 +91,13 @@ def _select(
     lockfiles: Iterable[LockFile | None],
     deployed: Iterable[str],
 ) -> tuple[ReceiptOrphan, ...]:
+    receipts = session.receipt_hashes()
+    if not receipts:
+        return ()
     root = session.root
     claimed = _claimed_spellings(root, _claimed_values(lockfiles, deployed))
     orphans: list[ReceiptOrphan] = []
-    for physical in sorted(session.receipt_hashes()):
+    for physical in sorted(receipts):
         path = Path(physical)
         if (
             not path.is_relative_to(root)

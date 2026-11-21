@@ -1,0 +1,23 @@
+{
+  "issue": 3188,
+  "fixed_in": "Unreleased",
+  "summary": "After a git pull dropped a package from apm.yml and apm.lock.yaml, install reported no changes, audit --ci passed and prune removed only the package checkout, leaving its deployed files behind forever; install and prune now delete a file this installation's receipt still lists when nothing current claims it and it holds the receipted bytes, and audit reports it read-only.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/integration/test_receipt_orphan_cleanup_lifecycle.py::test_audit_ci_reports_the_unclaimed_receipted_file_read_only",
+    "tests/integration/test_receipt_orphan_cleanup_lifecycle.py::test_install_after_pull_removes_the_receipted_file_and_is_stable",
+    "tests/integration/test_receipt_orphan_cleanup_lifecycle.py::test_prune_alone_removes_the_receipted_file",
+    "tests/integration/test_receipt_orphan_cleanup_lifecycle.py::test_edited_unclaimed_file_is_kept_and_named_once",
+    "tests/integration/test_receipt_orphan_cleanup_lifecycle.py::test_unreceipted_identical_skill_is_kept",
+    "tests/integration/test_receipt_orphan_cleanup_lifecycle.py::test_path_another_dependency_claims_is_kept",
+    "tests/integration/test_receipt_orphan_cleanup_lifecycle.py::test_moved_checkout_keeps_files_and_receipts",
+    "tests/integration/test_receipt_orphan_cleanup_lifecycle.py::test_failed_or_narrowed_install_keeps_files_and_receipts"
+  ]
+}

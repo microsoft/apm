@@ -69,6 +69,12 @@ deleted only with evidence that APM wrote its current bytes: a local deployment
 receipt, or byte equality with the locked version's render, taken before the
 package directory is removed. Files without evidence are kept with a warning.
 
+Prune also removes deployed files that this machine's deployment receipt
+lists but no lock entry claims any more, for example after a `git pull`
+dropped their package from `apm.yml` and `apm.lock.yaml`, when they still hold
+the bytes APM wrote. An edited file is kept with a warning naming it; delete it
+manually if no longer needed.
+
 `apm prune` also parses and reconciles the lockfile's canonical deployment
 ownership metadata on every run, even when `apm_modules/` does not exist or
 no package is orphaned. It also removes stale direct-dependency records whose

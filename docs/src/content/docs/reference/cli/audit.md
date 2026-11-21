@@ -321,7 +321,10 @@ its user-directed whole-file scan and remediation behavior.
 
 The default audit replays the install pipeline into a scratch tree and diffs
 the result against the working tree. It catches hand-edits, missing
-integrations, orphaned files, and `unrecorded` files. `unrecorded` applies when
+integrations, orphaned files, and `unrecorded` files. `orphaned` also covers a
+file this machine's deployment receipt lists that no lock entry claims and that
+still holds the bytes APM wrote; `apm install` or `apm prune` removes it, and
+audit never modifies it. `unrecorded` applies when
 replay produced the same normalized bytes as the project but no exact or
 directory `deployed_files` claim covers the path. For shared merge-hook
 targets, audit compares only APM-owned hook entries; user-owned hooks do not
