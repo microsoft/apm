@@ -76,10 +76,12 @@ def _project_state(world: World) -> dict[str, bytes]:
     }
 
 
-def _assert_refused_unfetched(world: World, result, cache_before: str, state_before) -> None:
+def _assert_refused_unfetched(
+    world: World, result, cache_before: str, state_before, *, denied: str = _DENIED
+) -> None:
     output = " ".join((result.stdout + result.stderr).split())
     assert result.returncode == 1, output
-    assert _DENIED in output, output
+    assert denied in output, output
     assert _BLOCKED in output, output
     assert _denied_requests(world) == [], _denied_requests(world)
     assert _cached_denied(world) == [], _cached_denied(world)
@@ -180,23 +182,13 @@ def test_frozen_and_audit_refuse_a_locked_denied_dependency_alike(lifecycle_worl
     assert _project_state(world) == state_before
 
 
-def _refused_without_contact(world: World, argv: list[str], subject: str) -> None:
-    """*argv* is refused by the deny rule; the denied repository is never contacted."""
+def _run_after_snapshot(world: World, argv: list[str]):
+    """Snapshot the cache and project, reset egress, then run *argv*."""
     driver.run(world, ["policy", "status"])
     cache_before = _tree_digest(_cache_root(world))
     state_before = _project_state(world)
     world.services.reset()
-
-    result = driver.run(world, argv)
-
-    output = " ".join((result.stdout + result.stderr).split())
-    assert result.returncode == 1, output
-    assert f"{subject} -- denied by pattern: **/{DENIED_PACKAGE}" in output, output
-    assert _BLOCKED in output, output
-    assert _denied_requests(world) == [], _denied_requests(world)
-    assert _cached_denied(world) == [], _cached_denied(world)
-    assert _tree_digest(_cache_root(world)) == cache_before
-    assert _project_state(world) == state_before
+    return driver.run(world, argv), cache_before, state_before
 
 
 def test_denied_gitlab_shorthand_is_never_probed(lifecycle_world: World) -> None:
@@ -205,7 +197,10 @@ def test_denied_gitlab_shorthand_is_never_probed(lifecycle_world: World) -> None
     use_policy(world, "deny-pkg")
     host, prefix = HOST_ALIASES["gitlab"]
     spec = f"{host}/{prefix}/{DENIED_PACKAGE}#{TAG}"
-    _refused_without_contact(world, ["install", spec], f"{host}/{prefix}/{DENIED_PACKAGE}")
+    result, cache_before, state_before = _run_after_snapshot(world, ["install", spec])
+    assert result.returncode == 1, result.stdout + result.stderr
+    denied = f"{host}/{prefix}/{DENIED_PACKAGE} -- denied by pattern: **/{DENIED_PACKAGE}"
+    _assert_refused_unfetched(world, result, cache_before, state_before, denied=denied)
 
 
 def test_marketplace_entry_resolving_to_a_denied_repo_is_never_fetched(
@@ -217,4 +212,6 @@ def test_marketplace_entry_resolving_to_a_denied_repo_is_never_fetched(
     added = driver.run(world, ["marketplace", "add", "lifecycle/marketplace"])
     assert added.returncode == 0, added.stdout + added.stderr
     spec = world.packages[f"{DENIED_PACKAGE}:marketplace"].spec
-    _refused_without_contact(world, ["install", spec], f"github.com/{ORG}/{DENIED_PACKAGE}")
+    result, cache_before, state_before = _run_after_snapshot(world, ["install", spec])
+    assert result.returncode == 1, result.stdout + result.stderr
+    _assert_refused_unfetched(world, result, cache_before, state_before)
