@@ -250,3 +250,16 @@ def test_a_restart_with_a_stale_cache_adopts_the_live_train(tmp_path) -> None:
     assert runner.main(["tick", "--state-dir", str(tmp_path), "--depth", "1"], api=api) == 0
     recovered = state.load(tmp_path / "state.json")
     assert [m.pr for m in recovered.trains[1].members] == [21] and list(recovered.trains) == [1]
+
+
+def test_a_build_where_every_member_conflicts_deletes_its_build_ref() -> None:
+    api, current, log = _repo(), state.State(), runner.Log(None, _clock())
+    api.post_handler = lambda path, body: (
+        Response(409, "conflict") if path.endswith("/merges") else Response(201, {})
+    )
+    runner.tick(api, current, log)
+    assert current.trains == {}
+    assert f"DELETE repos/{REPO}/git/refs/heads/queue-build/t0001 " in _writes(api)
+    assert [e["reason"] for e in log.events if e["event"] == "launch-failed"] == [
+        "no member merged"
+    ]
