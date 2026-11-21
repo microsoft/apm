@@ -107,7 +107,10 @@ What gets removed, in order:
    `.gemini/settings.json`, and `.kiro/hooks/` that the removed packages
    contributed. Remaining packages -- including transitive dependencies still
    required by another package -- have their hook entries rebuilt from the
-   post-removal lockfile.
+   post-removal lockfile. Remaining packages are rebuilt only into targets
+   `apm.lock.yaml` records: when `apm.yml` now declares a target the project
+   was not installed for, uninstall leaves it alone and says once to run
+   `apm install`, which deploys and records it.
 6. MCP and LSP servers contributed only by the removed packages. For current
    lockfiles, MCP cleanup touches only the runtimes recorded as owners in
    `mcp_target_servers`. An explicitly empty ownership map is a no-op. Older

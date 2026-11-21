@@ -327,13 +327,15 @@ class LockfileBuilder:
             prior_ledger = DeploymentLedgerCodec.from_lockfile(existing)
         prior_files_by_package: dict[str, list[str]] = {}
         prior_hashes_by_package: dict[str, dict[str, str]] = {}
+        receipted = getattr(self.ctx, "receipted_prior_deployments", {})
         for dep_key in lockfile.dependencies:
             previous = existing.get_dependency(dep_key) if existing is not None else None
+            stand_in = receipted.get(dep_key, {})
             prior_files_by_package[dep_key] = (
-                previous.deployed_files if previous is not None else []
+                previous.deployed_files if previous is not None else sorted(stand_in)
             )
             prior_hashes_by_package[dep_key] = (
-                previous.deployed_file_hashes if previous is not None else {}
+                previous.deployed_file_hashes if previous is not None else dict(stand_in)
             )
         from apm_cli.core.deployment_state import DeploymentReconciler
 

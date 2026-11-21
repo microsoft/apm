@@ -1435,6 +1435,7 @@ def _sync_integrations_after_uninstall(
     )
     from ...native_plugins.scopes import native_harnesses
     from ...primitives.discovery import clear_discovery_cache
+    from .recorded_targets import reconciled_targets
 
     installed_modules_dir = modules_dir or Path(APM_MODULES_DIR)
     config_target = list(apm_package.canonical_targets)
@@ -1444,6 +1445,7 @@ def _sync_integrations_after_uninstall(
     _base_targets = resolve_reintegration_targets(
         project_root, user_scope=user_scope, explicit_target=_explicit
     )
+    _base_targets = reconciled_targets(_base_targets, lockfile, logger)  # #4636
     _resolved_targets = resolve_skill_layout(
         _base_targets, recorded_paths=recorded_deployed_paths(lockfile)
     )
