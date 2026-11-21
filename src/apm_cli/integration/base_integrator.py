@@ -873,8 +873,10 @@ class BaseIntegrator:
             # The claim stays with its prior lock entry; finalize names the file.
             target_paths.append(target_path)
             return True, False
+        # A proven edit the gate cannot keep (the project's own local content)
+        # still names the true reason (RA-012).
         message = kept_edit_message(
-            rel_path, user_scope=bool(gate and gate.user_scope), proven_edit=False
+            rel_path, user_scope=bool(gate and gate.user_scope), proven_edit=edit is not None
         )
         if diagnostics is not None:
             diagnostics.error(message, package=gate.owner if gate else "")

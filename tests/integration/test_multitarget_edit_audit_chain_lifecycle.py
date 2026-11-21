@@ -89,14 +89,17 @@ def test_multi_target_edit_compile_audit_narrow_uninstall_chain(
         assert (project / name).read_bytes() == data, name
     assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
 
-    # 5. #4360: a plain reinstall keeps the hand-edited files, names each one and
-    #    exits 1; the printed remedy (move aside, then install) restores them.
+    # 5. #4360 + RA-012: the receipts prove the hand edits and nothing new comes
+    #    upstream, so a plain reinstall keeps the files, names each with the true
+    #    reason and exits 0; the printed remedy (move aside, then install)
+    #    restores them.
     edited = {".kiro/steering/py.md": edited_rule, ".codex/agents/rev.toml": edited_agent}
     edited_bytes = {relative: path.read_bytes() for relative, path in edited.items()}
-    kept = scenario.run("install", "--no-policy", cwd=project, expect=1)
+    kept = scenario.run("install", "--no-policy", cwd=project)
     text = output(kept)
+    assert "no local deployment receipt" not in text, text
     for relative, path in edited.items():
-        assert kept_edit_message(relative, user_scope=False, proven_edit=False) in text, text
+        assert kept_edit_message(relative, user_scope=False, proven_edit=True) in text, text
         assert path.read_bytes() == edited_bytes[relative]
     assert (project / "apm.lock.yaml").read_bytes() == lock_bytes
     aside = scenario.isolated.work_root / "aside"
