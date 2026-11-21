@@ -1,0 +1,14 @@
+{
+  "issue": 4288,
+  "fixed_in": "Unreleased",
+  "summary": "An MCP server that fails for two runtimes prints one failure line per runtime, each naming the runtime, instead of identical lines.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_failure_line_runtime_lifecycle.py::test_mcp_failure_line_names_each_runtime"
+  ]
+}

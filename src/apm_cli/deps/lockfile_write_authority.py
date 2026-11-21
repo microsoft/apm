@@ -187,6 +187,16 @@ def _commits(error: BaseException) -> bool:
     return isinstance(error, Exception | SystemExit | _click_exit())
 
 
+def commits_on_failure(error: BaseException) -> bool:
+    """Whether a command failing with *error* still commits what it staged.
+
+    A phase that must leave disk matching the lockfile the failure commits
+    (native Claude registration after a failed MCP reconcile, #4329) asks
+    here instead of re-deriving the refusal and interrupt rules.
+    """
+    return _commits(error)
+
+
 def _click_exit() -> type[BaseException]:
     from click.exceptions import Exit
 

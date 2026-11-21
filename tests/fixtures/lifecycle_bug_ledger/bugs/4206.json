@@ -1,0 +1,17 @@
+{
+  "issue": 4206,
+  "fixed_in": "0.37.0",
+  "summary": "install --skill with no matching skill listed the available skills but printed free-text advice instead of a runnable apm install command.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_failure_next_step_lifecycle.py::test_install_skill_miss_lists_skills_and_prints_runnable_next_step",
+    "tests/integration/test_architecture_outcome_guards.py::test_requested_component_miss_names_one_runnable_install"
+  ]
+}

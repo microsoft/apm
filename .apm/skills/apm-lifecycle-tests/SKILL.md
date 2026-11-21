@@ -69,8 +69,8 @@ Run `ls tests/lifecycle/conftest.py`.
 
 - PROMISE. A testable statement APM makes to a user, cited to source.
   Precedence: cross-cutting invariants I1-I9 (below); bug-ledger
-  property ids (`property_catalog` in
-  `tests/fixtures/lifecycle_bug_ledger.json`); OpenAPM `req-*` ids
+  property ids (`property_catalog/` in
+  `tests/fixtures/lifecycle_bug_ledger/`); OpenAPM `req-*` ids
   (`CONFORMANCE.json`); owner decisions
   (`.apm/architecture/owners/*.json`); `CHANGELOG.md` guarantees; docs
   claims with must / never / fails / exits wording. When
@@ -183,9 +183,9 @@ lint contract before pushing.
 
 ### Step 8 -- record it
 
-- Bug fix: add a row to `bugs` in
-  `tests/fixtures/lifecycle_bug_ledger.json` (template in
-  `assets/templates.md`), sorted by issue. Validate with
+- Bug fix: add one row file,
+  `tests/fixtures/lifecycle_bug_ledger/bugs/<issue>.json` (template in
+  `assets/templates.md`). Validate with
   `uv run --extra dev pytest tests/quality/test_lifecycle_bug_ledger.py -q`.
   Every Fixed line in `CHANGELOG.md` maps to a ledger row.
 - New promise: when a promise catalog exists, add its id there.

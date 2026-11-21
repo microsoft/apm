@@ -1,0 +1,19 @@
+{
+  "issue": 4279,
+  "fixed_in": "Unreleased",
+  "summary": "Org policy discovery read only the origin remote: a project whose single remote had another name was treated as having none, and several remotes without origin were not reported.",
+  "failure_modes": [
+    "outcome",
+    "routing"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_policy_remote_selection_lifecycle.py::test_several_remotes_without_origin_fail_closed",
+    "tests/integration/test_policy_remote_selection_lifecycle.py::test_single_non_origin_remote_is_used_for_discovery",
+    "tests/spec_conformance/test_policy_behavior_reqs.py::test_single_non_origin_remote_identifies_the_project",
+    "tests/spec_conformance/test_policy_behavior_reqs.py::test_several_non_origin_remotes_fail_closed_naming_candidates"
+  ]
+}
