@@ -445,12 +445,12 @@ def _resolve_package_references(
         verbose = bool(logger and logger.verbose)
         # Registry routing is authoritative: it validates its own version
         # selectors before git semver eligibility can defer the raw-ref probe.
-        if identity_policy_denial(dep_ref, active_identity_policy()) is not None:
-            # Org policy refuses this identity: never contact its source; the
-            # install's policy gate reports the refusal.
-            package_accessible = True
-        elif existing_source_is_registry or should_skip_github_probe_for_dep(
-            dep_ref, default_registry
+        # Org policy refuses a denied identity: never contact its source; the
+        # install's policy gate reports the refusal.
+        denied = identity_policy_denial(dep_ref, active_identity_policy()) is not None
+        if not denied and (
+            existing_source_is_registry
+            or should_skip_github_probe_for_dep(dep_ref, default_registry)
         ):
             ref_ok, ref_err = validate_registry_ref(dep_ref)
             if not ref_ok:
@@ -459,7 +459,7 @@ def _resolve_package_references(
                     logger.validation_fail(package, ref_err)
                 continue
             package_accessible = True
-        elif is_git_semver_resolution_eligible(dep_ref):
+        elif denied or is_git_semver_resolution_eligible(dep_ref):
             package_accessible = True
         else:
             from ..utils.git_env import GitUrlRewriteError, GitUrlRewriteProbeError
