@@ -21,16 +21,21 @@ ls-remote snapshot, which cannot make ``outdated`` miss a newer upstream ref
 (the snapshot is the freshest listing of this run). Failures are not cached,
 preserving the per-dep ``unknown`` degradation of the un-wrapped path.
 
-Auth-lens: the cache key is the repo *identity* (host, repo_url, port,
-insecure-transport, ref-family) -- never a token. Two deps from one repo
-resolve the same credential via ``AuthResolver`` and the same upstream refs,
-so identity alone is a sufficient and non-secret key.
+Auth-lens: the cache key is the full repo *identity*: host, repo_url, port,
+insecure-transport, ref-family, the manifest ``host_type`` and the provider
+the host resolves to (``classify_host_provider``: kind and credential
+purpose) -- never a token. Two deps share a listing only when every input
+that selects the listing or its provider and credential resolution matches,
+so each distinct dep still runs its own resolution.
 """
 
 from __future__ import annotations
 
 import threading
 from typing import TYPE_CHECKING, Any
+
+from ..core.host_providers import classify_host_provider
+from ..utils.github_host import default_host
 
 if TYPE_CHECKING:
     from ..models.dependency.reference import DependencyReference
@@ -43,15 +48,33 @@ def _identity_key(dep_ref: DependencyReference, include_heads: bool) -> tuple:
     ``include_heads`` distinguishes the tags+branches listing
     (``list_remote_refs``) from the tags-only listing
     (``list_remote_tag_refs``): the two return different ref sets and must
-    not share a bucket. No token is part of the key -- see module docstring.
+    not share a bucket. ``host_type`` and the resolved provider keep two deps
+    on the same host and path but a different provider apart. No token is
+    part of the key -- see module docstring.
     """
+    host_type = getattr(dep_ref, "host_type", None)
     return (
         dep_ref.host or "",
         dep_ref.repo_url or "",
         getattr(dep_ref, "port", None),
         bool(getattr(dep_ref, "is_insecure", False)),
         include_heads,
+        (host_type or "").strip().lower(),
+        _provider_identity(dep_ref.host or default_host(), host_type),
     )
+
+
+def _provider_identity(host: str, host_type: str | None) -> tuple[str, str]:
+    """The provider *host* resolves to: ``(kind, credential_purpose)``.
+
+    An unclassifiable pair keeps its own bucket; the wrapped downloader then
+    reports the error for that dep as it would without the cache.
+    """
+    try:
+        provider = classify_host_provider(host, host_type=host_type)
+    except ValueError:
+        return ("unclassified", "")
+    return (provider.kind, provider.credential_purpose or "")
 
 
 class OutdatedRefCache:

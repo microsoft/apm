@@ -195,3 +195,37 @@ def test_concurrent_same_repo_coalesces_to_one_fetch():
 # ---------------------------------------------------------------------------
 # End-to-end through ``apm outdated``: dedup AND correctness preserved
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Provider identity is part of the key (#4560)
+# ---------------------------------------------------------------------------
+def _typed(host_type: str | None) -> DependencyReference:
+    return DependencyReference(
+        repo_url="team/tools", reference="v1.0.0", host="git.example.com", host_type=host_type
+    )
+
+
+def test_same_host_and_path_with_another_provider_gets_its_own_listing():
+    """host_type changes the provider, so each dep resolves and lists on its own."""
+    generic, gitlab = _typed(None), _typed("gitlab")
+    assert _identity_key(generic, True) != _identity_key(gitlab, True)
+
+    inner = MagicMock()
+    inner.list_remote_refs.side_effect = [[_tag("v1.0.0", "aaa")], [_tag("v1.0.0", "bbb")]]
+    cache = OutdatedRefCache(inner)
+
+    assert cache.list_remote_refs(generic)[0].commit_sha == "aaa"
+    assert cache.list_remote_refs(gitlab)[0].commit_sha == "bbb"
+    assert [call.args[0] for call in inner.list_remote_refs.call_args_list] == [generic, gitlab]
+
+
+def test_identical_typed_deps_still_share_one_listing():
+    inner = MagicMock()
+    inner.list_remote_refs.return_value = [_tag("v1.0.0")]
+    cache = OutdatedRefCache(inner)
+
+    cache.list_remote_refs(_typed("gitlab"))
+    cache.list_remote_refs(_typed("gitlab"))
+
+    assert inner.list_remote_refs.call_count == 1
