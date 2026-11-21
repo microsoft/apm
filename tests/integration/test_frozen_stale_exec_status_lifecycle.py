@@ -118,7 +118,8 @@ def test_stale_exec_status_fails_frozen_and_audit_until_install(
     assert "recorded deployed, now denied" in frozen, frozen
     assert _REPAIR in frozen, frozen
     assert "commit apm.lock.yaml" in frozen, frozen
-    assert not _hook_deployed(chain)
+    # RA-024: --frozen refuses before any write, so the hook stays until install.
+    assert _hook_deployed(chain)
     assert lock_path.read_bytes() == lock_bytes
 
     audit = _fails(chain, "audit", "--ci")

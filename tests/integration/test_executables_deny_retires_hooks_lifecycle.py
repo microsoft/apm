@@ -283,7 +283,7 @@ def test_deny_names_each_retired_hook_file_and_never_reports_it_retained(
 def test_frozen_fails_when_a_gated_hook_retires_but_the_lock_still_claims_it(
     tmp_path: Path, apm_binary_path: Path, gate_off: str
 ) -> None:
-    """Frozen and audit agree once a gated hook leaves disk under an unchanged lock (#4043)."""
+    """Frozen refuses a gated hook before any write, as audit --ci does (#4043, RA-024)."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
     env = isolated.subprocess_env()
     _hook_package(isolated.work_root / "hooky")
@@ -333,16 +333,15 @@ def test_frozen_fails_when_a_gated_hook_retires_but_the_lock_still_claims_it(
     assert set(_hook_residue(project)) == hook_paths
     apm("audit", "--ci", "--no-policy", expect=1)
 
-    # I7-X1: deny wins, so frozen retires the hook, then fails naming each file;
-    # a second run changes nothing more and fails the same way.
+    # RA-024: frozen refuses the stale decision before any write, naming the
+    # package and 'apm install'; a second run fails the same way.
     for _attempt in range(2):
         frozen = " ".join(apm("install", "--frozen", "--no-policy", expect=1).split())
-        assert "[x] --frozen: files recorded in apm.lock.yaml are missing from disk." in frozen
-        for path in sorted(hook_paths):
-            assert f"- {path}: retired because {source}" in frozen, frozen
-        assert "run 'apm install' without --frozen" in frozen, frozen
+        assert "[x] --frozen: apm.lock.yaml records an executables decision" in frozen, frozen
+        assert "../hooky: recorded " in frozen, frozen
+        assert "Run 'apm install'" in frozen, frozen
         assert "commit apm.lock.yaml" in frozen, frozen
-        assert _hook_residue(project) == []
+        assert set(_hook_residue(project)) == hook_paths
         assert lock_path.read_bytes() == lock_bytes
         apm("audit", "--ci", "--no-policy", expect=1)
 

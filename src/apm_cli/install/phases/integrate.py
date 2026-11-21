@@ -815,6 +815,12 @@ def run(ctx: InstallContext) -> None:
                 getattr(effective_allow_map(ctx), "trust_context", None)
                 or getattr(ctx, "exec_trust_ctx", None),
             )
+            # A deny, a revoked approval or a policy change since the lock
+            # refuses after the specific checks above, before any executable
+            # deploys or retires (RA-024).
+            from apm_cli.install.frozen_retirement import refuse_stale_exec_decisions
+
+            refuse_stale_exec_decisions(ctx, ctx.existing_lockfile, ctx.lockfile_path.parent)
         from apm_cli.install.commit_gate import check_before_deploy
 
         check_before_deploy(ctx)
