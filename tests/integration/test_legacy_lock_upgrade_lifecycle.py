@@ -254,25 +254,36 @@ def _kept_entry(world: _World, path: str) -> tuple[str | None, list[str | None]]
 
 
 def _assert_kept_partial_apply(
-    world: _World, output: str, kept_entry_before: tuple, edited_bytes: bytes
+    world: _World, output: str, kept_entry_before: tuple, edited_bytes: bytes, *, rewrites: bool
 ) -> None:
     """RA-009/RA-010: a failed install with a kept file is an honest partial apply.
 
     The kept file's lock entry and ledger rows are unchanged, the lock matches
     the disk for every file, the closing sentence names what was written, the
     two read-only verifiers agree, and either printed remedy converges.
+
+    *rewrites*: a pre-0.37 lock has no deployment receipts, so the install
+    writes (adopts) the other files and names them. A 0.37 lock's other files
+    are receipted and identical, so they are unchanged (RA-012, I2): the
+    install writes nothing and says only that the kept entries are kept.
     """
     target = world.project / _C3_EDITED
     assert _kept_entry(world, _C3_EDITED) == kept_entry_before
     _assert_lock_matches_disk(world)
     flat = [" ".join(line.split()) for line in output.splitlines()]
-    header = next(line for line in flat if line.startswith("[i] This install wrote "))
-    written = int(header.split()[4])
-    assert written > 0, header
-    assert (
-        f"apm.lock.yaml records the {written} written file(s) and keeps the previous "
-        "entries of the 1 kept file(s)."
-    ) in " ".join(flat)
+    headers = [line for line in flat if line.startswith("[i] This install wrote ")]
+    kept_note = "keeps the previous entries of the 1 kept file(s)."
+    if rewrites:
+        (header,) = headers
+        written = int(header.split()[4])
+        assert written > 0, header
+        assert f"apm.lock.yaml records the {written} written file(s) and {kept_note}" in (
+            " ".join(flat)
+        )
+    else:
+        assert headers == [], headers
+        assert "written file(s)" not in " ".join(flat)
+        assert f"apm.lock.yaml {kept_note}" in " ".join(flat)
     audit, frozen = world.run("audit", "--ci"), world.run("install", "--frozen")
     assert (audit[0], frozen[0]) == (1, 1), (audit, frozen)
     # Remedy: export the edit (RA-008: --force is no Kept remedy). This fixture's
@@ -383,7 +394,9 @@ def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file(
         # evidence the file is kept under the #4360 wording.
         assert _kept_lines(out + err) == [_unproven_line(_C3_EDITED)]
         assert world._git("status", "--porcelain", "--", _C3_EDITED) == git_status
-        _assert_kept_partial_apply(world, out + err, kept_entry_before, edited_bytes)
+        _assert_kept_partial_apply(
+            world, out + err, kept_entry_before, edited_bytes, rewrites=stamp != "candidate"
+        )
 
 
 def test_c3b_half_forged_lock_hash_follows_the_deployment_ledger(
