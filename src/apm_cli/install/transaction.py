@@ -286,7 +286,12 @@ class InstallTransaction:
 
         if not self._journal_released or self._deploy_journal is None:
             return False
-        return unless_lockfile_commits(self._restore_deploy_targets)
+        return unless_lockfile_commits(self._undo_uncommitted_deploys)
+
+    def _undo_uncommitted_deploys(self) -> None:
+        """Restore the journaled paths and drop target roots this attempt created."""
+        self._restore_deploy_targets()
+        self._remove_created_target_roots()
 
     def _take_deploy_journal(self) -> DeployJournal | None:
         """Stop listening at the write seam and hand over the journal."""

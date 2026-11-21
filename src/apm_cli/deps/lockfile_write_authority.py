@@ -231,8 +231,7 @@ def lockfile_write_scope(writer: LockfileWriter) -> Iterator[None]:
         raise
     else:
         if active.scope is not None:
-            commit_point_seam_for_tests()
-            _commit_or_abandon(active.scope)
+            _commit_or_abandon(active.scope, seam=True)
     finally:
         _active_writer.reset(token)
 
@@ -426,8 +425,11 @@ def _abandon(scope: _WriteScope) -> None:
         action()
 
 
-def _commit_or_abandon(scope: _WriteScope) -> None:
+def _commit_or_abandon(scope: _WriteScope, *, seam: bool = False) -> None:
+    """Commit *scope*; an error or interrupt at the commit point abandons it."""
     try:
+        if seam:
+            commit_point_seam_for_tests()
         _commit(scope)
     except BaseException:
         _abandon(scope)

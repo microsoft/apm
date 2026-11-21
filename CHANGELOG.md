@@ -24,7 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
 - An `http://` registry URL whose host is an integer, hex or leading-zero IPv4 spelling (`http://167772161/apm`) no longer counts as a private network host; write the dotted address (`http://10.0.0.1/apm`) or set `insecure: true`. (#4521)
 - A failed or interrupted (Ctrl-C, SIGTERM) `apm install` restores every file it wrote and keeps `apm.lock.yaml` unchanged, with or without the install-time audit. (#4612)
-- A failed lockfile write after `apm update` or `apm deps update` deployed files restores them, so the files and `apm.lock.yaml` stay in step. (closes #4664, #4686)
 
 ### Fixed
 
