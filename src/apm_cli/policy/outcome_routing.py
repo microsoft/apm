@@ -25,7 +25,7 @@ preview in ``install_preflight`` or the ``[x]`` / ``[!]`` lines of
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -72,6 +72,10 @@ POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset(
     }
 )
 
+# The source answered but publishes no policy. Normal for auto-discovery; a
+# failure for an explicit ``--policy`` source the caller named (#1925).
+POLICY_NOT_PUBLISHED_OUTCOMES = frozenset({"absent", "no_git_remote"})
+
 
 # How each outcome routes.
 _ENFORCE = "enforce"  # found: enforce the policy
@@ -114,6 +118,9 @@ class DiscoveryRoute:
     so a trust decision made without it is not final.
     ``from_fetch_failure_default`` is ``True`` when the block comes from the
     project's ``policy.fetch_failure_default: block``.
+    ``unavailable_source`` is the outcome of a composed ``--policy`` source
+    that produced no policy (#1925): ``policy`` then holds only the sources
+    that loaded, so the route is unresolved.
     """
 
     outcome: str
@@ -122,6 +129,7 @@ class DiscoveryRoute:
     block_reason: str | None = None
     unresolved: bool = False
     from_fetch_failure_default: bool = False
+    unavailable_source: str | None = None
 
     @property
     def disabled(self) -> bool:
@@ -143,8 +151,36 @@ def classify_discovery_outcome(
     """Decide how *fetch_result* routes; the one decision every policy reader uses.
 
     Pure: no logging, no raising. An outcome outside
-    :data:`POLICY_DISCOVERY_OUTCOMES` blocks.
+    :data:`POLICY_DISCOVERY_OUTCOMES` blocks. A composed source that produced
+    no policy (#1925) leaves the route unresolved. A failed explicit
+    ``--policy`` source always blocks; a failed discovered policy blocks when
+    it alone would under the same ``fetch_failure_default``.
     """
+    route = _classify_one(fetch_result, fetch_failure_default=fetch_failure_default)
+    unavailable = list(getattr(fetch_result, "unavailable_sources", None) or ())
+    if not unavailable or route.blocks:
+        return route
+    first = next((u for u in unavailable if _is_explicit(u)), unavailable[0])
+    explicit = _is_explicit(first)
+    missing = _classify_one(
+        first, fetch_failure_default="block" if explicit else fetch_failure_default
+    )
+    return replace(
+        route,
+        unresolved=True,
+        unavailable_source=first.outcome or "cache_miss_fetch_fail",
+        block_reason=missing.block_reason,
+        from_fetch_failure_default=missing.from_fetch_failure_default and not explicit,
+    )
+
+
+def _is_explicit(fetch_result: PolicyFetchResult) -> bool:
+    """True for the named ``--policy`` component of a composed result (#1925)."""
+    return bool(getattr(fetch_result, "explicit", False))
+
+
+def _classify_one(fetch_result: PolicyFetchResult, *, fetch_failure_default: str) -> DiscoveryRoute:
+    """Classify one source's outcome, ignoring composed sources."""
     outcome = getattr(fetch_result, "outcome", "")
     source = getattr(fetch_result, "source", "") or "unknown"
     policy = getattr(fetch_result, "policy", None)
@@ -273,6 +309,15 @@ def route_discovery_outcome(
     """
     route = classify_discovery_outcome(fetch_result, fetch_failure_default=fetch_failure_default)
     source = fetch_result.source
+    # Composed sources that produced no policy (#1925) are routed first:
+    # each follows the same fail-closed rules, then the effective policy
+    # (built from the sources that did load) is routed below.
+    route_unavailable_sources(
+        fetch_result,
+        logger=logger,
+        fetch_failure_default=fetch_failure_default,
+        raise_blocking_errors=raise_blocking_errors,
+    )
     policy = route.policy
     if logger is not None:
         # cached_stale logs policy_resolved first, then the miss that
@@ -286,6 +331,7 @@ def route_discovery_outcome(
                 age_seconds=fetch_result.cache_age_seconds,
                 subgroup_scoped=fetch_result.subgroup_scoped,
                 chain=fetch_result.chain_sources,
+                explicit=getattr(fetch_result, "explicit", False),
             )
         # A fetch_failure_default block raises, and the exception (which
         # carries any hint) is its only report: the miss wording ("proceeding
@@ -330,6 +376,21 @@ class _TrustReaderLog:
 
     def policy_discovery_miss(self, **kwargs) -> None:
         self._pending.append(kwargs)
+
+    def policy_source_unavailable(
+        self, source: str, error: str, blocking: bool = False, explicit: bool = False
+    ) -> None:
+        """Report a composed policy source that did not load (#1925)."""
+        render = getattr(self._logger, "policy_source_unavailable", None)
+        if render is not None:
+            render(source=source, error=error, blocking=blocking, explicit=explicit)
+            return
+        from apm_cli.utils.console import _rich_warning
+
+        kind = "Explicit" if explicit else "Discovered"
+        _rich_warning(
+            f"{kind} policy source {source} could not be loaded: {error}", symbol="warning"
+        )
 
     def flush(self) -> None:
         render = getattr(self._logger, "policy_discovery_miss", None)
@@ -434,3 +495,80 @@ def resolve_trust_policy(
     if log is not None:
         log.flush()
     return policy
+
+
+def route_unavailable_sources(
+    fetch_result: PolicyFetchResult,
+    *,
+    logger,
+    fetch_failure_default: str,
+    raise_blocking_errors: bool = True,
+) -> None:
+    """Route each composed source that produced no policy (#1925)."""
+    for unavailable in getattr(fetch_result, "unavailable_sources", None) or ():
+        _route_unavailable_source(
+            unavailable,
+            logger=logger,
+            fetch_failure_default=fetch_failure_default,
+            raise_blocking_errors=raise_blocking_errors,
+        )
+
+
+def _route_unavailable_source(
+    unavailable: PolicyFetchResult,
+    *,
+    logger,
+    fetch_failure_default: str,
+    raise_blocking_errors: bool,
+) -> None:
+    """Route one composed policy source that produced no policy (#1925).
+
+    The named ``--policy`` source fails closed whatever
+    ``policy.fetch_failure_default`` says. For a failed discovered policy,
+    hash-pin mismatches and incomplete chains keep their unconditional
+    fail-closed handling; any other failure follows the project's
+    ``policy.fetch_failure_default``: ``block`` stops the install, ``warn``
+    reports the source and continues with the sources that did load.
+    """
+    if _is_explicit(unavailable):
+        _block_on_explicit_source(
+            unavailable, logger=logger, raise_blocking_errors=raise_blocking_errors
+        )
+        return
+    if unavailable.outcome in (POLICY_HASH_MISMATCH_OUTCOME, "incomplete_chain"):
+        route_discovery_outcome(
+            unavailable,
+            logger=logger,
+            fetch_failure_default=fetch_failure_default,
+            raise_blocking_errors=raise_blocking_errors,
+        )
+        return
+    source = unavailable.source or "unknown"
+    error = unavailable.error or unavailable.fetch_error or unavailable.outcome
+    if logger is not None:
+        logger.policy_source_unavailable(
+            source=source, error=error, blocking=fetch_failure_default == "block"
+        )
+    if raise_blocking_errors and fetch_failure_default == "block":
+        raise PolicyViolationError(
+            f"Install blocked: discovered policy source {source} could not be loaded "
+            f"({error}) and project apm.yml has policy.fetch_failure_default=block",
+            policy_source=source,
+        )
+
+
+def _block_on_explicit_source(
+    unavailable: PolicyFetchResult, *, logger, raise_blocking_errors: bool
+) -> None:
+    """Fail closed on a named ``--policy`` source that did not load (#1925)."""
+    source = unavailable.source or "unknown"
+    error = unavailable.error or unavailable.fetch_error or unavailable.outcome
+    if logger is not None:
+        logger.policy_source_unavailable(source=source, error=error, blocking=True, explicit=True)
+    if raise_blocking_errors:
+        raise PolicyViolationError(
+            f"Install blocked: explicit policy source {source} could not be loaded "
+            f"({error}); a named --policy source must load whatever "
+            "policy.fetch_failure_default says",
+            policy_source=source,
+        )
