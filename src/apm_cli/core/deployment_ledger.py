@@ -749,7 +749,6 @@ class OverwriteGate:
         if adopted and self.session is not None:
             from apm_cli.utils.content_hash import compute_file_hash
 
-            # The lock proves APM deployed these bytes: record them as such.
             self.session.record({path: compute_file_hash(path)}, self.targets, self.owner)
             self.session.legacy_adopted += 1
         return adopted
