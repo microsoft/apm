@@ -106,16 +106,16 @@ def open_for_write(path: Path, mode: str = "w", **kwargs: Any) -> IO[Any]:
     return open(path, mode, **kwargs)
 
 
-def copy2(source: Path, destination: Path, **kwargs: Any) -> Any:
-    """``shutil.copy2`` through the seam."""
+def copy2(source: Path, destination: Path) -> Path:
+    """``shutil.copy2`` through the seam, replacing the destination atomically (#4691)."""
     record_before_write(destination, follow=True)
-    return shutil.copy2(source, destination, **kwargs)
+    return atomic_io.atomic_copy(source, destination, metadata=True)
 
 
-def copyfile(source: Path, destination: Path) -> Any:
-    """``shutil.copyfile`` through the seam."""
+def copyfile(source: Path, destination: Path) -> Path:
+    """``shutil.copyfile`` through the seam, replacing the destination atomically (#4691)."""
     record_before_write(destination, follow=True)
-    return shutil.copyfile(source, destination)
+    return atomic_io.atomic_copy(source, destination, metadata=False)
 
 
 def rename(source: Path, destination: Path) -> None:

@@ -52,6 +52,39 @@ def _replace_atomic_file(source: str, destination: Path) -> None:
     os.replace(source, destination)
 
 
+def atomic_copy(source: Path, destination: Path, *, metadata: bool = True) -> Path:
+    """Copy *source* over *destination* atomically (#4691).
+
+    The bytes are copied to a temp file in the destination's directory, which
+    is then renamed over the destination with :func:`os.replace`, so a reader
+    sees the old file or the new one, never a partial one. With *metadata*
+    (``shutil.copy2``) the source's mode and times are kept; without it
+    (``shutil.copyfile``) an existing destination keeps its mode and a new
+    one gets the mode a plain ``open()`` would give it. A symlinked
+    destination is replaced at its target, as an in-place copy writes
+    through the link. On failure the temp file is removed and the
+    destination is untouched.
+    """
+    import shutil
+
+    target = Path(os.path.realpath(destination)) if destination.is_symlink() else destination
+    mode = None
+    if not metadata:
+        mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else umask_file_mode(target)
+    fd, tmp_name = tempfile.mkstemp(prefix="apm-atomic-", dir=str(target.parent))
+    os.close(fd)
+    try:
+        (shutil.copy2 if metadata else shutil.copyfile)(source, tmp_name)
+        if mode is not None:
+            os.chmod(tmp_name, mode)
+        os.replace(tmp_name, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
+    return destination
+
+
 def normalize_crlf_to_lf(data: str) -> str:
     """Normalize CRLF to LF (leaves bare CR alone, like the drift normalizer).
 
