@@ -1,0 +1,18 @@
+{
+  "issue": 4200,
+  "fixed_in": "0.37.0",
+  "summary": "apm marketplace add OWNER/REPO#ref kept the #ref inside the stored repository URL, tracked main, failed the fetch, and printed an unpinned warning suggesting OWNER/REPO#ref#v1.0.0.",
+  "failure_modes": [
+    "reference",
+    "outcome"
+  ],
+  "properties": [
+    "source.ref_cache_coherent",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_registered_ref_lifecycle.py::test_shorthand_fragment_ref_registers_the_named_ref",
+    "tests/unit/marketplace/test_registration_fragment_ref.py::test_registration_source_honors_shorthand_fragment_ref",
+    "tests/unit/marketplace/test_registration_fragment_ref.py::test_registration_source_keeps_hash_in_local_paths"
+  ]
+}

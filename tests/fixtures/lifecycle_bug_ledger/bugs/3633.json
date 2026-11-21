@@ -1,0 +1,18 @@
+{
+  "issue": 3633,
+  "summary": "Policy chains and native MCP config byte comparisons exceed replay rows.",
+  "failure_modes": [
+    "ownership",
+    "reference"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_edit_policy_chain_lifecycle.py::test_mcp_install_alias_writes_the_same_files_as_install_mcp",
+    "tests/integration/test_mcp_edit_policy_chain_lifecycle.py::test_opencode_layout_is_stable_across_reinstall_and_removal",
+    "tests/integration/test_mcp_edit_policy_chain_lifecycle.py::test_policy_denied_mcp_fails_closed_through_every_entry_point",
+    "tests/integration/test_mcp_edit_policy_chain_lifecycle.py::test_secret_references_survive_reinstall_across_targets",
+    "tests/integration/test_mcp_edit_policy_chain_lifecycle.py::test_user_servers_survive_reinstall_removal_and_frozen"
+  ]
+}

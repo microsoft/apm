@@ -1,0 +1,17 @@
+{
+  "issue": 4322,
+  "fixed_in": "Unreleased",
+  "summary": "A partly successful marketplace install records ref pins only for requested packages that install, and the not-found diagnostic names every credential source tried, in order, without values.",
+  "failure_modes": [
+    "transaction",
+    "observation"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_ref_pin_lifecycle.py::test_mixed_success_marketplace_install_pins_only_the_installed_plugin",
+    "tests/unit/core/test_auth_validation.py::TestDescribeCredentialTried::test_names_secondary_sources_tried_in_order_without_values"
+  ]
+}

@@ -1,7 +1,7 @@
 """Cached org policy content is verified against its pin before use (#4218).
 
 PROMISE: transaction.failed_command_preserves_state and
-outcome.status_matches_state (tests/fixtures/lifecycle_bug_ledger.json);
+outcome.status_matches_state (tests/fixtures/lifecycle_bug_ledger/);
 owner: policy/discovery.py _read_cache_entry (the only policy cache reader).
 
 The installed CLI discovers a pinned org policy (``policy.hash``) served over

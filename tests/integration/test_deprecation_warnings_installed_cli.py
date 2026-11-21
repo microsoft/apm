@@ -288,16 +288,114 @@ def test_policy_bin_deploy_warning_is_reported_as_policy_data(
     assert "bin_deploy" not in result.stderr
 
 
-def test_marketplace_outputs_list_warning_stays_unprinted(
+_MARKETPLACE = _MANIFEST + "marketplace:\n  owner:\n    name: o\n  packages: []\n"
+_OUTPUTS_LIST = _MARKETPLACE + "  outputs: [claude]\n"
+_OUTPUTS_LIST_WARNING = "[!] outputs: [claude] is deprecated; use the map form: outputs: claude: {}"
+# The legacy warning's wording is pinned by the "marketplace-yml" scenario.
+_LEGACY_YML_WARNING = _collapse(SCENARIOS["marketplace-yml"].text.removeprefix("[!] "))
+_LEGACY_YML_FILES = {
+    "apm.yml": _MANIFEST,
+    "marketplace.yml": "name: m\ndescription: d\nversion: 1.0.0\nowner:\n  name: o\npackages: []\n",
+}
+
+
+def _both(result: subprocess.CompletedProcess[str]) -> str:
+    return _collapse(result.stdout + " " + result.stderr)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [("pack",), ("pack", "--check-versions"), ("marketplace", "check")],
+    ids=["pack", "pack-gate-reload", "marketplace-check"],
+)
+def test_marketplace_outputs_list_warning_prints_once(
+    argv: tuple[str, ...], tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The collected list-form deprecation reaches the user exactly once (#4046)."""
+    result = _run(tmp_path, apm_binary_path, {"apm.yml": _OUTPUTS_LIST}, argv)
+    evidence = f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+
+    assert result.returncode == 0, evidence
+    assert _collapse(result.stdout).count(_OUTPUTS_LIST_WARNING) == 1, evidence
+    assert _both(result).count("use the map form") == 1, evidence
+    assert "v0.15" not in _both(result), evidence
+
+
+def test_marketplace_outputs_map_form_prints_no_deprecation(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """The list form's warning is collected as config data; no command prints it."""
-    manifest = (
-        _MANIFEST + "marketplace:\n  owner:\n    name: o\n  outputs: [claude]\n  packages: []\n"
-    )
+    manifest = _MARKETPLACE + "  outputs:\n    claude: {}\n"
     result = _run(tmp_path, apm_binary_path, {"apm.yml": manifest}, ("pack",))
 
     assert result.returncode == 0, result.stdout + result.stderr
-    combined = result.stdout + result.stderr
-    assert "use the map form" not in combined
-    assert "list form will be removed" not in combined
+    assert "is deprecated" not in _both(result)
+
+
+def test_marketplace_outputs_path_conflict_warning_prints_once(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    manifest = (
+        _MARKETPLACE
+        + "  outputs:\n    claude:\n      path: a/marketplace.json\n"
+        + "  claude:\n    output: b/marketplace.json\n"
+    )
+    result = _run(tmp_path, apm_binary_path, {"apm.yml": manifest}, ("pack", "--dry-run"))
+    expected = (
+        "marketplace.outputs.claude.path ('a/marketplace.json') conflicts with "
+        "marketplace.claude.output ('b/marketplace.json')."
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _both(result).count(expected) == 1, result.stdout + result.stderr
+
+
+def test_legacy_marketplace_yml_warning_prints_once_when_pack_reloads(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The release gate's second config load repeats no load warning."""
+    result = _run(tmp_path, apm_binary_path, _LEGACY_YML_FILES, ("pack", "--check-versions"))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _both(result).count(_LEGACY_YML_WARNING) == 1, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("files", "warning"),
+    [
+        ({"apm.yml": _OUTPUTS_LIST}, "outputs: [claude] is deprecated; use the map form"),
+        (_LEGACY_YML_FILES, _LEGACY_YML_WARNING),
+    ],
+    ids=["outputs-list", "legacy-marketplace-yml"],
+)
+@pytest.mark.parametrize(
+    "argv",
+    [("pack", "--check-clean"), ("pack", "--check-clean", "--dry-run")],
+    ids=["implicit-dry-run", "explicit-dry-run"],
+)
+def test_check_clean_prints_each_config_load_warning_once(
+    argv: tuple[str, ...],
+    files: dict[str, str],
+    warning: str,
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """--check-clean alone skips producer rendering; load warnings still print once."""
+    result = _run(tmp_path, apm_binary_path, files, argv)
+    evidence = f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+
+    # No marketplace.json exists yet, so the drift gate fails with exit 4.
+    assert result.returncode == 4, evidence
+    assert _both(result).count(warning) == 1, evidence
+
+
+def test_pack_json_carries_the_outputs_list_warning_without_corrupting_stdout(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    result = _run(tmp_path, apm_binary_path, {"apm.yml": _OUTPUTS_LIST}, ("pack", "--json"))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    envelope = json.loads(result.stdout)
+    matches = [w for w in envelope["warnings"] if "use the map form" in w]
+    assert len(matches) == 1, envelope["warnings"]
+    assert matches[0].startswith("outputs: [claude] is deprecated; use the map form:")
+    assert "use the map form" not in result.stderr

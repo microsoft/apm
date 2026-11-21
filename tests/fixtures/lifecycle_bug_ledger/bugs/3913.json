@@ -1,0 +1,19 @@
+{
+  "issue": 3913,
+  "summary": "Marketplace dependency-confusion refusal and enterprise Git sources are excluded.",
+  "failure_modes": [
+    "auth",
+    "outcome",
+    "reference"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_dependency_confusion_lifecycle.py::test_apm_update_re_admits_an_entry_locked_before_its_catalog_turned_ambiguous",
+    "tests/integration/test_marketplace_dependency_confusion_lifecycle.py::test_bare_cross_repo_marketplace_entry_is_refused_before_any_write",
+    "tests/integration/test_marketplace_dependency_confusion_lifecycle.py::test_bare_entry_is_admitted_when_github_host_is_the_marketplace_host",
+    "tests/integration/test_marketplace_dependency_confusion_lifecycle.py::test_bare_entry_is_still_refused_when_github_host_is_another_host",
+    "tests/integration/test_marketplace_dependency_confusion_lifecycle.py::test_host_qualified_or_in_marketplace_entry_still_installs"
+  ]
+}

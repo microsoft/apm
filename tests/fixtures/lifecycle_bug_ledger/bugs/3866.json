@@ -1,0 +1,53 @@
+{
+  "issue": 3866,
+  "summary": "Traps root .mcp.json heal from retired vscode/github files and vscode alias (#3866, #3868); needs MCP JSON bytes, legacy locks and many targets.",
+  "failure_modes": [
+    "cleanup",
+    "outcome",
+    "ownership",
+    "routing",
+    "transaction"
+  ],
+  "properties": [
+    "lockfile.frozen_preserves_bytes",
+    "outcome.status_matches_state",
+    "ownership.preserve_unowned",
+    "routing.authorized_targets_only",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_a_committed_frozen_move_is_adopted_in_a_clone_without_vscode_dir",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_a_lock_rewrite_before_the_mcp_phase_keeps_the_heal_pending",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_claude_and_copilot_share_one_mcp_json_entry",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_copilot_writes_root_mcp_json_and_leaves_user_entries",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_dependency_manifest_vscode_installs_for_copilot_without_warning",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_direct_mcp_retarget_keeps_the_entry_the_new_runtime_owns",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_edited_vscode_entry_is_kept_when_copilot_is_not_selected",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_frozen_upgrade_keeps_an_edited_root_entry_of_a_removed_server",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_frozen_upgrade_keeps_the_root_entry_apm_wrote",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_frozen_upgrade_then_a_changed_declaration_updates_the_root_entry",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_frozen_upgrade_then_removing_the_server_removes_its_root_entry",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_heal_runs_once_and_keeps_an_autodetected_project_installable",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_identical_root_entry_stays_the_users_unless_every_adoption_bound_holds",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_legacy_copilot_claim_never_adopts_a_user_root_entry",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_legacy_vscode_claim_never_adopts_an_identical_user_root_entry",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_manifest_migrate_command_no_longer_exists",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_moved_claim_never_adopts_a_differing_root_entry",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_partial_install_keeps_unhealed_retired_claims_for_the_retry",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_plural_all_is_not_a_replacement_for_singular_all",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_saved_vscode_default_target_deploys_like_copilot",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_target_warning_suggests_a_value_that_deploys_identically",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_upgrade_heals_only_apm_entries_out_of_retired_files",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_user_scope_copilot_keeps_its_global_config",
+    "tests/integration/test_copilot_root_mcp_json_lifecycle.py::test_vscode_alias_deploys_exactly_like_copilot",
+    "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_foreign_entry_in_a_retired_shape_is_never_taken_over",
+    "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_frozen_heal_keeps_ownership_of_fingerprinted_registry_entries",
+    "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_heal_does_not_slip_past_a_declared_transport_deny",
+    "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_heal_under_a_permissive_transport_policy_is_not_blocked",
+    "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_healed_entries_are_cleaned_when_their_declaration_is_removed",
+    "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_policy_fetch_failure_keeps_its_disposition_during_heal",
+    "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_registry_sse_heal_is_blocked_by_effective_transport",
+    "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_upgrade_removes_a_stale_codex_sse_entry",
+    "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_upgrade_rewrites_apm_owned_entries_into_the_current_shape"
+  ]
+}

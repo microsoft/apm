@@ -1,0 +1,18 @@
+{
+  "issue": 4251,
+  "fixed_in": "Unreleased",
+  "summary": "Vendor-extension target ids (x-<vendor>-<name>) were rejected at manifest parse; they now parse and are named as unsupported instead of deploying or being ignored.",
+  "failure_modes": [
+    "routing",
+    "observation"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_vendor_extension_manifest_lifecycle.py::test_vendor_target_is_named_and_not_deployed",
+    "tests/spec_conformance/test_manifest_behavior_reqs.py::test_vendor_extension_target_identifier_is_accepted",
+    "tests/spec_conformance/test_targets_behavior_reqs.py::test_vendor_target_identifier_parses"
+  ]
+}

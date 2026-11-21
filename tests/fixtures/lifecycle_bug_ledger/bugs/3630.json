@@ -1,0 +1,15 @@
+{
+  "issue": 3630,
+  "summary": "Traps auto-bootstrapped apm.yml author handling under org policy and init metadata (#3630, #2231); needs init, pack, policy and manifest fields.",
+  "failure_modes": [
+    "idempotency",
+    "outcome"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_init_bootstrap_chain_lifecycle.py::test_bootstrap_without_author_then_init_metadata_chain"
+  ]
+}

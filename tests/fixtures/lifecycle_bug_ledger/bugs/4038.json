@@ -1,0 +1,18 @@
+{
+  "issue": 4038,
+  "summary": "Traps required-package identity under replace: (req-rpl-002); needs org policy over HTTPS proxy, fork hosts and audit check details.",
+  "failure_modes": [
+    "outcome",
+    "reference"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/policy/test_required_packages_source_replacement_lifecycle.py::test_original_entry_does_not_identify_a_replaced_dependency",
+    "tests/integration/policy/test_required_packages_source_replacement_lifecycle.py::test_selected_entry_identifies_the_replaced_dependency",
+    "tests/integration/policy/test_required_packages_source_replacement_lifecycle.py::test_selected_entry_version_pin_reads_the_locked_ref",
+    "tests/integration/policy/test_required_packages_source_replacement_lifecycle.py::test_without_replacement_the_declared_package_keeps_matching"
+  ]
+}

@@ -212,6 +212,18 @@ def _check_host_credential_resolution(provider: FactsProvider) -> tuple[Violatio
             parse=True,
         )
     )
+    # #4560 -- the outdated ls-remote cache keys on the same effective identity.
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_HOST_CRED,
+            "src/apm_cli/deps/outdated_ref_cache.py",
+            ("return effective_host_provider_identity(host, host_type=host_type)",),
+            "The outdated ref cache must key on the canonical effective host-provider identity",
+            parse=True,
+        )
+    )
     # #3657 -- proxy routing targets have one owner; drift and the resolver reuse it.
     findings.extend(
         _count_checks(
