@@ -24,10 +24,11 @@ from apm_cli.install.primitive_classification import (
     PrimitiveKind,
     classify_agent_source_file,
 )
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
+from apm_cli.integration.write_seam import write_text_lf
 from apm_cli.primitives.models import resolve_user_invocable
-from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
@@ -290,7 +291,7 @@ class AgentIntegrator(BaseIntegrator):
             else:
                 # Non-kiro path: eager mkdir (existing behavior preserved).
                 if not agents_dir_created:
-                    agents_dir.mkdir(parents=True, exist_ok=True)
+                    write_seam.mkdir(agents_dir, parents=True, exist_ok=True)
                     agents_dir_created = True
                 if mapping.format_id == "codex_agent":
                     rendered, links_resolved = self._render_codex_agent(
@@ -443,7 +444,7 @@ class AgentIntegrator(BaseIntegrator):
         )
         if skip:
             return _ADOPTED if adopted else _SKIPPED
-        target_path.parent.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(target_path.parent, parents=True, exist_ok=True)
         write_text_lf(target_path, rendered)
         self.note_rendered_write(target_path)
         target_paths.append(target_path)
@@ -1013,19 +1014,19 @@ class AgentIntegrator(BaseIntegrator):
             return IntegrationResult(0, 0, 0, [])
 
         agents_dir = project_root / ".github" / "agents"
-        agents_dir.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(agents_dir, parents=True, exist_ok=True)
 
         claude_agents_dir = None
         claude_dir = project_root / ".claude"
         if claude_dir.exists() and claude_dir.is_dir():
             claude_agents_dir = claude_dir / "agents"
-            claude_agents_dir.mkdir(parents=True, exist_ok=True)
+            write_seam.mkdir(claude_agents_dir, parents=True, exist_ok=True)
 
         cursor_agents_dir = None
         cursor_dir = project_root / ".cursor"
         if cursor_dir.exists() and cursor_dir.is_dir():
             cursor_agents_dir = cursor_dir / "agents"
-            cursor_agents_dir.mkdir(parents=True, exist_ok=True)
+            write_seam.mkdir(cursor_agents_dir, parents=True, exist_ok=True)
 
         files_integrated = 0
         files_skipped = 0
@@ -1173,7 +1174,7 @@ class AgentIntegrator(BaseIntegrator):
         """
         from apm_cli.integration.targets import KNOWN_TARGETS
 
-        (project_root / ".claude").mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(project_root / ".claude", parents=True, exist_ok=True)
         return self.integrate_agents_for_target(
             KNOWN_TARGETS["claude"],
             package_info,

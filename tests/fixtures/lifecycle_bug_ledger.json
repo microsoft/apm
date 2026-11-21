@@ -3795,6 +3795,25 @@
       ]
     },
     {
+      "issue": 4282,
+      "fixed_in": "Unreleased",
+      "summary": "An install that failed or was interrupted (SIGINT, SIGTERM) after deploying, with the install-time audit off, left deployed files the lockfile did not record; every install now journals the prior bytes of each path it writes and restores them, discarding the staged lockfile, so disk and apm.lock.yaml keep their pre-command state.",
+      "failure_modes": [
+        "transaction"
+      ],
+      "properties": [
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/integration/test_lockfile_commit_point_lifecycle.py::test_a_failed_lockfile_write_restores_deploys_and_the_lock",
+        "tests/integration/test_lockfile_commit_point_lifecycle.py::test_a_failure_after_deploy_leaves_every_byte_as_it_was",
+        "tests/integration/test_lockfile_commit_point_lifecycle.py::test_sigterm_without_a_deploy_snapshot_keeps_the_lock_equal_to_disk",
+        "tests/integration/test_lockfile_commit_point_lifecycle.py::test_sigterm_without_an_audit_restores_deploys_and_the_lock",
+        "tests/integration/test_lockfile_commit_point_lifecycle.py::test_the_next_install_reaps_a_killed_installs_deploy_snapshot",
+        "tests/unit/install/test_deploy_snapshot.py::test_rollback_returns_every_written_path_to_its_prior_state"
+      ]
+    },
+    {
       "issue": 4286,
       "fixed_in": "Unreleased",
       "summary": "Registry URLs are validated against the spec scheme rules (req-sc-006) under both manifest contracts through one owner: a plain http URL is a parse error that names the registry and writes nothing, unless the host is loopback or RFC 1918 private or the entry sets insecure: true.",
