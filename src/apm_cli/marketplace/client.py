@@ -117,7 +117,7 @@ def _cache_dir() -> str:
     from ..config import CONFIG_DIR
 
     d = os.path.join(CONFIG_DIR, _CACHE_DIR_NAME)
-    if not _CACHE_READ_ONLY.get():
+    if not _CACHE_READ_ONLY.get() and _CACHE_PENDING.get() is None:
         os.makedirs(d, exist_ok=True)
     return d
 
@@ -204,8 +204,22 @@ def _write_cache(
     etag: str = "",
     last_modified: str = "",
 ) -> None:
-    """Write marketplace data and metadata to cache, unless reads are read-only."""
+    """Write marketplace data and metadata to cache, unless reads are read-only.
+
+    Inside :func:`catalog_cache_writes_on_success` the write is held and
+    persisted only when that scope completes.
+    """
     if _CACHE_READ_ONLY.get():
+        return
+    pending = _CACHE_PENDING.get()
+    if pending is not None:
+        pending.append(
+            (
+                name,
+                data,
+                {"index_digest": index_digest, "etag": etag, "last_modified": last_modified},
+            )
+        )
         return
     data_path = _cache_data_path(name)
     meta_path = _cache_meta_path(name)
@@ -1459,6 +1473,26 @@ class _CatalogInvocation:
 _INVOCATION_LOCK = threading.RLock()
 _invocation: _CatalogInvocation | None = None
 _CACHE_READ_ONLY: ContextVar[bool] = ContextVar("marketplace_cache_read_only", default=False)
+_CACHE_PENDING: ContextVar[list | None] = ContextVar("marketplace_cache_pending", default=None)
+
+
+@contextlib.contextmanager
+def catalog_cache_writes_on_success(commit: bool = True) -> Iterator[None]:
+    """Hold catalog cache writes; persist them only if the scope completes.
+
+    A scope that raises (a refused re-verification) leaves the cache as it
+    was; one that completes persists what it fetched, validators included,
+    unless *commit* is false (``--dry-run``).
+    """
+    pending: list = []
+    token = _CACHE_PENDING.set(pending)
+    try:
+        yield
+    finally:
+        _CACHE_PENDING.reset(token)
+    if commit:
+        for name, data, validators in pending:
+            _write_cache(name, data, **validators)
 
 
 @contextlib.contextmanager
