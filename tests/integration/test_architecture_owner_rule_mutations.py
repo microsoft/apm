@@ -762,6 +762,12 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
             id="commit-order-journal-never-released",
         ),
         pytest.param(
+            "src/apm_cli/commands/install.py",
+            "service_result = run_service_integrations_or_restore(",
+            "service_result = run_service_integrations(",
+            id="commit-order-services-without-restore",
+        ),
+        pytest.param(
             "src/apm_cli/install/transaction.py",
             "                    self._restore_deploy_targets()\n",
             "                    pass\n",

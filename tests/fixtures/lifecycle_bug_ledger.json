@@ -4557,6 +4557,20 @@
         "tests/integration/test_cache_pin.py::test_sync_drops_the_marker_of_an_unmarkable_dep",
         "tests/lifecycle/machines/test_m_source.py::test_git_to_registry_switch_drops_the_stale_cache_pin"
       ]
+    },
+    {
+      "issue": 4594,
+      "fixed_in": "Unreleased",
+      "summary": "A failed MCP configuration write after deploy left the failed attempt's hooks and apm.lock.yaml on disk; the install now rolls back through its deploy journal before the lockfile writer scope commits.",
+      "failure_modes": [
+        "transaction"
+      ],
+      "properties": [
+        "transaction.failed_command_preserves_state"
+      ],
+      "regression_tests": [
+        "tests/lifecycle/scenarios/test_failure_phase.py::test_failed_install_preserves_state_and_recovers"
+      ]
     }
   ],
   "lifecycle_contracts": [

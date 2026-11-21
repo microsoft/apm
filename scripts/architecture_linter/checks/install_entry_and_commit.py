@@ -295,7 +295,7 @@ def check_install_commit_order(provider: FactsProvider) -> tuple[Violation, ...]
         )
     if not _ordered(
         loaded[_COMMAND],
-        "service_result = run_service_integrations(",
+        "service_result = run_service_integrations_or_restore(",
         "install_result.post_install()",
     ):
         found.append(

@@ -259,3 +259,27 @@ def run_service_integrations(  # noqa: PLR0913
         prepared=prepared_lsp,
     )
     return ServiceIntegrationResult(mcp_count, lsp_count, target_decision)
+
+
+def run_service_integrations_or_restore(
+    ctx: ServiceCommandContext, **kwargs: Any
+) -> ServiceIntegrationResult:
+    """Run :func:`run_service_integrations`; a failure restores the deploys (#4594).
+
+    MCP and LSP configuration is written inside the install's lockfile writer
+    scope, while the install transaction still holds its deploy journal: a
+    failed write rolls the transaction back before the scope commits, so the
+    deployed files, ``apm.lock.yaml`` and ``apm.yml`` keep their pre-command
+    bytes. An MCP collision keeps the writes that reached disk (#4268).
+    """
+    from apm_cli.install.errors import MCPNativeConflictError
+
+    try:
+        return run_service_integrations(ctx, **kwargs)
+    except MCPNativeConflictError:
+        raise
+    except BaseException:
+        transaction = getattr(ctx, "transaction", None)
+        if transaction is not None:
+            transaction.rollback()
+        raise
