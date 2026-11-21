@@ -1347,6 +1347,9 @@ def _audit_content_scan(
         _render_owner_violations(owner_violations, logger)
         if not file_path:
             _render_canvas_note(cfg.project_root, package, logger)
+            from ..compilation.link_resolver import warn_missing_module_links
+
+            warn_missing_module_links(cfg.project_root, logger, package)
         if drift_findings:
             from ..install.drift import render_drift_text
 

@@ -350,6 +350,12 @@ over the transport its declaring `apm.yml` states, as install does: a
 `git@host:...` or `ssh://` dependency replays over SSH, and shorthand follows
 the usual [transport selection](../../../consumer/install-packages/#transport-selection).
 
+### Missing apm_modules link targets
+
+In text output, a deployed file that links into `apm_modules/` at a missing target
+(for example after a fresh clone) gets one warning naming the file, the target and
+the remedy, `apm install`. It does not change the exit code.
+
 ### Deployment-owner integrity
 
 Before content scanning or drift, both modes validate the lockfile's
