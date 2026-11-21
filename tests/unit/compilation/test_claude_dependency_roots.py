@@ -65,12 +65,12 @@ def test_manifest_materialization_roots(
     nested.parent.mkdir()
     nested.write_text("# Not a package root\n", encoding="utf-8")
     formatter = ClaudeFormatter(str(tmp_path))
-    result = formatter.format_distributed(PrimitiveCollection(), {})
+    result = formatter.format_agents_md_imports(PrimitiveCollection(), set())
     assert result.success, result.errors
     imports = [
         line
         for line in result.content_map[tmp_path / "CLAUDE.md"].splitlines()
-        if line.startswith("@")
+        if line.startswith("@") and line != "@AGENTS.md"
     ]
     assert imports == [f"@apm_modules/{relative}/CLAUDE.md"]
     assert get_dependency_declaration_order(str(tmp_path)) == [relative]
@@ -162,7 +162,7 @@ def test_lock_metadata_links_preserve_precedence_and_fail_closed(
             LockFile().write(target)
         (tmp_path / filename).symlink_to(target)
     before = ArtifactSnapshot.capture(tmp_path)
-    result = ClaudeFormatter(str(tmp_path)).format_distributed(PrimitiveCollection(), {})
+    result = ClaudeFormatter(str(tmp_path)).format_agents_md_imports(PrimitiveCollection(), set())
     invalid = selected is not None and (
         modern == "dangling" if selected == "apm.lock.yaml" else legacy == "dangling"
     )
@@ -174,7 +174,7 @@ def test_lock_metadata_links_preserve_precedence_and_fail_closed(
         imports = [
             line
             for line in result.content_map.get(tmp_path / "CLAUDE.md", "").splitlines()
-            if line.startswith("@")
+            if line.startswith("@") and line != "@AGENTS.md"
         ]
         assert imports == (["@apm_modules/owner/unrecorded/CLAUDE.md"] if selected is None else [])
     assert ArtifactSnapshot.capture(tmp_path) == before
@@ -214,7 +214,9 @@ def test_cross_drive_recovery_respects_selected_source_store(
     monkeypatch.setattr(
         "apm_cli.compilation.claude_formatter.portable_link_relpath", lambda *_: None
     )
-    result = ClaudeFormatter(str(output), str(source)).format_distributed(PrimitiveCollection(), {})
+    result = ClaudeFormatter(str(output), str(source)).format_agents_md_imports(
+        PrimitiveCollection(), set()
+    )
     assert not result.success
     message = "\n".join(result.errors)
     assert str(source / "apm_modules") in message
@@ -242,7 +244,7 @@ def test_traversal_metadata_fails_without_fallback(tmp_path: Path, metadata: str
             },
             tmp_path / "apm.lock.yaml",
         )
-    result = ClaudeFormatter(str(tmp_path)).format_distributed(PrimitiveCollection(), {})
+    result = ClaudeFormatter(str(tmp_path)).format_agents_md_imports(PrimitiveCollection(), set())
     assert not result.success
     assert result.errors
     assert not result.content_map
@@ -252,7 +254,7 @@ def test_traversal_metadata_fails_without_fallback(tmp_path: Path, metadata: str
 def test_malformed_metadata_fails_without_fallback(tmp_path: Path, filename: str) -> None:
     _memory(tmp_path, "owner/unrecorded")
     (tmp_path / filename).write_text("[unclosed", encoding="utf-8")
-    result = ClaudeFormatter(str(tmp_path)).format_distributed(PrimitiveCollection(), {})
+    result = ClaudeFormatter(str(tmp_path)).format_agents_md_imports(PrimitiveCollection(), set())
     assert not result.success
     assert result.errors
     assert not result.content_map
@@ -280,7 +282,7 @@ def test_escaping_symlinks_fail_closed(tmp_path: Path, boundary: str) -> None:
     if boundary in {"manifest", "lock"}:
         _memory(project, "owner/pkg")
     link.symlink_to(sentinel if boundary in {"file", "manifest", "lock"} else outside)
-    result = ClaudeFormatter(str(project)).format_distributed(PrimitiveCollection(), {})
+    result = ClaudeFormatter(str(project)).format_agents_md_imports(PrimitiveCollection(), set())
     assert not result.success
     assert any("outside" in error for error in result.errors)
     assert not result.content_map
