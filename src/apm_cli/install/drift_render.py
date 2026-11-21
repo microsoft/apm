@@ -76,6 +76,10 @@ class CheckLogger(CommandLogger):
         self._emit("warning", f"Drift detected: {n} file(s)")
 
 
+# Why a shared hook config drifts after a deny or a revoked approval (RA-028).
+RETIRED_HOOK_ENTRIES_CAUSE = "APM-owned hook entries retired by an executables decision"
+
+
 def _inline_diff_for(scratch_path: Path, project_path: Path) -> str:
     """Build an inline diff hint, capped to keep findings compact."""
     try:
@@ -126,6 +130,8 @@ def render_drift_text(
         lines.append(f"  {kind} ({len(items)}):")
         for item in items:
             suffix = f"  [{item.package}]" if item.package else ""
+            if item.owned_entries_only:
+                suffix += f" ({RETIRED_HOOK_ENTRIES_CAUSE})"
             lines.append(f"    - {item.path}{suffix}")
             if verbose and item.inline_diff:
                 lines.append(f"      {item.inline_diff}")
