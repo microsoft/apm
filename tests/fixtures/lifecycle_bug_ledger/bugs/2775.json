@@ -1,0 +1,20 @@
+{
+  "issue": 2775,
+  "fixed_in": "Unreleased",
+  "summary": "An unrecognised GitHub Enterprise Server host in a mixed-host install was refused without naming GITHUB_HOST as its configuration.",
+  "failure_modes": [
+    "routing",
+    "outcome"
+  ],
+  "properties": [
+    "auth.credentials_isolated",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_explicit_host_identity.py::test_mixed_host_global_lifecycle_keeps_each_package_host",
+    "tests/lifecycle/scenarios/test_explicit_host_identity.py::test_strict_host_credentials_keep_the_ghes_token_on_ghes",
+    "tests/lifecycle/scenarios/test_explicit_host_identity.py::test_unconfigured_ghes_host_is_refused_with_working_remedies",
+    "tests/lifecycle/scenarios/test_explicit_host_identity.py::test_frozen_reload_without_the_configured_host_fails_closed",
+    "tests/unit/install/test_validation_error_handling.py::TestGenericHostAmbiguousSubpathHint::test_unrecognised_selfhosted_ambiguous_path_returns_hint"
+  ]
+}

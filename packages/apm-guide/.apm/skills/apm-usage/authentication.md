@@ -310,6 +310,21 @@ apm install myorg/internal-package       # resolves to github.company.com
 apm pack                                 # marketplace.json also resolves against github.company.com
 ```
 
+Mixed hosts in one command: the server's package and explicit `github.com/`
+packages each keep their own host, subpath and ref. The server's entry is
+written as shorthand, so keep `GITHUB_HOST` set when reinstalling:
+
+```bash
+export GITHUB_HOST=github.company.com
+apm install --global \
+  github.company.com/myorg/internal-skills/.agents/skills/jdk-installer#v2.1.0 \
+  github.com/example/android-skills/performance/analyzer#main
+```
+
+Without `GITHUB_HOST`, a custom host is not GitHub-class: the package is
+refused with a hint to set `GITHUB_HOST` (and write `github.com/` before
+GitHub entries in apm.yml) or to use a `git:` + `path:` object entry.
+
 ## GitLab (SaaS or self-managed)
 
 GitLab `path:` single-file sparse fetches follow the clone transport policy:
