@@ -140,10 +140,18 @@ def test_global_audit_still_reports_missing_package_materialization(
 
     assert result.returncode == 1, (result.stdout, result.stderr)
     checks = {check["name"]: check for check in payload["checks"]}
-    for name in ("skill-subset-consistency", "drift"):
-        assert checks[name]["passed"] is False, checks[name]
-        assert _MISSING in checks[name]["message"]
-        assert "apm install --global" in checks[name]["message"]
+    # One finding, said once (RA-005): drift carries the replay error in its
+    # details; every other check that needed the replay points there.
+    drift = checks["drift"]
+    assert drift["passed"] is False, drift
+    assert drift["message"].startswith("drift replay failed"), drift
+    drift_details = " ".join(drift["details"])
+    assert _MISSING in drift_details, drift
+    assert "apm install --global" in drift_details, drift
+    subset = checks["skill-subset-consistency"]
+    assert subset["passed"] is False, subset
+    assert "reported under drift" in subset["message"], subset
+    assert not subset.get("details"), subset
     assert not (user_root / "apm_modules").exists()
 
     scene.ok("update", "--global", "--yes", *_TARGETS)

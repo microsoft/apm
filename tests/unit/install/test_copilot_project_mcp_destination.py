@@ -116,6 +116,7 @@ def test_heal_removes_only_proven_apm_entries_and_keeps_the_file(tmp_path: Path)
         stored_configs=configs,
         native_hashes={},
         project_root=tmp_path,
+        keep_signal_files=False,
     )
 
     assert heal.removed == {"copilot": {"echo"}}
@@ -167,6 +168,7 @@ def test_heal_keeps_an_emptied_github_mcp_json(tmp_path: Path) -> None:
         stored_configs={"echo": _ECHO},
         native_hashes={},
         project_root=tmp_path,
+        keep_signal_files=False,
     )
 
     assert heal.removed == {"copilot": {"echo"}}
@@ -333,6 +335,7 @@ def test_heal_accepts_a_matching_fingerprint_and_deletes_an_apm_only_file(tmp_pa
         stored_configs={"echo": _ECHO},
         native_hashes={"vscode": {"echo": mcp_native_hash(entry)}},
         project_root=tmp_path,
+        keep_signal_files=False,
     )
 
     assert heal.removed == {"vscode": {"echo"}}
@@ -351,6 +354,7 @@ def test_heal_never_follows_a_symlinked_retired_file(tmp_path: Path) -> None:
         stored_configs={"echo": _ECHO},
         native_hashes={},
         project_root=tmp_path,
+        keep_signal_files=False,
     )
 
     assert heal.removed == {}

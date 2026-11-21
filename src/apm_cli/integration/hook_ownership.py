@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from apm_cli.core.scope import manifest_file
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -276,6 +277,40 @@ def apm_owned_hook_entries_remain(
     return owned != b"{}"
 
 
+def apm_owned_hook_entry_pointers(config_path: Path, event_container_key: str) -> frozenset[str]:
+    """Return the JSON pointers of APM-owned entries in a shared hook config.
+
+    Audit uses this so that an entry APM merged is never reported as untracked
+    (RA-043). Ownership is the ``_apm_source`` marker, inline or restored from
+    the ``apm-hooks.json`` sidecar beside the config. A pointer has the form
+    ``/<container>/<event>/<index>``. Unreadable JSON is user-owned.
+    """
+    try:
+        config = read_hook_object(config_path)
+        sidecar = read_hook_object(config_path.parent / "apm-hooks.json")
+    except (OSError, ValueError, TypeError):
+        return frozenset()
+    container = config.get(event_container_key)
+    if not isinstance(container, dict):
+        return frozenset()
+    events = {
+        event: [dict(entry) if isinstance(entry, dict) else entry for entry in entries]
+        for event, entries in container.items()
+        if isinstance(entries, list)
+    }
+    reinject_apm_source_from_sidecar(events, sidecar)
+
+    def escape(value: str) -> str:
+        return value.replace("~", "~0").replace("/", "~1")
+
+    return frozenset(
+        f"/{escape(event_container_key)}/{escape(event)}/{index}"
+        for event, entries in events.items()
+        for index, entry in enumerate(entries)
+        if isinstance(entry, dict) and isinstance(entry.get("_apm_source"), str)
+    )
+
+
 # "::" never appears in a canonical dependency string, so no package can claim it.
 LOCAL_BUNDLE_HOOK_SOURCE_PREFIX = "local-bundle::"
 
@@ -346,11 +381,11 @@ def lockfile_dependency_identities(
         from apm_cli.deps.lockfile import LEGACY_LOCKFILE_NAME, LockFile, get_lockfile_path
 
         lockfile_path = get_lockfile_path(project_root)
-        if not lockfile_path.exists():
+        if not lockfile_exists(lockfile_path):
             legacy_path = project_root / LEGACY_LOCKFILE_NAME
             if legacy_path.exists():
                 lockfile_path = legacy_path
-        if not lockfile_path.exists():
+        if not lockfile_exists(lockfile_path):
             return [], False
         lockfile = LockFile.read(lockfile_path)
         if lockfile is None:

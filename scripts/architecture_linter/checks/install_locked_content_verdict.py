@@ -28,6 +28,10 @@ AUDIT_REPLAY = "src/apm_cli/install/audit_replay.py"
 LEGACY = "src/apm_cli/install/legacy_plugin_compat.py"
 # Names a cache copy that contradicts the lock before re-downloading (report only).
 DOWNLOAD = "src/apm_cli/install/phases/download.py"
+# Frozen lock-sync judges declarations only from copies that match the lock (#4389).
+MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
+# A no-op update runs install when a copy contradicts the lock (#4385).
+UPDATE = "src/apm_cli/commands/update.py"
 
 # (path, function, callee, purpose): each consumer asks the verdict owner.
 _ROUTES = (
@@ -41,10 +45,13 @@ _ROUTES = (
     (REPLAY, "_verify_remote_cache_candidate", "locked_content_mismatch", "check live copies"),
     (REPLAY, "_materialize_install_path", "locked_content_mismatch", "check scratch downloads"),
     (AUDIT_REPLAY, "_live_copies_stale", "locked_content_mismatch", "check warm audit copies"),
+    (UPDATE, "_locked_copy_contradicts_lock", "locked_content_mismatch", "re-check no-op copies"),
 )
 # Closed world: who may call each half of the verdict.
 _ALLOWED_CALLERS = {
-    "locked_content_mismatch(": frozenset({OWNER, SOURCES, REPLAY, AUDIT_REPLAY, DOWNLOAD}),
+    "locked_content_mismatch(": frozenset(
+        {OWNER, SOURCES, REPLAY, AUDIT_REPLAY, DOWNLOAD, MCP_VIEW, UPDATE}
+    ),
     "matches_fresh_legacy_plugin_hash(": frozenset({OWNER, LEGACY}),
 }
 

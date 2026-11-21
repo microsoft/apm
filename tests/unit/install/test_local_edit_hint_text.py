@@ -28,9 +28,10 @@ class TestLocalEditHint:
         assert "run 'apm export-patch'" in text
         assert text.isascii()
 
-    def test_skills_are_kept_by_install_other_kinds_are_not(self) -> None:
+    def test_install_keeps_an_edit_of_every_kind(self) -> None:
+        # Skills refuse a modified member; other kinds need deployment evidence (#4360).
         assert install_keeps_edit(".agents/skills/kit/SKILL.md")
-        assert not install_keeps_edit(".github/instructions/kit.instructions.md")
+        assert install_keeps_edit(".github/instructions/kit.instructions.md")
 
 
 class TestDriftTextHint:
@@ -41,10 +42,11 @@ class TestDriftTextHint:
                 DriftFinding(path=".github/b.md", kind="modified", package="org/pkg"),
             ]
         )
-        assert local_edit_hint(2) in out
-        # The hint must precede the restore advice that would overwrite edits,
-        # which deletes the edited files first (#3994, RA-009).
-        assert out.index("apm export-patch") < out.index("Delete the edited files")
+        assert local_edit_hint(2, overwritten=0) in out
+        # The hint precedes the restore advice, which moves the edited files
+        # aside, never deletes them (#3994, RA-044).
+        assert out.index("apm export-patch") < out.index("Move the edited files aside")
+        assert "Delete" not in out
         assert "Run 'apm install' to re-sync" not in out
 
     def test_bundle_file_restore_names_the_bundle_reinstall(self) -> None:
@@ -67,3 +69,25 @@ class TestDriftTextHint:
             ]
         )
         assert "apm export-patch" not in out
+
+
+@pytest.mark.parametrize("retired", [True, False], ids=["gate-retired", "user-edit"])
+def test_shared_hook_config_drift_gets_local_edit_advice_only_for_user_edits(retired):
+    """RA-028: gate residue in a shared hook config is re-synced, never exported."""
+    finding = DriftFinding(
+        path=".claude/settings.json", kind="modified", owned_entries_only=retired
+    )
+
+    text = render_drift_text([finding])
+
+    assert "Drift detected: 1 file(s)" in text
+    cause = (
+        "    - .claude/settings.json (APM-owned hook entries retired by an executables decision)\n"
+    )
+    assert (cause in text) is retired
+    if retired:
+        for advice in ("local edit", "export-patch", "Move the edited files aside"):
+            assert advice not in text
+        assert "Run 'apm install' to re-sync deployed files with the lockfile." in text
+    else:
+        assert "1 local edit(s) to managed files" in text

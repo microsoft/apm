@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -60,22 +59,17 @@ def test_uninstall_cleanup_preserves_same_named_server_in_other_runtime(
         mcp_servers=["shared-name"],
         mcp_target_servers={"hermes": ["shared-name"]},
     )
-    view = SimpleNamespace(dependencies=[], configs={}, provenance={}, bundle_owned=frozenset())
-
-    with patch(
-        "apm_cli.integration.mcp_config_view.CurrentMcpConfigView.derive",
-        return_value=view,
-    ):
-        _cleanup_stale_mcp(
-            MagicMock(),
-            lockfile,
-            tmp_path / "apm.lock.yaml",
-            {"shared-name"},
-            modules_dir=tmp_path / "apm_modules",
-            user_scope=True,
-            scope=InstallScope.USER,
-            persist=False,
-        )
+    # The real view owner derives an empty current set (no package declares MCP).
+    _cleanup_stale_mcp(
+        MagicMock(),
+        lockfile,
+        tmp_path / "apm.lock.yaml",
+        {"shared-name"},
+        modules_dir=tmp_path / "apm_modules",
+        user_scope=True,
+        scope=InstallScope.USER,
+        persist=False,
+    )
 
     assert (
         "shared-name"

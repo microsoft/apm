@@ -93,6 +93,15 @@ def test_conflict_remediation_quotes_the_locked_origin() -> None:
     assert "run: apm marketplace add" not in unsafe or "'https://x/$(rm)'" in unsafe
 
 
+def test_conflict_advice_restores_the_lock_first_and_renders_origins_as_ascii() -> None:
+    message = str(MarketplaceOriginConflictError("company", "plugin", _A, _B))
+    restore = message.index("restore it from version control")
+    assert restore < message.index("verify that source first, then run 'apm marketplace add")
+    escaped = str(MarketplaceOriginConflictError("company", "plugin", "https://x/\x1b[31m", "\x07"))
+    assert escaped.isascii() and "\x1b" not in escaped and "\x07" not in escaped
+    assert "apm marketplace add https://x" not in escaped
+
+
 def test_row_level_check_refuses_a_rebound_alias_and_accepts_legacy_rows(registered) -> None:
     """``apm outdated`` checks the row it already holds through the same owner (#3959)."""
     registered(_B)
@@ -103,3 +112,140 @@ def test_row_level_check_refuses_a_rebound_alias_and_accepts_legacy_rows(registe
 
     (legacy,) = _lock(None).dependencies.values()
     catalog_origin.require_locked_row_origin(legacy)
+
+
+_PROJECT_CONFLICT = (
+    f"marketplace 'company' now points at {_B}, but apm.lock.yaml recorded 'plugin' "
+    f"from {_A}. Nothing was changed. If apm.lock.yaml was not changed on purpose, "
+    "restore it from version control. Otherwise, verify that source first, then run "
+    f"'apm marketplace add {_A} --name company' "
+    "to keep the locked marketplace (add --ref or --path if the original "
+    "registration used them). To switch marketplaces on purpose, remove 'plugin' from "
+    "apm.yml, then run 'apm install' to drop the plugin locked from the old marketplace, "
+    "then add it back and run 'apm install' again."
+)
+_USER_CONFLICT = (
+    f"marketplace 'company' now points at {_B}, but ~/.apm/apm.lock.yaml recorded "
+    f"'plugin' from {_A}. Nothing was changed. If ~/.apm/apm.lock.yaml was not changed "
+    "on purpose, restore it from version control. Otherwise, verify that source first, "
+    f"then run 'apm marketplace add {_A} --name "
+    "company' to keep the locked marketplace (add --ref or --path if the original "
+    "registration used them). To switch marketplaces on purpose, remove 'plugin' from "
+    "~/.apm/apm.yml, then run 'apm install -g' to drop the plugin locked from the old "
+    "marketplace, then add it back and run 'apm install -g' again."
+)
+
+
+def test_conflict_remedy_names_the_refused_scope() -> None:
+    """RA-029: a user-scope refusal names the user manifest and ``apm install -g``.
+
+    The restore remedy keeps no ``-g``: the marketplace registry is user-global.
+    """
+    project = MarketplaceOriginConflictError("company", "plugin", _A, _B)
+    user = MarketplaceOriginConflictError("company", "plugin", _A, _B, user_scope=True)
+
+    assert str(project) == _PROJECT_CONFLICT
+    assert str(user) == _USER_CONFLICT
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [(["-g"], _USER_CONFLICT), ([], _PROJECT_CONFLICT)],
+    ids=["global", "project"],
+)
+def test_origin_refusal_reads_the_scope_of_the_invoking_command(registered, argv, expected) -> None:
+    """RA-029: ``apm install -g x@m`` raises below install, which does not thread scope."""
+    import click
+    from click.testing import CliRunner
+
+    registered(_B)
+
+    @click.command()
+    @click.option("--global", "-g", "global_", is_flag=True)
+    def install(global_):
+        catalog_origin.require_locked_catalog_origin("company", "plugin", _lock(_A))
+
+    result = CliRunner().invoke(install, argv)
+
+    assert isinstance(result.exception, MarketplaceOriginConflictError)
+    assert str(result.exception) == expected
+
+
+_MKT_A = "https://git.example.invalid/acme/mkta"
+_MKT_B = "https://git.example.invalid/evil/mktb"
+
+
+def _marketplace_row() -> LockedDependency:
+    return LockedDependency(
+        repo_url="acme/mkta",
+        host="git.example.invalid",
+        virtual_path="plugins/x",
+        is_virtual=True,
+        resolved_ref="v1.0.0",
+        resolved_commit="a" * 40,
+        discovered_via="m",
+        marketplace_plugin_name="x",
+        source_url=_MKT_A,
+    )
+
+
+@pytest.mark.parametrize(
+    ("declared", "named"),
+    [
+        (
+            "    - git: https://git.example.invalid/acme/mkta.git\n"
+            "      path: plugins/x\n"
+            "      ref: v1.0.0\n",
+            "remove the entry 'git: https://git.example.invalid/acme/mkta.git, "
+            "path: plugins/x, ref: v1.0.0' from apm.yml",
+        ),
+        (
+            "    - git.example.invalid/acme/mkta/plugins/x#v1.0.0\n",
+            "remove 'git.example.invalid/acme/mkta/plugins/x#v1.0.0' from apm.yml",
+        ),
+        (
+            "    - {name: x, marketplace: m}\n",
+            "remove the entry 'name: x, marketplace: m' from apm.yml",
+        ),
+    ],
+    ids=["git-path", "string", "object-form"],
+)
+def test_rebound_alias_remedy_names_the_manifest_entry_as_written(
+    monkeypatch, tmp_path, declared, named
+) -> None:
+    """RA-042: the switch remedy quotes the apm.yml entry, never the bare plugin name."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "apm.yml").write_text(
+        "name: proj\nversion: 1.0.0\ndependencies:\n  apm:\n" + declared, encoding="utf-8"
+    )
+    _register_path(monkeypatch, _MKT_B, "")
+
+    with pytest.raises(MarketplaceOriginConflictError) as exc:
+        catalog_origin.require_locked_row_origin(_marketplace_row(), user_scope=False)
+
+    message = str(exc.value)
+    assert f"To switch marketplaces on purpose, {named}, then run 'apm install'" in message
+    assert "remove 'x' from" not in message
+
+
+def test_rebound_alias_remedy_reads_the_user_manifest_at_user_scope(monkeypatch, tmp_path) -> None:
+    """RA-042 at user scope: the named entry comes from ~/.apm/apm.yml."""
+    home = tmp_path / "apm-home"
+    home.mkdir()
+    (home / "apm.yml").write_text(
+        "name: user\nversion: 1.0.0\ndependencies:\n  apm:\n"
+        "    - git.example.invalid/acme/mkta/plugins/x#v1.0.0\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APM_HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+    _register_path(monkeypatch, _MKT_B, "")
+
+    with pytest.raises(MarketplaceOriginConflictError) as exc:
+        catalog_origin.require_locked_row_origin(_marketplace_row(), user_scope=True)
+
+    assert (
+        "To switch marketplaces on purpose, remove "
+        "'git.example.invalid/acme/mkta/plugins/x#v1.0.0' from ~/.apm/apm.yml, "
+        "then run 'apm install -g'"
+    ) in str(exc.value)

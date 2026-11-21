@@ -44,8 +44,3 @@ steps:
       - {advice: apm list}
     rerun: [apm run review --param target=src/auth.py]
 known_cells:
-  - id: J13-run-unknown-script-prints-no-next-command
-    law: O8
-    tracking: "#4205"
-    step: 4
-    match: "advice 'apm list' is not printed"

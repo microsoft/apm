@@ -502,8 +502,42 @@ class TestRefConsistency:
         assert not result.passed
         assert any("missing locked version evidence" in detail for detail in result.details)
 
+    # -- Deployed files present -----------------------------------------
 
-# -- Deployed files present -----------------------------------------
+    @pytest.mark.parametrize(
+        ("locked_slug", "repair"),
+        [
+            ("owner/kept", "run 'apm install'"),
+            ("attacker/swapped", "run 'apm update'"),
+        ],
+        ids=["newly-declared", "identity-swapped"],
+    )
+    def test_unlocked_dependency_names_the_converging_remedy(self, tmp_path, locked_slug, repair):
+        """A newly declared dep is locked by plain install; a swapped identity re-resolves."""
+        deps = ["owner/new#v1.0.0"]
+        if locked_slug == "owner/kept":
+            deps.insert(0, "owner/kept#v1.0.0")
+        _write_apm_yml(tmp_path, deps=deps)
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: {locked_slug}
+                    resolved_ref: v1.0.0
+                    deployed_files: []
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_ref_consistency(manifest, lock)
+        assert not result.passed
+        assert result.message == f"1 ref mismatch -- {repair} to update lockfile"
+        assert result.details == ["owner/new: not found in lockfile"]
 
 
 class TestDeployedFilesPresent:
@@ -1400,7 +1434,23 @@ class TestRunBaselineChecks:
         )
         result = run_baseline_checks(tmp_path)
         assert result.passed
-        assert len(result.checks) == 11
+        # The exact baseline, in run order: a dropped or added check fails here.
+        assert [check.name for check in result.checks] == [
+            "lockfile-exists",
+            "ref-consistency",
+            "deployment-ledger-owners",
+            "deployed-files-present",
+            "no-orphaned-packages",
+            "lockfile-targets-current",
+            "skill-subset-consistency",
+            "config-consistency",
+            "native-mcp-ownership",
+            "content-integrity",
+            "local-bundle-hooks",
+            "hook-approval-pins",
+            "exec-status-current",
+            "includes-consent",
+        ]
 
     def test_mixed_pass_fail(self, tmp_path):
         # Ref mismatch (fail) + missing file (fail) + clean otherwise

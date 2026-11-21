@@ -43,6 +43,7 @@ from .helpers.reconciliation_scope import (
 )
 from .presentation import surface_target_cleanup
 from .selected_cleanup import SelectedCleanupOutcome
+from .target_governance import install_governance, is_governed_by_install
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger
@@ -55,77 +56,6 @@ if TYPE_CHECKING:
     from apm_cli.integration.cleanup import CleanupResult, DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
-
-
-def install_governance(
-    targets: list[TargetProfile],
-    *,
-    bounded: bool = False,
-) -> tuple[set[str], set[str]]:
-    """Return ``(file_prefixes, uri_schemes)`` governed by *targets*.
-
-    Dedicated target roots govern their full subtree. The shared ``.agents``
-    root is partitioned by primitive subdirectory so one active target cannot
-    claim a declared sibling's files (for example, Copilot's
-    ``.agents/skills`` versus Antigravity's ``.agents/rules``).
-
-    ``bounded`` partitions dedicated roots the same way. Ownership tests need
-    the whole root, but a tree walk does not: a root such as ``.claude`` also
-    holds session transcripts and other data APM never deploys.
-
-    ``uri_schemes`` is the set of lockfile URI schemes used by dynamic /
-    user-machine targets (``copilot-app`` -> ``copilot-app-db://``,
-    ``copilot-cowork`` -> ``cowork://``).
-    """
-    file_prefixes: set[str] = set()
-    uri_schemes: set[str] = set()
-    from apm_cli.integration.targets import target_lockfile_uri_schemes
-
-    for target in targets or []:
-        target_schemes = target_lockfile_uri_schemes(target)
-        if target_schemes:
-            uri_schemes.update(target_schemes)
-            continue
-        root = str(getattr(target, "root_dir", None) or "").rstrip("/")
-        shared_root = root == ".agents"
-        if root and not shared_root and not bounded:
-            file_prefixes.add(root + "/")
-        primitives = getattr(target, "primitives", None)
-        if isinstance(primitives, dict):
-            for mapping in primitives.values():
-                deploy_root = getattr(mapping, "deploy_root", None)
-                base = str(deploy_root or root or "").rstrip("/")
-                if not base or (base != ".agents" and not bounded):
-                    continue
-                subdir = getattr(mapping, "subdir", None)
-                if subdir:
-                    file_prefixes.add(f"{base}/{str(subdir).strip('/')}/")
-                    continue
-                extension = getattr(mapping, "extension", None)
-                if extension:
-                    file_prefixes.add(f"{base}/{str(extension).strip('/')}")
-                else:
-                    # Compatibility for minimal TargetProfile stand-ins.
-                    file_prefixes.add(f"{base}/")
-        if root and (shared_root or bounded):
-            for generated in getattr(target, "generated_files", ()) or ():
-                file_prefixes.add(f"{root}/{str(generated).lstrip('/')}")
-    return file_prefixes, uri_schemes
-
-
-def is_governed_by_install(path: str, file_prefixes: set[str], uri_schemes: set[str]) -> bool:
-    """Return ``True`` if *path* is owned by the current install's targets.
-
-    File paths are matched by top-level directory; scheme URIs (e.g.
-    ``copilot-app-db://``, ``cowork://``) are matched by their scheme.
-    """
-    if "://" in path:
-        scheme = path.split("://", 1)[0] + "://"
-        return scheme in uri_schemes
-    return any(
-        path.startswith(prefix) if prefix.endswith("/") else path == prefix
-        for prefix in file_prefixes
-    )
 
 
 def merge_hook_config_paths(targets: list[TargetProfile]) -> set[str]:
@@ -391,17 +321,13 @@ def union_preserving(
     return files, merged_hashes
 
 
-def declared_target_profiles(
-    project_root: Path,
-    *,
-    user_scope: bool = False,
-    active_targets: Iterable[TargetProfile] | None = None,
-    diagnostics: DiagnosticCollector | None = None,
+def _declared_manifest_profiles(
+    project_root: Path, *, user_scope: bool
 ) -> list[TargetProfile] | None:
-    """Resolve the target universe declared by a project manifest."""
+    """The profiles apm.yml's ``target:``/``targets:`` names; None without a declaration."""
     from apm_cli.core.errors import TargetResolutionError
     from apm_cli.core.target_catalog import normalize_target_name
-    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+    from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.models.manifest_targets import read_manifest_target_declaration
 
     declaration = read_manifest_target_declaration(manifest_file(project_root), lenient=True)
@@ -411,19 +337,41 @@ def declared_target_profiles(
         names = declaration.restriction() or []
     except TargetResolutionError:
         return None
-    active_by_name = _profiles_by_name(active_targets)
     if not names:
         return None
-
     profiles: list[TargetProfile] = []
-    if names:
-        for name in dict.fromkeys(normalize_target_name(name) for name in names):
-            profile = KNOWN_TARGETS.get(name)
-            if profile is None:
-                continue
-            scoped = profile.for_scope(user_scope=user_scope)
-            if scoped is not None:
-                profiles.append(scoped)
+    for name in dict.fromkeys(normalize_target_name(name) for name in names):
+        profile = KNOWN_TARGETS.get(name)
+        scoped = profile.for_scope(user_scope=user_scope) if profile is not None else None
+        if scoped is not None:
+            profiles.append(scoped)
+    return profiles
+
+
+def declared_target_names(project_root: Path, *, user_scope: bool = False) -> list[str]:
+    """The target names apm.yml declares ([] for auto-detect), as the lock records them.
+
+    Only the declaration: never the gated and always-on targets
+    :func:`declared_target_profiles` adds to its reconcile universe (#4517).
+    """
+    profiles = _declared_manifest_profiles(project_root, user_scope=user_scope)
+    return sorted({profile.name for profile in profiles or ()})
+
+
+def declared_target_profiles(
+    project_root: Path,
+    *,
+    user_scope: bool = False,
+    active_targets: Iterable[TargetProfile] | None = None,
+    diagnostics: DiagnosticCollector | None = None,
+) -> list[TargetProfile] | None:
+    """Resolve the target universe declared by a project manifest."""
+    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+
+    profiles = _declared_manifest_profiles(project_root, user_scope=user_scope)
+    if profiles is None:
+        return None
+    active_by_name = _profiles_by_name(active_targets)
     for name, profile in KNOWN_TARGETS.items():
         if _is_manifest_target(name):
             continue
@@ -590,6 +538,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     generic_governed_values: frozenset[str] = frozenset(),
     user_scope: bool = False,
     completed_reintegration: CompletedReintegration | None = None,
+    retained_values: frozenset[str] = frozenset(),
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Reconcile one deployed-state block and safely remove dropped paths.
 
@@ -646,6 +595,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
             generic_governed_values=generic_governed_values,
             completed_reintegration=completed_reintegration,
             verified_absent_values=verified_absent,
+            retained_values=retained_values,
         ),
         project_root=project_root,
         diagnostics=diagnostics,
@@ -705,6 +655,9 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         recorded_hashes=prior_hashes,
         user_scope=user_scope,
         live_paths=files,
+        # A departing owner (selected removal) releases a skill directory left
+        # holding only user content, as prune and install cleanup do (#4162).
+        failed_path_retained=desired_owners is None,
     )
     if on_cleanup is not None:
         on_cleanup(cleanup)
@@ -739,6 +692,67 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     if include_ledger:
         return files, hashes, ledger
     return files, hashes
+
+
+def _dropped_target_of(
+    *,
+    active_targets: Iterable[TargetProfile],
+    declared_targets: Iterable[TargetProfile] | None,
+    user_scope: bool,
+) -> Callable[[str], str | None]:
+    """Return a classifier naming the undeclared known target that governs a path.
+
+    The single dropped-target predicate: contraction deletes these rows, and
+    ``--frozen`` refuses before any write when the lock still records one (#4517).
+    """
+    allowed = [*active_targets, *(declared_targets or [])]
+    allowed_prefixes, allowed_schemes = install_governance(allowed)
+    allowed_names = {profile.name for profile in allowed}
+    dropped = [
+        (profile.name, *install_governance([profile]))
+        for profile in _scoped_known_targets_for_reconciliation(
+            user_scope=user_scope, active_targets=active_targets, declared_targets=declared_targets
+        ).values()
+        if profile.name not in allowed_names
+    ]
+
+    def classify(path: str) -> str | None:
+        if is_governed_by_install(path, allowed_prefixes, allowed_schemes):
+            return None
+        for name, prefixes, schemes in dropped:
+            if is_governed_by_install(path, prefixes, schemes):
+                return name
+        return None
+
+    return classify
+
+
+def dropped_target_files(
+    project_root: Path, lockfile: LockFile, *, user_scope: bool = False
+) -> dict[str, str]:
+    """Map each lock-recorded file of a target apm.yml no longer declares to that target.
+
+    Empty when the manifest declares no targets (auto-detect keeps every row).
+    """
+    declared = declared_target_profiles(project_root, user_scope=user_scope)
+    if declared is None:
+        return {}
+    classify = _dropped_target_of(
+        active_targets=(), declared_targets=declared, user_scope=user_scope
+    )
+    recorded = [
+        *(path for dep in lockfile.dependencies.values() for path in dep.deployed_files),
+        *lockfile.local_deployed_files,
+    ]
+    dropped = {path: name for path in recorded if (name := classify(path)) is not None}
+    # A target apm.yml declared when the lock was written and no longer does is
+    # dropped; one only an explicit --target deployed is precedence (#4517).
+    # Without a recorded declaration (an older lock), every undeclared target counts.
+    if lockfile.manifest_targets:
+        dropped = {
+            path: name for path, name in dropped.items() if name in lockfile.manifest_targets
+        }
+    return dropped
 
 
 def reconcile_target_deployed_files(
@@ -790,30 +804,16 @@ def reconcile_target_deployed_files(
         if selected_owner_removal
         else None
     )
-    allowed_targets = [*active_targets, *(declared_targets or [])]
-    allowed_prefixes, allowed_schemes = install_governance(allowed_targets)
-    known_targets = list(
-        _scoped_known_targets_for_reconciliation(
-            user_scope=user_scope,
-            active_targets=active_targets,
-            declared_targets=declared_targets,
-        ).values()
+    dropped_target = _dropped_target_of(
+        active_targets=active_targets, declared_targets=declared_targets, user_scope=user_scope
     )
-    known_prefixes, known_schemes = install_governance(known_targets)
 
     def _retained(files: list[str]) -> list[str]:
         if selected_owner_removal:
             return [path for path in files if path in survivor_files or "://" in path]
         if declared_targets is None:
             return list(files)
-        return [
-            path
-            for path in files
-            if not (
-                is_governed_by_install(path, known_prefixes, known_schemes)
-                and not is_governed_by_install(path, allowed_prefixes, allowed_schemes)
-            )
-        ]
+        return [path for path in files if dropped_target(path) is None]
 
     changed = False
     prior_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
@@ -999,6 +999,7 @@ def reconcile_project_deployed_state(
             lockfile=lockfile,
             lockfile_root=lock_path.parent,
             diagnostics=diagnostics,
+            kept=(),
         ),
         user_scope=user_scope,
     )

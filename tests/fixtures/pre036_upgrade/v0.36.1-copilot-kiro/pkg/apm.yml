@@ -1,0 +1,11 @@
+name: mcp-pkg
+version: 1.0.0
+description: Copilot and Kiro upgrade fixture
+dependencies:
+  mcp:
+  - name: notes
+    registry: false
+    transport: stdio
+    command: node
+    args:
+    - server.js

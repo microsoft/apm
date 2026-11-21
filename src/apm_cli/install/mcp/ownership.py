@@ -76,29 +76,6 @@ def adoptable_root_mcp_entries(names: frozenset[str]) -> Iterator[None]:
         _adoptable_root_names.reset(token)
 
 
-def native_mcp_entry_present(
-    runtime: str,
-    name: str,
-    *,
-    stored_config: dict | None,
-    project_root: Any,
-    user_scope: bool,
-) -> bool:
-    """Whether *runtime*'s native config already holds an entry for *name*."""
-    from apm_cli.core.conflict_detector import MCPConflictDetector
-    from apm_cli.factory import ClientFactory
-
-    try:
-        client = ClientFactory.create_client(
-            runtime, project_root=project_root, user_scope=user_scope
-        )
-        existing = MCPConflictDetector(client).get_existing_server_configs()
-    except Exception:
-        logger.debug("Could not read %s MCP config", runtime, exc_info=True)
-        return True  # unreadable: never treat as safely absent
-    return _native_config_key(client, name, stored_config=stored_config) in existing
-
-
 def native_comparison_clients(
     target_runtimes: list[str], *, project_root: Any, user_scope: bool
 ) -> dict[str, Any]:
@@ -930,6 +907,9 @@ def reconcile_legacy_truncated_key(
     if legacy_key == dep_name or legacy_key in claimed_keys:
         return
     scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    # Runtimes that share one config file (Claude Code and Copilot CLI both
+    # read .mcp.json) report a left legacy entry once (#4289).
+    warned_paths: set[str] = set()
     for rt in runtimes:
         if rt in _DECLARED_KEY_RUNTIMES:
             continue
@@ -959,6 +939,9 @@ def reconcile_legacy_truncated_key(
                     native_hashes={rt: {legacy_key: legacy_hash}} if legacy_hash else None,
                 )
             except RequiredIntegrationError:
+                if str(config_path) in warned_paths:
+                    continue
+                warned_paths.add(str(config_path))
                 logger.warning(
                     f"Left existing MCP server '{legacy_key}' in {config_path}: it changed "
                     f"since APM wrote it for '{dep_name}'. Remove it manually if it is "
@@ -966,7 +949,8 @@ def reconcile_legacy_truncated_key(
                 )
                 continue
             logger.progress(f"Renamed MCP server '{legacy_key}' to '{dep_name}' in {config_path}")
-        else:
+        elif str(config_path) not in warned_paths:
+            warned_paths.add(str(config_path))
             logger.warning(
                 f"Left existing MCP server '{legacy_key}' in {config_path}: APM has no "
                 f"record of writing it for '{dep_name}'. Remove it manually if it is "

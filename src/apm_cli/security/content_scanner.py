@@ -29,6 +29,16 @@ class ScanFinding:
     description: str
     pointer: str | None = None
 
+    @property
+    def location(self) -> str:
+        """Render the file and the JSON pointer inside it as separate parts."""
+        return pointer_location(self.file, self.pointer)
+
+
+def pointer_location(file: str, pointer: str | None) -> str:
+    """The one ``<file> at <pointer>`` form for audit locations (RA-043)."""
+    return f"{file} at {pointer}" if pointer else file
+
 
 # Each entry: (range_start, range_end, severity, category, description)
 # range_end is inclusive.

@@ -74,6 +74,16 @@ class InstallContext:
     allow_insecure_hosts: tuple[str, ...] = ()
     trust_bin: bool | None = None
     trust_transitive_mcp: bool = False
+    # MCP servers the command integrates after this pipeline: the commit gate
+    # enforces their policy before any deploy (install/commit_gate.py).
+    install_mcp: bool = True
+    mcp_runtime: str | None = None
+    mcp_policy_enforced: bool = False
+    # --dry-run: what this pipeline could not resolve, and the merged MCP set
+    # the commit gate collected (install/dry_run_plan.py renders both).
+    preview_errors: list[str] = field(default_factory=list)
+    preview_declaration_errors: list[str] = field(default_factory=list)
+    preview_mcp_dependencies: tuple[Any, ...] | None = None
     transaction: Any = None  # InstallTransaction
     claude_native_plugins: dict[str, ClaudeNativePlugin] = field(default_factory=dict)
     # Dependency keys routed to native Claude this run, admitted or parked.
@@ -128,6 +138,7 @@ class InstallContext:
     # Targets phase outputs
     # ------------------------------------------------------------------
     targets: list[Any] = field(default_factory=list)  # targets
+    created_target_roots: list[Path] = field(default_factory=list)  # targets
     integrators: dict[str, Any] = field(default_factory=dict)  # targets
 
     # ------------------------------------------------------------------
@@ -176,7 +187,16 @@ class InstallContext:
     # Cleanup refusals retain the original lockfile hash, not a hash of
     # user-edited bytes. Lockfile assembly consumes this after cleanup.
     package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    # Managed files install kept without deployment evidence: (owner, entry) (#4360).
+    kept_overwrites: list[tuple[str, str]] = field(default_factory=list)
+    # Kept entries a pre-0.37 lock proves edited: "drift" or "blocked" (#4398).
+    kept_overwrite_kinds: dict[str, str] = field(default_factory=dict)
+    # Unedited pre-0.37 renders a frozen replay kept as committed (#4398).
+    legacy_adopted: int = 0
+    kept_overwrite_written: list[str] = field(default_factory=list)
     orphan_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    # Declared members integration left on disk unwritten; cleanup retains them.
+    kept_deployed_values: frozenset[str] = frozenset()
     package_types: dict[str, str] = field(default_factory=dict)
     # Package content hashes in the stream the existing lockfile records
     # (legacy for versions 1-3, framed for 4 or a new lockfile), and the framed
@@ -247,6 +267,8 @@ class InstallContext:
     # ------------------------------------------------------------------
     policy_fetch: Any = None  # Optional[PolicyFetchResult] from discovery
     policy_enforcement_active: bool = False
+    # Dependencies a blocking org policy refused by identity before any fetch.
+    prefetch_policy_denials: list[Any] = field(default_factory=list)
     no_policy: bool = False  # W2-escape-hatch will wire --no-policy here
     audit_override: str | None = None  # --audit/--no-audit CLI override (off|warn|block)
     skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages
@@ -260,6 +282,7 @@ class InstallContext:
     # ------------------------------------------------------------------
     old_local_deployed: list[str] = field(default_factory=list)  # pipeline setup
     local_deployed_files: list[str] = field(default_factory=list)  # integrate (root)
+    local_hooks_merged: bool = False  # integrate (root merged hook entries, #4033)
     local_content_errors_before: int = 0  # integrate (pre-root)
 
     # ------------------------------------------------------------------

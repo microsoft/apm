@@ -15,6 +15,7 @@ from apm_cli.core.remediation import (
     ORPHANED_PACKAGES_PRUNE,
 )
 from apm_cli.core.scope import manifest_file
+from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.install.locking import serialized_lifecycle, serialized_lifecycle_unless
 
 # Import existing APM components
@@ -57,7 +58,7 @@ def _format_primitive_counts(primitives):
     return ", ".join(parts)
 
 
-_PROVIDER_SOURCE_LABELS = {"ado": "azure-devops", "gitlab": "gitlab"}
+_PROVIDER_SOURCE_LABELS = {"ado": "azure-devops", "gitlab": "gitlab", "generic": "git"}
 
 
 def _deps_list_source_label(
@@ -70,7 +71,8 @@ def _deps_list_source_label(
     """Map a dependency's provider to the ``apm deps list`` Source column.
 
     Remote hosts classify through the canonical provider registry, so a
-    declared or locked ``host_type`` labels a self-hosted GitLab correctly.
+    declared or locked ``host_type`` labels a self-hosted GitLab correctly,
+    and an unrecognized host is labeled ``git`` rather than ``github``.
     """
     from ...core.host_providers import classify_host_provider
 
@@ -1089,6 +1091,7 @@ def clean(dry_run: bool, yes: bool):
     ),
 )
 @serialized_lifecycle
+@lockfile_writer(LockfileWriter.UPDATE)
 def update(packages, verbose, force, target, parallel_downloads, global_, legacy_skill_paths):
     """Update APM dependencies to latest git refs.
 

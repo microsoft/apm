@@ -1,0 +1,24 @@
+lockfile_version: '1'
+apm_version: 0.36.1
+dependencies:
+- repo_url: _local/pkg
+  name: single-pkg
+  version: 1.0.0
+  package_type: apm_package
+  deployed_files:
+  - .github/instructions/tools.instructions.md
+  deployed_file_hashes:
+    .github/instructions/tools.instructions.md: sha256:ce5f642fff61aca0238202465ff876666e98c32ab253f831204e249ce6f71528
+  source: local
+  local_path: ../pkg
+  content_hash: sha256:5ea186a2d0b1ba58a2305bd7f124007428e10fdb1f68aee21d8a115d7d2af815
+deployments:
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/tools.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:ce5f642fff61aca0238202465ff876666e98c32ab253f831204e249ce6f71528

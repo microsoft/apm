@@ -230,7 +230,7 @@ def test_install_preview_keeps_files_a_retained_owner_still_claims(
     kept = {
         line.removeprefix("Kept ").split(":", 1)[0]
         for line in _lines(preview.stdout)
-        if line.startswith("Kept ") and line.endswith("still deployed by a remaining package")
+        if line.startswith("Kept ") and line.endswith("still deployed by a remaining package.")
     }
     assert kept == shared
 

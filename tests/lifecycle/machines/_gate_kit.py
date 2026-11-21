@@ -139,6 +139,23 @@ def _frozen_after_tightening(machine: GateMachine, op: Operation, before, after,
 
 
 _HOOK_KEY = "hook-file"
+# The exec_status a plain install records for each gate state (#4053).
+_RECORDED_STATUS = {"allow": "deployed", "pending": "gated_pending_approval"}
+
+
+def _stale_decision(machine: GateMachine, before: Observation) -> bool:
+    """The lock records an executables decision the gate no longer makes (#4053)."""
+    lock = before.lock
+    if lock is None:
+        return False
+    for kind in machine.declared:
+        path = str(machine.world.packages[kind])
+        wanted = _RECORDED_STATUS.get(machine.gate_state(kind), "denied")
+        for dependency in lock.get_package_dependencies():
+            recorded = dependency.exec_status
+            if dependency.local_path == path and recorded not in (None, "absent", wanted):
+                return True
+    return False
 
 
 def _recorded(observation: Observation) -> frozenset[str]:
@@ -158,67 +175,9 @@ def _recorded(observation: Observation) -> frozenset[str]:
     return frozenset(keys)
 
 
-KNOWN_CELLS: tuple[KnownCell, ...] = (
-    KnownCell(
-        "gate-cell-approve-usage",
-        "R",
-        "#4262",
-        lambda machine, op, before, after, result: (
-            op.name == "approve" and not op.cell_kinds and result is not None
-        ),
-        match=r"^approve without a package exited 1, expected 2$",
-    ),
-    KnownCell(
-        "gate-cell-update-empty",
-        "R",
-        "#4263",
-        lambda machine, op, before, after, result: (
-            op.name == "update"
-            and bool(op.cell_kinds)
-            and not machine.declared
-            and result is not None
-            and result.returncode == 0
-        ),
-        match=r"^update [a-z]+ exited 0, expected 1$",
-    ),
-    KnownCell(
-        "gate-cell-c-lock",
-        "I1",
-        "#4043",
-        _frozen_after_tightening,
-        match=r"^recorded file is missing: .*hook-kit-session\.json$",
-    ),
-    KnownCell(
-        "gate-cell-c-pair",
-        "I3",
-        "#4043",
-        lambda machine, op, before, after, result: (
-            op.name == "install-frozen"
-            and bool(op.paired)
-            and _frozen_after_tightening(machine, op, before, after, result)
-        ),
-        match=r"^audit --ci exited 1 but install --frozen exited 0$",
-        scopes=("project",),
-    ),
-    KnownCell(
-        "gate-cell-g",
-        "I3",
-        "#4050",
-        lambda machine, op, before, after, result: (
-            op.name == "install-frozen" and op.paired.get("audit") == 0 and before.lock is None
-        ),
-        match=r"^audit --ci exited 0 but install --frozen exited 1$",
-    ),
-    KnownCell(
-        "gate-cell-g",
-        "I2",
-        "#4050",
-        lambda machine, op, before, after, result: (
-            op.name == "install-frozen" and machine.converged and before.lock is None
-        ),
-        match=r"^converged install-frozen exited 1$",
-    ),
-)
+# gate-cell-c-lock (#4043) is fixed: install --frozen refuses a tightened gate
+# before any write, so no recorded hook goes missing (RA-024).
+KNOWN_CELLS: tuple[KnownCell, ...] = ()
 
 
 @dataclass
@@ -396,7 +355,16 @@ class GateWorld:
             # The world's LSP server, as the adapter config shows it; I1 reconciles
             # it with the lock's lsp claims (#4133).
             services={"lsp": frozenset({_LSP_SERVER}) if "lsp" in deployed else frozenset()},
+            surface_paths=self._surface_paths(),
         )
+
+    def _surface_paths(self) -> dict[str, frozenset[str]]:
+        """Artifact paths each gate surface deploys, under the deploy root's id."""
+        root = "project" if self.scope == "project" else "home"
+        return {
+            "hook": frozenset({f"{root}:{_HOOK_FILE[self.scope]}"}),
+            "lsp": frozenset({f"{root}:{_LSP_FILE[self.scope]}"}),
+        }
 
 
 def _hook_package(root: Path) -> Path:
@@ -567,8 +535,14 @@ class GateMachine(RuleBasedStateMachine):
             if result is None:
                 return []
             # The outcome comes first: a plain install or update on local
-            # packages succeeds; --frozen refuses only without a lockfile (#4133).
-            expected = 1 if mode == "frozen" and before.lock is None else 0
+            # packages succeeds; --frozen refuses without a lockfile (#4133) unless
+            # nothing is declared (a converged no-op, #4050), and when it retired a
+            # hook the lock still records (I7-X1, #4043) or the lock records a
+            # stale executables decision (#4053).
+            retired = _frozen_after_tightening(self, Operation(name), before, after, result)
+            missing_lock = before.lock is None and bool(self.declared)
+            refused = missing_lock or retired or _stale_decision(self, before)
+            expected = 1 if mode == "frozen" and refused else 0
             if result.returncode != expected:
                 return [f"{name} exited {result.returncode}, expected {expected}"]
             if result.returncode != 0 or mode != "plain":

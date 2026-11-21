@@ -49,7 +49,7 @@ steps:
       - "Available: composition-patterns, deploy-to-vercel, preview, react-best-practices, web-design-guidelines."
       - "No install transaction changes were committed."
     remediate:
-      - {advice: apm install vercel-labs/agent-skills --skill preview}
+      - {advice: apm install vercel-labs/agent-skills --skill composition-patterns}
     rerun: [apm install vercel-labs/agent-skills --skill preview]
   - n: 4
     run: ["apm install vercel-labs/agent-skills --skill '*'"]
@@ -78,8 +78,3 @@ steps:
       - "[i] Cleaned 10 stale deployed paths for vercel-labs/agent-skills:"
       - "[i] Removed vercel-labs/agent-skills from dependencies.apm in apm.yml"
 known_cells:
-  - id: skill-miss-no-runnable-advice
-    law: O8
-    tracking: "#4206"
-    step: 3
-    match: "is not printed"

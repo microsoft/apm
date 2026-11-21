@@ -13,7 +13,7 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.scope import InstallScope
-from apm_cli.deps.lockfile import LockFile
+from apm_cli.deps.lockfile import FRAMED_CONTENT_HASH_VERSION, LockFile
 from apm_cli.models.apm_package import clear_apm_yml_cache
 from apm_cli.utils.content_hash import compute_file_hash
 
@@ -208,7 +208,8 @@ def _assert_replacement_intent_preserves_receipts(
         after = LockFile.read(lock_path)
         assert before is not None and after is not None
         assert after.replacements == declared
-        assert after.lockfile_version == "3"
+        # Local deployed-file hashes and no package hash: the current schema (RA-018).
+        assert after.lockfile_version == FRAMED_CONTENT_HASH_VERSION
         after.replacements = before.replacements
         after.lockfile_version = before.lockfile_version
         assert after.is_semantically_equivalent(before)

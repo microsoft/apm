@@ -13,7 +13,9 @@ rather than duplicate it.  The gate phase adds pipeline-specific wiring
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import contextlib
+from collections.abc import Iterator, Mapping
+from contextvars import ContextVar
 from pathlib import Path
 
 # #832: Canonical exception type lives in ``apm_cli.install.errors``.
@@ -53,6 +55,35 @@ def emit_check_violations(logger, check, *, severity: str, source: str | None) -
             declared_by=subject.declared_by,
             rule=check.name,
         )
+
+
+def render_dry_run_verdicts(logger, audit_result, enforcement: str) -> None:
+    """Render failed checks as a capped ``--dry-run`` preview per severity."""
+    block_lines: list[tuple[str, str]] = []
+    warn_lines: list[tuple[str, str]] = []
+    for check in audit_result.failed_checks:
+        # #832: a failed check without subjects still yields one entry
+        # (keyed by its name), so it is never silently omitted.
+        for subject in check.violation_subjects():
+            line = (subject.ref, subject.reason)
+            if enforcement == "block":
+                block_lines.append(line)
+            else:
+                warn_lines.append(line)
+
+    for dep_ref, detail in block_lines[:_DRY_RUN_PREVIEW_LIMIT]:
+        logger.warning(f"Would be blocked by policy: {dep_ref} -- {detail}")
+    overflow = len(block_lines) - _DRY_RUN_PREVIEW_LIMIT
+    if overflow > 0:
+        logger.warning(
+            f"... and {overflow} more would be blocked by policy. Run `apm audit` for full report."
+        )
+
+    for dep_ref, detail in warn_lines[:_DRY_RUN_PREVIEW_LIMIT]:
+        logger.warning(f"Policy warning: {dep_ref} -- {detail}")
+    overflow = len(warn_lines) - _DRY_RUN_PREVIEW_LIMIT
+    if overflow > 0:
+        logger.warning(f"... and {overflow} more policy warnings. Run `apm audit` for full report.")
 
 
 def run_policy_preflight(
@@ -173,38 +204,7 @@ def run_policy_preflight(
 
     if not audit_result.passed:
         if dry_run:
-            # -- D2: capped preview per severity bucket ----------------
-            block_lines: list[tuple[str, str]] = []
-            warn_lines: list[tuple[str, str]] = []
-            for check in audit_result.failed_checks:
-                # #832: a failed check without subjects still yields one
-                # entry (keyed by its name), so it is never silently
-                # omitted from the dry-run preview.
-                for subject in check.violation_subjects():
-                    line = (subject.ref, subject.reason)
-                    if enforcement == "block":
-                        block_lines.append(line)
-                    else:
-                        warn_lines.append(line)
-
-            # Emit block bucket (capped)
-            for dep_ref, detail in block_lines[:_DRY_RUN_PREVIEW_LIMIT]:
-                logger.warning(f"Would be blocked by policy: {dep_ref} -- {detail}")
-            overflow = len(block_lines) - _DRY_RUN_PREVIEW_LIMIT
-            if overflow > 0:
-                logger.warning(
-                    f"... and {overflow} more would be blocked by policy. "
-                    "Run `apm audit` for full report."
-                )
-
-            # Emit warn bucket (capped)
-            for dep_ref, detail in warn_lines[:_DRY_RUN_PREVIEW_LIMIT]:
-                logger.warning(f"Policy warning: {dep_ref} -- {detail}")
-            overflow = len(warn_lines) - _DRY_RUN_PREVIEW_LIMIT
-            if overflow > 0:
-                logger.warning(
-                    f"... and {overflow} more policy warnings. Run `apm audit` for full report."
-                )
+            render_dry_run_verdicts(logger, audit_result, enforcement)
         else:
             # -- Real install: push each violation to DiagnosticCollector
             for check in audit_result.failed_checks:
@@ -223,3 +223,59 @@ def run_policy_preflight(
             )
 
     return fetch_result, True
+
+
+def prefetch_identity_policy(policy_root: Path, *, no_policy: bool = False):
+    """The blocking org policy that refuses a dependency before it is fetched.
+
+    A deny or allow rule decides on the dependency identity alone, so a
+    dependency the policy blocks is never contacted, cloned or cached.
+    Returns ``None`` when policy is disabled, unusable or not blocking;
+    the install gate then reports the outcome as before.
+    """
+    from .discovery import policy_disabled_by_env
+    from .outcome_routing import resolve_trust_policy
+
+    if no_policy or policy_disabled_by_env():
+        return None
+    policy = resolve_trust_policy(policy_root, announce=False, raise_blocking_errors=False)
+    if policy is None or policy.enforcement != "block":
+        return None
+    return policy
+
+
+def identity_policy_denial(dependency, policy) -> str | None:
+    """The reason *policy* refuses *dependency* by identity, else ``None``."""
+    if policy is None:
+        return None
+    from .matcher import check_dependency_allowed
+
+    allowed, reason = check_dependency_allowed(dependency, policy.dependencies)
+    return None if allowed else reason
+
+
+_IDENTITY_POLICY: ContextVar[object | None] = ContextVar("identity_policy", default=None)
+
+
+@contextlib.contextmanager
+def identity_policy_scope(policy_root: Path, *, no_policy: bool = False) -> Iterator[None]:
+    """Make the blocking policy visible to package validation for one install."""
+    policy = prefetch_identity_policy(Path(policy_root).resolve(), no_policy=no_policy)
+    token = _IDENTITY_POLICY.set(policy)
+    try:
+        yield
+    finally:
+        _IDENTITY_POLICY.reset(token)
+
+
+def active_identity_policy():
+    """The blocking policy of the enclosing :func:`identity_policy_scope`, if any."""
+    return _IDENTITY_POLICY.get()
+
+
+def identity_policy_refuses(dependency) -> bool:
+    """Whether the enclosing scope's policy refuses *dependency*, so it is never probed.
+
+    The install's policy gate reports the refusal.
+    """
+    return identity_policy_denial(dependency, active_identity_policy()) is not None

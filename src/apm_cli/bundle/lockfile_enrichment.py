@@ -212,6 +212,30 @@ def _filter_files_by_target(
     return direct, path_mappings
 
 
+# Top-level lockfile keys that record the packager's OWN install state
+# (deployment receipts, MCP/LSP wiring, staged local content, the manifest
+# targets seen at install time). Bundle consumers never read them -- bundle
+# MCP/LSP servers ship as files -- and keeping them would make the packed lock
+# differ before vs after the author runs ``apm install`` (RA-031).
+_AUTHOR_INSTALL_STATE_KEYS = (
+    "manifest_targets",
+    "deployments",
+    "mcp_servers",
+    "mcp_configs",
+    "mcp_omissions",
+    "mcp_target_servers",
+    "mcp_config_provenance",
+    "lsp_servers",
+    "lsp_configs",
+    "lsp_target_servers",
+    "lsp_config_provenance",
+    "local_deployed_files",
+    "local_deployed_file_hashes",
+    "local_staged_files",
+    "local_staged_file_hashes",
+)
+
+
 def enrich_lockfile_for_pack(
     lockfile: LockFile,
     fmt: str | BundleFormat,
@@ -253,7 +277,7 @@ def enrich_lockfile_for_pack(
     # Build a filtered lockfile YAML: each dep's deployed_files is narrowed
     # to only the paths matching the pack target (with cross-target mapping).
     all_mappings: dict[str, str] = {}
-    data = yaml.safe_load(lockfile.to_yaml())
+    data = yaml.safe_load(lockfile.without_author_local_state().to_yaml())
     if data and "dependencies" in data:
         for dep in data["dependencies"]:
             if "deployed_files" in dep:
@@ -272,9 +296,10 @@ def enrich_lockfile_for_pack(
     # in the bundle lockfile would cause ``LockFile.from_yaml()`` on the
     # consumer side to synthesize a self-entry whose ``deployed_files`` do
     # not exist under the bundle source dir, breaking unpacker verification.
+    # The rest of the packager's install receipts go too (RA-031).
     if isinstance(data, dict):
-        data.pop("local_deployed_files", None)
-        data.pop("local_deployed_file_hashes", None)
+        for key in _AUTHOR_INSTALL_STATE_KEYS:
+            data.pop(key, None)
         # The bundle lock is a new artifact: its generator is the packer, so a
         # consumer older than this APM is warned (#3962).
         from apm_cli.deps.lockfile import installed_apm_version

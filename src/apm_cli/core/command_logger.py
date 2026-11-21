@@ -7,7 +7,7 @@ from apm_cli.utils.console — no new output primitives.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -102,6 +102,7 @@ class CommandLogger:
         self.verbose = verbose
         self.dry_run = dry_run
         self._diagnostics = None  # Lazy init
+        self._targets_announced = False
 
     @property
     def diagnostics(self):
@@ -122,7 +123,14 @@ class CommandLogger:
         """Log progress during an operation."""
         _rich_info(message, symbol=symbol)
 
-    def mcp_lookup_heartbeat(self, count: int):
+    def announce_targets(self, line: str) -> None:
+        """Print the canonical ``Targets: X  (source: Y)`` line once per command."""
+        if self._targets_announced:
+            return
+        self._targets_announced = True
+        _rich_info(line, symbol="info")
+
+    def mcp_lookup_heartbeat(self, count: int, registry: str | None = None):
         """Emit a single batch heartbeat before MCP registry validation
         (F4, microsoft/apm#1116).
 
@@ -138,7 +146,8 @@ class CommandLogger:
         if count <= 0:
             return
         noun = "server" if count == 1 else "servers"
-        _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
+        where = f"registry {registry}" if registry else "registry"
+        _rich_info(f"Looking up {count} MCP {noun} in {where}...", symbol="running")
 
     def info(self, message: str, symbol: str = "info", *, soft_wrap: bool = False):
         """Log static advisory / informational context.
@@ -283,6 +292,10 @@ class CommandLogger:
         if self._diagnostics and self._diagnostics.has_diagnostics:
             self._diagnostics.render_summary()
 
+    def nothing_to_prune(self) -> None:
+        """Log the single no-op line of ``apm prune``, whatever apm_modules/ holds (#4460)."""
+        _rich_success("No orphaned packages found. Nothing to prune.", symbol="check")
+
 
 # --- Library output -----------------------------------------------------------
 # Library code below the command layer (MCP client adapters, the safe MCP
@@ -317,6 +330,16 @@ def library_logger() -> CommandLogger:
     return NullCommandLogger()
 
 
+def _dependency_identity(ref: str) -> str | None:
+    """Canonical identity of a dependency reference, or ``None`` if it does not parse."""
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    try:
+        return DependencyReference.parse(ref).get_identity()
+    except (ValueError, TypeError):
+        return None
+
+
 class InstallLogger(CommandLogger):
     """Install-specific logger with validation, resolution, and download phases.
 
@@ -344,6 +367,10 @@ class InstallLogger(CommandLogger):
         # The project's own .apm/ content changed on disk; never an APM dependency.
         self._local_content_updated = False
         self._failed_install_residue_note = ""
+        # Identities `apm install <pkg>` is adding; a refused add never reaches apm.yml.
+        self._adding: frozenset[str] = frozenset()
+        # Policy banners already shown; the package and MCP phases share them.
+        self._policy_banners: set[tuple[str, ...]] = set()
 
     def failed_install_residue(self, residue: FailedInstallResidue) -> None:
         """List native target output a failed install left behind, with one next step.
@@ -372,16 +399,40 @@ class InstallLogger(CommandLogger):
             for entry in entries:
                 self.error_detail(f"  {entry}")
         command = "apm install -g" if residue.user_scope else "apm install"
-        force_hint = "(add --force if it skips them as not managed by APM)."
+        # Never a --force hint: it also deploys despite critical findings (RA-008).
         if files:
-            self.info(f"Remove these files, or re-run '{command}' {force_hint}")
+            self.info(f"Remove these files, then re-run '{command}'.")
         else:
-            self.info(f"Re-run '{command}' {force_hint}")
+            self.info(f"Re-run '{command}'.")
         total = len(files) + len(entries)
         self._failed_install_residue_note = (
             f"{total} native target {'item' if total == 1 else 'items'} listed above "
             f"{'remains' if total == 1 else 'remain'} in place."
         )
+
+    def kept_overwrites(self, kept: int, written: Sequence[str]) -> None:
+        """Name the files an install wrote beside the managed files it kept (#4360)."""
+        if written:
+            self.info(f"This install wrote {len(written)} file(s), recorded in apm.lock.yaml:")
+            for path in written:
+                self.error_detail(f"  {path}")
+        # The lock is rewritten for the files written; the kept files' entries
+        # are carried over unchanged (RA-009), so say both.
+        if written:
+            note = (
+                f"apm.lock.yaml records the {len(written)} written file(s) and keeps the "
+                f"previous entries of the {kept} kept file(s)."
+            )
+        elif self._lockfile_written:
+            # Nothing was written, but the lock was (an older format upgraded,
+            # or hash copies normalized to the deployment ledger): say so.
+            note = (
+                "apm.lock.yaml is rewritten in the current format; it records the "
+                f"{kept} kept file(s) as APM last deployed them."
+            )
+        else:
+            note = f"apm.lock.yaml keeps the previous entries of the {kept} kept file(s)."
+        self._failed_install_residue_note = note
 
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
         """Report retained revision pins once, with per-pin verbose detail."""
@@ -555,8 +606,12 @@ class InstallLogger(CommandLogger):
         Called from the MAIN thread by the resolver/download callback
         BEFORE network work begins; F7's parallel BFS keeps emission
         on the main thread so output ordering is deterministic even
-        when downloads are dispatched to a worker pool.
+        when downloads are dispatched to a worker pool. A ``--dry-run``
+        preview keeps it verbose-only so it lists only what it would install.
         """
+        if self.dry_run:
+            self.verbose_detail(f"Resolving {dep_name}...")
+            return
         _rich_info(f"Resolving {dep_name}...", symbol="running")
 
     def download_complete(
@@ -688,7 +743,7 @@ class InstallLogger(CommandLogger):
             color="dim",
         )
 
-    def materialize_result(self, sparse_applied: bool, consumer_size_bytes: int):
+    def materialize_result(self, dep_name: str, sparse_applied: bool, consumer_size_bytes: int):
         """Log materialization outcome and consumer dir size (verbose only).
 
         ``sparse_applied`` tells the reader whether sparse-cone fired
@@ -702,7 +757,7 @@ class InstallLogger(CommandLogger):
         size_mb = consumer_size_bytes / (1024 * 1024)
         applied = "yes" if sparse_applied else "no"
         _rich_echo(
-            f"    [i] perf: materialize sparse={applied} size={size_mb:.2f} MB",
+            f"    [i] perf: materialize {dep_name} sparse={applied} size={size_mb:.2f} MB",
             color="dim",
         )
 
@@ -796,6 +851,8 @@ class InstallLogger(CommandLogger):
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
+        if not self._first_policy_banner("resolved", source, enforcement):
+            return
         parts = [f"Policy: {source}"]
         if chain and len(chain) > 1:
             # The leaf is already the source; show its ancestors root first.
@@ -853,6 +910,8 @@ class InstallLogger(CommandLogger):
             hint: Optional discovery diagnostic (``PolicyFetchResult.
                 discovery_hint``), shown with ``absent`` in verbose mode only.
         """
+        if not self._first_policy_banner("miss", outcome, source):
+            return
         err_text = error or "unknown"
 
         if outcome == "absent":
@@ -902,7 +961,7 @@ class InstallLogger(CommandLogger):
             _rich_warning(
                 f"Could not fetch org policy from {source} ({err_text}); "
                 "proceeding without policy enforcement. "
-                "Retry, check connectivity, or use --no-policy to bypass.",
+                "Retry, check connectivity, or run `apm policy status` to diagnose.",
                 symbol="warning",
             )
             return
@@ -913,7 +972,7 @@ class InstallLogger(CommandLogger):
             _rich_warning(
                 f"Policy response from {source} is not valid YAML "
                 f"({err_text}); proceeding without policy enforcement. "
-                "Contact your org admin or use --no-policy.",
+                "Contact your org admin to fix the policy source.",
                 symbol="warning",
             )
             return
@@ -1006,19 +1065,40 @@ class InstallLogger(CommandLogger):
                         remedy=remedy,
                         declared_by=declared_by,
                         rule=rule,
-                        command=self.command,
+                        refused_add=self._refused_add(declared_by, dep_ref),
                     ),
                     color="dim",
                     err=True,
                 )
+
+    def record_adding(self, packages: Iterable[str]) -> None:
+        """Name the packages this ``apm install <pkg>`` adds to apm.yml (RA-015b)."""
+        self._adding = frozenset(filter(None, map(_dependency_identity, packages)))
+
+    def _refused_add(self, *refs: str | None) -> bool:
+        return any(_dependency_identity(ref) in self._adding for ref in refs if ref)
+
+    def _first_policy_banner(self, *key: str) -> bool:
+        """Record a policy banner; False when this invocation already showed it.
+
+        The package phase and the MCP phase both route the same policy
+        outcome, so every policy banner is printed once per invocation.
+        """
+        if key in self._policy_banners:
+            return False
+        self._policy_banners.add(key)
+        return True
 
     def policy_disabled(self, reason: str):
         """Log a loud warning that policy enforcement is disabled.
 
         Emitted when ``--no-policy`` or ``APM_POLICY_DISABLE=1`` is
         active.  Always visible (never silenceable) -- matches the
-        ``--allow-insecure`` pattern.
+        ``--allow-insecure`` pattern.  Shown once per invocation even when
+        several install phases check the escape hatch.
         """
+        if not self._first_policy_banner("disabled", reason):
+            return
         _rich_warning(
             f"Policy enforcement disabled by {reason} for this invocation. "
             "This does NOT bypass apm audit --ci. "
@@ -1037,23 +1117,11 @@ class InstallLogger(CommandLogger):
         )
 
     @staticmethod
-    def _policy_bypass_hint(command: str) -> str:
-        """One-off bypass the *command* actually accepts (#3994).
-
-        ``apm install`` has ``--no-policy``; other commands (``apm update``)
-        only honour a one-shot ``APM_POLICY_DISABLE=1`` prefix, which must
-        never be exported where it would disable policy for a whole CI job.
-        """
-        if command == "install":
-            return "use `--no-policy` for one-off bypass"
-        return f"bypass once with `APM_POLICY_DISABLE=1 apm {command}` (never export it in CI)"
-
-    @staticmethod
-    def _policy_reason_unreachable(source: str, *, command: str = "install") -> str:
-        """Actionable reason for unreachable policy source."""
+    def _policy_reason_unreachable(source: str) -> str:
+        """Actionable reason for unreachable policy source; never a bypass (RA-015)."""
         return (
-            f"Policy source {source} is unreachable "
-            f"-- retry, check VPN/firewall, or {InstallLogger._policy_bypass_hint(command)}"
+            f"Policy source {source} is unreachable -- retry, check VPN/firewall, "
+            "or run `apm policy status` to diagnose"
         )
 
     @staticmethod
@@ -1069,30 +1137,34 @@ class InstallLogger(CommandLogger):
         remedy: PolicyRemedy | None = None,
         declared_by: str | None = None,
         rule: str | None = None,
-        command: str = "install",
+        refused_add: bool = False,
     ) -> str:
-        """Actionable reason for a blocked dependency.
+        """Actionable reason for a blocked dependency; never a policy bypass (RA-015).
 
         Only :class:`~apm_cli.policy.models.PolicyRemedy` members render an
-        apm.yml edit; ``None`` or an unknown remedy renders none.
+        apm.yml edit; ``None`` or an unknown remedy renders none. A package
+        this command was adding is not in apm.yml, so its remedy is to choose
+        another package (RA-015b).
         """
         from apm_cli.policy.models import PolicyRemedy
 
-        if remedy == PolicyRemedy.ADD:
-            edit = f"add `{dep_ref}` to apm.yml, "
+        if refused_add:
+            edit = "Choose a package the policy allows, or contact"
+        elif remedy == PolicyRemedy.ADD:
+            edit = f"Add `{dep_ref}` to apm.yml, or contact"
         elif remedy == PolicyRemedy.PIN:
-            edit = f"pin `{dep_ref}` to a semver range, tag, or SHA in apm.yml, "
+            edit = f"Pin `{dep_ref}` to a semver range, tag, or SHA in apm.yml, or contact"
         elif remedy == PolicyRemedy.REMOVE and declared_by:
-            edit = f"remove `{declared_by}` (it brings in `{dep_ref}`) from apm.yml, "
+            edit = f"Remove `{declared_by}` (it brings in `{dep_ref}`) from apm.yml, or contact"
         elif remedy == PolicyRemedy.REMOVE:
-            edit = f"remove `{dep_ref}` from apm.yml, "
+            edit = f"Remove `{dep_ref}` from apm.yml, or contact"
         else:
-            edit = ""
+            edit = "Contact"
         rule_part = f" ({rule})" if rule and rule != dep_ref else ""
         return (
-            f"Blocked by org policy at {source}{rule_part} "
-            f"-- {edit}contact admin to update policy, "
-            f"or {InstallLogger._policy_bypass_hint(command)}"
+            f"Blocked by org policy at {source}{rule_part}. Nothing was changed. "
+            f"{edit} your policy admin to allow it. "
+            "Run `apm policy status` to see the active policy."
         )
 
     # --- Install summary ---

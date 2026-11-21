@@ -28,6 +28,7 @@ from ..core.target_catalog import (
     canonical_target_token,
     deprecated_target_alias_message,
     first_deprecated_target_alias,
+    is_vendor_target_id,
     normalize_target_name,
 )
 from ..core.target_detection import (
@@ -43,11 +44,50 @@ _MANIFEST_TARGET_KEYS: tuple[str, ...] = ("target", "targets")
 _LEGACY_ALL_TARGET = "all"
 
 _deprecated_manifest_keys_warned: set[tuple[str, str]] = set()
+_vendor_targets_warned: set[tuple[str, str]] = set()
 
 
 def reset_manifest_deprecation_warnings() -> None:
     """Re-arm the once-per-process deprecation warnings. For tests only."""
     _deprecated_manifest_keys_warned.clear()
+    _vendor_targets_warned.clear()
+
+
+def _split_vendor_targets(names: Iterable[str]) -> tuple[list[str], tuple[str, ...]]:
+    """Split ``x-<vendor>-<name>`` targets (req-tg-004) from deployable ones."""
+    names = list(names)
+    return (
+        [name for name in names if not is_vendor_target_id(name)],
+        tuple(name for name in names if is_vendor_target_id(name)),
+    )
+
+
+def _warn_vendor_targets(vendor: tuple[str, ...], manifest_path: Path) -> None:
+    """Name each vendor target this APM has no handler for, once per process (#4251).
+
+    Only the consumer manifest selects deployment targets, so only it warns.
+    """
+    from ..core.scope import InstallScope
+    from ..utils.console import _rich_warning
+
+    scope = _consumer_manifest_scope(manifest_path)
+    if scope is None:
+        return
+    label = (
+        "apm.yml"
+        if scope is InstallScope.PROJECT
+        else ascii(Path(manifest_path).resolve().as_posix())[1:-1]
+    )
+    for name in vendor:
+        if (scope.value, name) in _vendor_targets_warned:
+            continue
+        _vendor_targets_warned.add((scope.value, name))
+        _rich_warning(
+            f"{label} declares vendor target '{name}', which has no registered handler "
+            "in this APM version; nothing is deployed for it.",
+            symbol="warning",
+            err=True,
+        )
 
 
 def _consumer_manifest_scope(manifest_path: Path) -> InstallScope | None:
@@ -239,6 +279,8 @@ class ManifestTargetDeclaration:
         declaration = cls.from_mapping(data, manifest_path)
         if warn_deprecated and declaration._is_valid():
             _warn_deprecated_manifest_keys(data, manifest_path)
+            if declaration.vendor_targets:
+                _warn_vendor_targets(declaration.vendor_targets, manifest_path)
         return declaration
 
     def _is_valid(self) -> bool:
@@ -255,15 +297,29 @@ class ManifestTargetDeclaration:
         return keys[-1] if keys else None
 
     @cached_property
-    def _validated(self) -> tuple[str | list[str] | None, tuple[str, ...]]:
+    def _parsed(self) -> tuple[str | list[str] | None, list[str]]:
         data = dict(self.fields)
         if "targets" in data:
             # Also rejects a manifest that declares both keys.
             parsed = parse_targets_field(data)
-            return (list(parsed) or None), canonical_target_names(parsed)
+            return (list(parsed) or None), list(parsed)
         value = parse_target_field(data.get("target"), source_path=self.source_path)
         values = value if isinstance(value, list) else [value] if isinstance(value, str) else []
-        return value, canonical_target_names(values)
+        return value, values
+
+    @cached_property
+    def _validated(self) -> tuple[str | list[str] | None, tuple[str, ...]]:
+        value, values = self._parsed
+        names, vendor = _split_vendor_targets(values)
+        if vendor:
+            # Vendor targets parse but select nothing APM can deploy (req-tg-004).
+            value = (names or None) if isinstance(value, list) else None
+        return value, canonical_target_names(names)
+
+    @property
+    def vendor_targets(self) -> tuple[str, ...]:
+        """Declared ``x-<vendor>-<name>`` targets, which this APM cannot deploy."""
+        return _split_vendor_targets(self._parsed[1])[1]
 
     @property
     def selection(self) -> str | list[str] | None:
@@ -313,7 +369,9 @@ class ManifestTargetDeclaration:
                 if strict:
                     self._raise_invalid_selection()
             return None
-        names = parse_targets_field(data, allow_empty_singular=not strict)
+        names, _vendor = _split_vendor_targets(
+            parse_targets_field(data, allow_empty_singular=not strict)
+        )
         return names or None
 
     def _raise_invalid_selection(self) -> None:

@@ -37,7 +37,7 @@ Those controls are owned by the **agent harness** that runs your agents, not by 
 Discovery order, in priority:
 
 1. Explicit policy source on `apm audit --ci` via `--policy <ref>` or `apm policy status` via `--policy-source <ref>`. `apm install` auto-discovers from the project's git remote and supports `--no-policy`; it does not accept `--policy` today.
-2. Auto-discovery from the project's git remote -- checks the org policy repo cascade (`.github-private`, `.github`, `.apm`, `_apm`; Azure DevOps uses repository `apm-policy` in project `apm`, then falls back to legacy `_apm/_apm` only after a 404). When no candidate has a policy, the install proceeds silently; `apm policy status` reports outcome `absent` (see [output fields](../cli/policy/#output-fields)). On GitHub, if `.github-private` returned 404, the status adds a hint that the credential may lack read access, because GitHub also answers 404 for private repositories you cannot read.
+2. Auto-discovery from the project's git remote -- checks the org policy repo cascade (`.github-private`, `.github`, `.apm`, `_apm`; Azure DevOps uses repository `apm-policy` in project `apm`, then falls back to legacy `_apm/_apm` only after a 404). When no candidate has a policy, the install proceeds silently; `apm policy status` reports outcome `absent` (see [output fields](../cli/policy/#output-fields)). On GitHub, if `.github-private` returned 404, the status adds a hint that the credential may lack read access, because GitHub also answers 404 for private repositories you cannot read. Offline, an unreachable earlier candidate does not hide a policy cached from a later one: a cached policy up to 7 days old is applied, and output names it as stale. An authentication error still fails closed.
 
 The `<ref>` accepts:
 
@@ -140,9 +140,9 @@ Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
 
 ```text
 [x] Policy violation: acme/lib -- bare branch 'main' tracks a moving tip
-  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint) -- pin `acme/lib` to a semver range, tag, or SHA in apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint). Nothing was changed. Pin `acme/lib` to a semver range, tag, or SHA in apm.yml, or contact your policy admin to allow it. Run `apm policy status` to see the active policy.
 [x] Policy violation: acme/skills -- no ref; resolves to default branch
-  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint) -- pin `acme/skills` to a semver range, tag, or SHA in apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint). Nothing was changed. Pin `acme/skills` to a semver range, tag, or SHA in apm.yml, or contact your policy admin to allow it. Run `apm policy status` to see the active policy.
 ```
 
 `apm audit --ci` lists the same dependencies under `dependency-pinned-constraint details:`.

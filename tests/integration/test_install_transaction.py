@@ -185,7 +185,7 @@ def test_marketplace_ref_pins_are_written_only_on_commit(
     from apm_cli.marketplace.version_pins import stage_ref_pin
 
     apm_home = tmp_path / "apm-home"
-    monkeypatch.setattr("apm_cli.config.CONFIG_DIR", str(apm_home))
+    monkeypatch.setenv("APM_HOME", str(apm_home))
     pins = apm_home / "cache" / "marketplace" / "version-pins.json"
     project = tmp_path / "project"
     project.mkdir()

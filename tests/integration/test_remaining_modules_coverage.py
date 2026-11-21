@@ -842,7 +842,7 @@ class TestLocalDependencySourceUserScope:
         return ctx
 
     def test_relative_local_path_skipped_at_user_scope(self, tmp_path: Path) -> None:
-        """Relative local paths return None at user scope (skip integration)."""
+        """A root-declared relative local path fails at user scope."""
         from apm_cli.install.sources import LocalDependencySource
 
         ctx = self._make_ctx(tmp_path)
@@ -853,7 +853,7 @@ class TestLocalDependencySourceUserScope:
         source = LocalDependencySource(ctx, dep_ref, tmp_path / "pkg", "key")
         result = source.acquire()
         assert result is None
-        ctx.diagnostics.warn.assert_called_once()
+        ctx.diagnostics.error.assert_called_once()
 
 
 class TestCachedDependencySourceResolveCachedCommit:

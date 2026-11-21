@@ -55,11 +55,16 @@ COMPONENT_ONLY: dict[str, str] = {
     "registration later moved; covered by the marketplace origin lifecycle tests",
     "marketplace-origin-switch": "needs a lockfile recorded against a marketplace whose "
     "registration later moved; covered by the marketplace origin lifecycle tests",
+    "marketplace-origin-switch-global": "user-scope form of marketplace-origin-switch; "
+    "full sentence asserted by test_conflict_remedy_names_the_refused_scope",
     "marketplace-register-manual": "alternative to marketplaces-outside-user-manifest; "
     "manual registration is covered by the marketplace add tests",
     "marketplace-unregistered-shorthand": _NETWORK,
     "marketplace-unregistered-url": _NETWORK,
     "marketplace-yml-compile": _TEMPLATE,
+    "marketplace-origin-readd": "full sentence asserted by test_remediation_gate9_call_sites; test_marketplace_origin_entry_points_lifecycle reaches the refusal",
+    "marketplace-origin-reinstall": "full sentence asserted by test_remediation_gate9_call_sites; test_marketplace_origin_entry_points_lifecycle reaches the refusal",
+    "marketplace-ref-swap-accept": "test_marketplace_ref_swap_lifecycle asserts the printed next step; full sentence in test_remediation_gate9_call_sites",
 }
 
 

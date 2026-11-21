@@ -75,7 +75,7 @@ _REQUIRED: dict[str, tuple[tuple[str, str], ...]] = {
     "src/apm_cli/install/native_plugin_admission.py": (
         ("framed=lock_dep.content_hash_framed", "verify in the row's stream"),
     ),
-    "src/apm_cli/install/service.py": (
+    "src/apm_cli/install/local_content_verdict.py": (
         ("selected_source, framed=dependency.content_hash_framed", "verify in the row's stream"),
     ),
     "src/apm_cli/security/trust.py": (

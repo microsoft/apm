@@ -126,9 +126,11 @@ def test_widened_install_names_every_destination_folder(
     widened = world.apm("install")
 
     destinations = (".claude/rules/", ".github/instructions/", ".cursor/rules/")
-    assert _integration_lines(widened) == [
-        f"  |-- 1 rule(s) integrated (2 adopted) -> {', '.join(destinations)}"
-    ], _evidence(widened)
+    # Only the new target's folder is written; the two receipted, unchanged
+    # folders are neither integrated nor adopted (RA-007).
+    assert _integration_lines(widened) == ["  |-- 1 rule(s) integrated -> .cursor/rules/"], (
+        _evidence(widened)
+    )
     for folder in destinations:
         assert any((world.project.root / folder).iterdir()), folder
     after = world.snap()

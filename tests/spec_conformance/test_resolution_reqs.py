@@ -330,7 +330,7 @@ def test_registry_picker_matches_semver_dialect_oracle(case):
     assert pick_best(case["range"], case["tags"]) == case["expected"]
 
 
-@pytest.mark.xfail(strict=True, reason="registry range grammar does not accept this form yet")
+@pytest.mark.xfail(strict=True, reason="#3648 registry range grammar does not accept this form yet")
 @pytest.mark.parametrize("case", _registry_oracle_cases(grammar_gaps=True))
 def test_registry_picker_range_grammar_gaps(case):
     assert pick_best(case["range"], case["tags"]) == case["expected"]

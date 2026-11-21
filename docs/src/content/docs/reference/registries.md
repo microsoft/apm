@@ -58,7 +58,7 @@ apm install
 
 On success, `apm.lock.yaml` records `source: registry`, `version`, `resolved_url`, and `resolved_hash` for each registry dep. A `404` usually means the package is not published or the `owner/repo` is wrong.
 
-Registry URLs MUST start with `https://`. Anonymous `http://` access is limited to loopback addresses for local development. Credentials are never sent over HTTP. Prefer lowercase registry names with letters, digits, and `-` (see [names that share an env var](#registry-names-that-sanitize-to-the-same-env-var)). Unknown keys under a registry entry are rejected at parse time (typo guard).
+Registry URLs MUST start with `https://`. An `http://` URL is a parse error unless the host is loopback or an RFC 1918 private address, or the entry sets `insecure: true`; at install time anonymous `http://` access is limited to loopback addresses for local development. Credentials are never sent over HTTP. Prefer lowercase registry names with letters, digits, and `-` (see [names that share an env var](#registry-names-that-sanitize-to-the-same-env-var)). Unknown keys under a registry entry are rejected at parse time (typo guard); `x-` extension keys are ignored.
 
 ## 2. Install from a private or self-hosted registry
 

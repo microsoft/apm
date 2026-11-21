@@ -654,6 +654,7 @@ def test_synced_removal_retires_receipts_in_the_evidence_scope(
         receipts={target.resolve().as_posix(): compute_file_hash(target)},
         render=None,
         user_scope=user_scope,
+        kept=(),
     )
 
     result = remove_synced_files(
@@ -667,3 +668,73 @@ def test_synced_removal_retires_receipts_in_the_evidence_scope(
 
     assert result.deleted == [rel]
     assert retired == [user_scope]
+
+
+@pytest.mark.parametrize("stale", ["member", "directory"])
+def test_member_this_install_kept_is_retained_despite_evidence(
+    project_root, diagnostics, stale: str
+) -> None:
+    """#4230: a declared member the integrator left unwritten is never cleaned as stale."""
+    from apm_cli.integration.cleanup import DeploymentEvidence
+
+    member = ".agents/skills/x/references/a.md"
+    target = _make_managed_file(project_root, member, "reference a\n")
+    _make_managed_file(project_root, ".agents/skills/x/SKILL.md", "x\n")
+    receipts = {target.resolve().as_posix(): compute_file_hash(target)}
+    paths = [member] if stale == "member" else [".agents/skills/x/", member]
+
+    def evidence(kept: tuple[str, ...]) -> DeploymentEvidence:
+        return DeploymentEvidence(
+            deploy_root=project_root, receipts=receipts, render=None, kept=kept
+        )
+
+    result = remove_stale_deployed_files(
+        paths,
+        project_root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=evidence((member,)),
+    )
+    assert result.deleted == []
+    assert sorted(result.retained) == sorted(paths)
+    assert target.read_text(encoding="utf-8") == "reference a\n"
+
+    control = remove_stale_deployed_files(
+        [member],
+        project_root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=evidence(()),
+    )
+    assert control.deleted == [member]
+
+
+def test_refusals_name_a_symlinked_member_of_a_claimed_directory(project_root):
+    """Cleanup keeps a directory holding a symlink, so uninstall refuses first (#4451).
+
+    A managed final symlink outside any claimed directory keeps its own
+    unlink rule and is not refused.
+    """
+    from apm_cli.integration.cleanup import SYMLINKED
+
+    skill = project_root / ".agents" / "skills" / "kit"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").symlink_to(project_root / "apm.yml")
+    final = project_root / ".github" / "agents" / "linked.agent.md"
+    final.parent.mkdir(parents=True)
+    final.symlink_to(project_root / "apm.yml")
+    (project_root / "apm.yml").write_text("name: p\n", encoding="utf-8")
+    evidence = receipted_evidence(project_root)
+
+    refused = evidence.refusals(
+        [
+            ".agents/skills/kit",
+            ".agents/skills/kit/SKILL.md",
+            ".github/agents/linked.agent.md",
+        ]
+    )
+
+    assert refused == [(".agents/skills/kit/SKILL.md", SYMLINKED)]
+    assert (skill / "SKILL.md").is_symlink() and final.is_symlink()

@@ -45,11 +45,21 @@ class NullCommandLogger:
 
     verbose = False
 
+    def __init__(self, targets_owner: object | None = None) -> None:
+        # A command logger here owns the once-per-command Targets line.
+        self._targets_owner = targets_owner
+
     def start(self, message: str, symbol: str = "running"):
         _rich_info(message, symbol=symbol)
 
     def progress(self, message: str, symbol: str = "info"):
         _rich_info(message, symbol=symbol)
+
+    def announce_targets(self, line: str) -> None:
+        if self._targets_owner is not None:
+            self._targets_owner.announce_targets(line)
+            return
+        _rich_info(line, symbol="info")
 
     def info(self, message: str, symbol: str = "info", *, soft_wrap: bool = False):
         # Only soft-wrapped calls pass the flag; the default call shape stays unchanged.
@@ -58,7 +68,7 @@ class NullCommandLogger:
             return
         _rich_info(message, symbol=symbol)
 
-    def mcp_lookup_heartbeat(self, count: int):
+    def mcp_lookup_heartbeat(self, count: int, registry: str | None = None):
         """Mirror of ``CommandLogger.mcp_lookup_heartbeat`` (F4, #1116).
 
         Provided so ``MCPIntegrator`` can call this unconditionally
@@ -68,7 +78,8 @@ class NullCommandLogger:
         if count <= 0:
             return
         noun = "server" if count == 1 else "servers"
-        _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
+        where = f"registry {registry}" if registry else "registry"
+        _rich_info(f"Looking up {count} MCP {noun} in {where}...", symbol="running")
 
     def success(self, message: str, symbol: str = "sparkles"):
         _rich_success(message, symbol=symbol)

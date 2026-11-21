@@ -5,9 +5,11 @@ Mirrors the MCP integration pattern with runtime-neutral target selection.
 
 import builtins
 import logging
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.scope import manifest_file
 
@@ -232,6 +234,74 @@ def _bundle_owner_aliases(owner: str) -> frozenset[str]:
     return frozenset({canonical, owner})
 
 
+@dataclass(frozen=True)
+class WithdrawnBundleLspServer:
+    """A deployed bundle LSP server whose bundle's LSP grant was withdrawn (RA-041)."""
+
+    owner: str
+    server: str
+
+    def describe(self) -> str:
+        return (
+            f"{self.owner}: bundle LSP server '{self.server}' is deployed, but the "
+            "bundle's approval no longer grants lsp"
+        )
+
+
+def withdrawn_bundle_lsp_servers(
+    lockfile: "LockFile | None", scope_dir: Path, trust_context: Callable[[], Any]
+) -> list[WithdrawnBundleLspServer]:
+    """Bundle-owned LSP servers in *lockfile* that a deny or revoke withdrew (RA-041).
+
+    The one rule ``apm install`` retires them by and ``apm install --frozen``
+    and ``apm audit --ci`` refuse them by. *trust_context* is called once, and
+    only when a bundle owning a recorded LSP server has an install record.
+    """
+    from apm_cli.install.local_bundle_pending import bundle_grant_withdrawn, recorded_bundle_keys
+    from apm_cli.security.executables import EXEC_TYPE_LSP
+
+    raw = getattr(lockfile, "lsp_config_provenance", None)
+    provenance = dict(raw) if isinstance(raw, dict) else {}
+    owners = {
+        name: owner.removeprefix(_BUNDLE_LSP_OWNER_PREFIX)
+        for name, owner in sorted(provenance.items())
+        if not _is_regular_owner(owner)
+    }
+    if not any(recorded_bundle_keys(scope_dir, owner) for owner in owners.values()):
+        return []
+    context = trust_context()
+    if context is None:
+        return []
+    return [
+        WithdrawnBundleLspServer(owner, name)
+        for name, owner in owners.items()
+        if bundle_grant_withdrawn(scope_dir, owner, context, EXEC_TYPE_LSP)
+    ]
+
+
+def withdrawn_bundle_lsp_for_scope(
+    lockfile: "LockFile | None",
+    scope_dir: Path,
+    project_root: Path,
+    *,
+    user_scope: bool,
+    no_policy: bool,
+) -> list[WithdrawnBundleLspServer]:
+    """:func:`withdrawn_bundle_lsp_servers` under the scope's grants and org policy.
+
+    ``apm install``, ``apm install --frozen`` and ``apm audit --ci`` all ask
+    here, through the trust owner's admission, so they reach one verdict.
+    """
+    from apm_cli.security.trust import McpAdmission
+
+    def _context() -> Any:
+        return McpAdmission.for_project(
+            project_root, user_scope=user_scope, no_policy=no_policy
+        ).context
+
+    return withdrawn_bundle_lsp_servers(lockfile, scope_dir, _context)
+
+
 def _clean_target_differences(
     *,
     old_targets: dict[str, set[str]],
@@ -372,8 +442,14 @@ def reconcile_lsp_after_uninstall(
     project_root: Path,
     user_scope: bool,
     logger,
+    excluded_package_keys: Mapping[str, str] = MappingProxyType({}),
 ) -> bool:
-    """Recompute trusted LSP state from every surviving declaration."""
+    """Recompute trusted LSP state from every surviving declaration.
+
+    Servers declared by *excluded_package_keys* (survivors the current gates
+    no longer allow, from ``install/exec_gate.py::gate_retirements``) are
+    left out, so the reconcile removes them (#4446).
+    """
     if not has_recorded_lsp_state(lockfile):
         return False
     if apm_package is None:
@@ -409,6 +485,34 @@ def reconcile_lsp_after_uninstall(
     )
     apm_config = {"scripts": apm_package.scripts or {}}
     apm_config.update(canonical_package_target_config(apm_package))
+    target_context = (apm_config, target_decision.value, scope)
+    prepared = None
+    if excluded_package_keys:
+        prepared = prepare_lsp_integration(
+            apm_package=apm_package,
+            apm_modules_path=modules_dir,
+            lock_path=lock_path,
+            project_root=project_root,
+            should_install=True,
+            logger=logger,
+            existing_lock=lockfile,
+            user_scope=user_scope,
+            target_context=target_context,
+            target_decision=target_decision,
+        )
+        kept, dropped = [], set()
+        for dependency in prepared.dependencies:
+            owner = getattr(dependency, "resolved_by", None)
+            if owner in excluded_package_keys:
+                dropped.add(owner)
+            else:
+                kept.append(dependency)
+        for owner in sorted(dropped):
+            logger.warning(
+                f"{owner} is no longer allowed ({excluded_package_keys[owner]}); "
+                "removing its LSP servers"
+            )
+        prepared = replace(prepared, dependencies=kept)
     run_lsp_integration(
         apm_package=apm_package,
         apm_modules_path=modules_dir,
@@ -418,10 +522,11 @@ def reconcile_lsp_after_uninstall(
         user_scope=user_scope,
         should_install=True,
         logger=logger,
-        target_context=(apm_config, target_decision.value, scope),
+        target_context=target_context,
         target_decision=target_decision,
         fail_on_write_error=True,
         persist=False,
+        prepared=prepared,
     )
     after = (
         list(lockfile.lsp_servers),
@@ -626,6 +731,17 @@ def run_lsp_integration(  # noqa: PLR0913
         bundle_names = {
             name for name, owner in old_lsp_provenance.items() if not _is_regular_owner(owner)
         }
+        withdrawn = bundle_names & {
+            item.server
+            for item in withdrawn_bundle_lsp_for_scope(
+                existing_lock,
+                apm_modules_path.parent,
+                project_root,
+                user_scope=user_scope,
+                no_policy=no_policy,
+            )
+        }
+        bundle_names -= withdrawn
         old_regular_names = {
             name for name, owner in old_lsp_provenance.items() if _is_regular_owner(owner)
         }
@@ -663,7 +779,7 @@ def run_lsp_integration(  # noqa: PLR0913
             for runtime_name, server_names in old_lsp_targets.items()
         }
         for server_names in new_targets.values():
-            server_names.difference_update(old_regular_names)
+            server_names.difference_update(old_regular_names | withdrawn)
         for target_runtime in target_runtimes or []:
             new_targets.setdefault(target_runtime, set()).update(
                 LSPIntegrator.expressible_server_names(lsp_deps, target_runtime)

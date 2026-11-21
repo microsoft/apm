@@ -55,6 +55,7 @@ swiss-army-knife escape hatch for the rest of the install surface.
 from __future__ import annotations
 
 import copy
+import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +65,7 @@ import click
 
 from apm_cli.core.remediation import (
     CLI_BINARY_OUTDATED,
+    UPDATE_UNDECLARED_PACKAGE,
     USER_MANIFEST_MISSING,
 )
 from apm_cli.core.scope import manifest_file
@@ -73,6 +75,7 @@ from ..core.command_logger import InstallLogger
 from ..core.target_catalog import target_help_fragment
 from ..core.target_detection import TargetParamType
 from ..deps.github_downloader import GitHubPackageDownloader
+from ..deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from ..deps.revision_pins import (
     RemoteRefDownloader,
     RevisionPinResolutionError,
@@ -116,6 +119,7 @@ class _UpdateRunState:
     proceeded: bool = False
     revision_pins_applied: bool = False
     cache_rehydration_requested: bool = False
+    gate_retirement: bool = False
 
 
 def _stdin_is_tty() -> bool:
@@ -147,6 +151,31 @@ def _module_cache_needs_rehydration(
         if install_path.exists():
             return False
     return has_locked_dependency
+
+
+def _locked_copy_contradicts_lock(lockfile: LockFile | None, modules_dir: Path) -> bool:
+    """Whether a materialized locked package no longer matches its ``content_hash``.
+
+    An update with no ref change still runs install when a copy contradicts
+    the lock, so install's locked-source verdict
+    (:func:`~apm_cli.install.source_helpers.locked_content_mismatch`) re-fetches
+    it or refuses, as ``apm install``, ``--frozen`` and ``audit --ci`` do (#4385).
+    """
+    if lockfile is None:
+        return False
+    from apm_cli.install.source_helpers import locked_content_mismatch
+
+    for key, dependency in lockfile.dependencies.items():
+        # Local packages re-copy from their source on every install, so their
+        # copy carries no locked-source verdict (as audit's replay skips them).
+        if key == "." or not dependency.content_hash or dependency.source == "local":
+            continue
+        install_path = dependency.to_dependency_ref().get_install_path(modules_dir)
+        if install_path.is_dir() and locked_content_mismatch(
+            key, dependency, install_path, lockfile=lockfile
+        ):
+            return True
+    return False
 
 
 def _executables_need_reconcile(
@@ -189,6 +218,65 @@ def _executables_need_reconcile(
             get_deploy_root(scope), user_scope=scope is _Scope.USER, lockfile=lockfile
         ),
         fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+    )
+
+
+def _gate_retirements_pending(
+    lockfile: LockFile | None, modules_dir: Path, scope: InstallScope, apm_package: Any
+) -> bool:
+    """Whether the current gates no longer allow something deployed (#4444, #4445).
+
+    Asked once the resolver restaged local packages, so a changed local
+    definition is judged as install judges it: a policy-denied dependency or
+    a server install's MCP admission now parks also runs the install gate,
+    which refuses or retires it.
+    """
+    from apm_cli.core.scope import InstallScope as _Scope
+    from apm_cli.core.scope import get_deploy_root
+    from apm_cli.install.exec_gate import gate_retirements
+
+    try:
+        retirements = gate_retirements(
+            lockfile,
+            modules_dir,
+            apm_package,
+            get_deploy_root(scope),
+            user_scope=scope is _Scope.USER,
+        )
+    except (OSError, ValueError):
+        return False
+    # An unresolved or blocking org policy is the policy preflight's outcome.
+    return retirements is not None and any(retirements)
+
+
+def _reconcile_note(exec_reconcile_required: bool, gate_retirement: bool) -> str | None:
+    """The info line for an update that reconciles deployed state without moving refs."""
+    if gate_retirement:
+        return "Re-checking deployed items against the current gates, as install does."
+    if exec_reconcile_required:
+        return (
+            "Executables approvals changed since the last install; "
+            "reconciling deployed executables."
+        )
+    return None
+
+
+def _enforce_policy_without_changes(
+    apm_package: Any, scope: InstallScope, logger: InstallLogger, dry_run: bool
+) -> None:
+    """Apply org policy to the declared dependencies when an update changes nothing."""
+    from apm_cli.core.scope import InstallScope as _Scope
+    from apm_cli.core.scope import get_deploy_root, manifest_root
+    from apm_cli.install.pipeline_entry import enforce_declared_policy
+
+    from ..models.dependency.replacement import project_manifest_dependencies
+
+    enforce_declared_policy(
+        manifest_root(get_deploy_root(scope), user_scope=scope is _Scope.USER),
+        list(project_manifest_dependencies(apm_package)),
+        list(apm_package.get_all_mcp_dependencies()) or None,
+        logger,
+        dry_run=dry_run,
     )
 
 
@@ -368,10 +456,7 @@ def _run_mcp_lsp_integration(
             pre_install_lock=existing_lock,
         )
     except PolicyBlockError:
-        logger.refusal(
-            "MCP server(s) blocked by org policy. "
-            "APM packages remain installed; MCP configs were NOT written."
-        )
+        logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
         logger.render_summary()
         sys.exit(1)
 
@@ -393,6 +478,23 @@ def _run_mcp_lsp_integration(
         force=force,
         prepared=prepared_lsp,
     )
+
+
+def _resolve_only_packages(packages: tuple[str, ...], declared: list) -> list[str] | None:
+    """Resolve named packages to declared keys, or refuse with exit 1."""
+    try:
+        return resolve_requested_packages(packages, declared)
+    except UnknownPackageError as e:
+        _rich_error(f"Package '{e.token}' not found in apm.yml")
+        if e.available:
+            _rich_info(f"Available: {', '.join(e.available)}", symbol="info")
+        else:
+            _rich_info(
+                "No APM dependencies are declared. "
+                + UPDATE_UNDECLARED_PACKAGE.bind(package=shlex.quote(e.token)).sentence(),
+                symbol="info",
+            )
+        sys.exit(1)
 
 
 def _handle_service_only_update(
@@ -424,6 +526,7 @@ def _handle_service_only_update(
     )
     if not has_services:
         logger.info("No APM dependencies declared in apm.yml -- nothing to update.")
+        _explain_local_bundles(scope, apm_package, logger)
         return True
     if dry_run:
         logger.dry_run_notice("would reconcile MCP/LSP configuration; no files written")
@@ -454,7 +557,84 @@ def _handle_service_only_update(
         logger.render_summary()
         sys.exit(1)
     logger.success("MCP/LSP configuration reconciled. No APM dependencies to update.")
+    _explain_local_bundles(scope, apm_package, logger)
     return True
+
+
+def _explain_local_bundles(scope: Any, apm_package: Any, logger: InstallLogger) -> None:
+    """Name the installed local bundles 'apm update' leaves untouched (#4318)."""
+    from apm_cli.install.local_bundle_hook_trust import installed_local_bundles
+    from apm_cli.install.outcome import (
+        local_bundle_parked_next_step,
+        local_bundle_update_next_step,
+    )
+
+    names, file_count = installed_local_bundles(scope, apm_package)
+    if names or file_count:
+        logger.info(local_bundle_update_next_step(names, file_count, scope))
+    for slug, exec_types in _parked_local_bundles(scope, apm_package):
+        logger.info(local_bundle_parked_next_step(slug, exec_types, scope))
+
+
+def _parked_local_bundles(scope: Any, apm_package: Any) -> list[tuple[str, tuple[str, ...]]]:
+    """Installed local bundles whose executables the current trust still parks (#4441)."""
+    from apm_cli.core.scope import get_apm_dir, get_deploy_root, is_user_scope
+    from apm_cli.install.local_bundle_pending import pending_bundles
+    from apm_cli.security.executables import (
+        package_type_approved,
+        resolve_project_exec_allow_map,
+    )
+
+    allow = resolve_project_exec_allow_map(
+        get_deploy_root(scope), apm_package, user_scope=is_user_scope(scope), no_policy=True
+    )
+    return [
+        (bundle.slug, bundle.exec_types)
+        for bundle in pending_bundles(
+            get_apm_dir(scope), lambda key, kind: package_type_approved(allow, (key,), kind)
+        )
+    ]
+
+
+def _no_ref_change_summary(exec_reconciled: bool, provenance_restored: bool) -> str:
+    """The success line of an update that reconciled state without moving a ref."""
+    if exec_reconciled:
+        return "Reconciled executables without changing refs."
+    if provenance_restored:
+        return "Recorded restored marketplace provenance without changing refs."
+    return "Restored dependency cache without changing refs."
+
+
+def _reverified_lock(lockfile, lock_path: Path, logger, *, dry_run: bool):
+    """Re-verify locked marketplace provenance before planning; fail closed (#4228).
+
+    Returns ``(lockfile, restored)``: the lockfile with restored rows applied
+    in memory, and their provenance for the lockfile phase. The update's one
+    lockfile write records it (``LockfileBuilder`` via
+    ``marketplace_provenance``, #4430); a failed update writes nothing.
+    """
+    from apm_cli.marketplace.catalog_origin import locked_provenance, reverify_locked_provenance
+    from apm_cli.marketplace.client import catalog_cache_writes_on_success
+    from apm_cli.marketplace.errors import MarketplaceError
+
+    rows = lockfile.dependencies if lockfile is not None else {}
+    before = {key: locked_provenance(dep) for key, dep in rows.items()}
+    try:
+        # A refused re-verification leaves the catalog cache unchanged; a
+        # completed one persists what it fetched, validators included, and a
+        # dry run persists nothing (#4484).
+        with catalog_cache_writes_on_success(commit=not dry_run):
+            restored = reverify_locked_provenance(lockfile, manifest_file(lock_path.parent))
+    except MarketplaceError as exc:
+        _rich_error(str(exc), symbol="error")
+        sys.exit(1)
+    for row in restored:
+        logger.info(f"Restored marketplace provenance for {row} from its catalog.")
+    return lockfile, {
+        key: current
+        for key, dep in rows.items()
+        if (current := locked_provenance(dep)) != before.get(key)
+    }
 
 
 @click.command(
@@ -650,6 +830,7 @@ def update(
     )
 
 
+@lockfile_writer(LockfileWriter.UPDATE)
 def _run_dep_update(
     *,
     assume_yes: bool,
@@ -749,6 +930,13 @@ def _run_dep_update_locked(
     logger = InstallLogger(
         verbose=verbose, dry_run=dry_run, partial=bool(packages), command="update"
     )
+    from ..models.dependency.replacement import project_manifest_dependencies
+
+    # Map any positional [PACKAGES] to canonical dependency keys for the
+    # engine's only_packages filter; None means "refresh everything". A named
+    # package must be declared even when apm.yml declares no APM dependencies
+    # (#4263), so this runs before any reconcile or service-only path.
+    only_packages = _resolve_only_packages(packages, project_manifest_dependencies(apm_package))
     from apm_cli.install.local_bundle_hook_trust import reconcile_scope_bundle_hooks
 
     reconcile_scope_bundle_hooks(scope, apm_package, logger=logger, dry_run=dry_run)
@@ -768,21 +956,7 @@ def _run_dep_update_locked(
     # pipeline must resolve against the new SHAs, but declined/dry-run paths
     # should not mutate the APMPackage instance parsed from the on-disk manifest.
     staged_apm_package = copy.deepcopy(apm_package)
-    from ..models.dependency.replacement import project_manifest_dependencies
-
     all_declared_deps = project_manifest_dependencies(staged_apm_package)
-
-    # Map any positional [PACKAGES] to canonical dependency keys for the
-    # engine's only_packages filter; None means "refresh everything".
-    try:
-        only_packages = resolve_requested_packages(
-            packages,
-            all_declared_deps,
-        )
-    except UnknownPackageError as e:
-        _rich_error(f"Package '{e.token}' not found in apm.yml")
-        _rich_info(f"Available: {', '.join(e.available)}", symbol="info")
-        sys.exit(1)
 
     revision_pin_resolution = _resolve_and_stage_revision_pin_updates(
         all_declared_deps=all_declared_deps,
@@ -847,12 +1021,13 @@ def _run_dep_update_locked(
                 _rich_echo(rendered)
                 _rich_echo("")
         elif not revision_pin_updates:
-            if _exec_reconcile_required:
-                logger.info(
-                    "Executables approvals changed since the last install; "
-                    "reconciling deployed executables."
-                )
-            elif not _cache_rehydration_required:
+            plan_state.gate_retirement = not _exec_reconcile_required and (
+                _gate_retirements_pending(_existing_lock, _modules_dir, scope, staged_apm_package)
+            )
+            reconcile_note = _reconcile_note(_exec_reconcile_required, plan_state.gate_retirement)
+            if reconcile_note:
+                logger.info(reconcile_note)
+            elif not _cache_rehydration_required and not _restored_provenance:
                 retained_count = len(revision_pin_resolution.skips)
                 if retained_count:
                     noun = "pin" if retained_count == 1 else "pins"
@@ -865,6 +1040,9 @@ def _run_dep_update_locked(
                         "All dependencies already at their latest matching refs.",
                         symbol="check",
                     )
+                # Nothing to change still judges the installed set against org
+                # policy, as install does (#4458).
+                _enforce_policy_without_changes(apm_package, scope, logger, dry_run)
                 return False
             plan_state.cache_rehydration_requested = True
 
@@ -902,11 +1080,13 @@ def _run_dep_update_locked(
     _modules_dir = get_modules_dir(scope)
     _mcp_lsp_project_root = get_deploy_root(scope)
     _lock_path = get_lockfile_path(_apm_dir)
-    _existing_lock = LockFile.read(_lock_path)
+    _existing_lock, _restored_provenance = _reverified_lock(
+        LockFile.read(_lock_path), _lock_path, logger, dry_run=dry_run
+    )
     _cache_rehydration_required = _module_cache_needs_rehydration(
         _existing_lock,
         _modules_dir,
-    )
+    ) or _locked_copy_contradicts_lock(_existing_lock, _modules_dir)
     _exec_reconcile_required = not _cache_rehydration_required and _executables_need_reconcile(
         _existing_lock, _modules_dir, scope, apm_package
     )
@@ -931,9 +1111,12 @@ def _run_dep_update_locked(
             parallel_downloads=parallel_downloads,
             logger=logger,
             plan_callback=_plan_callback,
+            marketplace_provenance=_restored_provenance or None,
             target=target,
             legacy_skill_paths=legacy_skill_paths,
             lsp_preflight=LspPreflight(),
+            trust_transitive_mcp=trust_transitive_mcp,
+            post_install_after_services=True,
         )
     except FrozenInstallError as e:
         _rich_error(str(e))
@@ -950,8 +1133,12 @@ def _run_dep_update_locked(
             _rich_echo(e.diagnostic_context)
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
         sys.exit(1)
-    except (DirectDependencyError, PolicyViolationError, RequiredIntegrationError) as e:
-        _rich_error(str(e), err=isinstance(e, PolicyViolationError))
+    except PolicyViolationError as e:
+        logger.render_summary()
+        _rich_error(f"{e} Nothing was written.", symbol="error", err=True)
+        sys.exit(1)
+    except (DirectDependencyError, RequiredIntegrationError) as e:
+        logger.error(str(e))
         sys.exit(1)
     except click.UsageError:
         raise
@@ -1022,6 +1209,10 @@ def _run_dep_update_locked(
                 logger.info("Run with --verbose for detailed diagnostics.")
             sys.exit(1)
 
+    post_install = getattr(result, "post_install", None)
+    if post_install is not None:
+        post_install()
+
     if plan_state.proceeded:
         # Name files cleanup kept (#3701) and other install warnings once.
         update_diagnostics = getattr(result, "diagnostics", None)
@@ -1048,9 +1239,10 @@ def _run_dep_update_locked(
             _rich_success(f"Updated {changed} APM {dep_noun}.")
         elif plan_state.cache_rehydration_requested and installed:
             logger.success(
-                "Reconciled executables without changing refs."
-                if _exec_reconcile_required
-                else "Restored dependency cache without changing refs.",
+                _no_ref_change_summary(
+                    _exec_reconcile_required or plan_state.gate_retirement,
+                    bool(_restored_provenance),
+                ),
                 symbol="check",
             )
         elif revision_pin_updates:

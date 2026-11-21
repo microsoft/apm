@@ -140,7 +140,8 @@ def test_uninstall_deduplication_retains_manifest_objects_and_argument_order(
     assert removed[0] is entries[1]
     assert removed[1] is entries[0]
     assert missing == ["org/missing"]
-    assert logger.progress.call_count == (3 if log_matches else 0)
+    # A repeated argument prints its 'found in apm.yml' line once (#4331).
+    assert logger.progress.call_count == (2 if log_matches else 0)
 
 
 def test_uninstall_alias_and_exact_path_remove_one_unhashable_entry() -> None:

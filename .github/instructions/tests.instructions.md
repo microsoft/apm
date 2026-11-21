@@ -104,6 +104,12 @@ production code must follow (see
   and `tests/unit/install/conftest.py`. Don't re-implement temp-dir or
   mock-logger fixtures inline.
 
+- **Fold review follow-ups.** Review follow-ups on test changes are fixed and
+  folded into the PR where they were found (or a successor PR in the same lane
+  if that PR already merged); do not file a follow-up issue. Only design or
+  scope decisions explicitly made by a maintainer (a human) may be tracked as
+  issues.
+
 - **Targeted runs during iteration.** Run the specific test file first
   (`uv run pytest tests/unit/install/test_X.py -x`) before running the
   full suite (`uv run pytest tests/unit tests/test_console.py`).
@@ -342,13 +348,14 @@ with `--update-baseline`; edit stale or moved taxonomy entries by hand.
 marker. Do not confuse it with `requires_windows` -- there is no
 `requires_windows` marker in this repo, and there must never be one
 used for this purpose. `windows_compat` tests run on **every OS**
-(Linux, macOS, Windows) as part of the normal unit suite; the marker
-additionally selects them for a dedicated, focused PR-time job
-(`Windows Compatibility Gate` in `.github/workflows/ci.yml`: three
-duration-balanced `windows-latest` shards) that runs `pytest -m
-windows_compat tests/unit tests/integration`.
-That job exists because the full Windows matrix in
-`build-release.yml` only runs post-merge -- without this gate, a
+(Linux, macOS, Windows) as part of the normal unit suite. The PR-time
+`Windows Compatibility Gate` in `.github/workflows/ci.yml` (three
+duration-balanced `windows-latest` shards) runs the full Windows unit
+suite through `scripts/ci_selections.py` (the selection main push runs)
+plus `pytest -m windows_compat tests/integration`, so on integration
+tests the marker is what schedules them on Windows at PR time.
+That gate exists because the full Windows matrix in
+`build-release.yml` only runs post-merge -- without it, a
 Windows-only regression (CRLF line endings, backslash path
 separators, bare `git` argv resolution, socket/thread shutdown races,
 etc.) is structurally invisible until after the PR has already
@@ -399,15 +406,16 @@ helper).
    pytestmark = pytest.mark.windows_compat
    ```
 3. Do **not** edit `.github/workflows/ci.yml` to add your test file --
-   the gate selects by marker, not by file enumeration. If your test
+   unit tests always run; integration tests are selected by marker,
+   not by file enumeration. If your test
    is properly marked, it is picked up automatically the next PR run.
 4. Confirm collection locally:
    ```bash
-   uv run --extra dev pytest -m windows_compat tests/unit --collect-only -q
+   uv run --extra dev pytest -m windows_compat tests/integration --collect-only -q
    ```
 5. `tests/integration/test_windows_compat_gate_workflow.py` asserts the
    *shape* of the gate (marker-scoped, bounded, non-empty, required,
-   non-duplicative of the Linux full suite) -- it does not enumerate
+   no unit test run twice) -- it does not enumerate
    file names, so it does not need editing when you add or remove a
    marked test.
 

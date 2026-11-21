@@ -213,9 +213,13 @@ def verify_codex_source_identity(
         and record.source_commit == source_commit
         and record.source_hash != source_hash
     ):
+        from apm_cli.core.cache_drift import package_cache_drift
+
         raise CodexNativeError(
-            f"Codex native cache differs from its admitted source for {dependency_key}; "
-            "native state was retained. " + CODEX_NATIVE_CACHE_DIFFERS.sentence()
+            package_cache_drift(
+                f"Codex native package {dependency_key}",
+                "native state was retained. " + CODEX_NATIVE_CACHE_DIFFERS.sentence(),
+            )
         )
     return records
 

@@ -448,12 +448,16 @@ class TestGitSubprocessEnv:
         assert "/Users/alice/.ssh/id_private" not in message
         assert "Host key verification failed." in message
 
-    def test_rewrite_probe_failure_has_safe_recovery(self) -> None:
+    def test_rewrite_probe_failure_shows_first_redacted_stderr_line(self) -> None:
+        token = "ghp_" + "Q7xR2mK9pL4vN8wT3yZ6bC1dF5gH0jS2aE4u"
         result = subprocess.CompletedProcess(
             ["git", "config"],
-            2,
+            128,
             stdout=b"",
-            stderr=b"private config detail",
+            stderr=(
+                f"error: invalid key: https://x-access-token:{token}@github.com/\n"
+                "fatal: unable to parse command-line config\n"
+            ).encode(),
         )
         with (
             patch("apm_cli.utils.git_env._git_config_run", return_value=result),
@@ -462,11 +466,14 @@ class TestGitSubprocessEnv:
             git_network_env("https://git.example.com/acme/repo")
 
         message = str(raised.value)
-        assert "Git config probe failed" in message
-        assert "check Git configuration and retry" in message
-        assert "--show-origin" in message
-        assert "remove the unsafe rule" not in message
-        assert "private config detail" not in message
+        assert message == (
+            "Unable to verify Git URL rewrite safety (Git config probe failed: "
+            "invalid key: https://***@github.com/); check Git configuration with "
+            "'git config --show-origin --list' and retry"
+        )
+        assert token not in message
+        assert "x-access-token" not in message
+        assert "unable to parse" not in message
 
     def test_rewrite_probe_retries_once_after_timeout(self) -> None:
         calls: list[int] = []
@@ -499,6 +506,7 @@ class TestGitSubprocessEnv:
         message = str(raised.value)
         assert "Git config probe timed out" in message
         assert "check Git configuration and retry" in message
+        assert "'git config --show-origin --list'" in message
         assert calls == [10, 30]
 
     def test_clone_retains_url_rewrite_without_restoring_parent_auth(self, tmp_path) -> None:

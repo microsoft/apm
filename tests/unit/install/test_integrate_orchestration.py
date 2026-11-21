@@ -143,8 +143,9 @@ class TestResolveDownloadStrategy:
         # Mark already resolved so skip_download starts True
         ctx.callback_downloaded["org/pkg"] = "sha1"
 
-        install_path = tmp_path / "pkg"
-        install_path.mkdir()
+        install_path = ctx.apm_modules_dir / "org" / "pkg"
+        install_path.mkdir(parents=True)
+        (install_path / "a.md").write_text("copy\n")
 
         with (
             patch("apm_cli.drift.detect_ref_change", return_value=False),
@@ -153,7 +154,6 @@ class TestResolveDownloadStrategy:
                 "apm_cli.utils.content_hash.verify_package_hash",
                 return_value=False,
             ),
-            patch("apm_cli.utils.path_security.safe_rmtree"),
         ):
             _resolved_ref, skip_download, _locked, _changed = _resolve_download_strategy(
                 ctx, dep_ref, install_path
@@ -162,6 +162,10 @@ class TestResolveDownloadStrategy:
         assert not skip_download
         assert "org/pkg" not in ctx.content_hash_verified_deps
         logger.progress.assert_called()
+        # The copy is staged with the install transaction, so a refusal restores it.
+        assert not install_path.exists()
+        ctx.transaction.rollback()
+        assert (install_path / "a.md").read_text() == "copy\n"
 
     def test_registry_enforce_only_skips_cached(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setenv("PROXY_REGISTRY_ONLY", "1")
@@ -594,6 +598,50 @@ class TestIntegrateRootProject:
             result = _integrate_root_project(ctx)
 
         assert result is None
+
+    @pytest.mark.parametrize(
+        ("scope_value", "expected", "forbidden"),
+        [
+            ("user", "  [+] <user scope> (local)", "<project root>"),
+            ("project", "  [+] <project root> (local)", "<user scope>"),
+        ],
+    )
+    def test_root_row_names_the_install_scope_on_stdout(
+        self, tmp_path: Path, capsys, scope_value: str, expected: str, forbidden: str
+    ) -> None:
+        """RA-020: apm install -g never labels the user scope as the project root."""
+        from apm_cli.core.command_logger import InstallLogger
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.integrate import _integrate_root_project
+
+        ctx = _make_ctx(tmp_path)
+        ctx.scope = InstallScope(scope_value)
+        ctx.root_has_local_primitives = True
+        ctx.targets = [MagicMock()]
+        ctx.logger = InstallLogger(verbose=False)
+        ctx.managed_files = set()
+        ctx.old_local_deployed = []
+        ctx.package_deployed_files = {}
+        ctx.integrators = {
+            name: MagicMock()
+            for name in ("prompt", "agent", "skill", "instruction", "command", "hook")
+        }
+
+        with (
+            patch(
+                "apm_cli.install.services.integrate_local_content",
+                side_effect=RuntimeError("stop after the root row"),
+            ),
+            patch(
+                "apm_cli.integration.base_integrator.BaseIntegrator.normalize_managed_files",
+                return_value=set(),
+            ),
+        ):
+            _integrate_root_project(ctx)
+
+        out = capsys.readouterr().out
+        assert expected in out.splitlines()
+        assert forbidden not in out
 
 
 # ---------------------------------------------------------------------------

@@ -242,7 +242,7 @@ class TestIntelliJClientAdapter(unittest.TestCase):
         with (
             self._patch_config_path(),
             patch(
-                "apm_cli.adapters.client.intellij.atomic_write_text",
+                "apm_cli.utils.json_config.atomic_write_text",
                 side_effect=OSError("disk full"),
             ),
             pytest.raises(IntelliJConfigError, match="write"),
@@ -639,7 +639,7 @@ def test_cli_atomic_write_failure_is_nonzero_without_partial_config(
             return_value=None,
         ),
         patch(
-            "apm_cli.adapters.client.intellij.atomic_write_text",
+            "apm_cli.utils.json_config.atomic_write_text",
             side_effect=OSError("disk full"),
         ),
     ):

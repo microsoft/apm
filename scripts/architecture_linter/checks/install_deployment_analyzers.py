@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from scripts.architecture_linter.checks.install_agent_render_adopt import (
     GUARD_AGENT_RENDER_ADOPT,
+    GUARD_COMMAND_RENDER_ADOPT,
     check_agent_render_then_adopt,
+    check_command_render_then_adopt,
 )
 from scripts.architecture_linter.checks.install_base_integrator_and_contraction import (
     _GUARD_BASE_INTEGRATOR,
@@ -33,6 +35,16 @@ from scripts.architecture_linter.checks.install_bundle_compile_staging import (
 from scripts.architecture_linter.checks.install_bundle_compile_staging import (
     check_bundle_compile_staging,
 )
+from scripts.architecture_linter.checks.install_checkout_skill_trust import (
+    GUARD_KEPT_MEMBERS,
+    GUARD_TRUSTED_RECEIPT,
+    check_cleanup_retains_kept_members,
+    check_skill_adoption_trusted_receipt,
+)
+from scripts.architecture_linter.checks.install_cleanup_target_roots import (
+    GUARD_CLEANUP_TARGET_ROOTS,
+    check_cleanup_target_roots,
+)
 from scripts.architecture_linter.checks.install_codex_agent_links import (
     GUARD_CODEX_AGENT_LINKS,
     check_codex_agent_link_resolution,
@@ -45,6 +57,12 @@ from scripts.architecture_linter.checks.install_dry_run_plan import (
 from scripts.architecture_linter.checks.install_effective_selection import (
     GUARD_EFFECTIVE_SELECTION,
     check_effective_selection,
+)
+from scripts.architecture_linter.checks.install_entry_and_commit import (
+    GUARD_COMMIT_ORDER,
+    GUARD_ENTRY_ROUTING,
+    check_install_commit_order,
+    check_install_entry_routing,
 )
 from scripts.architecture_linter.checks.install_frozen_and_audit import (
     _GUARD_AUDIT_REPLAY,
@@ -59,6 +77,10 @@ from scripts.architecture_linter.checks.install_frozen_and_audit import (
     check_lifecycle_serialization,
     check_mcp_ownership_migration,
     check_uninstall_reachability,
+)
+from scripts.architecture_linter.checks.install_gate_retirement import (
+    GUARD_GATE_RETIREMENT,
+    check_gate_retirement,
 )
 from scripts.architecture_linter.checks.install_lifecycle_serialization import (
     GUARD_LIFECYCLE_SERIALIZATION_CLOSED,
@@ -79,6 +101,20 @@ from scripts.architecture_linter.checks.install_locked_copy_validity import (
 )
 from scripts.architecture_linter.checks.install_locked_copy_validity import (
     check_locked_copy_validity,
+)
+from scripts.architecture_linter.checks.install_locked_source_cache import (
+    GUARD as _GUARD_LOCKED_SOURCE_CACHE,
+)
+from scripts.architecture_linter.checks.install_locked_source_cache import (
+    check_locked_source_cache,
+)
+from scripts.architecture_linter.checks.install_lockfile_preflight import (
+    GUARD_INSTALL_LOCKFILE_PREFLIGHT,
+    check_install_lockfile_preflight,
+)
+from scripts.architecture_linter.checks.install_lockfile_required import (
+    GUARD_LOCKFILE_REQUIRED,
+    check_lockfile_required,
 )
 from scripts.architecture_linter.checks.install_lsp_capability_gate import (
     GUARD_LSP_CAPABILITY_GATE,
@@ -102,6 +138,10 @@ from scripts.architecture_linter.checks.install_orphan_removal import (
     GUARD_ORPHAN_SELECTION,
     check_orphan_selection,
 )
+from scripts.architecture_linter.checks.install_overwrite_evidence import (
+    GUARD_OVERWRITE_EVIDENCE,
+    check_overwrite_evidence,
+)
 from scripts.architecture_linter.checks.install_package_content_hash import (
     GUARD as _GUARD_PACKAGE_CONTENT_HASH,
 )
@@ -112,6 +152,10 @@ from scripts.architecture_linter.checks.install_package_target_authorization imp
     _GUARD_PACKAGE_TARGET,
     check_package_target_authorization,
 )
+from scripts.architecture_linter.checks.install_policy_cache_pin import (
+    GUARD_POLICY_CACHE_PIN,
+    check_policy_cache_pin,
+)
 from scripts.architecture_linter.checks.install_policy_intent import EXTRA_RULES
 from scripts.architecture_linter.checks.install_policy_outcome_routing import (
     GUARD_POLICY_FIELD_TYPES,
@@ -121,6 +165,14 @@ from scripts.architecture_linter.checks.install_policy_outcome_routing import (
 )
 from scripts.architecture_linter.checks.install_portable_trust import (
     RULES as PORTABLE_TRUST_RULES,
+)
+from scripts.architecture_linter.checks.install_receipt_collection import (
+    GUARD_RECEIPT_COLLECTION,
+    check_receipt_collection,
+)
+from scripts.architecture_linter.checks.install_registry_url_scheme import (
+    GUARD_REGISTRY_URL_SCHEME,
+    check_registry_url_scheme,
 )
 from scripts.architecture_linter.checks.install_request_and_source import (
     _GUARD_INSTALL_SCOPE,
@@ -163,17 +215,21 @@ from scripts.architecture_linter.checks.install_skills_root_derivation import (
 from scripts.architecture_linter.checks.install_trust_integrity import (
     GUARD_BUNDLE_ADMISSION,
     GUARD_BUNDLE_USER_SCOPE_ROOT,
+    GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT,
     GUARD_LOCAL_BUNDLE_HOOK_TRUST,
     GUARD_TRUST_POLICY_OUTCOME,
     GUARD_UNPACK_EXECUTABLES,
     GUARD_UPDATE_CONTENT_INTEGRITY,
+    GUARD_UPDATE_MARKETPLACE_PROVENANCE,
     GUARD_UPDATE_REGISTRY_INTEGRITY,
     check_bundle_admission_owner,
     check_bundle_user_scope_root,
+    check_local_bundle_hook_retirement,
     check_local_bundle_hook_trust,
     check_trust_policy_outcome,
     check_unpack_executable_refusal,
     check_update_content_integrity,
+    check_update_marketplace_provenance,
     check_update_registry_integrity,
 )
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
@@ -184,9 +240,38 @@ from scripts.architecture_linter.checks.install_uninstall_and_resolution import 
     check_resolution_replacement,
     check_uninstall_selection,
 )
+from scripts.architecture_linter.checks.install_uninstall_preflight import (
+    GUARD_UNINSTALL_PREFLIGHT,
+    check_uninstall_preflight,
+)
 from scripts.architecture_linter.models import Rule
 
 RULES: tuple[Rule, ...] = (
+    _rule(
+        GUARD_UNINSTALL_PREFLIGHT,
+        "Uninstall validates recorded paths and survivor trust before its first write.",
+        check_uninstall_preflight,
+    ),
+    _rule(
+        GUARD_INSTALL_LOCKFILE_PREFLIGHT,
+        "Every mutating install refuses an unwritable lockfile before it deploys.",
+        check_install_lockfile_preflight,
+    ),
+    _rule(
+        GUARD_LOCKFILE_REQUIRED,
+        "Frozen install and audit share one answer to whether a lockfile is required.",
+        check_lockfile_required,
+    ),
+    _rule(
+        GUARD_CLEANUP_TARGET_ROOTS,
+        "Deploy cleanup prunes empty parents only through its owner, which keeps target roots.",
+        check_cleanup_target_roots,
+    ),
+    _rule(
+        GUARD_RECEIPT_COLLECTION,
+        "Orphaned deployment receipts are collected only by the receipt owner.",
+        check_receipt_collection,
+    ),
     _rule(
         _GUARD_BUNDLE_STAGING,
         "Local bundle compile staging is lockfile-proven input, never a deployment claim.",
@@ -201,6 +286,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_LOCKED_COPY_VALIDITY,
         "apm_modules copy validity against the lock is owned by drift.locked_copy_proof.",
         check_locked_copy_validity,
+    ),
+    _rule(
+        _GUARD_LOCKED_SOURCE_CACHE,
+        "Install, update and audit --ci replay read locked git sources through one cache.",
+        check_locked_source_cache,
     ),
     _rule(
         _GUARD_PACKAGE_CONTENT_HASH,
@@ -218,6 +308,16 @@ RULES: tuple[Rule, ...] = (
         check_policy_field_types,
     ),
     _rule(
+        GUARD_REGISTRY_URL_SCHEME,
+        "Registry URL scheme acceptance stays owned by deps/registry/url_scheme.py.",
+        check_registry_url_scheme,
+    ),
+    _rule(
+        GUARD_POLICY_CACHE_PIN,
+        "A cached org policy is verified against its record before use, in one reader.",
+        check_policy_cache_pin,
+    ),
+    _rule(
         GUARD_TRUST_POLICY_OUTCOME,
         "Executables-trust readers route policy outcomes through resolve_trust_policy.",
         check_trust_policy_outcome,
@@ -233,6 +333,11 @@ RULES: tuple[Rule, ...] = (
         check_update_registry_integrity,
     ),
     _rule(
+        GUARD_UPDATE_MARKETPLACE_PROVENANCE,
+        "apm update re-verifies locked marketplace provenance against its catalog.",
+        check_update_marketplace_provenance,
+    ),
+    _rule(
         GUARD_BUNDLE_USER_SCOPE_ROOT,
         "apm install -g <bundle> keeps its lock and grants under APM_HOME.",
         check_bundle_user_scope_root,
@@ -241,6 +346,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_LOCAL_BUNDLE_HOOK_TRUST,
         "Local-bundle hooks are re-checked against their recorded approval on every command.",
         check_local_bundle_hook_trust,
+    ),
+    _rule(
+        GUARD_LOCAL_BUNDLE_HOOK_RETIREMENT,
+        "A bundle reinstall retires earlier hooks through the local-bundle hook trust owner.",
+        check_local_bundle_hook_retirement,
     ),
     _rule(
         GUARD_UNPACK_EXECUTABLES,
@@ -318,6 +428,16 @@ RULES: tuple[Rule, ...] = (
         check_prospective_dry_run_plan,
     ),
     _rule(
+        GUARD_ENTRY_ROUTING,
+        "Every package install and its dry-run preview enter one install pipeline.",
+        check_install_entry_routing,
+    ),
+    _rule(
+        GUARD_COMMIT_ORDER,
+        "Every install check completes before the lockfile and deployed files commit.",
+        check_install_commit_order,
+    ),
+    _rule(
         _GUARD_SOURCE_PLAN,
         "Authorized deployable source paths come from install/deployable_source_plan.py.",
         check_source_plan,
@@ -336,6 +456,16 @@ RULES: tuple[Rule, ...] = (
         GUARD_SKILL_ADOPTION_BASELINE,
         "Receipt-less skill adoption compares with the locked render when the commit changes.",
         check_skill_adoption_baseline,
+    ),
+    _rule(
+        GUARD_TRUSTED_RECEIPT,
+        "Skill adoption bails only when every file still holds its receipted bytes.",
+        check_skill_adoption_trusted_receipt,
+    ),
+    _rule(
+        GUARD_KEPT_MEMBERS,
+        "Cleanup retains every member the install declared but left unwritten.",
+        check_cleanup_retains_kept_members,
     ),
     _rule(
         GUARD_SELECTION_MERGE,
@@ -368,6 +498,11 @@ RULES: tuple[Rule, ...] = (
         check_cleanup_ownership_release,
     ),
     _rule(
+        GUARD_GATE_RETIREMENT,
+        "Update and uninstall retire what the gates no longer allow through gate_retirements.",
+        check_gate_retirement,
+    ),
+    _rule(
         GUARD_CODEX_AGENT_LINKS,
         "Codex agent bodies are rewritten by BaseIntegrator.resolve_links before serialization.",
         check_codex_agent_link_resolution,
@@ -376,6 +511,16 @@ RULES: tuple[Rule, ...] = (
         GUARD_AGENT_RENDER_ADOPT,
         "Agent writers render first and adopt only via _check_adopt_or_skip on that text.",
         check_agent_render_then_adopt,
+    ),
+    _rule(
+        GUARD_COMMAND_RENDER_ADOPT,
+        "Command adoption compares the rendered command via _check_adopt_or_skip.",
+        check_command_render_then_adopt,
+    ),
+    _rule(
+        GUARD_OVERWRITE_EVIDENCE,
+        "Managed files are replaced only with a deployment receipt or locked-render evidence.",
+        check_overwrite_evidence,
     ),
     _rule(
         GUARD_CONSUMER_MANIFEST_REWRITE,

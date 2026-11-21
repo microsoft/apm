@@ -32,6 +32,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, urlsplit
@@ -116,7 +117,8 @@ def _cache_dir() -> str:
     from ..config import CONFIG_DIR
 
     d = os.path.join(CONFIG_DIR, _CACHE_DIR_NAME)
-    os.makedirs(d, exist_ok=True)
+    if not _CACHE_READ_ONLY.get() and _CACHE_PENDING.get() is None:
+        os.makedirs(d, exist_ok=True)
     return d
 
 
@@ -202,7 +204,23 @@ def _write_cache(
     etag: str = "",
     last_modified: str = "",
 ) -> None:
-    """Write marketplace data and metadata to cache."""
+    """Write marketplace data and metadata to cache, unless reads are read-only.
+
+    Inside :func:`catalog_cache_writes_on_success` the write is held and
+    persisted only when that scope completes.
+    """
+    if _CACHE_READ_ONLY.get():
+        return
+    pending = _CACHE_PENDING.get()
+    if pending is not None:
+        pending.append(
+            (
+                name,
+                data,
+                {"index_digest": index_digest, "etag": etag, "last_modified": last_modified},
+            )
+        )
+        return
     data_path = _cache_data_path(name)
     meta_path = _cache_meta_path(name)
     try:
@@ -1108,7 +1126,7 @@ def fetch_raw(
             + (
                 " after a proxy miss"
                 if cfg is not None
-                else "; set PROXY_REGISTRY_URL or unset PROXY_REGISTRY_ONLY"
+                else "; set PROXY_REGISTRY_URL to route it through your proxy"
             )
         )
 
@@ -1165,7 +1183,7 @@ def _refuse_direct_egress(source_name: str, what: str) -> None:
             f"PROXY_REGISTRY_ONLY is set: refusing direct fetch of {what}",
             retry_hint=(
                 "Register a GitHub or GitLab marketplace and set PROXY_REGISTRY_URL "
-                "to route it through your proxy, or unset PROXY_REGISTRY_ONLY."
+                "to route it through your proxy."
             ),
         )
 
@@ -1454,6 +1472,37 @@ class _CatalogInvocation:
 
 _INVOCATION_LOCK = threading.RLock()
 _invocation: _CatalogInvocation | None = None
+_CACHE_READ_ONLY: ContextVar[bool] = ContextVar("marketplace_cache_read_only", default=False)
+_CACHE_PENDING: ContextVar[list | None] = ContextVar("marketplace_cache_pending", default=None)
+
+
+@contextlib.contextmanager
+def catalog_cache_writes_on_success(commit: bool = True) -> Iterator[None]:
+    """Hold catalog cache writes; persist them only if the scope completes.
+
+    A scope that raises (a refused re-verification) leaves the cache as it
+    was; one that completes persists what it fetched, validators included,
+    unless *commit* is false (``--dry-run``).
+    """
+    pending: list = []
+    token = _CACHE_PENDING.set(pending)
+    try:
+        yield
+    finally:
+        _CACHE_PENDING.reset(token)
+    if commit:
+        for name, data, validators in pending:
+            _write_cache(name, data, **validators)
+
+
+@contextlib.contextmanager
+def catalog_cache_read_only(enabled: bool = True) -> Iterator[None]:
+    """Read catalogs without persisting them to the cache (``--dry-run`` reads)."""
+    token = _CACHE_READ_ONLY.set(enabled)
+    try:
+        yield
+    finally:
+        _CACHE_READ_ONLY.reset(token)
 
 
 @contextlib.contextmanager

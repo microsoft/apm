@@ -370,7 +370,9 @@ def _resolve_targets_by_scope(
                     "No global targets resolved -- nothing will be "
                     "deployed. Check 'target:' in apm.yml or use --target."
                 )
-        _create_target_dirs(targets, ctx.project_root, explicit, ctx.logger)
+        ctx.created_target_roots.extend(
+            _create_target_dirs(targets, ctx.project_root, explicit, ctx.logger)
+        )
         return targets
 
     # Project scope: v2 resolution.
@@ -421,15 +423,20 @@ def _resolve_targets_by_scope(
             ctx.logger.error(str(exc), symbol="error")
         raise SystemExit(2) from exc
 
-    from apm_cli.utils.console import _rich_info
-
     _provenance_msg = format_provenance(_resolved)
-    _rich_info(_provenance_msg, symbol="info")
+    if ctx.logger:
+        ctx.logger.announce_targets(_provenance_msg)
+    else:
+        from apm_cli.utils.console import _rich_info
+
+        _rich_info(_provenance_msg, symbol="info")
 
     from apm_cli.integration.targets import materialize_project_target_profiles
 
     try:
-        _v2_targets = materialize_project_target_profiles(ctx.project_root, _resolved.targets)
+        _v2_targets = materialize_project_target_profiles(
+            ctx.project_root, _resolved.targets, ctx.created_target_roots
+        )
     except PermissionError as exc:
         if ctx.logger:
             ctx.logger.error(

@@ -425,6 +425,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     # (per the 1/2/3+ collapse rule), not one per target.
     # Structure: { prim_name: {"files": int, "adopted": int, "label": str, "paths": [str]} }
     _per_kind: dict[str, dict[str, Any]] = {}
+    _hooks_registered = 0
 
     for _prim_name, _entry in _dispatch.items():
         if _entry.multi_target:
@@ -527,6 +528,8 @@ def integrate_package_primitives(  # noqa: PLR0913
             # Treat anything that is not a real int as 0 so we never
             # invent fake adopt counts.
             _adopted = _adopted_attr if isinstance(_adopted_attr, int) else 0
+            _registered = getattr(_int_result, "hooks_registered", 0)
+            _hooks_registered += _registered if isinstance(_registered, int) else 0
             # Show the per-kind line whenever ANY work happened -- either
             # a fresh integrate or a silent adopt of pre-existing
             # byte-identical files. Adopt-only runs (e.g. re-install
@@ -570,21 +573,21 @@ def integrate_package_primitives(  # noqa: PLR0913
         if _prim_name not in _per_kind:
             continue
         _info = _per_kind[_prim_name]
-        # Build the verb + count phrase. When at least one file was
-        # freshly integrated we lead with "N X integrated"; pure-adopt
-        # runs (no fresh writes) lead with "N X adopted" so the line
-        # still appears and the count is truthful.
+        # Build the verb + count phrase. Adoption (a file already holding the
+        # render) changes nothing, so it is silent unless --verbose: a repeat
+        # install is a quiet no-op (#4382/#4360, I2).
         _files = _info["files"]
-        _adopted = _info["adopted"]
+        _adopted = _info["adopted"] if _verbose else 0
         _noun = _info["label"].removesuffix("s") if (_files or _adopted) == 1 else _info["label"]
         if _files > 0:
             _verb_phrase = f"{_files} {_noun} integrated"
             if _adopted > 0:
                 _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
         else:
-            _verb_phrase = f"{_adopted} {_noun} adopted"
-        for line in _destination_tree_lines(_verb_phrase, _info["paths"], _verbose):
-            _log_integration(line)
+            _verb_phrase = f"{_adopted} {_noun} adopted" if _adopted else ""
+        if _verb_phrase:
+            for line in _destination_tree_lines(_verb_phrase, _info["paths"], _verbose):
+                _log_integration(line)
         # Emit per-hook-file action summaries for the hooks primitive.
         # display_payloads reflects post-path-rewrite data (what is
         # actually written to disk and executed), so this is faithful.
@@ -669,6 +672,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     _total_integrated += _skill_count
     _total_integrated += int(skill_result.bin_deployed)
     result["files_changed"] = _total_integrated
+    # Hook files this package registers, written or unchanged (#4033).
+    result["hooks_contributed"] = _hooks_registered
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 
@@ -880,6 +885,7 @@ def integrate_local_bundle(
 
     deployed_files: list[str] = []
     deployed_hashes: dict[str, str] = {}
+    written_files: list[str] = []
     staged_files: list[str] = []
     staged_hashes: dict[str, str] = {}
     staged_fallback_hashes: dict[str, str] = {}
@@ -1116,6 +1122,7 @@ def integrate_local_bundle(
             # Staged instructions are compile input, never deployment claims (#3705).
             claims = staged_files if _staged else deployed_files
             claims.append(record)
+            written_files.extend(() if dry_run or _staged else (record,))
             # Canonical ``sha256:<hex>`` claims, staged ones included (#3718); IM4: a
             # real deploy hashes LF-normalized disk bytes, a dry run previews them.
             (staged_hashes if _staged else deployed_hashes)[record] = (
@@ -1134,7 +1141,11 @@ def integrate_local_bundle(
         project_root,
         targets=targets,
         slug=str(slug),
-        hooks_approved=_hooks_approved_bundle,
+        hooks_approved=(
+            None
+            if not _hooks_approved_bundle and _hooks_denied_bundle(allow_executables, approval_key)
+            else _hooks_approved_bundle
+        ),
         approval_key=approval_key,
         force=force,
         dry_run=dry_run,
@@ -1143,12 +1154,14 @@ def integrate_local_bundle(
         logger=logger,
     )
     deployed_files.extend(record for record in hook_result.scripts if record not in deployed_hashes)
+    written_files.extend(hook_result.written)
     deployed_hashes.update(hook_result.script_hashes)
     skipped += hook_result.skipped
 
     return {
         "deployed_files": deployed_files,
         "deployed_file_hashes": deployed_hashes,
+        "written_files": written_files,
         "staged_files": staged_files,
         "staged_file_hashes": staged_hashes,
         "staged_file_fallback_hashes": staged_fallback_hashes,
@@ -1161,3 +1174,13 @@ def integrate_local_bundle(
         "prompts": 0,
         "sub_skills": 0,
     }
+
+
+def _hooks_denied_bundle(allow_executables: Any, approval_key: str | None) -> bool:
+    """Whether a deny of this exact bundle, not a missing approval, withholds its hooks."""
+    if approval_key is None:
+        return False
+    from ..security.executables import EXEC_TYPE_HOOKS
+    from .local_bundle_handler import bundle_type_denied
+
+    return bundle_type_denied(allow_executables, approval_key, EXEC_TYPE_HOOKS)

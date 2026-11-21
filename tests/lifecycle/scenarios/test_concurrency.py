@@ -12,7 +12,9 @@ The holder is always an ``install``. It parks right after it acquires the
 lifecycle lock until the test releases it: with the engine driver a one-shot
 ``sitecustomize`` wraps ``acquire_lifecycle_lock``; with the binary driver a
 one-shot ``git`` shim parks the first ``git remote get-url origin`` (policy
-discovery under the lock; project scope only). The overlap is deterministic:
+discovery under the lock) at project scope, and at user scope, which has no
+git remote, a one-shot ``pre-install`` script of the user manifest (it also
+runs under the lock). The overlap is deterministic:
 the contender starts while the holder owns the lock, must still be running
 ``_BLOCKED_WINDOW`` seconds after its imports (the shim sees its
 ``git version``), and must report that it waited. The contenders cover install, update, uninstall,
@@ -37,6 +39,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 import pytest
 import yaml
@@ -105,6 +108,9 @@ _acquire = locking.acquire_lifecycle_lock
 
 
 def _parked_acquire(*args, **kwargs):
+    if os.path.exists({ready!r}):
+        # The holder is parked: this process is the contender reaching the lock.
+        open({started!r}, "w").close()
     handle = _acquire(*args, **kwargs)
     armed = {armed!r}
     try:
@@ -126,11 +132,13 @@ class _Park:
     """Park the holder inside the lifecycle lock until a release file appears.
 
     A one-shot hook parks the first lock holder: the lock acquire itself
-    (engine driver) or ``git remote get-url`` (binary driver). A ``git`` shim
-    marks the contender's start (GitPython's ``git version`` at import).
+    (engine driver), or with the binary driver ``git remote get-url`` (project
+    scope) or a user-manifest ``pre-install`` script (user scope). The contender's
+    start is its own lock acquire (engine driver) or its first ``git`` call
+    once the holder is parked (binary driver); startup itself spawns no git.
     """
 
-    def __init__(self, world) -> None:
+    def __init__(self, world, user_manifest: Path | None = None) -> None:
         self.world = world
         self.dir = world.root / "park-shim"
         self.dir.mkdir()
@@ -138,12 +146,14 @@ class _Park:
         self.ready = self.dir / "ready"
         self.release = self.dir / "release"
         self.started = self.dir / "contender-started"
-        park_in_git = driver.selected_driver() == "binary"
+        binary = driver.selected_driver() == "binary"
+        park_in_git = binary and user_manifest is None
+        self.user_manifest = user_manifest if binary else None
         real = shutil.which("git", path=world.env["PATH"])
         script = (
             "#!/bin/sh\n"
-            # GitPython runs `git version` while apm imports, before the lock.
-            f'if [ "$1" = "version" ] && [ -e "{self.ready}" ]; then : > "{self.started}"; fi\n'
+            # The parked holder runs no git, so any git call now is the contender's.
+            f'if [ -e "{self.ready}" ]; then : > "{self.started}"; fi\n'
         )
         if park_in_git:
             script += (
@@ -159,7 +169,19 @@ class _Park:
         (self.dir / "git").chmod(0o755)
         self.saved_env = dict(world.env)
         world.env["PATH"] = os.pathsep.join((str(self.dir), world.env["PATH"]))
-        if not park_in_git:
+        if self.user_manifest is not None:
+            park = (
+                f'if mv "{self.armed}" "{self.armed}.taken" 2>/dev/null; then '
+                f': > "{self.ready}"; i=0; '
+                f'while [ ! -e "{self.release}" ] && [ "$i" -lt 1200 ]; '
+                "do sleep 0.05; i=$((i+1)); done; fi"
+            )
+            data = yaml.safe_load(self.user_manifest.read_text(encoding="utf-8"))
+            data["lifecycle"] = {
+                "pre-install": [{"type": "command", "bash": park, "timeout_sec": 120}]
+            }
+            self.user_manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+        elif not park_in_git:
             hook = self.dir / "site"
             hook.mkdir()
             (hook / "sitecustomize.py").write_text(
@@ -167,6 +189,7 @@ class _Park:
                     armed=str(self.armed),
                     ready=str(self.ready),
                     release=str(self.release),
+                    started=str(self.started),
                     timeout=_PARK_TIMEOUT,
                 ),
                 encoding="ascii",
@@ -184,7 +207,7 @@ class _Park:
             time.sleep(0.02)
 
     def wait_contender(self, contender: _Run) -> None:
-        """Wait until the contender is past its imports, then let it reach the lock."""
+        """Wait until the contender reaches the lock, then give it time to finish."""
         deadline = time.monotonic() + _PARK_TIMEOUT
         while not self.started.exists():
             assert contender.thread.is_alive(), f"contender never started: {contender.output()}"
@@ -199,6 +222,14 @@ class _Park:
         self.release.write_text("", encoding="ascii")
         self.world.env.clear()
         self.world.env.update(self.saved_env)
+
+    def disarm(self) -> None:
+        """Drop the park script from the user manifest (an input edit)."""
+        if self.user_manifest is None:
+            return
+        data = yaml.safe_load(self.user_manifest.read_text(encoding="utf-8"))
+        data.pop("lifecycle", None)
+        self.user_manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
 
 
 class _Run:
@@ -270,8 +301,9 @@ def run_pair(scenario: Scenario, holder: Writer, contender: Writer) -> tuple[Ste
     )
     req_contender, final, final_roots = _plan(scenario, after_holder, holder_roots, contender_args)
 
+    user_manifest = scenario.manifest_root / "apm.yml" if holder.scope == "user" else None
+    park = _Park(world, user_manifest)
     before = scenario.observe()
-    park = _Park(world)
     try:
         first = _Run(world, holder_args, holder.scope)
         park.wait_parked(first)
@@ -283,6 +315,7 @@ def run_pair(scenario: Scenario, holder: Writer, contender: Writer) -> tuple[Ste
     finally:
         park.close()
     after = scenario.observe()
+    park.disarm()
 
     # Serialization: the contender waited for the holder and said so.
     assert blocked, f"contender finished while the holder held the lock:\n{second.output()}"
@@ -389,10 +422,6 @@ ROWS = (
         "install p-child",
         Writer("deny p-exec", "project"),
         then=_decision("p-exec", "deny"),
-        # Retiring the last hook removes .github; the repeat recreates it.
-        repeat_known={
-            "I2": Known("#4132", r"converged install rewrote files: \['project:\.github'\]")
-        },
     ),
     PairRow(
         "install-vs-self-update-setting",

@@ -136,12 +136,29 @@ def skill_bundle_file_entries(
     return entries
 
 
+def _managed_skills_root(tp: Path, project_root: Path, targets: Any) -> str | None:
+    """Name the real skills directory of the managed-root target that owns *tp*.
+
+    Project-relative when it lies under *project_root*, absolute otherwise.
+    """
+    for target in targets:
+        root = target.managed_deploy_root
+        if root is None or not target.supports("skills") or not tp.is_relative_to(root):
+            continue
+        skills_root = target.skills_deploy_path(project_root)
+        if skills_root.is_relative_to(project_root):
+            return portable_relpath(skills_root, project_root)
+        return skills_root.as_posix()
+    return None
+
+
 def skill_summary_paths(target_paths: Any, project_root: Path, targets: Any) -> list[str]:
     """Return the sorted skills roots (``<root>/<subdir>/``) a skill landed in.
 
     Each root is derived from the owning target's skills mapping so targets with
     a non-default subdir (e.g. ``agent-data/workflows``) render truthfully;
-    external (dynamic-root) deployments are labelled by their owning target.
+    managed-root deployments (e.g. a configured Cowork skills dir) name the
+    owning target's real skills directory.
     """
     from apm_cli.integration.targets import target_name_for_locator
 
@@ -154,21 +171,15 @@ def skill_summary_paths(target_paths: Any, project_root: Path, targets: Any) -> 
     )
     roots: set[str] = set()
     for tp in target_paths:
+        managed = _managed_skills_root(tp, project_root, targets)
+        if managed is not None:
+            roots.add(managed)
+            continue
         try:
             rel = tp.relative_to(project_root)
         except ValueError:
-            owner = next(
-                (
-                    t
-                    for t in targets
-                    if t.managed_deploy_root is not None
-                    and tp.is_relative_to(t.managed_deploy_root)
-                ),
-                None,
-            )
             locator_name = target_name_for_locator(deployed_path_entry(tp, project_root, targets))
-            label = owner.name if owner is not None else locator_name or "external"
-            roots.add(f"{label}/skills")
+            roots.add(f"{locator_name or 'external'}/skills")
             continue
         if not rel.parts:
             continue

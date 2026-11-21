@@ -60,7 +60,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "package; covered by the executables filter tests",
     "package-directory-collision": "needs duplicate package directories on a "
     "case-insensitive filesystem",
-    "plugin-mcp-ownership-unknown": _FAULT,
+    "plugin-mcp-ownership-unknown": "executed end to end by "
+    "tests/integration/test_lock_move_aside_remedies_lifecycle.py (RA-004)",
     "registry-token-in-manifest": "needs the registries experimental flag and a registry",
     "subset-pairings-inconsistent": "needs a hand-edited lockfile subset record",
 }

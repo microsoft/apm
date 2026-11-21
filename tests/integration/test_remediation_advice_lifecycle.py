@@ -247,6 +247,14 @@ def _unlink(relative: str) -> Callable[[_World], None]:
     return lambda world: (world.consumer.root / relative).unlink()
 
 
+def _move_aside(relative: str) -> Callable[[_World], None]:
+    def move(world: _World) -> None:
+        path = world.consumer.root / relative
+        path.rename(path.with_name(f"{path.name}.aside"))
+
+    return move
+
+
 def _corrupt_lockfile(world: _World) -> None:
     (world.consumer.root / "apm.lock.yaml").write_text("dependencies: [\n", encoding="ascii")
 
@@ -351,7 +359,7 @@ TEXT_PROOFS: tuple[_TextProof, ...] = (
         lambda world: ("export-patch", "--dry-run"),
         1,
         _expect_ok,
-        before=_unlink("apm.lock.yaml"),
+        before=_move_aside("apm.lock.yaml"),
     ),
     _TextProof(
         "executables-denied",
@@ -948,6 +956,8 @@ W3_CORE_MODELS_PROOFS: tuple[_TextProof, ...] = (
         lambda _world: _INSTALL_ARGS,
         0,
         _user_file_overwritten,
+        # The printed manual step, as printed: move the local file aside (RA-008).
+        before=_move_aside(_INSTRUCTION),
     ),
     _TextProof(
         "deployment-owners-invalid",
@@ -1035,6 +1045,59 @@ def test_w4_frozen_policy_remediation_clears_the_reported_state(
     tmp_path: Path, apm_binary_path: Path, proof: _BoundProof
 ) -> None:
     _check_bound_proof(tmp_path, apm_binary_path, proof)
+
+
+def test_policy_fetch_failure_remediation_clears_the_block(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``fetch_failure_default: block`` with no reachable org policy blocks the
+    install; the advice comes from the catalog, the advised ``apm policy status``
+    runs, and once the source serves a policy the retried install succeeds."""
+    import os
+
+    from apm_cli.core.remediation import catalog
+    from tests.integration._policy_scope_kit import PolicyScopeWorld
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+    from tests.utils.local_github_https_fixture import local_github_https_fixture
+
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    package = world.publish_package("pkg-a")
+    project = world.consumer(
+        dependencies=[f"{package.slug}#v1.0.0"],
+        extra={"policy": {"fetch_failure_default": "block"}},
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=600)
+    entry = catalog()["policy-fetch-failure-blocked"].bind(source="")
+
+    def run(env: dict[str, str], args: tuple[str, ...], scenario_id: str):
+        return runner.run(args, scenario_id=scenario_id, cwd=project, env=env)
+
+    with local_github_https_fixture(
+        tmp_path / "certs-unreachable", world.served_repositories()
+    ) as fx:
+        reported = run(fx.child_environment(world.git_env()), ("install",), "remediation-reported")
+    assert reported.returncode == 1, _result_evidence(reported)
+    assert entry.sentence() in _normalized(reported), _result_evidence(reported)
+    assert "--no-policy" not in _normalized(reported), _result_evidence(reported)
+
+    # The manual step the advice names: make the org policy source reachable.
+    world.publish_policy(
+        {
+            "name": "contoso-policy",
+            "version": "1.0.0",
+            "enforcement": "block",
+            "mcp": {"deny": ["unused-server"]},
+        }
+    )
+    with local_github_https_fixture(
+        tmp_path / "certs-reachable", world.served_repositories()
+    ) as fx:
+        env = fx.child_environment(world.git_env())
+        advised = run(env, entry.argv()[1:], "remediation-run-policy-fetch-failure-blocked")
+        assert advised.returncode == 0, _result_evidence(advised)
+        again = run(env, ("install",), "remediation-cleared")
+    assert again.returncode == 0, _result_evidence(again)
+    assert entry.option() not in _normalized(again), _result_evidence(again)
 
 
 # -- end W4 frozen-policy proofs --
@@ -1397,3 +1460,44 @@ def test_area_remediation_clears_the_reported_state(
     tmp_path: Path, apm_binary_path: Path, proof: _TextProof
 ) -> None:
     _check_text_proof(tmp_path, apm_binary_path, proof)
+
+
+def test_local_bundle_approval_hint_is_the_catalog_remedy_and_runs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4436: a parked bundle hook prints the catalog's 'apm approve <key>'; running it works.
+
+    Needs ``apm approve`` for content-bound bundle keys (#4437, #4490): fold #4490 first.
+    """
+    from apm_cli.core.remediation import LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED
+    from apm_cli.security.trust import approve_command
+    from apm_cli.utils.content_hash import compute_file_hash
+    from tests.integration._marketplace_pack_kit import MarketplacePackWorld, output
+    from tests.integration.test_local_bundle_hooks_lifecycle import _hook_entries, _packed_bundle
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("consumer", targets=("claude",))
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {}
+    dump_yaml(manifest, consumer / "apm.yml")
+
+    text = output(world.apm(consumer, "install", str(bundle), "--no-policy"))
+    remedy = LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED.bind(
+        key=key, exec_type="hooks", install="apm install <bundle-path>"
+    ).with_command(approve_command(key))
+    expected = f"To {remedy.fixes_promise}, run: {remedy.command} then {remedy.then}."
+    assert expected in text, text
+    assert not (consumer / ".claude" / "settings.json").exists()
+
+    # Run the printed remedy: the printed 'apm approve' command, then the reinstall.
+    printed = re.search(r"run: (apm approve '[^']+') then", text)
+    assert printed is not None, text
+    world.apm(consumer, *shlex.split(printed.group(1))[1:])
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+    lock = load_yaml(consumer / "apm.lock.yaml")
+    recorded = lock.get("local_deployed_file_hashes") or {}
+    assert recorded, lock
+    assert {path: compute_file_hash(consumer / path) for path in recorded} == recorded
+    world.apm(consumer, "audit", "--ci", "--no-policy")

@@ -51,6 +51,17 @@ class InstallRequest:
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     legacy_skill_paths: bool = False  # --legacy-skill-paths / APM_LEGACY_SKILL_PATHS
     trust_transitive_mcp: bool = False
+    # MCP servers the caller integrates after the pipeline; their org policy
+    # is enforced by the commit gate before anything deploys.
+    install_mcp: bool = True
+    mcp_runtime: str | None = None
+    # --dry-run: the pipeline resolves into rollback staging, runs its gates
+    # in preview mode, and stops before the first write.
+    # The caller reconciles MCP/LSP services after the pipeline and fires
+    # post-install itself (result.post_install), so scripts see the final
+    # lockfile (#4319).
+    post_install_after_services: bool = False
+    dry_run: bool = False
     trust_bin: bool | None = None
     # Set when the caller integrates LSP after the pipeline: declared LSP
     # without a capable target fails before the pipeline writes (#3727).

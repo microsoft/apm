@@ -594,6 +594,9 @@ def _integrate_materialization(
         deltas["installed"] = package_install_count(
             int_result, fetched=bool(deltas.get("installed"))
         )
+        # A parked native bundle deployed nothing: it is not an install (#4154).
+        if int_result.get("parked_native"):
+            deltas["installed"] = 0
         ctx.package_deployed_files[dep_key] = int_result["deployed_files"]
         from apm_cli.core.deployment_state import CompletedReintegration
 

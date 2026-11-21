@@ -50,7 +50,7 @@ export PROXY_REGISTRY_ONLY=1
 | `PROXY_REGISTRY_URL` | Base URL of the proxy. APM downloads package archives from it. |
 | `PROXY_REGISTRY_TOKEN` | Bearer token, never sent to hosts other than the proxy. |
 | `PROXY_REGISTRY_ONLY` | `1` refuses any direct download from the upstream host, including on lockfile replay, and skips source-host probes such as the `apm update` auth check. |
-| `PROXY_REGISTRY_ALLOW_HTTP` | `1` silences the warning for a plaintext `http://` proxy. Use it on internal networks. |
+| `PROXY_REGISTRY_ALLOW_HTTP` | `1` authorizes sending `PROXY_REGISTRY_TOKEN` over `http://` to a host that is not loopback or a private network address (10/8, 172.16/12, 192.168/16). Without it, the token is not sent there and a `[!]` line says why. |
 
 The lockfile records which entries came through the proxy. With `PROXY_REGISTRY_ONLY=1`,
 a lockfile written without the proxy is refused before anything downloads:
@@ -59,7 +59,7 @@ a lockfile written without the proxy is refused before anything downloads:
 PROXY_REGISTRY_ONLY is set but the lockfile contains dependencies locked to direct VCS sources:
   - microsoft/apm-sample-package (host: github.com)
   - github/awesome-copilot/skills/review-and-refactor (host: github.com)
-Run 'apm update' to re-resolve through the registry, or unset PROXY_REGISTRY_ONLY.
+Run 'apm update' to re-resolve through the registry.
 [x] Install failed after 0.3s.
 ```
 
@@ -124,7 +124,7 @@ Build a bundle on a connected machine, carry it across, and install it.
 
    APM checks every file against the bundle's hashes and rejects symlinks, unlisted
    files and mismatches before deploying. The hashes travel inside the bundle, so they
-   catch corruption, not a bundle someone rebuilt: carry it over a channel you trust. `apm install` does not edit `apm.yml`; it records the
+   catch corruption, not a bundle someone rebuilt: carry it over a channel you trust. `apm install` does not edit an existing `apm.yml` (it creates a minimal one when the project has none); it records the
    deployed files in `apm.lock.yaml`. Org policy resolves as for a package install; on
    a disconnected machine the fetch fails and `policy.fetch_failure_default` decides.
    `security.integrity.require_hashes: true` refuses bundles without hashes.

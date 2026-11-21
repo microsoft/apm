@@ -1,0 +1,165 @@
+lockfile_version: '1'
+apm_version: 0.36.1
+dependencies:
+- repo_url: _local/pkg
+  name: legacy-pkg
+  version: 1.0.0
+  package_type: apm_package
+  deployed_files:
+  - .agents/skills/legacy-skill
+  - .agents/skills/legacy-skill/SKILL.md
+  - .claude/agents/editor.md
+  - .claude/agents/reviewer.md
+  - .claude/rules/everywhere.md
+  - .claude/rules/python.md
+  - .claude/skills/legacy-skill
+  - .claude/skills/legacy-skill/SKILL.md
+  - .codex/agents/editor.toml
+  - .codex/agents/reviewer.toml
+  - .cursor/agents/editor.md
+  - .cursor/agents/reviewer.md
+  - .cursor/rules/everywhere.mdc
+  - .cursor/rules/python.mdc
+  deployed_file_hashes:
+    .agents/skills/legacy-skill/SKILL.md: sha256:729ab091b6c41fff776cf92820875fce822ded4557734f170c108309f05d23e2
+    .claude/agents/editor.md: sha256:0a41b8b554934188a1dbc95c26f39896444832fe48008d9a23fcf5480193e512
+    .claude/agents/reviewer.md: sha256:85ec0ae45ab9d25a19ba7e261a3edd3349bf78dc76cade7fb1afd2111f6aa9e3
+    .claude/rules/everywhere.md: sha256:69411fca56b92c82905256592c35b6b30b2a0fa3d25803f5ff1490941e709590
+    .claude/rules/python.md: sha256:236f0217c9be9e8a2abab37317d846b07fe516252bb2b4ef3e99f15636a873c6
+    .claude/skills/legacy-skill/SKILL.md: sha256:729ab091b6c41fff776cf92820875fce822ded4557734f170c108309f05d23e2
+    .codex/agents/editor.toml: sha256:b34628de528f62bcdd8f89f7eea918767a44ecdeaccb6b8b2b4ff7418d3e2da9
+    .codex/agents/reviewer.toml: sha256:ab1c741d791ab877b9a87d888e0d86312d552ad369df3b3c927700a063f7c072
+    .cursor/agents/editor.md: sha256:0a41b8b554934188a1dbc95c26f39896444832fe48008d9a23fcf5480193e512
+    .cursor/agents/reviewer.md: sha256:85ec0ae45ab9d25a19ba7e261a3edd3349bf78dc76cade7fb1afd2111f6aa9e3
+    .cursor/rules/everywhere.mdc: sha256:8323f887e602cea86deb3eba920a6585355603cab7ceee9f95e7a0b59974ab55
+    .cursor/rules/python.mdc: sha256:945590fe0d01410d195e3d38f41ac1271a05373aacd3cf7407bff56b6eb9e79d
+  source: local
+  local_path: ../pkg
+  content_hash: sha256:0f74047de28f0f292b75796434c10e734627431062545680f9a38d31c69a2f76
+deployments:
+- kind: project-relative
+  target: claude
+  value: .claude/agents/editor.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:0a41b8b554934188a1dbc95c26f39896444832fe48008d9a23fcf5480193e512
+- kind: project-relative
+  target: claude
+  value: .claude/agents/reviewer.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:85ec0ae45ab9d25a19ba7e261a3edd3349bf78dc76cade7fb1afd2111f6aa9e3
+- kind: project-relative
+  target: claude
+  value: .claude/rules/everywhere.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:69411fca56b92c82905256592c35b6b30b2a0fa3d25803f5ff1490941e709590
+- kind: project-relative
+  target: claude
+  value: .claude/rules/python.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:236f0217c9be9e8a2abab37317d846b07fe516252bb2b4ef3e99f15636a873c6
+- kind: project-relative
+  target: claude
+  value: .claude/skills/legacy-skill
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/legacy-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:729ab091b6c41fff776cf92820875fce822ded4557734f170c108309f05d23e2
+- kind: project-relative
+  target: codex
+  value: .agents/skills/legacy-skill
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: null
+- kind: project-relative
+  target: codex
+  value: .agents/skills/legacy-skill/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:729ab091b6c41fff776cf92820875fce822ded4557734f170c108309f05d23e2
+- kind: project-relative
+  target: codex
+  value: .codex/agents/editor.toml
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:b34628de528f62bcdd8f89f7eea918767a44ecdeaccb6b8b2b4ff7418d3e2da9
+- kind: project-relative
+  target: codex
+  value: .codex/agents/reviewer.toml
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:ab1c741d791ab877b9a87d888e0d86312d552ad369df3b3c927700a063f7c072
+- kind: project-relative
+  target: cursor
+  value: .cursor/agents/editor.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:0a41b8b554934188a1dbc95c26f39896444832fe48008d9a23fcf5480193e512
+- kind: project-relative
+  target: cursor
+  value: .cursor/agents/reviewer.md
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:85ec0ae45ab9d25a19ba7e261a3edd3349bf78dc76cade7fb1afd2111f6aa9e3
+- kind: project-relative
+  target: cursor
+  value: .cursor/rules/everywhere.mdc
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:8323f887e602cea86deb3eba920a6585355603cab7ceee9f95e7a0b59974ab55
+- kind: project-relative
+  target: cursor
+  value: .cursor/rules/python.mdc
+  runtime: null
+  scope: project
+  owners:
+  - ../pkg
+  active_owner: ../pkg
+  content_hash: sha256:945590fe0d01410d195e3d38f41ac1271a05373aacd3cf7407bff56b6eb9e79d

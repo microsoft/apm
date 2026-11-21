@@ -411,7 +411,7 @@ def _u8_mapping(cell) -> str | None:
     if op == "marketplace" and src not in _MARKETPLACE_ADD_SOURCES:
         return "marketplace add of a source without a catalog"  # registration.py:45
     if op == "uninstall" and src in _MCP_SERVER_SOURCES:
-        return f"uninstall of an MCP server ({src})"  # uninstall/engine.py:698, 857
+        return f"uninstall of an MCP server ({src})"  # uninstall/engine.py:710, 869
     if src == "local-bundle" and op in ("uninstall", "update", "prune"):
         return f"{op} of a local bundle"  # uninstall/engine.py:690, update.py:448, prune.py:199
     return None

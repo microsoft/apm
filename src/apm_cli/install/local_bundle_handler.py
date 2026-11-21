@@ -35,6 +35,8 @@ from .deployed_paths import log_bundle_deployed
 if TYPE_CHECKING:
     from apm_cli.models.dependency.mcp import MCPDependency
 
+    from .local_bundle_pending import BundleRecordStage
+
 
 def install_local_bundle(
     *,
@@ -149,6 +151,23 @@ def install_local_bundle(
 
             targets = resolve_skill_layout(targets, legacy_skill_paths=True)
 
+        from .bundle_admission import admit_bundle, plugin_bundle_integrity
+
+        verify_integrity = plugin_bundle_integrity(bundle_info, logger)
+        integrity_verified = False
+
+        def integrity_check(require_hashes: bool) -> None:
+            nonlocal integrity_verified
+            if not integrity_verified:
+                verify_integrity(require_hashes)
+                integrity_verified = bundle_info.lockfile is not None
+
+        if bundle_info.lockfile is not None:
+            # A bundle with a manifest is verified whatever the policy says, so
+            # refuse a tampered one before the executables gate offers to
+            # approve its content (RA-035). admit_bundle reuses this verdict.
+            integrity_check(False)
+
         bundle_mcp_deps: list[MCPDependency] = []
         bundle_mcp_declared = False
         if bundle_info.lockfile is not None:
@@ -176,18 +195,14 @@ def install_local_bundle(
             if bundle_info.source_dir is not None
             else []
         )
-        from ..security.executables import exec_map_authorizes_all
-
-        bundle_approval_key = None
-        if not exec_map_authorizes_all(allow_executables):
-            from ..security.executables import local_bundle_approval_key
-
-            bundle_approval_key = local_bundle_approval_key(
-                bundle_info.package_id,
-                str(bundle_info.plugin_json.get("version") or ""),
-                bundle_info.source_dir,
-                bundle_info.lockfile,
-            )
+        bundle_approval_key = _bundle_approval_key(bundle_info, allow_executables)
+        bundle_record = _stage_bundle_executables(
+            bundle_info,
+            str(alias or bundle_info.package_id),
+            bundle_approval_key,
+            (bundle_mcp_deps, bundle_lsp_deps),
+            scope_dir=None if dry_run else _bundle_lock_root(global_),
+        )
         bundle_mcp_deps = _filter_bundle_executables(
             bundle_mcp_deps,
             bundle_info=bundle_info,
@@ -206,8 +221,6 @@ def install_local_bundle(
             logger=logger,
             user_scope=global_,
         )
-        from .bundle_admission import admit_bundle, plugin_bundle_integrity
-
         deployment_decision = EffectiveTargetDecision(
             [resolved.name for resolved in targets], "bundle deployment targets"
         )
@@ -216,7 +229,7 @@ def install_local_bundle(
             apm_deps=(),
             mcp_deps=bundle_mcp_deps,
             target_decision=deployment_decision,
-            integrity_check=plugin_bundle_integrity(bundle_info, logger),
+            integrity_check=integrity_check,
             no_policy=no_policy,
             logger=logger,
             dry_run=dry_run,
@@ -313,7 +326,7 @@ def install_local_bundle(
                 force=force,
             )
 
-        # Persist into project lockfile -- never mutate apm.yml (per design).
+        # Persist into project lockfile -- never edit an existing apm.yml.
         staged_fallbacks = result.get("staged_file_fallback_hashes", {})
         if deployed or staged_instructions or staged_fallbacks:
             from ..deps.lockfile import migrate_lockfile_if_needed
@@ -321,7 +334,7 @@ def install_local_bundle(
             migrate_lockfile_if_needed(_bundle_lock_root(global_))
             lockfile_path = get_lockfile_path(_bundle_lock_root(global_))
             lockfile = LockFile.read(lockfile_path) or LockFile()
-            from ..core.deployment_ledger import DeploymentLedgerCodec
+            from ..core.deployment_ledger import DeploymentLedgerCodec, record_bundle_receipts
             from ..integration.cleanup import DeploymentEvidence
             from ..utils.diagnostics import DiagnosticCollector
 
@@ -333,6 +346,15 @@ def install_local_bundle(
                 lockfile=lockfile,
                 lockfile_root=lockfile_path.parent,
                 diagnostics=migration_diagnostics,
+                # Not an integrating install: nothing was kept this run.
+                kept=(),
+            )
+            # The bytes just deployed from this bundle are its render (#4360).
+            migration_evidence.add_rendered(
+                {
+                    Path(record) if Path(record).is_absolute() else project_root / record: value
+                    for record, value in deployed_hashes.items()
+                }
             )
             DeploymentLedgerCodec.record_local_bundle_files(
                 lockfile,
@@ -343,69 +365,35 @@ def install_local_bundle(
                 staged_hashes=result.get("staged_file_hashes", {}),
                 staged_fallback_hashes=staged_fallbacks,
             )
+            # Receipts are a bundle file's only deletion evidence (#4223); a
+            # dry run writes nothing, so it reports no written files.
+            record_bundle_receipts(
+                project_root,
+                scope=scope,
+                targets=targets,
+                written=result.get("written_files", []),
+                lockfile=lockfile,
+            )
 
-            # Auto-migrate legacy per-client skill paths (#737).
-            # After deploying new .agents/skills/ files, detect and clean up
-            # any legacy paths (e.g. .github/skills/) still recorded in the
-            # lockfile from a previous --legacy-skill-paths install.
-            if not legacy_skill_paths:
-                from ..utils.console import _rich_error, _rich_info
-                from .skill_path_migration import (
-                    COLLISION_DETAIL_TEMPLATE,
-                    COLLISION_HEADER_TEMPLATE,
-                    COLLISION_HINT,
-                    MIGRATION_SUMMARY_TEMPLATE,
+            _kept_legacy = (
+                []
+                if legacy_skill_paths
+                else _migrate_legacy_skills(
+                    lockfile, project_root, migration_evidence, migration_diagnostics, logger
                 )
-                from .skill_path_migration import (
-                    check_collisions as _check_coll,
-                )
-                from .skill_path_migration import (
-                    detect_legacy_skill_deployments as _detect_legacy,
-                )
-                from .skill_path_migration import (
-                    execute_migration as _exec_mig,
-                )
+            )
 
-                _plans = _detect_legacy(lockfile, project_root)
-                if _plans:
-                    _colls = _check_coll(_plans, project_root)
-                    if _colls:
-                        # H2: collision is an error.
-                        _rich_error(
-                            COLLISION_HEADER_TEMPLATE.format(count=len(_colls)),
-                            symbol="error",
-                        )
-                        # M2: enumerate each collision (parity with pipeline).
-                        for _plan in _plans:
-                            for _cd in _colls:
-                                if _plan.dst_path in _cd:
-                                    _rich_error(
-                                        COLLISION_DETAIL_TEMPLATE.format(
-                                            dst_path=_plan.dst_path,
-                                            src_path=_plan.src_path,
-                                            dep_name=_plan.dep_name,
-                                        ),
-                                        symbol="error",
-                                    )
-                                    break
-                        _rich_info(COLLISION_HINT, symbol="info")
-                    else:
-                        _mig_result = _exec_mig(
-                            _plans, lockfile, project_root, evidence=migration_evidence
-                        )
-                        migration_diagnostics.render_summary()
-                        _total = len(_mig_result.deleted) + len(_mig_result.skipped_no_file)
-                        if _total:
-                            _rich_info(
-                                MIGRATION_SUMMARY_TEMPLATE.format(count=_total),
-                                symbol="info",
-                            )
-                        if getattr(logger, "verbose", False) and _mig_result.deleted:
-                            for _dp in _mig_result.deleted:
-                                _rich_info(f"  removed {_dp}", symbol="info")
-
+            if not global_:
+                _bootstrap_project_manifest(logger)
             lockfile.write(lockfile_path)
+            # The lockfile write commits this install; the pending record joins it.
+            if bundle_record is not None:
+                bundle_record.commit()
+            if _kept_legacy:
+                _refuse_unproven_legacy(_kept_legacy, logger, user_scope=global_)
 
+        if bundle_record is not None:
+            bundle_record.commit()
         msg = f"Installed {len(deployed) + len(staged_instructions)} file(s) from local bundle"
         if skipped:
             msg += f" ({skipped} skipped)"
@@ -432,6 +420,92 @@ def install_local_bundle(
         # Tarball cleanup (caller-owned per LocalBundleInfo contract).
         if bundle_info.temp_dir is not None and bundle_info.temp_dir.exists():
             shutil.rmtree(bundle_info.temp_dir, ignore_errors=True)
+
+
+def _migrate_legacy_skills(
+    lockfile, project_root: Path, migration_evidence, migration_diagnostics, logger
+) -> list[str]:
+    """Auto-migrate legacy per-client skill paths (#737); return the kept ones (#4360).
+
+    After deploying new .agents/skills/ files, detect and clean up any legacy
+    paths (e.g. .github/skills/) still recorded in the lockfile from a
+    previous --legacy-skill-paths install.
+    """
+    from ..utils.console import _rich_error, _rich_info
+    from .skill_path_migration import (
+        COLLISION_DETAIL_TEMPLATE,
+        COLLISION_HEADER_TEMPLATE,
+        COLLISION_HINT,
+        MIGRATION_SUMMARY_TEMPLATE,
+    )
+    from .skill_path_migration import (
+        check_collisions as _check_coll,
+    )
+    from .skill_path_migration import (
+        detect_legacy_skill_deployments as _detect_legacy,
+    )
+    from .skill_path_migration import (
+        execute_migration as _exec_mig,
+    )
+
+    _plans = _detect_legacy(lockfile, project_root)
+    if _plans:
+        _colls = _check_coll(_plans, project_root)
+        if _colls:
+            # H2: collision is an error.
+            _rich_error(
+                COLLISION_HEADER_TEMPLATE.format(count=len(_colls)),
+                symbol="error",
+            )
+            # M2: enumerate each collision (parity with pipeline).
+            for _plan in _plans:
+                for _cd in _colls:
+                    if _plan.dst_path in _cd:
+                        _rich_error(
+                            COLLISION_DETAIL_TEMPLATE.format(
+                                dst_path=_plan.dst_path,
+                                src_path=_plan.src_path,
+                                dep_name=_plan.dep_name,
+                            ),
+                            symbol="error",
+                        )
+                        break
+            _rich_info(COLLISION_HINT, symbol="info")
+            # A legacy copy unlike this bundle's render may hold edits (#4360).
+            return [
+                _plan.src_path
+                for _plan in _plans
+                if any(_plan.dst_path in _cd for _cd in _colls)
+                and not migration_evidence.authorizes(_plan.src_path, project_root / _plan.src_path)
+            ]
+        else:
+            _mig_result = _exec_mig(_plans, lockfile, project_root, evidence=migration_evidence)
+            migration_diagnostics.render_summary()
+            _total = len(_mig_result.deleted) + len(_mig_result.skipped_no_file)
+            if _total:
+                _rich_info(
+                    MIGRATION_SUMMARY_TEMPLATE.format(count=_total),
+                    symbol="info",
+                )
+            if getattr(logger, "verbose", False) and _mig_result.deleted:
+                for _dp in _mig_result.deleted:
+                    _rich_info(f"  removed {_dp}", symbol="info")
+            return _mig_result.failed
+
+    return []
+
+
+def _refuse_unproven_legacy(kept: list[str], logger, *, user_scope: bool) -> None:
+    """Fail on legacy skill files no evidence proves APM deployed (#4360).
+
+    The lockfile keeps their rows; the files stay on disk for the user.
+    """
+    from ..integration.base_integrator import kept_edit_message
+    from .errors import InstallFailureAlreadyRendered
+
+    for path in kept:
+        logger.error(kept_edit_message(path, user_scope=user_scope, proven_edit=False))
+    raise InstallFailureAlreadyRendered(f"{len(kept)} legacy skill file(s) kept")
 
 
 def _parse_legacy_bundle_mcp_servers(
@@ -570,12 +644,97 @@ def _filter_bundle_executables(
     if package_type_approved(allow_executables, (approval_key,), exec_type):
         return dependencies
     noun = "executable" if len(dependencies) == 1 else "executables"
-    logger.warning(
-        f"Skipped {len(dependencies)} bundle {exec_type.upper()} {noun} from "
-        f"{bundle_info.package_id}. "
-        + local_bundle_approval_hint(approval_key, exec_type, user_scope=user_scope)
-    )
+    lead = f"Skipped {len(dependencies)} bundle {exec_type.upper()} {noun} from {bundle_info.package_id}"
+    if bundle_type_denied(allow_executables, approval_key, exec_type):
+        logger.warning(
+            f"{lead}: {bundle_denied_hint(approval_key, exec_type, user_scope=user_scope)}"
+        )
+    else:
+        logger.warning(
+            f"{lead}. " + local_bundle_approval_hint(approval_key, exec_type, user_scope=user_scope)
+        )
     return []
+
+
+def bundle_type_denied(allow_executables: Any, approval_key: str, exec_type: str) -> bool:
+    """Whether a deny of this exact bundle, not a missing approval, withholds *exec_type*."""
+    from ..security.trust import package_denies_type
+
+    context = getattr(allow_executables, "trust_context", None)
+    return package_denies_type(context, (approval_key,), exec_type)
+
+
+def bundle_denied_hint(approval_key: str, exec_type: str, *, user_scope: bool) -> str:
+    """Name the deny and the user's own command that lifts it (RA-041).
+
+    The one wording for a denied local bundle's hooks, MCP and LSP: a deny is
+    never reported as a pending approval.
+    """
+    from ..core.remediation import LOCAL_BUNDLE_EXECUTABLES_DENIED
+    from ..security.trust import approve_command
+
+    install = "apm install -g <bundle-path>" if user_scope else "apm install <bundle-path>"
+    remedy = LOCAL_BUNDLE_EXECUTABLES_DENIED.bind(
+        key=approval_key, exec_type=exec_type, install=install
+    ).with_command(approve_command(approval_key, user_scope=user_scope))
+    return (
+        f"{exec_type} is denied for this exact bundle ({approval_key}). "
+        f"To {remedy.fixes_promise}, run:\n    {remedy.command}\nthen {remedy.then}."
+    )
+
+
+def _bundle_approval_key(bundle_info, allow_executables) -> str | None:
+    """The exact-content approval key, or None when the gate admits everything."""
+    from ..security.executables import exec_map_authorizes_all, local_bundle_approval_key
+
+    if exec_map_authorizes_all(allow_executables):
+        return None
+    return local_bundle_approval_key(
+        bundle_info.package_id,
+        str(bundle_info.plugin_json.get("version") or ""),
+        bundle_info.source_dir,
+        bundle_info.lockfile,
+    )
+
+
+def _declared_bundle_exec_types(bundle_info, mcp_deps: list, lsp_deps: list) -> tuple[str, ...]:
+    """Executable types the bundle ships, before trust filters them."""
+    from .local_bundle_paths import bundle_pack_files, is_plugin_hook_path
+
+    files = list(bundle_pack_files(bundle_info))
+    if not files and bundle_info.source_dir is not None:
+        root = Path(bundle_info.source_dir)
+        files = [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()]
+    declared = []
+    if any(is_plugin_hook_path(path) for path in files):
+        declared.append("hooks")
+    if mcp_deps:
+        declared.append("mcp")
+    if lsp_deps:
+        declared.append("lsp")
+    return tuple(declared)
+
+
+def _stage_bundle_executables(
+    bundle_info,
+    slug: str,
+    approval_key: str | None,
+    service_deps: tuple[list, list],
+    *,
+    scope_dir: Path | None,
+) -> BundleRecordStage | None:
+    """Stage this install's exact-content key and executable types; not on dry runs.
+
+    ``apm approve --pending`` lists the types trust still parks (#4221);
+    ``apm approve <key>`` grants only a key an install recorded (#4437).
+    The record is written only when the install commits (#4492).
+    """
+    from .local_bundle_pending import BundleRecordStage
+
+    if scope_dir is None:
+        return None
+    declared = _declared_bundle_exec_types(bundle_info, *service_deps)
+    return BundleRecordStage(scope_dir, slug, approval_key, tuple(declared) if approval_key else ())
 
 
 def _bundle_owner_key(bundle_info) -> str:
@@ -614,6 +773,27 @@ def _home_relative_claims(
     return [_relative(path) for path in deployed], {
         _relative(path): digest for path, digest in hashes.items()
     }
+
+
+def _bootstrap_project_manifest(logger) -> None:
+    """Create the bootstrap apm.yml a bundle install needs to be auditable (RA-017).
+
+    A project lockfile without apm.yml fails ``apm audit --ci``
+    (manifest-missing), so a bundle installed into a directory with no
+    manifest gets the same minimal one ``apm install <pkg>`` creates. An
+    existing apm.yml is never edited.
+    """
+    from ..constants import APM_YML_FILENAME
+    from ..core.project_name import resolve_bootstrap_project_name
+    from ..core.scope import InstallScope, get_manifest_path
+    from ..models.manifest_bootstrap import bootstrap_config, write_minimal_manifest
+
+    manifest_path = get_manifest_path(InstallScope.PROJECT)
+    if manifest_path.exists():
+        return
+    project_name = resolve_bootstrap_project_name(manifest_path.parent.name)
+    write_minimal_manifest(bootstrap_config(project_name), target_path=manifest_path)
+    logger.success(f"Created {APM_YML_FILENAME}")
 
 
 def _bundle_lock_root(user_scope: bool) -> Path:

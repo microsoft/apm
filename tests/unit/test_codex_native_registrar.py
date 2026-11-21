@@ -304,7 +304,7 @@ def test_source_identity_refusal_precedes_native_access(tmp_path, monkeypatch, f
     factory = Mock(side_effect=AssertionError("native access must not happen"))
     monkeypatch.setattr(CodexNativeClient, "for_scope", factory)
     diagnostic = {
-        "same-pin": "cache differs",
+        "same-pin": "package cache differs from its locked content",
         "missing-provenance": "source provenance is missing",
         "invalid-pin": "Invalid original Codex source pin",
     }[fault]

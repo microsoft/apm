@@ -355,8 +355,8 @@ def findings_to_markdown(
         ]
         for entry in coverage:
             values = (
-                entry.file + entry.pointer,
-                "recorded-file" if entry.tracked else "untracked",
+                entry.location,
+                entry.tracking,
                 entry.status,
                 entry.diagnostic or "",
             )

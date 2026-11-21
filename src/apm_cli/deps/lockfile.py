@@ -43,6 +43,9 @@ from ..models.dependency.replacement import (
 from ..models.dependency.subsets import SkillTargetSelection, canonical_target_subset
 from ..native_plugins.record import NativePluginRecord, NativePluginRecordError
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
+from .lockfile_container import validate_lockfile_container as _validate_lockfile_container
+from .lockfile_extensions import carry_vendor_extensions, vendor_extensions
+from .lockfile_version_remedy import with_version_remedy
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +159,20 @@ def suppress_lockfile_writes() -> Iterator[list[str]]:
         _suppressed_writes.reset(token)
 
 
+def _declared_target_names(root: Path, *, user_scope: bool) -> list[str] | None:
+    """Targets the apm.yml beside a lockfile declares ([] for auto-detect).
+
+    ``None`` when no manifest sits beside it (a scratch snapshot).
+    """
+    from apm_cli.core.scope import manifest_file
+
+    if not manifest_file(root).is_file():
+        return None
+    from apm_cli.install.manifest_reconcile import declared_target_names
+
+    return declared_target_names(root, user_scope=user_scope)
+
+
 def installed_apm_version() -> str:
     """Return the running APM version stamped into lockfile metadata.
 
@@ -191,19 +208,14 @@ def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> 
     return lock_holds_untranslated_mcp_claims(existing.apm_version, carried)
 
 
-def _same_document_on_disk(path: Path, serialized: str) -> bool:
-    """Whether *path* already holds exactly the data *serialized* would write.
-
-    Only formatting may differ; a legacy layout the writer would migrate is a
-    different document and is rewritten.
-    """
+def _same_document(current: str | None, serialized: str) -> bool:
+    """Whether *current* holds the data *serialized* would write; only formatting may differ."""
     from ..utils.yaml_io import load_yaml_str
 
     try:
-        on_disk = load_yaml_str(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError, ValueError):
+        return current is not None and load_yaml_str(current) == load_yaml_str(serialized)
+    except (UnicodeError, yaml.YAMLError, ValueError):
         return False
-    return on_disk == load_yaml_str(serialized)
 
 
 def recorded_generator(data: Mapping[str, Any]) -> object:
@@ -357,81 +369,6 @@ def require_supported_lockfile_version(data: object) -> str:
     return version
 
 
-def _validate_lockfile_container(data: object) -> dict[str, Any]:
-    """Validate version and top-level container shapes before construction."""
-    if not isinstance(data, dict):
-        raise LockfileFormatError("Lockfile root must be a mapping")
-    data = dict(data)
-    # Pre-versioned lockfiles are a supported legacy v1 migration input.
-    # Explicit unknown/newer versions still fail closed here.
-    data["lockfile_version"] = require_supported_lockfile_version(data)
-    list_fields = (
-        "dependencies",
-        "deployments",
-        "mcp_servers",
-        "lsp_servers",
-        "local_deployed_files",
-        "local_staged_files",
-    )
-    mapping_fields = (
-        "mcp_configs",
-        "mcp_target_servers",
-        "mcp_config_provenance",
-        "mcp_omissions",
-        "lsp_configs",
-        "lsp_target_servers",
-        "lsp_config_provenance",
-        "local_deployed_file_hashes",
-        "local_staged_file_hashes",
-    )
-    for field_name in list_fields:
-        if field_name in data and data[field_name] is None:
-            data[field_name] = []
-        elif field_name in data and not isinstance(data[field_name], list):
-            raise LockfileFormatError(f"Lockfile field {field_name!r} must be a list")
-    for field_name in mapping_fields:
-        if field_name in data and data[field_name] is None:
-            data[field_name] = {}
-        elif field_name in data and not isinstance(data[field_name], dict):
-            raise LockfileFormatError(f"Lockfile field {field_name!r} must be a mapping")
-    for index, dependency in enumerate(data.get("dependencies", [])):
-        if not isinstance(dependency, dict):
-            raise LockfileFormatError(f"Lockfile dependency at index {index} must be a mapping")
-    if any(not isinstance(name, str) or not name for name in (data.get("mcp_omissions") or {})):
-        raise LockfileFormatError(
-            "MCP omission evidence has invalid server names; selection is unknown. "
-            "Restore a known-good lockfile and repeat the intended install selection"
-        )
-    for field_name in ("mcp_target_servers", "lsp_target_servers"):
-        for target, servers in (data.get(field_name) or {}).items():
-            if not isinstance(target, str) or not target or not isinstance(servers, list):
-                raise LockfileFormatError(
-                    f"Lockfile {field_name} values must be string-to-list mappings"
-                )
-            if not all(isinstance(server, str) and bool(server) for server in servers):
-                raise LockfileFormatError(f"Lockfile {field_name} entries must be strings")
-    for server, provenance in (data.get("mcp_config_provenance") or {}).items():
-        if not isinstance(server, str) or not (
-            (isinstance(provenance, str) and bool(provenance))
-            or (
-                isinstance(provenance, list)
-                and bool(provenance)
-                and all(isinstance(owner, str) and bool(owner) for owner in provenance)
-            )
-        ):
-            raise LockfileFormatError(
-                "Lockfile mcp_config_provenance values must be strings or string lists"
-            )
-    if "deployments" in data:
-        from ..core.deployment_ledger import DeploymentLedgerCodec
-
-        try:
-            DeploymentLedgerCodec.validate_rows(data["deployments"])
-        except ValueError as exc:
-            raise LockfileFormatError(str(exc)) from exc
-    return data
-
-
 def _normalized_mcp_provenance(
     provenance: dict[str, str | list[str]],
 ) -> dict[str, str | list[str]]:
@@ -489,6 +426,20 @@ def _normalize_exec_allowed_types(raw: Any) -> tuple[str, ...]:
             f"{', '.join(ALL_EXEC_TYPES)}"
         )
     return tuple(sorted(set(raw)))
+
+
+def _ledger_without_owner(ledger: DeploymentLedger, owner: str) -> DeploymentLedger:
+    """Return *ledger* with *owner*'s claims removed (records it alone owned drop)."""
+    records = {}
+    for key, record in ledger.records.items():
+        owners = tuple(claimant for claimant in record.owners if claimant != owner)
+        if not owners:
+            continue
+        if owners != record.owners:
+            active = record.active_owner if record.active_owner in owners else owners[0]
+            record = replace(record, owners=owners, active_owner=active)
+        records[key] = record
+    return DeploymentLedger(records=records)
 
 
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
@@ -1228,6 +1179,10 @@ class LockFile:
     lockfile_version: str = "1"
     generated_at: str | None = None
     apm_version: str | None = None
+    # Targets apm.yml declared when this lock was written ([] = auto-detect;
+    # None = not recorded). An explicit --target is precedence, not a
+    # declaration, so only a change here is a dropped target (#4517).
+    manifest_targets: list[str] | None = None
     dependencies: dict[str, LockedDependency] = field(default_factory=dict)
     mcp_servers: list[str] = field(default_factory=list)
     mcp_configs: dict[str, dict] = field(default_factory=dict)
@@ -1258,6 +1213,7 @@ class LockFile:
     _mcp_target_servers_present: bool = field(default=False, repr=False, compare=False)
     _lsp_target_servers_present: bool = field(default=False, repr=False, compare=False)
     _apm_version_null: bool = field(default=False, repr=False, compare=False)
+    _extensions: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     # Root replacement rules (issue #3180).  Stores the full normalized rule
     # table including dormant rules so frozen validation can compare declared
@@ -1266,6 +1222,8 @@ class LockFile:
     replacements: list[dict] | None = field(default=None, repr=False)
     # Whether package content hashes use the framed stream (lockfile version 4).
     framed_content_hashes: bool = field(default=True, repr=False, compare=False)
+    # req-lk-002: a rewrite of a lockfile already at v2 or later never emits v1.
+    version_floor: str = field(default="1", repr=False, compare=False)
 
     def set_content_hash_stream(self, *, framed: bool) -> None:
         """Record which stream every package ``content_hash`` row uses."""
@@ -1514,13 +1472,43 @@ class LockFile:
 
     def _required_lockfile_version(self) -> str:
         """Return the minimum schema version required by current lock state."""
-        if self.framed_content_hashes and any(
-            dep.content_hash for dep in self.dependencies.values()
-        ):
+        hashed = any(dep.content_hash for dep in self.dependencies.values())
+        if self.framed_content_hashes and hashed:
+            return FRAMED_CONTENT_HASH_VERSION
+        # Local deployed-file hashes are plain file hashes, framing-independent:
+        # a lock recording them and no unframed package hash is current (RA-018).
+        if self.local_deployed_file_hashes and not hashed:
             return FRAMED_CONTENT_HASH_VERSION
         if self._needs_v3():
             return "3"
-        return "2" if self._needs_v2() else "1"
+        return "2" if self._needs_v2() or self.version_floor != "1" else "1"
+
+    def is_origin_recording_format(self) -> bool:
+        """Whether this lock's version is one only APM 0.37+ writes (#4228)."""
+        return self.lockfile_version == FRAMED_CONTENT_HASH_VERSION
+
+    def without_author_local_state(self) -> LockFile:
+        """Return a shallow copy without the packager's own local install state.
+
+        Local deployed-file hashes alone promote ``lockfile_version`` (RA-018);
+        a bundle ships none, so its version follows the shipped dependencies
+        (RA-031). This lockfile is not mutated.
+        """
+        import copy
+
+        shipped = copy.copy(self)
+        # Own containers: to_yaml normalizes these in place.
+        shipped.dependencies = {
+            key: dep for key, dep in self.dependencies.items() if key != _SELF_KEY
+        }
+        shipped.local_deployed_files = []
+        shipped.local_deployed_file_hashes = {}
+        shipped.local_staged_files = []
+        shipped.local_staged_file_hashes = {}
+        # Keep the shipped dependencies' records (to_yaml projects their
+        # deployed_files from them); drop only the author's own claims.
+        shipped.deployment_ledger = _ledger_without_owner(self.deployment_ledger, _SELF_KEY)
+        return shipped
 
     def sync_lockfile_version(self) -> None:
         """Re-derive ``lockfile_version`` from current content.
@@ -1531,8 +1519,8 @@ class LockFile:
         """
         self.lockfile_version = self._required_lockfile_version()
 
-    def to_yaml(self) -> str:
-        """Serialize to YAML string."""
+    def to_yaml(self, *, user_scope: bool = False) -> str:
+        """Serialize to YAML string; *user_scope* emits the user-lockfile row form."""
         from ..core.deployment_ledger import DeploymentLedgerCodec
 
         self._validate_replacement_evidence()
@@ -1559,8 +1547,10 @@ class LockFile:
                 data["generated_at"] = self.generated_at
             if self.apm_version:
                 data["apm_version"] = self.apm_version
+            if self.manifest_targets is not None:
+                data["manifest_targets"] = sorted(self.manifest_targets)
             data["dependencies"] = [dep.to_dict() for dep in self.get_all_dependencies()]
-            data["deployments"] = DeploymentLedgerCodec.rows(self.deployment_ledger)
+            data["deployments"] = DeploymentLedgerCodec.persisted_rows(self, user_scope=user_scope)
             if self.mcp_servers:
                 data["mcp_servers"] = sorted(self.mcp_servers)
             if self.mcp_configs:
@@ -1601,6 +1591,7 @@ class LockFile:
                 )
             if self.replacements is not None:
                 data["replacements"] = self.replacements
+            data.update(sorted(self._extensions.items()))
             from ..utils.yaml_io import yaml_to_str
 
             return yaml_to_str(data)
@@ -1673,6 +1664,11 @@ class LockFile:
             framed_content_hashes=data.get("lockfile_version") == FRAMED_CONTENT_HASH_VERSION,
         )
         lock._apm_version_null = "apm_version" in data and data["apm_version"] is None
+        recorded_targets = data.get("manifest_targets")
+        lock.manifest_targets = (
+            [str(name) for name in recorded_targets] if isinstance(recorded_targets, list) else None
+        )
+        lock._extensions = vendor_extensions(data)
         for dep_data in data.get("dependencies", []):
             lock.add_dependency(LockedDependency.from_dict(dep_data))
         lock.mcp_servers = list(data.get("mcp_servers", []))
@@ -1760,14 +1756,16 @@ class LockFile:
             suppressed.append(self.to_yaml())
             return False
         ensure_lockfile_writable(path)
+        from ..core.deployment_ledger import DeploymentLedgerCodec
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
+        from .lockfile_write_authority import stage_lockfile, staged_lockfile_text
 
         existing: LockFile | None
         legacy_timestamp_present = False
-        if isinstance(existing_lockfile, _ExistingLockfileUnset) and path.exists():
-            existing_text = path.read_text(encoding="utf-8")
+        existing_text = staged_lockfile_text(path)
+        if isinstance(existing_lockfile, _ExistingLockfileUnset) and existing_text is not None:
             try:
                 existing_data = load_yaml_str(existing_text)
             except (yaml.YAMLError, ValueError):
@@ -1779,9 +1777,9 @@ class LockFile:
                     existing = type(self)._from_validated_data(
                         _validate_lockfile_container(existing_data)
                     )
-                except UnsupportedLockfileVersionError:
+                except UnsupportedLockfileVersionError as exc:
                     if legacy_timestamp_present:
-                        raise
+                        raise with_version_remedy(exc, path) from exc
                     existing = None
                 except LockfileFormatError:
                     existing = None
@@ -1789,7 +1787,20 @@ class LockFile:
             existing = None
         else:
             existing = existing_lockfile
+        if existing is not None:
+            carry_vendor_extensions(self, existing)
+        if existing is not None and existing.lockfile_version != "1":
+            self.version_floor = "2"
+            self.sync_lockfile_version()
+        user_scope = DeploymentLedgerCodec.prepare_lockfile_write(self, existing, path)
         unchanged = existing is not None and self.is_semantically_equivalent(existing)
+        # A no-op keeps the recorded declaration; any other write records the
+        # targets the sibling apm.yml declares now (#4517).
+        self.manifest_targets = (
+            existing.manifest_targets
+            if unchanged
+            else _declared_target_names(path.parent, user_scope=user_scope)
+        )
         if existing is not None and existing.generated_at is not None:
             if unchanged:
                 self.generated_at = existing.generated_at
@@ -1808,17 +1819,24 @@ class LockFile:
         elif not _keeps_untranslated_mcp_stamp(self, existing):
             # The generator gate's only signal: whoever changes it owns it (#3962).
             self.apm_version = installed_apm_version()
-        serialized = self.to_yaml()
+        serialized = self.to_yaml(user_scope=user_scope)
         assert_no_staging_paths(serialized, path.name)
-        if unchanged and _same_document_on_disk(path, serialized):
+        if unchanged and _same_document(existing_text, serialized):
             # A proven no-op keeps the file's own bytes (comments, key style).
             return True
-        atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
+        if not stage_lockfile(path, serialized):
+            atomic_write_text(path, serialized, new_file_mode=umask_file_mode(path))
         return True
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
         """Read lock file from disk. Returns None when the file does not exist."""
+        from ..core.deployment_ledger import DeploymentLedgerCodec
+        from .lockfile_write_authority import has_staged_lockfile, staged_lockfile_text
+
+        if (staged := has_staged_lockfile(path)) is not None:  # staged (or removed) by a writer
+            lock = cls.from_yaml(staged_lockfile_text(path)) if staged else None
+            return DeploymentLedgerCodec.adopt_lockfile_rows(lock, path)
         if not path.exists() and not path.is_symlink():
             return None
         try:
@@ -1826,15 +1844,15 @@ class LockFile:
             if has_conflict_markers(text):
                 raise LockfileConflictError(path)
             lock = cls.from_yaml(text)
-        except (LockfileFormatError, UnsupportedLockfileVersionError):
-            raise
+        except LockfileFormatError as exc:
+            raise with_version_remedy(exc, path)  # noqa: B904 -- the helper chains its cause
         except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:
             raise LockfileFormatError(f"Invalid lockfile at {path}: {exc}") from exc
         from .lockfile_generator import warn_if_newer
 
         # An explicit ``apm_version: null`` is unverifiable, unlike an absent one.
         warn_if_newer(path, "null" if lock._apm_version_null else lock.apm_version)
-        return lock
+        return DeploymentLedgerCodec.adopt_lockfile_rows(lock, path)
 
     @classmethod
     def load_or_create(cls, path: Path) -> LockFile:

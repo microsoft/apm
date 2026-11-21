@@ -86,8 +86,6 @@ CLONE_BUDGET_SECONDS = 0.25
 _GATED = frozenset({"hook", "mcp", "lsp", "bin", "canvas", "native"})
 # Native plugins have their own source tests (Claude targets, user-scope bin/).
 _APM_GIT_PACKAGES = tuple(name for name in GIT_PUBLISHED if not name.startswith("p-native-"))
-_TRACK_USER_TRANSITIVE = "#4153"
-_TRACK_NATIVE_APPROVE = "#4154"
 
 # Files each package deploys after an approval, relative to the deploy root
 # (the project, or HOME at user scope), with a marker the file must contain.
@@ -137,11 +135,7 @@ _TARGETS = {
     "p-native-codex": "codex",
     "p-native-claude-bin": "claude",
 }
-_KNOWN = {
-    ("p-parent", "user"): _TRACK_USER_TRANSITIVE,
-    ("p-parent2", "user"): _TRACK_USER_TRANSITIVE,
-    ("p-native-codex", "user"): _TRACK_NATIVE_APPROVE,
-}
+_KNOWN = {}
 
 
 def _deploy_root(world: World, scope: str) -> Path:
@@ -357,21 +351,10 @@ def test_user_scope_with_apm_home_outside_home(lifecycle_world: World) -> None:
 # -- sources -----------------------------------------------------------------
 
 
-# p-lsp declares only LSP servers. Locally its empty .apm/ satisfies package
-# validation; git cannot carry an empty directory, so the served copy is
-# refused ("missing the required .apm/ directory"). Found by the world.
-_LSP_ONLY_REMOTE = "tracking #4257: LSP-only package rejected from git/marketplace (no .apm/)"
+# p-lsp declares only LSP servers; it is served from git like every other
+# package and installs through the same acceptance rule (#4257).
 _REMOTE_CELLS = [
-    pytest.param(
-        package,
-        scope,
-        marks=(
-            [pytest.mark.xfail(strict=True, reason=_LSP_ONLY_REMOTE, raises=AssertionError)]
-            if package == "p-lsp"
-            else []
-        ),
-        id=f"{package}-{scope}",
-    )
+    pytest.param(package, scope, id=f"{package}-{scope}")
     for package in _APM_GIT_PACKAGES
     for scope in ("project", "user")
 ]
@@ -403,6 +386,28 @@ def test_marketplace_source_installs(lifecycle_world: World, package: str, scope
     _install_and_approve(world, f"{package}:marketplace", scope)
     assert package in _locked(world, scope)
     _assert_surfaces(world, package, scope)
+
+
+def _tree_bytes(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def test_marketplace_update_dry_run_writes_nothing_under_apm_home(lifecycle_world: World) -> None:
+    """#4484: update --dry-run re-verifies marketplace provenance read-only (I5)."""
+    world = lifecycle_world
+    _ok(world, ["marketplace", "add", world.services.marketplace_url])
+    _install_and_approve(world, "p-skill:marketplace", "project")
+    home = _tree_bytes(world.apm_home)
+    project = _tree_bytes(world.project)
+
+    _ok(world, ["update", "--dry-run"])
+
+    assert _tree_bytes(world.apm_home) == home
+    assert _tree_bytes(world.project) == project
 
 
 def test_local_bundle_installs_offline(lifecycle_world: World) -> None:

@@ -1,0 +1,7 @@
+name: copilot-single-project
+version: 1.0.0
+targets:
+- copilot
+dependencies:
+  apm:
+  - path: ../pkg

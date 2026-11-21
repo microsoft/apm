@@ -1,0 +1,25 @@
+# apm journey golden v1: J06 step 4
+$ rm -f .mcp.json
+[exit 0]
+--- stdout
+--- stderr
+$ apm install --frozen
+[exit 0]
+--- stdout
+[>] Installing dependencies from apm.yml...
+[i] Targets: claude, copilot  (source: apm.yml)
++- MCP Servers (2)
+[i] Using MCP registry: https://mcp-registry.lifecycle.test (from --registry or the apm.yml registry field)
+[>] Looking up 1 MCP server in registry https://mcp-registry.lifecycle.test...
+|  [>]  io.github.github/github-mcp-server
+|     +- Configuring for Claude Code, Copilot CLI...
+|  [+]  io.github.github/github-mcp-server -> Claude Code, Copilot CLI (configured)
+|     +- wrote: .mcp.json (Claude Code, Copilot CLI)
+|  [>]  filesystem (self-defined, stdio)
+|     +- Configuring for Claude Code, Copilot CLI...
+|  [+]  filesystem -> Claude Code, Copilot CLI (configured)
+|     +- wrote: .mcp.json (Claude Code, Copilot CLI)
+[*] Configured 2 servers
+
+[*] Installed 2 MCP servers in <DUR>.
+--- stderr
