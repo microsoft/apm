@@ -225,15 +225,17 @@ def pack_bundle(
             seen.add(f)
             unique_files.append(f)
     # Claude rules #3939 compiles into AGENTS.md still ship as rules (#4005).
-    from .claude_routed_rules import routed_claude_rules, write_routed_claude_rules
+    from .claude_routed_rules import (
+        merged_routed_claude_rules,
+        routed_claude_rules,
+        write_routed_claude_rules,
+    )
 
     rendered_rules = {
         dep_key: {path: text for path, text in rules.items() if path not in seen}
         for dep_key, rules in routed_claude_rules(lockfile, project_root, effective_target).items()
     }
-    rendered_files = {
-        path: text for rules in rendered_rules.values() for path, text in rules.items()
-    }
+    rendered_files = merged_routed_claude_rules(rendered_rules)
 
     # 5. Verify each path is safe (no traversal) and exists on disk
     project_root_resolved = project_root.resolve()

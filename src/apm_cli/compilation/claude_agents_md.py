@@ -25,6 +25,7 @@ import re
 from pathlib import Path
 
 from ..utils.path_security import PathTraversalError, ensure_path_within
+from ..utils.paths import portable_relpath
 from ..utils.patterns import normalize_apply_to, parse_apply_to
 from .constants import (
     AGENTS_MD_GENERATED_MARKER,
@@ -75,9 +76,11 @@ def routes_to_agents_md(apply_to: object, project_root: Path | None = None) -> b
     pattern -- file-type globs, wildcard directories, or lists -- stays a
     path-scoped ``.claude/rules/`` file so its scope is not widened.
 
-    With *project_root*, a directory instruction routes only when that
-    directory exists and the project compiles distributed output: a
-    single-file ``AGENTS.md`` would load it for every file.
+    With *project_root*, a directory instruction routes only when the project
+    compiles distributed output (a single-file ``AGENTS.md`` would load it for
+    every file) and compile can deliver ``<dir>/AGENTS.md`` to Claude: the
+    directory exists outside any nested Git repository, and no hand-authored
+    or symlinked ``AGENTS.md`` or import-less ``CLAUDE.md`` sits in it.
     """
     if _is_always_on(apply_to):
         return True
@@ -86,7 +89,9 @@ def routes_to_agents_md(apply_to: object, project_root: Path | None = None) -> b
         return False
     if project_root is None:
         return True
-    return (project_root / prefix).is_dir() and not _single_file_compile(project_root)
+    return not _single_file_compile(project_root) and _directory_destination_open(
+        project_root, prefix
+    )
 
 
 def imports_agents_md(content: str) -> bool:
@@ -163,53 +168,101 @@ def _agents_md_managed_section(project_root: Path) -> bool:
     return isinstance(agents_md, dict) and agents_md.get("mode") == "managed_section"
 
 
+def _label(directory: Path, project_root: Path, name: str) -> str:
+    """Name *name* in *directory* relative to the project, without following links."""
+    relative = portable_relpath(directory, project_root)
+    return name if relative == "." else f"{relative}/{name}"
+
+
+def _claude_md_blocker(directory: Path, project_root: Path) -> str | None:
+    """Why the ``CLAUDE.md`` in *directory* keeps Claude from reading its ``AGENTS.md``."""
+    from .claude_formatter import CLAUDE_HEADER
+
+    claude_md = directory / "CLAUDE.md"
+    agents_md = directory / "AGENTS.md"
+    if not (claude_md.is_symlink() or claude_md.exists()):
+        return None
+    label = _label(directory, project_root, "CLAUDE.md")
+    content = _read_text(claude_md, project_root)
+    try:
+        same_file = agents_md.exists() and claude_md.samefile(agents_md)
+    except OSError:
+        same_file = False
+    if same_file:
+        return None
+    if content is None:
+        return f"{label} could not be read; make it readable"
+    generated = not claude_md.is_symlink() and has_generated_marker_header(
+        content, (CLAUDE_HEADER,)
+    )
+    if not generated and not imports_agents_md(content):
+        return f"{label} is hand-authored and does not import @AGENTS.md; add '@AGENTS.md' to it"
+    return None
+
+
+def _agents_md_blocker(directory: Path, project_root: Path) -> str | None:
+    """Why compile cannot write the ``AGENTS.md`` in *directory*, or None."""
+    agents_md = directory / "AGENTS.md"
+    if not (agents_md.is_symlink() or agents_md.exists()):
+        return None
+    label = _label(directory, project_root, "AGENTS.md")
+    if agents_md.is_symlink():
+        # Compile never writes through a symlinked AGENTS.md, managed section or not.
+        return f"{label} is a symlink; replace it with a regular file"
+    content = _read_text(agents_md, project_root)
+    generated = content is not None and has_generated_marker_header(
+        content, (AGENTS_MD_GENERATED_MARKER, DISTRIBUTED_AGENTS_MD_GENERATED_MARKER)
+    )
+    if not generated and not _agents_md_managed_section(project_root):
+        return (
+            f"{label} is hand-authored and APM does not manage a section in it;"
+            " set 'compilation.agents_md.mode: managed_section' in apm.yml"
+        )
+    return None
+
+
+def _in_nested_repository(directory: Path, project_root: Path) -> bool:
+    """Return True when *directory* sits in a nested Git repository compile skips."""
+    current = directory
+    while current != project_root and project_root in current.parents:
+        if (current / ".git").exists():
+            return True
+        current = current.parent
+    return False
+
+
 def claude_agents_md_blocker(project_root: Path) -> str | None:
     """Return why Claude cannot take the AGENTS.md route here, or None.
 
-    Two existing user files block the route, so instructions stay in
+    Existing user files block the route, so instructions stay in
     ``.claude/rules/`` and nothing the user wrote is overwritten:
 
     * a hand-authored root ``CLAUDE.md`` that does not import ``@AGENTS.md``
-      (Claude Code then never reads ``AGENTS.md``), and
+      (Claude Code then never reads ``AGENTS.md``),
     * a hand-authored root ``AGENTS.md`` APM may not write into (no
-      ``compilation.agents_md.mode: managed_section``).
+      ``compilation.agents_md.mode: managed_section``), and
+    * a symlinked root ``AGENTS.md``, which compile never writes through.
     """
-    from .claude_formatter import CLAUDE_HEADER
+    return _claude_md_blocker(project_root, project_root) or _agents_md_blocker(
+        project_root, project_root
+    )
 
-    claude_md = project_root / "CLAUDE.md"
-    agents_md = project_root / "AGENTS.md"
-    if claude_md.is_symlink() or claude_md.exists():
-        content = _read_text(claude_md, project_root)
-        try:
-            same_file = agents_md.exists() and claude_md.samefile(agents_md)
-        except OSError:
-            same_file = False
-        if not same_file:
-            if content is None:
-                return "CLAUDE.md could not be read; make it readable"
-            generated = not claude_md.is_symlink() and has_generated_marker_header(
-                content, (CLAUDE_HEADER,)
-            )
-            if not generated and not imports_agents_md(content):
-                return (
-                    "CLAUDE.md is hand-authored and does not import @AGENTS.md;"
-                    " add '@AGENTS.md' to it"
-                )
-    if agents_md.is_symlink() or agents_md.exists():
-        content = _read_text(agents_md, project_root)
-        generated = (
-            content is not None
-            and not agents_md.is_symlink()
-            and has_generated_marker_header(
-                content, (AGENTS_MD_GENERATED_MARKER, DISTRIBUTED_AGENTS_MD_GENERATED_MARKER)
-            )
-        )
-        if not generated and not _agents_md_managed_section(project_root):
-            return (
-                "AGENTS.md is hand-authored and APM does not manage a section in it;"
-                " set 'compilation.agents_md.mode: managed_section' in apm.yml"
-            )
-    return None
+
+def _directory_destination_open(project_root: Path, prefix: str) -> bool:
+    """Return True when compile can deliver ``<prefix>/AGENTS.md`` to Claude.
+
+    The same files that block the root route keep a directory instruction in
+    ``.claude/rules/``: a nested ``AGENTS.md`` compile may not write, a nested
+    ``CLAUDE.md`` without the import, or a destination in a nested Git
+    repository that compile skips.
+    """
+    directory = project_root / prefix
+    if not directory.is_dir() or _in_nested_repository(directory, project_root):
+        return False
+    return (
+        _agents_md_blocker(directory, project_root) is None
+        and _claude_md_blocker(directory, project_root) is None
+    )
 
 
 def claude_agents_md_blocker_warning(blocker: str) -> str:

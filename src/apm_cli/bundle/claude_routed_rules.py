@@ -75,7 +75,7 @@ def routed_claude_rules(
 
     rules: dict[str, dict[str, str]] = {}
     for key, rendered in routed_claude_rule_renders(
-        lockfile, project_root, project_root / "apm_modules", include_local=False
+        lockfile, project_root, project_root / "apm_modules", include_local=False, verified=True
     ).items():
         deployed = set(lockfile.dependencies[key].deployed_files)
         missing = {path: text for path, text in rendered.items() if path not in deployed}
@@ -92,6 +92,27 @@ def routed_claude_rules(
         )
         return {}
     return rules
+
+
+def merged_routed_claude_rules(rendered: dict[str, dict[str, str]]) -> dict[str, str]:
+    """Flatten per-dependency rules into one bundle tree; refuse divergent same-path renders.
+
+    Before #3939 two dependencies writing the same rule path collided at
+    install; the pack must not silently keep only the last one.
+    """
+    merged: dict[str, str] = {}
+    owners: dict[str, str] = {}
+    for dep_key, rules in rendered.items():
+        for path, text in rules.items():
+            if path in merged and merged[path] != text:
+                raise ValueError(
+                    f"Cannot pack {path}: dependencies {owners[path]} and {dep_key} both route "
+                    "a different instruction with that name to AGENTS.md, and the bundle can "
+                    "ship only one. Rename one of the instruction files."
+                )
+            merged[path] = text
+            owners.setdefault(path, dep_key)
+    return merged
 
 
 def write_routed_claude_rules(bundle_dir: Path, rendered: dict[str, str]) -> None:

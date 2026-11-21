@@ -959,17 +959,22 @@ class InstructionIntegrator(BaseIntegrator):
 
 
 def routed_claude_rule_renders(
-    lockfile, project_root: Path, modules_root: Path, *, include_local: bool
+    lockfile, project_root: Path, modules_root: Path, *, include_local: bool, verified: bool = False
 ) -> dict[str, dict[str, str]]:
     """Return ``{dependency key: {rule path: content}}`` #3939 routed to AGENTS.md.
 
     Each locked dependency installed under *modules_root* is rendered through
     :meth:`InstructionIntegrator.render_agents_md_routed_rules`: the
     ``.claude/rules/`` files a pre-#3939 install deployed for it. Pack ships
-    them; cleanup proves a legacy rule file against them.
+    them; cleanup proves a legacy rule file against them. A dependency whose
+    edge or own ``targets:`` exclude Claude renders nothing, as at install.
+    With *verified* (pack), a cached copy that contradicts its locked
+    ``content_hash`` is refused: ``apm_modules`` is not attested.
     """
     from apm_cli.core.scope import manifest_file
     from apm_cli.install.package_resolution import effective_dependency_selection
+    from apm_cli.install.target_filter import resolve_effective_package_targets
+    from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.models.apm_package import APMPackage, PackageInfo
 
     rules: dict[str, dict[str, str]] = {}
@@ -977,9 +982,6 @@ def routed_claude_rule_renders(
         if dep.source == "local" and not include_local:
             continue
         dep_ref = dep.to_dependency_ref()
-        subset = effective_dependency_selection(dep_ref).target_subset
-        if subset is not None and "claude" not in subset:
-            continue
         install_path = dep_ref.get_install_path(modules_root)
         if not install_path.is_dir():
             continue
@@ -989,6 +991,17 @@ def routed_claude_rule_renders(
             if manifest.is_file()
             else APMPackage(name=dep.name or install_path.name, version=dep.version or "0.0.0")
         )
+        selection = resolve_effective_package_targets(
+            [KNOWN_TARGETS["claude"]],
+            effective_dependency_selection(dep_ref).target_subset,
+            package,
+            None,
+            dep.get_unique_key(),
+        )
+        if not selection.targets:
+            continue
+        if verified:
+            _require_locked_source(lockfile, dep, install_path, project_root)
         package_info = PackageInfo(
             package=package, install_path=install_path, dependency_ref=dep_ref
         )
@@ -996,3 +1009,18 @@ def routed_claude_rule_renders(
         if rendered:
             rules[dep.get_unique_key()] = rendered
     return rules
+
+
+def _require_locked_source(lockfile, dep, install_path: Path, project_root: Path) -> None:
+    """Refuse to render from a cached copy that contradicts its locked content hash."""
+    from apm_cli.core.remediation import PACK_INSTALLED_FILE_TAMPERED
+    from apm_cli.install.source_helpers import locked_content_mismatch
+
+    key = dep.get_unique_key()
+    if locked_content_mismatch(key, dep, install_path, lockfile=lockfile):
+        cached = portable_relpath(install_path, project_root)
+        raise ValueError(
+            f"Cannot pack dependency {dep.repo_url}: {cached} does not match the content "
+            "hash recorded in apm.lock.yaml, so its Claude rules cannot be rendered. "
+            f"{PACK_INSTALLED_FILE_TAMPERED.bind(path=cached).sentence()}"
+        )

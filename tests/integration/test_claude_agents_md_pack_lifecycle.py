@@ -189,3 +189,32 @@ def test_cli_target_claude_install_with_ambiguous_folders_never_drops_rules_sile
         assert not (bundle / _RULE).exists()
         text = packed.stdout + packed.stderr
         assert "Skipped 1 Claude rule(s) routed to AGENTS.md" in " ".join(text.split()), text
+
+
+def test_pack_refuses_routed_rules_from_an_apm_modules_copy_the_lock_does_not_attest(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Routed rules render only from a cached copy matching its locked content hash."""
+    scenario = _new_scenario(tmp_path / "tampered-pack", apm_binary_path)
+    source = _publish(scenario, "guard-kit", instruction="guard")
+    producer = scenario.consumers.create(
+        "producer", dependencies=(source.dependency,), targets=("claude",)
+    )
+    _run_success(
+        scenario, producer, _INSTALL_ARGS, environment=source.environment, scenario_id="install"
+    )
+    (cached,) = (producer.root / "apm_modules").rglob("guard.instructions.md")
+    cached.write_text(cached.read_text(encoding="ascii") + "Injected.\n", encoding="ascii")
+    out = tmp_path / "bundles"
+
+    for args in (("--format", "apm"), ()):
+        result = scenario.runner.run(
+            ("pack", *args, "-o", str(out)),
+            scenario_id=f"pack-tampered{'-'.join(args)}",
+            cwd=producer.root,
+            env=source.environment,
+        )
+        output = " ".join((result.stdout + result.stderr).split())
+        assert result.returncode != 0, output
+        assert "does not match the content hash recorded in apm.lock.yaml" in output, output
+        assert not out.exists() or not any(out.iterdir())

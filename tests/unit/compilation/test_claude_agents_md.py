@@ -86,6 +86,53 @@ class TestBlocker:
         )
         assert claude_agents_md_blocker(tmp_path) is None
 
+    def test_symlinked_agents_md_blocks_even_with_managed_section(self, tmp_path):
+        (tmp_path / "apm.yml").write_text(
+            "name: p\nversion: 1.0.0\ncompilation:\n  agents_md:\n    mode: managed_section\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "shared.md").write_text("# Shared\n", encoding="utf-8")
+        (tmp_path / "AGENTS.md").symlink_to(tmp_path / "shared.md")
+        assert claude_agents_md_blocker(tmp_path) == (
+            "AGENTS.md is a symlink; replace it with a regular file"
+        )
+
+
+class TestDirectoryDestination:
+    """A directory instruction routes only when compile can deliver <dir>/AGENTS.md."""
+
+    def test_clean_directory_routes(self, tmp_path):
+        (tmp_path / "docs").mkdir()
+        assert routes_to_agents_md("docs/**", tmp_path) is True
+
+    def test_generated_nested_agents_md_routes(self, tmp_path):
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "AGENTS.md").write_text(
+            f"{DISTRIBUTED_AGENTS_MD_GENERATED_MARKER}\n# docs\n", encoding="utf-8"
+        )
+        assert routes_to_agents_md("docs/**", tmp_path) is True
+
+    @pytest.mark.parametrize(
+        ("name", "content"),
+        [("AGENTS.md", "# Hand-authored docs guidance\n"), ("CLAUDE.md", "# Docs notes\n")],
+    )
+    def test_hand_authored_nested_file_keeps_the_rule(self, tmp_path, name, content):
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / name).write_text(content, encoding="utf-8")
+        assert routes_to_agents_md("docs/**", tmp_path) is False
+        assert routes_to_agents_md("**", tmp_path) is True
+
+    def test_nested_claude_md_with_import_routes(self, tmp_path):
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+        assert routes_to_agents_md("docs/**", tmp_path) is True
+
+    def test_nested_git_repository_keeps_the_rule(self, tmp_path):
+        (tmp_path / "vendor" / "lib" / "src").mkdir(parents=True)
+        (tmp_path / "vendor" / "lib" / ".git").mkdir()
+        assert routes_to_agents_md("vendor/lib/src/**", tmp_path) is False
+        assert routes_to_agents_md("vendor/lib/**", tmp_path) is False
+
 
 def _package(tmp_path: Path, files: dict[str, str]) -> SimpleNamespace:
     instructions = tmp_path / "pkg" / ".apm" / "instructions"
@@ -304,3 +351,39 @@ class TestCompileShims:
 
         assert any("add '@AGENTS.md' to CLAUDE.md" in w for w in result.warnings)
         assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == "# Team notes\n"
+
+
+class TestPackRoutedRules:
+    """The pack renders routed rules with install's authorization (#4005 review)."""
+
+    def test_divergent_same_path_renders_are_refused(self):
+        from apm_cli.bundle.claude_routed_rules import merged_routed_claude_rules
+
+        same = {"a/x": {".claude/rules/style.md": "one"}, "b/y": {".claude/rules/style.md": "one"}}
+        assert merged_routed_claude_rules(same) == {".claude/rules/style.md": "one"}
+        with pytest.raises(ValueError, match=r"a/x and b/y both route a different instruction"):
+            merged_routed_claude_rules(
+                {"a/x": {".claude/rules/style.md": "one"}, "b/y": {".claude/rules/style.md": "two"}}
+            )
+
+    @pytest.mark.parametrize(("targets", "rendered"), [("[copilot]", False), ("[claude]", True)])
+    def test_package_targets_restriction_applies(self, tmp_path, targets, rendered):
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+        from apm_cli.integration.instruction_integrator import routed_claude_rule_renders
+
+        lockfile = LockFile()
+        lockfile.add_dependency(LockedDependency(repo_url="owner/kit", resolved_commit="a" * 40))
+        package = tmp_path / "apm_modules" / "owner" / "kit"
+        (package / ".apm" / "instructions").mkdir(parents=True)
+        (package / "apm.yml").write_text(
+            f"name: kit\nversion: 1.0.0\ntargets: {targets}\n", encoding="utf-8"
+        )
+        (package / ".apm" / "instructions" / "style.instructions.md").write_text(
+            "---\napplyTo: '**'\n---\n# Style\n", encoding="utf-8"
+        )
+
+        rules = routed_claude_rule_renders(
+            lockfile, tmp_path, tmp_path / "apm_modules", include_local=False
+        )
+
+        assert bool(rules) is rendered
