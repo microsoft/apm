@@ -236,8 +236,7 @@ def test_owned_mcp_records_only_servers_this_install_claims(tmp_path) -> None:
             target_runtimes=["codex"],
         )
 
-    updated = LockFile.read(lock_path)
-    assert updated is not None
+    updated = LockFile.from_yaml(lock_path.read_text(encoding="utf-8"))
     assert updated.mcp_servers == ["other", "owned"]
     assert set(updated.mcp_configs) == {"other", "owned"}
     assert updated.mcp_config_provenance == {"other": "bundle:bundle-b", "owned": "bundle:bundle-a"}
