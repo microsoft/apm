@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -350,6 +352,18 @@ def test_concurrent_real_lifecycles_are_worker_isolated(
         )
 
 
+def _git(cwd: Path, receipt: _LifecycleReceipt, *args: str) -> None:
+    subprocess.run(
+        ("git", "-c", "user.name=APM Test", "-c", "user.email=apm@example.invalid", *args),
+        cwd=cwd,
+        env=receipt.isolated.subprocess_env(),
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
@@ -378,6 +392,13 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
     lock_path = project_root / "apm.lock.yaml"
     lock = load_yaml(lock_path)
     locked_dependency = lock["dependencies"][0]
+    deployed_bytes = (project_root / instruction_path).read_bytes()
+    committed_lock = lock_path.read_bytes()
+    if mutation == "content-hash":
+        # The project is under version control, so the printed remedy can run.
+        _git(project_root, receipt, "init", "-q")
+        _git(project_root, receipt, "add", "apm.yml", "apm.lock.yaml")
+        _git(project_root, receipt, "commit", "-q", "-m", "consumer")
 
     if mutation == "deployed-file":
         (project_root / instruction_path).write_text(
@@ -416,7 +437,7 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         recovery_args.append("--update")
     if mutation == "content-hash":
         # An unchanged commit never re-pins new content through an update
-        # (#4027): the deliberate repair drops the entry and installs again.
+        # (#4027); the printed remedy restores the committed lockfile.
         (result,) = runner.run_sequence(
             (negative_args,),
             expected_returncodes=(1,),
@@ -433,9 +454,16 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         )[0]
         assert "Content hash mismatch" in " ".join(refused.stdout.split())
         assert load_yaml(lock_path)["dependencies"][0]["content_hash"] == f"sha256:{'0' * 64}"
-        tampered = load_yaml(lock_path)
-        tampered["dependencies"] = []
-        dump_yaml(tampered, lock_path)
+        # Execute the printed remedy: the lockfile changed, so restore it from
+        # version control with the exact command the refusal names.
+        restore = re.search(
+            r"for example '(git checkout -- [^']+)'", " ".join(result.stderr.split())
+        )
+        assert restore, result.stderr
+        restore_argv = shlex.split(restore.group(1))
+        assert restore_argv[:3] == ["git", "checkout", "--"], restore_argv
+        _git(project_root, receipt, *restore_argv[1:])
+        assert lock_path.read_bytes() == committed_lock
         recovery, clean_audit = runner.run_sequence(
             (tuple(recovery_args), ("audit", "--ci", "--no-policy", "--format", "json")),
             expected_returncodes=(0, 0),
@@ -459,7 +487,9 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         assert (project_root / instruction_path).read_text(encoding="utf-8") == (
             "# Mutated generated deployment\n"
         )
-        (project_root / instruction_path).unlink()
+        # Execute the printed remedy: move the edited file aside, then install.
+        moved = receipt.isolated.work_root / "kept-instruction.md"
+        (project_root / instruction_path).rename(moved)
         recovery, clean_audit = runner.run_sequence(
             (tuple(recovery_args), ("audit", "--ci", "--no-policy", "--format", "json")),
             expected_returncodes=(0, 0),
@@ -480,6 +510,11 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             env=environment,
         )
 
+    if mutation == "deployed-file":
+        assert (project_root / instruction_path).read_bytes() == deployed_bytes
+        assert moved.read_text(encoding="utf-8") == "# Mutated generated deployment\n"
+    if mutation == "content-hash":
+        assert lock_path.read_bytes() == committed_lock
     if mutation == "content-hash":
         # The refusal is an error line, so it goes to stderr (RA-004).
         normalized_stderr = " ".join(result.stderr.split())
