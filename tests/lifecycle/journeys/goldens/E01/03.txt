@@ -33,3 +33,4 @@ $ apm audit --ci --policy org
 [+] Replayed 2 package(s)
 [>] Diffing scratch vs working tree...
 [+] No drift detected
+[i] Policy: org:contoso/.github -- enforcement=warn
