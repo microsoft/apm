@@ -32,22 +32,25 @@ from pathlib import Path
 REPO = os.environ.get("GITHUB_REPOSITORY", "microsoft/apm")
 ARTIFACT = "train-failures"
 WORKFLOW = "merge-train.yml"
-_NODE = re.compile(r"(?:^|\s)(?:FAILED|ERROR) (tests/\S+::\S+)")
+# One summary line per node: "FAILED <node id>[ - <message>]". The id may contain
+# spaces inside its parameter brackets, so it runs to " - " or the end of the line.
+_NODE = re.compile(r"(?:^|\s)(?:FAILED|ERROR) (tests/[^\s:]+::.+?)(?: - .*)?\s*$", re.MULTILINE)
 _SELF = ("train-gate", "cleanup")
-# Jobs that only aggregate others (``if: always()`` plus ``needs``) in the workflows a
-# full train calls. One fails whenever a job it needs fails, without node ids of its
-# own; tests/unit/scripts/merge_queue/test_gate.py pins this set to the workflows.
-AGGREGATES = frozenset(
-    {
-        "Coverage Combine (Linux)",
-        "Integration Tests (Linux)",
-        "Lifecycle Smoke (Linux)",
-        "Owner Surface Check",
-        "Spec conformance gate",
-        "Test Architecture Ratchets",
-        "Windows Compatibility Gate",
-    }
-)
+# The steps that only re-check other jobs' results (``needs.*.result``) in the
+# ``if: always()`` jobs of the workflows a full train calls. Such a job failing in
+# these steps alone fails because a job it needs failed; any other failing step
+# (a coverage gate, for example) is an independent failure. Pinned to the workflows
+# by tests/quality/test_ci_topology.py.
+AGGREGATION_STEPS: dict[str, frozenset[str]] = {
+    "Integration Tests (Linux)": frozenset(
+        {"Aggregate shard results", "Aggregate scaling-guards result"}
+    ),
+    "Lifecycle Smoke (Linux)": frozenset({"Require every lifecycle shard"}),
+    "Owner Surface Check": frozenset({"Require the selected slice"}),
+    "Spec conformance gate": frozenset({"Require statement and all execution shards"}),
+    "Test Architecture Ratchets": frozenset({"Require the architecture contracts"}),
+    "Windows Compatibility Gate": frozenset({"Require every Windows shard"}),
+}
 _INFRA = ("cancelled", "timed_out", "startup_failure")
 
 Gh = Callable[[list[str]], str]
@@ -101,6 +104,15 @@ def baseline(run: Gh, base_sha: str) -> tuple[set[str], str]:
     return set(report.get("failing", [])), f"run {out}"
 
 
+def _only_aggregation_failed(job: dict) -> bool:
+    """The job failed only in steps that re-check the jobs it needs."""
+    allowed = AGGREGATION_STEPS.get(job["name"].rpartition(" / ")[2], frozenset())
+    failed = {
+        step["name"] for step in job.get("steps") or () if step.get("conclusion") == "failure"
+    }
+    return bool(failed) and failed <= allowed
+
+
 def evaluate(jobs: Iterable[dict], logs: dict[int, str], inherited: set[str]) -> dict[str, object]:
     """The report train-gate publishes; ``inherited_only`` is its exemption."""
     failing: set[str] = set()
@@ -115,7 +127,7 @@ def evaluate(jobs: Iterable[dict], logs: dict[int, str], inherited: set[str]) ->
             ids = failing_ids(logs.get(job["id"], ""))
             if ids:
                 failing |= ids
-            elif job["name"].rpartition(" / ")[2] in AGGREGATES:
+            elif _only_aggregation_failed(job):
                 derived.append(job["name"])
             else:
                 unidentified.append(job["name"])

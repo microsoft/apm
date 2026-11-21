@@ -281,6 +281,7 @@ jobs:
         path: train-failures.json
         retention-days: 14
         if-no-files-found: ignore
+        overwrite: true
 
   # Deletes the train branch once train-gate has reported. Its result is not
   # part of the verdict: train-gate does not need it.

@@ -159,7 +159,7 @@ def preflight(api: Api, item: state.Train) -> tuple[dict[int, closure.Audit], st
         if not found.clean:
             return audits, (
                 f"#{member.pr} closure mismatch: ticket fixes {list(found.fixes)},"
-                f" the merge would close {list(found.closing)}"
+                f" the merge would close {list(found.closing) + list(found.foreign)}"
             )
         audits[member.pr] = found
     return audits, None

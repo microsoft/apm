@@ -3705,19 +3705,32 @@ def test_train_gate_excuses_failed_jobs_only_when_every_failure_is_inherited(
     )
 
 
-def test_train_gate_aggregate_jobs_match_the_called_workflows() -> None:
-    """gate.py ignores an id-less failure of a job that only aggregates others; its
-    list must be exactly the always()+needs jobs of the workflows a full train calls."""
-    from scripts.merge_queue import gate
+def test_train_gate_excusable_steps_match_the_workflows() -> None:
+    """gate.py excuses an id-less failure only in a step that re-checks needed jobs'
+    results, and attributes a guard failure only to a guard check step. Both lists
+    must match the workflows exactly."""
+    from scripts.merge_queue import gate, proof
 
     workflows = _train_workflows()
-    aggregates = {
-        job["name"]
-        for name in TRAIN_TIERS.values()
-        for job in workflows[name]["jobs"].values()
-        if job.get("needs") and "always()" in str(job.get("if", ""))
-    }
-    assert aggregates == set(gate.AGGREGATES)
+    aggregation = {}
+    for name in TRAIN_TIERS.values():
+        for job in workflows[name]["jobs"].values():
+            if not (job.get("needs") and "always()" in str(job.get("if", ""))):
+                continue
+            steps = {
+                step["name"]
+                for step in job.get("steps", [])
+                if "needs." in str(step.get("run", "")) + str(step.get("env", ""))
+            }
+            if steps:
+                aggregation[job["name"]] = steps
+    assert aggregation == {name: set(steps) for name, steps in gate.AGGREGATION_STEPS.items()}
+    guard_steps = [
+        step.get("name")
+        for step in workflow_job(workflows[MERGE_TRAIN_WORKFLOW], TRAIN_GUARD_JOB)["steps"]
+    ]
+    checks = guard_steps[guard_steps.index("Install dependencies") + 1 :]
+    assert set(checks) == set(proof.GUARD_CHECKS)
 
 
 TRAIN_SCOPE_CASES = [

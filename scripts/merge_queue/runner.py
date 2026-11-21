@@ -143,6 +143,14 @@ def ready_tickets(api: Api, log: Log, skip: set[int]) -> list[tickets.Ticket]:
     return ready
 
 
+def _stale(api: Api, item: state.Train, run_id: int | None) -> bool:
+    """After a rerun request, the completed verdict may still be the old attempt."""
+    if not item.awaiting_attempt or run_id is None:
+        return False
+    attempt = int(api.get(f"repos/{REPO}/actions/runs/{run_id}").get("run_attempt", 1))
+    return attempt < item.awaiting_attempt
+
+
 def poll(
     api: Api,
     current: state.State,
@@ -152,15 +160,18 @@ def poll(
 ) -> None:
     """Record verdicts for in-flight trains; a red one is classified and handled
     (red.py). Log the landings a real runner would make."""
+    if writer is not None:
+        for pr in list(current.unlabel):
+            red.unlabel(writer, current, pr)
     for item in current.in_flight():
         result, run_id = proof.verdict(api, item.head_ref, item.head_sha)
-        if result not in (proof.GREEN, proof.RED):
+        if result not in (proof.GREEN, proof.RED) or _stale(api, item, run_id):
             continue
         item.run_id = run_id
         log.emit("verdict", train=item.train_id, verdict=result, run=run_id)
         if result == proof.RED:
             action = red.handle(api, writer, current, item, log, read_report)
-            if action == classify.RERUN:
+            if action in (classify.RERUN, red.WAIT):
                 continue
             outcome = "red-unattributed" if action == classify.BISECT else "red-attributed"
         else:

@@ -50,6 +50,13 @@ def test_a_red_train_is_classified_in_design_order(report, red_guard, reruns, ex
     assert (decision.klass, decision.action, decision.culprit, decision.first_half) == expected
 
 
+def test_a_report_that_failed_to_collect_evidence_is_infra_not_a_flake() -> None:
+    report = {**_report(), "error": "GET jobs failed (502)"}
+    first = classify.classify(report, MEMBERS, None, 0)
+    second = classify.classify(report, MEMBERS, None, 1)
+    assert (first.klass, first.action, second.action) == ("infra", "rerun", "halt")
+
+
 def test_bisect_of_a_single_member_ejects_it() -> None:
     decision = classify.classify(_report(["tests/unit/test_z.py::t"]), MEMBERS[:1], None, 1)
     assert (decision.action, decision.culprit) == ("eject", 1)
@@ -59,6 +66,7 @@ LOG = """2026-11-21T20:34:41.1Z ============ short test summary info ===========
 2026-11-21T20:34:41.2Z FAILED tests/unit/test_a.py::test_one - AssertionError: boom
 2026-11-21T20:34:41.3Z ERROR tests/integration/test_b.py::TestX::test_two[case-1]
 2026-11-21T20:34:41.4Z FAILED: not a node id
+2026-11-21T20:34:41.5Z FAILED tests/unit/test_c.py::test_value[case A] - assert 1 == 2
 """
 
 
@@ -66,17 +74,39 @@ def test_failing_ids_come_from_pytest_summary_lines() -> None:
     assert gate.failing_ids(LOG) == {
         "tests/unit/test_a.py::test_one",
         "tests/integration/test_b.py::TestX::test_two[case-1]",
+        "tests/unit/test_c.py::test_value[case A]",
     }
 
 
-def _jobs(*conclusions: tuple[str, str]) -> list[dict]:
-    return [{"id": n, "name": name, "conclusion": c} for n, (name, c) in enumerate(conclusions)]
+def _jobs(*conclusions: tuple) -> list[dict]:
+    """(name, conclusion[, failed step names])."""
+    return [
+        {
+            "id": n,
+            "name": spec[0],
+            "conclusion": spec[1],
+            "steps": [
+                {"name": step, "conclusion": "failure"}
+                for step in (spec[2] if len(spec) > 2 else ())
+            ],
+        }
+        for n, spec in enumerate(conclusions)
+    ]
+
+
+def test_parameter_cases_with_spaces_stay_distinct() -> None:
+    train_log = "FAILED tests/unit/test_c.py::test_value[case B] - boom\n"
+    result = gate.evaluate(
+        _jobs(("tier1 / Unit", "failure")), {0: train_log}, gate.failing_ids(LOG)
+    )
+    assert not result["inherited_only"]
+    assert result["residual"] == ["tests/unit/test_c.py::test_value[case B]"]
 
 
 def test_only_inherited_failures_excuse_the_train() -> None:
     jobs = _jobs(
         ("tier2 / Integration Tests Shard 3 (Linux)", "failure"),
-        ("tier2 / Integration Tests (Linux)", "failure"),
+        ("tier2 / Integration Tests (Linux)", "failure", ("Aggregate shard results",)),
         ("guard", "success"),
     )
     logs = {0: LOG}
@@ -86,7 +116,10 @@ def test_only_inherited_failures_excuse_the_train() -> None:
     ]
     partial = gate.evaluate(jobs, logs, {"tests/unit/test_a.py::test_one"})
     assert not partial["inherited_only"]
-    assert partial["residual"] == ["tests/integration/test_b.py::TestX::test_two[case-1]"]
+    assert partial["residual"] == [
+        "tests/integration/test_b.py::TestX::test_two[case-1]",
+        "tests/unit/test_c.py::test_value[case A]",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -94,11 +127,21 @@ def test_only_inherited_failures_excuse_the_train() -> None:
     [
         _jobs(("tier1 / Lint", "failure")),
         _jobs(("tier2 / Integration Tests Shard 3 (Linux)", "cancelled")),
-        _jobs(("tier2 / Integration Tests (Linux)", "failure")),
+        _jobs(("tier2 / Integration Tests (Linux)", "failure", ("Aggregate shard results",))),
+        _jobs(
+            (
+                "tier2 / Integration Tests (Linux)",
+                "failure",
+                ("Enforce integration coverage gate",),
+            ),
+            ("tier2 / Integration Tests Shard 3 (Linux)", "failure"),
+        ),
+        _jobs(("tier1 / Coverage Combine (Linux)", "failure", ("Enforce unit coverage gate",))),
     ],
 )
 def test_a_failure_without_node_ids_is_never_excused(jobs) -> None:
-    result = gate.evaluate(jobs, {}, {"tests/unit/test_a.py::test_one"})
+    logs = {1: LOG} if len(jobs) > 1 else {}
+    result = gate.evaluate(jobs, logs, gate.failing_ids(LOG))
     assert not result["inherited_only"] and result["unidentified_jobs"] == [jobs[0]["name"]]
 
 
@@ -154,3 +197,65 @@ def test_gate_main_never_fails_the_job_on_an_api_error(tmp_path, monkeypatch) ->
     assert gate.main(["--run-id", "9", "--base-sha", "b" * 40, "--out", str(path)], run=broken) == 0
     assert output.read_text(encoding="utf-8") == "inherited_only=false\n"
     assert "gh not found" in json.loads(path.read_text(encoding="utf-8"))["error"]
+
+
+def _guarded_train(results: dict[str, dict]):
+    """A 2-member train whose prefix runs' guard jobs conclude as given per ref."""
+    from scripts.merge_queue import state
+    from scripts.merge_queue.api import REPO
+    from tests.unit.scripts.merge_queue._fake_api import FakeApi
+
+    api = FakeApi()
+    refs = ["queue/t0001/p1-guard", "queue/t0001/p2-full"]
+    members = [state.Member(1, "1" * 40, 1, "a" * 40), state.Member(2, "2" * 40, 2, "b" * 40)]
+    item = state.Train(1, "0" * 40, members, refs)
+    runs = {
+        ref: {
+            "id": n,
+            "head_sha": m.sha,
+            "head_branch": ref,
+            "status": job.pop("run", "completed"),
+            "created_at": "x",
+        }
+        for n, (ref, m, job) in enumerate(
+            ((r, m, results[r]) for r, m in zip(refs, members, strict=True)), 10
+        )
+        if job is not None
+    }
+    api.routes[f"repos/{REPO}/actions/workflows/merge-train.yml/runs"] = lambda q: {
+        "workflow_runs": [runs[q["branch"][0]]] if q["branch"][0] in runs else []
+    }
+    for ref, run in runs.items():
+        api.routes[f"repos/{REPO}/actions/runs/{run['id']}/jobs"] = {
+            "jobs": [{"name": "guard", **results[ref]}]
+        }
+    return api, item
+
+
+LINT_RED = {
+    "status": "completed",
+    "conclusion": "failure",
+    "steps": [{"name": "Lint chain", "conclusion": "failure"}],
+}
+GREEN = {"status": "completed", "conclusion": "success"}
+
+
+@pytest.mark.parametrize(
+    ("p1", "p2", "expected"),
+    [
+        (GREEN, LINT_RED, ("own", 2)),
+        (LINT_RED, LINT_RED, ("own", 1)),
+        (
+            {"status": "in_progress", "conclusion": None, "run": "in_progress"},
+            LINT_RED,
+            ("wait", None),
+        ),
+        ({"status": "completed", "conclusion": "timed_out"}, LINT_RED, ("infra", None)),
+        (GREEN, GREEN, ("none", None)),
+    ],
+)
+def test_guard_attribution_needs_every_earlier_prefix_green(p1, p2, expected) -> None:
+    from scripts.merge_queue import red
+
+    api, item = _guarded_train({"queue/t0001/p1-guard": dict(p1), "queue/t0001/p2-full": dict(p2)})
+    assert red.red_guard(api, item) == expected

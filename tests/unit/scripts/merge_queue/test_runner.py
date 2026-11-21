@@ -59,6 +59,17 @@ def _repo(verdict: str | None = None) -> FakeApi:
         return Response(201, {"sha": sha, "commit": {"tree": {"sha": "f" + sha[1:]}}})
 
     api.post_handler = merge
+    runs_path = f"repos/{REPO}/actions/workflows/merge-train.yml/runs"
+    api.routes[f"repos/{REPO}/actions/runs/99"] = {"run_attempt": 1}
+    api.routes[f"repos/{REPO}/actions/runs/99/jobs"] = lambda q: {
+        "jobs": [
+            {
+                "name": "train-gate",
+                "status": "completed",
+                "conclusion": api.routes[runs_path]["workflow_runs"][0]["conclusion"],
+            }
+        ]
+    }
     if verdict:
         api.routes[f"repos/{REPO}/actions/workflows/merge-train.yml/runs"] = {
             "workflow_runs": [
@@ -122,6 +133,10 @@ def test_an_unattributed_red_is_rerun_once_then_bisected() -> None:
     runner.tick(api, current, log, depth=0, read_report=lambda run: UNATTRIBUTED)
     assert current.trains[1].status == state.TESTING and current.trains[1].reruns == 1
     assert f"POST repos/{REPO}/actions/runs/99/rerun-failed-jobs " in _writes(api)
+    assert current.trains[1].awaiting_attempt == 2
+    runner.tick(api, current, log, depth=0, read_report=lambda run: UNATTRIBUTED)
+    assert current.trains[1].status == state.TESTING, "the old attempt is not the rerun's verdict"
+    api.routes[f"repos/{REPO}/actions/runs/99"] = {"run_attempt": 2}
     runner.tick(api, current, log, depth=0, read_report=lambda run: UNATTRIBUTED)
     assert current.trains[1].status == state.RED and current.window == 3
     assert current.split == [21]
@@ -154,6 +169,7 @@ def test_a_second_infra_red_halts_launches() -> None:
     infra = {"residual": [], "unidentified_jobs": ["tier2 / Integration Tests Shard 3 (Linux)"]}
     runner.tick(api, current, log, depth=1)
     runner.tick(api, current, log, depth=0, read_report=lambda run: infra)
+    api.routes[f"repos/{REPO}/actions/runs/99"] = {"run_attempt": 2}
     runner.tick(api, current, log, depth=2, read_report=lambda run: infra)
     assert current.trains[1].status == state.RED and "infra" in current.halted
     assert list(current.trains) == [1] and [e for e in log.events if e["event"] == "needs-input"]
@@ -166,6 +182,7 @@ def test_a_rerun_that_passes_is_a_flake_and_lands() -> None:
     api.routes[f"repos/{REPO}/actions/workflows/merge-train.yml/runs"]["workflow_runs"][0][
         "conclusion"
     ] = "success"
+    api.routes[f"repos/{REPO}/actions/runs/99"] = {"run_attempt": 2}
     runner.tick(api, current, log, depth=0)
     assert current.trains[1].status == state.GREEN
     flakes = [e for e in log.events if e["event"] == "flake"]
@@ -327,3 +344,50 @@ def test_with_landing_on_a_new_train_stacks_on_an_unlanded_green_train(landing_o
     runner.tick(api, current, log, depth=2, landing_on=landing_on)
     created = [b for m, p, b in api.calls if m == "POST" and p.endswith("/git/refs")]
     assert created[0] == {"ref": "refs/heads/queue-build/t0002", "sha": tip}
+
+
+def test_a_refused_rerun_request_is_retried_without_spending_the_rerun() -> None:
+    api, current, log = _repo("failure"), state.State(), runner.Log(None, _clock())
+    inner = api.post_handler
+    api.post_handler = lambda path, body: (
+        Response(403, "forbidden") if path.endswith("rerun-failed-jobs") else inner(path, body)
+    )
+    runner.tick(api, current, log, depth=1)
+    runner.tick(api, current, log, depth=0, read_report=lambda run: UNATTRIBUTED)
+    item = current.trains[1]
+    assert (item.status, item.reruns, item.awaiting_attempt) == (state.TESTING, 0, 0)
+    assert [e["status"] for e in log.events if e["event"] == "rerun-refused"] == [403]
+
+
+def test_a_failed_label_removal_is_retried_on_the_next_poll() -> None:
+    api, current, log = _repo("failure"), state.State(), runner.Log(None, _clock())
+    report = {"residual": ["tests/unit/test_f22.py::t"], "unidentified_jobs": []}
+    statuses = iter([500, 204])
+    deletes = []
+    real_delete = api.delete
+
+    def delete(path):
+        if "/labels/" in path:
+            deletes.append(path)
+            return Response(next(statuses), None)
+        return real_delete(path)
+
+    api.delete = delete
+    runner.tick(api, current, log, depth=1)
+    runner.tick(api, current, log, depth=0, landing_on=True, read_report=lambda run: report)
+    assert current.unlabel == [22]
+    assert [e["unlabeled"] for e in log.events if e["event"] == "ejected"] == [False]
+    runner.tick(api, current, log, depth=0, landing_on=True, read_report=lambda run: report)
+    assert current.unlabel == [] and len(deletes) == 2
+
+
+def test_a_red_train_aborts_the_speculative_trains_built_on_it() -> None:
+    api, current, log = _repo("failure"), state.State(window=6), runner.Log(None, _clock())
+    report = {"residual": ["tests/unit/test_f22.py::t"], "unidentified_jobs": []}
+    later = state.Train(2, MAIN, [state.Member(9, "9" * 40, 1, "e" * 40)], ["queue/t0002/p1-full"])
+    runner.tick(api, current, log, depth=1)
+    current.trains[2], current.max_id = later, 2
+    runner.tick(api, current, log, depth=0, read_report=lambda run: report)
+    assert current.trains[1].status == state.RED and later.status == state.ABORTED
+    assert f"DELETE repos/{REPO}/git/refs/heads/queue-build/t0002 " in _writes(api)
+    assert [e["behind"] for e in log.events if e["event"] == "aborted"] == [1]

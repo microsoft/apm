@@ -47,6 +47,8 @@ class Train:
     verdict_at: str = ""
     run_id: int | None = None
     reruns: int = 0
+    # After a rerun request: classify only once this attempt of the run completes.
+    awaiting_attempt: int = 0
     red_class: str = ""
     ejected: int | None = None
     residual: list[str] = field(default_factory=list)
@@ -76,6 +78,8 @@ class State:
     split: list[int] = field(default_factory=list)
     # Set by a second infra red; no train launches until a human clears it.
     halted: str = ""
+    # Ejected PRs whose queue:ready label removal failed; retried every poll.
+    unlabel: list[int] = field(default_factory=list)
 
     def in_flight(self) -> list[Train]:
         return sorted(
@@ -133,6 +137,7 @@ class State:
             ejected={int(pr): head for pr, head in raw.get("ejected", {}).items()},
             split=raw.get("split", []),
             halted=raw.get("halted", ""),
+            unlabel=raw.get("unlabel", []),
         )
 
 

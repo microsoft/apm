@@ -28,6 +28,7 @@ class World:
         self.merge_calls: list[tuple[int, str]] = []
         self.refuse: list[str] = []
         self.messages: dict[int, list[str]] = {}
+        self.foreign: dict[int, tuple[str, ...]] = {}
         self.github_closes = True
         self.crash_after_merge = False
         self.wrong_tree = False
@@ -72,7 +73,12 @@ class World:
 
     def _graphql(self, path, body) -> Response:
         pr = body["variables"]["pr"]
-        nodes = [{"number": n} for n in self.closing.get(pr, ())]
+        nodes = [
+            {"number": n, "repository": {"nameWithOwner": REPO}} for n in self.closing.get(pr, ())
+        ] + [
+            {"number": int(ref.split("#")[1]), "repository": {"nameWithOwner": ref.split("#")[0]}}
+            for ref in self.foreign.get(pr, ())
+        ]
         data = {"repository": {"pullRequest": {"closingIssuesReferences": {"nodes": nodes}}}}
         return Response(200, {"data": data})
 
@@ -248,6 +254,28 @@ def test_a_closure_mismatch_ejects_the_train_before_any_merge() -> None:
     notices = log.of("ejection-notice")
     assert [e["pr"] for e in notices] == [11, 12]
     assert "would close [101, 102]" in notices[0]["reason"]
+
+
+@pytest.mark.parametrize(
+    ("message", "foreign", "would_close"),
+    [
+        ("fix\n\nFixes other/repo#101", (), "other/repo#101"),
+        ("fix\n\nCloses microsoft/apm#102", (), "102"),
+        ("fix", ("other/repo#101",), "other/repo#101"),
+    ],
+)
+def test_qualified_and_cross_repository_closures_fail_the_audit(
+    message, foreign, would_close
+) -> None:
+    """The ticket fixes local #101; another repository's #101 is not the same issue."""
+    world = World({11: (101,)}, {11: (101,)})
+    world.messages[11] = [message]
+    world.foreign[11] = foreign
+    item = world.train(1, [11])
+    current, lander, log = state.State(trains={1: item}), landing.LandingState(), Log()
+    _run(world, current, lander, log)
+    assert world.merge_calls == [] and item.status == state.ABORTED
+    assert would_close in log.of("ejection-notice")[0]["reason"]
 
 
 def test_a_withdrawn_ticket_ejects_the_train() -> None:

@@ -66,6 +66,9 @@ def classify(
     unidentified = tuple(report.get("unidentified_jobs") or ())
     if not report:
         unidentified = ("no train-failures report",)
+    elif report.get("error"):
+        # gate.py could not collect its evidence: never blame a member for that.
+        unidentified = (f"evidence collection failed: {report['error']}", *unidentified)
     if unidentified:
         return Decision("infra", RERUN if reruns == 0 else HALT, evidence=unidentified)
     residual = tuple(report.get("residual") or ())
