@@ -19,6 +19,8 @@ from apm_cli.install.services import integrate_local_bundle
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.diagnostics import CATEGORY_AGENT_LOSSY_COMPILATION, DiagnosticCollector
 
+pytestmark = [pytest.mark.component, pytest.mark.promise("req-tg-006", "req-tg-015")]
+
 
 def _install_bundle_agent(tmp_path: Path, agent: str) -> tuple[dict, Path, DiagnosticCollector]:
     bundle = tmp_path / "bundle"
