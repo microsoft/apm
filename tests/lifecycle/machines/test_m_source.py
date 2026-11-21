@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,6 +44,7 @@ import pytest
 from hypothesis import strategies as st
 from hypothesis.stateful import initialize, rule, run_state_machine_as_test
 
+from tests.lifecycle.generator.rules import FIRST_PARTY_MCP_CELL
 from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.machines._kit import (
     Bench,
@@ -54,17 +55,22 @@ from tests.lifecycle.machines._kit import (
     earned_cells,
     machine_settings,
 )
+from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import UNGATED_KINDS, ModelState
 from tests.lifecycle.oracles import Evidence, Observation, check_obligation
 from tests.lifecycle.receipts import current_node
-from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED
+from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED, _SURFACE_GLOBS
 from tests.lifecycle.world import registry
 from tests.lifecycle.world.packages import INERT_COMMAND
+from tests.lifecycle.world.routes import PROXY_HOST, PROXY_PREFIX
+from tests.lifecycle.world.scopes import use_registry_proxy
 from tests.lifecycle.world.services import (
     API_HOST,
     GITHUB_HOST,
     HOST_ALIASES,
     MARKETPLACE_NAME,
+    MARKETPLACE_REPO,
+    ORG,
     RAW_HOST,
     REGISTRY_HOST,
     REGISTRY_SERVER,
@@ -98,7 +104,7 @@ pytestmark = [
     ),
 ]
 
-OPS = ("install", "update", "uninstall", "prune", "compile", "lock")
+OPS = ("install", "update", "uninstall", "prune", "compile", "lock", "marketplace")
 FORMS = (
     "shorthand",
     "git-object",
@@ -111,7 +117,10 @@ FORMS = (
     "mcp-registry",
     "inline-mcp",
 )
-SHAPES = ("github", *HOST_ALIASES)
+# A GHES host on a non-default port: the lock key carries host and port (HOSTID).
+PORTED = "ghes-port"
+_PORT = 8443
+SHAPES = ("github", *HOST_ALIASES, PORTED)
 TARGET_SETS = (("copilot",), ("copilot", "claude"), ("claude",))
 NETWORK = ("online", "offline", "proxy-only")
 REF = "v1.0.0"
@@ -123,6 +132,7 @@ WORLD_HOSTS = frozenset(
         RAW_HOST,
         REGISTRY_HOST,
         registry.HOST,
+        PROXY_HOST,
         *(host for host, _ in HOST_ALIASES.values()),
     }
 )
@@ -130,10 +140,18 @@ WORLD_HOSTS = frozenset(
 INLINE_SERVER = "p-inline"
 # MCP server slots -> the server name their ``dependencies.mcp`` entry carries.
 _MCP_SERVERS = {"p-registry": REGISTRY_SERVER, INLINE_SERVER: INLINE_SERVER}
+# The exact names a configured or locked entry of each slot may carry (a registry
+# server is keyed by its full id or by its short name).
+_MCP_NAMES = {
+    "p-registry": frozenset({REGISTRY_SERVER, REGISTRY_SERVER.rsplit("/", 1)[-1]}),
+    INLINE_SERVER: frozenset({INLINE_SERVER}),
+}
 _CLOSED_PROXY = "http://127.0.0.1:9"
-_NO_DRY_RUN = frozenset({"lock"})
+_NO_DRY_RUN = frozenset({"lock", "marketplace"})
 # Ops that do not resolve: they may keep what is deployed (``apm lock`` never deletes).
-_KEEPING = frozenset({"lock", "compile"})
+_KEEPING = frozenset({"lock", "compile", "marketplace"})
+# Forms a marketplace catalog declares: ``apm marketplace update`` acts on their source.
+_MARKET_FORMS = frozenset({"marketplace-object", "plugin-at-mkt"})
 _MARKET_CACHE = ".apm/cache/marketplace"
 _PINS = f"{_MARKET_CACHE}/version-pins.json"
 # The marketplace catalog cache a project install may refresh under APM_HOME.
@@ -214,6 +232,8 @@ _NAMES = sorted({*KINDS, "p-registry", INLINE_SERVER}, key=len, reverse=True)
 
 def applies(op: str, form: str) -> bool:
     """Whether *op* acts on a dependency of *form* (see the module docstring)."""
+    if op == "marketplace":
+        return form in _MARKET_FORMS
     if form == "bundle":
         return op == "install"
     return not (form in _MCP_FORMS and op == "uninstall")
@@ -251,19 +271,46 @@ _COMMON = (
     "UPDATE=on",
 )
 _UNAPPROVED = "GATE=unapproved-exec"
-_MANIFEST_CONTEXT = (*_COMMON, _UNAPPROVED, "FROZEN=on")
+# GATE=none: the gate-off pass (no ``executables`` block, the default user path).
+_MANIFEST_CONTEXT = (*_COMMON, _UNAPPROVED, "GATE=none", "FROZEN=on")
+# A root-declared MCP server has no executable-gate level (first-party, never parked).
+_ROOT_MCP_CONTEXT = (*_COMMON, "GATE=none", "FROZEN=on")
+
+
+def _hostid(hostid: str, lock: str | None) -> tuple[str, ...]:
+    """The HOSTID context of a step, alone and with the lock state it started from."""
+    return (f"HOSTID={hostid}", *((f"HOSTID={hostid}|LOCK={lock}",) if lock else ()))
+
+
+# Ops whose HOSTID cells the spine earns, with the lock state each starts from.
+_HOST_LOCKS = (("install", "stale"), ("lock", "consistent"), ("update", None), ("uninstall", None))
 # (op, form) -> the context ids its real steps must earn (``context_pass`` and the
 # ordinary steps of the spine reach every one).
 X_CONTEXT: Mapping[tuple[str, str], tuple[str, ...]] = {
-    ("install", "inline-mcp"): _MANIFEST_CONTEXT,
-    ("install", "mcp-registry"): _MANIFEST_CONTEXT,
-    ("install", "plugin-at-mkt"): _MANIFEST_CONTEXT,
+    ("install", "inline-mcp"): _ROOT_MCP_CONTEXT,
+    ("install", "mcp-registry"): _ROOT_MCP_CONTEXT,
+    ("install", "plugin-at-mkt"): (*_MANIFEST_CONTEXT, *_hostid("bare-default", "absent")),
     ("install", "native"): _MANIFEST_CONTEXT,
     ("install", "pkg-registry"): _MANIFEST_CONTEXT,
     # A local bundle has no manifest entry (``install --frozen`` never reads it) and
     # its install refuses ``--update`` (exit 2).
     ("install", "bundle"): (*(c for c in _COMMON if c != "UPDATE=on"), _UNAPPROVED),
     ("update", "marketplace-object"): ("DEPLOYED=clean",),
+    # ``apm marketplace update NAME`` with catalog-declared packages installed.
+    ("marketplace", "marketplace-object"): (
+        "SCOPE=project",
+        "NET=online",
+        "TGT=single-unchanged",
+        "SELECT=on",
+        "DEPLOYED=clean",
+    ),
+    ("marketplace", "plugin-at-mkt"): ("TGT=multi-unchanged", _UNAPPROVED, "GATE=none"),
+    # HOSTID (E1), read from the lock row: the default host, a host on a port, the proxy.
+    **{
+        (op, "git-object"): (*_hostid("bare-default", lock), *_hostid("qualified-host-port", lock))
+        for op, lock in _HOST_LOCKS
+    },
+    **{(op, "shorthand"): _hostid("proxy-logical", lock) for op, lock in _HOST_LOCKS},
     ("update", "pkg-registry"): ("DEPLOYED=clean",),
 }
 _FLAG_CONTEXT = {
@@ -272,6 +319,11 @@ _FLAG_CONTEXT = {
     "--frozen": "FROZEN=on",
     "--target": "SELECT=on",
 }
+
+
+def rule_cells() -> frozenset[str]:
+    """Rule cells the spine witnesses directly (U-FIRST-PARTY-MCP)."""
+    return frozenset({FIRST_PARTY_MCP_CELL})
 
 
 def x_cells() -> frozenset[str]:
@@ -353,6 +405,8 @@ class SourceMachine(MachineBase):
         # Slot -> targets of the last resolving step that handled it: a later step under
         # the same targets is "unchanged" for that slot.
         self.resolved_targets: dict[str, frozenset[str]] = {}
+        self.lock_before = "absent"
+        self.proxy = False
 
     # -- model -----------------------------------------------------------------
 
@@ -362,7 +416,9 @@ class SourceMachine(MachineBase):
         names |= {"p-exec"} if "remote-exec" in self.slots else set()
         if names & _DIAMOND:
             names.add("p-child")
-        return ModelState(declared=frozenset(names), targets=self.model.targets)
+        return ModelState(
+            declared=frozenset(names), targets=self.model.targets, exec_gate=self.model.exec_gate
+        )
 
     def remote(self) -> bool:
         return bool({"remote-skill", "remote-exec", "p-registry"} & set(self.slots))
@@ -392,15 +448,24 @@ class SourceMachine(MachineBase):
             shape = "single" if len(self.model.targets) == 1 else "multi"
             found.add(f"TGT={shape}-unchanged")
         found |= {context for flag, context in _FLAG_CONTEXT.items() if flag in args}
+        if op == "marketplace" and MARKET in args:
+            found.add("SELECT=on")  # ``apm marketplace update NAME`` names one catalog
         # GATE=none is "no executables gate configured" (factors.py GateLevel "none");
         # with the gate on, only the executable kinds of a package have a gate level.
         if "executables" not in self.bench.manifest():
             found.add("GATE=none")
-        else:
+        elif choice.form not in _MCP_FORMS:
+            # The project's own MCP servers are first-party: the gate never parks them.
             gated = choice.kinds - UNGATED_KINDS
             found |= {f"GATE={self.model.gate(choice.package, kind)}" for kind in gated}
         if any(cell.startswith(f"{choice.package}/") for cell in step.before.deployed):
             found.add("DEPLOYED=clean")
+        hostid = None
+        if any(c.startswith("HOSTID=") for c in X_CONTEXT.get((op, choice.form), ())):
+            hostid = self.hostid(step.before if op == "uninstall" else step.after, choice)
+        if hostid is not None:
+            lock = "absent" if step.before.lock is None else self.lock_before
+            found |= {f"HOSTID={hostid}", f"HOSTID={hostid}|LOCK={lock}"}
         listed = X_CONTEXT.get((op, choice.form), ())
         return [f"X|{op}|{choice.form}|{context}" for context in sorted(found & set(listed))]
 
@@ -411,10 +476,7 @@ class SourceMachine(MachineBase):
         if choice.form == "shorthand":
             return f"lifecycle/p-skill#{REF}"
         if choice.form == "git-object":
-            return {
-                "git": f"{self.bench.world.services.host_alias(self.shape)}/p-skill.git",
-                "ref": REF,
-            }
+            return {"git": f"{self.host_url()}/p-skill.git", "ref": REF}
         if choice.form == "marketplace-object":
             return {"name": "p-skill", "marketplace": MARKET}
         if choice.form == "pkg-registry":
@@ -424,6 +486,46 @@ class SourceMachine(MachineBase):
                 "version": "1.0.0",
             }
         return packages[choice.package].spec
+
+    def host_url(self) -> str:
+        """URL prefix of the world's repositories under the current host shape."""
+        services = self.bench.world.services
+        if self.shape != PORTED:
+            return services.host_alias(self.shape)
+        host, prefix = HOST_ALIASES["ghes"]
+        return f"https://{host}:{_PORT}/{prefix}"
+
+    def declared_hostid(self, choice: Choice) -> str | None:
+        """The HOSTID shape *choice*'s declaration must produce in the lock (E1)."""
+        if self.proxy:
+            return "proxy-logical" if choice.form == "shorthand" else None
+        if choice.form == "git-object":
+            return {"github": "bare-default", PORTED: "qualified-host-port"}.get(self.shape)
+        return "bare-default" if choice.form in ("shorthand", "plugin-at-mkt") else None
+
+    def hostid(self, observation: Observation, choice: Choice) -> str | None:
+        """The declared HOSTID once the lock row records it exactly: host, port, prefix, key."""
+        hostid = self.declared_hostid(choice)
+        if hostid is None:
+            return None
+        lock = observation.lock
+        rows = [
+            row
+            for row in (lock.get_package_dependencies() if lock else ())
+            if package_name(row.repo_url or "") == choice.package
+        ]
+        assert len(rows) == 1, f"{choice.package}: lock rows {[r.repo_url for r in rows]}"
+        row = rows[0]
+        repo = f"lifecycle/{choice.package}"
+        ghes = HOST_ALIASES["ghes"][0]
+        expected = {
+            "bare-default": (GITHUB_HOST, None, None, repo),
+            "qualified-host-port": (ghes, _PORT, None, f"{ghes}:{_PORT}/{repo}"),
+            "proxy-logical": (PROXY_HOST, None, PROXY_PREFIX, repo),
+        }[hostid]
+        found = (row.host, row.port, row.registry_prefix, row.get_unique_key())
+        assert found == expected, f"{hostid} lock row of {choice.package}: {found} != {expected}"
+        return hostid
 
     def selector(self, choice: Choice) -> str:
         """The ``apm uninstall`` argument that selects *choice*."""
@@ -450,9 +552,16 @@ class SourceMachine(MachineBase):
     # -- steps -------------------------------------------------------------------
 
     def command(
-        self, op: str, args: tuple[str, ...], choices: Collection[Choice], dry_run: bool
+        self,
+        op: str,
+        args: tuple[str, ...],
+        choices: Collection[Choice],
+        dry_run: bool,
+        verify: Callable[[Step], None] | None = None,
     ) -> Step:
         """Run *op* (after its ``--dry-run`` preview when asked) and credit T3/T5 cells."""
+        # The lock state this step starts from (absent is read from the observation).
+        self.lock_before = "consistent" if self.converged else "stale"
         requested = self.declared_model()
         if op == "uninstall":
             requested = self._without(requested, choices)
@@ -469,6 +578,8 @@ class SourceMachine(MachineBase):
         )
         self.egress(step)
         if step.result.returncode == 0:
+            if verify is not None:
+                verify(step)
             self.credit(step, op, args, choices, preview)
             self.model = requested
             self.converged = op not in _KEEPING or self.converged
@@ -575,6 +686,38 @@ class SourceMachine(MachineBase):
         self.egress(self.marketplace_add(url.rsplit("/", 1)[0] + "/no-such-catalog", {1}, False))
         self.registered = True
 
+    def refresh_marketplace(self) -> None:
+        """``apm marketplace update NAME``: revalidates the catalog cache, never the project."""
+        choices = [c for c in self._choices() if c.form in _MARKET_FORMS]
+        args = ("marketplace", "update", MARKET)
+        step = self.step(
+            args,
+            exits={0},
+            cells=self.cells("marketplace", "real", choices),
+            mutating=True,
+            forbidden={"project": ("*",), "outside": ("*",)},
+            allowed={"home": (*_PROJECT_HOME_ALLOWED, *_CATALOG_CACHE, _PINS)},
+        )
+        catalog = [
+            entry
+            for entry in self.bench.world.services.egress_log()
+            if entry["status"] == 200 and f"/{ORG}/{MARKETPLACE_REPO}" in entry["path"]
+        ]
+        assert catalog, "marketplace update revalidated nothing (no catalog request)"
+        self.egress(step)
+        cells = self.cells("marketplace", "real", choices)
+        for choice in choices:
+            cells += self.contexts(step, "marketplace", args, choice)
+        for cell in dict.fromkeys(cells):
+            check_obligation(
+                cell,
+                strength="e2e-evidence",
+                before=step.before,
+                after=step.after,
+                result=step.result,
+                evidence=Evidence(unchanged={"project": ("*",), "outside": ("*",)}, exit=0),
+            )
+
     def marketplace_add(self, url: str, exits: set[int], converged: bool) -> Step:
         return self.step(
             ("marketplace", "add", url),
@@ -646,6 +789,95 @@ class SourceMachine(MachineBase):
         choices = [c for c in self._choices() if c.form != "bundle"]
         self.command(op, args, choices, dry_run)
 
+    def gate_off_pass(self) -> None:
+        """No executables gate: every declared form deploys without approval (GATE=none).
+
+        Restoring the gate then retires every package executable that is no longer
+        approved, while the project's own MCP servers (declared in its apm.yml, so
+        first-party) stay configured.
+        """
+        saved = self.bench.manifest()["executables"]
+
+        def set_gate(value: object) -> Callable[[], None]:
+            def change() -> None:
+                data = self.bench.manifest()
+                data.pop("executables", None)
+                if value is not None:
+                    data["executables"] = value
+                self.bench.write_manifest(data)
+
+            return change
+
+        self.edit("executables-gate-off", set_gate(None))
+        self.model = self.model.with_exec_gate(False)
+        self.converged = False
+        manifest = [c for c in self._choices() if c.form != "bundle"]
+        self.command("install", (), manifest, False, verify=self.gate_off_deploys_everything)
+        self.refresh_marketplace()
+        self.edit("executables-gate-on", set_gate(saved))
+        self.model = self.model.with_exec_gate(True)
+        self.converged = False
+        self.command("install", (), manifest, False, verify=self.gate_on_keeps_first_party_mcp)
+
+    def deploys_what_the_model_allows(self, step: Step) -> None:
+        """A resolving step deploys exactly the observable surfaces the model allows."""
+        wanted = {
+            "/".join(cell)
+            for cell in expected_deployed(self.declared_model(), self.kinds)
+            if (cell[1], cell[2]) in _SURFACE_GLOBS
+        }
+        deployed = set(step.after.deployed)
+        assert deployed == wanted, f"deployed {sorted(deployed)}, model {sorted(wanted)}"
+
+    def root_mcp_problems(self, step: Step) -> list[str]:
+        """The project's declared MCP servers that are not configured or not locked."""
+        lock = step.after.lock
+        places = {
+            "configured in .mcp.json": set(_mcp_servers(step.after)),
+            "recorded in the lock": set(lock.mcp_servers if lock else ()),
+        }
+        problems = []
+        for choice in self._choices():
+            if choice.form in _MCP_FORMS:
+                names = _MCP_NAMES[choice.package]
+                problems += [
+                    f"{choice.package} not {place}"
+                    for place, found in places.items()
+                    if not names & found
+                ]
+        return problems
+
+    def gate_off_deploys_everything(self, step: Step) -> None:
+        """No gate: every allowed surface is deployed and no MCP server is parked."""
+        self.deploys_what_the_model_allows(step)
+        problems = self.root_mcp_problems(step)
+        assert not problems, "; ".join(problems)
+        output = f"{step.result.stdout}\n{step.result.stderr}"
+        assert "Parked MCP server" not in output, output
+
+    def gate_on_keeps_first_party_mcp(self, step: Step) -> None:
+        """Gate restored: package executables retire; the project's own MCP servers stay.
+
+        Witnesses U-FIRST-PARTY-MCP: with the gate on and nothing approved, every MCP
+        server the project declares is configured, locked and never parked.
+        """
+        self.deploys_what_the_model_allows(step)
+        problems = self.root_mcp_problems(step)
+        output = f"{step.result.stdout}\n{step.result.stderr}"
+        roots = [_MCP_NAMES[c.package] for c in self._choices() if c.form in _MCP_FORMS]
+        assert roots, "the gate-on step needs a root-declared MCP server to witness"
+        names = set().union(*roots)
+        problems += [f"{name} parked" for name in names if f"Parked MCP server '{name}'" in output]
+        assert not problems, "; ".join(problems)
+        check_obligation(
+            FIRST_PARTY_MCP_CELL,
+            strength="e2e-evidence",
+            before=step.before,
+            after=step.after,
+            result=step.result,
+            evidence=Evidence(present={"project": (".mcp.json",)}, exit=0),
+        )
+
     def context_pass(self) -> None:
         """Install every declared form under --force/--update/--target and --frozen, multi-target."""
         self.retarget(TARGET_SETS[1])
@@ -659,6 +891,7 @@ class SourceMachine(MachineBase):
             # The first install under the new targets widens them; the second is unchanged.
             self.declare_by_cli(bundle, False)
             self.declare_by_cli(bundle, False, ("--force", *selected))
+        self.refresh_marketplace()
         self.retarget(TARGET_SETS[0])
         self.reconcile("install", False)
 
@@ -707,6 +940,28 @@ class SourceMachine(MachineBase):
         self.shape = shape
         self.declare(_BY_FORM["git-object"], False)
 
+    def hostid_pass(self) -> None:
+        """A host on a non-default port and the registry proxy through the lock lifecycle.
+
+        The default host earns its HOSTID cells on the spine's ordinary git steps.
+        """
+        env = self.bench.world.env
+        for shape in (PORTED, "proxy"):
+            if shape == "proxy":
+                self.edit(
+                    "registry-proxy-on", lambda: use_registry_proxy(self.bench.world, only=False)
+                )
+                self.proxy = True
+                self.declare(_BY_FORM["shorthand"], False)
+            else:
+                self.host_alias(shape)
+            for op in ("install", "lock", "update"):
+                self.reconcile(op, False)
+            self.uninstall("remote-skill", False)
+        names = ("PROXY_REGISTRY_URL", "PROXY_REGISTRY_TOKEN", "PROXY_REGISTRY_ONLY")
+        self.edit("registry-proxy-off", lambda: [env.pop(name, None) for name in names])
+        self.proxy = False
+
 
 _DURABLE = {
     "home": (_PINS,),
@@ -739,8 +994,11 @@ def replay_spine(machine: SourceMachine) -> None:
         machine.declare(choice, False)
         for op in ("install", "update", "prune", "compile", "lock"):
             machine.reconcile(op, True)
+        if choice.form == "marketplace-object":
+            machine.refresh_marketplace()
         if choice is _REGISTRY_SKILL:
             machine.context_pass()
+            machine.gate_off_pass()
     # p-lsp still survives this uninstall (#4214).
     machine.uninstall("remote-skill", False)
     for slot in ("remote-exec", "p-lsp"):
@@ -767,6 +1025,7 @@ def replay_spine(machine: SourceMachine) -> None:
     for mode in NETWORK[1:] + NETWORK[:1]:
         machine.network_mode(mode)
         machine.reconcile("install", False)
+    machine.hostid_pass()
 
 
 def test_source_spine_covers_every_form_and_op(lifecycle_template, tmp_path: Path) -> None:
@@ -776,8 +1035,10 @@ def test_source_spine_covers_every_form_and_op(lifecycle_template, tmp_path: Pat
     strict = {cell.label for cell in machine.known}
     assert machine.expected_seen == strict, sorted(strict - machine.expected_seen)
     earned = earned_cells(current_node(), "T") | earned_cells(current_node(), "X|")
-    missing = (t3_cells() | t5_cells() | x_cells()) - earned - set(KNOWN_CELLS_BY_ID)
-    assert not missing, f"T3/T5/X cells without an oracle receipt: {sorted(missing)}"
+    earned |= earned_cells(current_node(), "rule|")
+    expected = t3_cells() | t5_cells() | x_cells() | rule_cells()
+    missing = expected - earned - set(KNOWN_CELLS_BY_ID)
+    assert not missing, f"T3/T5/X/rule cells without an oracle receipt: {sorted(missing)}"
 
 
 def _cache_bytes(bench: Bench) -> dict[str, bytes]:
