@@ -1921,6 +1921,20 @@
       ]
     },
     {
+      "issue": 3896,
+      "fixed_in": "Unreleased",
+      "summary": "A plugin that ships per-harness hook files (obra/superpowers) failed every project-scope install once its hooks were approved: split into primitives, the retired filename-routing guard refused it. It now installs whole to the committed .agents/plugins/ and is declared in Claude Code and GitHub Copilot project settings (#3921).",
+      "failure_modes": ["outcome", "routing"],
+      "properties": [
+        "idempotency.byte_stable",
+        "outcome.status_matches_state",
+        "routing.authorized_targets_only"
+      ],
+      "regression_tests": [
+        "tests/integration/test_native_project_plugin_lifecycle.py::test_multi_harness_plugin_installs_whole_at_project_scope"
+      ]
+    },
+    {
       "issue": 3901,
       "summary": "External APM_HOME and global audit exercise user scope.",
       "failure_modes": ["ownership", "routing"],
