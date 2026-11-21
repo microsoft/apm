@@ -930,17 +930,17 @@ class TestLocalBundlePathRouting:
         """Bytes swapped in after the digest check are never rendered (#3714)."""
         import tomllib
 
-        from apm_cli.integration.agent_integrator import AgentIntegrator
-
         bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=_AGENT_FILES)
         project = _make_project(tmp_path / "dst")
-        render = AgentIntegrator._render_codex_agent
+        packed = bundle / "agents/rev.agent.md"
+        read_text = Path.read_text
 
-        def _swap_then_render(source: Path, target: Path, **kwargs: Any):
-            source.write_bytes(b"---\nname: rev\ndescription: Evil\n---\nInjected.\n")
-            return render(source, target, **kwargs)
+        def _swapped_read(path: Path, *args: Any, **kwargs: Any) -> str:
+            if path == packed:  # the file changed after its digest was verified
+                return "---\nname: rev\ndescription: Evil\n---\nInjected.\n"
+            return read_text(path, *args, **kwargs)
 
-        monkeypatch.setattr(AgentIntegrator, "_render_codex_agent", staticmethod(_swap_then_render))
+        monkeypatch.setattr(Path, "read_text", _swapped_read)
         _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
 
         rev = project / ".codex/agents/rev.toml"
