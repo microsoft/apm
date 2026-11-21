@@ -12224,22 +12224,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[lock-absent-copilot]"
   },
   "pair|LOCK=absent|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[lock-absent-legacy-receipt]"
   },
   "pair|LOCK=absent|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[lock-absent-vscode]"
   },
   "pair|LOCK=absent|NET=offline": {
    "family": "pair",
@@ -12461,22 +12464,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-copilot]"
   },
   "pair|LOCK=consistent|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-legacy-receipt]"
   },
   "pair|LOCK=consistent|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-vscode]"
   },
   "pair|LOCK=consistent|NET=offline": {
    "family": "pair",
@@ -12681,22 +12687,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_newer_generator_lock_is_refused_for_every_mcp_owner[copilot]"
   },
   "pair|LOCK=newer-generator|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_newer_generator_lock_is_refused_for_every_mcp_owner[legacy-receipt]"
   },
   "pair|LOCK=newer-generator|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_newer_generator_lock_is_refused_for_every_mcp_owner[vscode]"
   },
   "pair|LOCK=newer-generator|NET=offline": {
    "family": "pair",
@@ -12908,22 +12917,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[lock-stale-copilot]"
   },
   "pair|LOCK=stale|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[lock-stale-legacy-receipt]"
   },
   "pair|LOCK=stale|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[lock-stale-vscode]"
   },
   "pair|LOCK=stale|NET=offline": {
    "family": "pair",
@@ -14729,22 +14741,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-copilot]"
   },
   "pair|OP=install|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-legacy-receipt]"
   },
   "pair|OP=install|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-vscode]"
   },
   "pair|OP=install|NET=offline": {
    "family": "pair",
@@ -15959,22 +15974,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[mcp-install-copilot]"
   },
   "pair|OP=mcp-install|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[mcp-install-legacy-receipt]"
   },
   "pair|OP=mcp-install|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[mcp-install-vscode]"
   },
   "pair|OP=mcp-install|NET=offline": {
    "family": "pair",
@@ -16567,22 +16585,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[prune-copilot]"
   },
   "pair|OP=prune|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[prune-legacy-receipt]"
   },
   "pair|OP=prune|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[prune-vscode]"
   },
   "pair|OP=prune|NET=offline": {
    "family": "pair",
@@ -16997,22 +17018,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[uninstall-copilot]"
   },
   "pair|OP=uninstall|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[uninstall-legacy-receipt]"
   },
   "pair|OP=uninstall|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[uninstall-vscode]"
   },
   "pair|OP=uninstall|NET=offline": {
    "family": "pair",
@@ -17428,22 +17452,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[update-copilot]"
   },
   "pair|OP=update|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[update-legacy-receipt]"
   },
   "pair|OP=update|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[update-vscode]"
   },
   "pair|OP=update|NET=offline": {
    "family": "pair",
@@ -19463,22 +19490,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-copilot]"
   },
   "pair|SCOPE=project|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-legacy-receipt]"
   },
   "pair|SCOPE=project|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-vscode]"
   },
   "pair|SCOPE=project|NET=offline": {
    "family": "pair",
@@ -19723,22 +19753,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|SCOPE=user|MCPOWN=legacy-receipt": {
-   "family": "pair",
-   "issue": "#4100",
-   "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|SCOPE=user|MCPOWN=vscode": {
-   "family": "pair",
-   "issue": "#4100",
-   "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_user_scope_copilot_owner"
   },
   "pair|SCOPE=user|NET=offline": {
    "family": "pair",
@@ -25124,6 +25141,12 @@
   "pair|PRIM=bin|SCOPE=project": [
    "U-BIN"
   ],
+  "pair|SCOPE=user|MCPOWN=legacy-receipt": [
+   "U-MCPOWN-USER"
+  ],
+  "pair|SCOPE=user|MCPOWN=vscode": [
+   "U-MCPOWN-USER"
+  ],
   "pair|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
@@ -25220,6 +25243,14 @@
     "docs/src/content/docs/consumer/install-mcp-servers.md:168"
    ],
    "text": "an MCP server the project declares in its own apm.yml is first-party: the executables gate governs servers from dependencies and never parks it, so every executable-gate level of an MCP source is one must-cover cell that witnesses it (an org policy dependency deny still applies)"
+  },
+  "U-MCPOWN-USER": {
+   "evidence": [
+    "src/apm_cli/install/mcp/retired_destinations.py:3",
+    "src/apm_cli/install/mcp/retired_destinations.py:468",
+    "src/apm_cli/install/mcp/retired_destinations.py:469"
+   ],
+   "text": "the retired MCP owners (vscode, legacy-receipt) exist only at project scope: APM <= 0.36 wrote them to project files and the retired-claim reader returns no claims at user scope, so a user-scope cell with a retired owner is unreachable and removed"
   },
   "U1": {
    "evidence": [],
