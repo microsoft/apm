@@ -525,18 +525,22 @@ class TestManagedEntryKeptEdits:
         outcome["diagnostics"].error.assert_not_called()
 
     def test_edit_that_blocks_a_new_render_fails(self, tmp_path):
-        self._deploy(tmp_path, {"command": "my-pyright", "args": []})
+        edited = {"command": "my-pyright", "args": []}
+        config = self._deploy(tmp_path, edited)
 
         outcome = self._install(tmp_path, command="pyright-v2")
 
+        assert json.loads(config.read_text())["lspServers"]["pyright"] == edited
         assert outcome["kept"] == {"pyright": "blocked"}
         outcome["diagnostics"].error.assert_called_once()
 
     def test_entry_without_a_locked_render_is_an_unproven_keep(self, tmp_path):
-        self._deploy(tmp_path, {"command": "my-pyright", "args": []})
+        edited = {"command": "my-pyright", "args": []}
+        config = self._deploy(tmp_path, edited)
 
         outcome = self._install(tmp_path, locked={})
 
+        assert json.loads(config.read_text())["lspServers"]["pyright"] == edited
         assert outcome["kept"] == {"pyright": "unproven"}
         (message,) = outcome["diagnostics"].error.call_args.args
         assert "no local deployment receipt or locked render" in message
