@@ -2831,11 +2831,12 @@ def test_merge_group_only_node_is_collected_as_lifecycle_smoke(
 
 
 def test_exactly_one_job_provisions_and_requires_codex() -> None:
-    """The Codex native plugin cell runs for real in one job and cannot silently vanish (#4154).
+    """The Codex native plugin cell runs for real and cannot silently vanish (#4154).
 
     The lifecycle world skips that cell without a qualified Codex unless
-    APM_REQUIRE_CODEX is set; exactly one job sets it, and that job installs
-    Codex pinned to the production floor before running the lifecycle suite.
+    APM_REQUIRE_CODEX is set; only the full lifecycle suite job of the nightly
+    and of the release-candidate lane sets it, and each installs Codex pinned
+    to the production floor before running the lifecycle suite.
     """
     from apm_cli.codex_plugins.client import MINIMUM_CODEX_VERSION
 
@@ -2848,21 +2849,23 @@ def test_exactly_one_job_provisions_and_requires_codex() -> None:
             steps = [step for step in job.get("steps") or [] if isinstance(step, dict)]
             if any(effective_env(workflow, job, step).get("APM_REQUIRE_CODEX") for step in steps):
                 requiring.append((path.name, job_id))
-    assert requiring == [("lifecycle-journeys.yml", "lifecycle-full")], requiring
-    workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml")
-    job = workflow_job(workflow, "lifecycle-full")
-    names = [step.get("name") for step in job["steps"]]
-    install = workflow_step(job, "Install the pinned Codex CLI")
-    assert install["run"].split() == [
-        "npm",
-        "install",
-        "-g",
-        f"@openai/codex@{MINIMUM_CODEX_VERSION}",
-    ]
-    run = workflow_step(job, "Run the full lifecycle suite")
-    assert effective_env(workflow, job, run)["APM_REQUIRE_CODEX"] == "1"
-    assert "tests/lifecycle" in run["run"].split()
-    assert names.index("Install the pinned Codex CLI") < names.index("Run the full lifecycle suite")
+    assert requiring == [(name, "lifecycle-full") for name in LIFECYCLE_WORKFLOWS], requiring
+    for name in LIFECYCLE_WORKFLOWS:
+        workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / name)
+        job = workflow_job(workflow, "lifecycle-full")
+        names = [step.get("name") for step in job["steps"]]
+        install = workflow_step(job, "Install the pinned Codex CLI")
+        assert install["run"].split() == [
+            "npm",
+            "install",
+            "-g",
+            f"@openai/codex@{MINIMUM_CODEX_VERSION}",
+        ]
+        run = workflow_step(job, "Run the full lifecycle suite")
+        assert effective_env(workflow, job, run)["APM_REQUIRE_CODEX"] == "1"
+        assert "tests/lifecycle" in run["run"].split()
+        install_at = names.index("Install the pinned Codex CLI")
+        assert install_at < names.index("Run the full lifecycle suite"), name
 
 
 def test_every_quality_module_runs_in_some_workflow_job() -> None:
@@ -2889,24 +2892,20 @@ def test_every_quality_module_runs_in_some_workflow_job() -> None:
     assert orphans == [], f"no workflow job runs these modules: {orphans}"
 
 
+# Nightly (schedule, default branch) and release-candidate lane (dispatch, any ref).
+LIFECYCLE_NIGHTLY = "lifecycle-journeys.yml"
+LIFECYCLE_RC = "lifecycle-rc-validation.yml"
+LIFECYCLE_WORKFLOWS = (LIFECYCLE_NIGHTLY, LIFECYCLE_RC)
+
 CACHE_FULL_MATRIX_NODE = (
     "tests/integration/test_architecture_linter_session_cache.py::"
     "test_session_cache_findings_match_uncached_runs_full_matrix"
 )
 
 
-def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
-    """The env-gated full-matrix cache replay has a schedule, not only "on demand".
-
-    PR shards keep the per-group sample; the nightly lifecycle workflow (also
-    dispatched on each release-candidate ref) replays the full matrix with
-    PYTEST_PERF=1, and its tracking-issue signal waits for that job.
-    """
-    workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml")
-    assert "schedule" in workflow["on"]
-    assert "ref" in workflow["on"]["workflow_dispatch"]["inputs"]
+def _assert_cache_full_matrix_job(workflow: dict, checkout_ref: str | None) -> None:
     job = workflow_job(workflow, "architecture-cache-full-matrix")
-    assert job["steps"][0]["with"]["ref"] == "${{ inputs.ref }}"
+    assert job["steps"][0]["with"].get("ref") == checkout_ref
     assert all(key not in job for key in ("if", "continue-on-error"))
     step = workflow_step(job, "Replay the full owner mutation matrix through the session cache")
     assert "if" not in step and "continue-on-error" not in step
@@ -2914,25 +2913,63 @@ def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
     tokens = step["run"].replace("\\\n", " ").split()
     assert CACHE_FULL_MATRIX_NODE in tokens
     assert ("-m", "benchmark") in set(pairwise(tokens))
-    signal = workflow_job(workflow, "signal")
+
+
+def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
+    """The env-gated full-matrix cache replay has a schedule, not only "on demand".
+
+    PR shards keep the per-group sample; the nightly lifecycle workflow replays
+    the full matrix with PYTEST_PERF=1 on the default branch and its
+    tracking-issue signal waits for that job; the release-candidate lane
+    replays it for the dispatched ref.
+    """
+    nightly = load_workflow(REPO_ROOT / ".github" / "workflows" / LIFECYCLE_NIGHTLY)
+    _assert_cache_full_matrix_job(nightly, None)
+    signal = workflow_job(nightly, "signal")
     assert "architecture-cache-full-matrix" in signal["needs"]
     result = workflow_step(signal, "Open, update or close the tracking issue")["env"]["RESULT"]
     assert "needs.architecture-cache-full-matrix.result" in result
+    rc = load_workflow(REPO_ROOT / ".github" / "workflows" / LIFECYCLE_RC)
+    _assert_cache_full_matrix_job(rc, "${{ inputs.ref }}")
+
+
+def test_scheduled_lifecycle_runs_only_the_default_branch() -> None:
+    """A scheduled run never executes a caller-chosen ref; only manual dispatch does.
+
+    The nightly has no inputs and checks out the default branch; the
+    release-candidate lane is dispatch-only and checks out its ``ref`` input
+    in every job, so dispatched code never runs in a scheduled context.
+    """
+    nightly = load_workflow(REPO_ROOT / ".github" / "workflows" / LIFECYCLE_NIGHTLY)
+    assert set(nightly["on"]) == {"schedule"}
+    rc = load_workflow(REPO_ROOT / ".github" / "workflows" / LIFECYCLE_RC)
+    assert set(rc["on"]) == {"workflow_dispatch"}
+    assert "ref" in rc["on"]["workflow_dispatch"]["inputs"]
+    assert "inputs." not in str(nightly)
+    for name, workflow, ref in (
+        (LIFECYCLE_NIGHTLY, nightly, None),
+        (LIFECYCLE_RC, rc, "${{ inputs.ref }}"),
+    ):
+        for job_id, job in workflow["jobs"].items():
+            for step in job.get("steps") or []:
+                if str(step.get("uses", "")).startswith("actions/checkout"):
+                    assert (step.get("with") or {}).get("ref") == ref, (name, job_id)
+    assert set(rc["jobs"]) == set(nightly["jobs"]) - {"signal"}
 
 
 def test_dispatched_ref_lifecycle_workflow_uses_no_shared_cache() -> None:
-    """A workflow that checks out an arbitrary dispatched ref never touches a shared cache.
+    """Lifecycle workflows never touch a shared cache.
 
-    Code from that ref must not save a cache a default-branch run later restores.
+    Code from a dispatched ref must not save a cache a default-branch run later restores.
     """
-    workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml")
-    assert "ref" in workflow["on"]["workflow_dispatch"]["inputs"]
-    for job_id, job in workflow["jobs"].items():
-        for step in job.get("steps") or []:
-            uses = str(step.get("uses", ""))
-            assert not uses.startswith("actions/cache"), (job_id, step.get("name"))
-            with_block = step.get("with") or {}
-            if uses.startswith("astral-sh/setup-uv"):
-                assert with_block.get("enable-cache") is False, (job_id, step.get("name"))
-            if uses.startswith(("actions/setup-python", "actions/setup-node")):
-                assert "cache" not in with_block, (job_id, step.get("name"))
+    for name in LIFECYCLE_WORKFLOWS:
+        workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / name)
+        for job_id, job in workflow["jobs"].items():
+            for step in job.get("steps") or []:
+                uses = str(step.get("uses", ""))
+                assert not uses.startswith("actions/cache"), (name, job_id, step.get("name"))
+                with_block = step.get("with") or {}
+                if uses.startswith("astral-sh/setup-uv"):
+                    assert with_block.get("enable-cache") is False, (name, job_id)
+                if uses.startswith(("actions/setup-python", "actions/setup-node")):
+                    assert "cache" not in with_block, (name, job_id, step.get("name"))

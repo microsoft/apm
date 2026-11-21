@@ -1,0 +1,145 @@
+name: Lifecycle RC Validation
+
+# The nightly lifecycle jobs (lifecycle-journeys.yml) for one dispatched ref:
+# dispatch with `ref` set to a release-candidate SHA to validate it before
+# tagging. Manual dispatch only; the nightly never runs a dispatched ref.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit SHA, branch or tag to test (empty: the default branch)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+# Every job checks out the dispatched `ref`, which may be any commit, so no job
+# restores or saves a shared cache: code from that ref never writes a cache a
+# default-branch run would later restore.
+
+concurrency:
+  group: lifecycle-rc-validation-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  journeys:
+    name: Lifecycle Journeys (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run every lifecycle journey
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -n 2 --durations=10 -m "not live" tests/lifecycle/journeys/test_journeys.py
+
+  lifecycle-full:
+    name: Lifecycle Full Suite (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install Unix shell startup test runtimes
+        run: bash scripts/ci-apt-install.sh fish zsh
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      # The one job that runs the Codex native plugin cell for real (#4154):
+      # pinned to the production floor (MINIMUM_CODEX_VERSION) and required
+      # through APM_REQUIRE_CODEX, so a missing Codex fails instead of skipping.
+      - name: Install the pinned Codex CLI
+        run: npm install -g @openai/codex@0.163.0
+
+      # The journeys job above covers tests/lifecycle/journeys on every OS.
+      - name: Run the full lifecycle suite
+        env:
+          APM_E2E_TESTS: "1"
+          APM_REQUIRE_CODEX: "1"
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -n 4 --dist loadgroup --durations=20 -m "not live" \
+            --ignore=tests/lifecycle/journeys tests/lifecycle
+
+  # PR integration shards keep only the per-group sample of the linter session
+  # cache's byte-equality guard; the full owner-mutation replay (~15 min) runs
+  # here for each release candidate, and nightly in lifecycle-journeys.yml.
+  architecture-cache-full-matrix:
+    name: Architecture Cache Full Matrix (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Replay the full owner mutation matrix through the session cache
+        env:
+          PYTEST_PERF: "1"
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -m benchmark \
+            tests/integration/test_architecture_linter_session_cache.py::test_session_cache_findings_match_uncached_runs_full_matrix

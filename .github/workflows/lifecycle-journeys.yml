@@ -5,29 +5,18 @@ name: Lifecycle Journeys Nightly
 # Linux. PR and main-push CI run only the lifecycle smoke subset, so this is
 # the only scheduled run of every lifecycle witness. A scheduled failure opens
 # (or updates) one tracking issue; the next green scheduled run closes it.
-# Dispatch with `ref` set to a release-candidate SHA to validate it before
-# tagging.
+# It only ever tests the default branch: release candidates run the same jobs
+# through lifecycle-rc-validation.yml.
 
 on:
   schedule:
     - cron: '17 5 * * *'
-  workflow_dispatch:
-    inputs:
-      ref:
-        description: 'Commit SHA, branch or tag to test (empty: the default branch)'
-        required: false
-        default: ''
-        type: string
 
 permissions:
   contents: read
 
-# Every job checks out the dispatched `ref`, which may be any commit, so no job
-# restores or saves a shared cache: code from that ref never writes a cache a
-# default-branch run would later restore.
-
 concurrency:
-  group: lifecycle-journeys-${{ inputs.ref || github.ref }}
+  group: lifecycle-journeys-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -48,7 +37,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Set up Python
@@ -76,7 +64,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Set up Python
@@ -118,7 +105,7 @@ jobs:
 
   # PR integration shards keep only the per-group sample of the linter session
   # cache's byte-equality guard; the full owner-mutation replay (~15 min) runs
-  # here, nightly and on every release-candidate dispatch.
+  # here nightly, and in lifecycle-rc-validation.yml for each release candidate.
   architecture-cache-full-matrix:
     name: Architecture Cache Full Matrix (Linux)
     runs-on: ubuntu-24.04
@@ -126,7 +113,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Set up Python
@@ -153,7 +139,7 @@ jobs:
   signal:
     name: Lifecycle Journeys Nightly Signal
     needs: [journeys, lifecycle-full, architecture-cache-full-matrix]
-    if: always() && github.event_name == 'schedule'
+    if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
