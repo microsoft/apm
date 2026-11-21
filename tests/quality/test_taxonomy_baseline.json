@@ -2848,7 +2848,6 @@
     "tests/unit/scripts/test_check_test_assertions.py",
     "tests/unit/scripts/test_contracts_strip_charset.py",
     "tests/unit/scripts/test_ratchet_baseline.py",
-    "tests/unit/scripts/test_run_mutation_pilot.py",
     "tests/unit/security/test_exec_vocab_unification.py",
     "tests/unit/security/test_executables.py",
     "tests/unit/security/test_resolve_exec_decision.py",
