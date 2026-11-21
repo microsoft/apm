@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` with a native Claude plugin and MCP or LSP servers writes `apm.lock.yaml` once: MCP/LSP reconciliation now runs before native plugin registration commits the lockfile. (#PRNUM)
 - A rebound marketplace refusal under `apm install -g` no longer says to restore `~/.apm/apm.lock.yaml` from version control; it prints runnable re-record steps. (#4555)
 
 ## [0.37.0] - 2026-11-21

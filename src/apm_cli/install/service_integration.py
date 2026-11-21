@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.service import FrozenDisposition
+    from apm_cli.models.results import InstallResult
 
 
 class ServiceCommandContext(Protocol):
@@ -259,3 +260,76 @@ def run_service_integrations(  # noqa: PLR0913
         prepared=prepared_lsp,
     )
     return ServiceIntegrationResult(mcp_count, lsp_count, target_decision)
+
+
+def adopt_pipeline_result(ctx: Any, install_result: InstallResult) -> None:
+    """Carry what the package pipeline decided into the command's service context."""
+    ctx.target_decision = install_result.target_decision
+    ctx.exec_allow_map = install_result.exec_allow_map
+    ctx.exec_allow_resolved = install_result.exec_allow_resolved
+    ctx.mcp_policy_enforced = install_result.mcp_policy_enforced
+
+
+class ServiceReconciliation:
+    """One install's MCP/LSP reconciliation, rendered as the install reports it.
+
+    ``apm install`` hands it to the package pipeline, which calls it with the
+    pre-commit result before native Claude registration commits the lockfile,
+    so the install writes the lockfile once (#4329). When no pipeline ran it,
+    the command calls it with the pipeline's result, or ``None``.
+    """
+
+    def __init__(self, ctx: Any, **options: Any) -> None:
+        self._ctx = ctx
+        self._options = options
+        self.result: ServiceIntegrationResult | None = None
+        self.failure: Exception | None = None
+
+    def settle(self, install_result: InstallResult | None) -> ServiceIntegrationResult:
+        """Return the reconciliation result, raising the failure the pipeline deferred."""
+        if self.failure is not None:
+            raise self.failure
+        return self.result or self(install_result)
+
+    def __call__(self, install_result: InstallResult | None) -> ServiceIntegrationResult:
+        try:
+            self.result = self._reconcile(install_result)
+        except Exception as error:
+            self.failure = error
+            raise
+        return self.result
+
+    def _reconcile(self, install_result: InstallResult | None) -> ServiceIntegrationResult:
+        from apm_cli.install.commit_gate import refuse_blocked_mcp
+        from apm_cli.install.errors import InstallFailureAlreadyRendered, RequiredIntegrationError
+        from apm_cli.policy.install_preflight import PolicyBlockError
+
+        ctx = self._ctx
+        if install_result is not None:
+            adopt_pipeline_result(ctx, install_result)
+        if ctx.update:
+            from apm_cli.models.apm_package import clear_apm_yml_cache
+
+            clear_apm_yml_cache()
+        try:
+            return run_service_integrations(
+                ctx,
+                diagnostics=install_result.diagnostics if install_result is not None else None,
+                explicit_target=ctx.target or ctx.runtime,
+                target_decision=ctx.target_decision,
+                active_package_keys=(
+                    install_result.active_package_keys if install_result is not None else None
+                ),
+                claude_native_keys=(
+                    install_result.claude_native_keys
+                    if install_result is not None
+                    else frozenset()
+                ),
+                **self._options,
+            )
+        except PolicyBlockError as exc:
+            refuse_blocked_mcp(ctx.logger, exc)
+        except RequiredIntegrationError as exc:
+            ctx.logger.error(str(exc))
+            ctx.logger.render_summary()
+            raise InstallFailureAlreadyRendered(str(exc)) from exc
