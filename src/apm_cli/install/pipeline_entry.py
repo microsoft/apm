@@ -29,6 +29,8 @@ class PipelinePreview:
     mcp_dependencies: tuple[Any, ...] | None
     errors: tuple[str, ...] = ()
     declaration_errors: tuple[str, ...] = ()
+    # (marketplace, plugin) pairs the resolver resolved to a package (RA-036).
+    resolved_marketplace_plugins: frozenset[tuple[str, str]] = frozenset()
 
 
 def record_preview_resolution(ctx: Any, graph: Any) -> None:

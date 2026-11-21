@@ -902,6 +902,31 @@ def _cache_would_contribute_hooks_or_mcp(install_path: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _lsp_servers_not_packed(
+    project_root: Path, package: APMPackage, lockfile: LockFile | None
+) -> list[str]:
+    """Name the LSP servers a Claude plugin bundle leaves out (RA-034).
+
+    Declared ``dependencies.lsp``, servers the lockfile records, and a root
+    ``.lsp.json``'s ``lspServers`` all describe LSP configuration the plugin
+    format has no surface for.
+    """
+    names = {dep.name for dep in package.get_lsp_dependencies()}
+    if lockfile is not None:
+        names.update(lockfile.lsp_servers or ())
+        names.update(lockfile.lsp_configs or {})
+    lsp_json = project_root / ".lsp.json"
+    if lsp_json.is_file() and not lsp_json.is_symlink():
+        try:
+            data = json.loads(lsp_json.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+        servers = data.get("lspServers", data) if isinstance(data, dict) else None
+        if isinstance(servers, dict):
+            names.update(str(name) for name in servers)
+    return sorted(names)
+
+
 def export_plugin_bundle(
     project_root: Path,
     output_dir: Path,
@@ -1108,6 +1133,18 @@ def export_plugin_bundle(
     # MCP -- root package wins on server-name collision
     root_mcp = _collect_mcp(project_root)
     _deep_merge(merged_mcp, root_mcp, overwrite=True)
+
+    # 6b. LSP servers have no place in a Claude plugin: name each one dropped (I8).
+    dropped_lsp = _lsp_servers_not_packed(project_root, package, lockfile)
+    if dropped_lsp:
+        message = (
+            "Claude plugin bundles do not carry LSP servers; not packed: "
+            f"{', '.join(dropped_lsp)}. Configure LSP in the target client instead."
+        )
+        if logger:
+            logger.warning(message)
+        else:
+            _rich_warning(message, symbol="warning")
 
     # 7. Emit collision warnings
     for msg in collisions:

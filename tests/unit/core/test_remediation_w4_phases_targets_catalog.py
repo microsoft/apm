@@ -42,13 +42,17 @@ _FAULT = "needs a filesystem fault or race the hermetic world cannot induce"
 _ROOT = "needs an unreadable file; the hermetic tests may run as root, which reads it anyway"
 _CODEX = "needs a real Codex native plugin registration"
 _HINT = "advisory hint printed after every qualifying install; compile does not suppress it"
-_HASH = "needs upstream content to change under a locked commit (same-commit hash mismatch)"
+_HASH = "needs a user-scope lockfile changed under a locked commit, restored from a backup"
+_RESTORE = (
+    "executed end to end against a same-commit hash mismatch by "
+    "tests/integration/test_locked_source_cache_parity_lifecycle.py (RA-004)"
+)
 _LEGACY_SKILLS = "needs legacy per-client skill deployments recorded by an older APM"
 
 COMPONENT_ONLY: dict[str, str] = {
     "repository-not-found": "needs a direct dependency whose host answers repository-not-found; "
     "covered by the install not-found lifecycle tests",
-    "install-audit-force": "needs the external-scanners flag and a block audit mode; covered "
+    "security-findings-review": "needs the external-scanners flag and a block audit mode; covered "
     "by the install audit policy floor tests",
     "codex-admission-stale": _CODEX,
     "codex-native-loose-files": _CODEX,
@@ -64,9 +68,9 @@ COMPONENT_ONLY: dict[str, str] = {
     "deployed loose hooks",
     "skill-path-migration-conflict": _LEGACY_SKILLS,
     "skill-path-migration-legacy": _LEGACY_SKILLS,
-    "content-hash-cache-clean": _HASH,
-    "content-hash-repin": _HASH,
-    "content-hash-repin-global": _HASH,
+    "content-hash-cache-clean": _RESTORE,
+    "content-hash-lock-restore": _RESTORE,
+    "content-hash-lock-restore-global": _HASH,
     "materialized-manifest-invalid": "needs an acquired package whose apm.yml turns invalid "
     "after resolution",
     "hook-reconcile-incomplete": _FAULT,

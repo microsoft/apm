@@ -5,8 +5,10 @@ Mirrors the MCP integration pattern with runtime-neutral target selection.
 
 import builtins
 import logging
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from apm_cli.core.scope import manifest_file
@@ -372,8 +374,14 @@ def reconcile_lsp_after_uninstall(
     project_root: Path,
     user_scope: bool,
     logger,
+    excluded_package_keys: Mapping[str, str] = MappingProxyType({}),
 ) -> bool:
-    """Recompute trusted LSP state from every surviving declaration."""
+    """Recompute trusted LSP state from every surviving declaration.
+
+    Servers declared by *excluded_package_keys* (survivors the current gates
+    no longer allow, from ``install/exec_gate.py::gate_retirements``) are
+    left out, so the reconcile removes them (#4446).
+    """
     if not has_recorded_lsp_state(lockfile):
         return False
     if apm_package is None:
@@ -409,6 +417,34 @@ def reconcile_lsp_after_uninstall(
     )
     apm_config = {"scripts": apm_package.scripts or {}}
     apm_config.update(canonical_package_target_config(apm_package))
+    target_context = (apm_config, target_decision.value, scope)
+    prepared = None
+    if excluded_package_keys:
+        prepared = prepare_lsp_integration(
+            apm_package=apm_package,
+            apm_modules_path=modules_dir,
+            lock_path=lock_path,
+            project_root=project_root,
+            should_install=True,
+            logger=logger,
+            existing_lock=lockfile,
+            user_scope=user_scope,
+            target_context=target_context,
+            target_decision=target_decision,
+        )
+        kept, dropped = [], set()
+        for dependency in prepared.dependencies:
+            owner = getattr(dependency, "resolved_by", None)
+            if owner in excluded_package_keys:
+                dropped.add(owner)
+            else:
+                kept.append(dependency)
+        for owner in sorted(dropped):
+            logger.warning(
+                f"{owner} is no longer allowed ({excluded_package_keys[owner]}); "
+                "removing its LSP servers"
+            )
+        prepared = replace(prepared, dependencies=kept)
     run_lsp_integration(
         apm_package=apm_package,
         apm_modules_path=modules_dir,
@@ -418,10 +454,11 @@ def reconcile_lsp_after_uninstall(
         user_scope=user_scope,
         should_install=True,
         logger=logger,
-        target_context=(apm_config, target_decision.value, scope),
+        target_context=target_context,
         target_decision=target_decision,
         fail_on_write_error=True,
         persist=False,
+        prepared=prepared,
     )
     after = (
         list(lockfile.lsp_servers),

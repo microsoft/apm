@@ -92,8 +92,7 @@ See [SSL / TLS issues](./ssl-issues/).
 `--frozen` installs exactly what `apm.lock.yaml` records and never rewrites it. It fails when
 the lockfile is missing, when `apm.yml` changed without a lockfile update, or when a deployed
 file differs from its locked hash; in that case nothing is written. For edited files, keep
-the change with `apm export-patch`, then delete the files and rerun `apm install`, or run
-`apm install --force`. Otherwise, reproduce it locally, then fix and commit:
+the change with `apm export-patch`, then delete the files and rerun `apm install`. Otherwise, reproduce it locally, then fix and commit:
 
 ```bash frame="terminal"
 apm install --frozen
@@ -134,7 +133,7 @@ apm find --source .claude/skills/style-checker/SKILL.md
 ```
 
 To keep the change, `apm export-patch` writes it as a patch for the package's author. To discard
-it, run `apm install --force` (plain `apm install` keeps your edit). See [Inventory and drift](../enterprise/drift-detection/).
+it, move the file aside and rerun `apm install` (plain `apm install` keeps your edit). See [Inventory and drift](../enterprise/drift-detection/).
 
 ## `apm list` does not show my packages
 

@@ -241,13 +241,11 @@ def resolve_ci_audit_materialization(
         stale, mismatches = _live_copies_stale(project_root / APM_MODULES_DIR, lockfile_path)
         if not stale:
             return CiAuditMaterialization()
-        from apm_cli.utils.console import _rich_warning
-
-        for line in mismatches:
-            _rich_warning(f"{line} Verifying from the locked source.", symbol="warning", err=True)
     if get_workspace_deploy_root(project_root) != project_root.resolve():
         if warm:
             from apm_cli.core.cache_drift import package_cache_drift
+
+            _warn_live_mismatches(mismatches)
 
             return CiAuditMaterialization(
                 error=package_cache_drift(
@@ -269,12 +267,24 @@ def resolve_ci_audit_materialization(
             )
         )
     try:
-        return CiAuditMaterialization(
-            prepared_replay=prepare_ci_audit_replay(
-                project_root,
-                verbose=verbose,
-                policy_provider=policy_provider,
-            )
+        prepared = prepare_ci_audit_replay(
+            project_root,
+            verbose=verbose,
+            policy_provider=policy_provider,
         )
     except CiAuditReplayError as exc:
-        return CiAuditMaterialization(error=" ".join((*mismatches, str(exc))))
+        # One finding, said once: the replay error already names a mismatch it hit.
+        error = str(exc)
+        return CiAuditMaterialization(
+            error=" ".join((*(line for line in mismatches if line not in error), error))
+        )
+    _warn_live_mismatches(mismatches)
+    return CiAuditMaterialization(prepared_replay=prepared)
+
+
+def _warn_live_mismatches(mismatches: tuple[str, ...]) -> None:
+    """Warn about live copies that contradict the lock while audit verifies elsewhere."""
+    from apm_cli.utils.console import _rich_warning
+
+    for line in mismatches:
+        _rich_warning(f"{line} Verifying from the locked source.", symbol="warning", err=True)

@@ -188,6 +188,10 @@ def _preview_install(ctx: InstallContext, *, run_gates: bool) -> InstallResult:
             mcp_dependencies=ctx.preview_mcp_dependencies,
             errors=tuple(ctx.preview_errors),
             declaration_errors=tuple(ctx.preview_declaration_errors),
+            resolved_marketplace_plugins=frozenset(
+                (row.get("discovered_via"), row.get("marketplace_plugin_name"))
+                for row in (ctx.marketplace_provenance or {}).values()
+            ),
         ),
     )
 
@@ -815,7 +819,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
                         _rich_error(f"  - {name} (host: {host})")
                     _rich_error(
                         f"Run '{lockfile_refresh_command(scope)}' to re-resolve "
-                        "through the registry, or unset PROXY_REGISTRY_ONLY."
+                        "through the registry."
                     )
                     raise InstallFailureAlreadyRendered(
                         "Proxy-only lockfile contains direct VCS dependencies"

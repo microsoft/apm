@@ -132,14 +132,22 @@ def _locked_hashes(world: _World) -> dict[str, str]:
     return dict(dependency["deployed_file_hashes"])
 
 
-def _kept_line(entry: str, *, user_scope: bool) -> str:
-    install = "apm install -g" if user_scope else "apm install"
-    return (
-        f"Kept {entry}: it differs from what APM renders and there is no local "
+def _kept_line(entry: str, *, user_scope: bool, proven_edit: bool = False) -> str:
+    reason = (
+        "it was modified since APM deployed it"
+        if proven_edit
+        else "it differs from what APM renders and there is no local "
         "deployment receipt or locked render proving APM wrote it, so it may hold "
-        f"local edits. Move it aside, then run '{install}' to restore it, or "
-        f"'{install} --force' to overwrite it."
+        "local edits"
     )
+    # Never a --force overwrite: it also deploys despite critical findings (RA-008).
+    remedy = (
+        "Move it aside, then run 'apm install -g' to restore it."
+        if user_scope
+        else "Move it aside, then run 'apm install' to restore it, or 'apm export-patch' "
+        "to export the local edits as upstream patches."
+    )
+    return f"Kept {entry}: {reason}. {remedy}"
 
 
 def _output(result: CommandResult) -> str:
@@ -181,15 +189,22 @@ def test_receiptless_install_keeps_each_edited_kind(
         assert result.returncode == 1, output
         for path in paths.values():
             assert _kept_line(_entry(world, path), user_scope=user_scope) in output, output
-        assert "apm.lock.yaml keeps the previous entries of the 5 kept file(s)." in output
+        # The closing line names what the rewritten lock records (RA-009).
+        written = re.search(r"\[i\] This install wrote (\d+) file\(s\)", output)
+        assert written is not None, output
+        assert (
+            f"apm.lock.yaml records the {written.group(1)} written file(s) and keeps "
+            "the previous entries of the 5 kept file(s)."
+        ) in output
         assert {path: path.read_bytes() for path in paths.values()} == edited
         assert _locked_hashes(world) == hashes_before
 
-    # The printed remedy restores the files.
+    # Restore remedy, as printed: move each file aside, then install.
     for path in paths.values():
-        path.unlink()
+        path.rename(path.with_name(f"{path.name}.aside"))
     restored = world.install()
     assert restored.returncode == 0, _output(restored)
+    assert "Kept " not in _output(restored)
     assert all(_EDIT not in path.read_text(encoding="utf-8") for path in paths.values())
 
 
@@ -348,5 +363,8 @@ def test_receipted_file_edited_after_deployment_is_kept_on_upgrade(
     output = _output(result)
     assert result.returncode == 1, output
     for path in paths.values():
-        assert _kept_line(_entry(world, path), user_scope=user_scope) in output, output
+        # The receipt proves the edit: the true reason, never "no receipt" (RA-012).
+        line = _kept_line(_entry(world, path), user_scope=user_scope, proven_edit=True)
+        assert line in output, output
+        assert "no local deployment receipt" not in output, output
     assert {path: path.read_bytes() for path in paths.values()} == edited

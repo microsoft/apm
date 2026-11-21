@@ -78,6 +78,10 @@ from scripts.architecture_linter.checks.install_frozen_and_audit import (
     check_mcp_ownership_migration,
     check_uninstall_reachability,
 )
+from scripts.architecture_linter.checks.install_gate_retirement import (
+    GUARD_GATE_RETIREMENT,
+    check_gate_retirement,
+)
 from scripts.architecture_linter.checks.install_lifecycle_serialization import (
     GUARD_LIFECYCLE_SERIALIZATION_CLOSED,
     check_lifecycle_serialization_closed_world,
@@ -492,6 +496,11 @@ RULES: tuple[Rule, ...] = (
         _GUARD_CLEANUP_RELEASE,
         "Stale cleanup releases skill directories that hold only user content.",
         check_cleanup_ownership_release,
+    ),
+    _rule(
+        GUARD_GATE_RETIREMENT,
+        "Update and uninstall retire what the gates no longer allow through gate_retirements.",
+        check_gate_retirement,
     ),
     _rule(
         GUARD_CODEX_AGENT_LINKS,

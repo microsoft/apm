@@ -217,10 +217,10 @@ def test_bundle_hooks_park_then_register_like_a_source_install(
     assert "not approved for this exact bundle content" in text, text
     assert _hook_entries(consumer) == {"PreToolUse": ["Write"]}
 
-    # Apply the printed remedy as printed: the apm.yml executables.allow snippet,
-    # then reinstall ('apm approve <key>' writes the same entry, #4437).
+    # Apply the printed remedy as printed: the catalog's apm.yml executables.allow
+    # entry (#4506), then reinstall ('apm approve <key>' writes the same entry, #4437).
     printed = re.search(
-        r"add to apm\.yml: executables: allow: \"([^\"]+)\": (\w+): true Then rerun the install",
+        r"The same grant as this entry in apm\.yml: executables: allow: \"([^\"]+)\": (\w+): true",
         text,
     )
     assert printed is not None, text

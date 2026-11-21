@@ -173,3 +173,34 @@ def test_root_only_hooks_without_dependencies_get_a_lockfile_audit_replays(
     returncode, output = _audit(apm_binary_path, project)
     assert returncode == 1, output
     assert _drifted(output, _SETTINGS), output
+
+
+def test_root_only_kiro_hooks_get_a_lockfile_audit_replays(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4033 on Kiro: per-action hook docs count as registered root hooks, even unchanged."""
+    project = tmp_path / "kiro-hooks-only"
+    project.mkdir()
+    (project / ".kiro").mkdir()
+    (project / "apm.yml").write_text(
+        "name: kiro-hooks-only\nversion: 1.0.0\ntargets: [kiro]\n", encoding="utf-8"
+    )
+    _write_json(
+        project / ".apm" / "hooks" / "root.json",
+        {"PreToolUse": [{"hooks": [{"type": "command", "command": "echo root"}]}]},
+    )
+    lock_path = project / "apm.lock.yaml"
+
+    install = _run(apm_binary_path, project, "install", "--no-policy")
+    assert install.returncode == 0, install.stderr or install.stdout
+    assert list((project / ".kiro" / "hooks").glob("*.json")), install.stdout
+    assert lock_path.is_file(), install.stdout + install.stderr
+
+    # An unchanged reinstall restores a deleted lockfile.
+    lock_path.unlink()
+    install = _run(apm_binary_path, project, "install", "--no-policy")
+    assert install.returncode == 0, install.stderr or install.stdout
+    assert lock_path.is_file(), install.stdout + install.stderr
+
+    returncode, output = _audit(apm_binary_path, project)
+    assert returncode == 0, output

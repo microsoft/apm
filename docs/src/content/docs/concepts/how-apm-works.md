@@ -122,7 +122,7 @@ Treat `.github/agents/`, `.claude/skills/` and the other folders APM writes the 
 compiled output. Change a package at its source, in the package's repository or your own
 `.apm/` folder, then install again. If you edit a deployed file, APM keeps your edit and warns,
 `apm audit` reports drift, and `apm install --frozen` fails. `apm export-patch` turns the edit
-into a patch for the package's author; `apm install --force` puts the locked version back.
+into a patch for the package's author; moving the file aside and running `apm install` puts the locked version back.
 
 ## Common questions
 

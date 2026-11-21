@@ -37,8 +37,18 @@ def test_command_help_and_errors_advertise_every_accepted_value(command: str) ->
     valid_line = next(
         line for line in error_result.output.splitlines() if line.startswith("Valid targets:")
     )
-    error_values = {target.strip() for target in valid_line.partition(":")[2].split(",")}
+    labels = [target.strip() for target in valid_line.partition(":")[2].split(",")]
+    error_values = {label.split(" (")[0] for label in labels}
     assert error_values == set(accepted_target_values(command))
+    # RA-037: every alias names its target; a deprecated one says so.
+    assert "vscode (deprecated alias of copilot)" in labels
+    assert "agents (alias of copilot)" in labels
+    assert "agy (alias of antigravity)" in labels
+    assert [label for label in labels if "(" not in label] == sorted(
+        value
+        for value in accepted_target_values(command)
+        if value not in {"vscode", "agents", "agy"}
+    )
     for value in accepted_target_values(command):
         assert value in help_result.output
 
@@ -80,3 +90,16 @@ def test_manifest_agents_value_is_not_reported_as_a_flag(tmp_path) -> None:
         parse_target_field("agents")
     assert agents_alias_was_detected()
     assert [w for w in caught if issubclass(w.category, AgentsTargetDeprecationWarning)]
+
+
+def test_unknown_target_error_marks_aliases_exactly() -> None:
+    """RA-037: the listing equals the documented targets, each alias marked."""
+    result = CliRunner().invoke(cli, ["install", "--target", "bogus"], terminal_width=1000)
+
+    assert result.exit_code == 2
+    assert (
+        "Valid targets: agent-skills, agents (alias of copilot), agy (alias of antigravity), "
+        "all, antigravity, claude, codex, copilot, copilot-app, copilot-cowork, cursor, "
+        "gemini, grok-bot, grok-build, grok-cloud, hermes, intellij, kiro, openclaw, "
+        "opencode, vscode (deprecated alias of copilot), windsurf"
+    ) in result.output.splitlines()

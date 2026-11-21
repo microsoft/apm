@@ -86,17 +86,17 @@ def locked_content_remediation(dep_key: str, *, user_scope: bool, apm_dir: Path 
     """Remediation for a dependency whose bytes contradict its locked content hash."""
     from apm_cli.core.remediation import (
         CONTENT_HASH_CACHE_CLEAN,
-        CONTENT_HASH_REPIN,
-        CONTENT_HASH_REPIN_GLOBAL,
+        CONTENT_HASH_LOCK_RESTORE,
+        CONTENT_HASH_LOCK_RESTORE_GLOBAL,
     )
     from apm_cli.deps.lockfile import get_lockfile_path
 
-    repin = CONTENT_HASH_REPIN_GLOBAL if user_scope else CONTENT_HASH_REPIN
+    restore = CONTENT_HASH_LOCK_RESTORE_GLOBAL if user_scope else CONTENT_HASH_LOCK_RESTORE
     lockfile = get_lockfile_path(apm_dir) if apm_dir is not None else "apm.lock.yaml"
     return (
         "This may indicate a supply-chain attack. "
-        f"{CONTENT_HASH_CACHE_CLEAN.sentence()} "
-        f"To accept the new content, {repin.bind(dep_key=dep_key, lockfile=lockfile).clause()}."
+        f"If the package copies changed, {CONTENT_HASH_CACHE_CLEAN.clause()}. "
+        f"If {lockfile} changed, {restore.bind(lockfile=lockfile).clause()}."
     )
 
 

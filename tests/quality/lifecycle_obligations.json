@@ -23648,16 +23648,16 @@
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:825",
-    "src/apm_cli/install/services.py:1028"
+    "src/apm_cli/install/services.py:827",
+    "src/apm_cli/install/services.py:1030"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
   "U-BIN": {
    "evidence": [
-    "src/apm_cli/install/exec_gate.py:701",
-    "src/apm_cli/install/exec_gate.py:702",
-    "src/apm_cli/install/exec_gate.py:705"
+    "src/apm_cli/install/exec_gate.py:713",
+    "src/apm_cli/install/exec_gate.py:714",
+    "src/apm_cli/install/exec_gate.py:717"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
@@ -23675,19 +23675,19 @@
   "U2": {
    "evidence": [
     "src/apm_cli/commands/approve.py:263",
-    "src/apm_cli/policy/install_preflight.py:218"
+    "src/apm_cli/policy/install_preflight.py:220"
    ],
    "text": "the executable gate governs only executable primitives; a plain file next to a revoked executable must survive; an org policy dependency deny removes it"
   },
   "U3": {
    "evidence": [
-    "src/apm_cli/core/deployment_ledger.py:864"
+    "src/apm_cli/core/deployment_ledger.py:872"
    ],
    "text": "edited is defined relative to a receipt; present with unknown provenance has no lock"
   },
   "U4": {
    "evidence": [
-    "src/apm_cli/install/manifest_reconcile.py:749"
+    "src/apm_cli/install/manifest_reconcile.py:757"
    ],
    "text": "a declared target change without a receipt is reachable; only receipt-backed contraction needs a prior lock"
   },
@@ -23706,21 +23706,21 @@
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:962"
+    "src/apm_cli/commands/install.py:978"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1242",
-    "src/apm_cli/commands/install.py:1006",
-    "src/apm_cli/commands/install.py:980",
+    "src/apm_cli/commands/install.py:1258",
+    "src/apm_cli/commands/install.py:1022",
+    "src/apm_cli/commands/install.py:996",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
-    "src/apm_cli/commands/uninstall/engine.py:749",
-    "src/apm_cli/commands/uninstall/engine.py:912",
-    "src/apm_cli/commands/uninstall/engine.py:741",
-    "src/apm_cli/commands/update.py:493",
+    "src/apm_cli/commands/uninstall/engine.py:727",
+    "src/apm_cli/commands/uninstall/engine.py:890",
+    "src/apm_cli/commands/uninstall/engine.py:719",
+    "src/apm_cli/commands/update.py:559",
     "src/apm_cli/core/command_logger.py:289",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
@@ -23735,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "06e575f3732161530423423e44ee748566d294c648bf753a623320dd07cbc622"
+ "sha256": "2ed2f7e27ea0037b467cccfe229f80c6fedd890ee89b6da9e0f50f80ef2916ad"
 }

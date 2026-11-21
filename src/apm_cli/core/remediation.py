@@ -181,19 +181,13 @@ RESTORE_EDITED_SKILL = _entry(
     then="commit the result",
 )
 # A managed file install kept because it may hold local edits (#4360, #4504).
+# Never 'apm install --force': it also deploys despite critical findings (RA-008).
 KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
-KEPT_FILE_OVERWRITE = _entry("kept-file-overwrite", "apm install --force", "overwrite it")
 # Files an APM before 0.37 rendered, kept as committed by a frozen replay (#4398).
 LEGACY_RENDER_MIGRATE = _entry(
     "legacy-render-migrate",
     "apm install",
-    "re-render them for this version and record deployment receipts",
-)
-RESTORE_EDITED_FORCE = _entry(
-    "drift-restore-edited-force",
-    "apm install --force",
-    "restore them without deleting first (overwrites every local edit and deploys "
-    "despite critical security findings)",
+    "re-render them for this version",
 )
 RESTORE_BUNDLE_EDITED = _entry(
     "drift-restore-bundle-edited",
@@ -270,8 +264,9 @@ INSTRUCTION_FRONTMATTER_REJECTED = _entry(
 )
 LOCAL_FILE_UNMANAGED = _entry(
     "local-file-unmanaged",
-    "apm install --force",
-    "overwrite it with the package version",
+    "apm install",
+    "deploy the package version",
+    before="move the local file aside",
 )
 COWORK_SKILLS_DIR_UNDETECTED = _entry(
     "cowork-skills-dir-undetected",
@@ -496,8 +491,9 @@ AGENT_PLUGIN_MCP_UNPORTABLE = _entry(
 )
 UNPACK_CRITICAL_FINDINGS = _entry(
     "unpack-critical-findings",
-    "apm unpack <bundle-path> --force",
-    "deploy the bundle anyway (not recommended)",
+    "apm audit --file <path>",
+    "inspect the critical findings, then drop or replace the bundle or contact its author",
+    before="extract the bundle",
 )
 # -- end W2 bundle --
 # -- end W2 -------------------------------------------------------------------
@@ -541,14 +537,14 @@ LOCKFILE_UNREADABLE = _entry(
     "lockfile-unreadable",
     "apm install",
     "regenerate apm.lock.yaml",
-    before="delete or fix {path}",
+    before="move {lockfile} aside",
 )
 # A lockfile written by a newer APM: regenerate it, or upgrade APM (req-lk-004).
 LOCKFILE_VERSION_UNSUPPORTED = _entry(
     "lockfile-version-unsupported",
     "apm lock",
     "regenerate it from apm.yml at a supported version",
-    before="move {path} aside",
+    before="move {lockfile} aside",
 )
 LOCKFILE_VERSION_UPGRADE_APM = _entry(
     "lockfile-version-upgrade-apm",
@@ -641,7 +637,7 @@ LOCAL_DEPENDENCY_UNMAPPED = _entry(
 )
 LOCKFILE_STATE_UNRECONCILED = _entry(
     "lockfile-state-unreconciled",
-    "apm install --force",
+    "apm install",
     "resync the lockfile state",
     then="retry",
 )
@@ -730,7 +726,10 @@ TARGET_NOT_DEPLOYED = _entry(
     "target-not-deployed", "apm install --target {target}", "deploy to {target}"
 )
 STAGED_BUNDLE_DRIFT = _entry(
-    "staged-bundle-drift", "apm install <bundle> --force", "restage the bundle"
+    "staged-bundle-drift",
+    "apm install <bundle>",
+    "restage the bundle",
+    before="delete the edited staged copy under apm_modules",
 )
 INIT_TARGETS_UNDETECTED = _entry(
     "init-targets-undetected",
@@ -950,7 +949,7 @@ CLAUDE_PLUGIN_BINDING_MOVED = _entry(
     "apm install --global",
     "register the native Claude plugins under this APM home",
     before="remove the old entries from Claude settings and ~/.agents/plugins, "
-    "delete apm.lock.yaml",
+    "move apm.lock.yaml aside",
 )
 CODEX_PLUGIN_USER_SCOPE = _entry(
     "codex-plugin-user-scope",
@@ -1022,7 +1021,7 @@ PLUGIN_MCP_OWNERSHIP_UNKNOWN = _entry(
     "plugin-mcp-ownership-unknown",
     "apm install",
     "regenerate apm.lock.yaml",
-    before="fix or delete the unreadable apm.lock.yaml",
+    before="move the unreadable apm.lock.yaml aside",
     then="run 'apm pack' again",
 )
 FROZEN_MARKETPLACE_UNLOCKED = _entry(
@@ -1089,7 +1088,10 @@ EXECUTABLES_PIN_MALFORMED = _entry(
     "executables-pin-malformed", "apm approve {package}", "record a valid sha256 pin"
 )
 LOCAL_FILES_COLLIDE = _entry(
-    "local-files-collide", "apm install --force", "overwrite the unmanaged local files"
+    "local-files-collide",
+    "apm install",
+    "deploy the package versions",
+    before="move the local files aside",
 )
 GITHUB_GITLAB_HOST_CONFLICT = _entry(
     "github-gitlab-host-conflict",
@@ -1189,9 +1191,8 @@ BUNDLE_HOOKS_APPROVED = _entry(
 )
 REQUIRED_PACKAGE_UNLOCKED = _entry(
     "required-package-unlocked",
-    "apm install --no-policy",
+    "apm install",
     "record the required packages in the lockfile",
-    then="reinstall normally",
 )
 UNMANAGED_FILE_TRACK = _entry("unmanaged-file-track", "apm install <ref>", "track a flagged file")
 CONTENT_HASHES_MISSING = _entry(
@@ -1361,10 +1362,10 @@ LOCAL_BUNDLE_EXECUTABLES_PARKED = _entry(
 # -- W4 phases-targets --
 # Advice printed by install/phases, install/presentation and the install
 # target, staging and source helpers.
-INSTALL_AUDIT_FORCE = _entry(
-    "install-audit-force",
-    "apm install --force",
-    "install despite the critical findings (downgrades the audit block to a warning)",
+SECURITY_FINDINGS_REVIEW = _entry(
+    "security-findings-review",
+    "apm audit",
+    "review the critical findings, then drop or replace the dependency or contact its author",
 )
 CODEX_ADMISSION_STALE = _entry(
     "codex-admission-stale",
@@ -1453,23 +1454,26 @@ SKILL_PATH_MIGRATION_LEGACY = _entry(
     "apm install --legacy-skill-paths",
     "keep per-client skill paths",
 )
+# Integrity refusals only restore: never a lock edit or a whole-lock move-aside.
 CONTENT_HASH_CACHE_CLEAN = _entry(
     "content-hash-cache-clean",
-    "apm cache clean",
+    "apm cache clean --yes",
     "discard the cached package copies",
     then="retry",
 )
-CONTENT_HASH_REPIN = _entry(
-    "content-hash-repin",
+# The refusal cannot tell a changed copy from a changed lock, so it offers a
+# restore path for each; the lock is restored whole, never edited (#4385).
+CONTENT_HASH_LOCK_RESTORE = _entry(
+    "content-hash-lock-restore",
     "apm install",
-    "re-pin the dependency to the new content",
-    before="remove the '{dep_key}' entry from {lockfile}",
+    "verify the dependency against the committed lockfile",
+    before="restore {lockfile} from version control (for example 'git checkout -- {lockfile}')",
 )
-CONTENT_HASH_REPIN_GLOBAL = _entry(
-    "content-hash-repin-global",
+CONTENT_HASH_LOCK_RESTORE_GLOBAL = _entry(
+    "content-hash-lock-restore-global",
     "apm install -g",
-    "re-pin the dependency to the new content",
-    before="remove the '{dep_key}' entry from {lockfile}",
+    "verify the dependency against the saved lockfile",
+    before="restore {lockfile} from your backup",
 )
 MATERIALIZED_MANIFEST_INVALID = _entry(
     "materialized-manifest-invalid",

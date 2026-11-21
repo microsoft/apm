@@ -131,6 +131,10 @@ class IntegrationResult:
     # done in adopt-only runs instead of looking like a no-op.
     files_adopted: int = 0
 
+    # Hook files whose entries are registered after this call, written or
+    # unchanged; adoption display (RA-007) never changes it (#4033).
+    hooks_registered: int = 0
+
     # Hook transparency: per-file display metadata populated by HookIntegrator.
     # Each entry is a dict with keys: target_label, output_path, source_hook_file,
     # actions (list of {event, summary}), rendered_json.
@@ -219,11 +223,15 @@ def kept_edit_message(entry: str, *, user_scope: bool, proven_edit: bool) -> str
         else "it differs from what APM renders and there is no local deployment "
         "receipt or locked render proving APM wrote it, so it may hold local edits"
     )
-    restore, overwrite = remediation.KEPT_FILE_RESTORE, remediation.KEPT_FILE_OVERWRITE
+    # Restore, or keep the edit by exporting it; never a --force overwrite,
+    # which would also deploy despite critical security findings (RA-008).
     if user_scope:
-        restore = restore.with_command("apm install -g")
-        overwrite = overwrite.with_command("apm install -g --force")
-    return remediation.kept_file_message(entry, reason, restore, overwrite)
+        # export-patch reads the project lock only; user scope can only restore.
+        restore = remediation.KEPT_FILE_RESTORE.with_command("apm install -g")
+        return remediation.kept_file_message(entry, reason, restore)
+    return remediation.kept_file_message(
+        entry, reason, remediation.KEPT_FILE_RESTORE, remediation.LOCAL_EDITS_EXPORT
+    )
 
 
 class BaseIntegrator:
@@ -387,6 +395,39 @@ class BaseIntegrator:
             recovery_directory(directory, destination, user_scope=user_scope),
             user_scope=user_scope,
         )
+
+    def _receipted_hash(self, path: Path) -> str | None:
+        """The hash this checkout's deployment receipt binds for *path*, if any."""
+        gate = self._overwrite_gate
+        if gate is None or gate.session is None:
+            return None
+        return gate.session.receipted_hash(path, gate.targets)
+
+    def receipted_unchanged(self, path: Path) -> bool:
+        """Whether this checkout's receipt already binds *path*'s current bytes (RA-007)."""
+        receipted = self._receipted_hash(path)
+        return receipted is not None and receipted == self._file_hash(path)
+
+    @staticmethod
+    def _file_hash(path: Path) -> str | None:
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        try:
+            return compute_file_hash(path)
+        except OSError:
+            return None
+
+    def _receipted_edit(self, path: Path, rendered_hash: str) -> str | None:
+        """Classify a managed file a receipt proves the user edited (RA-012).
+
+        ``"drift"`` when the package renders the receipted bytes (nothing new
+        to deploy: kept, reported, exit 0); ``"blocked"`` when it renders new
+        bytes the edit holds back. ``None`` without a receipt.
+        """
+        receipted = self._receipted_hash(path)
+        if receipted is None or self._file_hash(path) in (None, receipted):
+            return None
+        return "drift" if rendered_hash == receipted else "blocked"
 
     def _rendered_hash(self, source_file: Path, expected_content: str | None) -> str:
         """Content hash of the bytes this integrator would deploy for one file."""
@@ -801,6 +842,9 @@ class BaseIntegrator:
         )
         if identical:
             target_paths.append(target_path)
+            # Already receipted with these bytes: unchanged, not an adoption (RA-007).
+            if self.receipted_unchanged(target_path):
+                return True, False
             # A managed file already holding the final render is APM's bytes:
             # record the receipt the skipped rewrite would have (#4184, #3701).
             if managed_files and rel_path.replace("\\", "/") in managed_files:
@@ -818,10 +862,10 @@ class BaseIntegrator:
         if gate is not None and gate.adopt_legacy(target_path, rel_path):
             target_paths.append(target_path)
             return True, False
+        rendered = self._rendered_hash(source_file, expected_content)
         edit = (
-            gate.legacy_edit(
-                target_path, rel_path, self._rendered_hash(source_file, expected_content)
-            )
+            gate.legacy_edit(target_path, rel_path, rendered)
+            or self._receipted_edit(target_path, rendered)
             if gate is not None
             else None
         )

@@ -124,19 +124,19 @@ See also: [Install failures](../install-failures/)
 
 ```
 [!] Drift detected: N file(s)
-[i] To restore the locked content, delete the modified files and rerun 'apm install', then commit the result ('apm install --force' also restores them, but overwrites every local edit and deploys despite critical security findings).
+[i] Delete the modified files, then run 'apm install' to restore the locked content, then commit the result.
 ```
 
 When some files are missing or unrecorded instead, APM prints `Run 'apm install' to re-sync deployed files with the lockfile.`
 
 Cause: deployed primitive files in the project differ from the content recorded in `apm.lock.yaml`. Either the files were edited locally, or the lockfile was updated without re-running install.
 
-Fix: for missing or unrecorded files, run `apm install`. Plain `apm install` can keep a local edit to a managed file, so for `modified` files delete them, rerun `apm install`, and commit the result. `apm install --force` also restores them, but it overwrites every local edit and deploys despite critical security findings. Files a local bundle deployed (shown as `[local-bundle]`) come back only from the bundle: delete them and rerun `apm install <bundle-path>`. If the local edits were intentional, vendor them into the source package or a local override before re-installing.
+Fix: for missing or unrecorded files, run `apm install`. Plain `apm install` can keep a local edit to a managed file, so for `modified` files delete them, rerun `apm install`, and commit the result. Files a local bundle deployed (shown as `[local-bundle]`) come back only from the bundle: delete them and rerun `apm install <bundle-path>`. If the local edits were intentional, vendor them into the source package or a local override before re-installing.
 
 For `unmanaged-conflict`, the file is yours, not a managed edit: install skipped
 it (or refused the skill plan). Rename the conflicting local file or skill, or
-choose a valid existing skill/target selection, first; `apm install --force`
-overwrites a skipped non-skill file. Audit does not adopt, overwrite, or delete the local file.
+choose a valid existing skill/target selection, first. Audit does not adopt,
+overwrite, or delete the local file.
 
 See also: [Install failures](../install-failures/)
 
@@ -145,16 +145,18 @@ See also: [Install failures](../install-failures/)
 ```
 [x] Content hash mismatch for <owner>/<repo>: expected <sha>, got <sha>.
 The downloaded content differs from the lockfile record. This may
-indicate a supply-chain attack. Run 'apm cache clean' and retry. To accept
-the new content, remove the '<owner>/<repo>' entry from <project>/apm.lock.yaml
-and run 'apm install'.
+indicate a supply-chain attack. If the package copies changed, run
+'apm cache clean --yes' to discard the cached package copies, then retry.
+If <project>/apm.lock.yaml changed, restore <project>/apm.lock.yaml from
+version control (for example 'git checkout -- <project>/apm.lock.yaml'), then
+run 'apm install' to verify the dependency against the committed lockfile.
 ```
 
-At user scope the hint names `$APM_HOME/apm.lock.yaml` and `apm install -g`.
+`apm install`, `apm install --frozen`, `apm audit --ci` and `apm update` refuse the same way, so `apm update` with no ref change still fails closed. At user scope the hint names `$APM_HOME/apm.lock.yaml` and `apm install -g`.
 
 Cause: the bytes APM downloaded for a locked dependency do not match the `content_hash` recorded in `apm.lock.yaml`. Usually a force-pushed tag, a mutated branch, or a tampered mirror. Older APM versions on Windows also recorded CRLF hashes when Git's host settings (`core.autocrlf=true`, or `core.eol`, which defaults to CRLF on Windows, for `.gitattributes` `text=auto` files) expanded LF-committed files. Current APM pins `core.autocrlf=false` and `core.eol=lf` on its dependency checkouts and rematerializes older cache shards, but `--frozen` cannot rewrite a lockfile that already stored that CRLF hash.
 
-Fix: investigate the upstream package before accepting. For a stale cache, run `apm cache clean` and retry. If the new content is legitimate, remove the dependency's entry from the lockfile the hint names, run `apm install`, and review the SHA and `content_hash` diff before committing. `apm update` does not accept new content for an unchanged commit (see [`apm update`](../../reference/cli/update/)). The same entry-removal flow regenerates a CRLF hash recorded by a pre-fix Windows CLI; bare `apm lock` does not rewrite it.
+Fix: a same-commit mismatch means a local copy or the lockfile changed, so restore, never edit: run `apm cache clean --yes` and retry, or restore `apm.lock.yaml` from version control and run `apm install`. APM never asks you to edit or delete lockfile entries. `apm update` does not accept new content for an unchanged commit (see [`apm update`](../../reference/cli/update/)).
 
 See also: [Install failures](../install-failures/), [Lockfile specification](../../reference/lockfile-spec/)
 

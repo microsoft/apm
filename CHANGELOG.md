@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `apm install` no longer refuses the install that records a policy-required package missing from the lockfile, and no remedy suggests `apm install --force`, `apm unpack --force`, `--no-policy` or unsetting `PROXY_REGISTRY_ONLY`. (#4424)
+- `apm audit --ci` reports a failed install replay once, under `drift`: in JSON the `drift` message now reads `drift replay failed; see details` and the error moves to `details`. (#4424)
+- Remedies never edit `apm.lock.yaml` or suggest `apm install --force`: a content-hash mismatch offers `apm cache clean --yes` or restoring the lockfile from version control, and a kept edited file offers moving it aside or `apm export-patch`. (#4424)
+- Policy refusals no longer suggest `--no-policy` or `APM_POLICY_DISABLE`; they say nothing was changed and point to `apm policy status`. `apm outdated` under `PROXY_REGISTRY_ONLY` states the policy without suggesting to unset it. (#4424)
 - `apm install` upgrades projects last installed by an APM before 0.37 automatically: unedited files re-render once, and edited files are kept and named. (#4398)
 - `apm install` names every kept edited file with one message and a runnable next step; an upgrade blocked by a kept edit exits 1. (#4504)
 - Docs: `GITHUB_APM_PAT` is sent to `github.com` and any `*.ghe.com` host a dependency names; a closed-world architecture guard pins that credential class. (#4092, #4371)
@@ -44,7 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A dependency that blocking org policy denies is refused before APM contacts, downloads or caches it, including transitive dependencies. (#4534)
 - Updating `.mcp.json`, `.github/mcp.json`, `~/.claude.json` or the IntelliJ MCP config keeps its indentation, final newline, line endings and non-ASCII text; other layout is normalized. (#4530)
+- `apm install -g --target copilot-cowork` names the configured Cowork skills directory in its summary instead of a placeholder path. (#4503)
+- A refused `apm update` leaves the marketplace catalog cache unchanged, and update restores a missing marketplace digest from the registered catalog. (#4532)
 - `apm update` records restored marketplace provenance in its single lockfile write; a failed update leaves `apm.lock.yaml` unchanged. (#4525)
+- `apm update` and `apm uninstall` retire the servers and hooks current gates no longer allow; update exits 1 when org policy denies an installed dependency. (#4516)
 - `apm install` and `apm update` run `post-install` scripts after MCP and LSP reconciliation, so scripts see the final lockfile and it is written once. (#4486)
 - `apm install --dry-run` after `apm deny`, a revoked approval or an org executables deny names each hook, MCP server, LSP server and bin/ the next install retires, and writes nothing. (#4478)
 - A failed `apm install <bundle>` no longer leaves a pending-executables record behind; `apm approve --pending` lists only bundles whose install completed. (closes #4492, #4505)
