@@ -21,20 +21,29 @@
 # receives `secrets: inherit`; nothing else does. Never add
 # pull_request_target or another push branch here.
 #
-# Caches stay off in every job this file defines: a train ref is speculative
-# code (#4531). tests/quality/test_ci_topology.py pins triggers, scope
-# coverage, the gate and the cache contract.
+# Queue refs are real branches. Train jobs may RESTORE caches, including
+# main's, but never save: every setup-uv step here sets save-cache: false
+# (#4531). Called ci.yml and ci-integration.yml jobs run as push events on
+# the queue branch, so any cache they save lands in that branch's scope only.
+#
+# cleanup deletes the train branch after train-gate; it is the only job with
+# contents: write and never feeds the verdict. tests/quality/test_ci_topology.py
+# pins triggers, scope coverage, the gate, cleanup and the cache contract.
 name: Merge Train
 
+# Deleting a queue branch (cleanup does) also fires `push`, with
+# github.event.deleted true and the default branch's SHA. Every job skips
+# that event, so it never posts a check on main's commit.
 on:
   push:
     branches: ['queue/t*/p*', 'queue/b*/p*']
   workflow_dispatch:
 
-# One run per ref, never cancelled: refs are unique and the runner cancels
-# abandoned runs itself.
+# Every run has its own group, so no run is ever cancelled or replaced while
+# pending (a shared group with cancel-in-progress: false still replaces a
+# pending run when a third joins). The runner cancels abandoned runs itself.
 concurrency:
-  group: merge-train-${{ github.ref }}
+  group: merge-train-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: false
 
 permissions:
@@ -46,6 +55,7 @@ env:
 jobs:
   scope:
     name: scope
+    if: github.event.deleted != true
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -78,16 +88,17 @@ jobs:
     - name: Resolve train base
       id: base
       run: |
-        base="$(git log -1 --format='%(trailers:key=Queue-Base,valueonly,separator=%x20)' HEAD | tr -d '[:space:]')"
-        if [ -z "$base" ]; then
-          base="$(git merge-base HEAD origin/main)"
-        fi
+        # The base is always the merge base with main. A Queue-Base trailer
+        # must name exactly that commit: an older ancestor would weaken the
+        # shrink-only ratchets' baseline-growth checks.
+        base="$(git merge-base HEAD origin/main)"
         if ! [[ "$base" =~ ^[0-9a-f]{40}$ ]]; then
-          echo "::error::Train base must be one 40-hex SHA; got '$base'."
+          echo "::error::Train head has no merge base with origin/main; got '$base'."
           exit 1
         fi
-        if ! git merge-base --is-ancestor "$base" HEAD || ! git merge-base --is-ancestor "$base" origin/main; then
-          echo "::error::Train base $base must be a main commit contained in the train head."
+        trailer="$(git log -1 --format='%(trailers:key=Queue-Base,valueonly,separator=%x20)' HEAD | tr -d '[:space:]')"
+        if [ -n "$trailer" ] && [ "$trailer" != "$base" ]; then
+          echo "::error::Queue-Base trailer '$trailer' must equal the merge base with main ($base)."
           exit 1
         fi
         echo "base_sha=$base" >> "$GITHUB_OUTPUT"
@@ -98,6 +109,7 @@ jobs:
   guard:
     name: guard
     needs: [scope]
+    if: github.event.deleted != true
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -113,7 +125,8 @@ jobs:
     - name: Install uv
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
-        enable-cache: false
+        enable-cache: true
+        save-cache: false
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev
@@ -151,7 +164,7 @@ jobs:
   tier1:
     name: tier1
     needs: [scope]
-    if: needs.scope.outputs.scope == 'full'
+    if: github.event.deleted != true && needs.scope.outputs.scope == 'full'
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
@@ -161,7 +174,7 @@ jobs:
   tier2:
     name: tier2
     needs: [scope]
-    if: needs.scope.outputs.scope == 'full'
+    if: github.event.deleted != true && needs.scope.outputs.scope == 'full'
     permissions:
       contents: read
       actions: read
@@ -173,7 +186,7 @@ jobs:
   train-gate:
     name: train-gate
     needs: [scope, guard, tier1, tier2]
-    if: always()
+    if: always() && github.event.deleted != true
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
@@ -208,3 +221,33 @@ jobs:
           exit 1
         fi
         echo "Train green at $SHA ($SCOPE scope)."
+
+  # Deletes the train branch once train-gate has reported. Its result is not
+  # part of the verdict: train-gate does not need it.
+  cleanup:
+    name: cleanup
+    needs: [scope, train-gate]
+    if: always() && github.event.deleted != true && startsWith(github.ref, 'refs/heads/queue/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: write
+    steps:
+    - name: Delete the train branch
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+      run: |
+        # Same refs the scope job accepts; anything else is never deleted.
+        if [ "$GITHUB_REF" != "refs/heads/$GITHUB_REF_NAME" ] || ! [[ "$GITHUB_REF_NAME" =~ ^queue/t[0-9]+/p[0-9]+-(guard|full)$ || "$GITHUB_REF_NAME" =~ ^queue/b[0-9a-f]{12}/p0-full$ ]]; then
+          echo "::notice::'$GITHUB_REF' is not a train branch; nothing to delete."
+          exit 0
+        fi
+        if output="$(gh api -X DELETE "repos/$REPO/git/refs/heads/$GITHUB_REF_NAME" 2>&1)"; then
+          echo "Deleted $GITHUB_REF_NAME."
+        elif grep -q "Reference does not exist" <<<"$output"; then
+          echo "$GITHUB_REF_NAME was already deleted."
+        else
+          echo "::error::Could not delete $GITHUB_REF_NAME: $output"
+          exit 1
+        fi
