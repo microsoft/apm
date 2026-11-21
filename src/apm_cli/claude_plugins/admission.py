@@ -185,6 +185,59 @@ class _Ineligible:
     name: str = ""
 
 
+def native_policy_violation(root: Path, policy: Any) -> str | None:
+    """The org MCP policy rejection that parks a native Claude plugin, else ``None``.
+
+    Only ``enforcement: block`` parks; install and gate retirement share it.
+    """
+    manifest_path = Path(root) / ".claude-plugin/plugin.json"
+    if getattr(policy, "enforcement", None) != "block" or not manifest_path.is_file():
+        return None
+    try:
+        manifest = parse_plugin_manifest(manifest_path)
+    except (OSError, ValueError):
+        return None
+    return _mcp_policy_violation(Path(root), manifest, policy)
+
+
+def locked_native_retired(
+    lockfile: Any, modules_dir: Path, trust_ctx: Callable[[], Any], policy: Any
+) -> dict[str, str]:
+    """Return lock key -> reason for each native plugin install would now park (#3921).
+
+    Judged by install's own owners: the trust owner's whole-plugin admission
+    (a deny, a revoked or changed pin, an MCP or bin/ grant now missing) and
+    the org MCP policy under ``enforcement: block``. A package that cannot be
+    read is left to install, which reports it.
+    """
+    from apm_cli.install.drift import _build_package_info
+    from apm_cli.install.exec_gate import ExecPolicyUnavailable, resolve_package_key
+    from apm_cli.security.trust import admit_native_plugin
+
+    retired: dict[str, str] = {}
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == "." or dep.native_plugin is None:
+            continue
+        install_path = dep.to_dependency_ref().get_install_path(modules_dir)
+        if not install_path.is_dir():
+            continue
+        try:
+            pkg_key = resolve_package_key(_build_package_info(dep, install_path), key)
+            verdict = admit_native_plugin(
+                trust_ctx(),
+                tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0]))),
+                install_path,
+                transitive=(dep.depth or 1) > 1,
+            )
+        except (ExecPolicyUnavailable, OSError, ValueError):
+            continue
+        why = verdict.reason if not verdict.allowed else None
+        retired_why = why or native_policy_violation(install_path, policy)
+        if retired_why is not None:
+            retired[key] = str(retired_why)
+    return retired
+
+
 def _intact_source(
     root: Path, skill_subset: tuple[str, ...] | None, *, portable: bool = False
 ) -> _Ineligible | tuple[dict[str, Any], str, str]:
@@ -410,6 +463,9 @@ def queue_native_claude(ctx: Any, package_name: str, plugin: Any, diagnostics: A
         diagnostics.warn(plugin.warning, package=package_name)
     if plugin.parked:
         from dataclasses import replace
+
+        if "copilot" in plugin.harnesses:
+            ctx.native_rejected_names.add(plugin.name)
 
         blocked = getattr(ctx, "blocked_executables", None)
         if blocked:

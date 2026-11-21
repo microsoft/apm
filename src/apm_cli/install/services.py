@@ -252,6 +252,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         logger=logger,
         scope=scope,
         skill_subset=skill_subset,
+        skill_pairing=skill_pairing,
         ctx=ctx,
         policy=policy,
         is_first_party=is_first_party,
@@ -315,11 +316,9 @@ def integrate_package_primitives(  # noqa: PLR0913
     ):
         return result
 
-    # A natively registered Agent Plugin stays opaque: Copilot loads the whole
-    # unit from .agents/plugins, so decomposing its skills or MCP servers would
-    # double-load them; the registrar owns it. This fires only AFTER target
-    # narrowing (a dependency that excludes copilot is not registered) and AFTER
-    # the executable trust gate (its MCP servers / bin cannot bypass default-deny).
+    # A native Agent Plugin stays opaque: Copilot loads it whole from .agents/plugins,
+    # so decomposing it would double-load it. This fires only AFTER target narrowing
+    # (excluding copilot registers nothing) and AFTER the executable trust gate.
     from apm_cli.copilot_plugins.capability import admits_native_plugin
     from apm_cli.install.native_plugin_admission import finalize_native_plugin
 

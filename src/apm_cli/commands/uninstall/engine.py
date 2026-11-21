@@ -1848,6 +1848,7 @@ def gate_retired_hook_survivors(
     """
     from ...install.exec_gate import gate_retirements
     from ...models.apm_package import APMPackage
+    from ...native_plugins.uninstall import retire_disallowed_native_survivors
     from .local_survivors import survivor_ships_hooks
 
     if lockfile is None:
@@ -1880,9 +1881,8 @@ def gate_retired_hook_survivors(
     for key, why in sorted(hooks.items()):
         if key not in denied:
             logger.warning(f"{key} hooks are no longer allowed ({why}); removing them")
-    for key in (set(retirements.denied_packages) - set(removed_keys)) | set(hooks):
-        lockfile.dependencies[key].native_plugin = None  # admitted whole: retire it (#3921)
-    return refreshed | set(denied) | set(hooks), set(denied)
+    native = retire_disallowed_native_survivors(lockfile, retirements, removed_keys, hooks, logger)
+    return refreshed | set(denied) | set(hooks) | native, set(denied)
 
 
 def _remove_stale_mcp_from_recorded_targets(

@@ -52,3 +52,30 @@ def reconcile_after_uninstall(
             f"converge. {exc} Reconcile remaining declarations with '{hint}' and the "
             "original --target selection; do not re-add the removed package."
         ) from exc
+
+
+def retire_disallowed_native_survivors(
+    lockfile: Any,
+    retirements: Any,
+    removed_keys: set[str],
+    hooks: Mapping[str, str],
+    logger: Any,
+) -> set[str]:
+    """Drop the lock record of each surviving native plugin a gate no longer admits.
+
+    A plugin loads as one unit (#3921): a denied package, retired hooks or a
+    whole-plugin verdict install would now park (a revoked or changed pin, a
+    missing MCP grant, a blocking org MCP policy) retires all of it. Without
+    its record, the native reconcile removes the root and the declarations.
+    Returns the keys retired for the native verdict, which the caller rebuilds
+    under install's gate.
+    """
+    removed = set(removed_keys)
+    denied = set(retirements.denied_packages) - removed
+    native = {k: why for k, why in retirements.native_packages.items() if k not in removed}
+    for key, why in sorted(native.items()):
+        if key not in hooks and key not in denied:
+            logger.warning(f"{key} native plugin is no longer allowed ({why}); removing it")
+    for key in denied | set(hooks) | set(native):
+        lockfile.dependencies[key].native_plugin = None
+    return set(native)

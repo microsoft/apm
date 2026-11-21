@@ -84,7 +84,7 @@ class _Project:
         return root
 
     def reconcile(
-        self, previous, *, run_targets=(CLAUDE, COPILOT), prepared=True, logger=None
+        self, previous, *, run_targets=(CLAUDE, COPILOT), prepared=True, logger=None, rejected=()
     ) -> None:
         reconcile_native_plugins(
             modules_dir=self.modules,
@@ -95,6 +95,7 @@ class _Project:
             deploy_root=self.root,
             run_targets=None if run_targets is None else frozenset(run_targets),
             logger=logger,
+            rejected=frozenset(rejected),
         )
 
     def settings(self, relative: str) -> dict:
@@ -338,6 +339,20 @@ def test_legacy_registration_is_kept_unless_copilot_declares_its_plugins(
     warnings = " ".join(str(call.args[0]) for call in logger.warning.call_args_list)
     assert "still loads alpha" in warnings
     assert "apm install" in warnings
+
+
+@pytest.mark.parametrize("admitted", [False, True], ids=["none-admitted", "another-admitted"])
+def test_a_refused_legacy_plugin_loses_its_legacy_registration(project, admitted) -> None:
+    """A plugin the gate refused this run stops loading from apm_modules (I4)."""
+    if admitted:
+        project.source("acme/beta", "beta")
+    ledger, local = _legacy(project)
+    project.reconcile(None, rejected={"alpha"})
+    assert "alpha@apm" not in json.loads(local.read_text())["enabledPlugins"]
+    assert json.loads(local.read_text())["enabledPlugins"]["mine@team"] is True
+    assert not ledger.exists()
+    enabled = project.settings(_COPILOT).get("enabledPlugins", {})
+    assert enabled == ({f"beta@{project.marketplace}": True} if admitted else {})
 
 
 def test_an_unreadable_ledger_is_never_deleted(project) -> None:

@@ -508,7 +508,7 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
                 "_refuse_binding(preview_declaration(target, declarations[harness]), target, marketplace)",
                 "rollback.undo(prior_names)",
                 "rollback.snapshot(legacy.settings_files if legacy else ())",
-                "legacy = _migratable(legacy, harnesses, run_targets, logger)",
+                "legacy = _migratable(legacy, harnesses, run_targets, logger, rejected)",
             ),
             "Claude declarations must derive ownership from the lockfile and verify approved bytes",
         )

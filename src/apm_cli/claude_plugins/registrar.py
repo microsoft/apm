@@ -33,6 +33,7 @@ from apm_cli.native_plugins.layout import (
     prune_empty,
     restore_replaced,
     retire_plugin,
+    write_attributes,
     write_catalog,
 )
 from apm_cli.native_plugins.record import NativePluginRecord, lock_native_plugins
@@ -294,6 +295,7 @@ def reconcile_native_plugins(
     run_targets: Collection[str] | None = None,
     logger: Any = None,
     dry_run: bool = False,
+    rejected: Collection[str] = (),
 ) -> dict[str, frozenset[str]]:
     """Converge deployed roots, the catalog and harness settings onto *lockfile*.
 
@@ -303,7 +305,8 @@ def reconcile_native_plugins(
     *previous* is the ownership the lock recorded before this command changed
     it, or ``None`` when there was no previous lock. *prepared* holds the
     plugins this run admitted, with the harnesses their targets select;
-    *run_targets* names the targets this run evaluated. A harness this run did
+    *run_targets* names the targets this run evaluated; *rejected* names the
+    plugins it evaluated for Copilot and refused. A harness this run did
     not evaluate keeps the declarations its settings already hold, as does a
     locked plugin this run did not admit. Every harness settings file is
     checked before any root is deployed. A failure up to the settings commit
@@ -339,7 +342,16 @@ def reconcile_native_plugins(
     try:
         following = native_ownership(lockfile) if lockfile is not None else {}
         if not following and not prior_names:
-            _keep_legacy(legacy, logger, "no native plugin is locked for it")
+            if legacy is not None and legacy.plugins and legacy.plugins <= set(rejected):
+                # Every legacy plugin was refused: retire the registration that loads it.
+                legacy = _migratable(legacy, {}, run_targets, logger, rejected)
+                rollback.snapshot(legacy.settings_files if legacy else ())
+                if legacy is not None:
+                    legacy.apply()
+                    with contextlib.suppress(OSError):
+                        legacy.finish(logger)
+            else:
+                _keep_legacy(legacy, logger, "no native plugin is locked for it")
             return {}
         marketplace, path = scope_binding(
             user_scope=user_scope,
@@ -380,7 +392,7 @@ def reconcile_native_plugins(
         }
         for harness, target in settings_paths.items():
             _refuse_binding(preview_declaration(target, declarations[harness]), target, marketplace)
-        legacy = _migratable(legacy, harnesses, run_targets, logger)
+        legacy = _migratable(legacy, harnesses, run_targets, logger, rejected)
         rollback.snapshot(legacy.settings_files if legacy else ())
         if legacy is not None:
             legacy.apply()
@@ -410,6 +422,7 @@ def reconcile_native_plugins(
                     if locked_before.get(name) == own.record.fingerprint:
                         restored.append(name)
         write_catalog(root, marketplace, declared, owned=bool(prior_names))
+        write_attributes(root, enabled=bool(declared) and not user_scope)
         changes = {}
         for harness, target in settings_paths.items():
             changes[harness] = write_declaration(target, declarations[harness])
@@ -463,13 +476,15 @@ def _migratable(
     harnesses: Mapping[str, frozenset[str]],
     run_targets: Collection[str] | None,
     logger: Any,
+    rejected: Collection[str] = (),
 ) -> Any:
     """The legacy Copilot registration to retire in this transaction, or ``None``.
 
     Retire it only in a run that evaluated Copilot and declares every plugin it
-    enabled from ``.agents/plugins``; otherwise retiring would silently switch
-    those plugins off (uninstall, prune, a narrowed --target, an old lock).
-    An unreadable ledger is never deleted.
+    enabled from ``.agents/plugins``, or refused it (*rejected*: the gate must
+    not leave it loading live ``apm_modules`` bytes); otherwise retiring would
+    silently switch plugins off (uninstall, prune, a narrowed --target, an old
+    lock). An unreadable ledger is never deleted.
     """
     if legacy is None:
         return None
@@ -479,7 +494,8 @@ def _migratable(
     if COPILOT not in frozenset(run_targets or ()):
         _keep_legacy(legacy, logger, "this command did not evaluate the copilot target")
         return None
-    missing = legacy.plugins - {name for name, on in harnesses.items() if COPILOT in on}
+    declared = {name for name, on in harnesses.items() if COPILOT in on}
+    missing = legacy.plugins - declared - set(rejected)
     if missing:
         _keep_legacy(legacy, logger, f"{', '.join(sorted(missing))} would no longer be declared")
         return None

@@ -86,6 +86,21 @@ def _assert_output_oracles(result: CommandResult) -> None:
         assert len(lines) == len(set(lines)), _evidence(result)
 
 
+def _commit_and_clone_with_crlf(project: Path, env: dict[str, str]) -> Path:
+    """Commit *project* and clone it with ``core.autocrlf=true``."""
+
+    def git(*args: str, cwd: Path) -> None:
+        subprocess.run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True)
+
+    git("init", "-q", cwd=project)
+    git("add", "-A", cwd=project)
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c", cwd=project)
+    clone = project.parent / "crlf-clone"
+    git("-c", "core.autocrlf=true", "clone", "-q", str(project), str(clone), cwd=project.parent)
+    git("config", "core.autocrlf", "true", cwd=clone)
+    return clone
+
+
 def test_multi_harness_plugin_installs_whole_at_project_scope(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -173,6 +188,18 @@ def test_multi_harness_plugin_installs_whole_at_project_scope(
         assert hook.returncode == 0, hook.stderr
         assert _SKILL_TEXT in hook.stdout
 
+    # A teammate's checkout that converts line endings keeps the pinned bytes:
+    # APM's .agents/plugins/.gitattributes turns conversion off for the roots.
+    assert (project / ".agents/plugins/.gitattributes").read_text().endswith("* -text\n")
+    clone = _commit_and_clone_with_crlf(project, env)
+    assert (clone / ".agents/plugins" / _PLUGIN / "hooks/hooks.json").read_bytes() == (
+        root / "hooks/hooks.json"
+    ).read_bytes()
+    for args in (("install", "--frozen"), ("audit", "--ci")):
+        result = runner.run(args, cwd=clone, env=env)
+        _assert_output_oracles(result)
+        assert result.returncode == 0, _evidence(result)
+
     # Uninstall removes the root and only the entries APM declared.
     copilot = project / _SETTINGS[1]
     user_entry = {"theme": "dark"}
@@ -182,6 +209,7 @@ def test_multi_harness_plugin_installs_whole_at_project_scope(
     )
     apm("uninstall", _DEPENDENCY)
     assert not root.exists()
+    assert not (project / ".agents/plugins").exists()
     for settings in _SETTINGS:
         declared = json.loads((project / settings).read_text(encoding="utf-8"))
         assert key not in declared.get("enabledPlugins", {}), settings

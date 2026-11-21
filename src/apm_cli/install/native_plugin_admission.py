@@ -148,11 +148,20 @@ def finalize_native_plugin(
             f"are not approved. {approve.sentence()}",
             package=package_name,
         )
+        _record_rejected(ctx, package_info)
         return result
 
     result["native_plugin"] = True
     queue_native_agent_plugin(ctx, package_name, package_info, diagnostics)
     return result
+
+
+def _record_rejected(ctx: InstallContext | None, package_info: Any) -> None:
+    """Name a refused Agent Plugin, so its legacy registration retires (#3921)."""
+    plugin = getattr(getattr(package_info, "package", None), "agent_plugin", None)
+    name = getattr(getattr(plugin, "identity", None), "name", None)
+    if ctx is not None and isinstance(name, str):
+        ctx.native_rejected_names.add(name)
 
 
 def queue_native_agent_plugin(
@@ -198,6 +207,7 @@ def queue_native_agent_plugin(
             "exclude copilot from this dependency's targets.",
             package=package_name,
         )
+        _record_rejected(ctx, package_info)
         return
     queue_native_claude(
         ctx,

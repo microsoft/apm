@@ -76,6 +76,7 @@ def run(ctx: InstallContext) -> None:
             run_targets=frozenset(target.name for target in ctx.targets or ()),
             logger=ctx.logger,
             dry_run=ctx.dry_run,
+            rejected=frozenset(ctx.native_rejected_names),
         )
     except ClaudeNativePluginError:
         if previous is not None:

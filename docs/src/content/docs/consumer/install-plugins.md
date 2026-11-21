@@ -69,6 +69,8 @@ APM downloads into `apm_modules/`; harnesses load from `.agents/`.
 - **Whole plugin, publisher's bytes.** APM copies exactly the plugin's files
   (without `.git`, a root `apm.yml` or a root `.apm/`) to the plugin folder and
   lists them in a generated `.agents/plugins/.claude-plugin/marketplace.json`.
+  At project scope it also writes `.agents/plugins/.gitattributes` (`* -text`),
+  so a checkout with `core.autocrlf` keeps the bytes the lock pins.
   `${CLAUDE_PLUGIN_ROOT}` in commands and hooks resolves to that folder.
 - **Declared, not installed by the harness.** APM writes only
   `extraKnownMarketplaces.<name>` and `enabledPlugins["<plugin>@<name>"]: true`.

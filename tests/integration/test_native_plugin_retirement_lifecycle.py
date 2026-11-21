@@ -7,8 +7,8 @@ deployed root under ``.agents/plugins/`` and its ``enabledPlugins`` entry in
 ``.claude/settings.json``, #3921) or refuses, as install does:
 
 - #4446: uninstalling another package rebuilds the integration and retires it,
-  for a changed definition, a local deny, an org deny, a revoked approval and a
-  policy dependency deny;
+  for a changed definition, a local deny, an org deny, a revoked approval, a
+  policy dependency deny and an org MCP policy that blocks its server (#3921);
 - #4445: ``apm update`` under an org policy that denies the plugin exits 1 and
   names it;
 - #4444: ``apm update`` after the plugin's definition changed since approval
@@ -121,13 +121,22 @@ def _change(world: World, change: str) -> None:
         _revoke(world)
     elif change == "policy-dep-deny":
         use_policy(world, "deny-native")
+    elif change == "policy-mcp-deny":
+        use_policy(world, "mcp-deny")
     else:
         raise ValueError(change)
 
 
 @pytest.mark.parametrize(
     "change",
-    ("definition-changed", "local-deny", "org-deny", "revoke-approval", "policy-dep-deny"),
+    (
+        "definition-changed",
+        "local-deny",
+        "org-deny",
+        "revoke-approval",
+        "policy-dep-deny",
+        "policy-mcp-deny",
+    ),
 )
 def test_uninstalling_another_package_retires_a_disallowed_native_plugin(
     lifecycle_world: World,  # noqa: F811
