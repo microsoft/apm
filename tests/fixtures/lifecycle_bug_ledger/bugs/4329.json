@@ -1,0 +1,20 @@
+{
+  "issue": 4329,
+  "fixed_in": "Unreleased",
+  "summary": "apm install with a native Claude plugin and MCP or LSP servers committed apm.lock.yaml at native registration and again after MCP/LSP reconciliation; reconciliation now runs before native registration, so the lockfile is written once and matches disk at that commit.",
+  "failure_modes": [
+    "idempotency",
+    "transaction"
+  ],
+  "properties": [
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/integration/test_claude_native_hook_lifecycle.py::test_native_claude_install_with_mcp_and_lsp_writes_the_lockfile_once",
+    "tests/integration/test_lockfile_commit_point_lifecycle.py::test_a_failed_mcp_reconcile_after_native_registration_keeps_the_lock_equal_to_disk",
+    "tests/unit/install/test_services_before_native_registration.py::test_services_reconcile_before_native_registration_commits_once",
+    "tests/unit/install/test_services_before_native_registration.py::test_a_committing_reconcile_failure_still_registers_and_commits_once",
+    "tests/unit/install/test_services_before_native_registration.py::test_a_refused_reconcile_registers_and_commits_nothing",
+    "tests/unit/install/test_services_before_native_registration.py::test_a_failed_native_declaration_keeps_the_reconciled_services_recorded"
+  ]
+}
