@@ -331,37 +331,9 @@ def _mcp_servers(observation: Observation) -> frozenset[str]:
     return frozenset(json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {})
 
 
-# The cache marker a git-sourced p-skill leaves behind (src/apm_cli/install/cache_pin.py).
-_STALE_PIN = "apm_modules/lifecycle/p-skill/.apm-pin"
-_STALE_PIN_ISSUE = "#4572"
-
-
-def _stale_pin(machine, op, before=None, after=None, result=None) -> bool:
-    """A registry p-skill keeps the git source's .apm-pin until ``install --update`` drops it."""
-    del after
-    return (
-        result is not None
-        and result.returncode == 0
-        and op.name == "install"
-        and "--update" in result.command
-        and machine.converged
-        and machine.network != "offline"
-        and machine.slots.get("remote-skill") is _REGISTRY_SKILL
-        and before is not None
-        and _STALE_PIN in before.artifacts.snapshot("project").paths
-    )
-
-
-# Strict known cells this machine discharges; #4214 is fixed (LSP-only packages survive uninstall).
-KNOWN_CELLS = (
-    KnownCell(
-        "registry-source-switch-stale-pin",
-        "I2",
-        _STALE_PIN_ISSUE,
-        rf"^converged install rewrote files: \['project:{re.escape(_STALE_PIN)}'\]$",
-        _stale_pin,
-    ),
-)
+# Strict known cells this machine discharges; #4214 (LSP-only packages survive
+# uninstall) and #4572 (stale .apm-pin after a git -> registry switch, #4597) are fixed.
+KNOWN_CELLS: tuple[KnownCell, ...] = ()
 
 
 class SourceMachine(MachineBase):
@@ -876,4 +848,4 @@ def test_source_generated_sequences_keep_cross_cutting_laws(
 
 
 # T3/T5 cells whose oracle fails on main -> tracking issue (a strict known cell discharges them).
-KNOWN_CELLS_BY_ID: dict[str, str] = {"X|install|pkg-registry|UPDATE=on": _STALE_PIN_ISSUE}
+KNOWN_CELLS_BY_ID: dict[str, str] = {}
