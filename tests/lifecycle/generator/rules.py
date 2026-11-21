@@ -77,10 +77,10 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_INSTALL, 1033, '"--no-policy"'),
     ),
     "update": (
-        Ev("src/apm_cli/commands/update.py", 644, 'argument("packages"'),
-        Ev("src/apm_cli/commands/update.py", 654, '"--dry-run"'),
-        Ev("src/apm_cli/commands/update.py", 675, '"--force"'),
-        Ev("src/apm_cli/commands/update.py", 702, '"--target"'),
+        Ev("src/apm_cli/commands/update.py", 652, 'argument("packages"'),
+        Ev("src/apm_cli/commands/update.py", 662, '"--dry-run"'),
+        Ev("src/apm_cli/commands/update.py", 683, '"--force"'),
+        Ev("src/apm_cli/commands/update.py", 710, '"--target"'),
     ),
     "uninstall": (
         Ev("src/apm_cli/commands/uninstall/cli.py", 789, 'argument("packages"'),
@@ -146,7 +146,7 @@ USER_SCOPE_OPS = frozenset(
 )
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 933, '"--global"'),
-    "update": Ev("src/apm_cli/commands/update.py", 667, '"--global"'),
+    "update": Ev("src/apm_cli/commands/update.py", 675, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 797, '"--global"'),
     "compile": Ev(_COMPILE, 1396, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
@@ -209,11 +209,11 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev(_INSTALL, 1013, '"--registry"'),
             Ev(_INSTALL, 987, '"--url"'),
             Ev("src/apm_cli/models/dependency/reference.py", 860, '"registry" in entry'),
-            Ev("src/apm_cli/marketplace/registration.py", 45, "No marketplace.json found"),
+            Ev("src/apm_cli/marketplace/registration.py", 50, "No marketplace.json found"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 727, "is an MCP server, not a package"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 890, "was not found in apm.yml"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 719, "cannot remove local-bundle"),
-            Ev("src/apm_cli/commands/update.py", 559, "No APM dependencies to update"),
+            Ev("src/apm_cli/commands/update.py", 560, "No APM dependencies to update"),
             Ev("src/apm_cli/core/command_logger.py", 297, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),
         ),
