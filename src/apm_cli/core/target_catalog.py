@@ -396,8 +396,14 @@ def target_all_exclusion_help() -> str:
 
 
 def target_error_values(command: str) -> tuple[str, ...]:
-    """Return accepted target values in deterministic error-display order."""
-    return tuple(sorted(accepted_target_values(command)))
+    """Return the values ``--target`` accepts on *command*, in error-display order.
+
+    A command no capability names (``pack``, ``lock``, ``init``, ...) accepts
+    the whole vocabulary through the shared parser, so its error lists that
+    vocabulary rather than only ``all`` and the deprecated aliases (RA-039).
+    """
+    served = any(command in capability.commands for capability in TARGET_CAPABILITIES.values())
+    return tuple(sorted(accepted_target_values(command if served else None)))
 
 
 def target_value_label(value: str) -> str:

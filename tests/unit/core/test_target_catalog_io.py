@@ -92,14 +92,41 @@ def test_manifest_agents_value_is_not_reported_as_a_flag(tmp_path) -> None:
     assert [w for w in caught if issubclass(w.category, AgentsTargetDeprecationWarning)]
 
 
+_VALID_TARGETS_LINE = (
+    "Valid targets: agent-skills, agents (alias of copilot), agy (alias of antigravity), "
+    "all, antigravity, claude, codex, copilot, copilot-app, copilot-cowork, cursor, "
+    "gemini, grok-bot, grok-build, grok-cloud, hermes, intellij, kiro, openclaw, "
+    "opencode, vscode (deprecated alias of copilot), windsurf"
+)
+
+
 def test_unknown_target_error_marks_aliases_exactly() -> None:
     """RA-037: the listing equals the documented targets, each alias marked."""
     result = CliRunner().invoke(cli, ["install", "--target", "bogus"], terminal_width=1000)
 
     assert result.exit_code == 2
-    assert (
-        "Valid targets: agent-skills, agents (alias of copilot), agy (alias of antigravity), "
-        "all, antigravity, claude, codex, copilot, copilot-app, copilot-cowork, cursor, "
-        "gemini, grok-bot, grok-build, grok-cloud, hermes, intellij, kiro, openclaw, "
-        "opencode, vscode (deprecated alias of copilot), windsurf"
-    ) in result.output.splitlines()
+    assert _VALID_TARGETS_LINE in result.output.splitlines()
+
+
+@pytest.mark.parametrize("argv", [("pack",), ("lock",), ("init",), ("plugin", "init")])
+def test_unknown_target_error_lists_the_vocabulary_on_every_target_flag(argv) -> None:
+    """RA-039: commands outside install/compile/update accept the same values,
+    so their error lists them all, not only "all, vscode"."""
+    result = CliRunner().invoke(cli, [*argv, "--target", "bogus"], terminal_width=1000)
+
+    assert result.exit_code == 2
+    lines = result.output.splitlines()
+    assert "Error: Unknown target 'bogus'" in lines
+    assert _VALID_TARGETS_LINE in lines
+
+
+@pytest.mark.parametrize("command", ["pack", "install", "compile"])
+def test_unknown_target_error_names_only_the_bad_token(command: str) -> None:
+    """RA-040: in a multi-target value the error names the one unknown token."""
+    result = CliRunner().invoke(cli, [command, "--target", "vscode,bogus"], terminal_width=1000)
+
+    assert result.exit_code == 2
+    lines = result.output.splitlines()
+    assert "Error: Unknown target 'bogus'" in lines
+    assert "vscode,bogus" not in result.output
+    assert _VALID_TARGETS_LINE in lines

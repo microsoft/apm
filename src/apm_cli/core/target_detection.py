@@ -534,6 +534,18 @@ VALID_TARGET_VALUES: frozenset[str] = accepted_target_values()
 TARGET_VALUES_HELP = ", ".join(sorted(accepted_target_values()))
 
 
+class UnknownTargetValueError(ValueError):
+    """A target value holds a token outside the accepted vocabulary.
+
+    ``token`` is that one token, so a multi-target error names it rather
+    than the whole list (RA-040).
+    """
+
+    def __init__(self, token: str, message: str) -> None:
+        super().__init__(message)
+        self.token = token
+
+
 def parse_target_field(
     value: str | list[str] | None,
     *,
@@ -624,12 +636,13 @@ def parse_target_field(
     # ---- validate every token ----
     for p in raw_parts:
         if p not in accepted_target_values() and not is_vendor_target_id(p):
-            raise ValueError(
+            raise UnknownTargetValueError(
+                p,
                 _target_error(
                     f"'{p}' is not a valid target. "
                     f"Choose from: {', '.join(sorted(accepted_target_values()))}",
                     source_path,
-                )
+                ),
             )
 
     # ---- deprecation warning for legacy "agents" alias (once per call) ----
@@ -771,11 +784,10 @@ class TargetParamType(click.ParamType):
             from apm_cli.core.errors import UnknownTargetError, render_unknown_target_error
 
             err_msg = str(e)
-            if "is not a valid target" in err_msg:
-                target_name = value if isinstance(value, str) else ",".join(value or [])
+            if isinstance(e, UnknownTargetValueError):
                 command = ctx.command.name if ctx is not None and ctx.command.name else "install"
                 rendered = render_unknown_target_error(
-                    target_name,
+                    e.token,
                     list(target_error_values(command)),
                     command=command,
                 )
