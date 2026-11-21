@@ -21249,8 +21249,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-unchanged]"
   },
   "pair|SRC=marketplace-file|TGT=multi-widened": {
    "family": "pair",
@@ -21272,8 +21273,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-unchanged]"
   },
   "pair|SRC=marketplace-file|TGT=single-widened": {
    "family": "pair",
@@ -21910,8 +21912,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-unchanged]"
   },
   "pair|SRC=marketplace-local|TGT=multi-widened": {
    "family": "pair",
@@ -21933,8 +21936,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-unchanged]"
   },
   "pair|SRC=marketplace-local|TGT=single-widened": {
    "family": "pair",
@@ -22971,8 +22975,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-unchanged]"
   },
   "pair|TGT=multi-unchanged|NET=online": {
    "family": "pair",
@@ -23186,8 +23191,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-unchanged]"
   },
   "pair|TGT=single-unchanged|NET=online": {
    "family": "pair",

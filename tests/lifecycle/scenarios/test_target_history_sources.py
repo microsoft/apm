@@ -38,6 +38,8 @@ pytestmark = [
 
 # TGT value -> (declared targets before the step, after it); ruling #3.
 TARGET_HISTORIES = {
+    "single-unchanged": (("copilot",), ("copilot",)),
+    "multi-unchanged": (("copilot", "claude"), ("copilot", "claude")),
     "single-narrowed": (("copilot",), ("claude",)),
     "single-widened": (("copilot",), ("copilot", "claude")),
     "multi-narrowed": (("copilot", "claude"), ("copilot",)),
@@ -221,8 +223,20 @@ def _deploy(world, row: str, before) -> tuple[Scenario, object, dict]:
     return scenario, ("install", world.packages["p-exec:bundle"].spec), {}
 
 
-@pytest.mark.parametrize("tgt", sorted(TARGET_HISTORIES))
-@pytest.mark.parametrize("row", ROWS)
+# Every row runs after each target change; the unchanged shapes run only for the
+# marketplace and offline rows, whose unchanged-TGT pairs no other row reaches.
+_CHANGED = ("single-narrowed", "single-widened", "multi-narrowed", "multi-widened")
+CASES = (
+    *((row, tgt) for row in ROWS for tgt in _CHANGED),
+    *(
+        (row, tgt)
+        for row in ("kinds-offline", "marketplace-install")
+        for tgt in ("single-unchanged", "multi-unchanged")
+    ),
+)
+
+
+@pytest.mark.parametrize(("row", "tgt"), CASES, ids=[f"{row}-{tgt}" for row, tgt in CASES])
 def test_first_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
     before, after = TARGET_HISTORIES[tgt]
     scenario, command, fields = _deploy(lifecycle_world, row, before)
@@ -240,7 +254,6 @@ CREDITS = credits(
     __file__,
     {
         f"test_first_command_after_a_target_change[{row}-{tgt}]": _credit(row, tgt)
-        for row in ROWS
-        for tgt in TARGET_HISTORIES
+        for row, tgt in CASES
     },
 )
