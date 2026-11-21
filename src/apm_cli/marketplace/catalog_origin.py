@@ -65,7 +65,9 @@ def require_locked_catalog_origin(
     accepted, so older lockfiles keep working and gain the origin on their
     next lock write. Only the origin is compared: the lock does not record
     the catalog path, so a move to another path in the same repository is
-    not detected (see :func:`same_marketplace_catalog`).
+    not detected (see :func:`same_marketplace_catalog`). A name the root
+    ``marketplaces:`` map declares is owned by the file, not an alias: its
+    rows re-resolve through the map (#2903).
 
     *user_scope* selects the scope the refusal's remedy names; ``None``
     reads it from the invocation (:func:`invocation_user_scope`).
@@ -77,8 +79,11 @@ def require_locked_catalog_origin(
     """
     if lockfile is None:
         return
+    from .project_marketplaces import project_wins_locked_origin
+
     for dep in lockfile.marketplace_rows(marketplace_name, plugin_name):
-        require_locked_row_origin(dep, marketplace_name=marketplace_name, user_scope=user_scope)
+        if not project_wins_locked_origin(marketplace_name, dep.source_url):
+            require_locked_row_origin(dep, marketplace_name=marketplace_name, user_scope=user_scope)
 
 
 def require_locked_row_origin(
@@ -315,6 +320,7 @@ def reverify_locked_provenance(
         MarketplaceOriginConflictError: The alias names a different catalog.
     """
     from .dependency_confusion import admit_marketplace_resolution
+    from .project_marketplaces import rebound_by_project_map
     from .resolver import resolve_marketplace_plugin
 
     if lockfile is None:
@@ -338,6 +344,10 @@ def reverify_locked_provenance(
                 f"apm.lock.yaml records no marketplace origin for {key} ({plugin}@{alias}). "
                 + _NEXT_STEP
             )
+        if rebound_by_project_map(alias, dep.source_url):
+            # apm.yml now names another catalog: the update re-resolves this
+            # row through the map instead of re-verifying the lock's (#2903).
+            continue
         require_locked_row_origin(dep)
         try:
             # Origin only: ref pins stay with install and update resolution.

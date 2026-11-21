@@ -1280,6 +1280,13 @@ def _cli(args: tuple[str, ...], stdout: str = "", stderr: str = "", code: int = 
         ),
         (
             ("install",),
+            "[!] Parked MCP server 's' from p: denied\n[+] p\n  [!] Parked MCP server 's' from p: denied\n",
+            "",
+            0,
+            "I9: stdout repeats a diagnostic: \"[!] Parked MCP server 's' from p: denied\"",
+        ),
+        (
+            ("install",),
             "[!] Policy off. This\ndoes not\n[i] x\n[!] Policy off. This\ndoes not\n",
             "",
             0,

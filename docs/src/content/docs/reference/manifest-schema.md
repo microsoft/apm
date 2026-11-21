@@ -67,7 +67,7 @@ compilation:   <CompilationConfig>
 policy:        <PolicyConfig>
 marketplace:   <MarketplaceConfig>       # OPTIONAL; marketplace authoring
 replace:       <list<ReplacementRule>>    # candidate; explicit selector required
-marketplaces:  <list<MarketplaceEntry>>   # user manifest only; see 3.14
+marketplaces:  <list<MarketplaceEntry>>   # user manifest or root project; see 3.14
 executables:   <ExecutablesConfig>       # OPTIONAL; dependency executable trust, see apm approve
 lifecycle:     <LifecycleConfig>         # OPTIONAL; lifecycle scripts
 x-[a-z][a-z0-9-]*: <any>             # OPTIONAL vendor extensions
@@ -452,14 +452,14 @@ and untested clients are not qualified. See the
 
 ---
 
-### 3.14. `marketplaces` (user manifest only)
+### 3.14. `marketplaces`
 
 | | |
 |---|---|
 | **Type** | `list<MarketplaceEntry>` |
 | **Required** | OPTIONAL |
-| **Scope** | Only the user manifest (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`). A project or package `apm.yml` that contains the key fails to parse with an error naming the user manifest. |
-| **Description** | Marketplaces that `apm install -g` registers for discovery. It registers missing entries, updates changed ones, and removes entries it registered earlier that are no longer listed. Registrations made with `apm marketplace add` are never overwritten or removed. |
+| **Scope** | The user manifest (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`) and the root project `apm.yml`. A dependency's `apm.yml` that contains the key is refused at install. |
+| **Description** | In the user manifest: marketplaces that `apm install -g` registers for discovery. It registers missing entries, updates changed ones, and removes entries it registered earlier that are no longer listed. Registrations made with `apm marketplace add` are never overwritten or removed. In the root project: the marketplaces that project's `marketplace: <name>` entries resolve through, with no registration; the map is never registered, wins over a same-named registration and over a lock row recorded from another catalog (`apm install --frozen` refuses that row), and is the only set of names a transitive `marketplace: <name>` may use. |
 
 ```yaml
 marketplaces:
@@ -476,9 +476,11 @@ marketplaces:
 | `source` | `string` | REQUIRED | Any SOURCE form accepted by [`apm marketplace add`](../cli/marketplace/#apm-marketplace-add). No `--host` equivalent; use a full URL for non-default hosts. Local paths must be absolute or start with `~/`. |
 | `ref` | `string` | OPTIONAL | Same as `--ref`. Cannot be combined with a `#ref` in `source`. |
 
-Unknown entry keys are rejected. Registering a marketplace does not install
-packages or grant trust. See
-[Declare marketplaces in your user manifest](../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest).
+Unknown entry keys are rejected. Declaring a marketplace does not install
+packages or grant trust; org policy `marketplace.allow` can restrict project
+declarations. See
+[Declare marketplaces in your user manifest](../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest)
+and [Declare marketplaces in a project](../../consumer/installing-from-marketplaces/#declare-marketplaces-in-a-project).
 
 ### 3.15. `default_host`
 
@@ -686,7 +688,7 @@ Marketplace dependency (resolved at install time):
 | `marketplace` | `string` | REQUIRED | `^[a-zA-Z0-9._-]+$` | Registered marketplace name. |
 | `version` | `string` | OPTIONAL | Semver range or exact version (e.g. `~2.1.0`, `^2.0`, `>=1.4`, `2.1.0`) | Version constraint resolved against git tags on the marketplace repository. When omitted the marketplace entry's default ref is used. |
 
-The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. Unknown keys in a marketplace entry are rejected. During dependency resolution the resolver calls `resolve_marketplace_plugin()`. A plugin entry that declares `registry` plus a semver `version` becomes a registry-sourced dependency using its declared owner/repo repository identity. Other entries become concrete Git coordinates (owner/repo, ref, and optional virtual path).
+The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. Unknown keys in a marketplace entry are rejected. During dependency resolution the resolver calls `resolve_marketplace_plugin()`. A plugin entry that declares `registry` plus a semver `version` becomes a registry-sourced dependency using its declared owner/repo repository identity; `apm install plugin@catalog` writes it to `apm.yml` in registry form (`id`, `registry`, `version`), and its lock row replays from the exact `version`, `resolved_url` and `resolved_hash`, with no commit. Other entries become concrete Git coordinates (owner/repo, ref, and optional virtual path).
 
 When `version` is a semver range or bare version number (for example
 `~2.1.0`, `^2.0`, or `2.1.0`), the resolver uses the plugin source's
@@ -1098,7 +1100,7 @@ Overrides exist for the rare case where the published marketplace identity diffe
 | `owner` | `Owner` | REQUIRED | -- | Marketplace publisher identity. See Section 7.3. |
 | `sourceBase` | `string` | OPTIONAL | unset | HTTPS git base that relative `packages[].source` values compose onto. See Section 7.5. |
 | `output` | `string` | OPTIONAL | `.claude-plugin/marketplace.json` | Shorthand for `claude.output`; the `claude` block wins when both are set. |
-| `outputs` | `map` | OPTIONAL | `{claude: {}}` | Marketplace formats to emit: `claude`, `codex`, `copilot`. Each entry may set `path`. The list form (`[claude, codex]`) still parses with a deprecation warning. See [Publish to a marketplace](../../producer/publish-to-a-marketplace/). |
+| `outputs` | `map` | OPTIONAL | `{claude: {}}` | Marketplace formats to emit: `claude`, `codex`, `copilot`. Each entry may set `path`. The list form (`[claude, codex]`) still parses; `apm pack` and `apm marketplace check` print a deprecation warning. See [Publish to a marketplace](../../producer/publish-to-a-marketplace/). |
 | `claude` / `codex` / `copilot` | `{output: string}` | OPTIONAL | `.claude-plugin/marketplace.json` / `.agents/plugins/marketplace.json` / `.github/plugin/marketplace.json` | Per-format output path. Wins over `outputs.<name>.path`. |
 | `versioning` | `{strategy: enum}` | OPTIONAL | `lockstep` | `lockstep`, `tag_pattern`, or `per_package`. See [Versioning strategies](../../producer/release-a-version/). |
 | `metadata` | `object` | OPTIONAL | `{}` | Free-form metadata forwarded verbatim to `marketplace.json` (e.g. `homepage`, `support`). |

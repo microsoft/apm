@@ -86,7 +86,8 @@ apm install ./dist/review-skills-1.1.0.zip --target copilot
 ```
 
 APM checks the files against the hashes `apm pack` recorded in the bundle,
-deploys them and records them in `apm.lock.yaml`. It does not edit an existing `apm.yml`;
+deploys them and records them in `apm.lock.yaml`. Files are copied, except
+agents for Codex, which are rendered to TOML in `.codex/agents/`. It does not edit an existing `apm.yml`;
 in a project without one it creates the same minimal `apm.yml` that `apm install <pkg>` does, so
 `apm audit --ci` can check the install. A reinstall
 removes bundle MCP and LSP servers that are no longer shipped, are denied or are not
@@ -151,6 +152,9 @@ Commit `apm.yml` and `apm.lock.yaml`. APM adds its download folder,
 `apm_modules/`, to `.gitignore`. Committing the deployed harness files is
 optional, since any clone rebuilds them from the lockfile
 ([should I commit them?](../../concepts/how-apm-works/#common-questions)).
+Native plugins are the exception: commit `.agents/plugins/`,
+`.claude/settings.json` and `.github/copilot/settings.json` so a fresh clone
+loads them without APM ([Native plugins](../install-plugins/#commit-native-plugins)).
 
 ## Remove a package
 

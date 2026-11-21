@@ -191,3 +191,64 @@ def test_version_pin_never_reads_a_same_path_row_from_another_host(
 
     assert result.passed
     assert not result.subjects
+
+
+PROXY = "art.example.com"
+PROXY_DEP = f"{PROXY}/artifactory/github/acme/tools"
+PROXY_ENTRY = f"{PROXY}/acme/tools"
+
+
+def _proxy_lock(dep: DependencyReference, registry_config=None) -> LockFile:
+    lock = LockFile()
+    row = LockedDependency.from_dependency_ref(
+        dep, "a" * 40, 1, None, registry_config=registry_config
+    )
+    row.exec_status = "deployed"
+    lock.add_dependency(row)
+    return lock
+
+
+def test_explicit_proxy_url_reads_the_row_the_lockfile_wrote() -> None:
+    """#4037: the row is host-qualified; the reference key stays bare."""
+    dep = DependencyReference.parse(f"{PROXY_DEP}#v1.0.0")
+    lock = _proxy_lock(dep)
+    assert list(lock.dependencies) == [PROXY_ENTRY]
+
+    manifest, deployed = _both([dep], lock, PROXY_ENTRY)
+    pinned = _check_required_package_version(
+        [dep],
+        lock,
+        DependencyPolicy(require=(f"{PROXY_ENTRY}#v2.0.0",), require_resolution="block"),
+    )
+    executables = _check_required_executable_untrusted(
+        [dep], lock, ExecutablesPolicy(require=(PROXY_ENTRY,))
+    )
+
+    assert manifest.passed, manifest.message
+    assert deployed.passed, deployed.message
+    assert pinned.details == [f"{PROXY_ENTRY}: expected ref 'v2.0.0', got 'v1.0.0'"]
+    assert executables.passed, executables.message
+
+
+def test_explicit_proxy_url_never_reads_a_same_path_default_host_row() -> None:
+    dep = DependencyReference.parse(f"{PROXY_DEP}#v1.0.0")
+    lock = _proxy_lock(DependencyReference.parse("acme/tools#v1.0.0"))
+    assert list(lock.dependencies) == ["acme/tools"]
+
+    manifest, deployed = _both([dep], lock, PROXY_ENTRY)
+
+    assert manifest.passed, manifest.message
+    assert not deployed.passed
+    assert "absent from the lockfile" in deployed.message
+
+
+def test_explicit_proxy_url_locked_under_a_registry_config_keeps_its_bare_row() -> None:
+    dep = DependencyReference.parse(f"{PROXY_DEP}#v1.0.0")
+    config = type("Config", (), {"host": PROXY, "prefix": "artifactory/github"})()
+    lock = _proxy_lock(dep, registry_config=config)
+    assert list(lock.dependencies) == ["acme/tools"]
+
+    manifest, deployed = _both([dep], lock, PROXY_ENTRY)
+
+    assert manifest.passed, manifest.message
+    assert deployed.passed, deployed.message

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
-from apm_cli.core.remediation import CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS
+from apm_cli.core.remediation import claude_native_switch_loose_hooks
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import destination_tree_lines as _destination_tree_lines
@@ -24,9 +24,11 @@ from .deployed_paths import log_hook_display_payloads as _log_hook_display_paylo
 from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
 from .exec_gate import plugin_bin_deployable, resolve_bin_skip
+from .local_bundle_agents import deploy_bundle_codex_agent as _deploy_bundle_codex_agent
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
+from .local_bundle_paths import bundle_render_format_id as _bundle_render_format
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
@@ -119,6 +121,7 @@ def _check_native_claude_transition(
     project_root: Path,
     targets: list[Any],
     package: str,
+    flag: str = "",
 ) -> None:
     """Refuse native activation over retained or unreadable loose hook state."""
     from apm_cli.claude_plugins.admission import ClaudeNativePluginError
@@ -135,9 +138,10 @@ def _check_native_claude_transition(
         failed = ", ".join(reconcile_stats.get("failed_paths", []))
         recovery = f"Repair unreadable hook settings or ownership. Inspect: {failed}"
         if not reconcile_stats.get("errors"):
-            recovery = CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS.bind(package=package).sentence()
+            switch = claude_native_switch_loose_hooks(user_scope=bool(flag))
+            recovery = switch.bind(package=package).sentence()
         raise ClaudeNativePluginError(
-            f"Cannot switch {package} to native Claude. Hook settings were preserved. {recovery}"
+            f"Cannot switch {package} to a native plugin. Hook settings were preserved. {recovery}"
         )
 
 
@@ -243,6 +247,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         logger=logger,
         scope=scope,
         skill_subset=skill_subset,
+        skill_pairing=skill_pairing,
         ctx=ctx,
         policy=policy,
         is_first_party=is_first_party,
@@ -289,7 +294,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 
     native_claude_plugin = deployment_plan.claude_native
-    native_target_names = {native_claude_plugin.target_name} if native_claude_plugin else set()
+    native_target_names = native_claude_plugin.harnesses if native_claude_plugin else set()
     projection_targets = deployment_plan.projection_targets
     source_plan = deployment_plan.source_plan
     if source_plan is None:
@@ -303,12 +308,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     ):
         return result
 
-    # A natively registered Agent Plugin stays opaque: Copilot loads the whole
-    # unit live from apm_modules, so decomposing its skills or MCP servers here
-    # would double-load them. The registrar owns this package instead. The
-    # short-circuit fires only AFTER target narrowing (so a dependency that
-    # excludes copilot is not registered) and AFTER the executable trust gate
-    # (so an Agent Plugin's MCP servers / bin cannot bypass a default-deny).
+    # A native Agent Plugin stays opaque (Copilot loads it whole from .agents/plugins); this
+    # fires only AFTER target narrowing and AFTER the executable trust gate.
     from apm_cli.copilot_plugins.capability import admits_native_plugin
     from apm_cli.install.native_plugin_admission import finalize_native_plugin
 
@@ -399,6 +400,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             project_root,
             [target for target in targets if target.name in native_target_names],
             package_name,
+            " --global" if scope is InstallScope.USER else "",
         )
         if not projection_targets:
             from apm_cli.claude_plugins.admission import queue_native_claude
@@ -1072,6 +1074,28 @@ def integrate_local_bundle(
                     )
             except ValueError:
                 record = dest.as_posix()
+
+            if _bundle_render_format(  # rendered (Codex TOML), never copied (#3714)
+                _rel_norm, _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
+            ):
+                skipped += _deploy_bundle_codex_agent(
+                    src,
+                    dest,
+                    rel_path=_rel_norm,
+                    record=record,
+                    collision_roots=(project_root, deploy_root),
+                    expected_hash=expected_hash,
+                    target_name=target.name,
+                    slug=str(slug),
+                    force=force,
+                    dry_run=dry_run,
+                    diagnostics=diagnostics,
+                    logger=logger,
+                    deployed_files=deployed_files,
+                    deployed_hashes=deployed_hashes,
+                    written_files=written_files,
+                )
+                continue
 
             normalized_text = _normalized_bundle_text(src)
             if normalized_text is None:

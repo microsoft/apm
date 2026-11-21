@@ -1805,6 +1805,81 @@ def _assert_windows_unit_layout(release: WorkflowNode) -> None:
     assert not accepts(values[:-1]), "Windows push gate accepted a missing shard"
 
 
+RELEASE_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "build-release.yml"
+RELEASE_PLAN_JOB = "release-plan"
+# Jobs that never run on a tag push, so the tag reachability gate need not precede them.
+RELEASE_PLAN_EXEMPT_CONDITIONS = {
+    "github.event_name == 'push' && github.ref_type == 'branch'": (
+        "windows-installer",
+        "windows-unit-1",
+        "windows-unit-2",
+        "windows-unit-3",
+    ),
+    "github.event_name == 'repository_dispatch' && github.event.action == 'publish-existing-tag'": (
+        "recover-tag",
+    ),
+}
+
+
+def _needs_closure(jobs: WorkflowNode, job_id: str) -> set[str]:
+    seen: set[str] = set()
+    pending = [job_id]
+    while pending:
+        needs = jobs[pending.pop()].get("needs") or []
+        for dep in [needs] if isinstance(needs, str) else needs:
+            if dep not in seen:
+                seen.add(dep)
+                pending.append(dep)
+    return seen
+
+
+def _assert_release_plan_gates_tag_runs(release: WorkflowNode) -> None:
+    """The release plan (tag reachability, then evidence) precedes every job a tag push runs."""
+    jobs = release["jobs"]
+    plan = workflow_job(release, RELEASE_PLAN_JOB)
+    step = workflow_step(plan, "Decide validation mode")
+    assert step["run"] == "python3 scripts/release_plan.py"
+    assert "if" not in step and "continue-on-error" not in step
+    assert "continue-on-error" not in plan
+    exempt: dict[str, tuple[str, ...]] = {}
+    for job_id, job in jobs.items():
+        if job_id == RELEASE_PLAN_JOB:
+            continue
+        if RELEASE_PLAN_JOB in _needs_closure(jobs, job_id):
+            continue
+        condition = " ".join(str(job.get("if", "")).split())
+        exempt.setdefault(condition, ())
+        exempt[condition] += (job_id,)
+    assert exempt == RELEASE_PLAN_EXEMPT_CONDITIONS, exempt
+
+
+def test_release_plan_precedes_every_tag_build_and_publish_job() -> None:
+    _assert_release_plan_gates_tag_runs(load_workflow(RELEASE_WORKFLOW_PATH))
+
+
+@pytest.mark.parametrize(
+    ("job_id", "mutation"),
+    [
+        ("create-release", "drop-plan"),
+        ("build-linux-x86", "drop-plan"),
+        ("publish-pypi", "drop-plan"),
+        ("windows-installer", "run-on-tags"),
+        ("release-plan", "continue-on-error"),
+    ],
+)
+def test_release_plan_gate_drift_fails(job_id: str, mutation: str) -> None:
+    release = load_workflow(RELEASE_WORKFLOW_PATH)
+    job = workflow_job(release, job_id)
+    if mutation == "drop-plan":
+        job["needs"] = []
+    elif mutation == "run-on-tags":
+        job["if"] = "github.event_name == 'push'"
+    else:
+        job["continue-on-error"] = True
+    with pytest.raises(AssertionError):
+        _assert_release_plan_gates_tag_runs(release)
+
+
 def _assert_macos_arm_split(release: WorkflowNode) -> None:
     jobs = release["jobs"]
     unit = jobs[MACOS_ARM_UNIT_JOB]
@@ -2240,15 +2315,25 @@ def _runs_on_merge_group(job: WorkflowNode) -> bool:
     `github.event_name == 'workflow_dispatch'`, an unknown expression) is not
     a merge_group producer, because a skipped check would still pass the gate.
     """
-    condition = str(job.get("if", "")).strip()
-    if condition.startswith("${{") and condition.endswith("}}"):
-        condition = condition[3:-2].strip()
-    return condition in {
+    return _job_condition(job) in {
         "",
         "always()",
         FULL_INTEGRATION_GATE,
         f"always() && ({FULL_INTEGRATION_GATE})",
     }
+
+
+def _job_condition(job: WorkflowNode) -> str:
+    """A job's `if:` with any `${{ }}` expression wrapper removed."""
+    condition = str(job.get("if", "")).strip()
+    if condition.startswith("${{") and condition.endswith("}}"):
+        condition = condition[3:-2].strip()
+    return condition
+
+
+def _runs_unconditionally(job: WorkflowNode) -> bool:
+    """No condition or `always()`: the job runs for every PR and merge group."""
+    return _job_condition(job) in {"", "always()"}
 
 
 def _check_names(job_id: str, job: WorkflowNode) -> tuple[str, ...]:
@@ -2417,6 +2502,114 @@ def test_merge_group_expected_checks_are_produced_by_merge_group_jobs(
     _assert_merge_group_checks_are_produced(
         repository_workflows["merge-gate.yml"], repository_workflows
     )
+
+
+SPEC_WORKFLOW = "spec-conformance.yml"
+SPEC_REQUIRED_CHECKS = (
+    "Spec conformance gate",
+    "Spec tests (1/3)",
+    "Spec tests (2/3)",
+    "Spec tests (3/3)",
+)
+NEVER_REQUIRED_CHECKS = ("Check conformance statement", "Architecture Scaling (Linux)")
+SPEC_EVENTS = frozenset({"pull_request", MERGE_GROUP_EVENT})
+
+
+def _with_expected_checks(merge_gate: WorkflowNode, contexts: dict[str, tuple[str, ...]]) -> None:
+    wait_step = workflow_step(workflow_job(merge_gate, "gate"), MERGE_GATE_WAIT_STEP)
+    merge_time, labeled, unlabeled = (
+        ",".join(contexts[key])
+        for key in (MERGE_GROUP_EVENT, "pull_request_labeled", "pull_request")
+    )
+    wait_step["env"]["EXPECTED_CHECKS"] = (
+        f"${{{{ github.event_name == 'merge_group' && '{merge_time}' || "
+        "contains(github.event.pull_request.labels.*.name, 'full-integration') "
+        f"&& '{labeled}' || '{unlabeled}' }}}}"
+    )
+
+
+def _assert_spec_checks_gate_every_context(merge_gate: WorkflowNode, spec: WorkflowNode) -> None:
+    """The gate requires the spec checks everywhere, and nothing can filter them out."""
+    for context, names in _expected_checks(merge_gate).items():
+        missing = [name for name in SPEC_REQUIRED_CHECKS if name not in names]
+        assert not missing, f"{context} EXPECTED_CHECKS does not require {missing}"
+        listed = [name for name in NEVER_REQUIRED_CHECKS if name in names]
+        assert not listed, f"{context} EXPECTED_CHECKS must not require {listed}"
+    triggers = spec.get("on")
+    assert isinstance(triggers, dict) and set(triggers) == SPEC_EVENTS, triggers
+    for event in sorted(SPEC_EVENTS):
+        config = triggers[event] or {}
+        filtered = sorted(key for key in ("paths", "paths-ignore") if key in config)
+        assert not filtered, f"{SPEC_WORKFLOW} {event} is filtered by {filtered}"
+    producers: dict[str, list[str]] = {}
+    for job_id, job in spec["jobs"].items():
+        for name in _check_names(job_id, job):
+            producers.setdefault(name, []).append(job_id)
+    for name in SPEC_REQUIRED_CHECKS:
+        jobs = producers.get(name, [])
+        assert len(jobs) == 1, f"{name} must come from exactly one {SPEC_WORKFLOW} job: {jobs}"
+        assert _runs_unconditionally(spec["jobs"][jobs[0]]), f"{name} is conditional: {jobs[0]}"
+
+
+def test_spec_conformance_checks_gate_every_context(
+    repository_workflows: dict[str, WorkflowNode],
+) -> None:
+    _assert_spec_checks_gate_every_context(
+        repository_workflows["merge-gate.yml"], repository_workflows[SPEC_WORKFLOW]
+    )
+
+
+@pytest.mark.parametrize("context", [MERGE_GROUP_EVENT, "pull_request_labeled", "pull_request"])
+@pytest.mark.parametrize("dropped", SPEC_REQUIRED_CHECKS)
+def test_spec_check_dropped_from_a_context_fails(
+    mutable_workflows: dict[str, WorkflowNode], context: str, dropped: str
+) -> None:
+    merge_gate = mutable_workflows["merge-gate.yml"]
+    contexts = _expected_checks(merge_gate)
+    contexts[context] = tuple(name for name in contexts[context] if name != dropped)
+    _with_expected_checks(merge_gate, contexts)
+
+    with pytest.raises(AssertionError, match="does not require"):
+        _assert_spec_checks_gate_every_context(merge_gate, mutable_workflows[SPEC_WORKFLOW])
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "paths",
+        "paths-ignore",
+        "conditional-shard",
+        "label-gated-shard",
+        "wrapped-label-gated-gate",
+        "duplicate-producer",
+        "statement",
+    ],
+)
+def test_spec_gate_drift_fails(mutable_workflows: dict[str, WorkflowNode], mutation: str) -> None:
+    merge_gate = mutable_workflows["merge-gate.yml"]
+    spec = mutable_workflows[SPEC_WORKFLOW]
+    if mutation in ("paths", "paths-ignore"):
+        spec["on"]["pull_request"][mutation] = ["tests/**"]
+    elif mutation == "conditional-shard":
+        spec["jobs"]["spec-2"]["if"] = "github.event_name == 'merge_group'"
+    elif mutation == "label-gated-shard":
+        spec["jobs"]["spec-2"]["if"] = FULL_INTEGRATION_GATE
+    elif mutation == "wrapped-label-gated-gate":
+        gate_id = next(
+            job_id
+            for job_id, job in spec["jobs"].items()
+            if "Spec conformance gate" in _check_names(job_id, job)
+        )
+        spec["jobs"][gate_id]["if"] = f"${{{{ always() && ({FULL_INTEGRATION_GATE}) }}}}"
+    elif mutation == "duplicate-producer":
+        spec["jobs"]["spec-4"] = deepcopy(spec["jobs"]["spec-3"])
+    else:
+        contexts = _expected_checks(merge_gate)
+        contexts["pull_request"] = (*contexts["pull_request"], "Check conformance statement")
+        _with_expected_checks(merge_gate, contexts)
+
+    with pytest.raises(AssertionError):
+        _assert_spec_checks_gate_every_context(merge_gate, spec)
 
 
 def test_merge_time_integration_uses_the_release_planner(
@@ -2871,7 +3064,7 @@ def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
     assert "schedule" in workflow["on"]
     assert "ref" in workflow["on"]["workflow_dispatch"]["inputs"]
     job = workflow_job(workflow, "architecture-cache-full-matrix")
-    assert job["steps"][0]["with"]["ref"] == "${{ inputs.ref }}"
+    assert job["steps"][0]["with"]["ref"] == JOURNEYS_RESOLVED_REF
     assert all(key not in job for key in ("if", "continue-on-error"))
     step = workflow_step(job, "Replay the full owner mutation matrix through the session cache")
     assert "if" not in step and "continue-on-error" not in step
@@ -2901,3 +3094,308 @@ def test_dispatched_ref_lifecycle_workflow_uses_no_shared_cache() -> None:
                 assert with_block.get("enable-cache") is False, (job_id, step.get("name"))
             if uses.startswith(("actions/setup-python", "actions/setup-node")):
                 assert "cache" not in with_block, (job_id, step.get("name"))
+
+
+JOURNEYS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml"
+JOURNEYS_RESOLVE_JOB = "resolve-ref"
+JOURNEYS_RESOLVE_STEP = "Resolve the requested ref to a tracked commit"
+JOURNEYS_RESOLVED_REF = "${{ needs.resolve-ref.outputs.sha }}"
+JOURNEYS_CHECKOUT_JOBS = ("journeys", "lifecycle-full", "architecture-cache-full-matrix")
+_DISPATCH_REF = re.compile(r"inputs\s*\.\s*ref\b|inputs\[\s*['\"]ref['\"]\s*\]")
+
+
+def _job_needs(job: WorkflowNode) -> list[str]:
+    needs = job.get("needs") or []
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def _assert_journeys_ref_gate(workflow: WorkflowNode) -> None:
+    """Every checkout tests the commit resolve-ref vetted; nothing else reads the input."""
+    assert workflow.get("permissions") == {"contents": "read"}, workflow.get("permissions")
+    resolve = workflow_job(workflow, JOURNEYS_RESOLVE_JOB)
+    assert resolve.get("permissions") == {"contents": "read"}, resolve.get("permissions")
+    assert not _job_needs(resolve), resolve.get("needs")
+    assert resolve.get("outputs", {}).get("sha") == "${{ steps.resolve.outputs.sha }}"
+    resolve_step = workflow_step(resolve, JOURNEYS_RESOLVE_STEP)
+    assert resolve_step.get("id") == "resolve"
+    assert (resolve_step.get("env") or {}).get("REQUESTED_REF") == "${{ inputs.ref }}"
+    checkout_jobs: list[str] = []
+    for job_id, job in workflow["jobs"].items():
+        if job_id == "signal":
+            assert job.get("permissions") == {"issues": "write"}, job.get("permissions")
+            assert "github.event_name == 'schedule'" in str(job.get("if", ""))
+        else:
+            assert job.get("permissions", {"contents": "read"}) == {"contents": "read"}, job_id
+        for step in job.get("steps") or []:
+            scrubbed = deepcopy(step)
+            if step is resolve_step:
+                scrubbed["env"].pop("REQUESTED_REF")
+            assert not _DISPATCH_REF.search(json.dumps(scrubbed)), (job_id, step.get("name"))
+            if not str(step.get("uses", "")).startswith("actions/checkout@"):
+                continue
+            with_block = step.get("with") or {}
+            assert with_block.get("persist-credentials") is False, (job_id, step.get("name"))
+            if job_id == JOURNEYS_RESOLVE_JOB:
+                assert "ref" not in with_block, with_block
+                continue
+            checkout_jobs.append(job_id)
+            assert JOURNEYS_RESOLVE_JOB in _job_needs(job), (job_id, job.get("needs"))
+            assert with_block.get("ref") == JOURNEYS_RESOLVED_REF, (job_id, with_block)
+    assert checkout_jobs, "no job checks out the resolved commit"
+
+
+def test_lifecycle_journeys_checks_out_only_the_resolved_commit() -> None:
+    _assert_journeys_ref_gate(load_workflow(JOURNEYS_WORKFLOW))
+
+
+@pytest.mark.parametrize("job_id", JOURNEYS_CHECKOUT_JOBS)
+@pytest.mark.parametrize("mutation", ["checkout-input", "drop-needs", "run-input"])
+def test_lifecycle_journeys_ref_gate_drift_fails(job_id: str, mutation: str) -> None:
+    workflow = load_workflow(JOURNEYS_WORKFLOW)
+    job = workflow_job(workflow, job_id)
+    if mutation == "checkout-input":
+        job["steps"][0]["with"]["ref"] = "${{ inputs.ref }}"
+    elif mutation == "drop-needs":
+        job.pop("needs")
+    else:
+        job["steps"][-1]["run"] += "\ngit checkout ${{ github.event.inputs.ref }}\n"
+    with pytest.raises(AssertionError):
+        _assert_journeys_ref_gate(workflow)
+
+
+@pytest.mark.parametrize("mutation", ["write-permission", "persisted-credentials", "env-alias"])
+def test_lifecycle_journeys_resolve_job_drift_fails(mutation: str) -> None:
+    workflow = load_workflow(JOURNEYS_WORKFLOW)
+    resolve = workflow_job(workflow, JOURNEYS_RESOLVE_JOB)
+    if mutation == "write-permission":
+        resolve["permissions"] = {"contents": "write"}
+    elif mutation == "persisted-credentials":
+        resolve["steps"][0]["with"]["persist-credentials"] = True
+    else:
+        workflow_step(resolve, JOURNEYS_RESOLVE_STEP)["env"]["SECOND"] = "${{ inputs.ref }}"
+    with pytest.raises(AssertionError):
+        _assert_journeys_ref_gate(workflow)
+
+
+def _git(cwd: Path, *args: str) -> str:
+    command = ["git", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", *args]
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    }
+    done = subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True, check=True)
+    return done.stdout.strip()
+
+
+@pytest.fixture(scope="module")
+def journeys_clone(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, dict[str, str]]:
+    """A clone whose origin has main, release/1.0 (tagged v1.0.0) and an untracked side branch."""
+    origin = tmp_path_factory.mktemp("journeys-origin")
+    _git(origin, "init", "-q", "-b", "main")
+    _git(origin, "commit", "-q", "--allow-empty", "-m", "main")
+    commits = {"main": _git(origin, "rev-parse", "HEAD")}
+    for branch in ("release/1.0", "side"):
+        _git(origin, "checkout", "-q", "-b", branch, commits["main"])
+        _git(origin, "commit", "-q", "--allow-empty", "-m", branch)
+        commits[branch] = _git(origin, "rev-parse", "HEAD")
+    _git(origin, "tag", "v1.0.0", commits["release/1.0"])
+    _git(origin, "checkout", "-q", "main")
+    clone = tmp_path_factory.mktemp("journeys-clone") / "repo"
+    _git(origin.parent, "clone", "-q", str(origin), str(clone))
+    return clone, commits
+
+
+def _resolve_dispatch(clone: Path, requested: str, tmp_path: Path) -> tuple[int, str, str]:
+    step = workflow_step(
+        workflow_job(load_workflow(JOURNEYS_WORKFLOW), JOURNEYS_RESOLVE_JOB),
+        JOURNEYS_RESOLVE_STEP,
+    )
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    result = run_bash(
+        f"cd {shlex.quote(clone.as_posix())}\n{step['run']}",
+        env={"REQUESTED_REF": requested, "DEFAULT_SHA": "d" * 40, "GITHUB_OUTPUT": str(output)},
+    )
+    resolved = dict(
+        line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines() if line
+    )
+    return result.returncode, resolved.get("sha", ""), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [
+        ("", "default"),
+        ("main", "main"),
+        ("release/1.0", "release/1.0"),
+        ("v1.0.0", "release/1.0"),
+        ("<main-sha>", "main"),
+        ("<release/1.0-sha>", "release/1.0"),
+    ],
+)
+def test_lifecycle_journeys_resolve_admits_tracked_commits(
+    journeys_clone: tuple[Path, dict[str, str]], tmp_path: Path, requested: str, expected: str
+) -> None:
+    clone, commits = journeys_clone
+    if requested.startswith("<"):
+        requested = commits[requested[1:].removesuffix("-sha>")]
+    code, sha, output = _resolve_dispatch(clone, requested, tmp_path)
+    assert code == 0, output
+    assert sha == ("d" * 40 if expected == "default" else commits[expected]), output
+
+
+@pytest.mark.parametrize(
+    ("requested", "message"),
+    [
+        ("side", "is not on main or a release/* branch"),
+        ("<side-sha>", "is not on main or a release/* branch"),
+        ("0" * 40, "does not resolve to a commit"),
+        ("--output=x", "is not a commit SHA, branch or tag name"),
+        ("main;id", "is not a commit SHA, branch or tag name"),
+    ],
+)
+def test_lifecycle_journeys_resolve_refuses_untracked_refs(
+    journeys_clone: tuple[Path, dict[str, str]], tmp_path: Path, requested: str, message: str
+) -> None:
+    clone, commits = journeys_clone
+    if requested.startswith("<"):
+        requested = commits[requested[1:].removesuffix("-sha>")]
+    code, sha, output = _resolve_dispatch(clone, requested, tmp_path)
+    assert code == 1, output
+    assert sha == "", output
+    assert message in output and "Allowed: a commit on main or a release/* branch" in output
+
+
+_EARLY_STOP_FLAGS = ("--maxfail", "-x", "--exitfirst")
+# Env vars whose value reaches pytest as arguments: PYTEST_ADDOPTS is read by
+# pytest itself, PYTEST_EXTRA_ARGS by scripts/test-integration.sh.
+_PYTEST_ARG_ENV = ("PYTEST_ADDOPTS", "PYTEST_EXTRA_ARGS")
+
+
+def _early_stopping_coverage_runs(workflows_dir: Path) -> list[str]:
+    """Steps whose pytest arguments both collect coverage and stop early."""
+    found: list[str] = []
+    for path in sorted(workflows_dir.glob("*.yml")):
+        if path.name.endswith(".lock.yml"):
+            continue
+        found.extend(_early_stopping_in(path.name, load_workflow(path)))
+    return found
+
+
+def _pytest_argument_tokens(
+    workflow: WorkflowNode, job: WorkflowNode, step: WorkflowNode
+) -> list[str]:
+    """Every pytest argument one step can see, across run and inherited env.
+
+    pytest merges PYTEST_ADDOPTS with its command line, so a coverage flag in
+    one source and an early stop in another still stop the coverage run.
+    """
+    env = effective_env(workflow, job, step)
+    tokens = [token for key in _PYTEST_ARG_ENV for token in str(env.get(key, "")).split()]
+    for line in str(step.get("run", "")).replace("\\\n", " ").splitlines():
+        words = line.split()
+        if any("pytest" in word for word in words):
+            tokens.extend(words)
+    return tokens
+
+
+def _early_stopping_in(name: str, workflow: WorkflowNode) -> list[str]:
+    found: list[str] = []
+    for job_id, job in (workflow.get("jobs") or {}).items():
+        for step in (job or {}).get("steps") or []:
+            tokens = _pytest_argument_tokens(workflow, job, step)
+            if not any(token.startswith("--cov") for token in tokens):
+                continue
+            stops = [
+                token
+                for token in tokens
+                if token in _EARLY_STOP_FLAGS or token.startswith("--maxfail=")
+            ]
+            if stops:
+                found.append(f"{name}:{job_id}:{step.get('name', step.get('uses'))}:{stops}")
+    return found
+
+
+def test_coverage_runs_never_stop_early() -> None:
+    """A coverage run that stops at N failures uploads partial data or none (#4552)."""
+    assert _early_stopping_coverage_runs(REPO_ROOT / ".github" / "workflows") == []
+
+
+@pytest.mark.parametrize(
+    "scope",
+    ["extra-args", "step-addopts", "job-addopts", "workflow-addopts", "run-command"],
+)
+@pytest.mark.parametrize("flag", ["--maxfail 10", "--maxfail=1", "-x", "--exitfirst"])
+def test_coverage_run_with_early_stop_fails(flag: str, scope: str) -> None:
+    workflow = load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW)
+    job = workflow_job(workflow, MERGE_GROUP_INTEGRATION_JOB)
+    step = workflow_step(job, MERGE_GROUP_INTEGRATION_STEP)
+    if scope == "extra-args":
+        step["env"]["PYTEST_EXTRA_ARGS"] = f"{step['env']['PYTEST_EXTRA_ARGS']} {flag}"
+    elif scope == "step-addopts":
+        step["env"]["PYTEST_ADDOPTS"] = flag
+    elif scope == "job-addopts":
+        job.setdefault("env", {})["PYTEST_ADDOPTS"] = flag
+    elif scope == "workflow-addopts":
+        workflow.setdefault("env", {})["PYTEST_ADDOPTS"] = flag
+    else:
+        step["run"] = f"{step['run']}uv run pytest tests/integration {flag}\n"
+
+    assert _early_stopping_in("ci-integration.yml", workflow)
+
+
+MUTATION_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "mutation-pilot.yml"
+MUTATION_STEP = "Mutate one owner and enforce its baseline"
+
+
+def _assert_mutation_shards_enforce_every_owner(workflow: WorkflowNode) -> None:
+    """One scheduled shard per owner, each enforcing its floor with a negative control (#4121)."""
+    assert "schedule" in workflow["on"], "the floors must be enforced on a schedule"
+    owners = workflow_job(workflow, "owners")
+    listing = " ".join(str(step.get("run", "")) for step in owners["steps"])
+    assert "scripts/run_mutation_pilot.py --list-owners" in listing
+    shard = workflow_job(workflow, "mutation-pilot")
+    assert "continue-on-error" not in shard and "if" not in shard
+    assert shard["needs"] == "owners"
+    strategy = shard["strategy"]
+    assert strategy["fail-fast"] is False
+    assert strategy["matrix"] == {"owner": "${{ fromJSON(needs.owners.outputs.keys) }}"}
+    step = workflow_step(shard, MUTATION_STEP)
+    assert "if" not in step and "continue-on-error" not in step
+    assert step["env"]["OWNER"] == "${{ matrix.owner }}"
+    tokens = step["run"].replace("\\\n", " ").split()
+    assert ("--owner", '"$OWNER"') in set(pairwise(tokens))
+    assert "--negative-control" in tokens
+    assert not {"--update-baseline", "--report-only", "--reuse-cache"} & set(tokens)
+    for job in workflow["jobs"].values():
+        for job_step in job.get("steps") or []:
+            assert not str(job_step.get("uses", "")).startswith("actions/cache")
+
+
+def test_mutation_shards_enforce_every_owner_floor() -> None:
+    _assert_mutation_shards_enforce_every_owner(load_workflow(MUTATION_WORKFLOW))
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["no-negative-control", "soft-shard", "static-matrix", "no-schedule", "baseline-write"],
+)
+def test_mutation_shard_drift_fails(mutation: str) -> None:
+    workflow = load_workflow(MUTATION_WORKFLOW)
+    shard = workflow_job(workflow, "mutation-pilot")
+    step = workflow_step(shard, MUTATION_STEP)
+    if mutation == "no-negative-control":
+        step["run"] = step["run"].replace("--negative-control", "")
+    elif mutation == "soft-shard":
+        shard["continue-on-error"] = True
+    elif mutation == "static-matrix":
+        shard["strategy"]["matrix"] = {"owner": ["update-plan"]}
+    elif mutation == "no-schedule":
+        del workflow["on"]["schedule"]
+    else:
+        step["run"] += " --update-baseline"
+    with pytest.raises(AssertionError):
+        _assert_mutation_shards_enforce_every_owner(workflow)

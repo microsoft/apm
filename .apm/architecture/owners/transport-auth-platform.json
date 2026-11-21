@@ -39,7 +39,7 @@
     {
       "id": "host-credential-resolution",
       "decision": "Host + credential resolution and effective provider identity consumed by dependency drift and dependency-scoped lock seeds, including registry-proxy route equivalence of lock rows; authenticated host access: escalation chain entry point and auth-outcome classification; helper credential outcome reporting (git credential approve after acceptance, reject after a verified rejection)",
-      "owner": "core/auth.py (AuthResolver, AuthResolver.try_with_fallback, AuthResolver.github_rest_headers, AuthResolver.bearer_headers, AuthResolver.gitlab_rest_headers), core/auth_outcome.py (classify_auth_outcome), install/repository_access.py (inaccessible and not-found install diagnostics), core/auth_chain.py (run_ado_chain, report_helper_outcome), core/token_manager.py (GitHubTokenManager.report_git_helper_credential), core/host_providers.py (effective_host_provider_identity), deps/artifactory_orchestrator.py (ArtifactoryRouter.routing_target, routes_to_locked_proxy); consumers: drift.py, tiered_ref_resolver.py, and every Azure DevOps egress (install/validation.py, install/pipeline.py, deps/download_strategies.py, deps/clone_engine.py, deps/git_reference_resolver.py, deps/github_downloader_validation.py, marketplace/ref_resolver.py, marketplace/client.py, policy/discovery.py, policy/_gitlab.py)",
+      "owner": "core/auth.py (AuthResolver, AuthResolver.try_with_fallback, AuthResolver.github_rest_headers, AuthResolver.bearer_headers, AuthResolver.gitlab_rest_headers), core/auth_outcome.py (classify_auth_outcome), install/repository_access.py (inaccessible and not-found install diagnostics), core/auth_chain.py (run_ado_chain, report_helper_outcome), core/token_manager.py (GitHubTokenManager.report_git_helper_credential), core/host_providers.py (effective_host_provider_identity), deps/artifactory_orchestrator.py (ArtifactoryRouter.routing_target, routes_to_locked_proxy); consumers: drift.py, tiered_ref_resolver.py, deps/outdated_ref_cache.py (ls-remote cache key), and every Azure DevOps egress (install/validation.py, install/pipeline.py, deps/download_strategies.py, deps/clone_engine.py, deps/git_reference_resolver.py, deps/github_downloader_validation.py, marketplace/ref_resolver.py, marketplace/client.py, policy/discovery.py, policy/_gitlab.py)",
       "selectors": [
         "src/apm_cli/core/auth.py",
         "src/apm_cli/core/auth_chain.py",
@@ -252,6 +252,16 @@
       "guards": [
         "transport-platform-archive-extraction-limits"
       ]
+    },
+    {
+      "id": "marketplace-catalog-credentials",
+      "decision": "Hosted HTTPS marketplace catalog credentials: APM_MARKETPLACE_TOKEN_/USER_/PASS_<NAME> are read only for a name the user bound with 'apm marketplace add URL --name NAME', through a marketplace-only AuthResolver entry point with no Git, host, registry or netrc fallback; ambiguous normalized names are rejected; the credential is sent only within the bound scheme, host, effective port, directory and query on every redirect hop; 401/403 or a sign-in redirect is denied access, never a cached read; package and Git requests never carry it",
+      "owner": "core/catalog_credentials.py (credential_env_suffix, resolve_catalog_credential, CatalogCredential, catalog_scope_url); core/auth.py (AuthResolver.resolve_marketplace_catalog_credential); marketplace/catalog_binding.py (catalog_credential, require_binding_available, access_denied_error); consumers: marketplace/client.py (_fetch_url_direct, fetch_marketplace), commands/marketplace add, deps/registry/auth.py (name normalization only)",
+      "selectors": [
+        "src/apm_cli/core/catalog_credentials.py",
+        "src/apm_cli/marketplace/catalog_binding.py"
+      ],
+      "guards": ["transport-platform-marketplace-catalog-credentials"]
     }
   ]
 }

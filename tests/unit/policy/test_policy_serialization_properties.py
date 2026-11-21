@@ -133,6 +133,9 @@ def enforceable_policy_data(draw: st.DrawFn) -> dict[str, Any]:
             "require": draw(_non_empty_unique(("internal", "official", "trusted"))),
             "allow_non_registry": False,
         },
+        "marketplace": {
+            "allow": draw(_non_empty_unique(("github.com/contoso/*", "gitlab.com/acme/**"))),
+        },
         "security": {
             "audit": {
                 "on_install": draw(st.sampled_from(("block", "off", "warn"))),
@@ -195,6 +198,7 @@ def _enforceable_fields(policy: ApmPolicy) -> dict[str, Any]:
         "unmanaged_files.exclude": policy.unmanaged_files.exclude,
         "registry_source.require": policy.registry_source.require,
         "registry_source.allow_non_registry": policy.registry_source.allow_non_registry,
+        "marketplace.allow": policy.marketplace.allow,
         "security.audit.on_install": policy.security.audit.on_install,
         "security.audit.external": policy.security.audit.external,
         "security.audit.scanners": policy.security.audit.scanners,
@@ -301,7 +305,7 @@ def test_effective_policy_cache_serialization_is_lossless_and_canonical(
     effective = resolve_policy_chain([parsed])
 
     assert set(_enforceable_fields(effective)) == _schema_enforceable_field_paths(effective)
-    assert len(_enforceable_fields(effective)) == 39
+    assert len(_enforceable_fields(effective)) == 40
     _assert_cache_round_trip(effective)
 
 

@@ -4,7 +4,8 @@ A ``Bench`` is one fresh world clone at one scope. ``Bench.observe`` builds the
 oracle ``Observation`` (project scope as ``RowReplay.observe`` does; user scope
 over HOME and APM_HOME as ``tests/integration/_gate_machine_kit.py`` does) and
 still observes a world whose lockfile is a symlink or not readable YAML.
-``MachineBase.step`` runs one command through ``driver.run`` and checks I1-I9
+``StepRunner.step`` (inherited by the rule-based ``MachineBase``) runs one
+command through ``driver.run`` and checks I1-I9
 with ``oracles.check_cross_cutting``; the before and after observations and
 the result stay in the returned ``Step`` for later per-obligation checks.
 """
@@ -26,6 +27,7 @@ from hypothesis.stateful import RuleBasedStateMachine
 
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver, receipts
+from tests.lifecycle.known import TRACKING
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import (
@@ -239,6 +241,9 @@ class KnownCell:
     match: str
     applies: Callable[..., bool]
 
+    def __post_init__(self) -> None:
+        assert TRACKING.fullmatch(self.tracking) and self.match, self
+
     @property
     def label(self) -> str:
         return f"{self.cell_id} (tracking {self.tracking})"
@@ -278,13 +283,12 @@ class Step:
     result: CommandResult
 
 
-class MachineBase(RuleBasedStateMachine):
+class StepRunner:
     """Common step runner: every command goes through the driver and the I1-I9 oracle."""
 
     known: tuple[KnownCell, ...] = ()
 
     def __init__(self, bench: Bench, model: ModelState, kinds: Mapping[str, Collection[str]]):
-        super().__init__()
         self.bench = bench
         self.model = model
         self.kinds = kinds
@@ -357,6 +361,14 @@ class MachineBase(RuleBasedStateMachine):
         change()
         after = self.observe()
         self.check(op, before, after, None, self.model, False)
+
+
+class MachineBase(StepRunner, RuleBasedStateMachine):
+    """A rule-based state machine over the step runner (generated sequences)."""
+
+    def __init__(self, bench: Bench, model: ModelState, kinds: Mapping[str, Collection[str]]):
+        RuleBasedStateMachine.__init__(self)
+        StepRunner.__init__(self, bench, model, kinds)
 
 
 def earned_cells(node: str, prefix: str) -> frozenset[str]:

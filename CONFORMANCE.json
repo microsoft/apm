@@ -145,6 +145,9 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_ssh_marketplace_install_records_repository_and_exact_commit[git@github.com:fixture/private-mkt.git-success]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_ssh_marketplace_install_records_repository_and_exact_commit[ssh://git@github.com/fixture/private-mkt.git-success-named]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_ssh_marketplace_install_records_repository_and_exact_commit[ssh://git@github.com/fixture/private-mkt.git-success]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_replays_on_url_and_hash_without_a_commit",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_without_url_or_hash_is_not_replayed[resolved_hash]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_without_url_or_hash_is_not_replayed[resolved_url]",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[False]",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[True]"
       ],
@@ -153,7 +156,7 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 9,
+      "test_count": 12,
       "tests": [
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_manifest_pin_requires_the_exact_locked_commit",
         "tests/spec_conformance/test_lockfile_reqs.py::test_full_sha_pin_audit_rejects_resolved_commit_mismatch",
@@ -162,6 +165,9 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_ssh_marketplace_install_records_repository_and_exact_commit[git@github.com:fixture/private-mkt.git-success]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_ssh_marketplace_install_records_repository_and_exact_commit[ssh://git@github.com/fixture/private-mkt.git-success-named]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_ssh_marketplace_install_records_repository_and_exact_commit[ssh://git@github.com/fixture/private-mkt.git-success]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_replays_on_url_and_hash_without_a_commit",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_without_url_or_hash_is_not_replayed[resolved_hash]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_without_url_or_hash_is_not_replayed[resolved_url]",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[False]",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[True]"
       ]
@@ -528,6 +534,10 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_marketplace_inventory_cannot_substitute_for_locked_selection[^1.0.0-1.2.3]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_marketplace_inventory_cannot_substitute_for_locked_selection[bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_marketplace_inventory_cannot_substitute_for_locked_selection[main-main]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_refuses_a_selector_that_excludes_its_version",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_version_is_the_replayed_selection[1.0.0]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_version_is_the_replayed_selection[^1.0.0]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_version_is_the_replayed_selection[~1.0.0]",
         "tests/spec_conformance/test_mcp_omission_inventory.py::test_omission_evidence_never_uses_inventory_as_identity[name]",
         "tests/spec_conformance/test_mcp_omission_inventory.py::test_omission_evidence_never_uses_inventory_as_identity[version]"
       ],
@@ -536,7 +546,7 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 10,
+      "test_count": 14,
       "tests": [
         "tests/spec_conformance/test_acquired_manifest_reqs.py::test_snapshot_preserves_manifestless_optional_version",
         "tests/spec_conformance/test_acquired_manifest_reqs.py::test_snapshot_preserves_resolver_version_precedence[git-semver]",
@@ -546,6 +556,10 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_marketplace_inventory_cannot_substitute_for_locked_selection[^1.0.0-1.2.3]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_marketplace_inventory_cannot_substitute_for_locked_selection[bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_marketplace_inventory_cannot_substitute_for_locked_selection[main-main]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_refuses_a_selector_that_excludes_its_version",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_version_is_the_replayed_selection[1.0.0]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_version_is_the_replayed_selection[^1.0.0]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_version_is_the_replayed_selection[~1.0.0]",
         "tests/spec_conformance/test_mcp_omission_inventory.py::test_omission_evidence_never_uses_inventory_as_identity[name]",
         "tests/spec_conformance/test_mcp_omission_inventory.py::test_omission_evidence_never_uses_inventory_as_identity[version]"
       ]
@@ -1282,6 +1296,38 @@
       ]
     },
     {
+      "behavioral_tests": [
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_declared_name_wins_and_is_never_registered",
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_root_manifest_map_is_accepted_and_validated"
+      ],
+      "conformance_class": "consumer",
+      "id": "req-mf-028",
+      "keyword": "MUST",
+      "section": "4.2.5",
+      "status": "active",
+      "test_count": 2,
+      "tests": [
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_declared_name_wins_and_is_never_registered",
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_root_manifest_map_is_accepted_and_validated"
+      ]
+    },
+    {
+      "behavioral_tests": [
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_dependency_declared_map_is_refused",
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_transitive_reference_must_name_a_root_declared_entry"
+      ],
+      "conformance_class": "consumer",
+      "id": "req-mf-029",
+      "keyword": "MUST",
+      "section": "4.2.5",
+      "status": "active",
+      "test_count": 2,
+      "tests": [
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_dependency_declared_map_is_refused",
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_transitive_reference_must_name_a_root_declared_entry"
+      ]
+    },
+    {
       "behavioral_tests": [],
       "conformance_class": "consumer",
       "id": "req-na-001",
@@ -1299,6 +1345,7 @@
     {
       "behavioral_tests": [
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_lock_drives_deployment_of_exactly_the_plugin_root",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_root_digest_omits_the_exec_bit_and_checks_it_per_machine",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_root_digest_matches_the_known_answer_vector"
       ],
       "conformance_class": "consumer",
@@ -1306,28 +1353,32 @@
       "keyword": "MUST",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_lock_drives_deployment_of_exactly_the_plugin_root",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_root_digest_omits_the_exec_bit_and_checks_it_per_machine",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_root_digest_matches_the_known_answer_vector"
       ]
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_writes_only_the_two_keys_and_runs_no_vendor_cli"
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_writes_only_the_two_keys_and_runs_no_vendor_cli",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_declares_a_relative_path_under_a_per_project_name"
       ],
       "conformance_class": "consumer",
       "id": "req-na-003",
       "keyword": "MUST",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_writes_only_the_two_keys_and_runs_no_vendor_cli"
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_declaration_writes_only_the_two_keys_and_runs_no_vendor_cli",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_declares_a_relative_path_under_a_per_project_name"
       ]
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_cross_target_suppression_is_the_consumers_own_false",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_no_receipt_and_removal_only_of_what_the_previous_lock_produced",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[add-and-remove]",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[binding-conflict]",
@@ -1347,8 +1398,9 @@
       "oracle": "tests/fixtures/spec-conformance/native-activation/req-na-004.json",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 12,
+      "test_count": 13,
       "tests": [
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_cross_target_suppression_is_the_consumers_own_false",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_no_receipt_and_removal_only_of_what_the_previous_lock_produced",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[add-and-remove]",
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_ownership_derives_from_previous_and_next_lockfile[binding-conflict]",
@@ -1380,31 +1432,34 @@
       ]
     },
     {
-      "behavioral_tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_unqualified_target_gets_explicit_split_install"
-      ],
+      "behavioral_tests": [],
       "conformance_class": "consumer",
       "id": "req-na-006",
       "keyword": "MUST",
       "section": "8.5.11",
-      "status": "active",
+      "status": "skipped",
       "test_count": 1,
       "tests": [
         "tests/spec_conformance/test_native_activation_profile_reqs.py::test_unqualified_target_gets_explicit_split_install"
+      ],
+      "waivers": [
+        "The explicit split fallback for Codex, which fails A3, is implemented in #3920; schema-bearing Agent Plugins v1 dependencies stay opaque under req-tg-011."
       ]
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding"
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_declares_a_relative_path_under_a_per_project_name"
       ],
       "conformance_class": "consumer",
       "id": "req-na-007",
       "keyword": "MUST",
       "section": "8.5.11",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
-        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding"
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_generated_marketplace_name_is_unique_per_apm_home_and_refuses_rebinding",
+        "tests/spec_conformance/test_native_activation_profile_reqs.py::test_project_scope_declares_a_relative_path_under_a_per_project_name"
       ]
     },
     {
@@ -1714,6 +1769,7 @@
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_recognition_grammar_and_scope",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics",
         "tests/spec_conformance/test_policy_reqs.py::test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile",
+        "tests/spec_conformance/test_policy_reqs.py::test_require_reads_the_lock_row_written_for_an_explicit_proxy_url",
         "tests/spec_conformance/test_policy_reqs.py::test_required_package_matching_follows_source_replacement"
       ],
       "conformance_class": "governance",
@@ -1721,12 +1777,13 @@
       "keyword": "MUST",
       "section": "6.3.1",
       "status": "active",
-      "test_count": 5,
+      "test_count": 6,
       "tests": [
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_qualified_patterns_match_effective_host",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_recognition_grammar_and_scope",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics",
         "tests/spec_conformance/test_policy_reqs.py::test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile",
+        "tests/spec_conformance/test_policy_reqs.py::test_require_reads_the_lock_row_written_for_an_explicit_proxy_url",
         "tests/spec_conformance/test_policy_reqs.py::test_required_package_matching_follows_source_replacement"
       ]
     },
@@ -2637,17 +2694,29 @@
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class"
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[default-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[empty-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-configured-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-other-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-outside-class]"
       ],
       "conformance_class": "consumer",
       "id": "req-sc-005",
       "keyword": "MUST",
       "section": "10.3",
-      "status": "xfail",
-      "test_count": 2,
+      "status": "active",
+      "test_count": 8,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_host_class_collapse_constrained_to_psl_or_aliases",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class"
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[default-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[empty-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-configured-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-other-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-outside-class]"
       ]
     },
     {
@@ -2711,6 +2780,7 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_denies_unapproved_manifest_referenced_mcp",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[gate-disabled]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[listed-type-approved]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[missing-map-denied]",
@@ -2721,8 +2791,9 @@
       "keyword": "MUST",
       "section": "10.13",
       "status": "active",
-      "test_count": 9,
+      "test_count": 10,
       "tests": [
+        "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_denies_unapproved_manifest_referenced_mcp",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[gate-disabled]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[listed-type-approved]",
         "tests/spec_conformance/test_exec_decision_reqs.py::test_executable_gate_fails_closed_without_explicit_authorization[missing-map-denied]",
@@ -2824,6 +2895,9 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_scans_the_exact_whole_bundle_before_transport[blocked]",
+        "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_scans_the_exact_whole_bundle_before_transport[safe]",
+        "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_scans_the_exact_whole_bundle_before_transport[symlink]",
         "tests/spec_conformance/test_manifest_reqs.py::test_agent_skip_diagnostic_preserves_authorized_scan_and_materialization[False]",
         "tests/spec_conformance/test_manifest_reqs.py::test_agent_skip_diagnostic_preserves_authorized_scan_and_materialization[True]",
         "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_fixture_oracle_covers_symlinked_content",
@@ -2835,8 +2909,11 @@
       "oracle": "tests/fixtures/spec-conformance/source-plan/req-sc-015.json",
       "section": "10.16",
       "status": "active",
-      "test_count": 5,
+      "test_count": 8,
       "tests": [
+        "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_scans_the_exact_whole_bundle_before_transport[blocked]",
+        "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_scans_the_exact_whole_bundle_before_transport[safe]",
+        "tests/spec_conformance/test_codex_compatibility_admission_reqs.py::test_codex_consumer_scans_the_exact_whole_bundle_before_transport[symlink]",
         "tests/spec_conformance/test_manifest_reqs.py::test_agent_skip_diagnostic_preserves_authorized_scan_and_materialization[False]",
         "tests/spec_conformance/test_manifest_reqs.py::test_agent_skip_diagnostic_preserves_authorized_scan_and_materialization[True]",
         "tests/spec_conformance/test_manifest_reqs.py::test_authorized_source_plan_fixture_oracle_covers_symlinked_content",
@@ -2991,6 +3068,7 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_diagnoses_dropped_capability_restriction",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_lossy_agent_capability_conversion"
       ],
       "conformance_class": "consumer",
@@ -2998,13 +3076,15 @@
       "keyword": "MUST",
       "section": "8.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_diagnoses_dropped_capability_restriction",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_lossy_agent_capability_conversion"
       ]
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_claude_requires_post_install_compile_for_agents_md",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_project_compile_guidance_for_dependency_instructions"
       ],
       "conformance_class": "consumer",
@@ -3012,8 +3092,9 @@
       "keyword": "MUST",
       "section": "8.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_claude_requires_post_install_compile_for_agents_md",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_emits_project_compile_guidance_for_dependency_instructions"
       ]
     },
@@ -3128,26 +3209,30 @@
     {
       "behavioral_tests": [
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_invalid_settings_fail_closed_without_overwrite",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_missing_ledger_re_adopts_only_the_exact_reserved_namespace",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_in_place_and_consumer_owned",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_missing_previous_lock_never_adopts_or_retires_existing_entries",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_and_consumer_owned",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_non_copilot_target_creates_no_native_registration",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_plugin_name_precedence_and_owner_identity_are_deterministic",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused"
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_same_plugin_name_claimants_are_refused"
       ],
       "conformance_class": "consumer",
       "id": "req-tg-013",
       "keyword": "MUST",
       "section": "8.5.7",
       "status": "active",
-      "test_count": 7,
+      "test_count": 8,
       "tests": [
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_invalid_settings_fail_closed_without_overwrite",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_missing_ledger_re_adopts_only_the_exact_reserved_namespace",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_missing_previous_lock_never_adopts_or_retires_existing_entries",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_lifecycle_registration_clauses_persist_in_spec",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_in_place_and_consumer_owned",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_native_registration_is_aggregate_and_consumer_owned",
         "tests/spec_conformance/test_copilot_plugins_reqs.py::test_non_copilot_target_creates_no_native_registration",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_plugin_name_precedence_and_owner_identity_are_deterministic",
-        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused"
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_removal_is_exact_and_unowned_entries_are_refused",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_req_tg_013_clauses_superseded_by_the_native_profile",
+        "tests/spec_conformance/test_copilot_plugins_reqs.py::test_same_plugin_name_claimants_are_refused"
+      ],
+      "waivers": [
+        "#3921 activates an Agent Plugin from an intact copy deployed to .agents/plugins/<name>, verified against the lock fingerprint, instead of referencing apm_modules in place; it refuses every plugin-name collision instead of letting a direct dependency win over a transitive one, and records ownership per lock entry rather than in a ledger, so there is no owner to re-point (see test_same_plugin_name_claimants_are_refused). These req-tg-013 clauses await their spec amendment."
       ]
     },
     {
@@ -3168,6 +3253,7 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_keeps_native_model_settings",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[claude-sonnet-4-5]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[haiku]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[inherit]",
@@ -3180,8 +3266,9 @@
       "keyword": "MUST",
       "section": "8.5.1",
       "status": "active",
-      "test_count": 6,
+      "test_count": 7,
       "tests": [
+        "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_keeps_native_model_settings",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[claude-sonnet-4-5]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[haiku]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[inherit]",
@@ -3256,12 +3343,12 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 108,
+      "active": 110,
       "partial": 1,
-      "skipped": 2,
+      "skipped": 3,
       "text-only": 3,
       "unbound": 0,
-      "xfail": 1
+      "xfail": 0
     },
     "governance": {
       "active": 21,
@@ -3288,5 +3375,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 149
+  "total_requirements": 151
 }

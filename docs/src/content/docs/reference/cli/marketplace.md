@@ -60,6 +60,9 @@ machine, list them under `marketplaces:` in the user manifest
 (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`) and run
 `apm install -g`. Manual registrations always win a name conflict. See
 [Declare marketplaces in your user manifest](../../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest).
+A project can commit its marketplaces in its own `apm.yml` instead; that map
+is never registered and wins inside the project. See
+[Declare marketplaces in a project](../../../consumer/installing-from-marketplaces/#declare-marketplaces-in-a-project).
 
 Accepted forms:
 
@@ -143,6 +146,10 @@ apm marketplace add https://gitea.example.com/org/repo.git#v1.0.0 --name custom
 # Hosted marketplace.json URL
 apm marketplace add https://catalog.example.com/marketplace.json --name catalog
 
+# Private hosted marketplace.json URL (Bearer token)
+export APM_MARKETPLACE_TOKEN_CATALOG=your_token
+apm marketplace add https://catalog.example.com/team/marketplace.json --name catalog
+
 # SSH
 apm marketplace add git@gitea.example.com:org/repo.git --name custom
 apm marketplace add ssh://git@gitea.example.com:2222/org/repo.git --name custom
@@ -193,9 +200,10 @@ Generic HTTPS can use a local Git credential helper; plain HTTP suppresses
 credentials, HTTPS-to-HTTP Git URL rewrites are rejected, and generic SSH is
 token-free and noninteractive. See the
 [authentication transport table](../../../getting-started/authentication/#generic-marketplace-git-transport)
-for the full policy. Hosted `marketplace.json`
-URLs are public HTTPS only: APM sends no auth headers. Use a
-git-backed marketplace for private catalogs. When packages are
+for the full policy. A hosted `marketplace.json` URL is fetched
+anonymously unless you register it with `--name`; then APM sends only
+that name's `APM_MARKETPLACE_*` credential (see
+[Private hosted catalogs](#private-hosted-catalogs)). When packages are
 installed from a remote catalog (hosted JSON URL or Git), the lockfile
 records the catalog origin (`source_url`) and a content digest
 (`source_digest`); local catalogs record neither. See
@@ -217,6 +225,39 @@ include an explicit HTTPS port but must use a root-hosted collection path;
 APM rejects `/tfs/` prefixes. APM tries the Azure DevOps Items API first,
 then subprocess git. See
 [Authentication](../../../getting-started/authentication/#azure-devops).
+
+#### Private hosted catalogs
+
+A hosted `marketplace.json` that requires a login authenticates with:
+
+| Variable | Sent as |
+|---|---|
+| `APM_MARKETPLACE_TOKEN_<NAME>` | `Authorization: Bearer <token>` |
+| `APM_MARKETPLACE_USER_<NAME>` + `APM_MARKETPLACE_PASS_<NAME>` | `Authorization: Basic <base64(user:pass)>` |
+
+`<NAME>` is the `--name` you registered, uppercased, with `-` and `.` mapped
+to `_` (`corp-main` -> `CORP_MAIN`), like the registry variables. Bearer wins
+when both are set.
+
+- **Binding.** Only `apm marketplace add <url> --name NAME` binds NAME to the
+  URL. A name taken from the catalog's own `name` field never selects a
+  credential. Re-adding a bound name with another URL fails; run
+  `apm marketplace remove NAME` first. Two bound names that map to the same
+  variables (`corp-main`, `corp.main`) are rejected.
+- **Scope.** The credential is sent only to the registered scheme, host and
+  port, under the catalog's directory, with the same query. Every redirect
+  hop is checked: a hop outside that scope continues without the credential,
+  and HTTPS-to-HTTP redirects are refused. `.netrc` and Git, GitHub, ADO and
+  registry credentials are never used for catalog requests, and catalog
+  credentials never authenticate package downloads.
+- **Denied access.** HTTP 401, 403 or a redirect to a sign-in page fails
+  with `Access to marketplace 'NAME' was denied` and the variable to set,
+  and exits 1. It is never served from cache: a denied `apm marketplace
+  update` keeps the last cached catalog and does not report it as updated.
+
+Applies to `add`, `browse`, `search`, `apm view`, `apm install` and
+`update`. Variable values never appear in URLs, `apm.yml`, the lockfile or
+output; a malformed value is reported by variable name only.
 
 ### `apm marketplace list`
 

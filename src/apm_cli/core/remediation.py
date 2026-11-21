@@ -432,17 +432,6 @@ MARKETPLACE_HOST_CONFLICT = _entry(
     "register it from the host embedded in SOURCE",
     before="drop --host",
 )
-MARKETPLACES_OUTSIDE_USER_MANIFEST = _entry(
-    "marketplaces-outside-user-manifest",
-    "apm install -g",
-    "register them from the user manifest",
-    before="move the entries to the user manifest ({path})",
-)
-MARKETPLACE_REGISTER_MANUAL = _entry(
-    "marketplace-register-manual",
-    "apm marketplace add <source> --name <name>",
-    "register one manually",
-)
 MARKETPLACE_ORIGIN_READD = _entry(
     "marketplace-origin-readd", "apm marketplace add <source>", "re-add the marketplace"
 )
@@ -454,6 +443,31 @@ MARKETPLACE_REF_SWAP_ACCEPT = _entry(
     "apm update",
     "accept the new ref (pin '{key}')",
     before="if the publisher moved this version on purpose",
+)
+MARKETPLACE_PROJECT_ORIGIN_RELOCK = _entry(
+    "marketplace-project-origin-relock",
+    "apm install",
+    "re-resolve it through the apm.yml marketplaces: map",
+    before="drop --frozen",
+    then="commit apm.lock.yaml",
+)
+MARKETPLACE_ALLOW_READD = _entry(
+    "marketplace-allow-readd",
+    "apm install",
+    "release the package locked from that catalog",
+    before="remove its entry from apm.yml",
+    then="add it back from an allowed catalog",
+)
+MARKETPLACE_CREDENTIAL_BIND = _entry(
+    "marketplace-credential-bind",
+    "apm marketplace add {url} --name {name}",
+    "bind that name to this catalog",
+    then="set {token} (Bearer), or {user} and {password} (Basic)",
+)
+MARKETPLACE_CREDENTIAL_REBIND = _entry(
+    "marketplace-credential-rebind",
+    "apm marketplace remove {name}",
+    "free the name for a new binding",
 )
 # -- end W2 marketplace --
 # -- W2 bundle --
@@ -618,8 +632,8 @@ HOOK_CONFIG_STALE = _entry("hook-config-stale", "apm install", "rebuild the hook
 COPILOT_PLUGIN_REGISTRATION_STALE = _entry(
     "copilot-plugin-registration-stale",
     "apm install",
-    "re-register the GitHub Copilot plugins",
-    before="resolve the cause above",
+    "move the GitHub Copilot plugin registration to .agents/plugins",
+    before="include copilot in the targets",
 )
 CLAUDE_PLUGIN_REGISTRATION_STALE = _entry(
     "claude-plugin-registration-stale",
@@ -916,6 +930,19 @@ PROTOCOL_FALLBACK_DISALLOWED = _entry(
     "apm config set allow-protocol-fallback true",
     "allow cross-protocol fallback (not recommended)",
 )
+CLAUDE_AGENTS_MD_BLOCKED = _entry(
+    "claude-agents-md-blocked",
+    "apm install",
+    "move always-on and directory instructions from .claude/rules/ into AGENTS.md",
+    before="{fix}",
+    then="run 'apm compile'",
+)
+CLAUDE_DIRECTORY_INSTRUCTION_SINGLE_FILE = _entry(
+    "claude-directory-instruction-single-file",
+    "apm install",
+    "keep it in .claude/rules/",
+    before="set 'compilation.strategy: single-file' in apm.yml",
+)
 
 # -- end W3 deps-compilation --
 # -- W3 plugins-runtime --
@@ -958,13 +985,13 @@ CLAUDE_PLUGIN_BIN_UNTRUSTED = _entry(
 CLAUDE_PLUGIN_SOURCE_STALE = _entry(
     "claude-plugin-source-stale",
     "apm install --global",
-    "restore the native Claude plugin from apm.lock.yaml",
+    "restore the native plugin from apm.lock.yaml",
 )
 CLAUDE_PLUGIN_BINDING_MOVED = _entry(
     "claude-plugin-binding-moved",
     "apm install --global",
-    "register the native Claude plugins under this APM home",
-    before="remove the old entries from Claude settings and ~/.agents/plugins, "
+    "declare the native plugins under this scope's marketplace",
+    before="remove the old entries from the harness settings and {plugins_dir}, "
     "move apm.lock.yaml aside",
 )
 CODEX_PLUGIN_USER_SCOPE = _entry(
@@ -995,11 +1022,11 @@ CODEX_NATIVE_REGISTRATION_UNVERIFIED = _entry(
     "apm install -g --target codex",
     "register the Codex plugin again from its admitted source",
 )
-COPILOT_SETTINGS_INVALID = _entry(
-    "copilot-settings-invalid",
+NATIVE_SETTINGS_INVALID = _entry(
+    "native-settings-invalid",
     "apm install",
-    "register the Agent Plugin and install the packages",
-    before="fix or delete the file",
+    "declare the native plugins and install the packages",
+    before="fix the file, or move it aside",
 )
 LLM_TLS_BOOTSTRAP_MISSING = _entry(
     "llm-tls-bootstrap-missing",
@@ -1465,6 +1492,21 @@ CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS = _entry(
     "remove the loose hook deployment",
     then="run 'apm install --global {package}' to activate it as a native Claude plugin",
 )
+CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS_PROJECT = _entry(
+    "claude-native-switch-loose-hooks-project",
+    "apm uninstall {package}",
+    "remove the loose hook deployment",
+    then="run 'apm install {package}' to activate it as a native plugin",
+)
+
+
+def claude_native_switch_loose_hooks(*, user_scope: bool) -> Remediation:
+    """The loose-hooks switch remedy for the scope the install runs at."""
+    return (
+        CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS if user_scope else CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS_PROJECT
+    )
+
+
 SKILL_PATH_MIGRATION_CONFLICT = _entry(
     "skill-path-migration-conflict",
     "apm install",
@@ -1523,6 +1565,9 @@ REPOSITORY_NOT_FOUND = _entry(
 )
 LOCAL_BUNDLE_UPDATE = _entry(
     "local-bundle-update", "apm install <newer-bundle-file>", "update a bundle"
+)
+NATIVE_PLUGIN_UPDATE_HELD = _entry(
+    "native-plugin-update-held", "apm install", "update it", before="drop --target"
 )
 # -- end W4 phases-targets --
 # -- end install/policy (W4) ---------------------------------------------------

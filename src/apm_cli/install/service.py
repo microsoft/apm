@@ -72,6 +72,11 @@ class FrozenDisposition:
         return self.replay
 
     @property
+    def retain_stale_files(self) -> bool:
+        """A locked file this version no longer renders stays on disk and in the lock."""
+        return self.replay
+
+    @property
     def withhold_lockfile_writes(self) -> bool:
         """apm.lock.yaml is never rewritten, so nothing new may be recorded."""
         return self.replay
@@ -311,26 +316,37 @@ class InstallService:
             # rewrite or keep them, so every primitive type answers alike.
             self._enforce_frozen_deployed_hashes(request, deployed=False)
 
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.marketplace.project_marketplaces import bind_project_marketplaces
+
+        # The root project's ``marketplaces:`` map resolves this install,
+        # previews included (#2903). Each path enters the scope once.
+        marketplace_scope = bind_project_marketplaces(
+            getattr(request.apm_package, "marketplaces", None),
+            user_scope=request.scope is InstallScope.USER,
+        )
         if request.dry_run:
             # A preview runs no lifecycle scripts and commits nothing.
-            return self._run_pipeline(request)
+            with marketplace_scope:
+                return self._run_pipeline(request)
 
         runner = self._build_script_runner(request)
         event = self._build_event("pre-install", request)
         runner.fire("pre-install", event)
 
-        if request.frozen:
-            # req-lk-006: the lockfile is never written in frozen mode.
-            # Suppress at the chokepoint, then decide from what was
-            # withheld whether this install can report success.  The
-            # pipeline still deploys, as `npm ci` does.
-            from apm_cli.install.frozen_withdrawal import frozen_capture
+        with marketplace_scope:
+            if request.frozen:
+                # req-lk-006: the lockfile is never written in frozen mode.
+                # Suppress at the chokepoint, then decide from what was
+                # withheld whether this install can report success.  The
+                # pipeline still deploys, as `npm ci` does.
+                from apm_cli.install.frozen_withdrawal import frozen_capture
 
-            with frozen_capture(_frozen_lockfile_path(request)) as withheld:
+                with frozen_capture(_frozen_lockfile_path(request)) as withheld:
+                    result = self._run_pipeline(request)
+            else:
+                withheld = None
                 result = self._run_pipeline(request)
-        else:
-            withheld = None
-            result = self._run_pipeline(request)
 
         install_worked = result.disposition in {
             InstallDisposition.SUCCESS,

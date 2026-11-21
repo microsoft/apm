@@ -11,6 +11,7 @@ from urllib.parse import quote, urlparse, urlunparse
 
 import requests
 
+from ..core.deprecations import deprecation_message
 from ..mcp_transport import canonical_remote_transport
 from ..utils.http_credentials import CredentialScopedSession
 
@@ -752,9 +753,7 @@ class SimpleRegistryClient:
         endpoint no longer exists on spec-compliant registries.
         """
         warnings.warn(
-            "SimpleRegistryClient.get_server_info(server_name) is deprecated; "
-            "use SimpleRegistryClient.get_server(server_name, version='latest'). "
-            "The parameter now means a server name per MCP Registry v0.1.",
+            deprecation_message("registry-get-server-info"),
             DeprecationWarning,
             stacklevel=2,
         )

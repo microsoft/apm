@@ -2144,6 +2144,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A -g local bundle keeps its lock under the home directory instead of APM_HOME.",
     ),
     MutationCase(
+        guard_id="install-deployment-claude-agents-md-routing",
+        rule_id="install-deployment-claude-agents-md-routing",
+        path="src/apm_cli/integration/instruction_integrator.py",
+        old="            if routes_to_agents_md(",
+        new="            if True or routes_to_agents_md(",
+        intent="Install widens Claude routing beyond the owner's verdict.",
+    ),
+    MutationCase(
         guard_id="install-deployment-cleanup-ownership-release",
         rule_id="install-deployment-cleanup-ownership-release",
         path="src/apm_cli/integration/cleanup.py",
@@ -2842,7 +2850,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="marketplace-integrations-claude-ownership",
         rule_id="marketplace-integrations-claude-ownership",
         path="src/apm_cli/native_plugins/settings.py",
-        old="if enabled.get(key) is True:",
+        old="if enabled.get(key) is True or (plugin in managed and enabled.get(key) is False):",
         new="if key in enabled:",
         intent="Retiring a native plugin deletes the user's explicit enabledPlugins false.",
     ),
@@ -2858,9 +2866,9 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="marketplace-integrations-copilot-ownership",
         rule_id="marketplace-integrations-copilot-ownership",
         path="src/apm_cli/copilot_plugins/registrar.py",
-        old="def synchronize_copilot_plugins(",
-        new="def synchronize_copilot_plugins_X(",
-        intent="Copilot marketplace ownership loses its single synchronization owner.",
+        old="def plan_legacy_copilot_retirement(",
+        new="def plan_legacy_copilot_retirement_X(",
+        intent="The legacy Copilot registration loses its single migration owner.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-dependency-confusion",
@@ -2971,6 +2979,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def _require_portable_agent_plugin(",
         new="def _require_portable_agent_plugin_X(",
         intent="Agent-plugin producer loses its portability admission gate.",
+    ),
+    MutationCase(
+        guard_id="marketplace-integrations-project-map",
+        rule_id="marketplace-integrations-project-map",
+        path="src/apm_cli/marketplace/registry.py",
+        old="    declared = project_marketplace(name)\n",
+        new="    declared = None\n",
+        intent="A same-named registration silently overrides the root marketplaces: map.",
     ),
     MutationCase(
         guard_id="marketplace-integrations-raw-diagnostics",
@@ -3103,6 +3119,17 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old='_rich_echo(f"  [x] {error}", color="red")',
         new='click.echo(f"  [x] {error}")',
         intent="A command prints an error line on stdout outside the console stream owner.",
+    ),
+    MutationCase(
+        guard_id="registry-delegation-deprecation-catalog",
+        rule_id="registry_delegation.deprecation_catalog",
+        path="src/apm_cli/commands/pack.py",
+        old='logger.warning(deprecation_message("unpack"))',
+        new=(
+            "logger.warning(\"'apm unpack' is deprecated and will be removed in a future "
+            'release.")'
+        ),
+        intent="A command re-spells a deprecation warning instead of reading the catalog.",
     ),
     MutationCase(
         guard_id="registry-delegation-experimental-flags",
@@ -3657,6 +3684,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The marketplace parser interprets peeled ^{} records outside tag_commit_shas.",
     ),
     MutationCase(
+        guard_id="transport-platform-marketplace-catalog-credentials",
+        rule_id="transport-platform-marketplace-catalog-credentials",
+        path="src/apm_cli/marketplace/client.py",
+        old="            bind_query=credential.presented,\n            ambient_credentials=False,\n",
+        new="            bind_query=credential.presented,\n            ambient_credentials=True,\n",
+        intent="Hosted catalog requests regain ambient .netrc credentials.",
+    ),
+    MutationCase(
         guard_id="transport-platform-marketplace-package-remote",
         rule_id="transport-platform-marketplace-package-remote",
         path="src/apm_cli/marketplace/resolver.py",
@@ -3783,6 +3818,14 @@ CASE_IDS: tuple[str, ...] = tuple(case.guard_id for case in MUTATIONS)
 # Multiple routing edges extend existing owners; they do not allocate competing
 # registry guards. Execute these through the same source-override mutation seam.
 USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
+    MutationCase(
+        guard_id="install-deployment-claude-agents-md-routing",
+        rule_id="install-deployment-claude-agents-md-routing",
+        path="src/apm_cli/integration/instruction_integrator.py",
+        old="blocker = claude_agents_md_blocker(live_root)",
+        new="blocker = None",
+        intent="Install routes Claude instructions to AGENTS.md past a hand-authored CLAUDE.md.",
+    ),
     MutationCase(
         guard_id="contracts-tooling-root-context-write-eligibility",
         rule_id="contracts-tooling-root-context-write-eligibility",
@@ -4379,8 +4422,8 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
     [
         (
             "src/apm_cli/install/deployment_plan.py",
-            "native_claude_plugin = plan_native_claude_plugin(",
-            "native_claude_plugin = rogue_native_plan(",
+            "if is_first_party\n        else plan_native_claude_plugin(",
+            "if False\n        else plan_native_claude_plugin(",
         ),
         (
             "src/apm_cli/install/services.py",
@@ -4414,8 +4457,8 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
         ),
         (
             "src/apm_cli/native_plugins/settings.py",
-            "for plugin in sorted((owned or frozenset()) - declaration.plugins):",
-            "for plugin in sorted(frozenset(enabled) - declaration.plugins):",
+            "for plugin in sorted((owned or frozenset()) - wanted):",
+            "for plugin in sorted(frozenset(enabled) - wanted):",
         ),
         (
             "src/apm_cli/install/phases/claude_plugins.py",
@@ -4444,7 +4487,17 @@ def test_claude_native_transition_guard_requires_read_only_preservation(old: str
         ),
         (
             "src/apm_cli/claude_plugins/registrar.py",
-            "if fingerprint_native_claude_source(source) != own.record.fingerprint:",
+            "if fingerprint_of(source) != own.record.fingerprint:",
+            "if False:",
+        ),
+        (
+            "src/apm_cli/claude_plugins/registrar.py",
+            "changes[harness] = write_declaration(target, declarations[harness])",
+            "changes[harness] = SettingsChange()",
+        ),
+        (
+            "src/apm_cli/install/drift.py",
+            'if result.get("native_plugin") and lock_dep.native_plugin is not None:',
             "if False:",
         ),
         (

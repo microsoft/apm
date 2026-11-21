@@ -652,6 +652,7 @@ install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
 install-deployment-gate-retirement
 install-deployment-codex-agent-link-resolution
+install-deployment-claude-agents-md-routing
 install-deployment-agent-render-then-adopt
 install-deployment-command-render-then-adopt
 install-deployment-overwrite-evidence
@@ -763,6 +764,7 @@ marketplace-integrations-package-construction
 marketplace-integrations-package-format-precedence
 marketplace-integrations-package-projection
 marketplace-integrations-producer-admission
+marketplace-integrations-project-map
 marketplace-integrations-projection-boundary
 marketplace-integrations-raw-diagnostics
 marketplace-integrations-ref-pin-commit
@@ -806,6 +808,7 @@ registry_delegation.compile_inventory_authority
 registry_delegation.compiled_output_writes
 registry_delegation.console_construction
 registry_delegation.console_streams
+registry_delegation.deprecation_catalog
 registry_delegation.diagnostic_ascii_owner
 registry_delegation.experimental_flags
 registry_delegation.experimental_target_hints
@@ -850,6 +853,7 @@ transport-platform-host-credential-resolution
 transport-platform-host-reference-coordinates
 transport-platform-http-session-construction
 transport-platform-ls-remote-tag-commits
+transport-platform-marketplace-catalog-credentials
 transport-platform-marketplace-package-remote
 transport-platform-network-host-parsing
 transport-platform-origin-bounded-redirect

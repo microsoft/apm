@@ -70,6 +70,75 @@ def test_install_and_audit_share_locked_selection(
     assert lockfile_satisfies_manifest(lock, [declaration])[0] is valid
 
 
+def _registry_locked(**changes: object) -> LockedDependency:
+    return LockedDependency(
+        **{
+            "repo_url": "owner/package",
+            "discovered_via": "catalog",
+            "marketplace_plugin_name": "tool",
+            "source": "registry",
+            "resolved_ref": "1.2.3",
+            "version": "1.2.3",
+            "resolved_url": "https://registry.example/apm/v1/packages/owner/package/versions/1.2.3/download",
+            "resolved_hash": "sha256:" + "c" * 64,
+            **changes,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("spec", "changes", "valid"),
+    [
+        (None, {}, True),
+        ("^1.0.0", {}, True),
+        ("~1.2.0", {}, True),
+        ("1.2.3", {}, True),
+        ("^2.0.0", {}, False),
+        ("1.2.4", {}, False),
+        ("a" * 40, {}, False),
+        ("a" * 40, {"version": "a" * 40, "resolved_ref": "a" * 40}, True),
+        ("^1.0.0", {"version": "1.1.0-rc.1", "resolved_ref": "1.1.0-rc.1"}, False),
+        ("^1.1.0-rc.1", {"version": "1.1.0-rc.1", "resolved_ref": "1.1.0-rc.1"}, True),
+        ("^1.0.0", {"version": None}, False),
+        ("^1.0.0", {"resolved_url": None}, False),
+        ("^1.0.0", {"resolved_hash": None}, False),
+        (None, {"resolved_hash": None}, False),
+    ],
+)
+def test_registry_row_is_locked_evidence_without_a_commit(
+    spec: str | None, changes: dict[str, object], valid: bool
+) -> None:
+    """A registry-routed catalog row replays on version, URL and hash (#4009)."""
+    declaration = _selection(spec) if spec else _selection_without_version()
+    locked = _registry_locked(**changes)
+    lock = LockFile(dependencies={locked.get_unique_key(): locked})
+    assert (marketplace_ref_mismatch(declaration, locked) is None) is valid
+    assert detect_ref_change(declaration, locked) is not valid
+    assert lockfile_satisfies_manifest(lock, [declaration])[0] is valid
+
+
+@pytest.mark.parametrize(
+    ("spec", "changes", "reason"),
+    [
+        (
+            "^1.0.0",
+            {"resolved_hash": None},
+            "missing locked registry version, URL or hash evidence",
+        ),
+        ("^2.0.0", {}, "manifest version '^2.0.0' != lockfile registry version '1.2.3'"),
+    ],
+)
+def test_registry_row_refusal_names_its_reason(
+    spec: str, changes: dict[str, object], reason: str
+) -> None:
+    """An unusable registry row says why: missing pin evidence or a moved selector."""
+    assert marketplace_ref_mismatch(_selection(spec), _registry_locked(**changes)) == reason
+
+
+def _selection_without_version() -> DependencyReference:
+    return DependencyReference.parse_from_dict({"name": "tool", "marketplace": "catalog"})
+
+
 def test_lookup_refreshes_after_mutation_and_rejects_placeholder_bypass() -> None:
     """Mutable lockfiles cannot retain a stale unique provenance answer."""
     selected = _locked()

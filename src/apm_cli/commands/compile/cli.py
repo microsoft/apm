@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
+from ...core.deprecations import deprecation_message
 from ...core.target_catalog import (
     TARGET_CAPABILITIES,
     expand_all,
@@ -1360,9 +1361,8 @@ def _run_compilation(  # noqa: PLR0912 -- one flow per compile mode
     "no_dedup",
     default=False,
     help=(
-        "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
-        "already populated, and in AGENTS.md even when .github/instructions/ is "
-        "already populated, in .github/copilot-instructions.md even when the "
+        "Include instructions in AGENTS.md even when .claude/rules/ or "
+        ".github/instructions/ already deliver them, in .github/copilot-instructions.md even when the "
         "matching .github/instructions/ file is deployed, or in .agents/rules/ "
         "for Antigravity. Overrides the "
         "default deduplication that normally omits these sections to avoid "
@@ -1471,7 +1471,7 @@ def compile(  # noqa: PLR0913 -- Click handler
         # warnings.warn(DeprecationWarning) is invisible by default in
         # CLI output and would only ever fire for downstream library
         # consumers running with -W default, which we have none of.
-        logger.warning("'--target all' is deprecated; use '--all' instead.")
+        logger.warning(deprecation_message("compile-target-all"))
 
     # --global: compile user-scope root context files from ~/.apm/apm_modules.
     # Must be checked before --watch / --root guards so we return early.

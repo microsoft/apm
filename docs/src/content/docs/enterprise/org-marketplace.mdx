@@ -105,7 +105,10 @@ repository.
 
    To register it on every machine without a manual step, list it under `marketplaces:`
    in the user manifest (`~/.apm/apm.yml`) and run `apm install -g`, for example from
-   your dev container setup. A project `apm.yml` cannot declare marketplaces.
+   your dev container setup. Or commit it in the project's own `apm.yml` under
+   `marketplaces:`, so a fresh clone or CI needs no registration; the policy
+   `marketplace.allow` list restricts which marketplaces a project may declare
+   ([Declare marketplaces in a project](../../consumer/installing-from-marketplaces/#declare-marketplaces-in-a-project)).
 
 4. **Declare the package with a range** (Ana), then install:
 
@@ -177,8 +180,9 @@ authoring guide:
   server, over HTTPS or SSH. Private marketplaces use the same credentials as private
   packages ([Use private sources](../../getting-started/authentication/)). Pin the
   marketplace with `--ref` so a moving default branch does not change what is listed.
-- **A `marketplace.json` URL** over HTTPS. APM sends no credentials to it, so reserve
-  this for public lists.
+- **A `marketplace.json` URL** over HTTPS. Anonymous by default; a private list
+  registered with `--name` authenticates with `APM_MARKETPLACE_TOKEN_<NAME>` or a
+  Basic pair ([private hosted catalogs](../../getting-started/authentication/#private-hosted-marketplace-catalogs)).
 - **One marketplace per audience.** Keep several `marketplace.json` files in one
   repository and register each with `--path`. This organizes discovery; it is not
   access control. Use separate repositories when audiences need separate access.

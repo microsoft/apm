@@ -73,12 +73,46 @@ def _registry_range_covers_locked_version(
     manifest_range: str | None,
     locked_version: str | None,
 ) -> bool:
-    """True when the lockfile's exact registry version still satisfies the manifest range."""
+    """True when the manifest range would still select the lockfile's exact registry version.
+
+    Uses the resolver's own ``pick_best`` so replay applies the same
+    pre-release eligibility rule: a stable range never selects a pre-release.
+    """
     if not manifest_range or not locked_version:
         return False
-    from apm_cli.deps.registry.semver import is_semver_range, match_version
+    from apm_cli.deps.registry.semver import pick_best
 
-    return bool(is_semver_range(manifest_range) and match_version(manifest_range, locked_version))
+    return pick_best(manifest_range, [locked_version]) == locked_version
+
+
+def registry_selector_mismatch(selector: str | None, locked_version: str | None) -> bool:
+    """True when a registry version selector no longer selects the locked version.
+
+    The manifest carries a selector (for example ``^1.2.0``) while the lock
+    records the exact version it resolved to (for example ``1.5.3``). A semver
+    range drifts only when it stops covering the locked version; any other
+    selector (exact tag or label) is exact-matched by the resolver, so it
+    drifts on a literal mismatch.
+    """
+    from apm_cli.deps.registry.semver import is_semver_range
+
+    if not is_semver_range(selector or ""):
+        return selector != locked_version
+    return not _registry_range_covers_locked_version(selector, locked_version)
+
+
+def has_complete_registry_pin(locked_dep: Any) -> bool:
+    """True when a registry lock row records its exact version, URL and hash.
+
+    These are the registry pin a replay needs (req-lk-003, req-lk-019):
+    the exact version selects the package, ``resolved_hash`` is the trust
+    anchor, and ``resolved_url`` is advisory. No commit is involved.
+    """
+    return bool(
+        getattr(locked_dep, "version", None)
+        and getattr(locked_dep, "resolved_url", None)
+        and getattr(locked_dep, "resolved_hash", None)
+    )
 
 
 def _normalize_dep_source(dep: Any) -> str:
@@ -119,6 +153,19 @@ def revision_pin_mismatch(reference: str | None, locked_dep: LockedDependency) -
     )
 
 
+def _registry_marketplace_mismatch(spec: str | None, locked_dep: Any) -> str | None:
+    """Compare a registry-routed catalog selection to its locked registry evidence.
+
+    A catalog entry routed to a registry locks registry evidence, not a commit
+    (#4009): the exact version, resolved URL and resolved hash.
+    """
+    if not has_complete_registry_pin(locked_dep):
+        return "missing locked registry version, URL or hash evidence"
+    if spec and registry_selector_mismatch(spec, locked_dep.version):
+        return f"manifest version '{spec}' != lockfile registry version '{locked_dep.version}'"
+    return None
+
+
 def marketplace_ref_mismatch(
     dep_ref: DependencyReference,
     locked_dep: LockedDependency,
@@ -129,6 +176,8 @@ def marketplace_ref_mismatch(
     from apm_cli.marketplace.version_resolver import is_version_constraint
 
     spec = dep_ref.marketplace_version_spec
+    if getattr(locked_dep, "source", None) == "registry":
+        return _registry_marketplace_mismatch(spec, locked_dep)
     if not is_full_revision_pin(locked_dep.resolved_commit):
         return "missing locked commit evidence"
     if not spec:
@@ -158,13 +207,18 @@ def locked_marketplace_row(
     dep_ref: DependencyReference,
     lockfile: LockFile | None,
     marketplace_index: dict | None = None,
+    *,
+    check_origin: bool = True,
 ) -> LockedDependency | None:
     """Return the lock row an unchanged marketplace declaration still matches.
 
     The row must be the lock's single association for the declaration's
-    ``{name, marketplace}``, carry no replacement binding, and satisfy
-    :func:`marketplace_ref_mismatch`. Never performs catalog I/O. Callers
-    looking up many declarations pass one ``lockfile.marketplace_index()``.
+    ``{name, marketplace}``, carry no replacement binding, satisfy
+    :func:`marketplace_ref_mismatch`, and, while the root ``marketplaces:``
+    map declares the name, record the origin the map declares (#2903;
+    *check_origin* ``False`` skips only that comparison). Never performs
+    catalog I/O. Callers looking up many declarations pass one
+    ``lockfile.marketplace_index()``.
     """
     if lockfile is None or getattr(dep_ref, "is_marketplace", False) is not True:
         return None
@@ -175,9 +229,16 @@ def locked_marketplace_row(
         locked_dep is None
         or locked_dep.replacement is not None
         or marketplace_ref_mismatch(dep_ref, locked_dep) is not None
+        or (check_origin and _declared_origin_conflict(dep_ref, locked_dep) is not None)
     ):
         return None
     return locked_dep
+
+
+def _declared_origin_conflict(dep_ref: DependencyReference, locked_dep: LockedDependency):
+    from apm_cli.marketplace.project_marketplaces import declared_origin_conflict
+
+    return declared_origin_conflict(dep_ref.marketplace_name, locked_dep.source_url)
 
 
 def _owns_locked_servers(
@@ -211,6 +272,7 @@ MARKETPLACE_REPLAYED = "replayed"
 MARKETPLACE_UNLOCKED = "unlocked"
 MARKETPLACE_UPDATE = "update"
 MARKETPLACE_CATALOG_METADATA = "catalog-metadata"
+MARKETPLACE_ORIGIN_CHANGED = "origin-changed"
 
 
 @dataclass(frozen=True)
@@ -219,6 +281,7 @@ class MarketplaceReplay:
 
     reason: str
     reference: DependencyReference | None = None
+    origin_conflict: Exception | None = None
 
 
 def locked_marketplace_replay(
@@ -236,7 +299,10 @@ def locked_marketplace_replay(
     commit and hashes then pin the download. New, changed, ambiguous,
     replacement-bound or under-evidenced entries are ``unlocked`` and
     ``apm update`` / ``--refresh`` (*update_refs*) is ``update``; both
-    resolve through the marketplace.
+    resolve through the marketplace. A row recorded from an origin other
+    than the one the root ``marketplaces:`` map now declares is
+    ``origin-changed``: it re-resolves through the map, since the file wins
+    (#2903), and ``--frozen`` refuses it.
 
     ``catalog-metadata`` covers one case: catalog entries may define MCP or
     LSP servers inline, and the lock cannot rebuild that metadata, so a row
@@ -248,7 +314,7 @@ def locked_marketplace_replay(
         return MarketplaceReplay(MARKETPLACE_UPDATE)
     locked_dep = locked_marketplace_row(dep_ref, lockfile)
     if locked_dep is None:
-        return MarketplaceReplay(MARKETPLACE_UNLOCKED)
+        return _unlocked_marketplace_replay(dep_ref, lockfile)
     replayed = locked_dep.to_edge_reference(dep_ref)
     if modules_dir is not None and replayed.get_install_path(modules_dir).is_dir():
         return MarketplaceReplay(MARKETPLACE_REPLAYED, replayed)
@@ -257,12 +323,36 @@ def locked_marketplace_replay(
     return MarketplaceReplay(MARKETPLACE_REPLAYED, replayed)
 
 
-def frozen_marketplace_refusal(decision: MarketplaceReplay) -> ValueError | None:
+def _unlocked_marketplace_replay(
+    dep_ref: DependencyReference, lockfile: LockFile | None
+) -> MarketplaceReplay:
+    """Classify a declaration with no replayable row: ``origin-changed`` or ``unlocked``."""
+    locked_dep = locked_marketplace_row(dep_ref, lockfile, check_origin=False)
+    declared_origin = None if locked_dep is None else _declared_origin_conflict(dep_ref, locked_dep)
+    if declared_origin is None:
+        return MarketplaceReplay(MARKETPLACE_UNLOCKED)
+    from apm_cli.marketplace.errors import ProjectMarketplaceOriginConflictError
+
+    return MarketplaceReplay(
+        MARKETPLACE_ORIGIN_CHANGED,
+        origin_conflict=ProjectMarketplaceOriginConflictError(
+            dep_ref.marketplace_name,
+            dep_ref.marketplace_plugin_name,
+            locked_dep.source_url,
+            declared_origin,
+        ),
+    )
+
+
+def frozen_marketplace_refusal(decision: MarketplaceReplay) -> Exception | None:
     """Return the ``--frozen`` refusal for a declaration the lock cannot replay.
 
-    Only an unlocked declaration is refused; ``catalog-metadata`` rows keep
-    reading the catalog because only it holds their server definitions.
+    An unlocked declaration is refused, and an ``origin-changed`` one with
+    its origin conflict; ``catalog-metadata`` rows keep reading the catalog
+    because only it holds their server definitions.
     """
+    if decision.origin_conflict is not None:
+        return decision.origin_conflict
     if decision.reason != MARKETPLACE_UNLOCKED:
         return None
     return ValueError(
@@ -394,15 +484,7 @@ def detect_ref_change(
     # (the user expanded/contracted the range away from the locked
     # version and we need to re-resolve).
     if manifest_source == "registry":
-        from apm_cli.deps.registry.semver import is_semver_range
-
-        ref = dep_ref.reference
-        if not is_semver_range(ref or ""):
-            # Non-semver selector (branch/label/exact tag): the resolver
-            # exact-matches it, so drift is a literal mismatch -- not the
-            # range-coverage test, which only applies to semver ranges.
-            return ref != locked_dep.version
-        return not _registry_range_covers_locked_version(ref, locked_dep.version)
+        return registry_selector_mismatch(dep_ref.reference, locked_dep.version)
 
     if (getattr(dep_ref, "is_insecure", False) is True) != (
         getattr(selected_locked, "is_insecure", False) is True
@@ -717,7 +799,7 @@ def build_download_ref(
         if locked is None or update_refs or ref_changed or locked.source == "local":
             raise ValueError("source has no unchanged remote lock pin")
         if locked.source == "registry":
-            if not (locked.version and locked.resolved_url and locked.resolved_hash):
+            if not has_complete_registry_pin(locked):
                 raise ValueError("registry source has no complete locked version, URL and hash")
         elif not is_full_revision_pin(locked.resolved_commit):
             raise ValueError("remote source has no immutable locked commit")

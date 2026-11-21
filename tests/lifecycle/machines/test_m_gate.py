@@ -25,7 +25,10 @@ from tests.lifecycle.machines._gate_kit import (
     GateMachine,
     GateWorld,
 )
+from tests.lifecycle.machines._gate_matrix import GateMatrix, matrix_cells, replay_matrix
+from tests.lifecycle.machines._kit import Bench, WorldPool, earned_cells
 from tests.lifecycle.oracles import ExpectedCell, Observation, Operation, check_cross_cutting
+from tests.lifecycle.receipts import current_node
 from tests.lifecycle.snapshot import restore_tree
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
@@ -167,6 +170,30 @@ def test_gate_generated_sequences_keep_cross_cutting_laws(
     )
 
 
+# Scopes the GATE matrix spine runs at (user scope joins with its own commands).
+MATRIX_SCOPES = ("project",)
+
+
+@pytest.mark.parametrize("scope", MATRIX_SCOPES)
+def test_gate_matrix_credits_op_prim_gate_cells(
+    lifecycle_template, tmp_path: Path, scope: str
+) -> None:
+    """Every command under every gate level keeps I1-I9 and earns its OP x PRIM x GATE ids."""
+    machine = GateMatrix(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), scope), scope)
+    replay_matrix(machine)
+    assert machine.expected_seen == set(), sorted(machine.expected_seen)
+    missing = matrix_cells(scope) - earned_cells(current_node(), "G1|")
+    assert not missing, f"GATE matrix ids without an oracle receipt: {sorted(missing)}"
+    # The spine ends by uninstalling every package under the dependency deny.
+    leftovers = [
+        p
+        for p in (".agents/skills", ".github/hooks", ".github/extensions")
+        if (machine.bench.deploy_root / p).exists()
+        and any((machine.bench.deploy_root / p).iterdir())
+    ]
+    assert not leftovers, f"uninstall left deployed surfaces: {leftovers}"
+
+
 def test_gate_machine_kills_the_recorded_approval_mutant(tmp_path: Path) -> None:
     """Skipping the approval check in the gate owner must fail the machine."""
     mutant = (sys.executable, str(MUTANT_PATH))
@@ -288,7 +315,12 @@ def test_home_allowlist_admits_only_exact_ancestors(tmp_path: Path) -> None:
 def _native_after(
     tmp_path: Path, managed: set[str], *, user_scope: bool = True, recorded_name: str = "tool"
 ) -> Observation:
-    """A user deploy root with one native plugin root recorded by its lock (#4225)."""
+    """A deploy root with one native plugin root recorded by its lock (#4225, #3921).
+
+    The record carries the per-machine digest at user scope and the portable
+    path-and-bytes digest at project scope.
+    """
+    from apm_cli.claude_plugins.admission import fingerprint_native_claude_source
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.native_plugins.record import NativePluginRecord
     from apm_cli.utils.content_hash import compute_native_plugin_hash
@@ -301,7 +333,9 @@ def _native_after(
     dependency = LockedDependency(repo_url="fixture/tool")
     dependency.native_plugin = NativePluginRecord(
         recorded_name,
-        compute_native_plugin_hash(root),
+        compute_native_plugin_hash(root)
+        if user_scope
+        else fingerprint_native_claude_source(root, portable=True),
         "apm-fixture",
         str(tmp_path / ".agents/plugins"),
     )
@@ -324,7 +358,7 @@ def test_i1_counts_paths_under_a_verified_native_plugin_root_as_recorded(tmp_pat
     after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool"})
     _expect_i1(after, [])
     project = _native_after(tmp_path / "p", {".agents/plugins/tool/bin/tool"}, user_scope=False)
-    _expect_i1(project, ["deployed file is not in the lock: .agents/plugins/tool/bin/tool"])
+    _expect_i1(project, [])
 
 
 def test_i1_fails_a_native_plugin_root_that_differs_from_its_record(tmp_path: Path) -> None:

@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from tests.lifecycle import obligation_space, oracles, receipts
+from tests.lifecycle.machines._gate_matrix import mcp_install_problems
 from tests.lifecycle.obligations import (
     GENERATED_PATH,
     Obligation,
@@ -188,6 +189,36 @@ def _pair(tmp_path: Path, before_files: dict[str, str], after_files: dict[str, s
     return before, ArtifactSnapshotSet.capture({"project": root})
 
 
+def test_e2e_receipt_needs_an_assertion_fact() -> None:
+    """Negative control (#4586): an e2e receipt that asserts nothing is refused."""
+    start = len(receipts.earned())
+    for empty in (
+        oracles.Evidence(),
+        oracles.Evidence(egress=()),
+        oracles.Evidence(absent={"project": ()}, present={}, unchanged={"home": []}),
+    ):
+        for strength in ("e2e", "e2e-evidence"):
+            with pytest.raises(AssertionError, match="needs at least one assertion fact"):
+                oracles.check_obligation(
+                    "G|install|local-deny|hook",
+                    strength=strength,
+                    result=_result(),
+                    evidence=empty,
+                )
+    assert len(receipts.earned()) == start
+    for facts in (
+        oracles.Evidence(exit=0),
+        oracles.Evidence(output_matches=(r"^$|.",)),
+        oracles.Evidence(output_forbids=(r"Traceback",)),
+        oracles.Evidence(ascii_output=True),
+        oracles.Evidence(expected=1, observed=1),
+    ):
+        oracles.check_obligation(
+            "G|install|local-deny|hook", strength="e2e", result=_result(), evidence=facts
+        )
+    assert len(receipts.earned()) == start + 5
+
+
 def test_check_obligation_credits_only_verified_evidence(tmp_path: Path) -> None:
     before, after = _pair(tmp_path, {"hook.json": "x", "keep.md": "k"}, {"keep.md": "k"})
     evidence = oracles.Evidence(
@@ -295,3 +326,43 @@ def test_a_real_witness_without_its_oracle_call_fails_the_ratchet(tmp_path: Path
     assert dropped.returncode != 0, dropped.stdout
     assert "no oracle receipt covered" in dropped.stdout, dropped.stdout
     assert owner_rows[0] in dropped.stdout, dropped.stdout
+
+
+# -- negative control of the M-GATE matrix U7 oracle (tests/lifecycle/machines) ----
+
+
+@pytest.mark.parametrize(
+    ("after", "declared", "locked", "message"),
+    [
+        # A successful no-op: nothing declared, locked or configured.
+        (frozenset({"p-exec-mcp"}), [], [], r"p-registry is not declared"),
+        # Collateral removal of a server the gate still allows.
+        (frozenset({"p-registry"}), ["io.github.lifecycle/p-registry"], ["p-registry"], "removed"),
+        # A server nobody requested.
+        (
+            frozenset({"p-exec-mcp", "p-registry", "rogue"}),
+            ["io.github.lifecycle/p-registry"],
+            ["p-registry"],
+            "configured other servers",
+        ),
+    ],
+)
+def test_mcp_install_oracle_rejects_no_ops_and_collateral(
+    after: frozenset[str], declared: list[str], locked: list[str], message: str
+) -> None:
+    """Negative control of the U7 oracle: each defect fails; the faithful outcome passes."""
+    from apm_cli.deps.lockfile import LockFile
+
+    before = frozenset({"p-exec-mcp"})
+    lock = LockFile(mcp_servers=list(locked))
+    manifest = {"dependencies": {"mcp": declared}}
+    problems = mcp_install_problems(before, after, manifest, lock, before)
+    assert any(re.search(message, problem) for problem in problems), problems
+    faithful = mcp_install_problems(
+        before,
+        before | {"p-registry"},
+        {"dependencies": {"mcp": ["io.github.lifecycle/p-registry"]}},
+        LockFile(mcp_servers=["io.github.lifecycle/p-registry"]),
+        before,
+    )
+    assert faithful == []

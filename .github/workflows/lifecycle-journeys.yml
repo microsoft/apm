@@ -5,8 +5,8 @@ name: Lifecycle Journeys Nightly
 # Linux. PR and main-push CI run only the lifecycle smoke subset, so this is
 # the only scheduled run of every lifecycle witness. A scheduled failure opens
 # (or updates) one tracking issue; the next green scheduled run closes it.
-# Dispatch with `ref` set to a release-candidate SHA to validate it before
-# tagging.
+# Dispatch with `ref` set to a release-candidate commit on main or a release/*
+# branch to validate it before tagging; resolve-ref refuses any other commit.
 
 on:
   schedule:
@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Commit SHA, branch or tag to test (empty: the default branch)'
+        description: 'Commit on main or a release/* branch: SHA, branch or tag (empty: the default branch)'
         required: false
         default: ''
         type: string
@@ -34,8 +34,59 @@ env:
   PYTHON_VERSION: '3.12'
 
 jobs:
+  # Every other checkout tests the commit this job resolves: the default
+  # branch head, or a dispatched ref that is a commit on main or a release/*
+  # branch. The dispatch input is read only here, through the environment.
+  resolve-ref:
+    name: Resolve the commit to test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - name: Resolve the requested ref to a tracked commit
+        id: resolve
+        env:
+          REQUESTED_REF: ${{ inputs.ref }}
+          DEFAULT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          allowed="a commit on main or a release/* branch (a SHA, one of those branches, or a tag on them)"
+          if [ -z "$REQUESTED_REF" ]; then
+            echo "sha=$DEFAULT_SHA" >> "$GITHUB_OUTPUT"
+            echo "[i] No ref requested; testing $DEFAULT_SHA"
+            exit 0
+          fi
+          case "$REQUESTED_REF" in
+            -* | *[!A-Za-z0-9._/-]*)
+              echo "::error::The requested ref is not a commit SHA, branch or tag name. Allowed: $allowed."
+              exit 1
+              ;;
+          esac
+          sha=$(git rev-parse --verify --quiet --end-of-options "$REQUESTED_REF^{commit}") \
+            || sha=$(git rev-parse --verify --quiet --end-of-options "refs/remotes/origin/$REQUESTED_REF^{commit}") \
+            || { echo "::error::Ref '$REQUESTED_REF' does not resolve to a commit in this repository. Allowed: $allowed."; exit 1; }
+          for branch in $(git for-each-ref --format='%(refname)' refs/remotes/origin/main refs/remotes/origin/release); do
+            if git merge-base --is-ancestor "$sha" "$branch"; then
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              echo "[+] Testing $sha from ${branch#refs/remotes/origin/}"
+              exit 0
+            fi
+          done
+          echo "::error::Ref '$REQUESTED_REF' ($sha) is not on main or a release/* branch. Allowed: $allowed."
+          exit 1
+
   journeys:
     name: Lifecycle Journeys (${{ matrix.os }})
+    needs: resolve-ref
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -48,7 +99,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.resolve-ref.outputs.sha }}
           persist-credentials: false
 
       - name: Set up Python
@@ -65,18 +116,33 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Run every lifecycle journey
+        env:
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
         run: |
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
             -n 2 --durations=10 -m "not live" tests/lifecycle/journeys/test_journeys.py
 
+      # Every generated journey witness must report on Linux (#4586); the other
+      # operating systems may skip platform-bound steps, so they do not require it.
+      - name: Require a receipt from every journey witness
+        if: matrix.os == 'ubuntu-24.04'
+        env:
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
+          APM_LIFECYCLE_RECEIPTS_REQUIRED: "1"
+          APM_LIFECYCLE_RECEIPTS_SCOPE: tests/lifecycle/journeys/
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q \
+            tests/quality/test_promise_obligations.py::test_merged_receipts_hold_the_ratchet
+
   lifecycle-full:
     name: Lifecycle Full Suite (Linux)
+    needs: resolve-ref
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.resolve-ref.outputs.sha }}
           persist-credentials: false
 
       - name: Set up Python
@@ -104,22 +170,39 @@ jobs:
       - name: Run the full lifecycle suite
         env:
           APM_E2E_TESTS: "1"
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
         run: |
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
             -n 4 --dist loadgroup --durations=20 -m "not live" \
             --ignore=tests/lifecycle/journeys tests/lifecycle
+
+      # This job runs every required witness under tests/lifecycle outside journeys
+      # (promise witnesses and the generated security, replay and machine rows), so
+      # each must have reported a receipt (#4586); the journeys job above requires the
+      # journey family. The PR lifecycle smoke shards (ci.yml) and
+      # gate-machine-nightly.yml run subsets and do not set
+      # APM_LIFECYCLE_RECEIPTS_REQUIRED.
+      - name: Require a receipt from every required witness
+        env:
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
+          APM_LIFECYCLE_RECEIPTS_REQUIRED: "1"
+          APM_LIFECYCLE_RECEIPTS_SCOPE: tests/lifecycle/,!tests/lifecycle/journeys/
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q \
+            tests/quality/test_promise_obligations.py::test_merged_receipts_hold_the_ratchet
 
   # PR integration shards keep only the per-group sample of the linter session
   # cache's byte-equality guard; the full owner-mutation replay (~15 min) runs
   # here, nightly and on every release-candidate dispatch.
   architecture-cache-full-matrix:
     name: Architecture Cache Full Matrix (Linux)
+    needs: resolve-ref
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.resolve-ref.outputs.sha }}
           persist-credentials: false
 
       - name: Set up Python

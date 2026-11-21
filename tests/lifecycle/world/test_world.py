@@ -24,6 +24,7 @@ import yaml
 
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.world import (
     World,
     apm_home_outside_home,
@@ -118,7 +119,11 @@ _SURFACES: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
         (".agents/skills/p-parent2/SKILL.md", "p-parent2"),
         (".agents/skills/p-child/SKILL.md", "p-child"),
     ),
-    ("p-native-claude", "project"): ((".claude/skills/p-native-claude/SKILL.md", "p-native"),),
+    # A Claude plugin installs whole at project scope too (#3921).
+    ("p-native-claude", "project"): (
+        (".agents/plugins/p-native-claude/skills/p-native-claude/SKILL.md", "p-native"),
+        (".claude/settings.json", "p-native-claude"),
+    ),
     ("p-native-claude", "user"): ((".claude/settings.json", "p-native-claude"),),
     # Split install (#3920): skills and MCP land as loose primitives at both scopes.
     ("p-native-codex", "project"): (
@@ -129,8 +134,10 @@ _SURFACES: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
         (".agents/skills/p-native-codex/SKILL.md", "p-native-codex"),
         (".codex/config.toml", "p-native-codex-mcp"),
     ),
+    # Whole at project scope (#3921) once its bin/ is trusted (the printed step).
     ("p-native-claude-bin", "project"): (
-        (".claude/skills/p-native-claude-bin/SKILL.md", "p-native-claude-bin"),
+        (".agents/plugins/p-native-claude-bin/.claude-plugin/plugin.json", "p-native-claude-bin"),
+        (".claude/settings.json", "p-native-claude-bin"),
     ),
     ("p-canvas", "project"): ((".github/extensions/p-canvas/extension.mjs", "p-canvas"),),
     # Copilot has no user-scope canvas surface (integration/targets.py "copilot").
@@ -141,7 +148,7 @@ _TARGETS = {
     "p-native-codex": "codex",
     "p-native-claude-bin": "claude",
 }
-_KNOWN = {}
+_KNOWN: dict[tuple[str, str], KnownFailure] = {}
 
 
 def _deploy_root(world: World, scope: str) -> Path:
@@ -237,13 +244,10 @@ def test_each_world_starts_with_an_empty_egress_log(lifecycle_world: World) -> N
 def _cell_marks(package: str, scope: str) -> list[pytest.MarkDecorator]:
     if (package, scope) not in _KNOWN:
         return []
-    return [
-        pytest.mark.xfail(
-            strict=True, reason=f"tracking {_KNOWN[(package, scope)]}", raises=AssertionError
-        )
-    ]
+    return [_KNOWN[(package, scope)].mark()]
 
 
+_TRUST_BIN_CELL = ("p-native-claude-bin", "project")
 _CELLS = [
     pytest.param(
         package,
@@ -265,6 +269,10 @@ def test_each_package_installs_through_the_real_cli(
     if package in _TARGETS:
         _set_targets(world, scope, _TARGETS[package])
     _install_and_approve(world, package, scope)
+    if (package, scope) == _TRUST_BIN_CELL:
+        # An approved native plugin's bin/ waits for trust in a non-interactive
+        # run; run the step the parked warning prints.
+        _ok(world, ["install", "--trust-bin"], scope)
     assert package in _locked(world, scope)
     _assert_surfaces(world, package, scope)
     assert world.services.egress_log() == [], "a local-path install reached the network"
@@ -850,6 +858,7 @@ _POLICY_EXIT = {
     "malformed": 0,
     "garbage_response": 0,
     "cached_stale": 1,
+    "deny-all-deps": 1,
 }
 _POLICY_ANNOUNCE = {
     "deny-pkg": "denied by pattern",
@@ -859,6 +868,7 @@ _POLICY_ANNOUNCE = {
     "malformed": "is not valid YAML",
     "garbage_response": "is not a YAML mapping",
     "cached_stale": "Using stale cached policy",
+    "deny-all-deps": "denied by pattern",
 }
 
 

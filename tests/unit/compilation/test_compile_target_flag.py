@@ -1330,8 +1330,8 @@ Use type hints.
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_claude_target_does_not_create_agents_md(self, temp_project):
-        """Test that --target claude doesn't create AGENTS.md."""
+    def test_claude_target_imports_agents_md(self, temp_project):
+        """--target claude writes AGENTS.md and a CLAUDE.md that imports it (#3939)."""
         config = CompilationConfig(target="claude", dry_run=False)
 
         compiler = AgentsCompiler(str(temp_project))
@@ -1353,14 +1353,9 @@ Use type hints.
         # Should succeed
         assert result.success
 
-        # CLAUDE.md should be created (in root or with distributed)
         claude_md = temp_project / "CLAUDE.md"
-        assert claude_md.exists()
-
-        # AGENTS.md should NOT be created at root
-        # (checking root AGENTS.md since distributed could create subdirectory ones)
-        agents_md = temp_project / "AGENTS.md"
-        assert not agents_md.exists()
+        assert "@AGENTS.md" in claude_md.read_text(encoding="utf-8").splitlines()
+        assert "Use type hints." in (temp_project / "AGENTS.md").read_text(encoding="utf-8")
 
 
 class TestTargetAllGeneratesBoth:

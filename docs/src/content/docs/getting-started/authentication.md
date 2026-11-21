@@ -45,6 +45,15 @@ host and uses the earliest credential it finds:
 these hosts. A GitHub Enterprise Server host joins the chain only when the
 `GITHUB_HOST` environment variable names it.
 
+To keep these tokens on one host, set `APM_STRICT_HOST_CREDENTIALS=1`.
+`GITHUB_APM_PAT_<ORG>`, `GITHUB_APM_PAT`, `GITHUB_TOKEN` and `GH_TOKEN` then
+reach only the configured host (`GITHUB_HOST`, else `github.com`). For any
+other `github.com` or `*.ghe.com` host, APM runs `gh auth token` and
+`git credential fill` without those variables, and warns once naming the host.
+Sign in for that host with `gh auth login --hostname <host>` or a credential
+helper. Values `0`, `false`, `no`, `off` or empty keep the default; any value
+APM does not recognise turns strict mode on and prints a warning.
+
 A token for one kind of host is never sent to another: a `GITHUB_TOKEN` set
 in CI never reaches GitLab. APM sends credentials as an HTTPS header, never
 in a URL, and does not store them. Every variable:
@@ -179,6 +188,29 @@ APM downloads marketplaces from generic git hosts without prompting:
 | HTTP | None |
 | SSH | Your key, no tokens, 30-second connect timeout |
 | GitHub, GitLab, Azure DevOps | The host's chain above |
+
+### Private hosted marketplace catalogs
+
+A hosted `marketplace.json` that requires a login uses its own variables,
+never your git, registry or `.netrc` credentials:
+
+| Variable | Sent as |
+|---|---|
+| `APM_MARKETPLACE_TOKEN_<NAME>` | `Authorization: Bearer <token>` |
+| `APM_MARKETPLACE_USER_<NAME>` + `APM_MARKETPLACE_PASS_<NAME>` | `Authorization: Basic <base64(user:pass)>` |
+
+`<NAME>` is the `--name` you registered, normalized like registry names
+(`corp-main` -> `CORP_MAIN`). Bearer wins when both are set.
+
+```bash frame="terminal"
+export APM_MARKETPLACE_TOKEN_CORP=your_token
+apm marketplace add https://catalog.example.com/team/marketplace.json --name corp
+```
+
+The credential stays within the registered URL's origin, directory and query
+on every redirect and never authenticates package downloads. A 401, 403 or
+sign-in redirect fails with the variable to set. See
+[Private hosted catalogs](../../reference/cli/marketplace/#private-hosted-catalogs).
 
 ### Git URL rewrite safety
 

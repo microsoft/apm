@@ -15,6 +15,16 @@ from pathlib import Path
 import pytest
 
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
+from tests.lifecycle.known import KnownFailure
+
+# @registry shorthand: a deferred design, its tracker stays open (#4543).
+_REGISTRY_SHORTHAND = KnownFailure(
+    "#4543",
+    "@registry scope shorthand not yet implemented",
+    r"Shorthand '@alias' is not supported",
+    kind="deferred-design",
+    raises=(ValueError, AssertionError),
+)
 
 pytestmark = pytest.mark.component
 
@@ -242,6 +252,12 @@ class TestRegistryUrlScheme:
             # Just outside the RFC 1918 172.16.0.0/12 range on both sides.
             "http://172.32.0.1/apm",
             "http://172.15.255.255/apm",
+            # Integer, hex and leading-zero spellings of 10.0.0.1 are not
+            # strict literals; resolvers read them differently, so they are
+            # never local (utils/net.py is_local_network_host).
+            "http://167772161/apm",
+            "http://0x0a000001/apm",
+            "http://010.0.0.1/apm",
         ],
     )
     def test_http_to_public_host_is_a_parse_error(self, write_yml, schema_line, url):
@@ -366,7 +382,7 @@ class TestDefaultRouting:
             assert dep.source == "registry"
             assert dep.registry_name == "corp"
 
-    @pytest.mark.xfail(reason="#4543 @registry scope shorthand not yet implemented", strict=True)
+    @_REGISTRY_SHORTHAND.mark()
     def test_at_scope_overrides_default(self, write_yml):
         p = write_yml("""
             name: x

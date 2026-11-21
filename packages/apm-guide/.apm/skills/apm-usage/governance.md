@@ -124,8 +124,10 @@ in full (`gitlab.example.com/group/sub/pkg`). `required-packages` (apm.yml)
 and `required-packages-deployed` (apm.lock.yaml) compare that same
 identity; an entry matching no declared package fails both, and the
 message names the other host and the entry that would match it (for a
-trusted host). An explicit proxy path (`host/artifactory/...`) is identified
-by the proxy host; prefer `PROXY_REGISTRY_URL` with plain shorthand.
+trusted host). An explicit proxy path (`art.example.com/artifactory/github/acme/tools`)
+is identified by the proxy host: require `art.example.com/acme/tools`; both
+checks read the lockfile entry written under that host. Prefer
+`PROXY_REGISTRY_URL` with plain shorthand to keep default-host entries.
 A project `default_host:` never rebinds a hostless entry, and `GITHUB_HOST`
 varies per machine, so org-wide policies should host-qualify every entry.
 Required-package matching follows source replacement: with a root
@@ -154,6 +156,31 @@ registry_source:
 
 The same registry-source rule applies to `apm install`,
 `apm install <pkg>`, `apm update`, and `apm audit --ci`.
+
+## Marketplace origin governance
+
+Restrict the marketplace catalogs a root project `apm.yml` may declare
+under `marketplaces:`, and the catalogs marketplace packages are installed
+from (the lock's `source_url` and each fresh resolution, map or
+registration), so a committed lock cannot bypass the list. A locked package
+with no recorded origin is refused. Checked at install (policy gate) and by
+`apm audit --ci`. To clear a refused package: remove its `apm.yml` entry, run
+`apm install`, then add it back from an allowed catalog (`apm update` keeps
+the recorded catalog).
+
+```yaml
+# .github/apm-policy.yml
+marketplace:
+  allow:
+    - github.com/contoso/*              # host/path glob of the catalog origin
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `allow` | `null` | Catalog origins every declared marketplace and every locked or resolved marketplace package must match (`*` = one segment, `**` = any depth; scheme, `.git` and host case ignored). `null` = no opinion; `[]` = none allowed. Local-path catalogs never match. Intersected (tighten-only) through `extends`. |
+
+Registration (`apm marketplace add`) enables discovery and `@name` shorthand
+only; it is never a trust gate. This policy is the org control.
 
 ## Integrity and drift enforcement
 
@@ -333,12 +360,10 @@ executable-trust configuration under either `executables` or the deprecated
 > `executables.deny` (bin type only) and honored as an alias for one minor
 > cycle. Prefer `executables.deny` for new policies.
 
-When a `marketplace_plugin` package ships a `bin/` directory, a global
-install (`apm install -g`) deploys those executables into
-`~/.claude/skills/<name>/bin/` so Claude Code invokes them as bare
-commands (the skills-directory plugin contract). Deployment is
-Claude-only and user-scope only; project-scope installs never deploy
-executables.
+When a `marketplace_plugin` package ships a `bin/` directory, `apm install`
+with the `claude` target keeps it inside the plugin deployed whole to
+`.agents/plugins/<plugin>/` (`~/.agents/plugins/` with `-g`), so Claude Code
+invokes the scripts as bare commands. A denied `bin/` parks the whole plugin.
 
 ```yaml
 # .github/apm-policy.yml
@@ -492,7 +517,8 @@ modify the manifest, lockfile, or deployment.
 Additional checks when a policy is provided:
 
 - **Dependencies:** allowlist, denylist, required packages (present, deployed,
-  version, executables trusted), transitive depth, pinned constraints, registry source
+  version, executables trusted), transitive depth, pinned constraints, registry source,
+  declared marketplace origins (`marketplace.allow`)
 - **Integrity:** dependency content hashes
 - **MCP:** allowlist, denylist, transport, self-defined servers
 - **Compilation:** target, strategy, source attribution

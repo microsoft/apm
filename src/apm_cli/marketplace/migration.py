@@ -28,9 +28,9 @@ import yaml
 
 from apm_cli.core.scope import manifest_file
 
+from ..core.deprecations import deprecation_message
 from ..core.remediation import (
     MARKETPLACE_CONFIG_DUPLICATE,
-    MARKETPLACE_CONFIG_LEGACY,
     MARKETPLACE_CONFIG_MISSING,
     PROJECT_MANIFEST_MISSING,
 )
@@ -50,7 +50,7 @@ __all__ = [
 ]
 
 
-DEPRECATION_MESSAGE = f"marketplace.yml is deprecated. {MARKETPLACE_CONFIG_LEGACY.sentence()}"
+DEPRECATION_MESSAGE = deprecation_message("marketplace-yml")
 
 
 logger = logging.getLogger(__name__)
@@ -120,15 +120,21 @@ def load_marketplace_config(
     *,
     warn_callback=None,
 ) -> MarketplaceConfig:
-    """Smart loader: detect source, load, warn if legacy.
+    """Smart loader: detect source, load, and report every load warning.
+
+    Single owner of config-load warnings (#4046): the legacy
+    ``marketplace.yml`` deprecation and each entry the parser collected in
+    ``MarketplaceConfig.warnings`` (the deprecated list/string form of
+    ``marketplace.outputs``, an ``outputs.<format>.path`` conflict) are each
+    delivered once, in that order, through *warn_callback*.
 
     Parameters
     ----------
     project_root : Path
         Directory holding apm.yml / marketplace.yml.
     warn_callback : callable, optional
-        Invoked with the deprecation message string when a legacy file
-        is loaded.  Defaults to a stdlib ``logging.warning`` call.
+        Invoked once with each warning message string. Defaults to a stdlib
+        ``logging.warning`` call.
 
     Raises
     ------
@@ -136,20 +142,21 @@ def load_marketplace_config(
         When no config is found, or when both files are present, or
         on any validation error from the underlying loaders.
     """
+    report = warn_callback if warn_callback is not None else logger.warning
     source = detect_config_source(project_root)
     if source == ConfigSource.APM_YML:
-        return load_marketplace_from_apm_yml(manifest_file(project_root))
-    if source == ConfigSource.LEGACY_YML:
-        msg = DEPRECATION_MESSAGE
-        if warn_callback is not None:
-            warn_callback(msg)
-        else:
-            logger.warning(msg)
-        return load_marketplace_from_legacy_yml(project_root / "marketplace.yml")
-    raise MarketplaceYmlError(
-        "No marketplace config found. Add a 'marketplace:' block to "
-        f"apm.yml or {MARKETPLACE_CONFIG_MISSING.clause()}."
-    )
+        config = load_marketplace_from_apm_yml(manifest_file(project_root))
+    elif source == ConfigSource.LEGACY_YML:
+        report(DEPRECATION_MESSAGE)
+        config = load_marketplace_from_legacy_yml(project_root / "marketplace.yml")
+    else:
+        raise MarketplaceYmlError(
+            "No marketplace config found. Add a 'marketplace:' block to "
+            f"apm.yml or {MARKETPLACE_CONFIG_MISSING.clause()}."
+        )
+    for message in config.warnings:
+        report(message)
+    return config
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,6 @@ from apm_cli.core.remediation import (
     AGENT_PLUGIN_BUNDLE_CONSUMER,
     BUNDLE_TARGET_MISMATCH,
     DEPLOYMENT_RECORDS_STALE,
-    LEGACY_BUNDLE_FORMAT,
 )
 from apm_cli.core.scope import manifest_file
 
@@ -25,6 +24,7 @@ from ..core.build_orchestrator import (
     OutputKind,
 )
 from ..core.command_logger import CommandLogger
+from ..core.deprecations import deprecation_message
 from ..core.plugin_manifest import plugin_manifest_notes_once
 from ..core.target_detection import TargetParamType
 from ..deps.lockfile_write_authority import LockfileWriter, lockfile_writer
@@ -416,11 +416,7 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
         except Exception:
             effective_target = None
     else:
-        logger.warning(
-            "--target is deprecated and will be removed in a future release. "
-            "Bundles are target-agnostic; the value is recorded as informational "
-            "pack.target metadata only and is ignored by 'apm install'."
-        )
+        logger.warning(deprecation_message("pack-target"))
         effective_target = target
     options = BuildOptions(
         project_root=project_root,
@@ -500,7 +496,15 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
             if source != ConfigSource.NONE:
                 from ..marketplace.migration import load_marketplace_config
 
-                gate_config = load_marketplace_config(project_root)
+                # The build above loaded this config and collected its load
+                # warnings. The render loop below reports them, except under an
+                # implicit --check-clean dry run (non-JSON), which skips every
+                # producer: only there does this reload report them (#4046).
+                report_reload = implicit_check_clean_dry_run and not json_output
+                gate_config = load_marketplace_config(
+                    project_root,
+                    warn_callback=logger.warning if report_reload else lambda _message: None,
+                )
         except MarketplaceYmlError as exc:
             _emit_json_error_or_raise(
                 ctx, json_output, "build_error", str(exc), warnings=authoring_warnings
@@ -975,10 +979,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     from ..install.errors import InstallFailureAlreadyRendered, PolicyViolationError
 
     logger = InstallLogger(verbose=verbose, dry_run=dry_run, command="unpack")
-    logger.warning(
-        "'apm unpack' is deprecated and will be removed in a future release. "
-        f"{LEGACY_BUNDLE_FORMAT.sentence()}",
-    )
+    logger.warning(deprecation_message("unpack"))
     try:
         logger.start(f"Unpacking {bundle_path} -> {output}")
 

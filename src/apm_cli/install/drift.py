@@ -735,7 +735,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                             live_modules=live_modules_dir,
                             scratch_root=scratch_root,
                         )
-                    if result.get("native_claude_plugin"):
+                    if result.get("native_plugin") and lock_dep.native_plugin is not None:
                         verify_claude_native_cache(
                             modules_dir=live_modules_dir, locked=lock_dep, source_root=install_path
                         )
@@ -849,6 +849,11 @@ def diff_scratch_against_project(
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
     local_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+    # An absolute claim under an external target root ($CODEX_HOME) is compared
+    # rebased onto that root, as its tracked claim is (#3714).
+    local_bundle_paths |= ReplayClaims.rebased(
+        local_bundle_paths, project_root, targets=tuple(targets), absolute_only=absolute_claims_only
+    )
     if local_bundle_paths:
         scratch_files = {
             relative_path: path

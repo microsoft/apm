@@ -11,7 +11,6 @@ import click
 from apm_cli.core.remediation import (
     DEPENDENCIES_NOT_INSTALLED,
     DEPENDENCY_UNPLACED,
-    DEPS_UPDATE_DEPRECATED,
     ORPHANED_PACKAGES_PRUNE,
 )
 from apm_cli.core.scope import manifest_file
@@ -21,6 +20,7 @@ from apm_cli.install.locking import serialized_lifecycle, serialized_lifecycle_u
 # Import existing APM components
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
+from ...core.deprecations import deprecation_message
 from ...core.project_name import DEFAULT_BOOTSTRAP_PROJECT_NAME
 from ...core.target_catalog import target_all_exclusion_help, target_help_fragment
 from ...core.target_detection import TargetParamType
@@ -528,24 +528,24 @@ def _agent_plugin_version(candidate) -> str | None:
 
 
 def _report_native_plugins(apm_dir, logger) -> None:
-    """Report Agent Plugins APM registers natively with GitHub Copilot."""
+    """Report the plugins APM activates natively, from apm.lock.yaml."""
     from pathlib import Path
 
-    from ...agent_plugins.errors import AgentPluginError
-    from ...copilot_plugins.registrar import registration_status
+    from ...deps.lockfile import LockFile, LockfileFormatError, get_lockfile_path
+    from ...native_plugins.record import lock_native_plugins
 
     try:
-        names = registration_status(Path(apm_dir) / "apm_modules")
-    except (AgentPluginError, OSError):
+        lockfile = LockFile.read(get_lockfile_path(Path(apm_dir)))
+    except (LockfileFormatError, OSError):
         return
+    names = sorted(record.name for record in lock_native_plugins(lockfile).values())
     if not names:
         return
-    noun = "Agent Plugin" if len(names) == 1 else "Agent Plugins"
     shown = ", ".join(names[:3])
     if len(names) > 3:
         shown += f", and {len(names) - 3} more"
     logger.info(
-        f"{len(names)} {noun} registered natively with GitHub Copilot: {shown}",
+        f"{len(names)} native plugin(s) activated from .agents/plugins: {shown}",
         symbol="info",
     )
     if len(names) > 3:
@@ -1118,13 +1118,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     # Soft-deprecation (issue #1525): `apm update` is now a strict superset
     # of this command. Kept working for one release; removed in the next
     # breaking release.
-    _rich_warning(
-        f"'apm deps update' is deprecated. {DEPS_UPDATE_DEPRECATED.sentence()} "
-        "'apm update' now supports -g/--global, [PACKAGES]..., --force, "
-        "--parallel-downloads, --target, and --legacy-skill-paths, plus an "
-        "interactive plan, --dry-run, and --yes.",
-        symbol="warning",
-    )
+    _rich_warning(deprecation_message("deps-update"), symbol="warning")
 
     logger = InstallLogger(verbose=verbose, partial=bool(packages))
 

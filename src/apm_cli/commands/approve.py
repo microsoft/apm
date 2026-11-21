@@ -1347,18 +1347,15 @@ def _pending_declarations(manifest: Path, *, logger: CommandLogger) -> list:
     ]
 
 
-def _is_native_plugin(
-    package_type: str | None, package_dir: Path, *, user_scope: bool = False
-) -> bool:
-    """A plugin a harness loads intact: an Agent Plugin, or a Claude plugin
-    under the user-scope native route (#3290)."""
+def _is_native_plugin(package_type: str | None, package_dir: Path) -> bool:
+    """A plugin a harness loads intact: an Agent Plugin, or a Claude plugin,
+    native at both scopes (#3290, #3921)."""
     if package_type == "agent_plugin":
         return True
     if package_type is None and _is_agent_plugin(package_dir):
         return True
     return (
-        user_scope
-        and package_type in (None, "marketplace_plugin")
+        package_type in (None, "marketplace_plugin")
         and (package_dir / ".claude-plugin" / "plugin.json").is_file()
     )
 
@@ -1394,9 +1391,6 @@ def scan_installed_executable_packages(manifest: Path) -> list:
 
     apm_modules = manifest.parent / "apm_modules"
     results: list[ExecutableDeclaration] = []
-    from ..core.scope import InstallScope, get_apm_dir
-
-    user_scope = manifest.parent.resolve() == get_apm_dir(InstallScope.USER).resolve()
 
     if not apm_modules.is_dir():
         return results
@@ -1453,7 +1447,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 parent_name=locked.resolved_by if locked.depth > 1 else None,
                 original_identity=approval.original_identity,
             )
-            native = _is_native_plugin(locked.package_type, package_dir, user_scope=user_scope)
+            native = _is_native_plugin(locked.package_type, package_dir)
             if native:
                 declaration = native_declaration(declaration, package_dir)
             if declaration.has_executables:
@@ -1499,7 +1493,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 version,
                 manifest_data=manifest_data,
             )
-            native = _is_native_plugin(None, pkg_dir, user_scope=user_scope)
+            native = _is_native_plugin(None, pkg_dir)
             if native:
                 decl = native_declaration(decl, pkg_dir)
             if decl.has_executables:

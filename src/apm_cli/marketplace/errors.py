@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import TYPE_CHECKING
 
 from ..core.remediation import (
+    MARKETPLACE_CREDENTIAL_REBIND,
     MARKETPLACE_FETCH_FAILED,
     MARKETPLACE_ORIGIN_RESTORE,
     MARKETPLACE_ORIGIN_SWITCH,
@@ -235,6 +237,44 @@ class MarketplaceFreshnessError(MarketplaceFetchError):
         )
 
 
+class MarketplaceAuthError(MarketplaceFetchError):
+    """A hosted catalog denied access, or its credential setup is unusable.
+
+    Never answered from a stale cache or another source: the caller reports
+    it and exits nonzero. The message names variables, never their values.
+    """
+
+    def __init__(self, name: str, message: str):
+        super().__init__(name, message, retry_hint="")
+        self.args = (message,)
+
+
+class MarketplaceAccessDeniedError(MarketplaceAuthError):
+    """The catalog answered HTTP 401/403 or redirected to a sign-in page."""
+
+    def __init__(self, name: str, message: str, *, status: int | None = None):
+        super().__init__(name, message)
+        self.status = status
+
+
+class MarketplaceCredentialError(MarketplaceAuthError):
+    """The ``APM_MARKETPLACE_*`` credential configuration cannot be used."""
+
+
+class MarketplaceBindingConflictError(MarketplaceError):
+    """``marketplace add`` would rebind a name whose credential is bound elsewhere."""
+
+    def __init__(self, name: str, bound_url: str):
+        self.name = name
+        self.bound_url = bound_url
+        super().__init__(
+            f"Marketplace '{name}' is already bound to {bound_url}, and its "
+            "APM_MARKETPLACE_* credential is sent only there. Nothing was changed. "
+            f"{MARKETPLACE_CREDENTIAL_REBIND.bind(name=shlex.quote(name)).sentence()} "
+            "Or choose a different --name."
+        )
+
+
 class MarketplaceNotCachedError(MarketplaceFetchError):
     """An advisory read during an explicit refresh found no cached catalog."""
 
@@ -318,4 +358,47 @@ class GitLsRemoteError(BuildError):
         super().__init__(
             f"{summary} {hint}",
             package=package,
+        )
+
+
+class UndeclaredMarketplaceError(MarketplaceError):
+    """A transitive dependency names a marketplace the root project does not declare.
+
+    Raised only when the root ``apm.yml`` declares ``marketplaces:``
+    (#2903 D3): every ``marketplace: <name>`` in the graph must then resolve
+    through that map, so a name cannot mean different things on different
+    machines.
+    """
+
+    def __init__(self, name: str, plugin_name: str, required_by: str):
+        self.name = name
+        self.plugin_name = plugin_name
+        self.required_by = required_by
+        super().__init__(
+            f"marketplace '{name}' is not declared in the root apm.yml, and a "
+            "transitive dependency may only use marketplaces the root declares. "
+            f"Add it to apm.yml:\n  marketplaces:\n    - name: {name}\n"
+            "      source: <catalog repository URL>"
+        )
+
+
+class ProjectMarketplaceOriginConflictError(MarketplaceOriginConflictError):
+    """``--frozen`` met a lock row from an origin the root ``apm.yml`` no longer declares.
+
+    The file wins (#2903 D3), so a plain install re-resolves through the map;
+    ``--frozen`` only replays the lock and refuses instead.
+    """
+
+    def __init__(self, marketplace_name: str, plugin_name: str, locked: str, current: str):
+        self.marketplace_name = marketplace_name
+        self.plugin_name = plugin_name
+        self.locked_origin = locked
+        self.current_origin = current
+        from ..core.remediation import MARKETPLACE_PROJECT_ORIGIN_RELOCK
+
+        MarketplaceError.__init__(
+            self,
+            f"marketplace {marketplace_name!r} in apm.yml now points at {current}, but "
+            f"apm.lock.yaml recorded {plugin_name!r} from {locked}. Nothing was changed. "
+            + MARKETPLACE_PROJECT_ORIGIN_RELOCK.sentence(),
         )
