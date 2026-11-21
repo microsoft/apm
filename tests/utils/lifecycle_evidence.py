@@ -386,19 +386,7 @@ def _scenario_runs(command: str, *ids: str) -> Callable[[tuple[str, ...], str], 
 
 # Product defects the oracle observes on main; each one names its issue and
 # is keyed by the surface family (command, flags, output shape) it occurs in.
-KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = (
-    # uninstall after a newly declared target re-integrates the remaining packages and
-    # prints its "Skipped .<target>/commands/" hint once per package (#4636, T-6a).
-    KnownOutputCell(
-        "uninstall-new-target-skipped-hint-repeats",
-        "I9",
-        "#4636",
-        _runs("uninstall"),
-        r"stdout repeats a line: '\[i\] Skipped \.\w+/commands/ -- create a",
-        # Only when the hint line repeats in one run.
-        output=r"^[ \t]*(\[i\] Skipped \.\w+/commands/ -- create a [^\n]*)$.*^[ \t]*\1$",
-    ),
-)
+KNOWN_OUTPUT_CELLS: tuple[KnownOutputCell, ...] = ()
 
 _EXPECTED_VIOLATIONS: ContextVar[frozenset[str]] = ContextVar(
     "apm_expected_output_violations", default=frozenset()

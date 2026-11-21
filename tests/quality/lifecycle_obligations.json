@@ -17561,9 +17561,8 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-pack]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|OP=pack|TGT=multi-unchanged": {
    "family": "pair",
@@ -17577,17 +17576,15 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-pack]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|OP=pack|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-pack]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|OP=pack|TGT=single-unchanged": {
    "family": "pair",
@@ -17601,9 +17598,8 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-pack]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|OP=prune|DEPLOYED=absent": {
    "family": "pair",
@@ -18475,8 +18471,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-uninstall]"
   },
   "pair|OP=uninstall|TGT=single-narrowed": {
    "family": "pair",
@@ -19151,7 +19148,7 @@
    "lane": "T-6e",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_registry_mcp_and_bundle_sources_work_offline"
   },
   "pair|PRIM=bin|NET=online": {
    "family": "pair",
@@ -19188,9 +19185,8 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|PRIM=bin|TGT=multi-unchanged": {
    "family": "pair",
@@ -19204,17 +19200,15 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|PRIM=bin|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|PRIM=bin|TGT=single-unchanged": {
    "family": "pair",
@@ -19228,9 +19222,8 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|PRIM=bin|UPDATE=on": {
    "family": "pair",
@@ -24383,7 +24376,7 @@
    "lane": "T-6e",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_registry_mcp_and_bundle_sources_work_offline"
   },
   "pair|SRC=pkg-registry|NET=online": {
    "credited_by": [

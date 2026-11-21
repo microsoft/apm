@@ -69,6 +69,8 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
     ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
+    # bin/ of a Claude marketplace or native plugin deploys only at user scope (U-BIN).
+    ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
 }
 # HOME paths a project command may write: receipts and bookkeeping only.
 PROJECT_HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
@@ -394,6 +396,7 @@ class Scenario:
             managed_paths=managed,
             user_bytes=dict(self.user_bytes),
             cell_paths=cell_paths,
+            user_scope=self.scope == "user",
         )
 
     def snapshot(self) -> ArtifactSnapshotSet:
