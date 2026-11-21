@@ -58,7 +58,8 @@ ACCEPTS: Mapping[str, frozenset[str]] = {
     "compile": frozenset({"DRYRUN", "SELECT"}),
     "lock": frozenset({"SELECT", "UPDATE", "NOPOLICY"}),
     "pack": frozenset({"DRYRUN", "FORCE", "SELECT"}),
-    "bundle-install": frozenset({"DRYRUN", "FORCE", "SELECT", "UPDATE", "NOPOLICY"}),
+    # --update is rejected with a local bundle (install.py rejected_flags; exit 2).
+    "bundle-install": frozenset({"DRYRUN", "FORCE", "SELECT", "NOPOLICY"}),
     # install --mcp accepts --target: mcp-install x SELECT is a success cell
     # (tests/integration/test_copilot_root_mcp_json_lifecycle.py).
     "mcp-install": frozenset({"DRYRUN", "FORCE", "SELECT", "NOPOLICY"}),
@@ -128,8 +129,13 @@ REFUSAL_EVIDENCE: Mapping[tuple[str, ...], Ev] = {
     ("mcp-install", "UPDATE"): Ev(
         "src/apm_cli/install/mcp/conflicts.py", 91, "--update does not apply to --mcp"
     ),
+    ("bundle-install", "UPDATE"): Ev(_INSTALL, 1299, '"--update": update'),
     # Verified on the real CLI: exit 2 at project and user scope, lock unchanged.
     ("install", "FROZEN", "UPDATE"): Ev(_INSTALL, 1210, "--frozen and --update are mutually"),
+}
+# Refusal cells whose message the covering replay pins (a regex over the output).
+REFUSAL_MESSAGES: Mapping[tuple[str, ...], str] = {
+    ("bundle-install", "UPDATE"): r"not valid with a local bundle install",
 }
 # Commands with a user-scope form; any other command refuses -g (U5 for pack).
 USER_SCOPE_OPS = frozenset(
@@ -416,6 +422,9 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
     return None
 
 
+_BUNDLE = "bundle-install"
+
+
 def _u8_target(cell: Mapping[str, str]) -> dict[str, str] | str | None:
     """Where U8 sends a source the command parses: the same command, or its refusal."""
     op, src = cell.get("OP"), cell.get("SRC")
@@ -427,6 +436,10 @@ def _u8_target(cell: Mapping[str, str]) -> dict[str, str] | str | None:
         return UNINSTALL_MCP_REFUSALS[src]
     if src == "local-bundle" and op in LOCAL_BUNDLE_REFUSALS:
         return LOCAL_BUNDLE_REFUSALS[op]
+    if src == "local-bundle" and op is None:
+        # Only an install states a local bundle; a modifier it refuses names that refusal.
+        if any(name in cell and name not in ACCEPTS[_BUNDLE] for name in MODIFIERS):
+            return {**cell, "OP": _BUNDLE}
     return None
 
 

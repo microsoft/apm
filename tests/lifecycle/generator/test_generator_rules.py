@@ -468,6 +468,10 @@ def _u8_mapping(cell) -> str | None:
         return f"uninstall of an MCP server ({src})"  # uninstall/engine.py:710, 869
     if src == "local-bundle" and op in ("uninstall", "update", "prune"):
         return f"{op} of a local bundle"  # uninstall/engine.py:690, update.py:448, prune.py:199
+    if src == "local-bundle" and op is None and {"FROZEN", "UPDATE"} & set(cell):
+        # Only an install states a bundle; it refuses --frozen ("positional packages")
+        # and --update (install.py rejected_flags), so the pair lands on that refusal.
+        return "a local bundle under a modifier its install refuses"
     return None
 
 
@@ -536,7 +540,11 @@ def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
         family, cell = parse_cell(key)
         clause = _u8_mapping(cell)
         clauses[clause] = clauses.get(clause, 0) + 1
-        if cell["OP"] == "install":
+        if "OP" not in cell:
+            modifier = next(name for name in ("FROZEN", "UPDATE") if name in cell)
+            refusal = cell_id("refusal", {"OP": "bundle-install", modifier: "on"})
+            assert entry["maps_to"] == refusal, key
+        elif cell["OP"] == "install":
             # The bundle-install cell itself, or the refusal its own modifier lands on.
             target = cell_id(family, {**cell, "OP": "bundle-install"})
             assert entry["maps_to"] in (target, data["mapped"].get(target, {}).get("maps_to")), key
@@ -554,6 +562,7 @@ def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
         "prune of a local bundle": 9,
         "uninstall of an MCP server (mcp-registry)": 3,
         "uninstall of an MCP server (inline-mcp)": 3,
+        "a local bundle under a modifier its install refuses": 2,
     }
 
 

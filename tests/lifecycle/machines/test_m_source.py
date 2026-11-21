@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -250,7 +250,8 @@ _COMMON = (
     "UPDATE=on",
 )
 _UNAPPROVED = "GATE=unapproved-exec"
-_MANIFEST_CONTEXT = (*_COMMON, _UNAPPROVED, "FROZEN=on")
+# GATE=none: the gate-off pass (no ``executables`` block, the default user path).
+_MANIFEST_CONTEXT = (*_COMMON, _UNAPPROVED, "GATE=none", "FROZEN=on")
 # (op, form) -> the context ids its real steps must earn (``context_pass`` and the
 # ordinary steps of the spine reach every one).
 X_CONTEXT: Mapping[tuple[str, str], tuple[str, ...]] = {
@@ -331,37 +332,9 @@ def _mcp_servers(observation: Observation) -> frozenset[str]:
     return frozenset(json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {})
 
 
-# The cache marker a git-sourced p-skill leaves behind (src/apm_cli/install/cache_pin.py).
-_STALE_PIN = "apm_modules/lifecycle/p-skill/.apm-pin"
-_STALE_PIN_ISSUE = "#4572"
-
-
-def _stale_pin(machine, op, before=None, after=None, result=None) -> bool:
-    """A registry p-skill keeps the git source's .apm-pin until ``install --update`` drops it."""
-    del after
-    return (
-        result is not None
-        and result.returncode == 0
-        and op.name == "install"
-        and "--update" in result.command
-        and machine.converged
-        and machine.network != "offline"
-        and machine.slots.get("remote-skill") is _REGISTRY_SKILL
-        and before is not None
-        and _STALE_PIN in before.artifacts.snapshot("project").paths
-    )
-
-
-# Strict known cells this machine discharges; #4214 is fixed (LSP-only packages survive uninstall).
-KNOWN_CELLS = (
-    KnownCell(
-        "registry-source-switch-stale-pin",
-        "I2",
-        _STALE_PIN_ISSUE,
-        rf"^converged install rewrote files: \['project:{re.escape(_STALE_PIN)}'\]$",
-        _stale_pin,
-    ),
-)
+# Strict known cells this machine discharges; #4214 and #4572 are fixed (LSP-only
+# packages survive uninstall; a git -> registry switch drops the stale .apm-pin).
+KNOWN_CELLS: tuple[KnownCell, ...] = ()
 
 
 class SourceMachine(MachineBase):
@@ -389,7 +362,9 @@ class SourceMachine(MachineBase):
         names |= {"p-exec"} if "remote-exec" in self.slots else set()
         if names & _DIAMOND:
             names.add("p-child")
-        return ModelState(declared=frozenset(names), targets=self.model.targets)
+        return ModelState(
+            declared=frozenset(names), targets=self.model.targets, exec_gate=self.model.exec_gate
+        )
 
     def remote(self) -> bool:
         return bool({"remote-skill", "remote-exec", "p-registry"} & set(self.slots))
@@ -477,7 +452,12 @@ class SourceMachine(MachineBase):
     # -- steps -------------------------------------------------------------------
 
     def command(
-        self, op: str, args: tuple[str, ...], choices: Collection[Choice], dry_run: bool
+        self,
+        op: str,
+        args: tuple[str, ...],
+        choices: Collection[Choice],
+        dry_run: bool,
+        verify: Callable[[Step], None] | None = None,
     ) -> Step:
         """Run *op* (after its ``--dry-run`` preview when asked) and credit T3/T5 cells."""
         requested = self.declared_model()
@@ -496,6 +476,8 @@ class SourceMachine(MachineBase):
         )
         self.egress(step)
         if step.result.returncode == 0:
+            if verify is not None:
+                verify(step)
             self.credit(step, op, args, choices, preview)
             self.model = requested
             self.converged = op not in _KEEPING or self.converged
@@ -673,6 +655,44 @@ class SourceMachine(MachineBase):
         choices = [c for c in self._choices() if c.form != "bundle"]
         self.command(op, args, choices, dry_run)
 
+    def gate_off_pass(self) -> None:
+        """No executables gate: every declared form deploys without approval (GATE=none).
+
+        Restoring the gate then removes what is no longer approved (I4).
+        """
+        saved = self.bench.manifest()["executables"]
+
+        def set_gate(value: object) -> Callable[[], None]:
+            def change() -> None:
+                data = self.bench.manifest()
+                data.pop("executables", None)
+                if value is not None:
+                    data["executables"] = value
+                self.bench.write_manifest(data)
+
+            return change
+
+        self.edit("executables-gate-off", set_gate(None))
+        self.model = self.model.with_exec_gate(False)
+        self.converged = False
+        manifest = [c for c in self._choices() if c.form != "bundle"]
+        self.command("install", (), manifest, False, verify=self.mcp_deployed_without_approval)
+        self.edit("executables-gate-on", set_gate(saved))
+        self.model = self.model.with_exec_gate(True)
+        self.converged = False
+        self.reconcile("install", False)
+
+    def mcp_deployed_without_approval(self, step: Step) -> None:
+        """Every declared MCP server is configured and locked, and none was parked."""
+        wanted = {c.package for c in self._choices() if c.form in _MCP_FORMS}
+        configured = {package_name(server) for server in _mcp_servers(step.after)}
+        assert wanted <= configured, f"MCP servers not configured: {sorted(wanted - configured)}"
+        lock = step.after.lock
+        locked = {package_name(server) for server in (lock.mcp_servers if lock else ())}
+        assert wanted <= locked, f"MCP servers not locked: {sorted(wanted - locked)}"
+        output = f"{step.result.stdout}\n{step.result.stderr}"
+        assert "Parked MCP server" not in output, output
+
     def context_pass(self) -> None:
         """Install every declared form under --force/--update/--target and --frozen, multi-target."""
         self.retarget(TARGET_SETS[1])
@@ -768,6 +788,7 @@ def replay_spine(machine: SourceMachine) -> None:
             machine.reconcile(op, True)
         if choice is _REGISTRY_SKILL:
             machine.context_pass()
+            machine.gate_off_pass()
     # p-lsp still survives this uninstall (#4214).
     machine.uninstall("remote-skill", False)
     for slot in ("remote-exec", "p-lsp"):
@@ -876,4 +897,4 @@ def test_source_generated_sequences_keep_cross_cutting_laws(
 
 
 # T3/T5 cells whose oracle fails on main -> tracking issue (a strict known cell discharges them).
-KNOWN_CELLS_BY_ID: dict[str, str] = {"X|install|pkg-registry|UPDATE=on": _STALE_PIN_ISSUE}
+KNOWN_CELLS_BY_ID: dict[str, str] = {}

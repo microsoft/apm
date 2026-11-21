@@ -2266,6 +2266,24 @@
     "U1"
    ]
   },
+  "pair|OP=bundle-install|SRC=local-bundle|FROZEN=on": {
+   "maps_to": "refusal|OP=bundle-install|FROZEN=on",
+   "rules": [
+    "U1"
+   ]
+  },
+  "pair|OP=bundle-install|SRC=local-bundle|UPDATE=on": {
+   "maps_to": "refusal|OP=bundle-install|UPDATE=on",
+   "rules": [
+    "U1"
+   ]
+  },
+  "pair|OP=bundle-install|UPDATE=on": {
+   "maps_to": "refusal|OP=bundle-install|UPDATE=on",
+   "rules": [
+    "U1"
+   ]
+  },
   "pair|OP=compile|FORCE=on": {
    "maps_to": "refusal|OP=compile|FORCE=on",
    "rules": [
@@ -2851,10 +2869,24 @@
     "E3"
    ]
   },
+  "pair|SRC=local-bundle|FROZEN=on": {
+   "maps_to": "refusal|OP=bundle-install|FROZEN=on",
+   "rules": [
+    "U8",
+    "U1"
+   ]
+  },
   "pair|SRC=local-bundle|PRIM=other-file": {
    "maps_to": "pair|SRC=local-bundle|PRIM=skill",
    "rules": [
     "E3"
+   ]
+  },
+  "pair|SRC=local-bundle|UPDATE=on": {
+   "maps_to": "refusal|OP=bundle-install|UPDATE=on",
+   "rules": [
+    "U8",
+    "U1"
    ]
   },
   "pair|SRC=local-path|PRIM=other-file": {
@@ -14405,13 +14437,6 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|OP=bundle-install|UPDATE=on": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "pair|OP=compile|DEPLOYED=absent": {
    "family": "pair",
    "issue": "#4099",
@@ -15131,6 +15156,7 @@
     "T5|real|install|inline-mcp",
     "X|install|inline-mcp|FORCE=on",
     "X|install|inline-mcp|FROZEN=on",
+    "X|install|inline-mcp|GATE=none",
     "X|install|inline-mcp|GATE=unapproved-exec",
     "X|install|inline-mcp|NET=online",
     "X|install|inline-mcp|SCOPE=project",
@@ -15173,6 +15199,7 @@
     "T5|real|install|plugin-at-mkt",
     "X|install|plugin-at-mkt|FORCE=on",
     "X|install|plugin-at-mkt|FROZEN=on",
+    "X|install|plugin-at-mkt|GATE=none",
     "X|install|plugin-at-mkt|GATE=unapproved-exec",
     "X|install|plugin-at-mkt|NET=online",
     "X|install|plugin-at-mkt|SCOPE=project",
@@ -15202,6 +15229,7 @@
     "T5|real|install|mcp-registry",
     "X|install|mcp-registry|FORCE=on",
     "X|install|mcp-registry|FROZEN=on",
+    "X|install|mcp-registry|GATE=none",
     "X|install|mcp-registry|GATE=unapproved-exec",
     "X|install|mcp-registry|NET=online",
     "X|install|mcp-registry|SCOPE=project",
@@ -15226,6 +15254,7 @@
     "T5|real|install|native",
     "X|install|native|FORCE=on",
     "X|install|native|FROZEN=on",
+    "X|install|native|GATE=none",
     "X|install|native|GATE=unapproved-exec",
     "X|install|native|NET=online",
     "X|install|native|SCOPE=project",
@@ -15251,12 +15280,14 @@
     "T5|real|install|pkg-registry",
     "X|install|pkg-registry|FORCE=on",
     "X|install|pkg-registry|FROZEN=on",
+    "X|install|pkg-registry|GATE=none",
     "X|install|pkg-registry|GATE=unapproved-exec",
     "X|install|pkg-registry|NET=online",
     "X|install|pkg-registry|SCOPE=project",
     "X|install|pkg-registry|SELECT=on",
     "X|install|pkg-registry|TGT=multi-unchanged",
-    "X|install|pkg-registry|TGT=single-unchanged"
+    "X|install|pkg-registry|TGT=single-unchanged",
+    "X|install|pkg-registry|UPDATE=on"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -20542,11 +20573,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|GATE=none": {
+   "credited_by": [
+    "X|install|inline-mcp|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -20773,13 +20808,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "pair|SRC=local-bundle|FROZEN=on": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "pair|SRC=local-bundle|GATE=allowed": {
    "family": "pair",
@@ -21030,13 +21058,6 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|SRC=local-bundle|UPDATE=on": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
    "status": "baseline",
    "strength": "e2e"
   },
@@ -21701,11 +21722,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|GATE=none": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -22312,11 +22337,15 @@
    "strength": "e2e"
   },
   "pair|SRC=mcp-registry|GATE=none": {
+   "credited_by": [
+    "X|install|mcp-registry|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=mcp-registry|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -22577,11 +22606,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|GATE=none": {
+   "credited_by": [
+    "X|install|native|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -22904,11 +22937,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|GATE=none": {
+   "credited_by": [
+    "X|install|pkg-registry|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -23145,9 +23182,8 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4572",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|TGT=multi-narrowed|DRYRUN=on": {
@@ -23712,6 +23748,18 @@
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-13-refusals]"
   },
+  "refusal|OP=bundle-install|UPDATE=on": {
+   "exit": 2,
+   "family": "refusal",
+   "issue": "#4099",
+   "lane": "T-5",
+   "rules": [
+    "U1"
+   ],
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-13-refusals]"
+  },
   "refusal|OP=compile|FORCE=on": {
    "exit": 2,
    "family": "refusal",
@@ -23770,7 +23818,7 @@
    ],
    "status": "required",
    "strength": "e2e-evidence",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-13-refusals]"
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-14-refusals]"
   },
   "refusal|OP=lock|DRYRUN=on": {
    "exit": 2,
@@ -23950,7 +23998,7 @@
    ],
    "status": "required",
    "strength": "e2e-evidence",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-14-refusals]"
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-15-refusals]"
   },
   "refusal|OP=prune|FORCE=on": {
    "exit": 2,
@@ -25464,9 +25512,9 @@
   "generated_cover-10-skill-local-single-approve-force.yaml": "1eccd294caf512b5e994b4eae797de9a43d99e6aec49cb71799f7cacc5f5129a",
   "generated_cover-11-canvas-local-multi-approve-mcp.yaml": "eb43280f957676b4cb1ab26a466a89361ddbea4a723a24905d4d78e97acb77e8",
   "generated_cover-12-canvas-local-single-unapproved-mcp.yaml": "a7fa2d1dc5dfc640c4c25d82d1e014e4bb934c6ff69596a635175523af1a0eb4",
-  "generated_cover-13-refusals.yaml": "6eb1941cb910d494c90ae4dbd1f8ba6730df87fe8ba702ee992e5ba073cc9d77",
-  "generated_cover-14-refusals.yaml": "670950509c0f185887feb8e014bced0c85b8b3a9b89ba01d1521b7dcdd3bb763",
-  "generated_cover-15-refusals.yaml": "6bfca20083437cf5708ee57a4467837d456a0526dac39ab373a40e0730d17c57",
+  "generated_cover-13-refusals.yaml": "c35ed662b974894b4b82346ffcb345ed3379c230b0783dbd0dfcb72ce246a72c",
+  "generated_cover-14-refusals.yaml": "2668f5641e39462b11e3f3366c0d1681113945255df1cad9a6e65d4bc2cccba0",
+  "generated_cover-15-refusals.yaml": "bb74265dd38bb0ef66bfcf59bcc51f2a30addd6ca53890071624e80b8e439a6f",
   "generated_cover-16-source-refusals.yaml": "dabc3fdbb50c3b1dfcf110c5831e492e34dfce99da84fec4d815d9bb0e1bc473",
   "generated_cover-17-local-bundle-refusals.yaml": "db88b18bb7af9c0adb424dc06ee2e1d159ae8dd520124411ac49b93b3ae31eae"
  },
